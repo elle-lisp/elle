@@ -111,5 +111,5 @@
 # Bytes/@bytes to @string conversions
 # ============================================================================
 
-(assert-eq (buffer->string (bytes->buffer (bytes 104 105))) "hi" "bytes->buffer->string")
-(assert-eq (buffer->string (blob->buffer (@bytes 104 105))) "hi" "@bytes->buffer->string")
+(assert-eq (freeze (bytes->buffer (bytes 104 105))) "hi" "bytes->buffer->string")
+(assert-eq (freeze (blob->buffer (@bytes 104 105))) "hi" "@bytes->buffer->string")

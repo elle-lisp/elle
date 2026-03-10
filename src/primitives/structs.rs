@@ -24,7 +24,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_freeze,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert a mutable collection to its immutable equivalent (@struct→struct, @set→set)",
+        doc: "Convert a mutable collection to its immutable equivalent. Handles @array, @struct, @set, @string (requires valid UTF-8), @bytes. Returns immutable values as-is.",
         params: &["collection"],
         category: "struct",
         example: "(freeze @{:a 1 :b 2})",
@@ -35,7 +35,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_thaw,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert an immutable collection to its mutable equivalent (struct→@struct, set→@set)",
+        doc: "Convert an immutable collection to its mutable equivalent. Handles array, struct, set, string, bytes. Returns mutable values as-is.",
         params: &["collection"],
         category: "struct",
         example: "(thaw {:a 1 :b 2})",
@@ -79,76 +79,128 @@ pub(crate) fn prim_struct(args: &[Value]) -> (SignalBits, Value) {
 
 /// Convert a mutable collection to its immutable equivalent
 /// (freeze collection) -> immutable collection
-/// Handles: @struct -> struct, @set -> set
+/// Handles: @array -> array, @struct -> struct, @set -> set, @string -> string, @bytes -> bytes
 pub(crate) fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
-    // Handle mutable set -> immutable set
+    // @array → array
+    if let Some(a) = args[0].as_array_mut() {
+        let elements = a.borrow().clone();
+        return (SIG_OK, Value::array(elements));
+    }
+    if args[0].is_array() {
+        return (SIG_OK, args[0]);
+    }
+
+    // @struct → struct
+    if let Some(t) = args[0].as_struct_mut() {
+        let map = t.borrow().clone();
+        return (SIG_OK, Value::struct_from(map));
+    }
+    if args[0].is_struct() {
+        return (SIG_OK, args[0]);
+    }
+
+    // @set → set
     if let Some(s) = args[0].as_set_mut() {
         let items: BTreeSet<Value> = s.borrow().iter().copied().collect();
         return (SIG_OK, Value::set(items));
     }
-    // Already immutable set — return as-is
     if args[0].is_set() {
         return (SIG_OK, args[0]);
     }
-    // Already immutable struct — return as-is
-    if args[0].is_struct() {
-        return (SIG_OK, args[0]);
-    }
-    // Handle @struct -> struct (existing behavior)
-    let t = match args[0].as_struct_mut() {
-        Some(t) => t,
-        None => {
-            return (
+
+    // @string → string (fallible: requires valid UTF-8)
+    if let Some(buf) = args[0].as_string_mut() {
+        let bytes = buf.borrow();
+        return match std::str::from_utf8(&bytes) {
+            Ok(s) => (SIG_OK, Value::string(s)),
+            Err(e) => (
                 SIG_ERROR,
                 error_val(
-                    "type-error",
-                    format!(
-                        "freeze: expected mutable collection (@struct, @set), got {}",
-                        args[0].type_name()
-                    ),
+                    "error",
+                    format!("freeze: @string contains invalid UTF-8: {}", e),
                 ),
-            );
-        }
-    };
+            ),
+        };
+    }
+    if args[0].is_string() {
+        return (SIG_OK, args[0]);
+    }
 
-    let map = t.borrow().clone();
-    (SIG_OK, Value::struct_from(map))
+    // @bytes → bytes
+    if let Some(b) = args[0].as_bytes_mut() {
+        let data = b.borrow().clone();
+        return (SIG_OK, Value::bytes(data));
+    }
+    if args[0].is_bytes() {
+        return (SIG_OK, args[0]);
+    }
+
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "freeze: expected collection (@array, @struct, @set, @string, @bytes), got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
 }
 
 /// Convert an immutable collection to its mutable equivalent
 /// (thaw collection) -> mutable collection
-/// Handles: struct -> @struct, set -> @set
+/// Handles: array -> @array, struct -> @struct, set -> @set, string -> @string, bytes -> @bytes
 pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
-    // Handle immutable set -> mutable set
+    // array → @array
+    if let Some(a) = args[0].as_array() {
+        return (SIG_OK, Value::array_mut(a.to_vec()));
+    }
+    if args[0].is_array_mut() {
+        return (SIG_OK, args[0]);
+    }
+
+    // struct → @struct
+    if let Some(s) = args[0].as_struct() {
+        let map = s.clone();
+        return (SIG_OK, Value::struct_mut_from(map));
+    }
+    if args[0].is_struct_mut() {
+        return (SIG_OK, args[0]);
+    }
+
+    // set → @set
     if let Some(s) = args[0].as_set() {
         let items: BTreeSet<Value> = s.iter().copied().collect();
         return (SIG_OK, Value::set_mut(items));
     }
-    // Already mutable set — return as-is
     if args[0].is_set_mut() {
         return (SIG_OK, args[0]);
     }
-    // Already mutable @struct — return as-is
-    if args[0].is_struct_mut() {
+
+    // string → @string
+    if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
+        return (SIG_OK, Value::string_mut(bytes));
+    }
+    if args[0].is_string_mut() {
         return (SIG_OK, args[0]);
     }
-    // Handle struct -> @struct (existing behavior)
-    let s = match args[0].as_struct() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "thaw: expected immutable collection (struct, set), got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
-    };
 
-    let map = s.clone();
-    (SIG_OK, Value::struct_mut_from(map))
+    // bytes → @bytes
+    if let Some(b) = args[0].as_bytes() {
+        return (SIG_OK, Value::bytes_mut(b.to_vec()));
+    }
+    if args[0].is_bytes_mut() {
+        return (SIG_OK, args[0]);
+    }
+
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "thaw: expected collection (array, struct, set, string, bytes), got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
 }

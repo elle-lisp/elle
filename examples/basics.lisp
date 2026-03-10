@@ -9,7 +9,7 @@
 #   Math             — math/sqrt, math/sin, math/cos, math/pow, math/pi, ...
 #   Comparison/logic — =, <, >, not, and, or (short-circuiting)
 #   Bitwise          — bit/and, bit/or, bit/xor, bit/not, bit/shl, bit/shr
-#   Type conversions — number->string, string->integer, integer, float, ...
+#   Type conversions — number->string, integer, float, ...
 #   Mutability split — [array] vs @[array], {struct} vs @{struct}, "str" vs @"str"
 #   Bytes and @bytes  — immutable/mutable binary data
 #   Boxes            — first-class mutable cells
@@ -191,10 +191,10 @@
 
 # number->string and back
 (display "  42 → \"") (display (number->string 42)) (print "\"")
-(display "  \"42\" → ") (print (string->integer "42"))
+(display "  \"42\" → ") (print (integer "42"))
 (assert-eq (number->string 42) "42" "number->string int")
-(assert-eq (string->integer "42") 42 "string->integer")     # parse string → int
-(assert-eq (string->float "3.14") 3.14 "string->float")     # parse string → float
+(assert-eq (integer "42") 42 "integer from string")          # parse string → int
+(assert-eq (float "3.14") 3.14 "float from string")          # parse string → float
 
 # Generic converters — named after the target type
 (assert-eq (integer 3.7) 3 "integer truncates float")  # truncates, doesn't round
@@ -205,7 +205,7 @@
 (assert-eq (string :hello) "hello" "string keyword (no colon)")
 
 # Round-trip: int → string → int
-(assert-eq (string->integer (number->string 99)) 99 "round-trip int")
+(assert-eq (integer (number->string 99)) 99 "round-trip int")
 
 
 # ========================================
@@ -254,8 +254,8 @@
 # Conversions: string ↔ bytes ↔ @bytes ↔ @string
 (def b2 (string->bytes "hi"))        # string → bytes
 (assert-eq (bytes->string b2) "hi" "round-trip string->bytes->string")
-(def bl2 (bytes->blob b2))          # bytes → @bytes (mutable copy)
-(assert-eq (type bl2) :@bytes "bytes->@bytes")
+(def bl2 (thaw b2))                  # bytes → @bytes (mutable copy)
+(assert-eq (type bl2) :@bytes "thaw bytes to @bytes")
 (def buf (bytes->buffer (string->bytes "test")))  # string → bytes → @string
 (assert-eq (type buf) :@string "bytes->@string")
 

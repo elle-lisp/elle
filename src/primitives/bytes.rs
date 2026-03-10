@@ -6,8 +6,22 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Create immutable bytes from integer arguments
+/// Create immutable bytes from integer arguments, or from a single string/keyword.
+///
+/// With integer arguments: each must be 0-255, assembled into a byte sequence.
+/// With a single string argument: encodes as UTF-8 bytes.
+/// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
+    // Single-argument string or keyword: convert to bytes
+    if args.len() == 1 {
+        if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
+            return (SIG_OK, Value::bytes(data));
+        }
+        if let Some(name) = args[0].as_keyword_name() {
+            return (SIG_OK, Value::bytes(name.as_bytes().to_vec()));
+        }
+    }
+    // Integer arguments: each must be 0-255
     let mut data = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         match arg.as_int() {
@@ -39,8 +53,22 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bytes(data))
 }
 
-/// Create mutable @bytes from integer arguments
+/// Create mutable @bytes from integer arguments, or from a single string/keyword.
+///
+/// With integer arguments: each must be 0-255, assembled into a byte sequence.
+/// With a single string argument: encodes as UTF-8 bytes.
+/// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
+    // Single-argument string or keyword: convert to bytes
+    if args.len() == 1 {
+        if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
+            return (SIG_OK, Value::bytes_mut(data));
+        }
+        if let Some(name) = args[0].as_keyword_name() {
+            return (SIG_OK, Value::bytes_mut(name.as_bytes().to_vec()));
+        }
+    }
+    // Integer arguments: each must be 0-255
     let mut data = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         match arg.as_int() {
@@ -50,7 +78,7 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "error",
-                        format!("blob: byte {} out of range 0-255: {}", i, n),
+                        format!("@bytes: byte {} out of range 0-255: {}", i, n),
                     ),
                 )
             }
@@ -60,7 +88,7 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "blob: expected integer, got {} at position {}",
+                            "@bytes: expected integer, got {} at position {}",
                             arg.type_name(),
                             i
                         ),
@@ -179,55 +207,6 @@ pub(crate) fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "type-error",
                 format!("blob->string: expected blob, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// blob->bytes: freeze @bytes to immutable bytes (copies)
-pub(crate) fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob->bytes: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes_mut() {
-        Some(blob_ref) => {
-            let borrowed = blob_ref.borrow();
-            (SIG_OK, Value::bytes(borrowed.clone()))
-        }
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("blob->bytes: expected blob, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// bytes->blob: thaw bytes to mutable @bytes (copies)
-pub(crate) fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bytes->blob: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes() {
-        Some(b) => (SIG_OK, Value::bytes_mut(b.to_vec())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bytes->blob: expected bytes, got {}", args[0].type_name()),
             ),
         ),
     }
@@ -588,10 +567,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_bytes,
         effect: Effect::inert(),
         arity: Arity::AtLeast(0),
-        doc: "Create immutable bytes from integer arguments (0-255).",
+        doc: "Create immutable bytes. Accepts integers (0-255), or a single string/keyword.",
         params: &[],
         category: "bytes",
-        example: "(bytes 72 101 108 108 111)",
+        example: "(bytes 72 101 108 108 111)\n(bytes \"hello\")",
         aliases: &[],
     },
     PrimitiveDef {
@@ -599,10 +578,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_blob,
         effect: Effect::inert(),
         arity: Arity::AtLeast(0),
-        doc: "Create a mutable bytes from integer arguments (0-255).",
+        doc: "Create mutable bytes. Accepts integers (0-255), or a single string/keyword.",
         params: &[],
         category: "bytes",
-        example: "(@bytes 72 101 108 108 111)",
+        example: "(@bytes 72 101 108 108 111)\n(@bytes \"hello\")",
         aliases: &[],
     },
     PrimitiveDef {
@@ -649,28 +628,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(blob->string (blob 104 105))",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "blob->bytes",
-        func: prim_blob_to_bytes,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Freeze @bytes to immutable bytes (copies).",
-        params: &["b"],
-        category: "bytes",
-        example: "(blob->bytes (blob 1 2 3))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bytes->blob",
-        func: prim_bytes_to_blob,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Thaw bytes to mutable @bytes (copies).",
-        params: &["b"],
-        category: "bytes",
-        example: "(bytes->blob (bytes 1 2 3))",
-        aliases: &[],
-    },
+
     PrimitiveDef {
         name: "bytes->hex",
         func: prim_bytes_to_hex,

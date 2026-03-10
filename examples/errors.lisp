@@ -96,7 +96,7 @@
 # protect is useful for "try this, fall back to that" patterns
 (defn safe-parse [s]
   "Try to parse a string as an integer, return nil on failure."
-  (def [ok? val] (protect (string->integer s)))
+  (def [ok? val] (protect (integer s)))
   (if ok? val nil))
 
 (assert-eq (safe-parse "42") 42 "safe-parse: valid input")

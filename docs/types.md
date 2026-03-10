@@ -55,7 +55,7 @@ Error values are structs: `{:error :division-by-zero :message "division by zero"
 | `{...}` → struct | ✅ Correct |
 | `@{...}` → @struct | ✅ Correct |
 | `"..."` → string | ✅ Correct |
-| `@"..."` → @string | ✅ Desugars to `(string->@string "...")` |
+| `@"..."` → @string | ✅ Desugars to `(thaw "...")` |
 
 ---
 
@@ -232,10 +232,10 @@ Strings are interned — equality is O(1).
 Mutable byte sequence. The mutable counterpart of string.
 
 ```janet
-@"hello"        # literal (desugars to (string->@string "hello"))
+@"hello"        # literal (desugars to (thaw "hello"))
 (@string 72 101) # constructor from bytes
-(string->@string "hello")  # from string (UTF-8 bytes)
-(@string->string buf)      # to string (UTF-8)
+(thaw "hello")  # from string (UTF-8 bytes)
+(freeze buf)    # to string (UTF-8, errors on invalid UTF-8)
 (get buf 0)     # byte at index (as integer)
 (put buf 0 88)  # set byte at index
 (push buf 33)   # append byte

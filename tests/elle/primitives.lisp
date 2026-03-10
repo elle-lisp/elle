@@ -37,9 +37,9 @@
 (assert-eq (number->string 42) "42" "number->string int")
 (assert-true (string? (number->string 3.14)) "number->string float")
 
-(assert-eq (string->integer "42") 42 "string->integer")
-(assert-eq (string->integer "-7") -7 "string->integer negative")
-(assert-eq (string->float "2.5") 2.5 "string->float")
+(assert-eq (integer "42") 42 "integer from string")
+(assert-eq (integer "-7") -7 "integer from string negative")
+(assert-eq (float "2.5") 2.5 "float from string")
 
 (assert-eq (any->string 42) "42" "any->string int")
 (assert-eq (any->string true) "true" "any->string bool")

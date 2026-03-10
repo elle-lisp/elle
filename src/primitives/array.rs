@@ -15,7 +15,11 @@ pub(crate) fn prim_tuple(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array(args.to_vec()))
 }
 
-/// Create an array of n elements, all set to fill
+/// Create a mutable array of n elements, all set to fill.
+///
+/// Complements `@array` (which takes explicit elements) by supporting
+/// pre-allocation of a fixed-size array with a uniform initial value.
+/// Returns @array (mutable), not array (immutable).
 pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (

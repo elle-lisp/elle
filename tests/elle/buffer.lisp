@@ -83,8 +83,8 @@
 # @string roundtrip conversions
 # ============================================================================
 
-(assert-eq (buffer->string (string->buffer "hello")) "hello" "string->buffer->string roundtrip")
-(assert-eq (buffer->string @"hello") "hello" "buffer->string literal")
+(assert-eq (freeze (thaw "hello")) "hello" "freeze/thaw string roundtrip")
+(assert-eq (freeze @"hello") "hello" "freeze @string literal")
 
 # ============================================================================
 # @string insert
@@ -121,7 +121,7 @@
 (assert-eq (string/index @"hello" "l") 2 "@string index of substring")
 (assert-eq (string/index @"hello" "z") nil "@string index not found")
 
-(assert-eq (buffer->string (slice @"hello" 1 4)) "ell" "slice of @string")
+(assert-eq (freeze (slice @"hello" 1 4)) "ell" "slice of @string")
 
 (assert-true (string? (string/upcase @"hello")) "upcase @string returns @string")
 (assert-true (string? (string/downcase @"HELLO")) "downcase @string returns @string")

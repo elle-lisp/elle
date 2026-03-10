@@ -218,16 +218,16 @@ pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
     (SIG_QUERY, Value::cons(args[0], args[1]))
 }
 
-/// (string->keyword str) — convert a string to a keyword
+/// (keyword str) — convert a string to a keyword
 ///
 /// Creates a content-addressed keyword from the string name.
-pub(crate) fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("string->keyword: expected 1 argument, got {}", args.len()),
+                format!("keyword: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -238,10 +238,7 @@ pub(crate) fn prim_string_to_keyword(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!(
-                    "string->keyword: expected string, got {}",
-                    args[0].type_name()
-                ),
+                format!("keyword: expected string, got {}", args[0].type_name()),
             ),
         )
     }
@@ -371,14 +368,14 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "string->keyword",
-        func: prim_string_to_keyword,
+        name: "keyword",
+        func: prim_keyword,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert a string to a keyword",
+        doc: "Convert a string to a keyword.",
         params: &["str"],
         category: "conversion",
-        example: "(string->keyword \"foo\")",
-        aliases: &[],
+        example: "(keyword \"foo\")",
+        aliases: &["string->keyword"],
     },
 ];

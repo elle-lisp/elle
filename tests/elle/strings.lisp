@@ -214,28 +214,28 @@
 # ============================================================================
 
 # number_to_string_roundtrip: number->string->integer roundtrip
-(assert-eq (string->integer (number->string 42)) 42
+(assert-eq (integer (number->string 42)) 42
   "number->string->integer roundtrip: 42")
-(assert-eq (string->integer (number->string -100)) -100
+(assert-eq (integer (number->string -100)) -100
   "number->string->integer roundtrip: -100")
-(assert-eq (string->integer (number->string 0)) 0
+(assert-eq (integer (number->string 0)) 0
   "number->string->integer roundtrip: 0")
 
-# string_to_integer_roundtrip: string->integer roundtrip
-(assert-eq (string->integer "42") 42
-  "string->integer: 42")
-(assert-eq (string->integer "-100") -100
-  "string->integer: -100")
-(assert-eq (string->integer "0") 0
-  "string->integer: 0")
+# string_to_integer_roundtrip: integer from string
+(assert-eq (integer "42") 42
+  "integer from string: 42")
+(assert-eq (integer "-100") -100
+  "integer from string: -100")
+(assert-eq (integer "0") 0
+  "integer from string: 0")
 
 # string_to_integer_invalid_returns_error: non-numeric string errors
-(assert-err (fn [] (string->integer "abc"))
-  "string->integer errors on abc")
-(assert-err (fn [] (string->integer "hello"))
-  "string->integer errors on hello")
-(assert-err (fn [] (string->integer "xyz"))
-  "string->integer errors on xyz")
+(assert-err (fn [] (integer "abc"))
+  "integer from string errors on abc")
+(assert-err (fn [] (integer "hello"))
+  "integer from string errors on hello")
+(assert-err (fn [] (integer "xyz"))
+  "integer from string errors on xyz")
 
 # ============================================================================
 # Index/get operations (migrated from property tests)

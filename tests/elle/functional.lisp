@@ -289,7 +289,7 @@
 (let ((result (sort-by abs [3 1 2])))
   (assert-true (array? result) "sort-by: array returns array"))
 
-## ── freeze / thaw ────────────────────────────────────────────────────
+## ── freeze / thaw: structs ───────────────────────────────────────────
 (let ((t @{:a 1 :b 2}))
   (let ((s (freeze t)))
     (assert-true (struct? s) "freeze: returns struct")
@@ -302,3 +302,46 @@
     (assert-eq (get t :a) 1 "thaw: preserves values")
     (put t :c 3)
     (assert-eq (get t :c) 3 "thaw: result is mutable")))
+
+## ── freeze / thaw: arrays ───────────────────────────────────────────
+(let ((ma @[1 2 3]))
+  (let ((a (freeze ma)))
+    (assert-true (array? a) "freeze @array: returns array")
+    (assert-eq (get a 0) 1 "freeze @array: preserves values")
+    (assert-eq (length a) 3 "freeze @array: preserves length")))
+
+(let ((a [1 2 3]))
+  (let ((ma (thaw a)))
+    (assert-true (@array? ma) "thaw array: returns @array")
+    (assert-eq (get ma 0) 1 "thaw array: preserves values")
+    (push ma 4)
+    (assert-eq (length ma) 4 "thaw array: result is mutable")))
+
+(assert-eq (freeze [1 2 3]) [1 2 3] "freeze: immutable array returns as-is")
+(assert-eq (type-of (thaw (thaw [1 2 3]))) :@array "thaw: idempotent on @array")
+
+## ── freeze / thaw: strings ──────────────────────────────────────────
+(assert-eq (freeze @"hello") "hello" "freeze @string: returns string")
+(assert-eq (type-of (freeze @"hello")) :string "freeze @string: type is string")
+(assert-eq (freeze "hello") "hello" "freeze: immutable string returns as-is")
+
+(assert-eq (type-of (thaw "hello")) :@string "thaw string: returns @string")
+(assert-eq (freeze (thaw "hello")) "hello" "thaw then freeze: roundtrip")
+(assert-eq (type-of (thaw (thaw "hello"))) :@string "thaw: idempotent on @string")
+
+## ── freeze / thaw: bytes ────────────────────────────────────────────
+(let ((mb (@bytes 1 2 3)))
+  (let ((b (freeze mb)))
+    (assert-true (bytes? b) "freeze @bytes: returns bytes")
+    (assert-eq (get b 0) 1 "freeze @bytes: preserves values")))
+
+(let ((b (bytes 1 2 3)))
+  (let ((mb (thaw b)))
+    (assert-true (@bytes? mb) "thaw bytes: returns @bytes")
+    (assert-eq (get mb 0) 1 "thaw bytes: preserves values")))
+
+(assert-eq (type-of (freeze (freeze (@bytes 1 2 3)))) :bytes "freeze: idempotent on bytes")
+(assert-eq (type-of (thaw (thaw (bytes 1 2 3)))) :@bytes "thaw: idempotent on @bytes")
+
+## ── freeze @string: invalid UTF-8 ──────────────────────────────────
+(assert-err (fn [] (freeze (@string 0xFF 0xFE))) "freeze @string with invalid UTF-8 signals error")

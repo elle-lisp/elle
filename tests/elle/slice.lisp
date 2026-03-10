@@ -59,14 +59,14 @@
 
 # ============================================================================
 # @string slicing (grapheme-aware)
-# Note: @string equality via = is reference-based, so we compare via buffer->string
+# Note: @string equality via = is reference-based, so we compare via freeze
 # ============================================================================
 
-(assert-eq (buffer->string (slice @"hello" 1 4)) "ell" "@string slice middle")
-(assert-eq (buffer->string (slice @"hello" 0 5)) "hello" "@string slice full")
-(assert-eq (buffer->string (slice @"hello" 0 0)) "" "@string slice empty start=end=0")
-(assert-eq (buffer->string (slice @"hello" 3 3)) "" "@string slice empty start=end")
-(assert-eq (buffer->string (slice @"hello" 4 2)) "" "@string slice start > end")
+(assert-eq (freeze (slice @"hello" 1 4)) "ell" "@string slice middle")
+(assert-eq (freeze (slice @"hello" 0 5)) "hello" "@string slice full")
+(assert-eq (freeze (slice @"hello" 0 0)) "" "@string slice empty start=end=0")
+(assert-eq (freeze (slice @"hello" 3 3)) "" "@string slice empty start=end")
+(assert-eq (freeze (slice @"hello" 4 2)) "" "@string slice start > end")
 (assert-true (string? (slice @"hello" 0 3)) "@string slice returns @string")
 
 # ============================================================================
