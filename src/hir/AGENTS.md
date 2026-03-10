@@ -58,7 +58,7 @@ HIR (bindings are inline — no separate HashMap)
 
 ## Dependents
 
-- `lir/lower/` - consumes HIR, reads `binding.needs_cell()` / `binding.is_global()` directly
+- `lir/lower/` - consumes HIR, reads `binding.needs_lbox()` / `binding.is_global()` directly
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
 - `lint/cli.rs` - uses `HirLinter` for static analysis
 - `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
@@ -72,9 +72,9 @@ HIR (bindings are inline — no separate HashMap)
    binding site share the same NaN-boxed pointer. `Binding` implements
    `Hash`/`Eq` via `Value::to_bits()`.
 
-3. **`needs_cell()` determines cell boxing.** A local binding needs a cell if
-   captured AND mutable. A parameter needs a cell if mutated. Globals never need
-   cells. Immutable captured locals are captured by value directly.
+3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if
+   captured AND mutable. A parameter needs an lbox if mutated. Globals never need
+   lboxes. Immutable captured locals are captured by value directly.
 
 4. **Effects combine upward.** A `begin` has the combined effect of its
    children. A `fn` body's effect is stored but the fn itself is Inert.
@@ -99,7 +99,7 @@ HIR (bindings are inline — no separate HashMap)
 
 9. **Binding metadata is mutable during analysis, read-only after.** The
    analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`.
-   The lowerer only reads via `needs_cell()`, `is_global()`, `name()`, etc.
+   The lowerer only reads via `needs_lbox()`, `is_global()`, `name()`, etc.
 
 10. **`Destructure` decomposes values into pattern bindings.** 
     `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is

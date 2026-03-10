@@ -9,7 +9,7 @@ final stack-based bytecode.
 **Lowering** (HIR → LIR): The `Lowerer` walks HIR and produces LIR instructions.
 This phase:
 - Allocates stack slots for local variables
-- Determines which bindings need cell boxing
+- Determines which bindings need lbox boxing
 - Translates control flow (if, while, etc.) into jumps and labels
 - Handles closure creation and capture loading
 
@@ -32,9 +32,9 @@ LIR:                          Bytecode:
   BinOp { Add, Reg(0), Reg(1) } Add             ; pop 10, pop 42, push 52
 ```
 
-## Cell Boxing
+## LBox Boxing
 
-When a variable is both captured by a closure AND mutated, it needs cell
+When a variable is both captured by a closure AND mutated, it needs lbox
 boxing so mutations are visible across closure boundaries:
 
 ```lisp
@@ -46,8 +46,8 @@ boxing so mutations are visible across closure boundaries:
 
 The lowerer:
 1. Detects that `counter` is captured and mutated
-2. Emits `MakeCell` to wrap the initial value
-3. Emits `LoadCell`/`StoreCell` for access in the outer scope
+2. Emits `MakeLBox` to wrap the initial value
+3. Emits `LoadLBox`/`StoreLBox` for access in the outer scope
 4. Emits `LoadCapture`/`StoreCapture` for access in the closure
 
 ## Lambda Lowering

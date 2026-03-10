@@ -160,10 +160,10 @@ impl fmt::Display for LirInstr {
             LirInstr::IsTable { dst, src } => write!(f, "{} ← struct?({})", dst, src),
             LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
-            // === Cell Operations ===
-            LirInstr::MakeCell { dst, value } => write!(f, "{} ← cell({})", dst, value),
-            LirInstr::LoadCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
-            LirInstr::StoreCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
+            // === Box Operations ===
+            LirInstr::MakeLBox { dst, value } => write!(f, "{} ← lbox({})", dst, value),
+            LirInstr::LoadLBox { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
+            LirInstr::StoreLBox { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
             // === Destructuring (silent nil) ===
             LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),

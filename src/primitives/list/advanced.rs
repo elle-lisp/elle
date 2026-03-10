@@ -20,7 +20,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Buffer (mutable) - mutate in place
+    // @string (mutable) - mutate in place
     if let Some(buf_ref) = args[0].as_string_mut() {
         if let Some(other_buf_ref) = args[1].as_string_mut() {
             let other_borrowed = other_buf_ref.borrow();
@@ -126,7 +126,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    // Blob (mutable) - mutate in place
+    // @bytes (mutable) - mutate in place
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         if let Some(other_blob_ref) = args[1].as_bytes_mut() {
             let other_borrowed = other_blob_ref.borrow();

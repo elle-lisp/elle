@@ -12,8 +12,13 @@ use unicode_segmentation::UnicodeSegmentation;
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
-    // Single-argument string or keyword: convert to bytes
+    // Single-argument string, @string, or keyword: convert to bytes
     if args.len() == 1 {
+        // @string → @bytes (preserves mutability)
+        if let Some(buf_ref) = args[0].as_string_mut() {
+            return (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone()));
+        }
+        // string → bytes (immutable)
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, Value::bytes(data));
         }
@@ -59,8 +64,11 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
-    // Single-argument string or keyword: convert to bytes
+    // Single-argument string, @string, or keyword: convert to bytes
     if args.len() == 1 {
+        if let Some(buf_ref) = args[0].as_string_mut() {
+            return (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone()));
+        }
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, Value::bytes_mut(data));
         }
@@ -100,119 +108,7 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bytes_mut(data))
 }
 
-/// string->bytes: encode string as UTF-8 bytes (immutable)
-pub(crate) fn prim_string_to_bytes(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string->bytes: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::bytes(bytes))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "string->bytes: expected string, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
-    }
-}
-
-/// string->blob: encode string as UTF-8 @bytes (mutable)
-pub(crate) fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("string->blob: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::bytes_mut(bytes))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("string->blob: expected string, got {}", args[0].type_name()),
-            ),
-        )
-    }
-}
-
-/// bytes->string: decode UTF-8 bytes to string (fallible)
-pub(crate) fn prim_bytes_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bytes->string: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes() {
-        Some(b) => match std::str::from_utf8(b) {
-            Ok(s) => (SIG_OK, Value::string(s)),
-            Err(e) => (
-                SIG_ERROR,
-                error_val("error", format!("bytes->string: invalid UTF-8: {}", e)),
-            ),
-        },
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bytes->string: expected bytes, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// blob->string: decode UTF-8 @bytes to string (fallible)
-pub(crate) fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob->string: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes_mut() {
-        Some(blob_ref) => {
-            let borrowed = blob_ref.borrow();
-            match std::str::from_utf8(&borrowed) {
-                Ok(s) => (SIG_OK, Value::string(s)),
-                Err(e) => (
-                    SIG_ERROR,
-                    error_val("error", format!("blob->string: invalid UTF-8: {}", e)),
-                ),
-            }
-        }
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("blob->string: expected blob, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// bytes->hex: convert bytes to lowercase hex string
+/// bytes->hex: convert bytes or @bytes to lowercase hex string
 pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -223,49 +119,30 @@ pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_bytes() {
-        Some(b) => {
-            let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
-            (SIG_OK, Value::string(hex.as_str()))
-        }
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bytes->hex: expected bytes, got {}", args[0].type_name()),
+    // Immutable bytes
+    if let Some(b) = args[0].as_bytes() {
+        let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
+        return (SIG_OK, Value::string(hex.as_str()));
+    }
+    // Mutable @bytes → mutable @string
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        let hex: String = borrowed
+            .iter()
+            .map(|byte| format!("{:02x}", byte))
+            .collect();
+        return (SIG_OK, Value::string_mut(hex.into_bytes()));
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "bytes->hex: expected bytes or @bytes, got {}",
+                args[0].type_name()
             ),
         ),
-    }
-}
-
-/// blob->hex: convert @bytes to lowercase hex string
-pub(crate) fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob->hex: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes_mut() {
-        Some(blob_ref) => {
-            let borrowed = blob_ref.borrow();
-            let hex: String = borrowed
-                .iter()
-                .map(|byte| format!("{:02x}", byte))
-                .collect();
-            (SIG_OK, Value::string(hex.as_str()))
-        }
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("blob->hex: expected blob, got {}", args[0].type_name()),
-            ),
-        ),
-    }
+    )
 }
 
 /// Slice a sequence. Returns same type as input.
@@ -336,7 +213,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::bytes(b[clamped_start..clamped_end].to_vec()));
     }
 
-    // Blob (mutable)
+    // @bytes (mutable)
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
         let clamped_start = start.min(borrowed.len());
@@ -350,7 +227,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Tuple (immutable)
+    // Array (immutable)
     if let Some(elems) = args[0].as_array() {
         let clamped_start = start.min(elems.len());
         let clamped_end = end.min(elems.len());
@@ -384,10 +261,10 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             .unwrap();
     }
 
-    // Buffer (mutable, grapheme-aware)
+    // @string (mutable, grapheme-aware)
     if let Some(buf_ref) = args[0].as_string_mut() {
         let borrowed = buf_ref.borrow();
-        // Buffer is valid UTF-8 by construction
+        // @string is valid UTF-8 by construction
         let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
         return slice_graphemes(s, start, end, true);
     }
@@ -451,116 +328,6 @@ fn slice_graphemes(s: &str, start: usize, end: usize, is_buffer: bool) -> (Signa
     }
 }
 
-/// buffer->bytes: convert @string to immutable bytes
-pub(crate) fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("buffer->bytes: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_string_mut() {
-        Some(buf_ref) => (SIG_OK, Value::bytes(buf_ref.borrow().clone())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "buffer->bytes: expected buffer, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        ),
-    }
-}
-
-/// buffer->blob: convert @string to mutable @bytes
-pub(crate) fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("buffer->blob: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_string_mut() {
-        Some(buf_ref) => (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone())),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("buffer->blob: expected buffer, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// bytes->buffer: convert bytes to @string. Error on invalid UTF-8.
-pub(crate) fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("bytes->buffer: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes() {
-        Some(b) => match std::str::from_utf8(b) {
-            Ok(_) => (SIG_OK, Value::string_mut(b.to_vec())),
-            Err(e) => (
-                SIG_ERROR,
-                error_val("error", format!("bytes->buffer: invalid UTF-8: {}", e)),
-            ),
-        },
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("bytes->buffer: expected bytes, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
-/// blob->buffer: convert @bytes to @string. Error on invalid UTF-8.
-pub(crate) fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob->buffer: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    match args[0].as_bytes_mut() {
-        Some(blob_ref) => {
-            let borrowed = blob_ref.borrow();
-            match std::str::from_utf8(&borrowed) {
-                Ok(_) => (SIG_OK, Value::string_mut(borrowed.clone())),
-                Err(e) => (
-                    SIG_ERROR,
-                    error_val("error", format!("blob->buffer: invalid UTF-8: {}", e)),
-                ),
-            }
-        }
-        None => (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!("blob->buffer: expected blob, got {}", args[0].type_name()),
-            ),
-        ),
-    }
-}
-
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes",
@@ -585,71 +352,15 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "string->bytes",
-        func: prim_string_to_bytes,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Encode a string as immutable UTF-8 bytes.",
-        params: &["str"],
-        category: "bytes",
-        example: "(string->bytes \"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "string->blob",
-        func: prim_string_to_blob,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Encode a string as mutable UTF-8 @bytes.",
-        params: &["str"],
-        category: "bytes",
-        example: "(string->blob \"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bytes->string",
-        func: prim_bytes_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Decode UTF-8 bytes to a string. Errors on invalid UTF-8.",
-        params: &["b"],
-        category: "bytes",
-        example: "(bytes->string (bytes 104 105))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "blob->string",
-        func: prim_blob_to_string,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Decode UTF-8 @bytes to a string. Errors on invalid UTF-8.",
-        params: &["b"],
-        category: "bytes",
-        example: "(blob->string (blob 104 105))",
-        aliases: &[],
-    },
-
-    PrimitiveDef {
         name: "bytes->hex",
         func: prim_bytes_to_hex,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
-        doc: "Convert bytes to a lowercase hex string.",
+        doc: "Convert bytes or @bytes to a lowercase hex string.",
         params: &["b"],
         category: "bytes",
         example: "(bytes->hex (bytes 72 101 108)) ;=> \"48656c\"",
         aliases: &["bytes->hex-string"],
-    },
-    PrimitiveDef {
-        name: "blob->hex",
-        func: prim_blob_to_hex,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert @bytes to a lowercase hex string.",
-        params: &["b"],
-        category: "bytes",
-        example: "(blob->hex (blob 72 101 108)) ;=> \"48656c\"",
-        aliases: &["blob->hex-string"],
     },
     PrimitiveDef {
         name: "slice",
@@ -662,48 +373,5 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(slice [1 2 3 4 5] 1 3)",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "buffer->bytes",
-        func: prim_buffer_to_bytes,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert @string to immutable bytes.",
-        params: &["buf"],
-        category: "bytes",
-        example: "(buffer->bytes @\"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "buffer->blob",
-        func: prim_buffer_to_blob,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert @string to mutable @bytes.",
-        params: &["buf"],
-        category: "bytes",
-        example: "(buffer->blob @\"hello\")",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "bytes->buffer",
-        func: prim_bytes_to_buffer,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert bytes to @string. Errors on invalid UTF-8.",
-        params: &["b"],
-        category: "bytes",
-        example: "(bytes->buffer (bytes 104 105))",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "blob->buffer",
-        func: prim_blob_to_buffer,
-        effect: Effect::inert(),
-        arity: Arity::Exact(1),
-        doc: "Convert @bytes to @string. Errors on invalid UTF-8.",
-        params: &["b"],
-        category: "bytes",
-        example: "(blob->buffer (blob 104 105))",
-        aliases: &[],
-    },
+
 ];

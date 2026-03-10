@@ -252,8 +252,8 @@ impl Lowerer {
             // the rest parameter slot for variadic functions, matching the environment layout.
             let num_params = self.current_func.num_params as u16;
             let local_index = self.current_func.num_locals - num_params;
-            if binding.needs_cell() && local_index < 64 {
-                self.current_func.cell_locals_mask |= 1 << local_index;
+            if binding.needs_lbox() && local_index < 64 {
+                self.current_func.lbox_locals_mask |= 1 << local_index;
             }
             self.num_captures + self.current_func.num_locals
         } else {

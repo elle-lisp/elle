@@ -29,7 +29,7 @@ impl Lowerer {
 
             // Check if this binding needs a cell (captured locals, mutated params)
             // We need to preserve the cell when capturing so mutations are shared
-            let binding_needs_cell = cap.binding.needs_cell();
+            let binding_needs_lbox = cap.binding.needs_lbox();
 
             match cap.kind {
                 CaptureKind::Local => {
@@ -41,7 +41,7 @@ impl Lowerer {
                         if self.in_lambda && is_upvalue {
                             // In a lambda, captures and params are accessed via LoadCapture
                             // Use LoadCaptureRaw for bindings that need cells to preserve the cell
-                            if binding_needs_cell {
+                            if binding_needs_lbox {
                                 self.emit(LirInstr::LoadCaptureRaw {
                                     dst: reg,
                                     index: slot,
@@ -71,7 +71,7 @@ impl Lowerer {
                     if self.in_lambda {
                         // We're in a nested lambda - load from parent's captures
                         // Use LoadCaptureRaw for bindings that need cells to preserve the cell
-                        if binding_needs_cell {
+                        if binding_needs_lbox {
                             self.emit(LirInstr::LoadCaptureRaw { dst: reg, index });
                         } else {
                             self.emit(LirInstr::LoadCapture { dst: reg, index });
@@ -170,24 +170,24 @@ impl Lowerer {
             self.upvalue_bindings.insert(cap.binding);
         }
 
-        // Build cell_params_mask and bind parameters to upvalue indices
+        // Build lbox_params_mask and bind parameters to upvalue indices
         // Parameters that need cells will be wrapped by the VM when the closure is called
-        let mut cell_params_mask: u64 = 0;
+        let mut lbox_params_mask: u64 = 0;
         for (i, param) in params.iter().enumerate() {
             let upvalue_idx = self.num_captures + i as u16;
 
-            let needs_cell = param.needs_cell();
+            let needs_lbox = param.needs_lbox();
 
-            if needs_cell && i < 64 {
+            if needs_lbox && i < 64 {
                 // Set the bit for this parameter
-                cell_params_mask |= 1 << i;
+                lbox_params_mask |= 1 << i;
             }
 
             // All parameters are upvalues - the VM will wrap them in cells if needed
             self.binding_to_slot.insert(*param, upvalue_idx);
             self.upvalue_bindings.insert(*param);
         }
-        self.current_func.cell_params_mask = cell_params_mask;
+        self.current_func.lbox_params_mask = lbox_params_mask;
 
         // Lower body
         let result_reg = self.lower_expr(body)?;

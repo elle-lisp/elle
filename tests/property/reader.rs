@@ -101,7 +101,7 @@ fn arb_source_depth(depth: u32) -> BoxedStrategy<String> {
             // Lists
             3 => prop::collection::vec(inner.clone(), 0..=4)
                 .prop_map(|items| format!("({})", items.join(" "))),
-            // Tuples
+            // Immutable arrays
             2 => prop::collection::vec(arb_source_depth(depth - 1), 0..=4)
                 .prop_map(|items| format!("[{}]", items.join(" "))),
             // Arrays

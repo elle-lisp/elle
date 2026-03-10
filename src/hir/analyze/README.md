@@ -8,7 +8,7 @@ The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving al
 
 2. **Capture Analysis**: When a lambda references a variable from an enclosing scope, the analyzer records what's captured and how to access it (directly from parent's locals, transitively through parent's captures, or from globals).
 
-3. **Mutation Tracking**: Variables modified with `set` are marked as mutated. Combined with capture information, this determines which variables need cell boxing for correct semantics.
+3. **Mutation Tracking**: Variables modified with `set` are marked as mutated. Combined with capture information, this determines which variables need lbox boxing for correct semantics.
 
 4. **Effect Inference**: Each expression is tagged with its effect (`Inert`, `Yields`, or `Polymorphic`). Effects propagate upward through the tree.
 

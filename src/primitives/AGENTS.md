@@ -91,8 +91,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `logic.rs` | `not` |
 | `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
 | `array.rs` | `array`, `@array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
-| `buffer.rs` | `@string` (constructor) |
-| `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `string.rs` | `@string` (constructor), `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
 | `format.rs` | `string/format` |
 | `table.rs` | `@struct`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
 | `access.rs` | `get`, `put` — polymorphic collection access |
@@ -105,7 +104,8 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `kwarg.rs` | `extract_keyword_timeout` helper function |
 | `display.rs` | `print`, `println`, `display`, `newline` |
-| `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `@array?`, `@struct?`, `struct?`, `@string?`, `box?`, `bytes?`, `@bytes?`, `set?`, `type-of` |
+| `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `struct?`, `bytes?`, `mutable?`, `type-of` |
+| `cell.rs` | `box`, `unbox`, `rebox`, `box?` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |

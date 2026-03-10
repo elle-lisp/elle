@@ -264,8 +264,8 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     match closure.template.arity {
         crate::value::Arity::AtLeast(n) => {
             for (i, arg) in args[..n.min(args.len())].iter().enumerate() {
-                if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
-                    env.push(Value::local_cell(*arg));
+                if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
+                    env.push(Value::local_lbox(*arg));
                 } else {
                     env.push(*arg);
                 }
@@ -274,16 +274,16 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
             let rest_args = if args.len() > n { &args[n..] } else { &[] };
             let rest = args_to_list(rest_args);
             let rest_idx = n;
-            if rest_idx < 64 && (closure.template.cell_params_mask & (1 << rest_idx)) != 0 {
-                env.push(Value::local_cell(rest));
+            if rest_idx < 64 && (closure.template.lbox_params_mask & (1 << rest_idx)) != 0 {
+                env.push(Value::local_lbox(rest));
             } else {
                 env.push(rest);
             }
         }
         _ => {
             for (i, arg) in args.iter().enumerate() {
-                if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
-                    env.push(Value::local_cell(*arg));
+                if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
+                    env.push(Value::local_lbox(*arg));
                 } else {
                     env.push(*arg);
                 }
@@ -292,7 +292,7 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     }
 
     // Add slots for locally-defined variables.
-    // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
+    // cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
     // Beyond index 63, conservatively use LocalCell.
     let num_param_slots = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
@@ -301,8 +301,8 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     };
     let num_locally_defined = closure.template.num_locals.saturating_sub(num_param_slots);
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
-            env.push(Value::local_cell(Value::NIL));
+        if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
+            env.push(Value::local_lbox(Value::NIL));
         } else {
             env.push(Value::NIL);
         }
@@ -441,8 +441,8 @@ mod tests {
             num_params: arity,
             constants: Rc::new(vec![]),
             effect: Effect::inert(),
-            cell_params_mask: 0,
-            cell_locals_mask: 0,
+            lbox_params_mask: 0,
+            lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,
@@ -542,8 +542,8 @@ mod tests {
             num_params: 1,
             constants: Rc::new(vec![]),
             effect: Effect::inert(),
-            cell_params_mask: 0,
-            cell_locals_mask: 0,
+            lbox_params_mask: 0,
+            lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             jit_code: None,

@@ -59,7 +59,7 @@ bytecode. Error messages include file:line:col information.
 
 `Value` is the runtime representation using NaN-boxing. Create values via methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
 - `Closure` — bytecode + captured environment + arity + effect + `location_map` + `doc` + `syntax`
-- `Cell` / `LocalCell` — mutable cells for captured variables
+- `LBox` / `LocalLBox` — mutable lboxes for captured variables
 - `Fiber` — independent execution context with stack, frames, signal mask
 - `Parameter` — dynamic binding with default value, looked up at runtime
 - `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
@@ -111,8 +111,8 @@ These must remain true. Violating them breaks the system:
 
 2. **Closures capture by value into their environment.** Immutable captured
    locals are captured directly. Mutable captured locals and mutated parameters
-   use `LocalCell` for indirection. The `cell_params_mask` on `Closure` tracks
-   which parameters need cell wrapping.
+   use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
+   which parameters need lbox wrapping.
 
 3. **Effects are inferred, not declared.** The `Effect` enum (`Inert`, `Yields`,
    `Polymorphic`) propagates from leaves to root during analysis.

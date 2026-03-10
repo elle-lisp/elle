@@ -430,7 +430,7 @@ impl<'a> Analyzer<'a> {
             ))
         } else {
             // At top level, creates a local binding.
-            // Mark as prebound so that needs_cell() returns true when
+            // Mark as prebound so that needs_lbox() returns true when
             // the binding is captured by a lambda in the same begin block.
             // Without this, an immutable captured local would be captured
             // by value (nil) before its initializer runs.

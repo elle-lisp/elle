@@ -24,6 +24,8 @@ syntax# the mutable variant uses the same delimiters prefixed with `@`.
 | array | @array | `[]` | `[1 2 3]` | `@[1 2 3]` |
 | struct | @struct | `{}` | `{:a 1 :b 2}` | `@{:a 1 :b 2}` |
 | string | @string | `""` | `"hello"` | `@"hello"` |
+| bytes | @bytes | *(no literal)* | `(bytes 1 2 3)` | `(@bytes 1 2 3)` |
+| set | @set | `\|\|` | `\|1 2 3\|` | `@\|1 2 3\|` |
 
 The `@` prefix means "mutable version of this literal." This is the only
 syntax difference between the two variants of each pair. The types within each
@@ -246,6 +248,60 @@ Mutable byte sequence. The mutable counterpart of string.
 (concat b1 b2)  # return new @string
 ```
 
+#### bytes (immutable binary data)
+
+Immutable byte sequence. No literal syntax. Displays as `#bytes[hex ...]`.
+
+```janet
+(bytes 1 2 3)       # constructor from integers
+(bytes "hello")     # constructor from string (UTF-8 encoding)
+(get b 0)           # byte at index
+(length b)          # byte count
+(bytes->hex b)      # hex string
+(bytes? x)          # predicate (matches bytes or @bytes)
+```
+
+#### @bytes (mutable binary data)
+
+Mutable byte sequence. No literal syntax. Displays as `#@bytes[hex ...]`.
+
+```janet
+(@bytes 1 2 3)      # constructor from integers
+(@bytes "hello")    # constructor from string (UTF-8 encoding)
+(get b 0)           # byte at index
+(put b 0 99)        # set byte at index
+(push b 33)         # append byte
+(pop b)             # remove and return last byte
+(length b)          # byte count
+(bytes->hex b)      # hex @string (preserves mutability)
+(bytes? x)          # predicate (matches bytes or @bytes)
+```
+
+#### set (immutable unique collection)
+
+Immutable ordered collection of unique values.
+
+```janet
+|1 2 3|             # literal
+(contains? s 2)     # membership
+(set? x)            # predicate (matches set or @set)
+```
+
+#### @set (mutable unique collection)
+
+Mutable ordered collection of unique values.
+
+```janet
+@|1 2 3|            # literal
+(add s 4)           # add element
+(del s 1)           # remove element
+(contains? s 2)     # membership
+(union s1 s2)       # set union
+(intersection s1 s2) # set intersection
+(difference s1 s2)  # set difference
+(set? x)            # predicate (matches set or @set)
+```
+
 ---
 
 ### Heap types: lists
@@ -282,9 +338,9 @@ Compiled function with captured environment.
 (closure? x)            # predicate
 ```
 
-Closures capture by value. Mutable captures use `LocalCell` (compiler-
-managed, auto-unwrapped). The `cell_params_mask` tracks which parameters
-need cell wrapping.
+Closures capture by value. Mutable captures use `LocalLBox` (compiler-
+managed, auto-unwrapped). The `lbox_params_mask` tracks which parameters
+need lbox wrapping.
 
 #### native function
 
@@ -311,18 +367,33 @@ mask. See `docs/fibers.md` for the full fiber architecture.
 (fiber? x)                    # predicate
 ```
 
-#### cell
+#### box (lbox)
 
 Mutable box. Two variants:
 
-- **User cell** (`box`): explicit creation and dereferencing.
-- **Local cell**: compiler-created for mutable captures. Auto-unwrapped by
+- **User box** (`box`): explicit creation and dereferencing.
+- **Local lbox**: compiler-created for mutable captures. Auto-unwrapped by
   `LoadUpvalue`. Users never see these directly.
 
 ```janet
-(box 42)        # create user cell
+(box 42)        # create user box
 (unbox c)       # read
-(set-box! c 99) # write
+(rebox c 99)    # write
+(box? c)        # predicate
+```
+
+#### parameter
+
+Dynamic binding. `(make-parameter default)` creates one; calling it reads the
+current value. `parameterize` sets it within a scope. Child fibers inherit
+parent parameter frames.
+
+```janet
+(def *port* (make-parameter :stdout))
+(*port*)            # read current value
+(parameterize ((*port* :stderr))
+  (*port*))         # => :stderr
+(parameter? x)      # predicate
 ```
 
 ---
@@ -381,22 +452,28 @@ Created by `ffi/malloc`.
 | `nil?` | nil only |
 | `boolean?` | `true` or `false` |
 | `number?` | integer or float |
+| `integer?` | integer only |
+| `float?` | float only |
 | `symbol?` | symbol |
 | `keyword?` | keyword |
-| `string?` | string |
+| `string?` | string (immutable or @string) |
 | `pair?` | cons cell |
 | `list?` | cons cell or empty list |
-| `empty?` | empty list, empty @array, empty array, empty @struct, empty struct |
-| `array?` | @array |
-| `array?` | array |
-| `@struct?` | @struct |
-| `struct?` | struct |
-| `closure?` | closure |
+| `empty?` | empty list, empty array, empty @array, empty struct, empty @struct, empty @string |
+| `array?` | array (immutable or @array) |
+| `struct?` | struct (immutable or @struct) |
+| `bytes?` | bytes (immutable or @bytes) |
+| `set?` | set (immutable or @set) |
+| `box?` | box (mutable box) |
+| `parameter?` | dynamic parameter |
+| `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
+| `function?` | closure or native function |
+| `closure?` | closure only |
+| `primitive?` | native function only |
 | `fiber?` | fiber |
 | `pointer?` | raw C pointer or managed pointer |
-
-**Note**: `array?`, `tuple?`, `table?`, and `struct?` are not yet exposed as
-primitives. They need to be added.
+| `zero?` | zero (integer or float) |
+| `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
 
 ## Display format
 
@@ -406,19 +483,25 @@ primitives. They need to be added.
 | boolean | `true` / `false` | |
 | integer | `42` | |
 | float | `3.14` | |
-| symbol | `foo` | Looked up in symbol table |
+| symbol | `'foo` | Looked up in symbol table |
 | keyword | `:foo` | |
 | empty list | `()` | |
 | string | `hello` | No quotes in Display |
+| @string | `@"hello"` | |
 | cons | `(1 2 3)` | `(a . b)` for improper |
-| array | `[1 2 3]` | Same delimiters as @array |
-| @array | `@[1 2 3]` | Desired. Currently displays as `[1 2 3]` |
+| array | `[1 2 3]` | |
+| @array | `@[1 2 3]` | |
 | struct | `{:a 1}` | |
-| @struct | `@{:a 1}` | Desired. Currently displays as `{:a 1}` |
+| @struct | `@{:a 1}` | |
+| set | `\|1 2 3\|` | |
+| @set | `@\|1 2 3\|` | |
+| bytes | `#bytes[01 02 03]` | |
+| @bytes | `#@bytes[01 02 03]` | |
+| box | `<box value>` | |
 | closure | `<closure>` | |
 | native fn | `<native-fn>` | |
 | fiber | `<fiber:status>` | |
-| cell | `<cell value>` | |
+| parameter | `<parameter id>` | |
 | syntax | `#<syntax:...>` | |
 | pointer | `<pointer 0x...>` | |
 
@@ -445,8 +528,12 @@ strings/symbols/keywords. Identity is pointer equality for heap objects.
 |-----------|---------|------------------|
 | array `[]` | @array `@[]` | sequential indexing |
 | struct `{}` | @struct `@{}` | key-value mapping |
-| string `""` | @string `@""` | byte sequence |
+| string `""` | @string `@""` | text |
+| bytes | @bytes | binary data |
+| set `\|\|` | @set `@\|\|` | unique values |
+| — | box | mutable box (`box`/`unbox`/`rebox`) |
+| — | parameter | dynamic binding |
 | cons/list | — | linked list (always immutable) |
 | nil, bool, int, float, symbol, keyword | — | immediates (always immutable) |
-| closure | — | always immutable (captures may be mutable via cells) |
-| fiber | — | always mutable (internal state) |
+| closure | — | always immutable (captures may be mutable via lboxes) |
+| fiber | — | always immutable (internal state is mutable, but the value is not) |

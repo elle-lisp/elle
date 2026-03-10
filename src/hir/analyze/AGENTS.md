@@ -6,7 +6,7 @@ Syntax to HIR analysis: binding resolution, capture computation, effect inferenc
 
 Transform expanded Syntax trees into HIR by:
 1. Resolving all variable references to `Binding` (NaN-boxed heap objects)
-2. Computing closure captures and cell requirements
+2. Computing closure captures and lbox requirements
 3. Inferring effects (including interprocedural effect tracking)
 4. Validating scope rules and control flow
 5. Extracting docstrings from function bodies
@@ -90,7 +90,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 2. **`Binding` identity is bit-pattern equality.** Two references to the same binding site share the same NaN-boxed pointer. `Binding` implements `Hash`/`Eq` via `Value::to_bits()`.
 
-3. **`needs_cell()` determines cell boxing.** A local binding needs a cell if captured. A parameter needs a cell if mutated. Globals never need cells.
+3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
 
 4. **Effects combine upward.** A `begin` has the combined effect of its children. A `fn` body's effect is stored but the fn itself is Inert.
 
@@ -102,7 +102,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 8. **`Define` and `LocalDefine` are unified.** There is a single `HirKind::Define { binding, value }`. The lowerer checks `binding.is_global()` to decide between global and local define semantics.
 
-9. **Binding metadata is mutable during analysis, read-only after.** The analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`. The lowerer only reads via `needs_cell()`, `is_global()`, `name()`, etc.
+9. **Binding metadata is mutable during analysis, read-only after.** The analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`. The lowerer only reads via `needs_lbox()`, `is_global()`, `name()`, etc.
 
 10. **`Destructure` decomposes values into pattern bindings.** `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is produced by the analyzer for `def`, `var`, `let`, and `fn` parameter destructuring. The pattern's leaf `Var` bindings are created in the current scope. `let*` is desugared to nested `let` in the expander, so the analyzer never sees `let*`.
 

@@ -92,7 +92,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
         Err("Cannot serialize symbols to JSON".to_string())
-    } else if let Some(cell) = value.as_cell() {
+    } else if let Some(cell) = value.as_lbox() {
         // Dereference the cell and serialize the inner value
         let inner = cell.borrow();
         serialize_value(&inner)
@@ -114,7 +114,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                     Err("Tuple should have been accessible".to_string())
                 }
             }
-            HeapTag::Cell => Err("Cell should have been handled above".to_string()),
+            HeapTag::LBox => Err("LBox should have been handled above".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
@@ -269,7 +269,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
         Err("Cannot serialize symbols to JSON".to_string())
-    } else if let Some(cell) = value.as_cell() {
+    } else if let Some(cell) = value.as_lbox() {
         // Dereference the cell and serialize the inner value
         let inner = cell.borrow();
         serialize_value_pretty(&inner, indent_level)
@@ -298,7 +298,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                     Err("Tuple should have been accessible".to_string())
                 }
             }
-            HeapTag::Cell => Err("Cell should have been handled above".to_string()),
+            HeapTag::LBox => Err("LBox should have been handled above".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())

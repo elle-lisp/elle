@@ -543,7 +543,7 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
     match tag {
         // Copy/scalar innards — no heap allocations
         HeapTag::Cons => false,
-        HeapTag::Cell => false,
+        HeapTag::LBox => false,
         HeapTag::Float => false,
         HeapTag::NativeFn => false,
         HeapTag::LibHandle => false,

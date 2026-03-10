@@ -26,22 +26,22 @@
 # String to bytes/blob conversions
 # ============================================================================
 
-(assert-true (bytes? (string->bytes "hello")) "string->bytes returns bytes")
-(assert-true (bytes? (string->blob "hello")) "string->blob returns @bytes")
+(assert-true (bytes? (bytes "hello")) "bytes from string returns bytes")
+(assert-true (bytes? (@bytes "hello")) "@bytes from string returns @bytes")
 
 # ============================================================================
 # Bytes/blob to string conversions
 # ============================================================================
 
-(assert-eq (bytes->string (bytes 104 105)) "hi" "bytes->string")
-(assert-eq (blob->string (@bytes 104 105)) "hi" "@bytes->string")
+(assert-eq (string (bytes 104 105)) "hi" "bytes->string")
+(assert-eq (freeze (string (@bytes 104 105))) "hi" "@bytes->string")
 
 # ============================================================================
 # Bytes/blob to hex conversions
 # ============================================================================
 
 (assert-eq (bytes->hex (bytes 72 101 108)) "48656c" "bytes->hex")
-(assert-eq (blob->hex (@bytes 72 101 108)) "48656c" "@bytes->hex")
+(assert-eq (freeze (bytes->hex (@bytes 72 101 108))) "48656c" "@bytes->hex")
 
 # ============================================================================
 # Bytes and blob length
@@ -104,12 +104,32 @@
 # @string to bytes/@bytes conversions
 # ============================================================================
 
-(assert-true (bytes? (buffer->bytes @"hello")) "buffer->bytes returns bytes")
-(assert-true (bytes? (buffer->blob @"hello")) "buffer->blob returns @bytes")
+(assert-true (bytes? (bytes @"hello")) "bytes from @string returns bytes")
+(assert-true (bytes? (@bytes @"hello")) "@bytes from @string returns @bytes")
 
 # ============================================================================
 # Bytes/@bytes to @string conversions
 # ============================================================================
 
-(assert-eq (freeze (bytes->buffer (bytes 104 105))) "hi" "bytes->buffer->string")
-(assert-eq (freeze (blob->buffer (@bytes 104 105))) "hi" "@bytes->buffer->string")
+(assert-eq (string (bytes 104 105)) "hi" "bytes->string via (string)")
+(assert-eq (freeze (string (@bytes 104 105))) "hi" "@bytes->string via (string)")
+
+# ============================================================================
+# Mutability-preserving conversions
+# ============================================================================
+
+# (string x) preserves mutability: bytes→string, @bytes→@string
+(assert-eq (type (string (bytes 104 105))) :string "string from bytes is immutable")
+(assert-eq (type (string (@bytes 104 105))) :@string "string from @bytes is mutable")
+
+# (string x) preserves mutability: string→string, @string→@string
+(assert-eq (type (string "hello")) :string "string from string is immutable")
+(assert-eq (type (string @"hello")) :@string "string from @string is mutable")
+
+# (bytes x) preserves mutability: string→bytes, @string→@bytes
+(assert-eq (type (bytes "hello")) :bytes "bytes from string is immutable")
+(assert-eq (type (bytes @"hello")) :@bytes "bytes from @string is mutable")
+
+# (bytes->hex x) preserves mutability: bytes→string, @bytes→@string
+(assert-eq (type (bytes->hex (bytes 72 101 108))) :string "bytes->hex from bytes is immutable")
+(assert-eq (type (bytes->hex (@bytes 72 101 108))) :@string "bytes->hex from @bytes is mutable")

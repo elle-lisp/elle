@@ -7,7 +7,7 @@ and basic blocks. Architecture-independent but close to target.
 
 - Lower HIR to explicit control flow (basic blocks, jumps)
 - Translate `Binding` references to concrete slot indices
-- Emit cell operations for mutable captures
+- Emit lbox operations for mutable captures
 - Produce bytecode via `Emitter`
 
 Does NOT:
@@ -41,7 +41,7 @@ HIR + spans
     ▼
 Lowerer
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
-    ├─► emit MakeCell for captured locals (binding.needs_cell())
+    ├─► emit MakeLBox for captured locals (binding.needs_lbox())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     └─► propagate HIR spans to SpannedInstr
@@ -68,7 +68,7 @@ Emitter
 ```
 
 The lowerer reads binding metadata directly from `Binding` objects (via
-`binding.needs_cell()`, `binding.is_global()`, `binding.name()`, etc.)
+`binding.needs_lbox()`, `binding.is_global()`, `binding.name()`, etc.)
 rather than looking up a separate bindings HashMap.
 
 ## Source location tracking
@@ -106,16 +106,16 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
     captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
 
-5. **`cell_params_mask` is set for mutable parameters.** Bit i set means
-    parameter i needs cell wrapping at call time.
+5. **`lbox_params_mask` is set for mutable parameters.** Bit i set means
+     parameter i needs lbox wrapping at call time.
 
-6. **`cell_locals_mask` is set for locals that need cells.** Bit i set means
-    locally-defined variable i (0-indexed from the first local after params)
-    needs cell wrapping because it's captured by a nested closure or mutated
-    via `set!`. The JIT uses this to skip `LocalCell` heap allocation for
-    non-captured, non-mutated `let` bindings. The VM interpreter does not
-    use this mask (it cell-wraps all locals unconditionally). Both masks
-    are limited to 64 entries (`u64`).
+6. **`lbox_locals_mask` is set for locals that need lboxes.** Bit i set means
+     locally-defined variable i (0-indexed from the first local after params)
+     needs lbox wrapping because it's captured by a nested closure or mutated
+     via `set!`. The JIT uses this to skip `LocalLBox` heap allocation for
+     non-captured, non-mutated `let` bindings. The VM interpreter does not
+     use this mask (it lbox-wraps all locals unconditionally). Both masks
+     are limited to 64 entries (`u64`).
 
 7. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
     splits the block: the current block ends with yield, and a new resume block
@@ -123,9 +123,20 @@ stored in `Closure.location_map` and used by the VM for error reporting.
     passed to `coro/resume`.
 
 8. **Docstring and syntax are threaded from HIR.** `LirFunction.doc` and
-     `LirFunction.syntax` are copied from `HirKind::Lambda.doc` and
-     `HirKind::Lambda.syntax` during lowering. The emitter preserves both
-     into `Closure.doc` and `Closure.syntax` without encoding them in bytecode.
+      `LirFunction.syntax` are copied from `HirKind::Lambda.doc` and
+      `HirKind::Lambda.syntax` during lowering. The emitter preserves both
+      into `Closure.doc` and `Closure.syntax` without encoding them in bytecode.
+
+9. **Yield point metadata is collected during emission.** `Emitter::emit()`
+     returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
+     must attach these to `LirFunction.yield_points` and `LirFunction.call_sites`
+     before storing the function on a `Closure`. The JIT reads this metadata
+     to generate side-exit code.
+
+10. **Call site metadata is only populated for may_suspend functions.**
+     `Emitter.current_func_may_suspend` gates call site recording. For
+     non-suspending functions, `call_sites` is empty. This avoids overhead
+     for inert functions that can never yield.
 
 9. **Yield point metadata is collected during emission.** `Emitter::emit()`
     returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
@@ -136,7 +147,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 10. **Call site metadata is only populated for may_suspend functions.**
     `Emitter.current_func_may_suspend` gates call site recording. For
     non-suspending functions, `call_sites` is empty. This avoids overhead
-    for pure functions that can never yield.
+    for inert functions that can never yield.
 
 ## Key instructions
 
@@ -144,10 +155,10 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 |-------------|--------------|-------|
 | `LoadLocal` | → value | Load from stack slot |
 | `StoreLocal` | value → value | Store to slot, keep on stack |
-| `LoadCapture` | → value | From closure env, auto-unwraps LocalCell |
-| `LoadCaptureRaw` | → cell | From closure env, preserves cell (for forwarding) |
-| `StoreCapture` | value → | Into closure env, handles cells |
-| `MakeCell` | value → cell | Wrap in LocalCell |
+| `LoadCapture` | → value | From closure env, auto-unwraps LocalLBox |
+| `LoadCaptureRaw` | → lbox | From closure env, preserves lbox (for forwarding) |
+| `StoreCapture` | value → | Into closure env, handles lboxes |
+| `MakeLBox` | value → lbox | Wrap in LocalLBox |
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 | `LoadResumeValue` | → value | First instruction in yield resume block |
@@ -296,7 +307,7 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `lower/escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe`, `all_breaks_have_safe_values` |
 | `lower/expr.rs` | ~457 | Expression lowering: literals, operators, calls |
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
-| `lower/lambda.rs` | ~250 | fn lowering, closure capture, cell wrapping |
+| `lower/lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |
 | `lower/control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
 | `lower/pattern.rs` | ~200 | Pattern matching lowering |
 | `emit.rs` | 902 | `Emitter`, LIR→Bytecode with stack simulation |

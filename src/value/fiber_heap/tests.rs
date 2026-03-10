@@ -83,7 +83,7 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
     heap.init_active_allocator();
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     heap.alloc(HeapObject::Float(42.5));
-    heap.alloc(HeapObject::Cell(std::cell::RefCell::new(Value::NIL), false));
+    heap.alloc(HeapObject::LBox(std::cell::RefCell::new(Value::NIL), false));
     assert_eq!(heap.len(), 3); // 3 total objects
     assert_eq!(heap.dtors.len(), 0); // None need Drop tracking
 }
@@ -94,7 +94,7 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     // If a new HeapTag variant is added, `needs_drop` won't compile
     // until a decision is made.
     assert!(!needs_drop(HeapTag::Cons));
-    assert!(!needs_drop(HeapTag::Cell));
+    assert!(!needs_drop(HeapTag::LBox));
     assert!(!needs_drop(HeapTag::Float));
     assert!(!needs_drop(HeapTag::NativeFn));
     assert!(!needs_drop(HeapTag::LibHandle));

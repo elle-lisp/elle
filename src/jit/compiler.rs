@@ -74,10 +74,10 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) is_pair: FuncId,
     #[allow(dead_code)]
     pub(crate) is_truthy: FuncId,
-    pub(crate) make_cell: FuncId,
-    pub(crate) load_cell: FuncId,
+    pub(crate) make_lbox: FuncId,
+    pub(crate) load_lbox: FuncId,
     pub(crate) load_capture: FuncId,
-    pub(crate) store_cell: FuncId,
+    pub(crate) store_lbox: FuncId,
     pub(crate) store_capture: FuncId,
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
@@ -150,20 +150,20 @@ impl JitCompiler {
         );
         builder.symbol("elle_jit_is_pair", dispatch::elle_jit_is_pair as *const u8);
         builder.symbol(
-            "elle_jit_make_cell",
-            dispatch::elle_jit_make_cell as *const u8,
+            "elle_jit_make_lbox",
+            dispatch::elle_jit_make_lbox as *const u8,
         );
         builder.symbol(
-            "elle_jit_load_cell",
-            dispatch::elle_jit_load_cell as *const u8,
+            "elle_jit_load_lbox",
+            dispatch::elle_jit_load_lbox as *const u8,
         );
         builder.symbol(
             "elle_jit_load_capture",
             dispatch::elle_jit_load_capture as *const u8,
         );
         builder.symbol(
-            "elle_jit_store_cell",
-            dispatch::elle_jit_store_cell as *const u8,
+            "elle_jit_store_lbox",
+            dispatch::elle_jit_store_lbox as *const u8,
         );
         builder.symbol(
             "elle_jit_store_capture",
@@ -304,10 +304,10 @@ impl JitCompiler {
             is_nil: declare(module, "elle_jit_is_nil", &unary_sig)?,
             is_pair: declare(module, "elle_jit_is_pair", &unary_sig)?,
             is_truthy: declare(module, "elle_jit_is_truthy", &unary_sig)?,
-            make_cell: declare(module, "elle_jit_make_cell", &unary_sig)?,
-            load_cell: declare(module, "elle_jit_load_cell", &unary_sig)?,
+            make_lbox: declare(module, "elle_jit_make_lbox", &unary_sig)?,
+            load_lbox: declare(module, "elle_jit_load_lbox", &unary_sig)?,
             load_capture: declare(module, "elle_jit_load_capture", &unary_sig)?,
-            store_cell: declare(module, "elle_jit_store_cell", &binary_sig)?,
+            store_lbox: declare(module, "elle_jit_store_lbox", &binary_sig)?,
             store_capture: declare(module, "elle_jit_store_capture", &ternary_sig)?,
             call: declare(module, "elle_jit_call", &call_sig)?,
             tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
@@ -717,12 +717,12 @@ impl JitCompiler {
             builder.seal_block(cons_loop_exit); // single predecessor: loop_head
             let rest_val = builder.block_params(cons_loop_exit)[0];
 
-            // Handle cell_params_mask: if the rest param needs a cell, wrap it
+            // Handle lbox_params_mask: if the rest param needs a cell, wrap it
             let rest_param_index = fixed;
-            if rest_param_index < 64 && (lir.cell_params_mask & (1 << rest_param_index)) != 0 {
+            if rest_param_index < 64 && (lir.lbox_params_mask & (1 << rest_param_index)) != 0 {
                 let cell = translator.call_helper_unary(
                     &mut builder,
-                    translator.helpers.make_cell,
+                    translator.helpers.make_lbox,
                     rest_val,
                 )?;
                 builder.def_var(var(rest_var_idx), cell);

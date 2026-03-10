@@ -195,9 +195,9 @@ fn test_table_constructor() {
 #[test]
 fn test_cell_constructor() {
     let inner = Value::int(42);
-    let v = Value::cell(inner);
-    assert!(v.is_cell());
-    if let Some(cell_ref) = v.as_cell() {
+    let v = Value::lbox(inner);
+    assert!(v.is_lbox());
+    if let Some(cell_ref) = v.as_lbox() {
         let borrowed = cell_ref.borrow();
         assert_eq!(*borrowed, Value::int(42));
     } else {
@@ -248,7 +248,7 @@ fn test_type_name() {
     );
     assert_eq!(Value::array_mut(vec![]).type_name(), "@array");
     assert_eq!(Value::struct_mut().type_name(), "@struct");
-    assert_eq!(Value::cell(Value::NIL).type_name(), "cell");
+    assert_eq!(Value::lbox(Value::NIL).type_name(), "box");
 }
 
 #[test]
@@ -301,8 +301,8 @@ fn test_truthiness_semantics() {
     // @struct is truthy
     assert!(Value::struct_mut().is_truthy(), "@struct is truthy");
 
-    // Cell is truthy
-    assert!(Value::cell(Value::int(42)).is_truthy(), "cell is truthy");
+    // Box is truthy
+    assert!(Value::lbox(Value::int(42)).is_truthy(), "box is truthy");
 }
 
 #[test]

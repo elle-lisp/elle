@@ -264,7 +264,7 @@
     (if (<= n 0)
       0
       (+ n (sum (- n 1))))))
-  (assert-eq (sum 5) 15 "pure function: sum 5"))
+  (assert-eq (sum 5) 15 "inert function: sum 5"))
 
 # test_yielding_function_detected
 (begin

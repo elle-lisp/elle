@@ -57,7 +57,7 @@ fn is_value_sendable(value: &Value) -> bool {
         }
         HeapObject::LStruct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
 
-        // Tuples are safe if their contents are
+        // Arrays (immutable) are safe if their contents are
         HeapObject::LArray(elems) => elems.iter().all(is_value_sendable),
 
         // Cons cells are safe if their contents are
@@ -82,8 +82,8 @@ fn is_value_sendable(value: &Value) -> bool {
         // Unsafe: thread handles
         HeapObject::ThreadHandle(_) => false,
 
-        // Cells are safe if their contents are sendable
-        HeapObject::Cell(cell, _) => {
+        // Boxes are safe if their contents are sendable
+        HeapObject::LBox(cell, _) => {
             if let Ok(val) = cell.try_borrow() {
                 is_value_sendable(&val)
             } else {
@@ -110,13 +110,13 @@ fn is_value_sendable(value: &Value) -> bool {
         // FFI type descriptors are pure data — safe to send
         HeapObject::FFIType(_) => true,
 
-        // Buffers are sendable if we deep-copy
+        // @string values are sendable if we deep-copy
         HeapObject::LStringMut(buf) => buf.try_borrow().is_ok(),
 
         // Bytes are immutable and sendable
         HeapObject::LBytes(_) => true,
 
-        // Blobs are sendable if we deep-copy
+        // @bytes values are sendable if we deep-copy
         HeapObject::LBytesMut(blob) => blob.try_borrow().is_ok(),
 
         // Managed pointers are not sendable (Cell is not thread-safe)
@@ -192,7 +192,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
     // Extract closure metadata needed for proper environment setup
     let num_locals = closure.template.num_locals;
-    let cell_locals_mask = closure.template.cell_locals_mask;
+    let lbox_locals_mask = closure.template.lbox_locals_mask;
     let _num_captures = closure.template.num_captures;
     let arity = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
@@ -230,13 +230,13 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
             .collect();
 
         // Add slots for locally-defined variables.
-        // Cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
+        // cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
         // Beyond index 63, conservatively use LocalCell.
         let num_params = arity;
         let num_locally_defined = num_locals.saturating_sub(num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (cell_locals_mask & (1 << i)) != 0 {
-                env_values.push(Value::local_cell(Value::NIL));
+            if i >= 64 || (lbox_locals_mask & (1 << i)) != 0 {
+                env_values.push(Value::local_lbox(Value::NIL));
             } else {
                 env_values.push(Value::NIL);
             }

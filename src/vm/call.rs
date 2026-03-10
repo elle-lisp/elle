@@ -566,7 +566,7 @@ impl VM {
         }
 
         // Add slots for locally-defined variables.
-        // Cell-wrapped locals (captured by nested closures) get LocalCell(NIL).
+        // cell-wrapped locals (captured by nested closures) get LocalCell(NIL).
         // Non-cell locals get bare NIL — they use stack slots via StoreLocal/LoadLocal
         // and the env slot is never accessed.
         // Beyond index 63, the mask can't represent the local — conservatively
@@ -576,8 +576,8 @@ impl VM {
             .num_locals
             .saturating_sub(closure.template.num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
-                buf.push(Value::local_cell(Value::NIL));
+            if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
+                buf.push(Value::local_lbox(Value::NIL));
             } else {
                 buf.push(Value::NIL);
             }
@@ -587,11 +587,11 @@ impl VM {
     }
 
     /// Push a parameter value into the environment buffer, wrapping in a
-    /// LocalCell if the cell_params_mask indicates it's needed.
+    /// LocalCell if the lbox_params_mask indicates it's needed.
     #[inline]
     fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-        if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
-            buf.push(Value::local_cell(val));
+        if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
+            buf.push(Value::local_lbox(val));
         } else {
             buf.push(val);
         }

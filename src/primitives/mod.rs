@@ -4,7 +4,6 @@ pub mod arena;
 pub mod arithmetic;
 pub mod array;
 pub mod bitwise;
-pub mod buffer;
 pub mod bytes;
 pub mod calling;
 pub mod cell;
