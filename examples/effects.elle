@@ -1,0 +1,23 @@
+# User-defined effects
+(effect :heartbeat)
+(effect :rate-limit)
+
+# Restricted higher-order function
+(defn apply-pure (f x)
+  "Apply f to x, requiring f to be pure."
+  (restrict f)
+  (f x))
+
+# This works: + is inert
+(apply-pure + 42)
+
+# Restricted function
+(defn validate (x)
+  "Validate x, may only error."
+  (restrict :error)
+  (if (< x 0) (error "negative") x))
+
+# Introspection
+(def registry (effects))
+(assert (= (registry :error) 0))
+(assert (= (registry :heartbeat) 16))
