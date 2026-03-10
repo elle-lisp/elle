@@ -198,7 +198,7 @@ impl<'a> Analyzer<'a> {
                 })
             }
             SyntaxKind::Array(items) => {
-                // Tuple pattern [...] - matches tuples (immutable)
+                // Array pattern [...] - matches arrays (immutable)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
                 let elements: Result<Vec<_>, _> = fixed
                     .iter()

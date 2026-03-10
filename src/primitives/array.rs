@@ -10,12 +10,16 @@ pub(crate) fn prim_array(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array_mut(args.to_vec()))
 }
 
-/// Create a tuple from arguments
+/// Create an immutable array from arguments
 pub(crate) fn prim_tuple(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array(args.to_vec()))
 }
 
-/// Create an array of n elements, all set to fill
+/// Create a mutable array of n elements, all set to fill.
+///
+/// Complements `@array` (which takes explicit elements) by supporting
+/// pre-allocation of a fixed-size array with a uniform initial value.
+/// Returns @array (mutable), not array (immutable).
 pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -53,7 +57,7 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array_mut(vec))
 }
 
-/// Push a value onto the end of an array or buffer (mutates in place, returns the collection)
+/// Push a value onto the end of an array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -90,7 +94,7 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "push: buffer value must be integer, got {}",
+                            "push: @string value must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -119,7 +123,7 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "push: blob value must be integer, got {}",
+                            "push: @bytes value must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -135,14 +139,14 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "push: expected array, buffer, or blob, got {}",
+                "push: expected @array, @string, or @bytes, got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Pop a value from the end of an array or buffer (mutates in place, returns the removed element)
+/// Pop a value from the end of an @array or @string (mutates in place, returns the removed element)
 pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -182,7 +186,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
                 drop(buf);
                 return (
                     SIG_ERROR,
-                    error_val("error", "pop: empty buffer".to_string()),
+                    error_val("error", "pop: empty @string".to_string()),
                 );
             }
         }
@@ -197,7 +201,10 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
             }
             None => {
                 drop(blob);
-                return (SIG_ERROR, error_val("error", "pop: empty blob".to_string()));
+                return (
+                    SIG_ERROR,
+                    error_val("error", "pop: empty @bytes".to_string()),
+                );
             }
         }
     }
@@ -207,14 +214,14 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "pop: expected array, buffer, or blob, got {}",
+                "pop: expected @array, @string, or @bytes, got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Pop n values from the end of an array or buffer and return them as a new collection
+/// Pop n values from the end of an @array or @string and return them as a new collection
 pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -270,14 +277,14 @@ pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "popn: expected array or buffer, got {}",
+                "popn: expected @array or @string, got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Insert a value at an index in an array or buffer (mutates in place, returns the collection)
+/// Insert a value at an index in an @array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
@@ -339,7 +346,7 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "insert: buffer value must be integer, got {}",
+                            "insert: @string value must be integer, got {}",
                             args[2].type_name()
                         ),
                     ),
@@ -361,14 +368,14 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "insert: expected array or buffer, got {}",
+                "insert: expected @array or @string, got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Remove element(s) at an index from an array or buffer (mutates in place, returns the collection)
+/// Remove element(s) at an index from an @array or @string (mutates in place, returns the collection)
 pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
         return (
@@ -457,7 +464,7 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "remove: expected array or buffer, got {}",
+                "remove: expected @array or @string, got {}",
                 args[0].type_name()
             ),
         ),
@@ -474,7 +481,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "array",
         example: "(array 1 2 3) #=> [1 2 3]",
-        aliases: &["tuple"],
+        aliases: &[],
     },
     PrimitiveDef {
         name: "@array",

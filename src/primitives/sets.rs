@@ -9,11 +9,11 @@ use crate::value::{error_val, Value};
 
 /// Recursively freeze mutable values for set insertion.
 /// Converts mutable types to immutable equivalents:
-/// - array → tuple
-/// - table → struct
+/// - @array → array
+/// - @struct → struct
 /// - mutable-set → set
-/// - buffer → string (lossy UTF-8)
-/// - blob → bytes
+/// - @string → string (lossy UTF-8)
+/// - @bytes → bytes
 fn freeze_value(v: Value) -> Value {
     if let Some(arr) = v.as_array_mut() {
         let items: Vec<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
@@ -296,11 +296,11 @@ pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Convert a set to an array or tuple
+/// Convert a set to an array or @array
 ///
-/// (set->array set) -> array or tuple
+/// (set->array set) -> array or @array
 ///
-/// Immutable set → tuple, mutable set → array. Elements in sorted order.
+/// Immutable set → array, mutable set → @array. Elements in sorted order.
 pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -335,8 +335,8 @@ pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// (seq->set seq) -> set or @set
 ///
-/// Immutable inputs (list, tuple, string, bytes, set) → immutable set.
-/// Mutable inputs (array, buffer, blob, @set) → mutable set.
+/// Immutable inputs (list, array, string, bytes, set) → immutable set.
+/// Mutable inputs (@array, @string, @bytes, @set) → mutable set.
 /// Mutable values are frozen on insertion.
 pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -380,13 +380,13 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::set(set));
     }
 
-    // Tuple (immutable) → immutable set
+    // Array (immutable) → immutable set
     if let Some(elems) = v.as_array() {
         let set: BTreeSet<Value> = elems.iter().map(|x| freeze_value(*x)).collect();
         return (SIG_OK, Value::set(set));
     }
 
-    // String (immutable) → immutable set of single-char strings
+    // String (immutable) → immutable set of single-grapheme-cluster strings
     if v.is_string() {
         let mut set = BTreeSet::new();
         v.with_string(|s| {
@@ -414,7 +414,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::set_mut(set));
     }
 
-    // Buffer (mutable) → mutable set of single-char strings
+    // @string (mutable) → mutable set of single-grapheme-cluster strings
     if let Some(buf) = v.as_string_mut() {
         let mut set = BTreeSet::new();
         let bytes = buf.borrow();
@@ -425,7 +425,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::set_mut(set));
     }
 
-    // Blob (mutable) → mutable set of ints
+    // @bytes (mutable) → mutable set of ints
     if let Some(blob) = v.as_bytes_mut() {
         let set: BTreeSet<Value> = blob
             .borrow()
@@ -445,7 +445,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "seq->set: expected sequence (list, array, tuple, string, buffer, bytes, blob, set, @set), got {}",
+                "seq->set: expected sequence (list, array, @array, string, @string, bytes, @bytes, set, @set), got {}",
                 v.type_name()
             ),
         ),

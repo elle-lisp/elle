@@ -67,14 +67,14 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | `Value::FALSE` | False | Falsy singleton |
 | `Value::UNDEFINED` | Undefined | Truthy singleton |
 | `Value::cons(car, cdr)` | Cons | Heap-allocated cons cell |
-| `Value::array(elems)` | Array | Heap-allocated mutable array |
-| `Value::table(entries)` | Table | Heap-allocated mutable table |
-| `Value::tuple(elems)` | Tuple | Heap-allocated immutable tuple |
-| `Value::struct_(entries)` | Struct | Heap-allocated immutable struct |
-| `Value::string(s)` | String | Heap-allocated immutable string |
-| `Value::buffer(bytes)` | Buffer | Heap-allocated mutable byte buffer |
-| `Value::bytes(bytes)` | Bytes | Heap-allocated immutable byte sequence |
-| `Value::blob(bytes)` | Blob | Heap-allocated mutable byte sequence |
+| `Value::array(elems)` | @array | Heap-allocated mutable @array |
+| `Value::@struct(entries)` | @struct | Heap-allocated mutable @struct |
+| `Value::array(elems)` | array | Heap-allocated immutable array |
+| `Value::struct_(entries)` | struct | Heap-allocated immutable struct |
+| `Value::string(s)` | string | Heap-allocated immutable string |
+| `Value::@string(bytes)` | @string | Heap-allocated mutable @string |
+| `Value::bytes(bytes)` | bytes | Heap-allocated immutable byte sequence |
+| `Value::@bytes(bytes)` | @bytes | Heap-allocated mutable @bytes |
 | `Value::closure(c)` | Closure | Bytecode + env + arity + effect + location_map |
 | `Value::fiber(f)` | Fiber | Independent execution context |
 | `Value::cell(v)` | Cell | Mutable cell (user-created via `box`) |

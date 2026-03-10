@@ -1,6 +1,6 @@
 # Scalar autograd engine
 #
-# Each Value node is a mutable table with:
+# Each Value node is a mutable @struct with:
 #   :id          unique integer (for visited-set keying)
 #   :data        float (forward value)
 #   :grad        float (accumulated gradient, mutated during backward)

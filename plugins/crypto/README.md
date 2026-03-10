@@ -28,7 +28,7 @@ Produces `target/debug/libelle_crypto.so` (or `target/release/libelle_crypto.so`
 
 ### Hash functions
 
-All accept string, bytes, or blob input.
+All accept string, bytes, or @bytes input.
 
 | Name | Output size | Description |
 |------|-------------|-------------|

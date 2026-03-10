@@ -44,7 +44,7 @@
       (let* ([divisor (eval-expr b)]
              [dividend (eval-expr a)])
         (if (= divisor 0)
-          (error [:division-by-zero "division by zero in expression"])
+          (error {:error :division-by-zero :message "division by zero in expression"})
           (/ dividend divisor))))
     (_ (error "unknown expression"))))
 

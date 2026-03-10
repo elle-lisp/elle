@@ -111,7 +111,7 @@ pub enum HeapObject {
     /// Immutable array (fixed-length sequence)
     LArray(Vec<Value>),
 
-    /// Mutable buffer (byte sequence)
+    /// Mutable @string (byte sequence)
     LStringMut(RefCell<Vec<u8>>),
 
     /// Immutable byte sequence (binary data)

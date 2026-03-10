@@ -71,7 +71,7 @@ pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     (SIG_HALT, value)
 }
 
-/// Return command-line arguments as a tuple, excluding the interpreter
+/// Return command-line arguments as an array, excluding the interpreter
 /// and script path (argv\[0\] and argv\[1\]).
 ///
 /// (sys/args) => ["arg1" "arg2" ...]
@@ -109,7 +109,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sys_args,
         effect: Effect::inert(),
         arity: Arity::Exact(0),
-        doc: "Return command-line arguments as a tuple (excluding interpreter and script path)",
+        doc: "Return command-line arguments as an array (excluding interpreter and script path)",
         params: &[],
         category: "sys",
         example: "(sys/args)",

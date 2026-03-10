@@ -18,7 +18,7 @@
      (letrec ((loop (fn (i acc)
                       (if (>= i (length coll))
                         (reverse acc)
-                        (loop (+ i 1) (cons (f (string/char-at coll i)) acc))))))
+                         (loop (+ i 1) (cons (f (get coll i)) acc))))))
        (loop 0 ())))
     ((or (pair? coll) (empty? coll))
      (if (empty? coll)
@@ -36,7 +36,7 @@
             (loop 0 (set))
             (loop 0 (@set)))))
 
-    (true (error [:type-error "map: not a sequence"])))))
+    (true (error {:error :type-error :message "map: not a sequence"})))))
 
 
 (def filter (fn (p lst)
@@ -97,7 +97,7 @@
                           (loop (+ i 1))
                           false)))))
        (loop 0)))
-    (true (error [:type-error "all?: not a sequence"])))))
+    (true (error {:error :type-error :message "all?: not a sequence"})))))
 
 (def any? (fn (pred coll)
   (cond
@@ -115,7 +115,7 @@
                           true
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error [:type-error "any?: not a sequence"])))))
+    (true (error {:error :type-error :message "any?: not a sequence"})))))
 
 (def find (fn (pred coll)
   (cond
@@ -133,7 +133,7 @@
                           (get coll i)
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error [:type-error "find: not a sequence"])))))
+    (true (error {:error :type-error :message "find: not a sequence"})))))
 
 (def find-index (fn (pred coll)
   (cond
@@ -153,7 +153,7 @@
                           i
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error [:type-error "find-index: not a sequence"])))))
+    (true (error {:error :type-error :message "find-index: not a sequence"})))))
 
 (def count (fn (pred coll)
   (cond
@@ -165,7 +165,7 @@
                         n
                         (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))))
        (loop 0 0)))
-    (true (error [:type-error "count: not a sequence"])))))
+    (true (error {:error :type-error :message "count: not a sequence"})))))
 
 (def nth (fn (n coll)
   (get coll n)))
@@ -183,7 +183,7 @@
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error [:type-error "zip: not a sequence"])))))
+         (true (error {:error :type-error :message "zip: not a sequence"})))))
      (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
@@ -191,7 +191,7 @@
           (let ((arr @[]))
             (each x in lst (push arr x))
             arr))
-         ((array? orig) (apply tuple lst)))))
+         ((array? orig) (apply array lst)))))
      (zip-lists (fn (lists)
        (if (any? empty? lists)
          ()
@@ -229,8 +229,8 @@
          (each x in (flat (to-list coll)) (push result x))
          result))
       ((array? coll)
-       (apply tuple (flat (to-list coll))))
-      (true (error [:type-error "flatten: not a sequence"]))))))
+       (apply array (flat (to-list coll))))
+      (true (error {:error :type-error :message "flatten: not a sequence"}))))))
 
 (def take-while (fn (pred coll)
   (letrec
@@ -258,8 +258,8 @@
                                               (reverse acc)
                                               (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))))
-         (apply tuple lst)))
-      (true (error [:type-error "take-while: not a sequence"]))))))
+         (apply array lst)))
+      (true (error {:error :type-error :message "take-while: not a sequence"}))))))
 
 (def drop-while (fn (pred coll)
   (letrec
@@ -292,8 +292,8 @@
                                               (reverse acc)
                                               (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))))
-         (apply tuple lst)))
-      (true (error [:type-error "drop-while: not a sequence"]))))))
+         (apply array lst)))
+      (true (error {:error :type-error :message "drop-while: not a sequence"}))))))
 
 (def distinct (fn (coll)
   (let ((seen @{}))
@@ -320,8 +320,8 @@
                                                  (reverse acc)
                                                  (loop (+ i 1) (cons (get coll i) acc))))))
                                 (loop 0 ())))))
-           (apply tuple lst)))
-        (true (error [:type-error "distinct: not a sequence"])))))))
+           (apply array lst)))
+        (true (error {:error :type-error :message "distinct: not a sequence"})))))))
 
 (def frequencies (fn (coll)
   (let ((counts @{}))
@@ -339,13 +339,13 @@
          (each y in (f x) (push result y)))
        result))
     ((array? coll)
-     (apply tuple (fold (fn (acc x) (append acc (f x))) ()
+     (apply array (fold (fn (acc x) (append acc (f x))) ()
                         (letrec ((loop (fn (i acc)
                                          (if (>= i (length coll))
                                            (reverse acc)
                                            (loop (+ i 1) (cons (get coll i) acc))))))
                           (loop 0 ())))))
-    (true (error [:type-error "mapcat: not a sequence"])))))
+    (true (error {:error :type-error :message "mapcat: not a sequence"})))))
 
 (def group-by (fn (f coll)
   (let ((groups @{}))
@@ -373,13 +373,13 @@
          (loop 0))
        result))
     ((array? coll)
-     (apply tuple
+     (apply array
        (letrec ((go (fn (i)
                       (if (>= i (length coll))
                         ()
                         (cons (f i (get coll i)) (go (+ i 1)))))))
          (go 0))))
-    (true (error [:type-error "map-indexed: not a sequence"])))))
+    (true (error {:error :type-error :message "map-indexed: not a sequence"})))))
 
 (def partition (fn (n coll)
   (cond
@@ -412,10 +412,10 @@
               (part (fn (lst)
                       (if (or (<= n 0) (empty? lst))
                         ()
-                        (cons (apply tuple (take n lst))
+                        (cons (apply array (take n lst))
                               (part (drop n lst)))))))
-       (apply tuple (part (to-list coll)))))
-    (true (error [:type-error "partition: not a sequence"])))))
+       (apply array (part (to-list coll)))))
+    (true (error {:error :type-error :message "partition: not a sequence"})))))
 
 (def interpose (fn (sep coll)
   (letrec
@@ -443,8 +443,8 @@
                                              (reverse acc)
                                              (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))))
-         (apply tuple lst)))
-      (true (error [:type-error "interpose: not a sequence"]))))))
+         (apply array lst)))
+      (true (error {:error :type-error :message "interpose: not a sequence"}))))))
 
 (def min-key (fn (f & args)
   (fold (fn (best x) (if (< (f x) (f best)) x best))
@@ -477,7 +477,7 @@
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error [:type-error "sort-by: not a sequence"])))))
+         (true (error {:error :type-error :message "sort-by: not a sequence"})))))
      (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
@@ -485,7 +485,7 @@
           (let ((arr @[]))
             (each x in lst (push arr x))
             arr))
-         ((array? orig) (apply tuple lst)))))
+         ((array? orig) (apply array lst)))))
      (merge (fn (a b)
        (cond
          ((empty? a) b)
@@ -542,17 +542,17 @@
   (let* ((fmt (if (empty? opts)
                 :mermaid
                 (if (> (length opts) 1)
-                  (error [:arity-error "fn/cfg: expected at most 1 format keyword"])
+                  (error {:error :arity-error :message "fn/cfg: expected at most 1 format keyword"})
                   (first opts))))
          (cfg (fn/flow target)))
     (when (nil? cfg)
-      (error [:type-error "fn/cfg: target has no LIR"]))
+      (error {:error :type-error :message "fn/cfg: target has no LIR"}))
     (cond
       ((= fmt :mermaid) (fn/cfg-mermaid cfg))
       ((= fmt :dot)     (fn/cfg-dot cfg))
-      (true (error [:type-error (-> "fn/cfg: unknown format "
-                                  (append (string fmt))
-                                  (append ", expected :mermaid or :dot"))])))))
+      (true (error {:error :type-error :message (-> "fn/cfg: unknown format "
+                                   (append (string fmt))
+                                   (append ", expected :mermaid or :dot"))})))))
 
 (defn fn/cfg-label (cfg)
   "Build the label string from a CFG struct's metadata."

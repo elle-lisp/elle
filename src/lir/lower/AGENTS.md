@@ -161,9 +161,9 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `CdrOrNil` | value → cdr | Cdr of cons, or EMPTY_LIST if not a cons |
 | `ArrayRefOrNil` | array → elem | Array element by immediate u16 index, or nil if out of bounds |
 | `IsArray` | value → bool | Type check: is value an array? (for pattern matching) |
-| `IsTable` | value → bool | Type check: is value a table or struct? (for pattern matching) |
+| `IsStruct` | value → bool | Type check: is value a struct or @struct? (for pattern matching) |
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
-| `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
+| `TableGetOrNil` | @struct → value | Get key from @struct/struct, or nil if missing/wrong type (u16 const_idx operand) |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |

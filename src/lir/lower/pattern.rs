@@ -162,7 +162,7 @@ impl Lowerer {
                         slot: temp_slot,
                     });
 
-                    // Emit constructor test (may create blocks for Tuple/Array)
+                    // Emit constructor test (may create blocks for Array/@array)
                     let test_reg = self.emit_constructor_test(reloaded, ctor)?;
                     self.terminate(Terminator::Branch {
                         cond: test_reg,
@@ -820,8 +820,8 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Tuple { elements, rest } => {
-                // Tuple [...] pattern matching for `match`.
-                // Check if value is a tuple, then use ArrayMutRefOrNil for each element.
+                // Array [...] pattern matching for `match`.
+                // Check if value is an array, then use ArrayMutRefOrNil for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -841,7 +841,7 @@ impl Lowerer {
                     });
                 }
 
-                // Step 2: Check if value is a tuple
+                // Step 2: Check if value is an array
                 let is_tuple_reg = self.fresh_reg();
                 self.emit(LirInstr::IsArray {
                     dst: is_tuple_reg,
@@ -857,7 +857,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(type_ok_label);
 
-                // Step 3: Check tuple length
+                // Step 3: Check array length
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
                 if self.in_lambda {
@@ -910,7 +910,7 @@ impl Lowerer {
 
                 // Step 4: Match each element using ArrayMutRefOrNil
                 for (i, element_pat) in elements.iter().enumerate() {
-                    // Reload the tuple from temp slot for each element
+                    // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
                     if self.in_lambda {
                         self.emit(LirInstr::LoadCapture {

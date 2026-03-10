@@ -77,7 +77,7 @@
   (display "  @[1 2 3]:     ") (display n) (newline))
 
 (let ((n (net-allocs (fn () @{:a 1 :b 2}))))
-  (assert-eq n 1 "table = 1 heap object")
+  (assert-eq n 1 "@struct = 1 heap object")
   (display "  @{:a 1 :b 2}: ") (display n) (newline))
 
 # String literals are in the constant pool, not runtime-allocated

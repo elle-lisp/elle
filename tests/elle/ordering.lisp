@@ -14,10 +14,10 @@
 (assert-false (= (list 1 2 3) (list 1 2 4)) "list structural neq")
 (assert-true (= (list) (list)) "empty list eq")
 
-# Tuples
-(assert-true (= [1 2 3] [1 2 3]) "tuple structural eq")
-(assert-false (= [1 2 3] [1 2 4]) "tuple structural neq")
-(assert-true (= [] []) "empty tuple eq")
+# Arrays
+(assert-true (= [1 2 3] [1 2 3]) "array structural eq")
+(assert-false (= [1 2 3] [1 2 4]) "array structural neq")
+(assert-true (= [] []) "empty array eq")
 
 # Strings
 (assert-true (= "hello" "hello") "string eq")
@@ -29,12 +29,12 @@
 (assert-false (= {:a 1} {:a 2}) "struct neq")
 
 # ============================================================================
-# Buffer equality (was broken — Buffer arm was missing from PartialEq)
+# @string equality (was broken — Buffer arm was missing from PartialEq)
 # ============================================================================
 
-(assert-true (= @"hello" @"hello") "buffer structural eq")
-(assert-false (= @"hello" @"world") "buffer structural neq")
-(assert-true (= @"" @"") "empty buffer eq")
+(assert-true (= @"hello" @"hello") "@string structural eq")
+(assert-false (= @"hello" @"world") "@string structural neq")
+(assert-true (= @"" @"") "empty @string eq")
 
 # ============================================================================
 # Cross-type inequality
@@ -43,7 +43,7 @@
 (assert-false (= 1 "1") "int != string")
 (assert-false (= nil false) "nil != false")
 (assert-false (= nil ()) "nil != empty list")
-(assert-false (= [1 2] @[1 2]) "tuple != array")
+(assert-false (= [1 2] @[1 2]) "array != @array")
 
 # ============================================================================
 # NaN equality

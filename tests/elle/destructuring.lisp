@@ -49,10 +49,10 @@
   (assert-eq b nil "def list wrong type: b is nil"))
 
 # ============================================================
-# def: array/tuple destructuring
+# def: @array/array destructuring
 # ============================================================
 
-# test_def_array_basic — [x y] destructures tuples and arrays
+# test_def_array_basic — [x y] destructures arrays
 (begin
   (def [x y] [10 20])
   (assert-eq x 10 "def array basic: x")
@@ -428,7 +428,7 @@
     "variadic compile time arity: 0 args fails"))
 
 # ============================================================
-# Struct/table destructuring
+# Struct/@struct destructuring
 # ============================================================
 
 # test_def_struct_basic
@@ -485,10 +485,10 @@
   (def {:point {:x px :y py}} {:point {:x 3 :y 4}})
   (assert-eq (+ px py) 7 "struct nested"))
 
-# test_struct_with_mutable_table
+# test_struct_with_mutable_@struct
 (begin
-  (def {:a a4} @{:a 99})
-  (assert-eq a4 99 "struct with mutable table"))
+    (def {:a a4} @{:a 99})
+    (assert-eq a4 99 "struct with mutable @struct"))
 
 # test_struct_in_match — bind match result to var (known bug workaround)
 (var match-circle
@@ -552,11 +552,11 @@
 
 # test_match_tuple_pattern_matches_tuple
 (var match-tuple (match [1 2] ([a b] (+ a b)) (_ :no-match)))
-(assert-eq match-tuple 3 "match tuple pattern matches tuple")
+(assert-eq match-tuple 3 "match array pattern matches array")
 
 # test_match_tuple_pattern_does_not_match_array
 (var match-tuple-arr (match @[1 2] ([a b] (+ a b)) (_ :no-match)))
-(assert-eq match-tuple-arr :no-match "match tuple pattern does not match array")
+(assert-eq match-tuple-arr :no-match "match array pattern does not match @array")
 
 # test_match_array_pattern_matches_array
 (var match-arr (match @[1 2] (@[a b] (+ a b)) (_ :no-match)))
@@ -564,21 +564,21 @@
 
 # test_match_array_pattern_does_not_match_tuple
 (var match-arr-tup (match [1 2] (@[a b] (+ a b)) (_ :no-match)))
-(assert-eq match-arr-tup :no-match "match array pattern does not match tuple")
+(assert-eq match-arr-tup :no-match "match @array pattern does not match array")
 
 # test_match_struct_pattern_matches_struct
 (var match-struct (match {:a 1} ({:a x} x) (_ :no-match)))
 (assert-eq match-struct 1 "match struct pattern matches struct")
 
-# test_match_struct_pattern_does_not_match_mutable_table
+# test_match_struct_pattern_does_not_match_mutable_@struct
 (var match-struct-tbl (match @{:a 1} ({:a x} x) (_ :no-match)))
 (assert-eq match-struct-tbl :no-match "match struct pattern does not match @struct")
 
-# test_match_mutable_table_pattern_matches_mutable_table
+# test_match_mutable_@struct_pattern_matches_mutable_@struct
 (var match-tbl (match @{:a 1} (@{:a x} x) (_ :no-match)))
 (assert-eq match-tbl 1 "match @struct pattern matches @struct")
 
-# test_match_mutable_table_pattern_does_not_match_struct
+# test_match_mutable_@struct_pattern_does_not_match_struct
 (var match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
 (assert-eq match-tbl-str :no-match "match @struct pattern does not match struct")
 
@@ -586,11 +586,11 @@
 (assert-eq (let (([a b] 42)) a) nil "destructure non-sequential int gives nil")
 (assert-eq (let (([a b] "hello")) a) nil "destructure non-sequential string gives nil")
 
-# test_def_tuple_basic
+# test_def_array_basic
 (begin
-  (def {:error a7 :message b7} (make-error-struct))
-  (assert-eq a7 :division-by-zero "def tuple basic: kind")
-  (assert-string-eq b7 "division by zero" "def tuple basic: message"))
+    (def {:error a7 :message b7} (make-error-struct))
+    (assert-eq a7 :division-by-zero "def array basic: kind")
+    (assert-string-eq b7 "division by zero" "def array basic: message"))
 
 # ============================================================
 # &opt optional parameters
@@ -783,7 +783,7 @@
   (assert-eq (coro/resume co) 10 "opt fiber resume: with initial arg"))
 
 # ============================================================
-# Symbol keys in struct/table destructuring (#424)
+# Symbol keys in struct/@struct destructuring (#424)
 # ============================================================
 
 # test_def_struct_symbol_key
@@ -817,12 +817,12 @@
     (_ :no-match)))
 (assert-eq match-sym 42 "match struct symbol key")
 
-# test_match_table_symbol_key
+# test_match_@struct_symbol_key
 (var match-tbl-sym
-  (match @{'a 42}
-    (@{'a v} v)
-    (_ :no-match)))
-(assert-eq match-tbl-sym 42 "match table symbol key")
+   (match @{'a 42}
+     (@{'a v} v)
+     (_ :no-match)))
+(assert-eq match-tbl-sym 42 "match @struct symbol key")
 
 # test_match_struct_symbol_key_missing_gives_nil
 # Struct patterns match any struct (IsStruct guard); missing keys give nil

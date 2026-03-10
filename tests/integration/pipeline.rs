@@ -1263,10 +1263,10 @@ fn test_eval_env_arg_ignored() {
 
 #[test]
 fn test_eval_empty_env() {
-    // Empty mutable table env should work fine
+    // Empty mutable struct env should work fine
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
-    let result = eval("(eval '(+ 1 2) (table))", &mut symbols, &mut vm, "<test>");
+    let result = eval("(eval '(+ 1 2) (@struct))", &mut symbols, &mut vm, "<test>");
     clear_symbol_table();
     assert_eq!(result.unwrap(), Value::int(3));
 }

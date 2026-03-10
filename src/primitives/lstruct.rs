@@ -21,7 +21,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "struct",
         example: "(@struct :a 1 :b 2)",
-        aliases: &["table"],
+        aliases: &[],
     },
     PrimitiveDef {
         name: "get",

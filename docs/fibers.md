@@ -280,13 +280,14 @@ Legacy coroutine primitives (`coro/new`, `coro/resume`,
 
 ## Error Handling
 
-Errors are values: `[:keyword "message"]` tuples. `error_val(kind, msg)`
-constructs them# `format_error(value)` extracts human-readable text.
+Errors are values: `{:error :keyword :message "message"}` structs.
+`error_val(kind, msg)` constructs them; `format_error(value)` extracts
+human-readable text.
 
 There is no `Condition` type, no exception hierarchy, no `handler-case`.
 Error handling is signal handling:
 
-1. Code signals `SIG_ERROR` with an error tuple
+1. Code signals `SIG_ERROR` with an error struct
 2. Signal propagates up the fiber chain
 3. A fiber with `SIG_ERROR` in its mask catches it
 4. The handler inspects `fiber/value` and decides: handle, resume, or

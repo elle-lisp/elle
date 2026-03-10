@@ -125,16 +125,16 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
    (def buf @"hello")        # @string
    (def ms @|1 2 3|)         # @set
 
-   # Bytes and blobs (no literal syntax)
+   # Bytes and @bytes (no literal syntax)
    (def b (bytes 1 2 3))     # bytes
-   (def bl (blob 1 2 3))     # @bytes
+   (def bl (@bytes 1 2 3))   # @bytes
    ```
 
 - **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
 
   ```janet
   (length "café")           # => 4, not 5 bytes
-  (string/char-at "café" 3) # => "é"
+  (get "café" 3)              # => "é"
   (slice "café" 0 2)        # => "ca"
   (first "café")            # => "c"
   (rest "café")             # => "afé"
@@ -199,20 +199,6 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 Every Elle value is a NaN-boxed 64-bit word. Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
 
-### Design principle: mutable/immutable split
-
-Every collection type has an immutable variant and a mutable variant. Bare literal syntax is immutable; the `@` prefix makes it mutable.
-
-| Immutable | Mutable | Literal | `@`-literal |
-|-----------|---------|---------|-------------|
-| array | @array | `[1 2 3]` | `@[1 2 3]` |
-| struct | @struct | `{:a 1}` | `@{:a 1}` |
-| string | @string | `"hello"` | `@"hello"` |
-| bytes | @bytes | *(no literal)* | *(no literal)* |
-| set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
-
-The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
-
 ### Immediate types
 
 | Type | Literal | Notes |
@@ -228,34 +214,80 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 ### Collections
 
+#### Design principle: mutable/immutable split
+
+Every collection type has an immutable variant and a mutable variant. Bare literal syntax is immutable; the `@` prefix makes it mutable.
+
+| Immutable | Mutable | Literal | `@`-literal |
+|-----------|---------|---------|-------------|
+| array | @array | `[1 2 3]` | `@[1 2 3]` |
+| struct | @struct | `{:a 1}` | `@{:a 1}` |
+| string | @string | `"hello"` | `@"hello"` |
+| bytes | @bytes | *(no literal)* | *(no literal)* |
+| set | @set | `|1 2 3|` | `@|1 2 3|` |
+
+The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
+
+**string** — interned text. Equality is O(1) via interning. Indexing and length count grapheme clusters, not bytes.
+
 ```janet
-# Immutable                        # Mutable
-[1 2 3]                             @[1 2 3]
-{:name "Bob" :age 25}               @{:name "Bob" :age 25}
-"hello"                             @"hello"
-(bytes 1 2 3)                       (@bytes 1 2 3)
-|1 2 3|                             @|1 2 3|
+(def s "café")
+(length s)              # => 4 (grapheme clusters, not bytes)
+(get s 3)               # => "é"
+(slice s 0 2)           # => "ca"
+(concat s "!")          # => "café!"
 ```
 
-**Array** — fixed-length immutable sequence. Error values are arrays: `[:division-by-zero "message"]`. Bracket destructuring works on both arrays and @arrays.
+**array** — fixed-length sequence.
 
-**@Array** — mutable resizable sequence. `(array-set! a 0 99)`, `(array-ref a 0)`, `(array-length a)`.
+```janet
+(def a [1 2 3])
+(get a 0)               # => 1
+(length a)              # => 3
+(concat a [4 5])        # => [1 2 3 4 5]
+```
 
-**Struct** — immutable ordered dictionary. `(get s :key)`. Keys are typically keywords.
+**struct** — ordered dictionary. Keys are typically keywords.
 
-**@Struct** — mutable ordered dictionary. `(get t :key)`, `(put t :key val)`, `(del t :key)`, `(keys t)`, `(values t)`, `(has? t :key)`.
+```janet
+(def s {:name "Bob" :age 25})
+(get s :name)           # => "Bob"
+(keys s)                # => (:name :age)
+(values s)              # => ("Bob" 25)
+(has? s :name)          # => true
+```
 
-**String** — immutable interned text. Equality is O(1). Indexing and length count grapheme clusters, not bytes.
+**set** — ordered collection of unique values. Mutable values are frozen on insertion.
 
-**@String** — mutable byte sequence. `@"hello"` desugars to `(string->@string "hello")`. Supports `get`, `put`, `push`, `pop`, `length`, `append`, `concat`.
+```janet
+(def s |1 2 3|)
+(contains? s 2)         # => true
+(add s 4)               # => |1 2 3 4|
+(del s 1)               # => |2 3|
+(union |1 2| |2 3|)     # => |1 2 3|
+(intersection |1 2| |2 3|)  # => |2|
+(difference |1 2| |2 3|)    # => |1|
+```
 
-**Bytes** — immutable binary data. No literal syntax; constructed via `(bytes 1 2 3)` or `(string->bytes "hello")`. Displays as `#bytes[hex ...]`.
+**bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
 
-**@Bytes** — mutable binary data. No literal syntax; constructed via `(@bytes 1 2 3)` or `(string->@bytes "hello")`. Displays as `#@bytes[hex ...]`.
+```janet
+(def b (bytes 1 2 3))
+(def b2 (string->bytes "hello"))
+(get b 0)               # => 1
+(length b)              # => 5
+(bytes->hex b2)         # => "68656c6c6f"
+```
 
-**Set** — immutable unordered collection of unique values. `|1 2 3|` literal syntax. `(set 1 2 3)` constructor. `(contains? s val)`, `(add s val)`, `(del s val)`, `(union s1 s2)`, `(intersection s1 s2)`, `(difference s1 s2)`. Mutable values are frozen on insertion.
+**@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
 
-**Mutable set** — mutable unordered collection of unique values. `@|1 2 3|` literal syntax. `(@set 1 2 3)` constructor. Same operations as immutable set but mutates in place.
+```janet
+(def b (@bytes 1 2 3))
+(def b2 (string->@bytes "hello"))
+(get b 0)               # => 1
+(length b)              # => 5
+(bytes->hex b2)         # => "68656c6c6f"
+```
 
 ### Lists
 
@@ -340,8 +372,8 @@ Exactly two values are falsy. Everything else is truthy.
 | `struct?` | struct |
 | `set?` | set (immutable or @set) |
 | `@string?` | @string |
-| `bytes?` | bytes |
-| `@bytes?` | @bytes |
+| `bytes?` | bytes (immutable) |
+| `@bytes?` | @bytes (mutable) |
 | `function?` | closure or native function |
 | `closure?` | closure only |
 | `primitive?` | native function only |
@@ -367,8 +399,8 @@ Exactly two values are falsy. Everything else is truthy.
 | @array | `@[1 2 3]` |
 | struct | `{:a 1}` |
 | @struct | `@{:a 1}` |
-| set | `\|1 2 3\|` |
-| @set | `@\|1 2 3\|` |
+| set | `|1 2 3|` |
+| @set | `@|1 2 3|` |
 | bytes | `#bytes[01 02 03]` |
 | @bytes | `#@bytes[01 02 03]` |
 | closure | `<closure>` |

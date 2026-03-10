@@ -119,8 +119,8 @@ State machine:
 | `io/backend` | errors | Create an I/O backend (`:sync` for synchronous, `:async` for asynchronous) |
 | `io/execute` | errors | Execute an I/O request on a backend (blocking) |
 | `io/submit` | errors | Submit async I/O request, return submission ID |
-| `io/reap` | errors | Non-blocking poll for completions (returns tuple) |
-| `io/wait` | errors | Blocking wait for completions with timeout (returns tuple) |
+| `io/reap` | errors | Non-blocking poll for completions (returns array) |
+| `io/wait` | errors | Blocking wait for completions with timeout (returns array) |
 
 ## Timeout Handling
 

@@ -12,7 +12,7 @@ Design documents, language references, and contributor guides for Elle.
 | `types.md` | Type system: mutable/immutable split, all types, predicates, display format, equality | Root AGENTS.md |
 | `semantics.md` | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring | Root AGENTS.md |
 | `macros.md` | Macro system: current state, architecture, hygiene, scope sets | Root AGENTS.md |
-| `except.md` | Exception handling: error tuples, try/catch, error propagation | Root AGENTS.md |
+| `except.md` | Exception handling: error structs, try/catch, error propagation | Root AGENTS.md |
 
 ### Contributor Guides
 

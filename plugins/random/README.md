@@ -37,5 +37,5 @@ Produces `target/debug/libelle_random.so` (or `target/release/libelle_random.so`
 | `random/float` | — | float (0..1) |
 | `random/bool` | — | boolean |
 | `random/bytes` | length | bytes |
-| `random/shuffle` | array or tuple | new shuffled array |
-| `random/choice` | array or tuple | random element |
+| `random/shuffle` | array or @array | new shuffled array |
+| `random/choice` | array or @array | random element |

@@ -29,10 +29,10 @@ pub(crate) enum AccessPath {
     Car(Box<AccessPath>),
     /// Cdr (tail) of a cons cell at the given path.
     Cdr(Box<AccessPath>),
-    /// Element at index `i` of a tuple/array at the given path.
+    /// Element at index `i` of an array at the given path.
     Index(Box<AccessPath>, usize),
-    /// Slice from index `i` to end of a tuple/array at the given path.
-    /// Used for `& rest` patterns in tuple/array destructuring.
+    /// Slice from index `i` to end of an array at the given path.
+    /// Used for `& rest` patterns in array destructuring.
     Slice(Box<AccessPath>, usize),
     /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),

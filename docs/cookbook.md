@@ -595,22 +595,22 @@ That's it. No Rust changes needed.
 ## my-form - description of what it does
 ## (my-form arg body...) => expansion
 (defmacro my-form (arg & body)
-  `(let ((tmp ,arg))
-     (if tmp (begin ,;body) nil)))
+   `(let ((tmp ,arg))
+      (if tmp (begin ,;body) nil)))
 ```
 
 ### How it works
 
 1. `prelude.lisp` is embedded into the binary via
-   `include_str!("../../../prelude.lisp")` in
-   `src/syntax/expand/mod.rs`.
+    `include_str!("../../../prelude.lisp")` in
+    `src/syntax/expand/mod.rs`.
 
 2. `Expander::load_prelude()` parses and expands the prelude, which
-   registers each `defmacro` in the Expander's macro table.
+    registers each `defmacro` in the Expander's macro table.
 
 3. When user code contains `(my-form ...)`, the Expander recognizes it
-   as a macro call, evaluates the macro body in the VM, and splices the
-   result back as Syntax.
+    as a macro call, evaluates the macro body in the VM, and splices the
+    result back as Syntax.
 
 4. The expanded code is then analyzed normally by the HIR analyzer.
 
@@ -618,7 +618,7 @@ That's it. No Rust changes needed.
 
 ```janet
 (defmacro name (param1 param2 & rest-params)
-  template)
+   template)
 ```
 
 - **Quasiquote** `` ` ``: template that allows unquoting.
@@ -638,7 +638,7 @@ That's it. No Rust changes needed.
 | `when` | `(if test (begin body...) nil)` |
 | `unless` | `(if test nil (begin body...))` |
 | `try`/`catch` | Fiber-based error handling |
-| `protect` | Returns `[success? value]` tuple |
+| `protect` | Returns `[success? value] array` |
 | `defer` | Cleanup after body |
 | `with` | Resource management (acquire/release) |
 | `yield*` | Delegate to sub-generator |

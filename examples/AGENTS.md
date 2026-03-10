@@ -17,8 +17,8 @@ Follow these when writing or editing examples:
   (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "./examples/assertions.lisp")))
   ```
 - `defn` with `[bracket params]` and a docstring as the first body form.
-- Literal syntax: `@[...]` arrays, `[...]` tuples, `{...}` structs,
-  `@{...}` tables, `@"..."` buffers.
+- Literal syntax: `@[...]` @arrays, `[...]` arrays, `{...}` structs,
+   `@{...}` @structs, `@"..."` @strings.
 - `#` for comments, `true`/`false` for booleans (not `#t`/`#f`).
 - `empty?` to test end-of-list (not `nil?`, not `(= (length x) 0)`).
 - `case`/`cond` over nested `if`. `when`/`unless` for one-armed conditionals.
@@ -50,10 +50,10 @@ For strict identity checks (no numeric coercion), use `identical?`.
 ## Gotchas
 
 - **`nil` vs empty list**: `(list)` returns `EMPTY_LIST`, which is truthy.
-  `nil` is falsy. `nil?` only matches `nil`. Use `empty?` for end-of-list.
-- **`string/join` accepts any sequence** (list, tuple, or array).
-- **`string/split` returns a tuple**.
-- **`[...]` in `match`** matches tuples (not arrays). `@[...]` matches arrays.
+   `nil` is falsy. `nil?` only matches `nil`. Use `empty?` for end-of-list.
+- **`string/join` accepts any sequence** (list, array, or @array).
+- **`string/split` returns an array**.
+- **`[...]` in `match`** matches arrays (not @arrays). `@[...]` matches @arrays.
 - **`put` on immutable types** returns a new copy. On mutable types it
-  returns the same mutated object.
+   returns the same mutated object.
 - **String iteration** is grapheme-cluster based. `(length "👋🏽")` is 1.

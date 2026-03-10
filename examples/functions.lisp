@@ -15,7 +15,7 @@
 #   Mutual recursion   — letrec with mutually-recursive helpers
 #   block / break      — named blocks with early exit
 #   Mutable captures   — shared state between closures
-#   Destructuring      — unpacking tuples and structs in let/fn params
+#   Destructuring      — unpacking arrays and structs in let/fn params
 
 (def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
@@ -316,7 +316,7 @@
   "Return [record!, summary] — closures sharing a running total and count."
   (var total 0)
   (var count 0)
-  [                                # return a tuple of two closures
+  [                                # return an array of two closures
     (fn [score]
       (assign total (+ total score))  # mutate shared 'total'
       (assign count (+ count 1)))     # mutate shared 'count'
@@ -325,7 +325,7 @@
         0
         (/ total count)))])        # compute average
 
-# Destructure the tuple directly into bindings
+# Destructure the array directly into bindings
 (def [record! avg] (make-tracker))
 (record! 90)
 (record! 80)

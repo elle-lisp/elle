@@ -11,7 +11,7 @@
 (assert-eq (+ ;@[1 2] ;@[3 4]) 10 "splice multiple splices")
 (assert-eq (+ 1 ;@[2 3] 4 ;@[5 6]) 21 "splice with normal args between")
 (assert-eq (+ 1 ;@[] 2) 3 "splice empty array")
-(assert-eq (+ ;[1 2 3]) 6 "splice tuple")
+(assert-eq (+ ;[1 2 3]) 6 "splice array")
 
 # ============================================================================
 # Splice in data constructors
@@ -21,7 +21,7 @@
   (assert-eq (length a) 4 "splice in array literal"))
 
 (let ([t [1 ;@[2 3] 4]])
-  (assert-eq (length t) 4 "splice in tuple literal"))
+  (assert-eq (length t) 4 "splice in array literal"))
 
 # ============================================================================
 # Splice with closures
