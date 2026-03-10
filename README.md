@@ -228,47 +228,26 @@ Every collection type has an immutable variant and a mutable variant. Bare liter
 
 The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
 
-**string** — immutable interned text. Equality is O(1) via interning. Indexing and length count grapheme clusters, not bytes.
+**string** — interned text. Equality is O(1) via interning. Indexing and length count grapheme clusters, not bytes.
 
 ```janet
 (def s "café")
 (length s)              # => 4 (grapheme clusters, not bytes)
-(string/char-at s 3)    # => "é"
+(get s 3)               # => "é"
 (slice s 0 2)           # => "ca"
-(string/concat s "!")   # => "café!" (new string)
+(concat s "!")          # => "café!"
 ```
 
-**@string** — mutable text buffer. `@"hello"` is literal syntax.
-
-```janet
-(def buf @"hello")
-(push buf " world")
-(length buf)            # => 11
-(get buf 0)             # => "h"
-(pop buf)               # => "d"
-```
-
-**array** — fixed-length immutable sequence. Error values are arrays: `[:division-by-zero "message"]`. Bracket destructuring works on both arrays and @arrays.
+**array** — fixed-length sequence.
 
 ```janet
 (def a [1 2 3])
 (get a 0)               # => 1
 (length a)              # => 3
-(def [x _ z] a)         # destructuring
+(concat a [4 5])        # => [1 2 3 4 5]
 ```
 
-**@array** — mutable resizable sequence.
-
-```janet
-(def a @[1 2 3])
-(push a 4)              # a is now @[1 2 3 4]
-(array-set! a 0 99)     # a is now @[99 2 3 4]
-(array-ref a 0)         # => 99
-(pop a)                 # => 4
-(array-length a)        # => 3
-```
-
-**structure** — immutable ordered dictionary. Keys are typically keywords.
+**structure** — ordered dictionary. Keys are typically keywords.
 
 ```janet
 (def s {:name "Bob" :age 25})
@@ -278,52 +257,26 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (has? s :name)          # => true
 ```
 
-**@structure** — mutable ordered dictionary.
-
-```janet
-(def t @{:name "Bob"})
-(put t :age 25)         # t is now @{:name "Bob" :age 25}
-(del t :name)           # t is now @{:age 25}
-(get t :age)            # => 25
-```
-
-**set** — immutable unordered collection of unique values. Mutable values are frozen on insertion.
+**set** — ordered collection of unique values. Mutable values are frozen on insertion.
 
 ```janet
 (def s |1 2 3|)
 (contains? s 2)         # => true
-(add s 4)               # => |1 2 3 4| (new set)
-(del s 1)               # => |2 3| (new set)
+(add s 4)               # => |1 2 3 4|
+(del s 1)               # => |2 3|
 (union |1 2| |2 3|)     # => |1 2 3|
 (intersection |1 2| |2 3|)  # => |2|
 (difference |1 2| |2 3|)    # => |1|
 ```
 
-**@set** — mutable unordered collection of unique values. Same operations as immutable set but mutates in place.
-
-```janet
-(def ms @|1 2 3|)
-(add ms 4)              # ms is now @|1 2 3 4|
-(del ms 1)              # ms is now @|2 3 4|
-(contains? ms 2)        # => true
-```
-
-**bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
+**bytes** — binary data. No literal syntax. Displays as `#bytes[hex ...]`.
 
 ```janet
 (def b (bytes 1 2 3))
 (def b2 (string->bytes "hello"))
 (get b 0)               # => 1
-(length b)              # => 3
-```
-
-**@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
-
-```janet
-(def bl (@bytes 1 2 3))
-(push bl 4)
-(length bl)             # => 4
-(def bl2 (string->@bytes "hello"))
+(length b)              # => 5
+(bytes->hex b2)         # => "68656c6c6f"
 ```
 
 ### Lists
