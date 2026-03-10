@@ -76,7 +76,7 @@ Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 ### Strings
 
-Strings are immutable sequences of characters:
+Strings are immutable sequences of grapheme clusters:
 
 ```janet
 "hello"                    # String literal

@@ -153,11 +153,11 @@
 (assert-string-eq (string/trim "   ") ""
   "trim whitespace-only")
 
-# single_character_operations: single character operations
+# single_grapheme_cluster_operations: single grapheme cluster operations
 (assert-true (= (length "a") 1)
-  "length of single char")
+  "length of single grapheme cluster")
 (assert-string-eq (get "a" 0) "a"
-  "get single char")
+  "get single grapheme cluster")
 
 # ============================================================================
 # Slice boundary checking (migrated from property tests)
@@ -241,7 +241,7 @@
 # Index/get operations (migrated from property tests)
 # ============================================================================
 
-# get_valid_index: get returns single character
+# get_valid_index: get returns single grapheme cluster
 (assert-string-eq (get "hello" 0) "h"
   "get string index 0")
 (assert-string-eq (get "hello" 4) "o"

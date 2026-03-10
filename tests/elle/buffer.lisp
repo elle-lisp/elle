@@ -39,7 +39,7 @@
 # Buffer get
 # ============================================================================
 
-# Buffer get returns character as string, not byte
+# Buffer get returns grapheme cluster as string, not byte
 (assert-eq (get @"hello" 0) "h" "get @\"hello\" 0")
 (assert-eq (get @"hello" 2) "l" "get @\"hello\" 2")
 (assert-eq (get @"hello" 4) "o" "get @\"hello\" 4")

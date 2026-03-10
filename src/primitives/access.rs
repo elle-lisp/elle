@@ -70,7 +70,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, elems[index as usize]);
     }
 
-    // Buffer (mutable string — indexed by character position)
+    // Buffer (mutable string — indexed by grapheme cluster position)
     if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -174,7 +174,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::int(borrowed[index as usize] as i64));
     }
 
-    // String (immutable character sequence)
+    // String (immutable grapheme cluster sequence)
     if args[0].is_string() {
         return args[0]
             .with_string(|s| {
@@ -317,7 +317,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
 /// Polymorphic put - works on tuples, arrays, strings, and structs
 /// For arrays: mutates in-place and returns the array
 /// For tuples: returns a new tuple with the updated element (immutable)
-/// For strings: returns a new string with the updated character (immutable)
+/// For strings: returns a new string with the updated grapheme cluster (immutable)
 /// For structs: mutates in-place (@struct) or returns new (struct)
 /// `(put collection key value)`
 pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
@@ -507,7 +507,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::array(new_elems));
     }
 
-    // String (immutable character sequence) - return new string
+    // String (immutable grapheme cluster sequence) - return new string
     if args[0].is_string() {
         return args[0]
             .with_string(|s| {

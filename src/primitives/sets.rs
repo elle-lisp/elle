@@ -386,7 +386,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::set(set));
     }
 
-    // String (immutable) → immutable set of single-char strings
+    // String (immutable) → immutable set of single-grapheme-cluster strings
     if v.is_string() {
         let mut set = BTreeSet::new();
         v.with_string(|s| {
@@ -414,7 +414,7 @@ pub(crate) fn prim_seq_to_set(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::set_mut(set));
     }
 
-    // Buffer (mutable) → mutable set of single-char strings
+    // Buffer (mutable) → mutable set of single-grapheme-cluster strings
     if let Some(buf) = v.as_string_mut() {
         let mut set = BTreeSet::new();
         let bytes = buf.borrow();
