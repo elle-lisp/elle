@@ -277,6 +277,20 @@ pub(crate) fn prim_is_primitive(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_native_fn()))
 }
 
+/// Check if value is mutable (can be modified in-place)
+pub(crate) fn prim_is_mutable(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("mutable?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(args[0].is_mutable()))
+}
+
 /// Check if value is numerically zero
 pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -485,6 +499,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["value"],
         category: "predicate",
         example: "(primitive? +) #=> true\n(primitive? (fn (x) x)) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "mutable?",
+        func: prim_is_mutable,
+        effect: Effect::inert(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is mutable (can be modified in-place).",
+        params: &["value"],
+        category: "predicate",
+        example: "(mutable? @[1 2 3]) #=> true\n(mutable? [1 2 3]) #=> false",
         aliases: &[],
     },
     PrimitiveDef {

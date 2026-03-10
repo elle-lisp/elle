@@ -553,6 +553,18 @@ impl Value {
         }
     }
 
+    /// Check if this value is mutable (can be modified in-place).
+    #[inline]
+    pub fn is_mutable(&self) -> bool {
+        self.is_array_mut()
+            || self.is_string_mut()
+            || self.is_bytes_mut()
+            || self.is_struct_mut()
+            || self.is_set_mut()
+            || self.is_cell()
+            || self.is_parameter()
+    }
+
     /// Check if this is a parameter.
     #[inline]
     pub fn is_parameter(&self) -> bool {

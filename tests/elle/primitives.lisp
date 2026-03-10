@@ -170,6 +170,41 @@
 
 (assert-eq (bit/and -3.7 255) (bit/and -3 255) "bit/and negative float")
 
+## === mutable? predicate ===
+
+# Mutable collections
+(assert-true (mutable? @[1 2 3]) "mutable? true for @array")
+(assert-true (mutable? @"hello") "mutable? true for @string")
+(assert-true (mutable? (@bytes 1 2 3)) "mutable? true for @bytes")
+(assert-true (mutable? @{:a 1}) "mutable? true for @struct")
+(assert-true (mutable? @|1 2 3|) "mutable? true for @set")
+(assert-true (mutable? (box 42)) "mutable? true for box")
+(assert-true (mutable? (make-parameter 0)) "mutable? true for parameter")
+
+# Immutable collections
+(assert-false (mutable? [1 2 3]) "mutable? false for array")
+(assert-false (mutable? "hello") "mutable? false for string")
+(assert-false (mutable? (bytes 1 2 3)) "mutable? false for bytes")
+(assert-false (mutable? {:a 1}) "mutable? false for struct")
+(assert-false (mutable? |1 2 3|) "mutable? false for set")
+
+# Other types
+(assert-false (mutable? 42) "mutable? false for integer")
+(assert-false (mutable? 3.14) "mutable? false for float")
+(assert-false (mutable? true) "mutable? false for boolean")
+(assert-false (mutable? nil) "mutable? false for nil")
+(assert-false (mutable? :foo) "mutable? false for keyword")
+(assert-false (mutable? (fn (x) x)) "mutable? false for closure")
+(assert-false (mutable? +) "mutable? false for primitive")
+(assert-false (mutable? (cons 1 2)) "mutable? false for cons")
+
+## === box? predicate ===
+
+(assert-true (box? (box 42)) "box? true for box")
+(assert-false (box? 42) "box? false for integer")
+(assert-false (box? @[1 2 3]) "box? false for @array")
+(assert-false (box? nil) "box? false for nil")
+
 ## === first polymorphism ===
 
 (assert-eq (first (list 1 2 3)) 1 "first list")

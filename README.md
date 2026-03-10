@@ -335,7 +335,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 
 **Parameter** — dynamic binding. `(parameter default)` creates one; calling it reads the current value. `parameterize` sets it within a scope. Child fibers inherit parent parameter frames.
 
-**Cell** — mutable box. User cells are explicit (`box`/`unbox`/`set-box!`). Local cells are compiler-created for mutable captures and auto-unwrapped — users never see them.
+**Box** — mutable cell. User boxes are explicit (`box`/`unbox`/`rebox`). Local cells are compiler-created for mutable captures and auto-unwrapped — users never see them.
 
 ### Truthiness
 
@@ -374,6 +374,9 @@ Exactly two values are falsy. Everything else is truthy.
 | `closure?` | closure only |
 | `primitive?` | native function only |
 | `fiber?` | fiber |
+| `box?` | box (mutable cell) |
+| `parameter?` | dynamic parameter |
+| `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
 | `pointer?` | raw or managed C pointer |
 | `zero?` | zero (integer or float) |
 | `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
@@ -402,7 +405,7 @@ Exactly two values are falsy. Everything else is truthy.
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
-| cell | `<cell value>` |
+| box | `<cell value>` |
 | @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 
