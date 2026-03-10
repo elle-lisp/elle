@@ -1,7 +1,7 @@
 // @string type tests
 //
 // Display formatting and byte-level Unicode tests that require Rust APIs.
-// Basic operation tests migrated to tests/elle/buffer.lisp.
+// Basic operation tests migrated to tests/elle/string.lisp.
 
 use crate::common::eval_source;
 

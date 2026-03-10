@@ -54,8 +54,8 @@ mod lint {
 mod compliance {
     include!("compliance.rs");
 }
-mod buffer {
-    include!("buffer.rs");
+mod string {
+    include!("string.rs");
 }
 // splice tests migrated to tests/elle/splice.lisp
 // bytes/crypto tests migrated to tests/elle/bytes.lisp and tests/elle/plugins/crypto.lisp

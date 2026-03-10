@@ -14,9 +14,11 @@ use unicode_segmentation::UnicodeSegmentation;
 pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
     // Single-argument string, @string, or keyword: convert to bytes
     if args.len() == 1 {
+        // @string → @bytes (preserves mutability)
         if let Some(buf_ref) = args[0].as_string_mut() {
-            return (SIG_OK, Value::bytes(buf_ref.borrow().clone()));
+            return (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone()));
         }
+        // string → bytes (immutable)
         if let Some(data) = args[0].with_string(|s| s.as_bytes().to_vec()) {
             return (SIG_OK, Value::bytes(data));
         }
@@ -122,14 +124,14 @@ pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
         let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
         return (SIG_OK, Value::string(hex.as_str()));
     }
-    // Mutable @bytes
+    // Mutable @bytes → mutable @string
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
         let hex: String = borrowed
             .iter()
             .map(|byte| format!("{:02x}", byte))
             .collect();
-        return (SIG_OK, Value::string(hex.as_str()));
+        return (SIG_OK, Value::string_mut(hex.into_bytes()));
     }
     (
         SIG_ERROR,

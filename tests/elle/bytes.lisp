@@ -34,14 +34,14 @@
 # ============================================================================
 
 (assert-eq (string (bytes 104 105)) "hi" "bytes->string")
-(assert-eq (string (@bytes 104 105)) "hi" "@bytes->string")
+(assert-eq (freeze (string (@bytes 104 105))) "hi" "@bytes->string")
 
 # ============================================================================
 # Bytes/blob to hex conversions
 # ============================================================================
 
 (assert-eq (bytes->hex (bytes 72 101 108)) "48656c" "bytes->hex")
-(assert-eq (bytes->hex (@bytes 72 101 108)) "48656c" "@bytes->hex")
+(assert-eq (freeze (bytes->hex (@bytes 72 101 108))) "48656c" "@bytes->hex")
 
 # ============================================================================
 # Bytes and blob length
@@ -112,4 +112,24 @@
 # ============================================================================
 
 (assert-eq (string (bytes 104 105)) "hi" "bytes->string via (string)")
-(assert-eq (string (@bytes 104 105)) "hi" "@bytes->string via (string)")
+(assert-eq (freeze (string (@bytes 104 105))) "hi" "@bytes->string via (string)")
+
+# ============================================================================
+# Mutability-preserving conversions
+# ============================================================================
+
+# (string x) preserves mutability: bytes→string, @bytes→@string
+(assert-eq (type (string (bytes 104 105))) :string "string from bytes is immutable")
+(assert-eq (type (string (@bytes 104 105))) :@string "string from @bytes is mutable")
+
+# (string x) preserves mutability: string→string, @string→@string
+(assert-eq (type (string "hello")) :string "string from string is immutable")
+(assert-eq (type (string @"hello")) :@string "string from @string is mutable")
+
+# (bytes x) preserves mutability: string→bytes, @string→@bytes
+(assert-eq (type (bytes "hello")) :bytes "bytes from string is immutable")
+(assert-eq (type (bytes @"hello")) :@bytes "bytes from @string is mutable")
+
+# (bytes->hex x) preserves mutability: bytes→string, @bytes→@string
+(assert-eq (type (bytes->hex (bytes 72 101 108))) :string "bytes->hex from bytes is immutable")
+(assert-eq (type (bytes->hex (@bytes 72 101 108))) :@string "bytes->hex from @bytes is mutable")
