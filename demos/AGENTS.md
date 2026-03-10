@@ -10,13 +10,15 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 
 | Demo | Purpose | Features tested |
 |------|---------|-----------------|
-| `nqueens/` | N-Queens backtracking algorithm | Recursion, list operations, functional predicates, backtracking |
-| `matrix-ops/` | Pure Lisp matrix operations | Dense matrix representation, numeric computation, performance |
 | `aws-sigv4/` | AWS API authentication | String manipulation, datetime handling, URL encoding, FFI (hashing) |
-| `fib/` | Fibonacci sequence | Recursion, memoization patterns |
-| `blas.lisp` | BLAS-style linear algebra | Numeric computation, array operations |
-| `logo.lisp` | Logo turtle graphics | Graphics primitives, state management |
+| `blas/` | BLAS-style linear algebra | Numeric computation, array operations |
 | `cfgviz/` | Configuration visualization | Data transformation, graph generation |
+| `docgen/` | Documentation site generator | Full pipeline, file I/O, string processing |
+| `fib/` | Fibonacci sequence | Recursion, memoization patterns |
+| `logo/` | Logo turtle graphics | Graphics primitives, state management |
+| `matrix/` | Matrix operations | Dense matrix representation, numeric computation, performance |
+| `microgpt/` | Micro GPT autograd/neural network | Autograd engine, backpropagation, table operations |
+| `nqueens/` | N-Queens backtracking algorithm | Recursion, list operations, functional predicates, backtracking |
 | `scope-alloc/` | Allocator scope testing | Memory management, region-based allocation |
 
 ## Running demos
@@ -25,16 +27,20 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 # N-Queens
 cargo run --release -- demos/nqueens/nqueens.lisp
 
-# Matrix operations
-cargo run --release -- demos/matrix-ops/matrix.lisp
-
 # AWS SigV4
 cargo run --release -- demos/aws-sigv4/sigv4.lisp
 
+# Fibonacci
+cargo run --release -- demos/fib/fib.lisp
+
+# Documentation site generator
+cargo build --release && ./target/release/elle demos/docgen/generate.lisp
+
 # Other demos
-cargo run --release -- demos/fib.lisp
-cargo run --release -- demos/blas.lisp
-cargo run --release -- demos/logo.lisp
+cargo run --release -- demos/blas/blas.lisp
+cargo run --release -- demos/logo/logo.lisp
+cargo run --release -- demos/matrix/matrix.lisp
+cargo run --release -- demos/scope-alloc/scope-alloc.lisp
 ```
 
 ## Writing new demos
@@ -60,36 +66,6 @@ Each demo should have:
 - **No error handling** — let errors propagate naturally
 - **Display output** — make results visible to the user
 
-### Example structure
-
-```janet
-;; N-Queens: Find all valid placements of N queens on an NxN chessboard
-;; Tests: recursion, list operations, backtracking
-
-(defn safe? [queens col]
-  "Check if placing a queen at col is safe given existing queens"
-  (let* ((row (length queens))
-         (check-col (fn [q-col]
-           (or (= q-col col)
-               (= (abs (- row (length queens))) (abs (- col q-col)))))))
-    (not (some check-col queens))))
-
-(defn solve-nqueens [n]
-  "Find all solutions for N-Queens problem"
-  (defn backtrack [queens]
-    (if (= (length queens) n)
-      (list queens)
-      (let ((solutions (list)))
-        (for col 0 n
-          (when (safe? queens col)
-            (set solutions (append solutions (backtrack (append queens (list col)))))))
-        solutions)))
-  (backtrack (list)))
-
-(println "N-Queens solutions:")
-(println (solve-nqueens 4))
-```
-
 ### Differences from examples/
 
 | Aspect | Demos | Examples |
@@ -107,14 +83,16 @@ See `demos/README.md` for a detailed list of known issues, their status, and how
 
 ## Files
 
-| File | Purpose |
-|------|---------|
-| `nqueens/` | N-Queens backtracking algorithm |
-| `matrix-ops/` | Matrix operations (multiply, transpose, LU decomposition) |
+| Directory | Purpose |
+|-----------|---------|
 | `aws-sigv4/` | AWS API authentication implementation |
-| `fib/` | Fibonacci sequence computation |
-| `blas.lisp` | BLAS-style linear algebra operations |
-| `logo.lisp` | Logo turtle graphics |
+| `blas/` | BLAS-style linear algebra operations |
 | `cfgviz/` | Configuration visualization |
+| `docgen/` | Documentation site generator |
+| `fib/` | Fibonacci sequence computation |
+| `logo/` | Logo turtle graphics |
+| `matrix/` | Matrix operations (multiply, transpose, LU decomposition) |
+| `microgpt/` | Micro GPT autograd/neural network |
+| `nqueens/` | N-Queens backtracking algorithm |
 | `scope-alloc/` | Allocator scope testing |
 | `README.md` | Detailed documentation and cross-language comparison |
