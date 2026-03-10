@@ -21,9 +21,9 @@ syntax# the mutable variant uses the same delimiters prefixed with `@`.
 
 | Immutable | Mutable | Delimiters | Immutable example | Mutable example |
 |-----------|---------|------------|-------------------|-----------------|
-| tuple | array | `[]` | `[1 2 3]` | `@[1 2 3]` |
-| struct | table | `{}` | `{:a 1 :b 2}` | `@{:a 1 :b 2}` |
-| string | buffer | `""` | `"hello"` | `@"hello"` |
+| array | @array | `[]` | `[1 2 3]` | `@[1 2 3]` |
+| struct | @struct | `{}` | `{:a 1 :b 2}` | `@{:a 1 :b 2}` |
+| string | @string | `""` | `"hello"` | `@"hello"` |
 
 The `@` prefix means "mutable version of this literal." This is the only
 syntax difference between the two variants of each pair. The types within each
@@ -32,31 +32,30 @@ byte sequence) but differ in mutability.
 
 ### Why this matters
 
-Bracket syntax `[1 2 3]` creates a **tuple** (immutable). If you want a
+Bracket syntax `[1 2 3]` creates an **array** (immutable). If you want a
 mutable array, write `@[1 2 3]`. This is not a cosmetic distinction — it
 affects what operations are valid:
 
 ```janet
-(def t [1 2 3])        # tuple — immutable
-(def a @[1 2 3])       # array — mutable
+(def t [1 2 3])        # array — immutable
+(def a @[1 2 3])       # @array — mutable
 (array-set! a 0 99)    # ok
-(array-set! t 0 99)    # error: tuples are immutable
+(array-set! t 0 99)    # error: arrays are immutable
 ```
 
-Error values are tuples: `[:division-by-zero "division by zero"]`. This is why
-bracket destructuring must work on both tuples and arrays — `try/catch` binds
-error tuples, and `[kind msg]` must destructure them.
+Error values are structs: `{:error :division-by-zero :message "division by zero"}`.
+`try/catch` binds error structs, and `{:error kind :message msg}` destructures them.
 
 ### Current implementation status
 
 | Feature | Status |
 |---------|--------|
-| `[...]` → tuple | ✅ Correct |
-| `@[...]` → array | ✅ Correct |
+| `[...]` → array | ✅ Correct |
+| `@[...]` → @array | ✅ Correct |
 | `{...}` → struct | ✅ Correct |
-| `@{...}` → table | ✅ Correct |
+| `@{...}` → @struct | ✅ Correct |
 | `"..."` → string | ✅ Correct |
-| `@"..."` → buffer | ✅ Desugars to `(string->buffer "...")` |
+| `@"..."` → @string | ✅ Desugars to `(thaw "...")` |
 
 ---
 
@@ -156,34 +155,34 @@ Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 
 ### Heap types: collections
 
-#### tuple (immutable sequential)
+#### array (immutable sequential)
 
-Fixed-length immutable sequence. The immutable counterpart of array.
+Fixed-length immutable sequence. The immutable counterpart of @array.
 
 ```janet
-[1 2 3]         # literal (desired — currently creates array)
-(tuple 1 2 3)   # constructor
+[1 2 3]         # literal
+(array 1 2 3)   # constructor
 ```
 
-Error values are tuples: `[:kind "message"]`. Bracket destructuring works on
-tuples:
+Error values are structs: `{:error :kind :message "message"}`. Struct
+destructuring extracts error fields:
 
 ```janet
-(try (/ 1 0) (catch [kind msg] kind))  # => :division-by-zero
-(let (([a b] [1 2])) a)                # => 1
+(try (/ 1 0) (catch {:error kind :message msg} kind))  # => :division-by-zero
+(let (([a b] [1 2])) a)                                # => 1
 ```
 
 In `match`, bracket patterns `[a b]` match **arrays only** (the `IsArray`
-guard rejects tuples). This is intentional — `match` is about type
+guard rejects @arrays). This is intentional — `match` is about type
 discrimination. Destructuring in `let`/`def`/`fn` works on both.
 
-#### array (mutable sequential)
+#### @array (mutable sequential)
 
-Mutable resizable sequence. The mutable counterpart of tuple.
+Mutable resizable sequence. The mutable counterpart of array.
 
 ```janet
-@[1 2 3]        # literal (desired — currently creates list)
-(array 1 2 3)   # constructor
+@[1 2 3]        # literal
+(@array 1 2 3)  # constructor
 (array-ref a 0) # indexed access
 (array-set! a 0 99) # mutation
 (array-length a)    # length
@@ -192,7 +191,7 @@ Mutable resizable sequence. The mutable counterpart of tuple.
 
 #### struct (immutable key-value)
 
-Immutable ordered dictionary. The immutable counterpart of table.
+Immutable ordered dictionary. The immutable counterpart of @struct.
 
 ```janet
 {:a 1 :b 2}    # literal
@@ -201,13 +200,13 @@ Immutable ordered dictionary. The immutable counterpart of table.
 (struct? x)     # predicate
 ```
 
-#### table (mutable key-value)
+#### @struct (mutable key-value)
 
 Mutable ordered dictionary. The mutable counterpart of struct.
 
 ```janet
 @{:a 1 :b 2}   # literal
-(table :a 1 :b 2)  # constructor
+(@struct :a 1 :b 2)  # constructor
 (get t :a)      # access
 (put t :a 99)   # mutation
 (del t :a)      # deletion
@@ -219,7 +218,7 @@ Mutable ordered dictionary. The mutable counterpart of struct.
 
 #### string (immutable text)
 
-Immutable interned text. The immutable counterpart of buffer.
+Immutable interned text. The immutable counterpart of @string.
 
 ```janet
 "hello"         # literal
@@ -228,16 +227,15 @@ Immutable interned text. The immutable counterpart of buffer.
 
 Strings are interned — equality is O(1).
 
-#### buffer (mutable text)
+#### @string (mutable text)
 
 Mutable byte sequence. The mutable counterpart of string.
 
 ```janet
-@"hello"        # literal (desugars to (string->buffer "hello"))
-(buffer? x)     # predicate
-(buffer 72 101)  # constructor from bytes
-(string->buffer "hello")  # from string (UTF-8 bytes)
-(buffer->string buf)      # to string (UTF-8)
+@"hello"        # literal (desugars to (thaw "hello"))
+(@string 72 101) # constructor from bytes
+(thaw "hello")  # from string (UTF-8 bytes)
+(freeze buf)    # to string (UTF-8, errors on invalid UTF-8)
 (get buf 0)     # byte at index (as integer)
 (put buf 0 88)  # set byte at index
 (push buf 33)   # append byte
@@ -245,7 +243,7 @@ Mutable byte sequence. The mutable counterpart of string.
 (length buf)    # byte count
 (empty? buf)    # empty check
 (append b1 b2)  # mutate b1 by extending with b2
-(concat b1 b2)  # return new buffer
+(concat b1 b2)  # return new @string
 ```
 
 ---
@@ -267,8 +265,8 @@ Singly-linked list built from cons cells. Proper lists terminate with `()`.
 (empty? x)      # predicate (empty list?)
 ```
 
-Lists are **not** the same as tuples or arrays. Lists are linked# tuples and
-arrays are contiguous in memory.
+Lists are **not** the same as arrays or @arrays. Lists are linked; arrays and
+@arrays are contiguous in memory.
 
 ---
 
@@ -388,10 +386,10 @@ Created by `ffi/malloc`.
 | `string?` | string |
 | `pair?` | cons cell |
 | `list?` | cons cell or empty list |
-| `empty?` | empty list, empty array, empty tuple, empty table, empty struct |
+| `empty?` | empty list, empty @array, empty array, empty @struct, empty struct |
+| `array?` | @array |
 | `array?` | array |
-| `tuple?` | tuple |
-| `table?` | table |
+| `@struct?` | @struct |
 | `struct?` | struct |
 | `closure?` | closure |
 | `fiber?` | fiber |
@@ -413,10 +411,10 @@ primitives. They need to be added.
 | empty list | `()` | |
 | string | `hello` | No quotes in Display |
 | cons | `(1 2 3)` | `(a . b)` for improper |
-| tuple | `[1 2 3]` | Same delimiters as array |
-| array | `@[1 2 3]` | Desired. Currently displays as `[1 2 3]` |
+| array | `[1 2 3]` | Same delimiters as @array |
+| @array | `@[1 2 3]` | Desired. Currently displays as `[1 2 3]` |
 | struct | `{:a 1}` | |
-| table | `@{:a 1}` | Desired. Currently displays as `{:a 1}` |
+| @struct | `@{:a 1}` | Desired. Currently displays as `{:a 1}` |
 | closure | `<closure>` | |
 | native fn | `<native-fn>` | |
 | fiber | `<fiber:status>` | |
@@ -434,7 +432,7 @@ Exactly two values are falsy:
 | `false` | No |
 | everything else | Yes |
 
-This includes `()`, `0`, `0.0`, `""`, `[]`, `@[]`. All truthy.
+This includes `()`, `0`, `0.0`, `""`, `[]`, `@[]`. All truthy. (Note: `[]` is an immutable array, `@[]` is a mutable @array.)
 
 ## Equality
 
@@ -445,9 +443,9 @@ strings/symbols/keywords. Identity is pointer equality for heap objects.
 
 | Immutable | Mutable | Shared structure |
 |-----------|---------|------------------|
-| tuple `[]` | array `@[]` | sequential indexing |
-| struct `{}` | table `@{}` | key-value mapping |
-| string `""` | buffer `@""` | byte sequence |
+| array `[]` | @array `@[]` | sequential indexing |
+| struct `{}` | @struct `@{}` | key-value mapping |
+| string `""` | @string `@""` | byte sequence |
 | cons/list | — | linked list (always immutable) |
 | nil, bool, int, float, symbol, keyword | — | immediates (always immutable) |
 | closure | — | always immutable (captures may be mutable via cells) |

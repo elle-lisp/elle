@@ -4,9 +4,9 @@ use crate::value::{error_val, list, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Append multiple lists
-/// Polymorphic append - works on arrays, tuples, and strings
+/// Polymorphic append - works on arrays and strings
 /// For arrays: mutates first arg in place, returns it
-/// For tuples: returns new tuple
+/// For arrays: returns new array
 /// For strings: returns new string
 /// `(append collection1 collection2)`
 pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
@@ -64,7 +64,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    // Tuple (immutable) - return new tuple
+    // Array (immutable) - return new array
     if let Some(elems) = args[0].as_array() {
         if let Some(other_elems) = args[1].as_array() {
             let mut result = elems.to_vec();
@@ -76,7 +76,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got tuple and {}",
+                        "append: both arguments must be same type, got array and {}",
                         args[1].type_name()
                     ),
                 ),
@@ -185,7 +185,7 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "append: expected collection (list, array, tuple, or string), got {}",
+                "append: expected collection (list, array, or string), got {}",
                 args[0].type_name()
             ),
         ),
@@ -374,7 +374,7 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
         vec.reverse();
         return (SIG_OK, Value::array_mut(vec));
     }
-    // Tuple — return new tuple
+    // Array — return new array
     if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
         vec.reverse();
@@ -396,7 +396,7 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "reverse: expected sequence (list, tuple, array, or string), got {}",
+                        "reverse: expected sequence (list, array, or string), got {}",
                         args[0].type_name()
                     ),
                 ),

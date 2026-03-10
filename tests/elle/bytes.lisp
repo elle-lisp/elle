@@ -1,6 +1,6 @@
-## Bytes and Blob Type Tests
+## Bytes and @bytes Type Tests
 ##
-## Tests for the immutable bytes and mutable blob types.
+## Tests for the immutable bytes and mutable @bytes types.
 ## Migrated from tests/integration/bytes.rs
 
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
@@ -12,43 +12,43 @@
 (assert-true (bytes? (bytes 72 101 108 108 111)) "bytes constructor creates bytes")
 (assert-true (bytes? (bytes)) "empty bytes constructor")
 
-(assert-true (bytes? (@bytes 72 101 108 108 111)) "blob constructor creates blob")
-(assert-true (bytes? (@bytes)) "empty blob constructor")
+(assert-true (bytes? (@bytes 72 101 108 108 111)) "@bytes constructor creates @bytes")
+(assert-true (bytes? (@bytes)) "empty @bytes constructor")
 
 # ============================================================================
 # Bytes and blob predicates
 # ============================================================================
 
 (assert-true (bytes? (bytes 1 2 3)) "bytes? true for bytes")
-(assert-true (bytes? (@bytes 1 2 3)) "bytes? true for blob")
+(assert-true (bytes? (@bytes 1 2 3)) "bytes? true for @bytes")
 
 # ============================================================================
 # String to bytes/blob conversions
 # ============================================================================
 
 (assert-true (bytes? (string->bytes "hello")) "string->bytes returns bytes")
-(assert-true (bytes? (string->blob "hello")) "string->blob returns blob")
+(assert-true (bytes? (string->blob "hello")) "string->blob returns @bytes")
 
 # ============================================================================
 # Bytes/blob to string conversions
 # ============================================================================
 
 (assert-eq (bytes->string (bytes 104 105)) "hi" "bytes->string")
-(assert-eq (blob->string (@bytes 104 105)) "hi" "blob->string")
+(assert-eq (blob->string (@bytes 104 105)) "hi" "@bytes->string")
 
 # ============================================================================
 # Bytes/blob to hex conversions
 # ============================================================================
 
 (assert-eq (bytes->hex (bytes 72 101 108)) "48656c" "bytes->hex")
-(assert-eq (blob->hex (@bytes 72 101 108)) "48656c" "blob->hex")
+(assert-eq (blob->hex (@bytes 72 101 108)) "48656c" "@bytes->hex")
 
 # ============================================================================
 # Bytes and blob length
 # ============================================================================
 
 (assert-eq (length (bytes 1 2 3 4 5)) 5 "bytes length")
-(assert-eq (length (@bytes 1 2 3 4 5)) 5 "blob length")
+(assert-eq (length (@bytes 1 2 3 4 5)) 5 "@bytes length")
 
 # ============================================================================
 # Bytes and blob get
@@ -57,8 +57,8 @@
 (assert-eq (get (bytes 72 101 108) 1) 101 "bytes get")
 (assert-err (fn () (get (bytes 72 101 108) 10)) "bytes get out of bounds errors")
 
-(assert-eq (get (@bytes 72 101 108) 1) 101 "blob get")
-(assert-err (fn () (get (@bytes 72 101 108) 10)) "blob get out of bounds errors")
+(assert-eq (get (@bytes 72 101 108) 1) 101 "@bytes get")
+(assert-err (fn () (get (@bytes 72 101 108) 10)) "@bytes get out of bounds errors")
 
 # ============================================================================
 # URI encoding
@@ -69,12 +69,12 @@
 (assert-eq (uri-encode "a/b") "a%2Fb" "uri-encode special")
 
 # ============================================================================
-# Blob mutations
+# @bytes mutations
 # ============================================================================
 
-(assert-true (bytes? (let ((b (@bytes 1 2))) (push b 3) b)) "blob push returns blob")
-(assert-eq (let ((b (@bytes 1 2 3))) (pop b)) 3 "blob pop returns byte")
-(assert-eq (let ((b (@bytes 1 2 3))) (put b 1 99) (get b 1)) 99 "blob put and get")
+(assert-true (bytes? (let ((b (@bytes 1 2))) (push b 3) b)) "@bytes push returns @bytes")
+(assert-eq (let ((b (@bytes 1 2 3))) (pop b)) 3 "@bytes pop returns byte")
+(assert-eq (let ((b (@bytes 1 2 3))) (put b 1 99) (get b 1)) 99 "@bytes put and get")
 
 # ============================================================================
 # Each over bytes and blob
@@ -92,7 +92,7 @@
                (assign sum (+ sum b)))
              sum)
            60
-           "each over blob")
+           "each over @bytes")
 
 # ============================================================================
 # Map over bytes
@@ -101,15 +101,15 @@
 (assert-eq (length (map (fn (b) (* b 2)) (bytes 1 2 3))) 3 "map over bytes returns list")
 
 # ============================================================================
-# Buffer to bytes/blob conversions
+# @string to bytes/@bytes conversions
 # ============================================================================
 
 (assert-true (bytes? (buffer->bytes @"hello")) "buffer->bytes returns bytes")
-(assert-true (bytes? (buffer->blob @"hello")) "buffer->blob returns blob")
+(assert-true (bytes? (buffer->blob @"hello")) "buffer->blob returns @bytes")
 
 # ============================================================================
-# Bytes/blob to buffer conversions
+# Bytes/@bytes to @string conversions
 # ============================================================================
 
-(assert-eq (buffer->string (bytes->buffer (bytes 104 105))) "hi" "bytes->buffer->string")
-(assert-eq (buffer->string (blob->buffer (@bytes 104 105))) "hi" "blob->buffer->string")
+(assert-eq (freeze (bytes->buffer (bytes 104 105))) "hi" "bytes->buffer->string")
+(assert-eq (freeze (blob->buffer (@bytes 104 105))) "hi" "@bytes->buffer->string")

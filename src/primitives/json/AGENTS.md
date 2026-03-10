@@ -45,8 +45,8 @@ JSON parsing and serialization primitives.
 | Number (int) | `Value::int()` |
 | Number (float) | `Value::float()` |
 | String | `Value::string()` |
-| Array | `Value::array()` (mutable) |
-| Object | `Value::table()` (mutable) |
+| Array | `Value::array()` (@array, mutable) |
+| Object | `Value::table()` (@struct, mutable) |
 
 ## Parser implementation
 
@@ -63,7 +63,7 @@ JSON parsing and serialization primitives.
 `serialize_value()` and `serialize_value_pretty()` handle:
 - Immediate values (nil, bool, int, float)
 - Strings (with escape sequences)
-- Collections (arrays, tables, tuples, structs)
+- Collections (@arrays, @structs, arrays, structs)
 - Nested structures (recursive)
 - Pretty-printing with configurable indentation
 
@@ -71,9 +71,9 @@ JSON parsing and serialization primitives.
 
 1. **JSON null maps to Elle nil.** `Value::NIL` serializes to `null` and `null` parses to `Value::NIL`.
 
-2. **JSON arrays map to Elle arrays.** Arrays are mutable (`Value::array()`), not immutable tuples.
+2. **JSON arrays map to Elle @arrays.** @arrays are mutable (`Value::array()`), not immutable arrays.
 
-3. **JSON objects map to Elle tables.** Objects are mutable (`Value::table()`), not immutable structs.
+3. **JSON objects map to Elle @structs.** @structs are mutable (`Value::table()`), not immutable structs.
 
 4. **String escaping is bidirectional.** `serialize_value()` escapes special characters; `JsonParser` unescapes them.
 

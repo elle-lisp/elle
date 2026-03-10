@@ -15,19 +15,19 @@ The simulation starts with a single hot cell in the center and shows how heat di
 
 ### Matrix Representation
 
-Matrices are represented as tuples of tuples (immutable, row-major):
+Matrices are represented as arrays of arrays (immutable, row-major):
 ```janet
 (defn make-matrix [rows cols initial-value]
-  "Create an m×n matrix (tuple of tuples, row-major)."
-  (tuple ;(map (fn [_] (tuple ;(map (fn [_] initial-value) (range cols))))
+  "Create an m×n matrix (array of arrays, row-major)."
+  (array ;(map (fn [_] (array ;(map (fn [_] initial-value) (range cols))))
                (range rows))))
 ```
 
 A 3×3 matrix of zeros:
 ```
-#[#[0 0 0]
-  #[0 0 0]
-  #[0 0 0]]
+[[0 0 0]
+ [0 0 0]
+ [0 0 0]]
 ```
 
 ### Matrix Operations
@@ -42,9 +42,9 @@ A 3×3 matrix of zeros:
 ```janet
 (defn matrix-set [m i j val]
   (let* ([row (get m i)]
-         [new-row (tuple ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))]
+         [new-row (array ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))]
          [rows (map (fn [k r] (if (= k i) new-row r)) (range (length m)) m)])
-    (tuple ;rows)))
+    (array ;rows)))
 ```
 
 This uses `map` with index tracking to rebuild the matrix with one element changed.
@@ -52,17 +52,17 @@ This uses `map` with index tracking to rebuild the matrix with one element chang
 **`matrix-map`** — Apply a function to every element
 ```janet
 (defn matrix-map [f m]
-  (tuple ;(map (fn [row]
-                 (tuple ;(map f row)))
-               m)))
+  (array ;(map (fn [row]
+                (array ;(map f row)))
+              m)))
 ```
 
 **`matrix-add`** — Element-wise addition
 ```janet
 (defn matrix-add [m1 m2]
-  (tuple ;(map (fn [r1 r2]
-                 (tuple ;(map + r1 r2)))
-               m1 m2)))
+  (array ;(map (fn [r1 r2]
+               (array ;(map + r1 r2)))
+             m1 m2)))
 ```
 
 ### The Diffusion Algorithm
@@ -105,7 +105,7 @@ Temperature is mapped to a 10-character gradient:
          [clamped (if (> scaled 9) 9 scaled)]
          [chars " .:-=+*#%@"]
          [idx (if (< clamped 0) 0 clamped)])
-    (string/char-at chars idx)))
+    (get chars idx)))
 ```
 
 - ` ` (space) = cold (0.0)

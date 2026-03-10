@@ -22,7 +22,7 @@ pub fn error_val(kind: &str, msg: impl Into<String>) -> Value {
 
 /// Extract a human-readable error message from an error value.
 ///
-/// Handles struct errors `{:error :keyword :message "string"}`, legacy tuple errors
+/// Handles struct errors `{:error :keyword :message "string"}`, legacy array errors
 /// `[:kind "msg"]` (for backward compatibility with user-constructed errors),
 /// plain string errors, and arbitrary values.
 /// Returns the formatted string representation.
@@ -41,7 +41,7 @@ pub fn format_error(value: Value) -> String {
         }
     }
 
-    // Legacy tuple error: [:error "msg"] (backward compat for user-constructed errors)
+    // Legacy array error: [:error "msg"] (backward compat for user-constructed errors)
     if let Some(elems) = value.as_array() {
         if elems.len() == 2 {
             if let Some(msg) = elems[1].with_string(|s| s.to_string()) {
@@ -97,8 +97,8 @@ mod tests {
     }
 
     #[test]
-    fn test_format_error_legacy_tuple() {
-        // Legacy tuple error for backward compatibility
+    fn test_format_error_legacy_array() {
+        // Legacy array error for backward compatibility
         let err = Value::array(vec![
             Value::keyword("type-error"),
             Value::string("expected integer"),

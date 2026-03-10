@@ -178,7 +178,7 @@
           (push ready pid))
 
         (_
-          (error [:protocol-error "unknown scheduler command"])))))
+          (error {:error :protocol-error :message "unknown scheduler command"})))))
 
     # Run one process: resume it, handle the result
     (var run-one (fn (pid)
@@ -203,7 +203,7 @@
                  (handle-cmd pid (fiber/value f)))
 
               (true
-                (error [:scheduler-error "unexpected signal bits"]))))))))
+                (error {:error :scheduler-error :message "unexpected signal bits"}))))))))
 
     # ---- main loop ----
 
@@ -311,7 +311,7 @@
               # worker-a spawns worker-b and links to it
               (let ([b (spawn-link (fn ()
                           # worker-b crashes
-                          (fiber/signal 1 [:boom "worker-b crashed"])))])
+                          (fiber/signal 1 {:error :boom :message "worker-b crashed"})))])
                 # worker-a waits for something (will be killed by link)
                 (recv))))])
 
@@ -334,7 +334,7 @@
     (trap-exit true)
     (let* ([me (self)]
            [child (spawn-link (fn ()
-                    (fiber/signal 1 [:intentional "test crash"])))])
+                    (fiber/signal 1 {:error :intentional :message "test crash"})))])
 
       (let ([msg (recv)])
         (display "  trapped exit: ") (print msg)

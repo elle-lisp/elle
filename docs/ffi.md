@@ -381,7 +381,7 @@ This means:
 ## Error Handling
 
 All FFI primitives return `(SignalBits, Value)`. Errors are signaled via
-`SIG_ERROR` with an error tuple.
+`SIG_ERROR` with an error struct.
 
 | Error kind | Signaled by | Cause |
 |------------|-----------|-------|

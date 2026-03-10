@@ -242,7 +242,7 @@ pub(crate) fn handle_cdr_or_nil(vm: &mut VM) {
     }
 }
 
-/// Indexed ref with silent nil: returns nil if out of bounds or not an array/tuple.
+/// Indexed ref with silent nil: returns nil if out of bounds or not an array.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by destructuring — missing values become nil, no errors.
 pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
@@ -263,7 +263,7 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
 }
 
 /// Slice from index with silent nil: returns sub-array from index to end.
-/// Works on both arrays and tuples; result type matches input type.
+/// Works on both arrays and @arrays; result type matches input type.
 /// Operand: u16 index (immediate, read from bytecode).
 /// Used by & rest destructuring — collects remaining elements.
 pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
@@ -336,7 +336,7 @@ pub(crate) fn handle_table_get_or_nil(
     vm.fiber.stack.push(Value::NIL);
 }
 
-/// Extend an array with all elements from an indexed source (array or tuple).
+/// Extend an @array with all elements from an indexed source (array or @array).
 /// Stack: \[array, source\] → \[extended_array\]
 /// Used by splice: builds the args array incrementally.
 pub(crate) fn handle_array_extend(vm: &mut VM) {

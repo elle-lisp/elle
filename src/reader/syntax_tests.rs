@@ -375,10 +375,10 @@ fn test_parse_buffer_literal() {
     match result.kind {
         SyntaxKind::List(ref items) => {
             assert_eq!(items.len(), 2);
-            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "string->buffer"));
+            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "thaw"));
             assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s == "hello"));
         }
-        _ => panic!("Expected list (string->buffer \"hello\")"),
+        _ => panic!("Expected list (thaw \"hello\")"),
     }
 }
 
@@ -388,10 +388,10 @@ fn test_parse_buffer_literal_empty() {
     match result.kind {
         SyntaxKind::List(ref items) => {
             assert_eq!(items.len(), 2);
-            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "string->buffer"));
+            assert!(matches!(items[0].kind, SyntaxKind::Symbol(ref s) if s == "thaw"));
             assert!(matches!(items[1].kind, SyntaxKind::String(ref s) if s.is_empty()));
         }
-        _ => panic!("Expected list (string->buffer \"\")"),
+        _ => panic!("Expected list (thaw \"\")"),
     }
 }
 

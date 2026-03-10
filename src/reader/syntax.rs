@@ -389,15 +389,12 @@ impl SyntaxReader {
                 }
             }
             Some(OwnedToken::String(s)) => {
-                // @"..." is sugar for (string->buffer "...")
+                // @"..." is sugar for (thaw "...")
                 let string_val = s.clone();
                 let len = self.current_length();
                 self.advance(); // skip the string token
                 let span = self.source_loc_to_span(start_loc, start_loc.col + len + 1);
-                let sym = Syntax::new(
-                    SyntaxKind::Symbol("string->buffer".to_string()),
-                    span.clone(),
-                );
+                let sym = Syntax::new(SyntaxKind::Symbol("thaw".to_string()), span.clone());
                 let str_lit = Syntax::new(SyntaxKind::String(string_val), span.clone());
                 Ok(Syntax::new(SyntaxKind::List(vec![sym, str_lit]), span))
             }

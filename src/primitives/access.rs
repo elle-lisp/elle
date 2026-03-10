@@ -1,14 +1,14 @@
 //! Polymorphic collection access primitives (get, put).
 //!
 //! These functions work on multiple collection types:
-//! - `get`: retrieves values from tuples, arrays, strings, buffers, bytes, blobs, lists, and structs
-//! - `put`: updates values in arrays, tuples, strings, buffers, blobs, and structs
+//! - `get`: retrieves values from arrays, @arrays, strings, @strings, bytes, @bytes, lists, and structs
+//! - `put`: updates values in @arrays, arrays, strings, @strings, @bytes, and structs
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Polymorphic get - works on tuples, arrays, strings, and structs
+/// Polymorphic get - works on arrays, @arrays, strings, @strings, and structs
 /// `(get collection key [default])`
 pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
@@ -47,7 +47,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, borrowed[index as usize]);
     }
 
-    // Tuple (immutable indexed collection)
+    // Array (immutable indexed collection)
     if let Some(elems) = args[0].as_array() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -57,7 +57,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "get: tuple index must be integer, got {}",
+                            "get: array index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -70,7 +70,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, elems[index as usize]);
     }
 
-    // Buffer (mutable string — indexed by character position)
+    // @string (mutable string — indexed by grapheme cluster position)
     if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -80,7 +80,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "get: buffer index must be integer, got {}",
+                            "get: @string index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -98,7 +98,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "error",
-                        format!("get: buffer contains invalid UTF-8: {}", e),
+                        format!("get: @string contains invalid UTF-8: {}", e),
                     ),
                 )
             }
@@ -140,7 +140,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::int(b[index as usize] as i64));
     }
 
-    // Blob (mutable binary data — indexed by byte position)
+    // @bytes (mutable binary data — indexed by byte position)
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -150,7 +150,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "get: blob index must be integer, got {}",
+                            "get: @bytes index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -174,7 +174,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::int(borrowed[index as usize] as i64));
     }
 
-    // String (immutable character sequence)
+    // String (immutable grapheme cluster sequence)
     if args[0].is_string() {
         return args[0]
             .with_string(|s| {
@@ -307,17 +307,17 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "get: expected collection (list, tuple, array, string, buffer, or struct), got {}",
+                "get: expected collection (list, array, @array, string, @string, or struct), got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Polymorphic put - works on tuples, arrays, strings, and structs
-/// For arrays: mutates in-place and returns the array
-/// For tuples: returns a new tuple with the updated element (immutable)
-/// For strings: returns a new string with the updated character (immutable)
+/// Polymorphic put - works on arrays, @arrays, strings, @strings, and structs
+/// For @arrays: mutates in-place and returns the @array
+/// For arrays: returns a new array with the updated element (immutable)
+/// For strings: returns a new string with the updated grapheme cluster (immutable)
 /// For structs: mutates in-place (@struct) or returns new (struct)
 /// `(put collection key value)`
 pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
@@ -331,7 +331,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Buffer (mutable byte sequence) - mutate in place
+    // @string (mutable byte sequence) - mutate in place
     if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -341,7 +341,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "put: buffer index must be integer, got {}",
+                            "put: @string index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -365,7 +365,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "put: buffer value must be integer, got {}",
+                            "put: @string value must be integer, got {}",
                             args[2].type_name()
                         ),
                     ),
@@ -383,10 +383,10 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             );
         }
         buf_ref.borrow_mut()[index as usize] = byte;
-        return (SIG_OK, args[0]); // Return the mutated buffer
+        return (SIG_OK, args[0]); // Return the mutated @string
     }
 
-    // Blob (mutable byte sequence) - mutate in place
+    // @bytes (mutable byte sequence) - mutate in place
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -396,7 +396,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "put: blob index must be integer, got {}",
+                            "put: @bytes index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -420,7 +420,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "put: blob value must be integer, got {}",
+                            "put: @bytes value must be integer, got {}",
                             args[2].type_name()
                         ),
                     ),
@@ -472,7 +472,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]); // Return the mutated array
     }
 
-    // Tuple (immutable indexed collection) - return new tuple
+    // Array (immutable indexed collection) - return new array
     if let Some(elems) = args[0].as_array() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -482,7 +482,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     error_val(
                         "type-error",
                         format!(
-                            "put: tuple index must be integer, got {}",
+                            "put: array index must be integer, got {}",
                             args[1].type_name()
                         ),
                     ),
@@ -507,7 +507,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, Value::array(new_elems));
     }
 
-    // String (immutable character sequence) - return new string
+    // String (immutable grapheme cluster sequence) - return new string
     if args[0].is_string() {
         return args[0]
             .with_string(|s| {
@@ -625,7 +625,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "put: expected collection (tuple, array, string, buffer, or struct), got {}",
+                "put: expected collection (array, @array, string, @string, or struct), got {}",
                 args[0].type_name()
             ),
         ),

@@ -39,16 +39,16 @@ pub enum SendValue {
     /// Deep copy of structs (immutable maps)
     Struct(BTreeMap<crate::value::heap::TableKey, SendValue>),
 
-    /// Deep copy of tuples (immutable fixed-length sequences)
+    /// Deep copy of arrays (immutable fixed-length sequences)
     Tuple(Vec<SendValue>),
 
-    /// Deep copy of buffers (mutable byte sequences)
+    /// Deep copy of @strings (mutable byte sequences)
     Buffer(Vec<u8>),
 
-    /// Deep copy of bytes (immutable binary data)
+    /// Deep copy of @bytes (immutable binary data)
     Bytes(Vec<u8>),
 
-    /// Deep copy of blobs (mutable binary data)
+    /// Deep copy of @bytes (mutable binary data)
     Blob(Vec<u8>),
 
     /// Deep copy of mutable cells (if contents are sendable)
@@ -74,7 +74,7 @@ pub enum SendValue {
 impl SendValue {
     /// Convert a Value to SendValue by deep-copying heap data.
     ///
-    /// Returns Err if the value contains non-sendable data (mutable tables,
+    /// Returns Err if the value contains non-sendable data (mutable @structs,
     /// native functions, FFI handles, etc.).
     pub fn from_value(value: Value) -> Result<Self, String> {
         // Keywords carry their name for cross-thread re-interning
@@ -146,7 +146,7 @@ impl SendValue {
             HeapObject::LStringMut(buf_ref) => {
                 let borrowed = buf_ref
                     .try_borrow()
-                    .map_err(|_| "Cannot borrow buffer for sending".to_string())?;
+                    .map_err(|_| "Cannot borrow @string for sending".to_string())?;
                 Ok(SendValue::Buffer(borrowed.clone()))
             }
 
@@ -162,8 +162,8 @@ impl SendValue {
             // Float values that couldn't be stored inline
             HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
-            // Unsafe: mutable structs
-            HeapObject::LStructMut(_) => Err("Cannot send mutable struct".to_string()),
+            // Unsafe: mutable @structs
+            HeapObject::LStructMut(_) => Err("Cannot send mutable @struct".to_string()),
 
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),
@@ -204,11 +204,11 @@ impl SendValue {
             // Bytes - immutable and safe to send
             HeapObject::LBytes(b) => Ok(SendValue::Bytes(b.clone())),
 
-            // Blobs - deep copy the bytes
+            // @bytes - deep copy the bytes
             HeapObject::LBytesMut(blob_ref) => {
                 let borrowed = blob_ref
                     .try_borrow()
-                    .map_err(|_| "Cannot borrow blob for sending".to_string())?;
+                    .map_err(|_| "Cannot borrow @bytes for sending".to_string())?;
                 Ok(SendValue::Blob(borrowed.clone()))
             }
 

@@ -20,7 +20,7 @@
 
 (assert-eq (get (fn/flow (fn (x y) (+ x y))) :arity) "2" "fn/flow arity value")
 
-(assert-true (array? (get (fn/flow (fn (x) x)) :blocks)) "fn/flow blocks is tuple")
+(assert-true (array? (get (fn/flow (fn (x) x)) :blocks)) "fn/flow blocks is array")
 
 (assert-true (> (length (get (fn/flow (fn (x) x)) :blocks)) 0) "fn/flow blocks nonempty")
 
@@ -31,10 +31,10 @@
   (assert-true (not (nil? (get block :edges))) "fn/flow block has edges"))
 
 (let ((instrs (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :instrs)))
-  (assert-true (array? instrs) "fn/flow instrs is tuple of strings"))
+  (assert-true (array? instrs) "fn/flow instrs is array of strings"))
 
 (let ((edges (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :edges)))
-  (assert-true (array? edges) "fn/flow edges is tuple"))
+  (assert-true (array? edges) "fn/flow edges is array"))
 
 (let ((term (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :term)))
   (assert-true (string? term) "fn/flow term is string"))

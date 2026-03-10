@@ -17,14 +17,14 @@
 (assert-eq (reverse (reverse (list))) (list)
   "reverse involution: empty list")
 
-## reverse_involution_tuple
-## Verify that reversing a tuple twice returns the original tuple
+## reverse_involution_array
+## Verify that reversing an array twice returns the original array
 
 (assert-eq (reverse (reverse [1 2 3])) [1 2 3]
-  "reverse involution: [1 2 3]")
+    "reverse involution: [1 2 3]")
 
 (assert-eq (reverse (reverse [-5 0 7])) [-5 0 7]
-  "reverse involution: [-5 0 7]")
+   "reverse involution: [-5 0 7]")
 
 ## rest_preserves_list_type
 ## Verify that rest of a list is a list
@@ -35,14 +35,14 @@
 (assert-true (list? (rest (list 1 2 3)))
   "rest preserves list type: (list 1 2 3)")
 
-## rest_preserves_tuple_type
-## Verify that rest of a tuple is a tuple
+## rest_preserves_array_type
+## Verify that rest of an array is an array
 
 (assert-true (array? (rest [1 2]))
-  "rest preserves tuple type: [1 2]")
+    "rest preserves array type: [1 2]")
 
 (assert-true (array? (rest [1 2 3]))
-  "rest preserves tuple type: [1 2 3]")
+   "rest preserves array type: [1 2 3]")
 
 ## rest_preserves_array_type
 ## Verify that rest of an array is an array

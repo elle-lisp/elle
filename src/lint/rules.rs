@@ -138,7 +138,6 @@ pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
         "string/append" => Some(2),
         "substring" => Some(3),
         "string-index" => Some(2),
-        "char-at" => Some(2),
         // Type operations
         "type-of" => Some(1),
         // Logic

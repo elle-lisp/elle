@@ -37,9 +37,9 @@
 (assert-eq (number->string 42) "42" "number->string int")
 (assert-true (string? (number->string 3.14)) "number->string float")
 
-(assert-eq (string->integer "42") 42 "string->integer")
-(assert-eq (string->integer "-7") -7 "string->integer negative")
-(assert-eq (string->float "2.5") 2.5 "string->float")
+(assert-eq (integer "42") 42 "integer from string")
+(assert-eq (integer "-7") -7 "integer from string negative")
+(assert-eq (float "2.5") 2.5 "float from string")
 
 (assert-eq (any->string 42) "42" "any->string int")
 (assert-eq (any->string true) "true" "any->string bool")
@@ -120,8 +120,8 @@
 
 ## === Alias tests ===
 
-(assert-eq (string->int "42") 42 "string->int alias")
-(assert-eq (int 42) 42 "int alias")
+(assert-eq (integer "42") 42 "integer from string")
+(assert-eq (int 42) 42 "int alias for integer")
 
 ## === Type predicates for collections ===
 
@@ -136,8 +136,8 @@
 (assert-eq (struct? "hello") false "struct? false for string")
 (assert-eq (struct? "hello") false "struct? false string")
 
-(assert-eq (empty? []) true "empty? tuple true")
-(assert-eq (empty? [1]) false "empty? tuple false")
+(assert-eq (empty? []) true "empty? array true")
+(assert-eq (empty? [1]) false "empty? array false")
 
 (assert-eq (empty? @[]) true "empty? array true")
 (assert-eq (empty? @[1]) false "empty? array false")
@@ -174,8 +174,8 @@
 
 (assert-eq (first (list 1 2 3)) 1 "first list")
 (assert-eq (first (list)) nil "first empty list")
-(assert-eq (first [1 2 3]) 1 "first tuple")
-(assert-eq (first []) nil "first empty tuple")
+(assert-eq (first [1 2 3]) 1 "first array")
+(assert-eq (first []) nil "first empty array")
 (assert-eq (first @[1 2 3]) 1 "first array")
 (assert-eq (first @[]) nil "first empty array")
 (assert-eq (first "abc") "a" "first string")
@@ -188,11 +188,11 @@
 (assert-eq (rest (list)) () "rest empty list")
 (assert-eq (rest (list 1)) () "rest single list")
 
-(assert-eq (length (rest [1 2 3])) 2 "rest tuple length")
-(assert-eq (array? (rest [1 2 3])) true "rest tuple type")
+(assert-eq (length (rest [1 2 3])) 2 "rest array length")
+(assert-eq (array? (rest [1 2 3])) true "rest array type")
 
-(assert-eq (array? (rest [])) true "rest empty tuple type")
-(assert-eq (length (rest [])) 0 "rest empty tuple length")
+(assert-eq (array? (rest [])) true "rest empty array type")
+(assert-eq (length (rest [])) 0 "rest empty array length")
 
 (assert-eq (length (rest @[1 2 3])) 2 "rest array length")
 (assert-eq (array? (rest @[1 2 3])) true "rest array type")
@@ -211,10 +211,10 @@
 (assert-eq (first (reverse (list 1 2 3))) 3 "reverse list")
 (assert-eq (reverse (list)) () "reverse empty list")
 
-(assert-eq (array? (reverse [1 2 3])) true "reverse tuple type")
-(assert-eq (get (reverse [1 2 3]) 0) 3 "reverse tuple first")
+(assert-eq (array? (reverse [1 2 3])) true "reverse array type")
+(assert-eq (get (reverse [1 2 3]) 0) 3 "reverse array first")
 
-(assert-eq (array? (reverse [])) true "reverse empty tuple type")
+(assert-eq (array? (reverse [])) true "reverse empty array type")
 
 (assert-eq (array? (reverse @[1 2 3])) true "reverse array type")
 (assert-eq (get (reverse @[1 2 3]) 0) 3 "reverse array first")

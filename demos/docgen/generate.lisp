@@ -590,7 +590,7 @@ tbody tr:nth-child(even) {
         (-> doc (append " (alias: ") (append (string-join aliases ", ")) (append ")"))))))
 
 ## Group primitives by category, skipping aliases.
-## Returns a table mapping category-name → list of metadata structs.
+## Returns an @struct mapping category-name → list of metadata structs.
 (var group-by-category
   (fn (names)
     (fold (fn (groups name)

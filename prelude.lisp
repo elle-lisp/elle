@@ -56,7 +56,7 @@
 ## (error value) => (fiber/signal 1 value)
 (defmacro error (& args)
   (if (> (length args) 1)
-    (fiber/signal 1 [:arity-error "error: expected 0 or 1 arguments"])
+    (fiber/signal 1 {:error :arity-error :message "error: expected 0 or 1 arguments"})
     `(fiber/signal 1 ,(if (empty? args) nil (first args)))))
 
 ## try/catch - error handling via fibers
@@ -140,55 +140,36 @@
              (ffi/call ,ptr-sym ,sig-sym ,;call-args))))))
 
 ## each - iterate over a sequence
-## Dispatches on type: lists use first/rest, indexed types use get/length,
-## strings use char-at/length.
+## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
   (let* ((has-in (and (not (empty? forms))
                       (not (empty? (rest forms)))
                       (= (syntax->datum iter-or-in) 'in)))
          (iter (if has-in (first forms) iter-or-in))
-         (body (if has-in (rest forms) forms))
-         (g-iter (gensym))
-         (g-idx (gensym))
-         (g-len (gensym))
-         (g-cur (gensym)))
-    `(let ((,g-iter ,iter))
-       (cond
-         ((empty? ,g-iter) nil)
-         ((pair? ,g-iter)
-          (let* ((,g-cur ,g-iter))
-            (while (pair? ,g-cur)
-              (begin
-                (let ((,var (first ,g-cur)))
-                  ,;body)
-                (assign ,g-cur (rest ,g-cur))))))
-         ((or (array? ,g-iter) (array? ,g-iter) (bytes? ,g-iter) (bytes? ,g-iter))
-          (let* ((,g-len (length ,g-iter))
-                 (,g-idx 0))
-            (while (< ,g-idx ,g-len)
-              (begin
-                (let ((,var (get ,g-iter ,g-idx)))
-                  ,;body)
-                (assign ,g-idx (+ ,g-idx 1))))))
-         ((or (string? ,g-iter) (string? ,g-iter))
-          (let* ((,g-len (length ,g-iter))
-                 (,g-idx 0))
-            (while (< ,g-idx ,g-len)
-              (begin
-                (let ((,var (string/char-at ,g-iter ,g-idx)))
-                  ,;body)
-                (assign ,g-idx (+ ,g-idx 1))))))
-           ((set? ,g-iter)
-            (let* ((,g-cur (set->array ,g-iter))
-                   (,g-len (length ,g-cur))
-                   (,g-idx 0))
-              (while (< ,g-idx ,g-len)
-                (begin
-                  (let ((,var (get ,g-cur ,g-idx)))
-                    ,;body)
-                  (assign ,g-idx (+ ,g-idx 1))))))
-         (true (error [:type-error "each: not a sequence"]))))))
+         (body (if has-in (rest forms) forms)))
+    `(let ((seq ,iter))
+       (match (type-of seq)
+         (:list
+          (unless (empty? seq)
+            (var cur seq)
+            (while (pair? cur)
+              (let ((,var (first cur))) ,;body)
+              (assign cur (rest cur)))))
+         ((or :array :@array :string :@string :bytes :@bytes)
+          (var idx 0)
+          (var len (length seq))
+          (while (< idx len)
+            (let ((,var (get seq idx))) ,;body)
+            (assign idx (+ idx 1))))
+         ((or :set :@set)
+          (let ((items (set->array seq)))
+            (var idx 0)
+            (var len (length items))
+            (while (< idx len)
+              (let ((,var (get items idx))) ,;body)
+              (assign idx (+ idx 1)))))
+         (_ (error {:error :type-error :message "each: not a sequence"}))))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])
@@ -259,4 +240,3 @@
      (allocator/install ,allocator)
      (defer (allocator/uninstall)
        ,;body)))
-

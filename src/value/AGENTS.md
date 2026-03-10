@@ -20,7 +20,7 @@ Runtime value representation using NaN-boxing.
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
 | `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
-| `error.rs` | `error_val()` and `format_error()` helpers for error tuples |
+| `error.rs` | `error_val()` and `format_error()` helpers for error structs |
 | `ffi.rs` | `LibHandle` for C interop |
 | `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit` |
 | `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
@@ -171,7 +171,7 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 | `fiber.rs` | ~540 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
 | `fiber_heap.rs` | ~890 | FiberHeap (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership/routing), thread-local routing, `needs_drop`, `region_enter`/`region_exit` |
 | `shared_alloc.rs` | ~180 | SharedAllocator (bump + destructor tracking), teardown, Drop impl |
-| `error.rs` | ~50 | error_val() and format_error() helpers |
+| `error.rs` | ~130 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |
 | `arena.rs` | ~318 | Heap arena: mark/release, alloc, deref, ArenaGuard, ArenaMark |
 | `heap.rs` | ~512 | HeapObject, Cons, ThreadHandle, BindingInner, BindingScope, LSet, LSetMut (re-exports arena functions) |

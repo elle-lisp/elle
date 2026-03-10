@@ -153,11 +153,11 @@
 (assert-string-eq (string/trim "   ") ""
   "trim whitespace-only")
 
-# single_character_operations: single character operations
+# single_grapheme_cluster_operations: single grapheme cluster operations
 (assert-true (= (length "a") 1)
-  "length of single char")
-(assert-string-eq (string/char-at "a" 0) "a"
-  "char-at single char")
+  "length of single grapheme cluster")
+(assert-string-eq (get "a" 0) "a"
+  "get single grapheme cluster")
 
 # ============================================================================
 # Slice boundary checking (migrated from property tests)
@@ -203,57 +203,57 @@
 (assert-string-eq (string/join (string/split "one|two|three" "|") "|") "one|two|three"
   "split/join roundtrip: pipe")
 
-# split_produces_tuple: split produces a tuple
+# split_produces_array: split produces an array
 (assert-true (array? (string/split "a,b" ","))
-  "split produces a tuple")
+   "split produces an array")
 (assert-true (array? (string/split "hello" "l"))
-  "split produces a tuple (hello)")
+   "split produces an array (hello)")
 
 # ============================================================================
 # Conversion roundtrips (migrated from property tests)
 # ============================================================================
 
 # number_to_string_roundtrip: number->string->integer roundtrip
-(assert-eq (string->integer (number->string 42)) 42
+(assert-eq (integer (number->string 42)) 42
   "number->string->integer roundtrip: 42")
-(assert-eq (string->integer (number->string -100)) -100
+(assert-eq (integer (number->string -100)) -100
   "number->string->integer roundtrip: -100")
-(assert-eq (string->integer (number->string 0)) 0
+(assert-eq (integer (number->string 0)) 0
   "number->string->integer roundtrip: 0")
 
-# string_to_integer_roundtrip: string->integer roundtrip
-(assert-eq (string->integer "42") 42
-  "string->integer: 42")
-(assert-eq (string->integer "-100") -100
-  "string->integer: -100")
-(assert-eq (string->integer "0") 0
-  "string->integer: 0")
+# string_to_integer_roundtrip: integer from string
+(assert-eq (integer "42") 42
+  "integer from string: 42")
+(assert-eq (integer "-100") -100
+  "integer from string: -100")
+(assert-eq (integer "0") 0
+  "integer from string: 0")
 
 # string_to_integer_invalid_returns_error: non-numeric string errors
-(assert-err (fn [] (string->integer "abc"))
-  "string->integer errors on abc")
-(assert-err (fn [] (string->integer "hello"))
-  "string->integer errors on hello")
-(assert-err (fn [] (string->integer "xyz"))
-  "string->integer errors on xyz")
+(assert-err (fn [] (integer "abc"))
+  "integer from string errors on abc")
+(assert-err (fn [] (integer "hello"))
+  "integer from string errors on hello")
+(assert-err (fn [] (integer "xyz"))
+  "integer from string errors on xyz")
 
 # ============================================================================
-# Index/char-at operations (migrated from property tests)
+# Index/get operations (migrated from property tests)
 # ============================================================================
 
-# char_at_valid_index: char-at returns single character
-(assert-string-eq (string/char-at "hello" 0) "h"
-  "char-at index 0")
-(assert-string-eq (string/char-at "hello" 4) "o"
-  "char-at index 4")
-(assert-string-eq (string/char-at "abc" 1) "b"
-  "char-at index 1")
+# get_valid_index: get returns single grapheme cluster
+(assert-string-eq (get "hello" 0) "h"
+  "get string index 0")
+(assert-string-eq (get "hello" 4) "o"
+  "get string index 4")
+(assert-string-eq (get "abc" 1) "b"
+  "get string index 1")
 
-# char_at_out_of_bounds_errors: char-at OOB errors
-(assert-err (fn [] (string/char-at "hi" 1000))
-  "char-at OOB errors (hi)")
-(assert-err (fn [] (string/char-at "abc" 100))
-  "char-at OOB errors (abc)")
+# get_out_of_bounds_returns_nil: get OOB returns nil
+(assert-eq (get "hi" 1000) nil
+  "get string OOB returns nil (hi)")
+(assert-eq (get "abc" 100) nil
+  "get string OOB returns nil (abc)")
 
 # string_index_finds_char: string/index finds character
 (assert-eq (string/index "hello" "l") 2

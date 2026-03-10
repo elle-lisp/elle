@@ -10,7 +10,7 @@ This directory contains design documents, language references, and contributor g
 | [types.md](types.md) | Type system: mutable/immutable split, all types, predicates, display format, equality |
 | [semantics.md](semantics.md) | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring |
 | [macros.md](macros.md) | Macro system: current state, architecture, hygiene, scope sets |
-| [except.md](except.md) | Exception handling: error tuples, try/catch, error propagation |
+| [except.md](except.md) | Exception handling: error structs, try/catch, error propagation |
 
 ## Contributor Guides
 

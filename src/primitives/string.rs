@@ -6,8 +6,8 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
-/// Extract text content from a string or buffer value.
-/// Returns (text, is_buffer). For buffers, validates UTF-8.
+/// Extract text content from a string or @string value.
+/// Returns (text, is_@string). For @strings, validates UTF-8.
 fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, Value)> {
     if let Some(s) = val.with_string(|s| s.to_string()) {
         Ok((s, false))
@@ -161,66 +161,7 @@ pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Get a character at an index from a string or buffer
-pub(crate) fn prim_char_at(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("char-at: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let (s, _is_buffer) = match as_text(&args[0], "char-at") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-
-    let index = match args[1].as_int() {
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("char-at: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    let grapheme_count = s.graphemes(true).count();
-
-    if index >= grapheme_count {
-        return (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!(
-                    "char-at: index {} out of bounds (length {})",
-                    index, grapheme_count
-                ),
-            ),
-        );
-    }
-
-    match s.graphemes(true).nth(index) {
-        Some(g) => (SIG_OK, Value::string(g)),
-        None => (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!(
-                    "char-at: index {} out of bounds (length {})",
-                    index, grapheme_count
-                ),
-            ),
-        ),
-    }
-}
-
-/// Split string or buffer on delimiter, returning a tuple
+/// Split string or @string on delimiter, returning an array
 pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -640,22 +581,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &["string-index", "string/index", "string-find"],
     },
     PrimitiveDef {
-        name: "string/char-at",
-        func: prim_char_at,
-        effect: Effect::inert(),
-        arity: Arity::Exact(2),
-        doc: "Get character at index as a single-character string.",
-        params: &["s", "idx"],
-        category: "string",
-        example: "(string/char-at \"hello\" 1) #=> \"e\"",
-        aliases: &["char-at"],
-    },
-    PrimitiveDef {
         name: "string/split",
         func: prim_string_split,
         effect: Effect::inert(),
         arity: Arity::Exact(2),
-        doc: "Split string by delimiter, returning a tuple of substrings.",
+        doc: "Split string by delimiter, returning an array of substrings.",
         params: &["s", "delim"],
         category: "string",
         example: "(string/split \"a,b,c\" \",\") #=> [\"a\" \"b\" \"c\"]",

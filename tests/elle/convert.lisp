@@ -31,13 +31,13 @@
 (assert-true (float? (float -99)) "float(-99) is a float")
 
 # number_to_string_int_roundtrip
-# (string->integer (number->string n)) should equal n
-(assert-eq (string->integer (number->string 42)) 42
-           "string->integer(number->string(42)) == 42")
-(assert-eq (string->integer (number->string 0)) 0
-           "string->integer(number->string(0)) == 0")
-(assert-eq (string->integer (number->string -99)) -99
-           "string->integer(number->string(-99)) == -99")
+# (integer (number->string n)) should equal n
+(assert-eq (integer (number->string 42)) 42
+           "integer(number->string(42)) == 42")
+(assert-eq (integer (number->string 0)) 0
+           "integer(number->string(0)) == 0")
+(assert-eq (integer (number->string -99)) -99
+           "integer(number->string(-99)) == -99")
 
 # string_from_int_matches_format
 # (string n) should format integer as string

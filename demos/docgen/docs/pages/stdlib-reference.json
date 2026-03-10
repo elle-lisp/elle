@@ -97,7 +97,6 @@
             ["(string-upcase s)", "Convert to uppercase"],
             ["(string-downcase s)", "Convert to lowercase"],
             ["(string-join lst sep)", "Join list of strings"],
-            ["(char-at s i)", "Get character at index"],
             ["(string-index s sub)", "Find index of substring"]
           ]
         }

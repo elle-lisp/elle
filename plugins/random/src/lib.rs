@@ -174,7 +174,7 @@ fn prim_random_bytes(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bytes(buf))
 }
 
-/// Extract elements from an array (mutable) or tuple (immutable).
+/// Extract elements from an @array (mutable) or array (immutable).
 fn extract_elements(val: &Value) -> Option<Vec<Value>> {
     if let Some(arr) = val.as_array_mut() {
         return Some(arr.borrow().clone());

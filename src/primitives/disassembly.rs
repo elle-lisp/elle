@@ -171,7 +171,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
         Value::int(lir.entry.0 as i64),
     );
 
-    // :blocks — tuple of block structs
+    // :blocks — array of block structs
     let blocks: Vec<Value> = lir
         .blocks
         .iter()
@@ -184,7 +184,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 Value::int(block.label.0 as i64),
             );
 
-            // :instrs — tuple of Debug-formatted instruction strings
+            // :instrs — array of Debug-formatted instruction strings
             let instrs: Vec<Value> = block
                 .instructions
                 .iter()
@@ -195,7 +195,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 Value::array(instrs),
             );
 
-            // :display — tuple of compact human-readable instruction strings
+            // :display — array of compact human-readable instruction strings
             let display: Vec<Value> = block
                 .instructions
                 .iter()
@@ -206,7 +206,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 Value::array(display),
             );
 
-            // :spans — tuple of "line:col" strings (nil for synthetic spans)
+            // :spans — array of "line:col" strings (nil for synthetic spans)
             let spans: Vec<Value> = block
                 .instructions
                 .iter()
@@ -267,7 +267,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                 Value::keyword(terminator_kind(&block.terminator.terminator)),
             );
 
-            // :edges — tuple of successor label ints
+            // :edges — array of successor label ints
             let edges: Vec<Value> = match &block.terminator.terminator {
                 Terminator::Return(_) | Terminator::Unreachable => vec![],
                 Terminator::Jump(label) => vec![Value::int(label.0 as i64)],
@@ -307,17 +307,17 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
 /// - :regs — number of virtual registers (int)
 /// - :locals — number of local slots (int)
 /// - :entry — entry block label (int)
-/// - :blocks — tuple of block structs, each with:
+/// - :blocks — array of block structs, each with:
 ///   - :label — block label (int)
-///   - :instrs — tuple of instruction strings (Debug format)
-///   - :display — tuple of compact instruction strings (Display format)
-///   - :spans — tuple of "line:col" strings, same length as :display (nil for synthetic spans)
-///   - :annotated — tuple of display strings with " @line:col" suffix (for CFG rendering)
+///   - :instrs — array of instruction strings (Debug format)
+///   - :display — array of compact instruction strings (Display format)
+///   - :spans — array of "line:col" strings, same length as :display (nil for synthetic spans)
+///   - :annotated — array of display strings with " @line:col" suffix (for CFG rendering)
 ///   - :term — terminator string (Debug format)
 ///   - :term-display — compact terminator string (Display format)
 ///   - :term-span — "line:col" string for the terminator (nil for synthetic)
 ///   - :term-kind — keyword: :return, :jump, :branch, :yield, or :unreachable
-///   - :edges — tuple of successor label ints
+///   - :edges — array of successor label ints
 ///
 /// Returns nil if the closure has no LIR (e.g., native function or LIR discarded).
 /// Errors if argument is not a closure or fiber, or if the fiber is currently executing.

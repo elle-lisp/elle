@@ -425,7 +425,7 @@ impl Lowerer {
                     });
                     self.lower_destructure(element, elem)?;
                 }
-                // Bind the remaining tuple slice to the rest pattern.
+                // Bind the remaining array slice to the rest pattern.
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
@@ -443,7 +443,7 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Struct { entries } => {
-                // Structs are immutable key-value maps, like tables
+                // Structs are immutable key-value maps
                 let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
                 self.emit(LirInstr::StoreLocal {

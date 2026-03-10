@@ -54,7 +54,7 @@
 # ========================================
 
 # Spawned closures capture immutable values from the enclosing scope.
-# Strings, numbers, tuples, structs — all fine.
+# Strings, numbers, arrays, structs — all fine.
 (let* ([name "Alice"]
        [age 30])
    (let* ([result (join (spawn (fn [] [name age])))]
@@ -63,12 +63,12 @@
      (assert-true (string/contains? greeting "Alice") "captured string in thread")
      (assert-true (string/contains? greeting "30") "captured number conversion")))
 
-# Tuples are immutable, so they cross thread boundaries.
+# Arrays are immutable, so they cross thread boundaries.
 (let* ([nums [10 20 30]]
        [result (join (spawn (fn []
          (+ (get nums 0) (get nums 1) (get nums 2)))))])
   (display "  sum of [10 20 30]: ") (print result)
-  (assert-eq result 60 "tuple elements accessible in thread"))
+  (assert-eq result 60 "array elements accessible in thread"))
 
 
 # ========================================

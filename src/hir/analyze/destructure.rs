@@ -53,7 +53,7 @@ impl<'a> Analyzer<'a> {
         Vec::new()
     }
 
-    /// Recursively extract all symbol names from a syntax pattern (list, tuple, array, struct, or table).
+    /// Recursively extract all symbol names from a syntax pattern (list, array, @array, struct, or @struct).
     pub(super) fn extract_pattern_names<'s>(
         syntax: &'s Syntax,
         out: &mut Vec<(&'s str, &'s [ScopeId])>,
@@ -77,7 +77,7 @@ impl<'a> Analyzer<'a> {
                 }
             }
             SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
-                // Struct/table patterns are alternating keyword/pattern pairs;
+                // Struct/@struct patterns are alternating keyword/pattern pairs;
                 // only extract names from the value patterns (odd indices)
                 for item in items.iter().skip(1).step_by(2) {
                     Self::extract_pattern_names(item, out);
@@ -87,7 +87,7 @@ impl<'a> Analyzer<'a> {
         }
     }
 
-    /// Check if a syntax node is a destructuring pattern (list, tuple, array, struct, or table).
+    /// Check if a syntax node is a destructuring pattern (list, array, @array, struct, or @struct).
     pub(super) fn is_destructure_pattern(syntax: &Syntax) -> bool {
         matches!(
             &syntax.kind,

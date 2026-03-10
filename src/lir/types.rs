@@ -256,13 +256,13 @@ pub enum LirInstr {
     IsNil { dst: Reg, src: Reg },
     /// Check if value is a pair
     IsPair { dst: Reg, src: Reg },
-    /// Check if value is a tuple (for pattern matching)
-    IsArray { dst: Reg, src: Reg },
     /// Check if value is an array (for pattern matching)
+    IsArray { dst: Reg, src: Reg },
+    /// Check if value is an @array (for pattern matching)
     IsArrayMut { dst: Reg, src: Reg },
     /// Check if value is a struct (for pattern matching)
     IsStruct { dst: Reg, src: Reg },
-    /// Check if value is a table (for pattern matching)
+    /// Check if value is an @struct (for pattern matching)
     IsTable { dst: Reg, src: Reg },
     /// Check if value is an immutable set (for pattern matching)
     IsSet { dst: Reg, src: Reg },
@@ -284,9 +284,9 @@ pub enum LirInstr {
     CarOrNil { dst: Reg, src: Reg },
     /// Cdr with silent nil: returns nil if not a cons cell
     CdrOrNil { dst: Reg, src: Reg },
-    /// Array/tuple ref with silent nil: returns nil if out of bounds or not an array/tuple
+    /// Array ref with silent nil: returns nil if out of bounds or not an array
     ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
-    /// Array/tuple slice from index: returns a new array from index to end, or empty array
+    /// Array slice from index: returns a new array from index to end, or empty array
     ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
     /// Table/struct get with silent nil: returns nil if key not found or wrong type.
     /// `key` is a constant pool index holding a keyword Value.
@@ -305,7 +305,7 @@ pub enum LirInstr {
     Eval { dst: Reg, expr: Reg, env: Reg },
 
     // === Splice Support ===
-    /// Extend an array with all elements of an indexed type (array or tuple).
+    /// Extend an array with all elements of an indexed type (array or @array).
     /// Used by splice path: builds the args array incrementally.
     ArrayMutExtend { dst: Reg, array: Reg, source: Reg },
     /// Append a single value to an array.

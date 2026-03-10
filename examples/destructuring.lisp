@@ -7,10 +7,10 @@
 #   Wildcard _           — discarding elements you don't need
 #   List & rest          — collecting remaining list elements
 #   Array & rest         — rest collects into an array
-#   Nested patterns      — list-in-list, tuple-in-list, struct-in-struct
+#   Nested patterns      — list-in-list, array-in-list, struct-in-struct
 #   Mutable destructuring — var + set on destructured bindings
 #   let / let*           — destructuring with sequential dependencies
-#   Struct/table by-key  — extraction, missing keys, nested structs
+#   Struct/@struct by-key  — extraction, missing keys, nested structs
 #   Match dispatch       — struct tag patterns for polymorphic data
 
 (def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
@@ -35,9 +35,9 @@
 (def (sn-x sn-y) 42)
 (assert-eq sn-x nil "silent nil: non-list => nil")
 
-# Same for tuple patterns on a non-indexed value
+# Same for array patterns on a non-indexed value
 (def [sn-i sn-j] "hello")
-(assert-eq sn-i nil "silent nil: string in tuple pattern => nil")
+(assert-eq sn-i nil "silent nil: string in array pattern => nil")
 
 (display "  fewer vals:  (def (a b c) (list 10)) → b=") (print sn-b)
 (display "  wrong type:  (def (x y) 42)          → x=") (print sn-x)
@@ -51,10 +51,10 @@
 (def (_ wc-mid _) (list 10 20 30))
 (assert-eq wc-mid 20 "wildcard: skip first and third")
 
-# Wildcard in tuple patterns
+# Wildcard in array patterns
 (def [_ wc-second _ wc-fourth] [100 200 300 400])
-(assert-eq wc-second 200 "wildcard: tuple skip")
-(assert-eq wc-fourth 400 "wildcard: tuple skip to fourth")
+(assert-eq wc-second 200 "wildcard: array skip")
+(assert-eq wc-fourth 400 "wildcard: array skip to fourth")
 
 # Nested wildcard — skip outer, extract inner
 (def ((_ wc-inner) _) (list (list :skip :want) :also-skip))
@@ -156,10 +156,10 @@
 (assign mut-a 100)
 (assert-eq mut-a 100 "mutable: set after destructure")
 
-# Works with tuples and structs too
+# Works with arrays and structs too
 (var [mut-x mut-y] [10 20])
 (assign mut-x (+ mut-x mut-y))
-(assert-eq mut-x 30 "mutable: tuple set x = x + y")
+(assert-eq mut-x 30 "mutable: array set x = x + y")
 
 (var {:count mut-count} {:count 0})
 (assign mut-count (+ mut-count 1))
@@ -198,7 +198,7 @@
 
 
 # ========================================
-# 8. Struct/table by-key extraction
+# 8. Struct/@struct by-key extraction
 # ========================================
 
 # Struct: extract named fields
@@ -213,9 +213,9 @@
 (def {:x sk-from-int} 42)
 (assert-eq sk-from-int nil "struct key: non-struct => nil")
 
-# Mutable table works with the same pattern
+# Mutable @struct works with the same pattern
 (def {:a sk-from-tbl} @{:a 99 :b 100})
-(assert-eq sk-from-tbl 99 "table key: extract from mutable table")
+(assert-eq sk-from-tbl 99 "@struct key: extract from mutable @struct")
 
 # Nested struct extraction — three levels deep
 (def {:config {:db {:host sk-host :port sk-port}}}
@@ -228,9 +228,9 @@
   (+ x y))
 (assert-eq (point-magnitude {:x 3 :y 4}) 7 "fn struct param")
 
-# Table in let
+# @struct in let
 (def let-tbl (let ([{:a la :b lb} {:a 10 :b 20}]) (+ la lb)))
-(assert-eq let-tbl 30 "let: table destructure sum")
+(assert-eq let-tbl 30 "let: @struct destructure sum")
 
 (display "  {:name n :age a} → ") (display sk-name) (display ", ") (print sk-age)
 (display "  nested 3-level struct → host=") (print sk-host)

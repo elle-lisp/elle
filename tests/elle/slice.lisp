@@ -5,19 +5,19 @@
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
-# Tuple slicing
+# Array slicing
 # ============================================================================
 
-(assert-eq (slice [1 2 3 4 5] 1 3) [2 3] "tuple slice middle")
-(assert-eq (slice [1 2 3 4 5] 0 5) [1 2 3 4 5] "tuple slice full")
-(assert-eq (slice [1 2 3 4 5] 0 0) [] "tuple slice empty start=end=0")
-(assert-eq (slice [1 2 3 4 5] 3 3) [] "tuple slice empty start=end")
-(assert-eq (slice [1 2 3 4 5] 4 2) [] "tuple slice start > end")
-(assert-eq (slice [1 2 3 4 5] 0 3) [1 2 3] "tuple slice from start")
-(assert-eq (slice [1 2 3 4 5] 3 5) [4 5] "tuple slice to end")
-(assert-eq (slice [1 2 3] 0 100) [1 2 3] "tuple slice end clamped")
-(assert-eq (slice [1 2 3] 100 200) [] "tuple slice start clamped past end")
-(assert-true (array? (slice [1 2 3] 0 2)) "tuple slice returns tuple")
+(assert-eq (slice [1 2 3 4 5] 1 3) [2 3] "array slice middle")
+(assert-eq (slice [1 2 3 4 5] 0 5) [1 2 3 4 5] "array slice full")
+(assert-eq (slice [1 2 3 4 5] 0 0) [] "array slice empty start=end=0")
+(assert-eq (slice [1 2 3 4 5] 3 3) [] "array slice empty start=end")
+(assert-eq (slice [1 2 3 4 5] 4 2) [] "array slice start > end")
+(assert-eq (slice [1 2 3 4 5] 0 3) [1 2 3] "array slice from start")
+(assert-eq (slice [1 2 3 4 5] 3 5) [4 5] "array slice to end")
+(assert-eq (slice [1 2 3] 0 100) [1 2 3] "array slice end clamped")
+(assert-eq (slice [1 2 3] 100 200) [] "array slice start clamped past end")
+(assert-true (array? (slice [1 2 3] 0 2)) "array slice returns array")
 
 # ============================================================================
 # Array slicing
@@ -58,16 +58,16 @@
 (assert-true (string? (slice "hello" 0 3)) "string slice returns string")
 
 # ============================================================================
-# Buffer slicing (grapheme-aware)
-# Note: buffer equality via = is reference-based, so we compare via buffer->string
+# @string slicing (grapheme-aware)
+# Note: @string equality via = is reference-based, so we compare via freeze
 # ============================================================================
 
-(assert-eq (buffer->string (slice @"hello" 1 4)) "ell" "buffer slice middle")
-(assert-eq (buffer->string (slice @"hello" 0 5)) "hello" "buffer slice full")
-(assert-eq (buffer->string (slice @"hello" 0 0)) "" "buffer slice empty start=end=0")
-(assert-eq (buffer->string (slice @"hello" 3 3)) "" "buffer slice empty start=end")
-(assert-eq (buffer->string (slice @"hello" 4 2)) "" "buffer slice start > end")
-(assert-true (string? (slice @"hello" 0 3)) "buffer slice returns buffer")
+(assert-eq (freeze (slice @"hello" 1 4)) "ell" "@string slice middle")
+(assert-eq (freeze (slice @"hello" 0 5)) "hello" "@string slice full")
+(assert-eq (freeze (slice @"hello" 0 0)) "" "@string slice empty start=end=0")
+(assert-eq (freeze (slice @"hello" 3 3)) "" "@string slice empty start=end")
+(assert-eq (freeze (slice @"hello" 4 2)) "" "@string slice start > end")
+(assert-true (string? (slice @"hello" 0 3)) "@string slice returns @string")
 
 # ============================================================================
 # Bytes slicing (existing behavior preserved)
@@ -78,12 +78,12 @@
 (assert-true (bytes? (slice (bytes 1 2 3) 0 2)) "bytes slice returns bytes")
 
 # ============================================================================
-# Blob slicing (existing behavior preserved)
+# @bytes slicing (existing behavior preserved)
 # ============================================================================
 
-(assert-eq (slice (@bytes 1 2 3 4 5) 1 3) (@bytes 2 3) "blob slice middle")
-(assert-eq (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3) "blob slice end clamped")
-(assert-true (bytes? (slice (@bytes 1 2 3) 0 2)) "blob slice returns blob")
+(assert-eq (slice (@bytes 1 2 3 4 5) 1 3) (@bytes 2 3) "@bytes slice middle")
+(assert-eq (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3) "@bytes slice end clamped")
+(assert-true (bytes? (slice (@bytes 1 2 3) 0 2)) "@bytes slice returns @bytes")
 
 # ============================================================================
 # Error cases
