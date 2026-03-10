@@ -32,7 +32,7 @@ fn setup() -> (VM, SymbolTable) {
 fn measure_eval(source: &str) -> stats_alloc::Stats {
     let (mut vm, mut symbols) = setup();
     let reg = Region::new(GLOBAL);
-    let _ = eval(source, &mut symbols, &mut vm).expect("program should succeed");
+    let _ = eval(source, &mut symbols, &mut vm, "<benchmark>").expect("program should succeed");
     reg.change()
 }
 

@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn submit_uring(
     ring: &mut io_uring::IoUring,
     id: u64,
