@@ -311,6 +311,21 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, r);
     }
 
+    if let Some(buf_ref) = val.as_string_mut() {
+        let buf = buf_ref.borrow();
+        let display = if buf.len() > 20 {
+            let s = String::from_utf8_lossy(&buf[..20]);
+            format!("\"{}...\"", s)
+        } else {
+            let s = String::from_utf8_lossy(&buf);
+            format!("\"{}\"", s)
+        };
+        return (
+            SIG_OK,
+            Value::string(format!("<@string {} ({} bytes)>", display, buf.len())),
+        );
+    }
+
     if let Some(_id) = val.as_symbol() {
         return (SIG_OK, Value::string(format!("<symbol {}>", val)));
     }
@@ -333,26 +348,71 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Array
-    if let Some(vec_ref) = val.as_array_mut() {
-        let vec = vec_ref.borrow();
-        return (SIG_OK, Value::string(format!("<array [{}]>", vec.len())));
+    // Immutable array
+    if let Some(elems) = val.as_array() {
+        return (
+            SIG_OK,
+            Value::string(format!("<array ({} elements)>", elems.len())),
+        );
     }
 
-    // Table
+    // Mutable array
+    if let Some(vec_ref) = val.as_array_mut() {
+        let vec = vec_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@array ({} elements)>", vec.len())),
+        );
+    }
+
+    // Immutable struct
+    if let Some(struct_map) = val.as_struct() {
+        return (
+            SIG_OK,
+            Value::string(format!("<struct ({} entries)>", struct_map.len())),
+        );
+    }
+
+    // Mutable struct
     if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         return (
             SIG_OK,
-            Value::string(format!("<table {{{} entries}}>", table.len())),
+            Value::string(format!("<@struct ({} entries)>", table.len())),
         );
     }
 
-    // Struct
-    if let Some(struct_map) = val.as_struct() {
+    // Immutable set
+    if let Some(set) = val.as_set() {
         return (
             SIG_OK,
-            Value::string(format!("<struct {{{} entries}}>", struct_map.len())),
+            Value::string(format!("<set ({} elements)>", set.len())),
+        );
+    }
+
+    // Mutable set
+    if let Some(set_ref) = val.as_set_mut() {
+        let set = set_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@set ({} elements)>", set.len())),
+        );
+    }
+
+    // Immutable bytes
+    if let Some(bytes) = val.as_bytes() {
+        return (
+            SIG_OK,
+            Value::string(format!("<bytes ({} bytes)>", bytes.len())),
+        );
+    }
+
+    // Mutable bytes
+    if let Some(bytes_ref) = val.as_bytes_mut() {
+        let bytes = bytes_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@bytes ({} bytes)>", bytes.len())),
         );
     }
 

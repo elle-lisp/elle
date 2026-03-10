@@ -597,4 +597,15 @@
   "each simple")
 
 (assert-eq (let ((sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6
-  "each with in")
+   "each with in")
+
+## === describe ===
+
+(assert-eq (describe |1 2 3|) "<set (3 elements)>" "describe set")
+(assert-eq (describe @|1 2 3|) "<@set (3 elements)>" "describe @set")
+(assert-eq (describe [1 2 3]) "<array (3 elements)>" "describe array")
+(assert-eq (describe @[1 2 3]) "<@array (3 elements)>" "describe @array")
+(assert-eq (describe {:a 1}) "<struct (1 entries)>" "describe struct")
+(assert-eq (describe @{:a 1}) "<@struct (1 entries)>" "describe @struct")
+(assert-eq (describe (bytes 1 2 3)) "<bytes (3 bytes)>" "describe bytes")
+(assert-eq (describe (@bytes 1 2 3)) "<@bytes (3 bytes)>" "describe @bytes")
