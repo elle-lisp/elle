@@ -247,7 +247,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (concat a [4 5])        # => [1 2 3 4 5]
 ```
 
-**structure** — ordered dictionary. Keys are typically keywords.
+**struct** — ordered dictionary. Keys are typically keywords.
 
 ```janet
 (def s {:name "Bob" :age 25})
