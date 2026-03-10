@@ -71,7 +71,7 @@ pub(crate) fn prim_disbit(args: &[Value]) -> (SignalBits, Value) {
         }
         (
             SIG_OK,
-            Value::array(lines.into_iter().map(Value::string).collect()),
+            Value::array_mut(lines.into_iter().map(Value::string).collect()),
         )
     } else {
         (
@@ -107,7 +107,7 @@ pub(crate) fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
         match compiler.clif_text(&lir, None) {
             Ok(lines) => (
                 SIG_OK,
-                Value::array(lines.into_iter().map(Value::string).collect()),
+                Value::array_mut(lines.into_iter().map(Value::string).collect()),
             ),
             Err(_) => (SIG_OK, Value::NIL),
         }

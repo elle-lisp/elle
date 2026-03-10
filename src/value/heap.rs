@@ -59,8 +59,8 @@ impl Ord for Cons {
 pub enum HeapTag {
     String = 0,
     Cons = 1,
-    Array = 2,
-    Table = 3,
+    LArrayMut = 2,
+    LStructMut = 3,
     Struct = 4,
     Closure = 5,
     Syntax = 6,
@@ -75,9 +75,9 @@ pub enum HeapTag {
     FFISignature = 18,
     FFIType = 19,
     ManagedPointer = 20,
-    Buffer = 21,
+    LStringMut = 21,
     Bytes = 22,
-    Blob = 23,
+    LBytesMut = 23,
     External = 24,
     Parameter = 25,
     LSet = 26,
@@ -97,10 +97,10 @@ pub enum HeapObject {
     Cons(Cons),
 
     /// Mutable array
-    Array(RefCell<Vec<Value>>),
+    LArrayMut(RefCell<Vec<Value>>),
 
     /// Mutable table (hash map)
-    Table(RefCell<BTreeMap<TableKey, Value>>),
+    LStructMut(RefCell<BTreeMap<TableKey, Value>>),
 
     /// Immutable struct
     Struct(BTreeMap<TableKey, Value>),
@@ -112,13 +112,13 @@ pub enum HeapObject {
     Tuple(Vec<Value>),
 
     /// Mutable buffer (byte sequence)
-    Buffer(RefCell<Vec<u8>>),
+    LStringMut(RefCell<Vec<u8>>),
 
     /// Immutable byte sequence (binary data)
     Bytes(Vec<u8>),
 
     /// Mutable byte sequence (binary data workspace)
-    Blob(RefCell<Vec<u8>>),
+    LBytesMut(RefCell<Vec<u8>>),
 
     /// Mutable cell for captured variables.
     /// The boolean distinguishes compiler-created cells (true, auto-unwrapped
@@ -262,14 +262,14 @@ impl HeapObject {
         match self {
             HeapObject::String(_) => HeapTag::String,
             HeapObject::Cons(_) => HeapTag::Cons,
-            HeapObject::Array(_) => HeapTag::Array,
-            HeapObject::Table(_) => HeapTag::Table,
+            HeapObject::LArrayMut(_) => HeapTag::LArrayMut,
+            HeapObject::LStructMut(_) => HeapTag::LStructMut,
             HeapObject::Struct(_) => HeapTag::Struct,
             HeapObject::Closure(_) => HeapTag::Closure,
             HeapObject::Tuple(_) => HeapTag::Tuple,
-            HeapObject::Buffer(_) => HeapTag::Buffer,
+            HeapObject::LStringMut(_) => HeapTag::LStringMut,
             HeapObject::Bytes(_) => HeapTag::Bytes,
-            HeapObject::Blob(_) => HeapTag::Blob,
+            HeapObject::LBytesMut(_) => HeapTag::LBytesMut,
             HeapObject::Cell(_, _) => HeapTag::Cell,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
@@ -293,14 +293,14 @@ impl HeapObject {
         match self {
             HeapObject::String(_) => "string",
             HeapObject::Cons(_) => "list",
-            HeapObject::Array(_) => "array",
-            HeapObject::Table(_) => "table",
+            HeapObject::LArrayMut(_) => "array",
+            HeapObject::LStructMut(_) => "table",
             HeapObject::Struct(_) => "struct",
             HeapObject::Closure(_) => "closure",
             HeapObject::Tuple(_) => "tuple",
-            HeapObject::Buffer(_) => "buffer",
+            HeapObject::LStringMut(_) => "buffer",
             HeapObject::Bytes(_) => "bytes",
-            HeapObject::Blob(_) => "blob",
+            HeapObject::LBytesMut(_) => "blob",
             HeapObject::Cell(_, _) => "cell",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
@@ -325,14 +325,14 @@ impl std::fmt::Debug for HeapObject {
         match self {
             HeapObject::String(s) => write!(f, "\"{}\"", s),
             HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
-            HeapObject::Array(v) => {
+            HeapObject::LArrayMut(v) => {
                 if let Ok(borrowed) = v.try_borrow() {
                     write!(f, "{:?}", &*borrowed)
                 } else {
                     write!(f, "[<borrowed>]")
                 }
             }
-            HeapObject::Table(_) => write!(f, "<table>"),
+            HeapObject::LStructMut(_) => write!(f, "<table>"),
             HeapObject::Struct(_) => write!(f, "<struct>"),
             HeapObject::Closure(_) => write!(f, "<closure>"),
             HeapObject::Tuple(elems) => {
@@ -345,7 +345,7 @@ impl std::fmt::Debug for HeapObject {
                 }
                 write!(f, "]")
             }
-            HeapObject::Buffer(v) => {
+            HeapObject::LStringMut(v) => {
                 if let Ok(borrowed) = v.try_borrow() {
                     write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
                 } else {
@@ -362,7 +362,7 @@ impl std::fmt::Debug for HeapObject {
                 }
                 write!(f, "]")
             }
-            HeapObject::Blob(b) => {
+            HeapObject::LBytesMut(b) => {
                 if let Ok(borrowed) = b.try_borrow() {
                     write!(f, "#blob[")?;
                     for (i, byte) in borrowed.iter().enumerate() {

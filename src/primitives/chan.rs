@@ -281,7 +281,7 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Extract the array of receivers.
-    let receivers_cell = match args[0].as_array() {
+    let receivers_cell = match args[0].as_array_mut() {
         Some(arr) => arr,
         None => {
             return (

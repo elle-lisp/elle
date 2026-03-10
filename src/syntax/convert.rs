@@ -77,7 +77,7 @@ impl Syntax {
             }
             SyntaxKind::Array(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::array(values)
+                Value::array_mut(values)
             }
             SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
@@ -188,7 +188,7 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::Tuple(syntaxes?)
-        } else if let Some(vec_ref) = value.as_array() {
+        } else if let Some(vec_ref) = value.as_array_mut() {
             let items = vec_ref.borrow().clone();
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
@@ -202,7 +202,7 @@ impl Syntax {
                 syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
             }
             SyntaxKind::Struct(syntaxes)
-        } else if let Some(table_ref) = value.as_table() {
+        } else if let Some(table_ref) = value.as_struct_mut() {
             let items = table_ref.borrow();
             let mut syntaxes = Vec::with_capacity(items.len() * 2);
             for (k, v) in items.iter() {
@@ -481,7 +481,7 @@ mod tests {
         // Build a table Value directly (to_value produces a list, not a table)
         let mut entries = BTreeMap::new();
         entries.insert(TableKey::Keyword("charlie".to_string()), Value::int(3));
-        let value = Value::table_from(entries);
+        let value = Value::struct_mut_from(entries);
 
         let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
         match result.kind {

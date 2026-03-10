@@ -1513,8 +1513,8 @@ fn test_json_parse_objects() {
 
     let result = call_primitive(&json_parse, &[Value::string("{}")]);
     match result.unwrap() {
-        v if v.as_table().is_some() => {
-            let t = v.as_table().unwrap();
+        v if v.as_struct_mut().is_some() => {
+            let t = v.as_struct_mut().unwrap();
             assert_eq!(t.borrow().len(), 0);
         }
         _ => panic!("Expected table"),
@@ -1525,8 +1525,8 @@ fn test_json_parse_objects() {
         &[Value::string("{\"name\":\"Alice\",\"age\":30}")],
     );
     match result.unwrap() {
-        v if v.as_table().is_some() => {
-            let t = v.as_table().unwrap();
+        v if v.as_struct_mut().is_some() => {
+            let t = v.as_struct_mut().unwrap();
             let table = t.borrow();
             assert_eq!(table.len(), 2);
         }
@@ -1668,7 +1668,7 @@ fn test_json_serialize_arrays() {
     let (_vm, mut symbols, meta) = setup();
     let json_serialize = get_primitive(&meta, &mut symbols, "json-serialize");
 
-    let vec = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let vec = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize, &[vec]);
     assert_eq!(result.unwrap(), Value::string("[1,2,3]"));
 }
@@ -1721,7 +1721,7 @@ fn test_disbit_returns_array_of_strings() {
     let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
 
     let disasm = call_primitive(&disbit, &[result]).unwrap();
-    let vec = disasm.as_array().expect("disbit should return an array");
+    let vec = disasm.as_array_mut().expect("disbit should return an array");
     let vec = vec.borrow();
     assert!(!vec.is_empty(), "disbit should return non-empty array");
     for elem in vec.iter() {
@@ -1757,7 +1757,7 @@ fn test_disjit_returns_array_for_pure_closure() {
 
     let ir = call_primitive(&disjit, &[result]).unwrap();
     if !ir.is_nil() {
-        let vec = ir.as_array().expect("disjit should return an array");
+        let vec = ir.as_array_mut().expect("disjit should return an array");
         let vec = vec.borrow();
         assert!(!vec.is_empty(), "disjit should return non-empty array");
         for elem in vec.iter() {

@@ -94,7 +94,7 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         };
     }
     // Array
-    if let Some(arr) = args[0].as_array() {
+    if let Some(arr) = args[0].as_array_mut() {
         let borrowed = arr.borrow();
         return if borrowed.is_empty() {
             (SIG_OK, Value::NIL)
@@ -158,12 +158,12 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
         };
     }
     // Array — return array
-    if let Some(arr) = args[0].as_array() {
+    if let Some(arr) = args[0].as_array_mut() {
         let borrowed = arr.borrow();
         return if borrowed.len() <= 1 {
-            (SIG_OK, Value::array(vec![]))
+            (SIG_OK, Value::array_mut(vec![]))
         } else {
-            (SIG_OK, Value::array(borrowed[1..].to_vec()))
+            (SIG_OK, Value::array_mut(borrowed[1..].to_vec()))
         };
     }
     // String — skip first grapheme, return string
@@ -237,11 +237,11 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
                 ),
             )
         }
-    } else if let Some(buf_ref) = args[0].as_buffer() {
+    } else if let Some(buf_ref) = args[0].as_string_mut() {
         (SIG_OK, Value::int(buf_ref.borrow().len() as i64))
     } else if let Some(b) = args[0].as_bytes() {
         (SIG_OK, Value::int(b.len() as i64))
-    } else if let Some(blob_ref) = args[0].as_blob() {
+    } else if let Some(blob_ref) = args[0].as_bytes_mut() {
         (SIG_OK, Value::int(blob_ref.borrow().len() as i64))
     } else if let Some(r) =
         args[0].with_string(|s| (SIG_OK, Value::int(s.graphemes(true).count() as i64)))
@@ -249,8 +249,8 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         r
     } else if let Some(elems) = args[0].as_tuple() {
         (SIG_OK, Value::int(elems.len() as i64))
-    } else if args[0].is_array() {
-        let vec = match args[0].as_array() {
+    } else if args[0].is_array_mut() {
+        let vec = match args[0].as_array_mut() {
             Some(v) => v,
             None => {
                 return (
@@ -260,8 +260,8 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         (SIG_OK, Value::int(vec.borrow().len() as i64))
-    } else if args[0].is_table() {
-        let table = match args[0].as_table() {
+    } else if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
@@ -370,12 +370,12 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         true
     } else if args[0].is_cons() {
         false
-    } else if let Some(buf_ref) = args[0].as_buffer() {
+    } else if let Some(buf_ref) = args[0].as_string_mut() {
         buf_ref.borrow().is_empty()
     } else if let Some(r) = args[0].with_string(|s| s.is_empty()) {
         r
-    } else if args[0].is_array() {
-        let vec = match args[0].as_array() {
+    } else if args[0].is_array_mut() {
+        let vec = match args[0].as_array_mut() {
             Some(v) => v,
             None => {
                 return (
@@ -387,7 +387,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
         vec.borrow().is_empty()
     } else if let Some(b) = args[0].as_bytes() {
         b.is_empty()
-    } else if let Some(blob_ref) = args[0].as_blob() {
+    } else if let Some(blob_ref) = args[0].as_bytes_mut() {
         blob_ref.borrow().is_empty()
     } else if args[0].is_tuple() {
         let elems = match args[0].as_tuple() {
@@ -400,8 +400,8 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         elems.is_empty()
-    } else if args[0].is_table() {
-        let table = match args[0].as_table() {
+    } else if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (

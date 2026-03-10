@@ -37,7 +37,7 @@ pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
             }
         }
     }
-    (SIG_OK, Value::buffer(bytes))
+    (SIG_OK, Value::string_mut(bytes))
 }
 
 /// Convert a string to a buffer (UTF-8 bytes)
@@ -52,7 +52,7 @@ pub(crate) fn prim_string_to_buffer(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::buffer(bytes))
+        (SIG_OK, Value::string_mut(bytes))
     } else {
         (
             SIG_ERROR,
@@ -78,7 +78,7 @@ pub(crate) fn prim_buffer_to_string(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
+    match args[0].as_string_mut() {
         Some(buf_ref) => {
             let borrowed = buf_ref.borrow();
             match String::from_utf8(borrowed.clone()) {

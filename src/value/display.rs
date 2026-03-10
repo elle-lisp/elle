@@ -71,7 +71,7 @@ impl fmt::Display for Value {
         }
 
         // Array
-        if let Some(vec_ref) = self.as_array() {
+        if let Some(vec_ref) = self.as_array_mut() {
             let vec = vec_ref.borrow();
             write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
@@ -84,7 +84,7 @@ impl fmt::Display for Value {
         }
 
         // Table
-        if let Some(table_ref) = self.as_table() {
+        if let Some(table_ref) = self.as_struct_mut() {
             let table = table_ref.borrow();
             write!(f, "@{{")?;
             let mut first = true;
@@ -155,7 +155,7 @@ impl fmt::Display for Value {
         }
 
         // Buffer
-        if let Some(buf_ref) = self.as_buffer() {
+        if let Some(buf_ref) = self.as_string_mut() {
             let borrowed = buf_ref.borrow();
             write!(f, "@\"")?;
             // Display as UTF-8 where valid, escape otherwise
@@ -186,7 +186,7 @@ impl fmt::Display for Value {
         }
 
         // Blob (mutable binary data)
-        if let Some(blob_ref) = self.as_blob() {
+        if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
             write!(f, "#blob[")?;
             for (i, byte) in borrowed.iter().enumerate() {
@@ -317,7 +317,7 @@ impl fmt::Debug for Value {
             return self.fmt_cons_debug(f);
         }
         // Array
-        if let Some(vec_ref) = self.as_array() {
+        if let Some(vec_ref) = self.as_array_mut() {
             let vec = vec_ref.borrow();
             write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
@@ -329,7 +329,7 @@ impl fmt::Debug for Value {
             return write!(f, "]");
         }
         // Buffer
-        if let Some(buf_ref) = self.as_buffer() {
+        if let Some(buf_ref) = self.as_string_mut() {
             let borrowed = buf_ref.borrow();
             write!(f, "@\"")?;
             for &byte in borrowed.iter() {
@@ -357,7 +357,7 @@ impl fmt::Debug for Value {
             return write!(f, "]");
         }
         // Blob (mutable binary data)
-        if let Some(blob_ref) = self.as_blob() {
+        if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
             write!(f, "#blob[")?;
             for (i, byte) in borrowed.iter().enumerate() {

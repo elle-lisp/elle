@@ -432,11 +432,11 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeArray { dst, elements } => {
+            LirInstr::MakeArrayMut { dst, elements } => {
                 for elem in elements {
                     self.ensure_on_top(*elem);
                 }
-                self.bytecode.emit(Instruction::MakeArray);
+                self.bytecode.emit(Instruction::MakeArrayMut);
                 self.bytecode.emit_byte(elements.len() as u8);
                 for _ in elements {
                     self.pop();
@@ -472,17 +472,17 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayRefOrNil { dst, src, index } => {
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayRefOrNil);
+                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArraySliceFrom { dst, src, index } => {
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArraySliceFrom);
+                self.bytecode.emit(Instruction::ArrayMutSliceFrom);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
@@ -590,9 +590,9 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsArray { dst, src } => {
+            LirInstr::IsArrayMut { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArray);
+                self.bytecode.emit(Instruction::IsArrayMut);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -625,9 +625,9 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayLen { dst, src } => {
+            LirInstr::ArrayMutLen { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayLen);
+                self.bytecode.emit(Instruction::ArrayMutLen);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -679,37 +679,37 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayExtend { dst, array, source } => {
+            LirInstr::ArrayMutExtend { dst, array, source } => {
                 // Stack: [array, source] → [extended_array]
                 self.ensure_binary_on_top(*array, *source);
-                self.bytecode.emit(Instruction::ArrayExtend);
+                self.bytecode.emit(Instruction::ArrayMutExtend);
                 self.pop(); // source
                 self.pop(); // array
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayPush { dst, array, value } => {
+            LirInstr::ArrayMutPush { dst, array, value } => {
                 // Stack: [array, value] → [extended_array]
                 self.ensure_binary_on_top(*array, *value);
-                self.bytecode.emit(Instruction::ArrayPush);
+                self.bytecode.emit(Instruction::ArrayMutPush);
                 self.pop(); // value
                 self.pop(); // array
                 self.push_reg(*dst);
             }
 
-            LirInstr::CallArray { dst, func, args } => {
+            LirInstr::CallArrayMut { dst, func, args } => {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::CallArray);
+                self.bytecode.emit(Instruction::CallArrayMut);
                 self.pop(); // args
                 self.pop(); // func
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCallArray { func, args } => {
+            LirInstr::TailCallArrayMut { func, args } => {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::TailCallArray);
+                self.bytecode.emit(Instruction::TailCallArrayMut);
                 self.pop(); // args
                 self.pop(); // func
             }

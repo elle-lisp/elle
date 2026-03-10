@@ -49,11 +49,11 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         let vec = value.list_to_vec()?;
         let elements: Result<Vec<String>, String> = vec.iter().map(serialize_value).collect();
         Ok(format!("[{}]", elements?.join(",")))
-    } else if let Some(v) = value.as_array() {
+    } else if let Some(v) = value.as_array_mut() {
         let borrowed = v.borrow();
         let elements: Result<Vec<String>, String> = borrowed.iter().map(serialize_value).collect();
         Ok(format!("[{}]", elements?.join(",")))
-    } else if let Some(t) = value.as_table() {
+    } else if let Some(t) = value.as_struct_mut() {
         let table = t.borrow();
         let mut pairs = Vec::new();
         for (k, v) in table.iter() {
@@ -100,8 +100,8 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         match tag {
             HeapTag::String => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
-            HeapTag::Array => Err("Array should have been handled above".to_string()),
-            HeapTag::Table => Err("Table should have been handled above".to_string()),
+            HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
+            HeapTag::LStructMut => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
             HeapTag::Tuple => {
@@ -129,9 +129,9 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
             HeapTag::FFISignature => Err("Cannot serialize FFI signatures to JSON".to_string()),
             HeapTag::FFIType => Err("Cannot serialize FFI type descriptors to JSON".to_string()),
             HeapTag::ManagedPointer => Err("Cannot serialize pointers to JSON".to_string()),
-            HeapTag::Buffer => Err("Cannot serialize buffers to JSON".to_string()),
+            HeapTag::LStringMut => Err("Cannot serialize buffers to JSON".to_string()),
             HeapTag::Bytes => Err("Cannot serialize bytes to JSON".to_string()),
-            HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
+            HeapTag::LBytesMut => Err("Cannot serialize blobs to JSON".to_string()),
             HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
             HeapTag::Parameter => Err("Cannot serialize parameters to JSON".to_string()),
             HeapTag::LSet => {
@@ -198,7 +198,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             elements?.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(v) = value.as_array() {
+    } else if let Some(v) = value.as_array_mut() {
         let borrowed = v.borrow();
         if borrowed.is_empty() {
             return Ok("[]".to_string());
@@ -213,7 +213,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             elements?.join(&format!(",\n{}", next_indent)),
             indent
         ))
-    } else if let Some(t) = value.as_table() {
+    } else if let Some(t) = value.as_struct_mut() {
         let table = t.borrow();
         if table.is_empty() {
             return Ok("{}".to_string());
@@ -276,8 +276,8 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
         match tag {
             HeapTag::String => Err("String should have been handled above".to_string()),
             HeapTag::Cons => Err("Cons should have been handled above".to_string()),
-            HeapTag::Array => Err("Array should have been handled above".to_string()),
-            HeapTag::Table => Err("Table should have been handled above".to_string()),
+            HeapTag::LArrayMut => Err("Array should have been handled above".to_string()),
+            HeapTag::LStructMut => Err("Table should have been handled above".to_string()),
             HeapTag::Struct => Err("Struct should have been handled above".to_string()),
             HeapTag::Closure => Err("Cannot serialize closures to JSON".to_string()),
             HeapTag::Tuple => {
@@ -312,9 +312,9 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             HeapTag::FFISignature => Err("Cannot serialize FFI signatures to JSON".to_string()),
             HeapTag::FFIType => Err("Cannot serialize FFI type descriptors to JSON".to_string()),
             HeapTag::ManagedPointer => Err("Cannot serialize pointers to JSON".to_string()),
-            HeapTag::Buffer => Err("Cannot serialize buffers to JSON".to_string()),
+            HeapTag::LStringMut => Err("Cannot serialize buffers to JSON".to_string()),
             HeapTag::Bytes => Err("Cannot serialize bytes to JSON".to_string()),
-            HeapTag::Blob => Err("Cannot serialize blobs to JSON".to_string()),
+            HeapTag::LBytesMut => Err("Cannot serialize blobs to JSON".to_string()),
             HeapTag::External => Err("Cannot serialize external objects to JSON".to_string()),
             HeapTag::Parameter => Err("Cannot serialize parameters to JSON".to_string()),
             HeapTag::LSet => {

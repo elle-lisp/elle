@@ -131,16 +131,16 @@ impl Value {
 
     /// Check if this is an array.
     #[inline]
-    pub fn is_array(&self) -> bool {
+    pub fn is_array_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Array)
+        self.heap_tag() == Some(HeapTag::LArrayMut)
     }
 
     /// Check if this is a table.
     #[inline]
-    pub fn is_table(&self) -> bool {
+    pub fn is_struct_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Table)
+        self.heap_tag() == Some(HeapTag::LStructMut)
     }
 
     /// Check if this is a struct.
@@ -173,9 +173,9 @@ impl Value {
 
     /// Check if this is a buffer.
     #[inline]
-    pub fn is_buffer(&self) -> bool {
+    pub fn is_string_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Buffer)
+        self.heap_tag() == Some(HeapTag::LStringMut)
     }
 
     /// Check if this is a bytes value.
@@ -187,9 +187,9 @@ impl Value {
 
     /// Check if this is a blob value.
     #[inline]
-    pub fn is_blob(&self) -> bool {
+    pub fn is_bytes_mut(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Blob)
+        self.heap_tag() == Some(HeapTag::LBytesMut)
     }
 
     /// Check if this is a syntax object.
@@ -296,20 +296,20 @@ impl Value {
 
     /// Extract as array if this is an array.
     #[inline]
-    pub fn as_array(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
+    pub fn as_array_mut(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Array(v) => Some(v),
+            HeapObject::LArrayMut(v) => Some(v),
             _ => None,
         }
     }
 
     /// Extract as table if this is a table.
     #[inline]
-    pub fn as_table(
+    pub fn as_struct_mut(
         &self,
     ) -> Option<&std::cell::RefCell<std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
     {
@@ -318,7 +318,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Table(t) => Some(t),
+            HeapObject::LStructMut(t) => Some(t),
             _ => None,
         }
     }
@@ -448,13 +448,13 @@ impl Value {
 
     /// Extract as buffer if this is a buffer.
     #[inline]
-    pub fn as_buffer(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+    pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Buffer(b) => Some(b),
+            HeapObject::LStringMut(b) => Some(b),
             _ => None,
         }
     }
@@ -474,13 +474,13 @@ impl Value {
 
     /// Extract as blob if this is a blob value.
     #[inline]
-    pub fn as_blob(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
+    pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Blob(b) => Some(b),
+            HeapObject::LBytesMut(b) => Some(b),
             _ => None,
         }
     }

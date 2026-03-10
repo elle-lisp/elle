@@ -107,11 +107,11 @@ pub(crate) fn handle_make_array(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
             vm.fiber
                 .stack
                 .pop()
-                .expect("VM bug: Stack underflow on MakeArray"),
+                .expect("VM bug: Stack underflow on MakeArrayMut"),
         );
     }
     vec.reverse();
-    vm.fiber.stack.push(Value::array(vec));
+    vm.fiber.stack.push(Value::array_mut(vec));
 }
 
 pub(crate) fn handle_array_ref(vm: &mut VM) {
@@ -119,12 +119,12 @@ pub(crate) fn handle_array_ref(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRef");
+        .expect("VM bug: Stack underflow on ArrayMutRef");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRef");
+        .expect("VM bug: Stack underflow on ArrayMutRef");
     let Some(idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -136,7 +136,7 @@ pub(crate) fn handle_array_ref(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    let Some(vec_ref) = vec.as_array() else {
+    let Some(vec_ref) = vec.as_array_mut() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
@@ -174,17 +174,17 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let idx = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let vec = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySet");
+        .expect("VM bug: Stack underflow on ArrayMutSet");
     let Some(_idx_val) = idx.as_int() else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -199,7 +199,7 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    if vec.as_array().is_none() {
+    if vec.as_array_mut().is_none() {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val(
@@ -251,8 +251,8 @@ pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayRefOrNil");
-    let result = if let Some(vec_ref) = val.as_array() {
+        .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
+    let result = if let Some(vec_ref) = val.as_array_mut() {
         vec_ref.borrow().get(index).copied()
     } else if let Some(elems) = val.as_tuple() {
         elems.get(index).copied()
@@ -272,13 +272,13 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArraySliceFrom");
-    let result = if let Some(vec_ref) = val.as_array() {
+        .expect("VM bug: Stack underflow on ArrayMutSliceFrom");
+    let result = if let Some(vec_ref) = val.as_array_mut() {
         let borrowed = vec_ref.borrow();
         if index < borrowed.len() {
-            Value::array(borrowed[index..].to_vec())
+            Value::array_mut(borrowed[index..].to_vec())
         } else {
-            Value::array(vec![])
+            Value::array_mut(vec![])
         }
     } else if let Some(elems) = val.as_tuple() {
         if index < elems.len() {
@@ -287,7 +287,7 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
             Value::tuple(vec![])
         }
     } else {
-        Value::array(vec![])
+        Value::array_mut(vec![])
     };
     vm.fiber.stack.push(result);
 }
@@ -326,7 +326,7 @@ pub(crate) fn handle_table_get_or_nil(
         }
     }
     // Try table (mutable)
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         if let Some(value) = table_ref.borrow().get(&key) {
             vm.fiber.stack.push(*value);
             return;
@@ -344,15 +344,15 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayExtend");
+        .expect("VM bug: Stack underflow on ArrayMutExtend");
     let array = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayExtend");
+        .expect("VM bug: Stack underflow on ArrayMutExtend");
 
     // Get the source elements
-    let source_elems: Vec<Value> = if let Some(arr) = source.as_array() {
+    let source_elems: Vec<Value> = if let Some(arr) = source.as_array_mut() {
         arr.borrow().to_vec()
     } else if let Some(tup) = source.as_tuple() {
         tup.to_vec()
@@ -387,10 +387,10 @@ pub(crate) fn handle_array_extend(vm: &mut VM) {
     };
 
     // Get the target array and extend it
-    if let Some(arr) = array.as_array() {
+    if let Some(arr) = array.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.extend(source_elems);
-        vm.fiber.stack.push(Value::array(vec));
+        vm.fiber.stack.push(Value::array_mut(vec));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -414,17 +414,17 @@ pub(crate) fn handle_array_push(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayPush");
+        .expect("VM bug: Stack underflow on ArrayMutPush");
     let array = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayPush");
+        .expect("VM bug: Stack underflow on ArrayMutPush");
 
-    if let Some(arr) = array.as_array() {
+    if let Some(arr) = array.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.push(value);
-        vm.fiber.stack.push(Value::array(vec));
+        vm.fiber.stack.push(Value::array_mut(vec));
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,

@@ -316,9 +316,9 @@ impl SyncBackend {
             s
         } else if let Some(b) = data.as_bytes() {
             b.to_vec()
-        } else if let Some(b) = data.as_blob() {
+        } else if let Some(b) = data.as_bytes_mut() {
             b.borrow().clone()
-        } else if let Some(b) = data.as_buffer() {
+        } else if let Some(b) = data.as_string_mut() {
             b.borrow().clone()
         } else {
             // Fall back to Display representation

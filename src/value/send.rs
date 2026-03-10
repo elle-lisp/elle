@@ -114,7 +114,7 @@ impl SendValue {
             }
 
             // Arrays - deep copy all elements
-            HeapObject::Array(vec_ref) => {
+            HeapObject::LArrayMut(vec_ref) => {
                 let borrowed = vec_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow array for sending".to_string())?;
@@ -143,7 +143,7 @@ impl SendValue {
             }
 
             // Buffers - deep copy the bytes
-            HeapObject::Buffer(buf_ref) => {
+            HeapObject::LStringMut(buf_ref) => {
                 let borrowed = buf_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow buffer for sending".to_string())?;
@@ -163,7 +163,7 @@ impl SendValue {
             HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
             // Unsafe: mutable tables
-            HeapObject::Table(_) => Err("Cannot send mutable table".to_string()),
+            HeapObject::LStructMut(_) => Err("Cannot send mutable table".to_string()),
 
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),
@@ -205,7 +205,7 @@ impl SendValue {
             HeapObject::Bytes(b) => Ok(SendValue::Bytes(b.clone())),
 
             // Blobs - deep copy the bytes
-            HeapObject::Blob(blob_ref) => {
+            HeapObject::LBytesMut(blob_ref) => {
                 let borrowed = blob_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow blob for sending".to_string())?;
@@ -245,7 +245,7 @@ impl SendValue {
             }
             SendValue::Array(items) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                alloc(HeapObject::Array(std::cell::RefCell::new(values)))
+                alloc(HeapObject::LArrayMut(std::cell::RefCell::new(values)))
             }
             SendValue::Struct(map) => {
                 let values: BTreeMap<_, _> = map
@@ -258,9 +258,9 @@ impl SendValue {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 alloc(HeapObject::Tuple(values))
             }
-            SendValue::Buffer(bytes) => alloc(HeapObject::Buffer(std::cell::RefCell::new(bytes))),
+            SendValue::Buffer(bytes) => alloc(HeapObject::LStringMut(std::cell::RefCell::new(bytes))),
             SendValue::Bytes(bytes) => alloc(HeapObject::Bytes(bytes)),
-            SendValue::Blob(bytes) => alloc(HeapObject::Blob(std::cell::RefCell::new(bytes))),
+            SendValue::Blob(bytes) => alloc(HeapObject::LBytesMut(std::cell::RefCell::new(bytes))),
             SendValue::Cell(contents, is_local) => {
                 let val = contents.into_value();
                 // Preserve the cell type (local vs user) across thread boundary

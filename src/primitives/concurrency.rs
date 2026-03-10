@@ -48,7 +48,7 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::String(_) => true,
 
         // Immutable collections are safe
-        HeapObject::Array(vec) => {
+        HeapObject::LArrayMut(vec) => {
             if let Ok(borrowed) = vec.try_borrow() {
                 borrowed.iter().all(is_value_sendable)
             } else {
@@ -71,7 +71,7 @@ fn is_value_sendable(value: &Value) -> bool {
         }
 
         // Unsafe: mutable tables
-        HeapObject::Table(_) => false,
+        HeapObject::LStructMut(_) => false,
 
         // Native function pointers are inherently Send + Sync
         HeapObject::NativeFn(_) => true,
@@ -111,13 +111,13 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::FFIType(_) => true,
 
         // Buffers are sendable if we deep-copy
-        HeapObject::Buffer(buf) => buf.try_borrow().is_ok(),
+        HeapObject::LStringMut(buf) => buf.try_borrow().is_ok(),
 
         // Bytes are immutable and sendable
         HeapObject::Bytes(_) => true,
 
         // Blobs are sendable if we deep-copy
-        HeapObject::Blob(blob) => blob.try_borrow().is_ok(),
+        HeapObject::LBytesMut(blob) => blob.try_borrow().is_ok(),
 
         // Managed pointers are not sendable (Cell is not thread-safe)
         HeapObject::ManagedPointer(_) => false,

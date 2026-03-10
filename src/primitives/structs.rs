@@ -95,7 +95,7 @@ pub(crate) fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
     // Handle table -> struct (existing behavior)
-    let t = match args[0].as_table() {
+    let t = match args[0].as_struct_mut() {
         Some(t) => t,
         None => {
             return (
@@ -129,7 +129,7 @@ pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
     // Already mutable table — return as-is
-    if args[0].is_table() {
+    if args[0].is_struct_mut() {
         return (SIG_OK, args[0]);
     }
     // Handle struct -> table (existing behavior)
@@ -150,5 +150,5 @@ pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let map = s.clone();
-    (SIG_OK, Value::table_from(map))
+    (SIG_OK, Value::struct_mut_from(map))
 }

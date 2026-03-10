@@ -7,7 +7,7 @@ use crate::value::{error_val, Value};
 
 /// Create an array from arguments
 pub(crate) fn prim_array(args: &[Value]) -> (SignalBits, Value) {
-    (SIG_OK, Value::array(args.to_vec()))
+    (SIG_OK, Value::array_mut(args.to_vec()))
 }
 
 /// Create a tuple from arguments
@@ -50,7 +50,7 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
 
     let fill = args[1];
     let vec = vec![fill; n];
-    (SIG_OK, Value::array(vec))
+    (SIG_OK, Value::array_mut(vec))
 }
 
 /// Push a value onto the end of an array or buffer (mutates in place, returns the collection)
@@ -65,14 +65,14 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         vec.push(args[1]);
         drop(vec);
         return (SIG_OK, args[0]);
     }
 
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let byte = match args[1].as_int() {
             Some(n) if (0..=255).contains(&n) => n as u8,
             Some(n) => {
@@ -101,7 +101,7 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let byte = match args[1].as_int() {
             Some(n) if (0..=255).contains(&n) => n as u8,
             Some(n) => {
@@ -154,7 +154,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         match vec.pop() {
             Some(v) => {
@@ -171,7 +171,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let mut buf = buf_ref.borrow_mut();
         match buf.pop() {
             Some(byte) => {
@@ -188,7 +188,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let mut blob = blob_ref.borrow_mut();
         match blob.pop() {
             Some(byte) => {
@@ -247,22 +247,22 @@ pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         let len = vec.len();
         let remove_count = std::cmp::min(n, len);
         let removed: Vec<Value> = vec.drain(len - remove_count..).collect();
         drop(vec);
-        return (SIG_OK, Value::array(removed));
+        return (SIG_OK, Value::array_mut(removed));
     }
 
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let mut buf = buf_ref.borrow_mut();
         let len = buf.len();
         let remove_count = std::cmp::min(n, len);
         let removed: Vec<u8> = buf.drain(len - remove_count..).collect();
         drop(buf);
-        return (SIG_OK, Value::buffer(removed));
+        return (SIG_OK, Value::string_mut(removed));
     }
 
     (
@@ -310,7 +310,7 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         if index > vec.len() {
             vec.push(args[2]);
@@ -321,7 +321,7 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let byte = match args[2].as_int() {
             Some(n) if (0..=255).contains(&n) => n as u8,
             Some(n) => {
@@ -426,7 +426,7 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         1
     };
 
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
         let len = vec.len();
         if index < len {
@@ -439,7 +439,7 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, args[0]);
     }
 
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let mut buf = buf_ref.borrow_mut();
         let len = buf.len();
         if index < len {

@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, Value)> {
     if let Some(s) = val.with_string(|s| s.to_string()) {
         Ok((s, false))
-    } else if let Some(buf_ref) = val.as_buffer() {
+    } else if let Some(buf_ref) = val.as_string_mut() {
         let borrowed = buf_ref.borrow();
         match String::from_utf8(borrowed.clone()) {
             Ok(s) => Ok((s, true)),
@@ -55,7 +55,7 @@ pub(crate) fn prim_string_upcase(args: &[Value]) -> (SignalBits, Value) {
     };
     let upper = s.to_uppercase();
     if is_buffer {
-        (SIG_OK, Value::buffer(upper.into_bytes()))
+        (SIG_OK, Value::string_mut(upper.into_bytes()))
     } else {
         (SIG_OK, Value::string(upper))
     }
@@ -78,7 +78,7 @@ pub(crate) fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
     };
     let lower = s.to_lowercase();
     if is_buffer {
-        (SIG_OK, Value::buffer(lower.into_bytes()))
+        (SIG_OK, Value::string_mut(lower.into_bytes()))
     } else {
         (SIG_OK, Value::string(lower))
     }
@@ -323,7 +323,7 @@ pub(crate) fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
 
     let replaced = s.replace(&*old, &new);
     if is_buffer {
-        (SIG_OK, Value::buffer(replaced.into_bytes()))
+        (SIG_OK, Value::string_mut(replaced.into_bytes()))
     } else {
         (SIG_OK, Value::string(replaced))
     }
@@ -347,7 +347,7 @@ pub(crate) fn prim_string_trim(args: &[Value]) -> (SignalBits, Value) {
     };
     let trimmed = s.trim().to_string();
     if is_buffer {
-        (SIG_OK, Value::buffer(trimmed.into_bytes()))
+        (SIG_OK, Value::string_mut(trimmed.into_bytes()))
     } else {
         (SIG_OK, Value::string(trimmed))
     }
@@ -513,7 +513,7 @@ pub(crate) fn prim_string_join(args: &[Value]) -> (SignalBits, Value) {
     // Try tuple first
     let vec = if let Some(elems) = seq.as_tuple() {
         elems.to_vec()
-    } else if let Some(arr) = seq.as_array() {
+    } else if let Some(arr) = seq.as_array_mut() {
         arr.borrow().clone()
     } else {
         // Fall back to list_to_vec for lists and syntax

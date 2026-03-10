@@ -69,7 +69,7 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
             }
         }
     }
-    (SIG_OK, Value::blob(data))
+    (SIG_OK, Value::bytes_mut(data))
 }
 
 /// string->bytes: encode string as UTF-8 bytes (immutable)
@@ -111,7 +111,7 @@ pub(crate) fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::blob(bytes))
+        (SIG_OK, Value::bytes_mut(bytes))
     } else {
         (
             SIG_ERROR,
@@ -163,7 +163,7 @@ pub(crate) fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             match std::str::from_utf8(&borrowed) {
@@ -195,7 +195,7 @@ pub(crate) fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             (SIG_OK, Value::bytes(borrowed.clone()))
@@ -222,7 +222,7 @@ pub(crate) fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     match args[0].as_bytes() {
-        Some(b) => (SIG_OK, Value::blob(b.to_vec())),
+        Some(b) => (SIG_OK, Value::bytes_mut(b.to_vec())),
         None => (
             SIG_ERROR,
             error_val(
@@ -270,7 +270,7 @@ pub(crate) fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             let hex: String = borrowed
@@ -358,16 +358,16 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable)
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
         let clamped_start = start.min(borrowed.len());
         let clamped_end = end.min(borrowed.len());
         if clamped_start >= clamped_end {
-            return (SIG_OK, Value::blob(vec![]));
+            return (SIG_OK, Value::bytes_mut(vec![]));
         }
         return (
             SIG_OK,
-            Value::blob(borrowed[clamped_start..clamped_end].to_vec()),
+            Value::bytes_mut(borrowed[clamped_start..clamped_end].to_vec()),
         );
     }
 
@@ -385,16 +385,16 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array (mutable)
-    if let Some(arr_ref) = args[0].as_array() {
+    if let Some(arr_ref) = args[0].as_array_mut() {
         let borrowed = arr_ref.borrow();
         let clamped_start = start.min(borrowed.len());
         let clamped_end = end.min(borrowed.len());
         if clamped_start >= clamped_end {
-            return (SIG_OK, Value::array(vec![]));
+            return (SIG_OK, Value::array_mut(vec![]));
         }
         return (
             SIG_OK,
-            Value::array(borrowed[clamped_start..clamped_end].to_vec()),
+            Value::array_mut(borrowed[clamped_start..clamped_end].to_vec()),
         );
     }
 
@@ -406,7 +406,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer (mutable, grapheme-aware)
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let borrowed = buf_ref.borrow();
         // Buffer is valid UTF-8 by construction
         let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
@@ -459,14 +459,14 @@ fn slice_graphemes(s: &str, start: usize, end: usize, is_buffer: bool) -> (Signa
     let clamped_end = end.min(graphemes.len());
     if clamped_start >= clamped_end {
         if is_buffer {
-            return (SIG_OK, Value::buffer(vec![]));
+            return (SIG_OK, Value::string_mut(vec![]));
         } else {
             return (SIG_OK, Value::string(""));
         }
     }
     let result: String = graphemes[clamped_start..clamped_end].concat();
     if is_buffer {
-        (SIG_OK, Value::buffer(result.into_bytes()))
+        (SIG_OK, Value::string_mut(result.into_bytes()))
     } else {
         (SIG_OK, Value::string(result))
     }
@@ -483,7 +483,7 @@ pub(crate) fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
+    match args[0].as_string_mut() {
         Some(buf_ref) => (SIG_OK, Value::bytes(buf_ref.borrow().clone())),
         None => (
             SIG_ERROR,
@@ -509,8 +509,8 @@ pub(crate) fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
-        Some(buf_ref) => (SIG_OK, Value::blob(buf_ref.borrow().clone())),
+    match args[0].as_string_mut() {
+        Some(buf_ref) => (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone())),
         None => (
             SIG_ERROR,
             error_val(
@@ -534,7 +534,7 @@ pub(crate) fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     }
     match args[0].as_bytes() {
         Some(b) => match std::str::from_utf8(b) {
-            Ok(_) => (SIG_OK, Value::buffer(b.to_vec())),
+            Ok(_) => (SIG_OK, Value::string_mut(b.to_vec())),
             Err(e) => (
                 SIG_ERROR,
                 error_val("error", format!("bytes->buffer: invalid UTF-8: {}", e)),
@@ -561,11 +561,11 @@ pub(crate) fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             match std::str::from_utf8(&borrowed) {
-                Ok(_) => (SIG_OK, Value::buffer(borrowed.clone())),
+                Ok(_) => (SIG_OK, Value::string_mut(borrowed.clone())),
                 Err(e) => (
                     SIG_ERROR,
                     error_val("error", format!("blob->buffer: invalid UTF-8: {}", e)),

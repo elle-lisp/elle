@@ -202,7 +202,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
         return (SIG_OK, Value::string(list_str));
     }
 
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         let mut formatted_items = Vec::new();
         for v in vec.iter() {

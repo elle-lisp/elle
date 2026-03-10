@@ -337,7 +337,7 @@ fn test_completion_list_structure() {
     );
     assert!(completion_list.get("items").is_some(), "items required");
     assert!(
-        completion_list.get("items").unwrap().is_array(),
+        completion_list.get("items").unwrap().is_array_mut(),
         "items must be array"
     );
 }
@@ -387,7 +387,7 @@ fn test_did_change_notification_params() {
         "contentChanges required"
     );
     assert!(
-        params.get("contentChanges").unwrap().is_array(),
+        params.get("contentChanges").unwrap().is_array_mut(),
         "contentChanges must be array"
     );
 }

@@ -203,7 +203,7 @@ pub(crate) fn prim_is_array(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_array().is_some()))
+    (SIG_OK, Value::bool(args[0].as_array_mut().is_some()))
 }
 
 /// Check if value is a tuple (immutable indexed sequence)
@@ -231,7 +231,7 @@ pub(crate) fn prim_is_table(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].as_table().is_some()))
+    (SIG_OK, Value::bool(args[0].as_struct_mut().is_some()))
 }
 
 /// Check if value is a buffer (mutable byte sequence)
@@ -245,7 +245,7 @@ pub(crate) fn prim_is_buffer(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].is_buffer()))
+    (SIG_OK, Value::bool(args[0].is_string_mut()))
 }
 
 /// Check if value is bytes (immutable binary data)
@@ -273,7 +273,7 @@ pub(crate) fn prim_is_blob(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    (SIG_OK, Value::bool(args[0].is_blob()))
+    (SIG_OK, Value::bool(args[0].is_bytes_mut()))
 }
 
 /// Check if value is a struct (immutable key-value map)

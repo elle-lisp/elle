@@ -50,7 +50,7 @@ fn prim_glob_glob(args: &[Value]) -> (SignalBits, Value) {
                         }
                     }
                 }
-                (SIG_OK, Value::array(results))
+                (SIG_OK, Value::array_mut(results))
             }
             Err(_) => (
                 SIG_ERROR,

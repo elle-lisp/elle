@@ -266,7 +266,7 @@ impl<'a> FunctionTranslator<'a> {
                 builder.def_var(var(dst.0), result);
             }
 
-            LirInstr::MakeArray { dst, elements } => {
+            LirInstr::MakeArrayMut { dst, elements } => {
                 // Allocate stack space for elements
                 if elements.is_empty() {
                     // Empty array - pass null pointer and 0 count
@@ -585,21 +585,21 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::CdrOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction("CdrOrNil".to_string()));
             }
-            LirInstr::ArrayRefOrNil { .. } => {
+            LirInstr::ArrayMutRefOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction(
-                    "ArrayRefOrNil".to_string(),
+                    "ArrayMutRefOrNil".to_string(),
                 ));
             }
-            LirInstr::ArraySliceFrom { .. } => {
+            LirInstr::ArrayMutSliceFrom { .. } => {
                 return Err(JitError::UnsupportedInstruction(
-                    "ArraySliceFrom".to_string(),
+                    "ArrayMutSliceFrom".to_string(),
                 ));
             }
             LirInstr::IsTuple { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsTuple".to_string()));
             }
-            LirInstr::IsArray { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsArray".to_string()));
+            LirInstr::IsArrayMut { .. } => {
+                return Err(JitError::UnsupportedInstruction("IsArrayMut".to_string()));
             }
             LirInstr::IsStruct { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsStruct".to_string()));
@@ -607,8 +607,8 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::IsTable { .. } => {
                 return Err(JitError::UnsupportedInstruction("IsTable".to_string()));
             }
-            LirInstr::ArrayLen { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayLen".to_string()));
+            LirInstr::ArrayMutLen { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayMutLen".to_string()));
             }
             LirInstr::TableGetOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction(
@@ -618,18 +618,18 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
-            LirInstr::ArrayExtend { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayExtend".to_string()));
+            LirInstr::ArrayMutExtend { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayMutExtend".to_string()));
             }
-            LirInstr::ArrayPush { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayPush".to_string()));
+            LirInstr::ArrayMutPush { .. } => {
+                return Err(JitError::UnsupportedInstruction("ArrayMutPush".to_string()));
             }
-            LirInstr::CallArray { .. } => {
-                return Err(JitError::UnsupportedInstruction("CallArray".to_string()));
+            LirInstr::CallArrayMut { .. } => {
+                return Err(JitError::UnsupportedInstruction("CallArrayMut".to_string()));
             }
-            LirInstr::TailCallArray { .. } => {
+            LirInstr::TailCallArrayMut { .. } => {
                 return Err(JitError::UnsupportedInstruction(
-                    "TailCallArray".to_string(),
+                    "TailCallArrayMut".to_string(),
                 ));
             }
             LirInstr::RegionEnter | LirInstr::RegionExit => {

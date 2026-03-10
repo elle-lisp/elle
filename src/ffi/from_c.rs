@@ -80,7 +80,7 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
                     read_value_from_buffer(unsafe { ptr.add(field_offset) }, field_desc)?;
                 values.push(field_val);
             }
-            Ok(Value::array(values))
+            Ok(Value::array_mut(values))
         }
 
         TypeDesc::Array(elem_desc, count) => {
@@ -93,7 +93,7 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
                     read_value_from_buffer(unsafe { ptr.add(i * elem_size) }, elem_desc)?;
                 values.push(elem_val);
             }
-            Ok(Value::array(values))
+            Ok(Value::array_mut(values))
         }
     }
 }

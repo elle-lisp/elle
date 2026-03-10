@@ -237,7 +237,7 @@ impl MarshalledArg {
 }
 
 fn marshal_struct(value: &Value, sd: &StructDesc, desc: &TypeDesc) -> LResult<MarshalledArg> {
-    let arr = value.as_array().ok_or_else(|| {
+    let arr = value.as_array_mut().ok_or_else(|| {
         LError::ffi_type_error(
             "struct",
             format!("expected array, got {}", value.type_name()),
@@ -274,7 +274,7 @@ fn marshal_struct(value: &Value, sd: &StructDesc, desc: &TypeDesc) -> LResult<Ma
 }
 
 fn marshal_array(value: &Value, elem_desc: &TypeDesc, count: usize) -> LResult<MarshalledArg> {
-    let arr = value.as_array().ok_or_else(|| {
+    let arr = value.as_array_mut().ok_or_else(|| {
         LError::ffi_type_error(
             "array",
             format!("expected array, got {}", value.type_name()),
@@ -452,7 +452,7 @@ pub fn write_value_to_buffer(
         }
 
         TypeDesc::Struct(sd) => {
-            let arr = value.as_array().ok_or_else(|| {
+            let arr = value.as_array_mut().ok_or_else(|| {
                 LError::ffi_type_error(
                     "struct",
                     format!("expected array, got {}", value.type_name()),
@@ -483,7 +483,7 @@ pub fn write_value_to_buffer(
         }
 
         TypeDesc::Array(elem_desc, count) => {
-            let arr = value.as_array().ok_or_else(|| {
+            let arr = value.as_array_mut().ok_or_else(|| {
                 LError::ffi_type_error(
                     "array",
                     format!("expected array, got {}", value.type_name()),

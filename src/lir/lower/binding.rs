@@ -376,7 +376,7 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    self.emit(LirInstr::ArrayRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefOrNil {
                         dst: elem,
                         src: reloaded,
                         index: i as u16,
@@ -385,7 +385,7 @@ impl Lowerer {
                 }
                 // Bind the remaining array slice to the rest pattern.
                 // For arrays, we need a slice-from-index operation.
-                // Use ArraySliceFrom instruction (to be added).
+                // Use ArrayMutSliceFrom instruction (to be added).
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
@@ -393,7 +393,7 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let slice = self.fresh_reg();
-                    self.emit(LirInstr::ArraySliceFrom {
+                    self.emit(LirInstr::ArrayMutSliceFrom {
                         dst: slice,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -418,7 +418,7 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    self.emit(LirInstr::ArrayRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefOrNil {
                         dst: elem,
                         src: reloaded,
                         index: i as u16,
@@ -433,7 +433,7 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let slice = self.fresh_reg();
-                    self.emit(LirInstr::ArraySliceFrom {
+                    self.emit(LirInstr::ArrayMutSliceFrom {
                         dst: slice,
                         src: reloaded,
                         index: elements.len() as u16,

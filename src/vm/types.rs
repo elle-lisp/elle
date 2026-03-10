@@ -60,8 +60,8 @@ pub(crate) fn handle_is_array(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on IsArray");
-    vm.fiber.stack.push(Value::bool(val.is_array()));
+        .expect("VM bug: Stack underflow on IsArrayMut");
+    vm.fiber.stack.push(Value::bool(val.is_array_mut()));
 }
 
 pub(crate) fn handle_is_struct(vm: &mut VM) {
@@ -78,8 +78,8 @@ pub(crate) fn handle_array_len(vm: &mut VM) {
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayLen");
-    let len = if let Some(a) = val.as_array() {
+        .expect("VM bug: Stack underflow on ArrayMutLen");
+    let len = if let Some(a) = val.as_array_mut() {
         a.borrow().len() as i64
     } else if let Some(t) = val.as_tuple() {
         t.len() as i64
@@ -95,7 +95,7 @@ pub(crate) fn handle_is_table(vm: &mut VM) {
         .stack
         .pop()
         .expect("VM bug: Stack underflow on IsTable");
-    vm.fiber.stack.push(Value::bool(val.is_table()));
+    vm.fiber.stack.push(Value::bool(val.is_struct_mut()));
 }
 
 pub(crate) fn handle_is_empty_list(vm: &mut VM) {

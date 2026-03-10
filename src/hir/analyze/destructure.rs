@@ -359,7 +359,7 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxKind::Tuple(items) | SyntaxKind::Array(items) => {
                 // Both [...] and @[...] destructure the same way in binding forms
-                // (no type guard — ArrayRefOrNil handles both)
+                // (no type guard — ArrayMutRefOrNil handles both)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, span)?;
                 let mut elements = Vec::new();
                 for item in fixed {

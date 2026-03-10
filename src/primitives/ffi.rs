@@ -128,7 +128,7 @@ mod tests {
     fn test_ffi_signature() {
         let result = prim_ffi_signature(&[
             Value::keyword("double"),
-            Value::array(vec![Value::keyword("double")]),
+            Value::array_mut(vec![Value::keyword("double")]),
         ]);
         assert_eq!(result.0, SIG_OK);
         assert!(result.1.as_ffi_signature().is_some());
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_ffi_signature_unknown_ret() {
-        let result = prim_ffi_signature(&[Value::keyword("bad"), Value::array(vec![])]);
+        let result = prim_ffi_signature(&[Value::keyword("bad"), Value::array_mut(vec![])]);
         assert_eq!(result.0, SIG_ERROR);
     }
 
@@ -217,7 +217,7 @@ mod tests {
     fn test_ffi_signature_variadic() {
         let result = prim_ffi_signature(&[
             Value::keyword("int"),
-            Value::array(vec![
+            Value::array_mut(vec![
                 Value::keyword("ptr"),
                 Value::keyword("string"),
                 Value::keyword("int"),
@@ -233,7 +233,7 @@ mod tests {
     fn test_ffi_signature_cif_caching() {
         let result = prim_ffi_signature(&[
             Value::keyword("int"),
-            Value::array(vec![Value::keyword("int")]),
+            Value::array_mut(vec![Value::keyword("int")]),
         ]);
         assert_eq!(result.0, SIG_OK);
         let sig_val = result.1;
@@ -252,7 +252,7 @@ mod tests {
     fn test_ffi_signature_variadic_out_of_range() {
         let result = prim_ffi_signature(&[
             Value::keyword("int"),
-            Value::array(vec![Value::keyword("int")]),
+            Value::array_mut(vec![Value::keyword("int")]),
             Value::int(5), // 5 > 1 arg
         ]);
         assert_eq!(result.0, SIG_ERROR);
@@ -262,7 +262,7 @@ mod tests {
     fn test_ffi_signature_variadic_bad_type() {
         let result = prim_ffi_signature(&[
             Value::keyword("int"),
-            Value::array(vec![Value::keyword("int")]),
+            Value::array_mut(vec![Value::keyword("int")]),
             Value::string("bad"),
         ]);
         assert_eq!(result.0, SIG_ERROR);
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_ffi_struct_basic() {
-        let result = prim_ffi_struct(&[Value::array(vec![
+        let result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i32"),
             Value::keyword("double"),
         ])]);
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn test_ffi_struct_nested() {
         // Create inner struct
-        let inner_result = prim_ffi_struct(&[Value::array(vec![
+        let inner_result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i8"),
             Value::keyword("i32"),
         ])]);
@@ -333,19 +333,19 @@ mod tests {
         let inner = inner_result.1;
 
         // Create outer struct using inner
-        let result = prim_ffi_struct(&[Value::array(vec![Value::keyword("i64"), inner])]);
+        let result = prim_ffi_struct(&[Value::array_mut(vec![Value::keyword("i64"), inner])]);
         assert_eq!(result.0, SIG_OK);
     }
 
     #[test]
     fn test_ffi_struct_empty() {
-        let result = prim_ffi_struct(&[Value::array(vec![])]);
+        let result = prim_ffi_struct(&[Value::array_mut(vec![])]);
         assert_eq!(result.0, SIG_ERROR);
     }
 
     #[test]
     fn test_ffi_struct_void_field() {
-        let result = prim_ffi_struct(&[Value::array(vec![Value::keyword("void")])]);
+        let result = prim_ffi_struct(&[Value::array_mut(vec![Value::keyword("void")])]);
         assert_eq!(result.0, SIG_ERROR);
     }
 
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn test_ffi_size_with_struct() {
         // Create a struct type
-        let struct_result = prim_ffi_struct(&[Value::array(vec![
+        let struct_result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i32"),
             Value::keyword("i32"),
         ])]);
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn test_ffi_align_with_struct() {
-        let struct_result = prim_ffi_struct(&[Value::array(vec![
+        let struct_result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i8"),
             Value::keyword("double"),
         ])]);
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_ffi_signature_with_struct() {
         // Create a struct type for use in signature
-        let struct_result = prim_ffi_struct(&[Value::array(vec![
+        let struct_result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i32"),
             Value::keyword("double"),
         ])]);
@@ -410,19 +410,19 @@ mod tests {
 
         // Use struct as return type
         let sig_result =
-            prim_ffi_signature(&[struct_type, Value::array(vec![Value::keyword("ptr")])]);
+            prim_ffi_signature(&[struct_type, Value::array_mut(vec![Value::keyword("ptr")])]);
         assert_eq!(sig_result.0, SIG_OK);
 
         // Use struct as argument type
         let sig_result2 =
-            prim_ffi_signature(&[Value::keyword("void"), Value::array(vec![struct_type])]);
+            prim_ffi_signature(&[Value::keyword("void"), Value::array_mut(vec![struct_type])]);
         assert_eq!(sig_result2.0, SIG_OK);
     }
 
     #[test]
     fn test_ffi_read_write_struct() {
         // Create a struct type
-        let struct_result = prim_ffi_struct(&[Value::array(vec![
+        let struct_result = prim_ffi_struct(&[Value::array_mut(vec![
             Value::keyword("i32"),
             Value::keyword("double"),
         ])]);
@@ -437,14 +437,14 @@ mod tests {
 
         // Write struct
         let test_float = 2.5;
-        let struct_val = Value::array(vec![Value::int(42), Value::float(test_float)]);
+        let struct_val = Value::array_mut(vec![Value::int(42), Value::float(test_float)]);
         let write_result = prim_ffi_write(&[ptr, struct_type, struct_val]);
         assert_eq!(write_result.0, SIG_OK);
 
         // Read struct back
         let read_result = prim_ffi_read(&[ptr, struct_type]);
         assert_eq!(read_result.0, SIG_OK);
-        let arr = read_result.1.as_array().unwrap();
+        let arr = read_result.1.as_array_mut().unwrap();
         let arr = arr.borrow();
         assert_eq!(arr[0].as_int(), Some(42));
         assert!((arr[1].as_float().unwrap() - test_float).abs() < 1e-10);

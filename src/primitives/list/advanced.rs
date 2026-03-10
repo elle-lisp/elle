@@ -21,8 +21,8 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer (mutable) - mutate in place
-    if let Some(buf_ref) = args[0].as_buffer() {
-        if let Some(other_buf_ref) = args[1].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        if let Some(other_buf_ref) = args[1].as_string_mut() {
             let other_borrowed = other_buf_ref.borrow();
             let mut borrowed = buf_ref.borrow_mut();
             borrowed.extend(other_borrowed.iter());
@@ -43,8 +43,8 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array (mutable) - mutate in place
-    if let Some(vec_ref) = args[0].as_array() {
-        if let Some(other_vec_ref) = args[1].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
+        if let Some(other_vec_ref) = args[1].as_array_mut() {
             let other_borrowed = other_vec_ref.borrow();
             let mut borrowed = vec_ref.borrow_mut();
             borrowed.extend(other_borrowed.iter().cloned());
@@ -127,8 +127,8 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable) - mutate in place
-    if let Some(blob_ref) = args[0].as_blob() {
-        if let Some(other_blob_ref) = args[1].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        if let Some(other_blob_ref) = args[1].as_bytes_mut() {
             let other_borrowed = other_blob_ref.borrow();
             let mut borrowed = blob_ref.borrow_mut();
             borrowed.extend(other_borrowed.iter());
@@ -207,13 +207,13 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer - return new buffer
-    if let Some(buf_ref) = args[0].as_buffer() {
-        if let Some(other_buf_ref) = args[1].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        if let Some(other_buf_ref) = args[1].as_string_mut() {
             let borrowed = buf_ref.borrow();
             let other_borrowed = other_buf_ref.borrow();
             let mut result = borrowed.clone();
             result.extend(other_borrowed.iter());
-            return (SIG_OK, Value::buffer(result));
+            return (SIG_OK, Value::string_mut(result));
         } else {
             return (
                 SIG_ERROR,
@@ -229,13 +229,13 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array - return new array
-    if let Some(vec_ref) = args[0].as_array() {
-        if let Some(other_vec_ref) = args[1].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
+        if let Some(other_vec_ref) = args[1].as_array_mut() {
             let borrowed = vec_ref.borrow();
             let other_borrowed = other_vec_ref.borrow();
             let mut result = borrowed.clone();
             result.extend(other_borrowed.iter().cloned());
-            return (SIG_OK, Value::array(result));
+            return (SIG_OK, Value::array_mut(result));
         } else {
             return (
                 SIG_ERROR,
@@ -346,10 +346,10 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     // Array — return new array
-    if let Some(arr) = args[0].as_array() {
+    if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.reverse();
-        return (SIG_OK, Value::array(vec));
+        return (SIG_OK, Value::array_mut(vec));
     }
     // Tuple — return new tuple
     if let Some(elems) = args[0].as_tuple() {

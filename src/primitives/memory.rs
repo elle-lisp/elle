@@ -19,7 +19,7 @@ pub(crate) fn prim_ffi_struct(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     // Accept array or list of type descriptors
-    let field_vals = if let Some(arr) = args[0].as_array() {
+    let field_vals = if let Some(arr) = args[0].as_array_mut() {
         arr.borrow().clone()
     } else {
         match args[0].list_to_vec() {

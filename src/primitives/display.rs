@@ -97,14 +97,14 @@ fn flat_repr(val: Value, depth: usize) -> String {
     }
 
     // Arrays
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         let parts: Vec<String> = vec.iter().map(|v| flat_repr(*v, depth + 1)).collect();
         return format!("[{}]", parts.join(" "));
     }
 
     // Tables
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
@@ -214,7 +214,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Arrays: break with elements indented
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         if vec.is_empty() {
             return "[]".to_string();
@@ -228,7 +228,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Tables: break with key-value pairs indented
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         if table.is_empty() {
             return "{}".to_string();
@@ -334,13 +334,13 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         return (SIG_OK, Value::string(format!("<array [{}]>", vec.len())));
     }
 
     // Table
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         return (
             SIG_OK,

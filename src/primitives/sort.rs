@@ -22,7 +22,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array — mutate in place
-    if let Some(arr) = args[0].as_array() {
+    if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow_mut();
         // Validate all elements are numbers
         for (i, v) in vec.iter().enumerate() {
@@ -253,7 +253,7 @@ pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    (SIG_OK, Value::array(result))
+    (SIG_OK, Value::array_mut(result))
 }
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[

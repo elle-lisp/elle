@@ -102,14 +102,14 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::Binding));
 
     assert!(needs_drop(HeapTag::String));
-    assert!(needs_drop(HeapTag::Array));
-    assert!(needs_drop(HeapTag::Table));
+    assert!(needs_drop(HeapTag::LArrayMut));
+    assert!(needs_drop(HeapTag::LStructMut));
     assert!(needs_drop(HeapTag::Struct));
     assert!(needs_drop(HeapTag::Closure));
     assert!(needs_drop(HeapTag::Tuple));
-    assert!(needs_drop(HeapTag::Buffer));
+    assert!(needs_drop(HeapTag::LStringMut));
     assert!(needs_drop(HeapTag::Bytes));
-    assert!(needs_drop(HeapTag::Blob));
+    assert!(needs_drop(HeapTag::LBytesMut));
     assert!(needs_drop(HeapTag::Syntax));
     assert!(needs_drop(HeapTag::Fiber));
     assert!(needs_drop(HeapTag::ThreadHandle));

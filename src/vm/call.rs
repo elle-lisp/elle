@@ -73,11 +73,11 @@ impl VM {
         )
     }
 
-    /// Handle the CallArray instruction.
+    /// Handle the CallArrayMut instruction.
     ///
     /// Like Call, but instead of reading arg_count from bytecode and popping
     /// individual args, pops an args array and uses its elements as arguments.
-    /// Used by splice: the lowerer builds an args array, then CallArray
+    /// Used by splice: the lowerer builds an args array, then CallArrayMut
     /// calls the function with those args.
     ///
     /// Stack: \[func, args_array\] → \[result\]
@@ -94,15 +94,15 @@ impl VM {
             .fiber
             .stack
             .pop()
-            .expect("VM bug: Stack underflow on CallArray");
+            .expect("VM bug: Stack underflow on CallArrayMut");
         let func = self
             .fiber
             .stack
             .pop()
-            .expect("VM bug: Stack underflow on CallArray");
+            .expect("VM bug: Stack underflow on CallArrayMut");
 
         // Extract args from the array
-        let args: Vec<Value> = if let Some(arr) = args_val.as_array() {
+        let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
             arr.borrow().to_vec()
         } else if let Some(tup) = args_val.as_tuple() {
             tup.to_vec()
@@ -131,7 +131,7 @@ impl VM {
         )
     }
 
-    /// Shared Call/CallArray logic after argument extraction.
+    /// Shared Call/CallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions, executes closures with environment setup,
     /// handles yield-through-calls and JIT compilation.
@@ -343,7 +343,7 @@ impl VM {
         self.tail_call_inner(func, args)
     }
 
-    /// Handle the TailCallArray instruction.
+    /// Handle the TailCallArrayMut instruction.
     ///
     /// Like TailCall, but pops an args array instead of individual args.
     /// Stack: \[func, args_array\] → (sets up pending tail call)
@@ -359,15 +359,15 @@ impl VM {
             .fiber
             .stack
             .pop()
-            .expect("VM bug: Stack underflow on TailCallArray");
+            .expect("VM bug: Stack underflow on TailCallArrayMut");
         let func = self
             .fiber
             .stack
             .pop()
-            .expect("VM bug: Stack underflow on TailCallArray");
+            .expect("VM bug: Stack underflow on TailCallArrayMut");
 
         // Extract args from the array
-        let args: Vec<Value> = if let Some(arr) = args_val.as_array() {
+        let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
             arr.borrow().to_vec()
         } else if let Some(tup) = args_val.as_tuple() {
             tup.to_vec()
@@ -386,7 +386,7 @@ impl VM {
         self.tail_call_inner(func, args)
     }
 
-    /// Shared TailCall/TailCallArray logic after argument extraction.
+    /// Shared TailCall/TailCallArrayMut logic after argument extraction.
     ///
     /// Dispatches native functions via tail signal handler, sets up pending
     /// tail call for closures with environment building.

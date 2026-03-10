@@ -36,7 +36,7 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match an array @\[...\] pattern with optional rest (emits IsArray guard)
+    /// Match an array @\[...\] pattern with optional rest (emits IsArrayMut guard)
     Array {
         elements: Vec<HirPattern>,
         rest: Option<Box<HirPattern>>,

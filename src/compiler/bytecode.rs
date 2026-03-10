@@ -75,13 +75,13 @@ pub enum Instruction {
     Cdr,
 
     /// Array construction (size)
-    MakeArray,
+    MakeArrayMut,
 
     /// Array ref (index)
-    ArrayRef,
+    ArrayMutRef,
 
     /// Array set (index)
-    ArraySet,
+    ArrayMutSet,
 
     /// Specialized arithmetic operations
     AddInt,
@@ -167,21 +167,21 @@ pub enum Instruction {
 
     /// Array/tuple ref with silent nil (for destructuring): returns nil if out of bounds
     /// Operand: u16 index (immediate)
-    ArrayRefOrNil,
+    ArrayMutRefOrNil,
     /// Array/tuple slice from index (for & rest destructuring): returns sub-array from index to end
     /// Operand: u16 index (immediate)
-    ArraySliceFrom,
+    ArrayMutSliceFrom,
 
     /// Type check: is value a tuple?
     IsTuple,
     /// Type check: is value an array?
-    IsArray,
+    IsArrayMut,
     /// Type check: is value a struct?
     IsStruct,
     /// Type check: is value a table?
     IsTable,
     /// Get array length as integer
-    ArrayLen,
+    ArrayMutLen,
     /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
     /// Operand: u16 constant pool index (keyword key)
     TableGetOrNil,
@@ -191,16 +191,16 @@ pub enum Instruction {
 
     /// Extend array with elements of another indexed type (for splice).
     /// Pops source, pops array, pushes extended array.
-    ArrayExtend,
+    ArrayMutExtend,
     /// Push a single value onto an array (for splice).
     /// Pops value, pops array, pushes array with value appended.
-    ArrayPush,
+    ArrayMutPush,
     /// Call function with elements of an array as arguments (for splice).
     /// Pops args array, pops function, calls function with array elements.
-    CallArray,
+    CallArrayMut,
     /// Tail call with elements of an array as arguments (for splice).
     /// Pops args array, pops function, tail calls with array elements.
-    TailCallArray,
+    TailCallArrayMut,
 
     /// Enter an allocation region (scope boundary for allocator).
     /// No operands. Pushes a scope mark on the current FiberHeap.
@@ -417,7 +417,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     i += 3;
                 }
             }
-            Instruction::ArrayRefOrNil | Instruction::ArraySliceFrom => {
+            Instruction::ArrayMutRefOrNil | Instruction::ArrayMutSliceFrom => {
                 if i + 1 < instructions.len() {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (index={})", idx));
@@ -434,10 +434,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::Eval => {
                 // No operands — pops 2 from stack, pushes 1
             }
-            Instruction::ArrayExtend | Instruction::ArrayPush => {
+            Instruction::ArrayMutExtend | Instruction::ArrayMutPush => {
                 // No operands
             }
-            Instruction::CallArray | Instruction::TailCallArray => {
+            Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
                 // No operands (arg count is dynamic, determined by array length)
             }
             Instruction::RegionEnter | Instruction::RegionExit => {

@@ -1229,7 +1229,7 @@ fn test_jit_make_array() {
     entry.instructions.push(load_arg(Reg(1), 1));
     entry.instructions.push(load_arg(Reg(2), 2));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeArray {
+        LirInstr::MakeArrayMut {
             dst: Reg(3),
             elements: vec![Reg(0), Reg(1), Reg(2)],
         },
@@ -1248,8 +1248,8 @@ fn test_jit_make_array() {
         ],
     )
     .unwrap();
-    assert!(result.is_array());
-    let vec = result.as_array().unwrap();
+    assert!(result.is_array_mut());
+    let vec = result.as_array_mut().unwrap();
     let borrowed = vec.borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0].as_int(), Some(1));

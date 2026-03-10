@@ -43,7 +43,7 @@ pub extern "C" fn elle_jit_make_array(elements: *const u64, count: u32) -> u64 {
         let bits = unsafe { *elements.add(i) };
         vec.push(unsafe { Value::from_bits(bits) });
     }
-    Value::array(vec).to_bits()
+    Value::array_mut(vec).to_bits()
 }
 
 /// Check if value is a pair (cons cell)
@@ -170,8 +170,8 @@ mod tests {
         let vec_bits = elle_jit_make_array(elements.as_ptr(), 3);
         let vec = unsafe { Value::from_bits(vec_bits) };
 
-        assert!(vec.is_array());
-        let vec_ref = vec.as_array().unwrap();
+        assert!(vec.is_array_mut());
+        let vec_ref = vec.as_array_mut().unwrap();
         let borrowed = vec_ref.borrow();
         assert_eq!(borrowed.len(), 3);
         assert_eq!(borrowed[0].as_int(), Some(1));

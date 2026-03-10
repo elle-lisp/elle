@@ -31,12 +31,12 @@ impl PartialEq for Value {
                 (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
 
                 // Array comparison (compare contents)
-                (HeapObject::Array(v1), HeapObject::Array(v2)) => {
+                (HeapObject::LArrayMut(v1), HeapObject::LArrayMut(v2)) => {
                     v1.borrow().as_slice() == v2.borrow().as_slice()
                 }
 
                 // Table comparison (compare contents)
-                (HeapObject::Table(t1), HeapObject::Table(t2)) => *t1.borrow() == *t2.borrow(),
+                (HeapObject::LStructMut(t1), HeapObject::LStructMut(t2)) => *t1.borrow() == *t2.borrow(),
 
                 // Struct comparison (compare contents)
                 (HeapObject::Struct(s1), HeapObject::Struct(s2)) => s1 == s2,
@@ -48,7 +48,7 @@ impl PartialEq for Value {
                 (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1 == t2,
 
                 // Buffer comparison (compare contents)
-                (HeapObject::Buffer(b1), HeapObject::Buffer(b2)) => *b1.borrow() == *b2.borrow(),
+                (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => *b1.borrow() == *b2.borrow(),
 
                 // Cell comparison (compare contents)
                 (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => *c1.borrow() == *c2.borrow(),
@@ -107,7 +107,7 @@ impl PartialEq for Value {
                 (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1 == b2,
 
                 // Blob comparison (compare contents)
-                (HeapObject::Blob(b1), HeapObject::Blob(b2)) => *b1.borrow() == *b2.borrow(),
+                (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => *b1.borrow() == *b2.borrow(),
 
                 // Set comparison (compare contents)
                 (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1 == s2,
@@ -168,14 +168,14 @@ impl Hash for Value {
                 }
 
                 // Structural content types (mutable — hash current contents)
-                HeapObject::Array(rc) => {
+                HeapObject::LArrayMut(rc) => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for v in borrowed.iter() {
                         v.hash(state);
                     }
                 }
-                HeapObject::Table(rc) => {
+                HeapObject::LStructMut(rc) => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for (k, v) in borrowed.iter() {
@@ -183,8 +183,8 @@ impl Hash for Value {
                         v.hash(state);
                     }
                 }
-                HeapObject::Buffer(rc) => rc.borrow().hash(state),
-                HeapObject::Blob(rc) => rc.borrow().hash(state),
+                HeapObject::LStringMut(rc) => rc.borrow().hash(state),
+                HeapObject::LBytesMut(rc) => rc.borrow().hash(state),
                 HeapObject::Cell(rc, _) => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
@@ -260,12 +260,12 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::Float => 3,  // same rank as inline float
             HeapTag::Cons => 9,
             HeapTag::Tuple => 10,
-            HeapTag::Array => 11,
+            HeapTag::LArrayMut => 11,
             HeapTag::Bytes => 12,
-            HeapTag::Buffer => 13,
-            HeapTag::Blob => 14,
+            HeapTag::LStringMut => 13,
+            HeapTag::LBytesMut => 14,
             HeapTag::Struct => 15,
-            HeapTag::Table => 16,
+            HeapTag::LStructMut => 16,
             HeapTag::Closure => 17,
             HeapTag::Cell => 18,
             HeapTag::NativeFn => 19,
@@ -363,7 +363,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1.cmp(t2),
 
         // Array — element-wise lexicographic (borrow)
-        (HeapObject::Array(a1), HeapObject::Array(a2)) => {
+        (HeapObject::LArrayMut(a1), HeapObject::LArrayMut(a2)) => {
             let b1 = a1.borrow();
             let b2 = a2.borrow();
             b1.as_slice().cmp(b2.as_slice())
@@ -373,14 +373,14 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1.cmp(b2),
 
         // Buffer — byte-wise lexicographic (borrow)
-        (HeapObject::Buffer(b1), HeapObject::Buffer(b2)) => {
+        (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
         // Blob — byte-wise lexicographic (borrow)
-        (HeapObject::Blob(b1), HeapObject::Blob(b2)) => {
+        (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)

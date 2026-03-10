@@ -71,7 +71,7 @@ fn test_file_side_effect_ordering() {
     "#;
     let result = eval_file_source(code).unwrap();
     // log should be @[1, 2]
-    let items = result.as_array().expect("expected array");
+    let items = result.as_array_mut().expect("expected array");
     let items = items.borrow();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0], Value::int(1));

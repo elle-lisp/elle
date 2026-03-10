@@ -173,13 +173,13 @@ impl VM {
                 Instruction::Cdr => {
                     data::handle_cdr(self);
                 }
-                Instruction::MakeArray => {
+                Instruction::MakeArrayMut => {
                     data::handle_make_array(self, bc, &mut ip);
                 }
-                Instruction::ArrayRef => {
+                Instruction::ArrayMutRef => {
                     data::handle_array_ref(self);
                 }
-                Instruction::ArraySet => {
+                Instruction::ArrayMutSet => {
                     data::handle_array_set(self);
                 }
 
@@ -190,10 +190,10 @@ impl VM {
                 Instruction::CdrOrNil => {
                     data::handle_cdr_or_nil(self);
                 }
-                Instruction::ArrayRefOrNil => {
+                Instruction::ArrayMutRefOrNil => {
                     data::handle_array_ref_or_nil(self, bc, &mut ip);
                 }
-                Instruction::ArraySliceFrom => {
+                Instruction::ArrayMutSliceFrom => {
                     data::handle_array_slice_from(self, bc, &mut ip);
                 }
                 Instruction::TableGetOrNil => {
@@ -281,7 +281,7 @@ impl VM {
                 Instruction::IsTuple => {
                     types::handle_is_tuple(self);
                 }
-                Instruction::IsArray => {
+                Instruction::IsArrayMut => {
                     types::handle_is_array(self);
                 }
                 Instruction::IsStruct => {
@@ -290,7 +290,7 @@ impl VM {
                 Instruction::IsTable => {
                     types::handle_is_table(self);
                 }
-                Instruction::ArrayLen => {
+                Instruction::ArrayMutLen => {
                     types::handle_array_len(self);
                 }
                 Instruction::IsNumber => {
@@ -349,13 +349,13 @@ impl VM {
                 Instruction::Eval => {
                     super::eval::handle_eval_instruction(self);
                 }
-                Instruction::ArrayExtend => {
+                Instruction::ArrayMutExtend => {
                     data::handle_array_extend(self);
                 }
-                Instruction::ArrayPush => {
+                Instruction::ArrayMutPush => {
                     data::handle_array_push(self);
                 }
-                Instruction::CallArray => {
+                Instruction::CallArrayMut => {
                     if let Some(bits) = self.handle_call_array(
                         bytecode,
                         constants,
@@ -367,7 +367,7 @@ impl VM {
                         return (bits, ip);
                     }
                 }
-                Instruction::TailCallArray => {
+                Instruction::TailCallArrayMut => {
                     if let Some(bits) = self.handle_tail_call_array(&mut ip, bc) {
                         return (bits, ip);
                     }

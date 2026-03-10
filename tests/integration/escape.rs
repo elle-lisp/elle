@@ -681,7 +681,7 @@ fn no_region_for_inner_let_with_outward_set() {
 
 #[test]
 fn no_region_when_intrinsic_has_spliced_args() {
-    // Spliced args to an intrinsic cause a CallArray (not intrinsic lowering),
+    // Spliced args to an intrinsic cause a CallArrayMut (not intrinsic lowering),
     // so the result type is unknown → unsafe.
     assert!(!has_region("(let ((a @[1 2])) (+ ;a))"));
 }

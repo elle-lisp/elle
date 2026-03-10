@@ -235,7 +235,7 @@ impl Lowerer {
             AccessPath::Index(inner, idx) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayRefOrNil {
+                self.emit(LirInstr::ArrayMutRefOrNil {
                     dst,
                     src: parent,
                     index: *idx as u16,
@@ -245,7 +245,7 @@ impl Lowerer {
             AccessPath::Slice(inner, start) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArraySliceFrom {
+                self.emit(LirInstr::ArrayMutSliceFrom {
                     dst,
                     src: parent,
                     index: *start as u16,
@@ -402,7 +402,7 @@ impl Lowerer {
                 src: reloaded_for_type,
             });
         } else {
-            self.emit(LirInstr::IsArray {
+            self.emit(LirInstr::IsArrayMut {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
@@ -426,7 +426,7 @@ impl Lowerer {
             slot: val_slot,
         });
         let len_reg = self.fresh_reg();
-        self.emit(LirInstr::ArrayLen {
+        self.emit(LirInstr::ArrayMutLen {
             dst: len_reg,
             src: reloaded,
         });

@@ -24,7 +24,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     let default = if args.len() == 3 { args[2] } else { Value::NIL };
 
     // Array (mutable indexed collection)
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -71,7 +71,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer (mutable string — indexed by character position)
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -141,7 +141,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable binary data — indexed by byte position)
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -205,8 +205,8 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Table (mutable keyed collection)
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
@@ -333,7 +333,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer (mutable byte sequence) - mutate in place
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -388,7 +388,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable byte sequence) - mutate in place
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -443,7 +443,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array (mutable indexed collection) - mutate in place
-    if let Some(vec_ref) = args[0].as_array() {
+    if let Some(vec_ref) = args[0].as_array_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
             None => {
@@ -584,8 +584,8 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
     };
     let value = args[2];
 
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (

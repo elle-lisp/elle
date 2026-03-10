@@ -134,7 +134,7 @@ impl fmt::Display for LirInstr {
             LirInstr::Cons { dst, head, tail } => {
                 write!(f, "{} ← cons({}, {})", dst, head, tail)
             }
-            LirInstr::MakeArray { dst, elements } => {
+            LirInstr::MakeArrayMut { dst, elements } => {
                 write!(f, "{} ← array(", dst)?;
                 fmt_regs(elements, f)?;
                 f.write_str(")")
@@ -155,10 +155,10 @@ impl fmt::Display for LirInstr {
             LirInstr::IsNil { dst, src } => write!(f, "{} ← nil?({})", dst, src),
             LirInstr::IsPair { dst, src } => write!(f, "{} ← pair?({})", dst, src),
             LirInstr::IsTuple { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
-            LirInstr::IsArray { dst, src } => write!(f, "{} ← array?({})", dst, src),
+            LirInstr::IsArrayMut { dst, src } => write!(f, "{} ← array?({})", dst, src),
             LirInstr::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
             LirInstr::IsTable { dst, src } => write!(f, "{} ← table?({})", dst, src),
-            LirInstr::ArrayLen { dst, src } => write!(f, "{} ← len({})", dst, src),
+            LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
             // === Cell Operations ===
             LirInstr::MakeCell { dst, value } => write!(f, "{} ← cell({})", dst, value),
@@ -168,10 +168,10 @@ impl fmt::Display for LirInstr {
             // === Destructuring (silent nil) ===
             LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
             LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
-            LirInstr::ArrayRefOrNil { dst, src, index } => {
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
                 write!(f, "{} ← {}[{}]?", dst, src, index)
             }
-            LirInstr::ArraySliceFrom { dst, src, index } => {
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 write!(f, "{} ← {}[{}..]", dst, src, index)
             }
             LirInstr::TableGetOrNil { dst, src, key } => {
@@ -187,16 +187,16 @@ impl fmt::Display for LirInstr {
             }
 
             // === Splice Support ===
-            LirInstr::ArrayExtend { dst, array, source } => {
+            LirInstr::ArrayMutExtend { dst, array, source } => {
                 write!(f, "{} ← extend({}, {})", dst, array, source)
             }
-            LirInstr::ArrayPush { dst, array, value } => {
+            LirInstr::ArrayMutPush { dst, array, value } => {
                 write!(f, "{} ← push({}, {})", dst, array, value)
             }
-            LirInstr::CallArray { dst, func, args } => {
+            LirInstr::CallArrayMut { dst, func, args } => {
                 write!(f, "{} ← {}(;{})", dst, func, args)
             }
-            LirInstr::TailCallArray { func, args } => {
+            LirInstr::TailCallArrayMut { func, args } => {
                 write!(f, "tailcall {}(;{})", func, args)
             }
 
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{}",
-                LirInstr::ArrayRefOrNil {
+                LirInstr::ArrayMutRefOrNil {
                     dst: Reg(2),
                     src: Reg(0),
                     index: 1

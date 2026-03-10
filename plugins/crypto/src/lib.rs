@@ -41,7 +41,7 @@ fn extract_byte_data(val: &Value, name: &str, pos: &str) -> Result<Vec<u8>, (Sig
         Ok(bytes)
     } else if let Some(b) = val.as_bytes() {
         Ok(b.to_vec())
-    } else if let Some(blob_ref) = val.as_blob() {
+    } else if let Some(blob_ref) = val.as_bytes_mut() {
         Ok(blob_ref.borrow().clone())
     } else {
         Err((

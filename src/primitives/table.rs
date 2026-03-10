@@ -122,7 +122,7 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
         map.insert(key, value);
     }
 
-    (SIG_OK, Value::table_from(map))
+    (SIG_OK, Value::struct_mut_from(map))
 }
 
 /// Polymorphic del - works on tables, structs, and sets
@@ -159,8 +159,8 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
@@ -217,8 +217,8 @@ pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
@@ -275,8 +275,8 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (
@@ -346,8 +346,8 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    if args[0].is_table() {
-        let table = match args[0].as_table() {
+    if args[0].is_struct_mut() {
+        let table = match args[0].as_struct_mut() {
             Some(t) => t,
             None => {
                 return (

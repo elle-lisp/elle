@@ -292,7 +292,7 @@ mod tests {
         let desc = TypeDesc::Struct(StructDesc {
             fields: vec![TypeDesc::I32, TypeDesc::Double],
         });
-        let val = Value::array(vec![Value::int(42), Value::float(1.5)]);
+        let val = Value::array_mut(vec![Value::int(42), Value::float(1.5)]);
         let m = MarshalledArg::new(&val, &desc).unwrap();
         let _ = m.as_arg(); // Should not panic
     }
@@ -302,7 +302,7 @@ mod tests {
         let desc = TypeDesc::Struct(StructDesc {
             fields: vec![TypeDesc::I32, TypeDesc::Double],
         });
-        let val = Value::array(vec![Value::int(42)]); // Only 1 value for 2 fields
+        let val = Value::array_mut(vec![Value::int(42)]); // Only 1 value for 2 fields
         assert!(MarshalledArg::new(&val, &desc).is_err());
     }
 
@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn test_marshal_array() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
+        let val = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
         let m = MarshalledArg::new(&val, &desc).unwrap();
         let _ = m.as_arg();
     }
@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn test_marshal_array_wrong_count() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 3);
-        let val = Value::array(vec![Value::int(1), Value::int(2)]);
+        let val = Value::array_mut(vec![Value::int(1), Value::int(2)]);
         assert!(MarshalledArg::new(&val, &desc).is_err());
     }
 
@@ -336,14 +336,14 @@ mod tests {
             fields: vec![TypeDesc::I32, TypeDesc::Double, TypeDesc::I64],
         };
         let desc = TypeDesc::Struct(sd.clone());
-        let values = Value::array(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
+        let values = Value::array_mut(vec![Value::int(42), Value::float(1.5), Value::int(-100)]);
 
         let (offsets, total_size) = sd.field_offsets().unwrap();
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
         // Write each field
-        let arr = values.as_array().unwrap();
+        let arr = values.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, (field_desc, &offset)) in sd.fields.iter().zip(offsets.iter()).enumerate() {
             let _ = write_value_to_buffer(
@@ -356,7 +356,7 @@ mod tests {
 
         // Read back
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems[0].as_int(), Some(42));
         assert!((result_elems[1].as_float().unwrap() - 1.5).abs() < 1e-10);
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn test_read_write_array_roundtrip() {
         let desc = TypeDesc::Array(Box::new(TypeDesc::I32), 4);
-        let values = Value::array(vec![
+        let values = Value::array_mut(vec![
             Value::int(10),
             Value::int(20),
             Value::int(30),
@@ -378,7 +378,7 @@ mod tests {
         let align = TypeDesc::I32.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = values.as_array().unwrap();
+        let arr = values.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, elem_val) in elems.iter().enumerate() {
             let _ = write_value_to_buffer(
@@ -390,7 +390,7 @@ mod tests {
         }
 
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems.len(), 4);
         assert_eq!(result_elems[0].as_int(), Some(10));
@@ -409,8 +409,8 @@ mod tests {
         };
         let desc = TypeDesc::Struct(outer_sd.clone());
 
-        let inner_val = Value::array(vec![Value::int(7), Value::int(999)]);
-        let outer_val = Value::array(vec![Value::int(123456), inner_val]);
+        let inner_val = Value::array_mut(vec![Value::int(7), Value::int(999)]);
+        let outer_val = Value::array_mut(vec![Value::int(123456), inner_val]);
 
         // Marshal via MarshalledArg
         let m = MarshalledArg::new(&outer_val, &desc).unwrap();
@@ -421,7 +421,7 @@ mod tests {
         let align = desc.align().unwrap();
         let buf = AlignedBuffer::new(total_size, align);
 
-        let arr = outer_val.as_array().unwrap();
+        let arr = outer_val.as_array_mut().unwrap();
         let elems = arr.borrow();
         for (i, (field_desc, &offset)) in outer_sd.fields.iter().zip(offsets.iter()).enumerate() {
             let _ = write_value_to_buffer(
@@ -433,11 +433,11 @@ mod tests {
         }
 
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array().unwrap();
+        let result_arr = result.as_array_mut().unwrap();
         let result_elems = result_arr.borrow();
         assert_eq!(result_elems[0].as_int(), Some(123456));
 
-        let inner_result = result_elems[1].as_array().unwrap();
+        let inner_result = result_elems[1].as_array_mut().unwrap();
         let inner_elems = inner_result.borrow();
         assert_eq!(inner_elems[0].as_int(), Some(7));
         assert_eq!(inner_elems[1].as_int(), Some(999));
