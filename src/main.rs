@@ -82,12 +82,12 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
 /// Only prints non-nil results.
 fn run_source(
     contents: &str,
-    _source_name: &str,
+    source_name: &str,
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
     // Compile file as a single letrec
-    let result = match compile_file(contents, symbols) {
+    let result = match compile_file(contents, symbols, source_name) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("✗ Compilation error: {}", e);
@@ -112,7 +112,7 @@ fn run_source(
             Ok(())
         }
         Err(e) => {
-            eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
+            eprintln!("{}", format_runtime_error(&e, symbols));
             Err("Errors encountered during execution".to_string())
         }
     }
@@ -161,7 +161,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 }
 
                 // Try to compile accumulated input
-                match compile(accumulated_input.trim(), symbols) {
+                match compile(accumulated_input.trim(), symbols, "<repl>") {
                     Ok(result) => {
                         accumulated_input.clear();
 
@@ -173,7 +173,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                                 }
                             }
                             Err(e) => {
-                                eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
+                                eprintln!("{}", format_runtime_error(&e, symbols));
                                 had_errors = true;
                             }
                         }
@@ -281,7 +281,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
         }
 
         // Try to compile accumulated input
-        match compile(trimmed, symbols) {
+        match compile(trimmed, symbols, "<repl>") {
             Ok(result) => {
                 accumulated_input.clear();
 
@@ -293,7 +293,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         }
                     }
                     Err(e) => {
-                        eprintln!("✗ Runtime error: {}", format_runtime_error(&e, symbols));
+                        eprintln!("{}", format_runtime_error(&e, symbols));
                         had_errors = true;
                     }
                 }

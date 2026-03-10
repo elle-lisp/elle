@@ -8,7 +8,7 @@
 # lists, arrays, tuples, strings, and grapheme-aware text processing.
 #
 # Demonstrates:
-#   Literal syntax    — [tuple]  @[array]  {struct}  @{table}  "string"  @"buffer"
+#   Literal syntax    — [array]  @[array]  {struct}  @{struct}  "string"  @"string"
 #   Mutability        — @ prefix means mutable; bare means immutable
 #   Polymorphic ops   — get, length, empty?, append, concat across types
 #   put semantics     — mutates mutable types, copies immutable types
@@ -16,10 +16,10 @@
 #   Destructuring     — {:key var} and [a b] patterns in let/def/fn
 #   Threading macros  — ->  ->>
 #   Splice            — ;expr for spreading arrays/tuples into calls
-#   Key-value ops     — put, del, keys, values, has-key?
+#   Key-value ops     — put, del, keys, values, has?
 #   List ops          — cons, first, rest, reverse, take, drop, last, butlast
 #   Array mutation    — push, pop, insert, remove
-#   String ops        — string/find, string/split, string/join, string/slice,
+#   String ops        — string/find, string/split, string/join, slice,
 #                       string/replace, string/contains?, string/trim,
 #                       string/upcase, string/downcase
 #   Grapheme clusters — string indexing operates on what humans see as characters
@@ -32,9 +32,9 @@
 # ========================================
 #
 # Bare delimiters are immutable; @-prefixed are mutable.
-#   [...]  tuple      @[...]  array
-#   {...}  struct     @{...}  table
-#   "..."  string     @"..."  buffer
+#   [...]  array      @[...]  @array
+#   {...}  struct     @{...}  @struct
+#   "..."  string     @"..."  @string
 
 # A contact is an immutable struct — once created, it never changes.
 (def alice {:name "Alice" :email "alice@example.com" :tags [:dev :lead]})
@@ -51,7 +51,7 @@
 
 # put on an immutable struct returns a NEW struct — original unchanged.
 (def alice-with-phone (put alice :phone "555-0100"))
-(assert-false (has-key? alice :phone) "put on struct: original unchanged")
+(assert-false (has? alice :phone) "put on struct: original unchanged")
 (assert-eq (get alice-with-phone :phone) "555-0100" "put on struct: new has key")
 
 # Populate the book
@@ -68,13 +68,13 @@
 #
 # get works on every collection type with the same interface.
 
-# By string key (table)
+# By string key (@struct)
 (assert-eq (get (get book "alice") :name) "Alice" "get: table → struct")
 
 # By keyword (struct)
 (assert-eq (get alice :email) "alice@example.com" "get: struct by keyword")
 
-# By index (tuple)
+# By index (@array)
 (assert-eq (get (get alice :tags) 0) :dev "get: tuple by index")
 
 # By index (string — returns a grapheme cluster)
@@ -105,10 +105,10 @@
 
 # Unpack tags by position
 (def [first-tag second-tag] atags)
-(assert-eq first-tag :dev "tuple destructure: first tag")
-(assert-eq second-tag :lead "tuple destructure: second tag")
+(assert-eq first-tag :dev "array destructure: first tag")
+(assert-eq second-tag :lead "array destructure: second tag")
 
-# Nested destructuring in let: struct containing a tuple
+# Nested destructuring in let: struct containing an array
 (let ([{:name n :tags [t & _]} (get book "carol")])
   (assert-eq n "Carol" "let destructure: name")
   (assert-eq t :ops "let destructure: first tag")
@@ -215,7 +215,7 @@
   "Format a tag tuple as [dev, lead]."
   (var parts (list))
   (each t in tags
-    (assign parts (append parts (list (keyword->string t)))))
+    (assign parts (append parts (list (string t)))))
   (-> "[" (append (string/join parts ", ")) (append "]")))
 
 (defn format-contact [{:name name :email email :tags tags}]
@@ -270,7 +270,7 @@
 (defn email-domain [email]
   "Extract the domain part of an email address."
   (let* ([at-pos (string/find email "@")]
-         [domain (string/slice email (+ at-pos 1))])
+         [domain (slice email (+ at-pos 1) (length email))])
     domain))
 
 (assert-eq (email-domain "alice@example.com") "example.com" "email-domain")
@@ -307,7 +307,7 @@
 (assert-eq (length "🇫🇷") 1 "flag: one grapheme")
 
 # Slicing and finding respect grapheme boundaries
-(assert-eq (string/slice "héllo" 1 4) "éll" "slice: grapheme indices")
+(assert-eq (slice "héllo" 1 4) "éll" "slice: grapheme indices")
 (assert-eq (string/find "aé👋🏽bc" "👋🏽") 2 "find: grapheme index of emoji")
 
 
@@ -339,9 +339,9 @@
 # 11. Updating and removing contacts
 # ========================================
 
-(assert-true (has-key? book "dave") "dave exists")
+(assert-true (has? book "dave") "dave exists")
 (del book "dave")
-(assert-false (has-key? book "dave") "del removes entry")
+(assert-false (has? book "dave") "del removes entry")
 (assert-eq (length (keys book)) 3 "three contacts remain")
 
 # Update alice's tags — structs are immutable, so replace the entry
@@ -351,11 +351,11 @@
 (assert-eq (length new-tags) 3 "alice now has 3 tags")
 (display "  updated alice tags: ") (print new-tags)
 
-# struct/del creates a new struct without a key
+# del creates a new struct without a key
 (def point {:x 1 :y 2 :z 3})
-(def point2d (struct/del point :z))
+(def point2d (del point :z))
 (assert-eq (get point :z) 3 "original struct unchanged")
-(assert-false (has-key? point2d :z) "new struct lacks :z")
+(assert-false (has? point2d :z) "new struct lacks :z")
 
 
 # ========================================

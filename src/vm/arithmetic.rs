@@ -2,7 +2,7 @@ use super::core::VM;
 use crate::arithmetic;
 use crate::value::{error_val, Value, SIG_ERROR};
 
-pub fn handle_add_int(vm: &mut VM) {
+pub(crate) fn handle_add_int(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -31,7 +31,7 @@ pub fn handle_add_int(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a + b));
 }
 
-pub fn handle_sub_int(vm: &mut VM) {
+pub(crate) fn handle_sub_int(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -60,7 +60,7 @@ pub fn handle_sub_int(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a - b));
 }
 
-pub fn handle_mul_int(vm: &mut VM) {
+pub(crate) fn handle_mul_int(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -89,7 +89,7 @@ pub fn handle_mul_int(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a * b));
 }
 
-pub fn handle_div_int(vm: &mut VM) {
+pub(crate) fn handle_div_int(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -123,7 +123,7 @@ pub fn handle_div_int(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a / b));
 }
 
-pub fn handle_add(vm: &mut VM) {
+pub(crate) fn handle_add(vm: &mut VM) {
     let b = vm
         .fiber
         .stack
@@ -145,7 +145,7 @@ pub fn handle_add(vm: &mut VM) {
     }
 }
 
-pub fn handle_sub(vm: &mut VM) {
+pub(crate) fn handle_sub(vm: &mut VM) {
     let b = vm
         .fiber
         .stack
@@ -167,7 +167,7 @@ pub fn handle_sub(vm: &mut VM) {
     }
 }
 
-pub fn handle_mul(vm: &mut VM) {
+pub(crate) fn handle_mul(vm: &mut VM) {
     let b = vm
         .fiber
         .stack
@@ -189,7 +189,7 @@ pub fn handle_mul(vm: &mut VM) {
     }
 }
 
-pub fn handle_div(vm: &mut VM) {
+pub(crate) fn handle_div(vm: &mut VM) {
     let b = vm
         .fiber
         .stack
@@ -233,7 +233,7 @@ pub fn handle_div(vm: &mut VM) {
     }
 }
 
-pub fn handle_rem(vm: &mut VM) {
+pub(crate) fn handle_rem(vm: &mut VM) {
     let b = vm
         .fiber
         .stack
@@ -255,7 +255,7 @@ pub fn handle_rem(vm: &mut VM) {
     }
 }
 
-pub fn handle_bit_and(vm: &mut VM) {
+pub(crate) fn handle_bit_and(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -284,7 +284,7 @@ pub fn handle_bit_and(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a & b));
 }
 
-pub fn handle_bit_or(vm: &mut VM) {
+pub(crate) fn handle_bit_or(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -313,7 +313,7 @@ pub fn handle_bit_or(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a | b));
 }
 
-pub fn handle_bit_xor(vm: &mut VM) {
+pub(crate) fn handle_bit_xor(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -342,7 +342,7 @@ pub fn handle_bit_xor(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a ^ b));
 }
 
-pub fn handle_bit_not(vm: &mut VM) {
+pub(crate) fn handle_bit_not(vm: &mut VM) {
     let a_val = vm
         .fiber
         .stack
@@ -362,7 +362,7 @@ pub fn handle_bit_not(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(!a));
 }
 
-pub fn handle_shl(vm: &mut VM) {
+pub(crate) fn handle_shl(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack
@@ -393,7 +393,7 @@ pub fn handle_shl(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a << shift));
 }
 
-pub fn handle_shr(vm: &mut VM) {
+pub(crate) fn handle_shr(vm: &mut VM) {
     let b_val = vm
         .fiber
         .stack

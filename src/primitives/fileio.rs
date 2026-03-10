@@ -6,7 +6,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Read entire file as a string
-pub fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -38,7 +38,7 @@ pub fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Write string content to a file (overwrites if exists)
-pub fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -83,7 +83,7 @@ pub fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Append string content to a file
-pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -147,7 +147,7 @@ pub fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Delete a file
-pub fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -182,7 +182,7 @@ pub fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Delete a directory (must be empty)
-pub fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -220,7 +220,7 @@ pub fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Create a directory
-pub fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -258,7 +258,7 @@ pub fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Create a directory and all parent directories
-pub fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -299,7 +299,7 @@ pub fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Rename a file
-pub fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -347,7 +347,7 @@ pub fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Copy a file
-pub fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -395,7 +395,7 @@ pub fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Get file size in bytes
-pub fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -430,7 +430,7 @@ pub fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// List directory contents
-pub fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -489,7 +489,7 @@ pub fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Read lines from a file and return as a list of strings
-pub fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -530,7 +530,7 @@ pub fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for file I/O operations.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/read",
         func: prim_slurp,

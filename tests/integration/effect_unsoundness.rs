@@ -36,6 +36,7 @@ fn test_unsound_effect_after_set() {
         "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
         &mut symbols,
         &mut vm,
+        "<test>",
     )
     .unwrap();
 
@@ -64,6 +65,7 @@ fn test_unsound_effect_unknown_global() {
         "(begin (def gen (fn (x) (yield x))) (map gen (list 1 2 3)))",
         &mut symbols,
         &mut vm,
+        "<test>",
     )
     .unwrap();
 

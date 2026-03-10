@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Find hoverable information at a given position
-pub fn find_hover_info(
+pub(crate) fn find_hover_info(
     line: u32,
     character: u32,
     symbol_index: &SymbolIndex,

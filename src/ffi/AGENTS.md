@@ -83,9 +83,11 @@ Elle code
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 80 | `FFISubsystem` struct: library map, callback store, load/get methods |
+| `mod.rs` | 74 | `FFISubsystem` struct: library map, callback store, load/get methods |
 | `types.rs` | 368 | `TypeDesc` enum, `StructDesc`, `Signature`, `CallingConvention`, keyword parsing, size/align |
-| `marshal.rs` | 1026 | `MarshalledArg`, `AlignedBuffer`, `ArgStorage`, `write_value_to_buffer`, `read_value_from_buffer`, `to_libffi_type` |
+| `marshal.rs` | 460 | Shared types (`to_libffi_type`, `AlignedBuffer`, helpers), re-exports, tests |
+| `to_c.rs` | 511 | `MarshalledArg`, `ArgStorage`, `write_value_to_buffer`, `marshal_struct`, `marshal_array` |
+| `from_c.rs` | 99 | `read_value_from_buffer` — C → Value unmarshalling |
 | `call.rs` | 221 | `prepare_cif`, `ffi_call` — CIF preparation and C function dispatch |
 | `callback.rs` | 556 | `create_callback`, `free_callback`, `CallbackStore`, `ActiveCallback`, `trampoline_callback`, thread-local error flag |
 | `loader.rs` | 192 | `load_library`, `load_self`, `LibraryHandle` — platform-guarded (Linux only) |
@@ -151,7 +153,7 @@ by code pointer, stored in `FFISubsystem`.
 
 Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
 `callbacks: CallbackStore`. Methods: `load_library`, `load_self`,
-`get_library`, `loaded_libraries`, `callbacks_mut`.
+`get_library`, `callbacks_mut`.
 
 ## Invariants
 

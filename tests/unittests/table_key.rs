@@ -85,13 +85,13 @@ fn test_same_external_produces_equal_key() {
 
 #[test]
 fn test_from_value_array_rejected() {
-    let val = Value::array(vec![Value::int(1)]);
+    let val = Value::array_mut(vec![Value::int(1)]);
     assert!(TableKey::from_value(&val).is_none());
 }
 
 #[test]
 fn test_from_value_table_rejected() {
-    let val = Value::table();
+    let val = Value::struct_mut();
     assert!(TableKey::from_value(&val).is_none());
 }
 

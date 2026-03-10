@@ -7,7 +7,7 @@ use crate::reader::Lexer;
 /// Rewrite source text by applying rules to each token.
 /// Returns (new_source, edits_applied). If no rules match, returns (original_source, empty_vec).
 /// Returns Err if lexing fails.
-pub fn rewrite_source(
+pub(crate) fn rewrite_source(
     source: &str,
     rules: &[&dyn RewriteRule],
 ) -> Result<(String, Vec<Edit>), String> {

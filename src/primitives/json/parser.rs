@@ -346,7 +346,7 @@ impl JsonParser {
 
         if self.pos < self.input.len() && self.input[self.pos] == '}' {
             self.pos += 1;
-            return Ok(Value::table_from(map));
+            return Ok(Value::struct_mut_from(map));
         }
 
         loop {
@@ -395,7 +395,7 @@ impl JsonParser {
                 }
                 '}' => {
                     self.pos += 1;
-                    return Ok(Value::table_from(map));
+                    return Ok(Value::struct_mut_from(map));
                 }
                 c => {
                     return Err(format!(

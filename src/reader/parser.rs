@@ -259,7 +259,7 @@ impl Reader {
                 }
                 Some(OwnedToken::RightBracket) => {
                     self.advance();
-                    return Ok(Value::array(elements));
+                    return Ok(Value::array_mut(elements));
                 }
                 _ => elements.push(self.read(symbols)?),
             }

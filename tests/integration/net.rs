@@ -21,7 +21,7 @@ fn setup_scheduled() -> (VM, SymbolTable) {
 
 /// Compile and execute Elle source on an already-initialized VM.
 fn run_scheduled(input: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
-    let result = compile_file(input, symbols)?;
+    let result = compile_file(input, symbols, "<test>")?;
     let value = vm.execute_scheduled(&result.bytecode, symbols)?;
     set_vm_context(std::ptr::null_mut());
     Ok(value)

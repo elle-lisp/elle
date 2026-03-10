@@ -12,7 +12,7 @@ use std::time::Duration;
 /// Currently recognizes `:timeout ms` (non-negative integer).
 /// Returns `Ok(None)` if `:timeout` is absent.
 /// Returns `Err` on bad keyword, missing value, or bad type.
-pub fn extract_keyword_timeout(
+pub(crate) fn extract_keyword_timeout(
     args: &[Value],
     start: usize,
     prim_name: &str,

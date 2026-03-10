@@ -9,7 +9,7 @@ use std::time::Duration;
 
 /// I/O operation descriptor.
 #[derive(Debug)]
-pub enum IoOp {
+pub(crate) enum IoOp {
     /// Read one line (up to `\n`). Returns string or nil (EOF).
     ReadLine,
     /// Read up to `count` bytes. Returns bytes/string or nil (EOF).
@@ -38,7 +38,7 @@ pub enum IoOp {
 
 /// Address for connect operations.
 #[derive(Debug)]
-pub enum ConnectAddr {
+pub(crate) enum ConnectAddr {
     Tcp { addr: String, port: u16 },
     Unix { path: String },
 }
@@ -49,7 +49,7 @@ pub enum ConnectAddr {
 /// - The `Value` holds the `Rc` to the `ExternalObject` containing the `Port`
 /// - The backend extracts `&Port` via `value.as_external::<Port>()`
 #[derive(Debug)]
-pub struct IoRequest {
+pub(crate) struct IoRequest {
     pub op: IoOp,
     pub port: Value,
     pub timeout: Option<Duration>,

@@ -97,7 +97,7 @@ fn bench_compilation(c: &mut Criterion) {
                 let (_, symbols) = setup();
                 symbols
             },
-            |mut symbols| black_box(compile("(+ 1 2)", &mut symbols).unwrap()),
+            |mut symbols| black_box(compile("(+ 1 2)", &mut symbols, "<benchmark>").unwrap()),
             criterion::BatchSize::SmallInput,
         );
     });
@@ -109,7 +109,9 @@ fn bench_compilation(c: &mut Criterion) {
                 let (_, symbols) = setup();
                 symbols
             },
-            |mut symbols| black_box(compile("(if (> 5 3) 100 200)", &mut symbols).unwrap()),
+            |mut symbols| {
+                black_box(compile("(if (> 5 3) 100 200)", &mut symbols, "<benchmark>").unwrap())
+            },
             criterion::BatchSize::SmallInput,
         );
     });
@@ -121,7 +123,11 @@ fn bench_compilation(c: &mut Criterion) {
                 let (_, symbols) = setup();
                 symbols
             },
-            |mut symbols| black_box(compile("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols).unwrap()),
+            |mut symbols| {
+                black_box(
+                    compile("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, "<benchmark>").unwrap(),
+                )
+            },
             criterion::BatchSize::SmallInput,
         );
     });
@@ -136,35 +142,40 @@ fn bench_vm_execution(c: &mut Criterion) {
     // Integer arithmetic (specialized ops)
     group.bench_function("int_add", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(+ 1 2 3 4 5)", &mut symbols).unwrap();
+        let result = compile("(+ 1 2 3 4 5)", &mut symbols, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Mixed int/float arithmetic
     group.bench_function("mixed_arithmetic", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(+ 1 2.5 3)", &mut symbols).unwrap();
+        let result = compile("(+ 1 2.5 3)", &mut symbols, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Comparisons
     group.bench_function("comparison", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(< 5 10)", &mut symbols).unwrap();
+        let result = compile("(< 5 10)", &mut symbols, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // List construction
     group.bench_function("cons", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(cons 1 (cons 2 (cons 3 nil)))", &mut symbols).unwrap();
+        let result = compile(
+            "(cons 1 (cons 2 (cons 3 nil)))",
+            &mut symbols,
+            "<benchmark>",
+        )
+        .unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // List access
     group.bench_function("first", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(first (list 1 2 3))", &mut symbols).unwrap();
+        let result = compile("(first (list 1 2 3))", &mut symbols, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
@@ -178,14 +189,19 @@ fn bench_conditionals(c: &mut Criterion) {
     // Simple if
     group.bench_function("if_true", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(if (> 5 3) 100 200)", &mut symbols).unwrap();
+        let result = compile("(if (> 5 3) 100 200)", &mut symbols, "<benchmark>").unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
     // Nested if
     group.bench_function("nested_if", |b| {
         let (mut vm, mut symbols) = setup();
-        let result = compile("(if (> 5 3) (if (< 2 4) 1 2) 3)", &mut symbols).unwrap();
+        let result = compile(
+            "(if (> 5 3) (if (< 2 4) 1 2) 3)",
+            &mut symbols,
+            "<benchmark>",
+        )
+        .unwrap();
         b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
     });
 
@@ -200,7 +216,9 @@ fn bench_end_to_end(c: &mut Criterion) {
     group.bench_function("simple", |b| {
         b.iter_batched(
             setup,
-            |(mut vm, mut symbols)| black_box(eval("(+ 1 2 3)", &mut symbols, &mut vm).unwrap()),
+            |(mut vm, mut symbols)| {
+                black_box(eval("(+ 1 2 3)", &mut symbols, &mut vm, "<benchmark>").unwrap())
+            },
             criterion::BatchSize::SmallInput,
         );
     });
@@ -210,7 +228,15 @@ fn bench_end_to_end(c: &mut Criterion) {
         b.iter_batched(
             setup,
             |(mut vm, mut symbols)| {
-                black_box(eval("(+ (* 2 3) (- 10 (/ 8 2)))", &mut symbols, &mut vm).unwrap())
+                black_box(
+                    eval(
+                        "(+ (* 2 3) (- 10 (/ 8 2)))",
+                        &mut symbols,
+                        &mut vm,
+                        "<benchmark>",
+                    )
+                    .unwrap(),
+                )
             },
             criterion::BatchSize::SmallInput,
         );
@@ -238,7 +264,7 @@ fn bench_scalability(c: &mut Criterion) {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let result = compile(&expr_str, &mut symbols).unwrap();
+                let result = compile(&expr_str, &mut symbols, "<benchmark>").unwrap();
 
                 b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
             },
@@ -258,7 +284,7 @@ fn bench_scalability(c: &mut Criterion) {
                         .collect::<Vec<_>>()
                         .join(" ")
                 );
-                let result = compile(&expr_str, &mut symbols).unwrap();
+                let result = compile(&expr_str, &mut symbols, "<benchmark>").unwrap();
 
                 b.iter(|| black_box(vm.execute(&result.bytecode).unwrap()));
             },

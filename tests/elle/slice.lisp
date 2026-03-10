@@ -17,7 +17,7 @@
 (assert-eq (slice [1 2 3 4 5] 3 5) [4 5] "tuple slice to end")
 (assert-eq (slice [1 2 3] 0 100) [1 2 3] "tuple slice end clamped")
 (assert-eq (slice [1 2 3] 100 200) [] "tuple slice start clamped past end")
-(assert-true (tuple? (slice [1 2 3] 0 2)) "tuple slice returns tuple")
+(assert-true (array? (slice [1 2 3] 0 2)) "tuple slice returns tuple")
 
 # ============================================================================
 # Array slicing
@@ -67,7 +67,7 @@
 (assert-eq (buffer->string (slice @"hello" 0 0)) "" "buffer slice empty start=end=0")
 (assert-eq (buffer->string (slice @"hello" 3 3)) "" "buffer slice empty start=end")
 (assert-eq (buffer->string (slice @"hello" 4 2)) "" "buffer slice start > end")
-(assert-true (buffer? (slice @"hello" 0 3)) "buffer slice returns buffer")
+(assert-true (string? (slice @"hello" 0 3)) "buffer slice returns buffer")
 
 # ============================================================================
 # Bytes slicing (existing behavior preserved)
@@ -81,9 +81,9 @@
 # Blob slicing (existing behavior preserved)
 # ============================================================================
 
-(assert-eq (slice (blob 1 2 3 4 5) 1 3) (blob 2 3) "blob slice middle")
-(assert-eq (slice (blob 1 2 3) 0 100) (blob 1 2 3) "blob slice end clamped")
-(assert-true (blob? (slice (blob 1 2 3) 0 2)) "blob slice returns blob")
+(assert-eq (slice (@bytes 1 2 3 4 5) 1 3) (@bytes 2 3) "blob slice middle")
+(assert-eq (slice (@bytes 1 2 3) 0 100) (@bytes 1 2 3) "blob slice end clamped")
+(assert-true (bytes? (slice (@bytes 1 2 3) 0 2)) "blob slice returns blob")
 
 # ============================================================================
 # Error cases

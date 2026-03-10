@@ -8,7 +8,7 @@
 # passing it as arguments.
 #
 # Demonstrates:
-#   make-parameter      — create a parameter with a default value
+#   parameter      — create a parameter with a default value
 #   parameter?          — test if a value is a parameter
 #   Calling a parameter — read its current value
 #   parameterize        — override a parameter's value in a scope
@@ -22,9 +22,9 @@
 # 1. Creating and reading parameters
 # ========================================
 
-# make-parameter creates a parameter with a default value.
+# parameter creates a parameter with a default value.
 # Calling the parameter (with no args) reads its current value.
-(def output-port (make-parameter "stdout"))
+(def output-port (parameter "stdout"))
 (assert-eq (output-port) "stdout" "parameter: read default")
 (display "  (output-port) = ") (print (output-port))
 
@@ -35,10 +35,10 @@
 (display "  (parameter? output-port) = ") (print (parameter? output-port))
 
 # Parameters can hold any value
-(def current-user (make-parameter nil))
+(def current-user (parameter nil))
 (assert-true (nil? (current-user)) "parameter: nil default")
 
-(def max-retries (make-parameter 3))
+(def max-retries (parameter 3))
 (assert-eq (max-retries) 3 "parameter: int default")
 
 
@@ -50,7 +50,7 @@
 # The override is active only within the parameterize body.
 # After the body, the parameter reverts to its previous value.
 
-(def p (make-parameter 10))
+(def p (parameter 10))
 
 # Inside parameterize, p reads the new value
 (parameterize ((p 20))
@@ -70,7 +70,7 @@
 # Nested parameterize creates a stack of overrides.
 # Inner overrides shadow outer ones.
 
-(def level (make-parameter 1))
+(def level (parameter 1))
 
 (parameterize ((level 2))
   (assert-eq (level) 2 "nested: outer override")
@@ -92,8 +92,8 @@
 # ========================================
 
 # parameterize can override multiple parameters at once.
-(def x (make-parameter 1))
-(def y (make-parameter 10))
+(def x (parameter 1))
+(def y (parameter 10))
 
 (parameterize ((x 2) (y 20))
   (assert-eq (x) 2 "multi: x overridden")
@@ -113,7 +113,7 @@
 # The body of parameterize is a begin — multiple expressions,
 # last one is the return value.
 
-(def config (make-parameter "default"))
+(def config (parameter "default"))
 
 (def result (parameterize ((config "test"))
   (def msg (string/join (list "Config: " (config)) ""))
@@ -131,7 +131,7 @@
 # A common use of parameters is to simulate I/O ports.
 # Functions can read the current output port without it being passed as an argument.
 
-(def current-output (make-parameter "stdout"))
+(def current-output (parameter "stdout"))
 
 (defn write-line [msg]
   "Write a message to the current output port."
@@ -163,7 +163,7 @@
 # When a child fiber is created inside a parameterize,
 # the child sees the overridden values.
 
-(def shared-param (make-parameter 100))
+(def shared-param (parameter 100))
 
 (parameterize ((shared-param 200))
   # Create a child fiber inside the parameterize

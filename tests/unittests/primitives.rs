@@ -499,8 +499,8 @@ fn test_string_split() {
 
     // Basic split
     let result = call_primitive(&split_fn, &[Value::string("a,b,c"), Value::string(",")]).unwrap();
-    assert!(result.is_tuple());
-    let vec = result.as_tuple().unwrap();
+    assert!(result.is_array());
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 3);
     assert_eq!(vec[0], Value::string("a"));
     assert_eq!(vec[1], Value::string("b"));
@@ -508,7 +508,7 @@ fn test_string_split() {
 
     // Split with multi-char delimiter
     let result = call_primitive(&split_fn, &[Value::string("hello"), Value::string("ll")]).unwrap();
-    let vec = result.as_tuple().unwrap();
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 2);
     assert_eq!(vec[0], Value::string("he"));
     assert_eq!(vec[1], Value::string("o"));
@@ -516,7 +516,7 @@ fn test_string_split() {
     // No match returns original in tuple
     let result =
         call_primitive(&split_fn, &[Value::string("hello"), Value::string("xyz")]).unwrap();
-    let vec = result.as_tuple().unwrap();
+    let vec = result.as_array().unwrap();
     assert_eq!(vec.len(), 1);
     assert_eq!(vec[0], Value::string("hello"));
 }
@@ -950,25 +950,6 @@ fn test_string_join_errors() {
 }
 
 #[test]
-fn test_number_to_string_errors() {
-    let (_vm, mut symbols, meta) = setup();
-    let num_to_str = get_primitive(&meta, &mut symbols, "number->string");
-
-    // Wrong arity - too few args
-    assert!(call_primitive(&num_to_str, &[]).is_err());
-
-    // Wrong arity - too many args
-    assert!(call_primitive(&num_to_str, &[Value::int(42), Value::int(100),]).is_err());
-
-    // Wrong type - not a number
-    assert!(call_primitive(&num_to_str, &[Value::string("42")]).is_err());
-
-    assert!(call_primitive(&num_to_str, &[Value::NIL]).is_err());
-
-    assert!(call_primitive(&num_to_str, &[Value::bool(true)]).is_err());
-}
-
-#[test]
 fn test_math_module_functions() {
     let (_vm, mut symbols, meta) = setup();
 
@@ -1030,7 +1011,7 @@ fn test_package_manager() {
     match call_primitive(&version_fn, &[]).unwrap() {
         v if v.is_string() => {
             let s = v.with_string(|s| s.to_string()).unwrap();
-            assert_eq!(s, "0.3.0")
+            assert_eq!(s, "1.0.0")
         }
         _ => panic!("Expected string"),
     }
@@ -1513,8 +1494,8 @@ fn test_json_parse_objects() {
 
     let result = call_primitive(&json_parse, &[Value::string("{}")]);
     match result.unwrap() {
-        v if v.as_table().is_some() => {
-            let t = v.as_table().unwrap();
+        v if v.as_struct_mut().is_some() => {
+            let t = v.as_struct_mut().unwrap();
             assert_eq!(t.borrow().len(), 0);
         }
         _ => panic!("Expected table"),
@@ -1525,8 +1506,8 @@ fn test_json_parse_objects() {
         &[Value::string("{\"name\":\"Alice\",\"age\":30}")],
     );
     match result.unwrap() {
-        v if v.as_table().is_some() => {
-            let t = v.as_table().unwrap();
+        v if v.as_struct_mut().is_some() => {
+            let t = v.as_struct_mut().unwrap();
             let table = t.borrow();
             assert_eq!(table.len(), 2);
         }
@@ -1668,7 +1649,7 @@ fn test_json_serialize_arrays() {
     let (_vm, mut symbols, meta) = setup();
     let json_serialize = get_primitive(&meta, &mut symbols, "json-serialize");
 
-    let vec = Value::array(vec![Value::int(1), Value::int(2), Value::int(3)]);
+    let vec = Value::array_mut(vec![Value::int(1), Value::int(2), Value::int(3)]);
     let result = call_primitive(&json_serialize, &[vec]);
     assert_eq!(result.unwrap(), Value::string("[1,2,3]"));
 }
@@ -1711,17 +1692,19 @@ fn test_json_serialize_errors() {
 
 // Disassembly tests
 #[test]
-fn test_disbit_returns_array_of_strings() {
+fn test_disjit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
-    let disbit = get_primitive(&meta, &mut symbols, "disbit");
+    let disjit = get_primitive(&meta, &mut symbols, "disjit");
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
-    let disasm = call_primitive(&disbit, &[result]).unwrap();
-    let vec = disasm.as_array().expect("disbit should return an array");
+    let disasm = call_primitive(&disjit, &[result]).unwrap();
+    let vec = disasm
+        .as_array_mut()
+        .expect("disbit should return an array");
     let vec = vec.borrow();
     assert!(!vec.is_empty(), "disbit should return non-empty array");
     for elem in vec.iter() {
@@ -1746,18 +1729,18 @@ fn test_disbit_arity_error() {
 }
 
 #[test]
-fn test_disjit_returns_array_for_pure_closure() {
+fn test_disbit_returns_array_for_pure_closure() {
     let (_vm, mut symbols, meta) = setup();
-    let disjit = get_primitive(&meta, &mut symbols, "disjit");
+    let disbit = get_primitive(&meta, &mut symbols, "disbit");
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
     let _effects = register_primitives(&mut vm2, &mut symbols2);
-    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2).unwrap();
+    let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
-    let ir = call_primitive(&disjit, &[result]).unwrap();
+    let ir = call_primitive(&disbit, &[result]).unwrap();
     if !ir.is_nil() {
-        let vec = ir.as_array().expect("disjit should return an array");
+        let vec = ir.as_array_mut().expect("disjit should return an array");
         let vec = vec.borrow();
         assert!(!vec.is_empty(), "disjit should return non-empty array");
         for elem in vec.iter() {
@@ -1793,7 +1776,7 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let _effects = register_primitives(&mut vm, &mut symbols);
     elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     elle::primitives::init_stdlib(&mut vm, &mut symbols);
-    pipeline_eval(input, &mut symbols, &mut vm).map_err(elle::error::LError::from)
+    pipeline_eval(input, &mut symbols, &mut vm, "<test>").map_err(elle::error::LError::from)
 }
 
 #[test]

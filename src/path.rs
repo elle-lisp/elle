@@ -30,24 +30,24 @@ pub fn filename(path: &str) -> Option<&str> {
 }
 
 /// File stem (filename without extension).
-pub fn stem(path: &str) -> Option<&str> {
+pub(crate) fn stem(path: &str) -> Option<&str> {
     Utf8Path::new(path).file_stem()
 }
 
 /// File extension (without dot).
-pub fn extension(path: &str) -> Option<&str> {
+pub(crate) fn extension(path: &str) -> Option<&str> {
     Utf8Path::new(path).extension()
 }
 
 /// Replace extension. Empty `ext` removes it.
-pub fn with_extension(path: &str, ext: &str) -> String {
+pub(crate) fn with_extension(path: &str, ext: &str) -> String {
     let mut buf = Utf8PathBuf::from(path);
     buf.set_extension(ext);
     buf.into_string()
 }
 
 /// Lexical normalization: resolve `.` and `..` without filesystem access.
-pub fn normalize(path: &str) -> String {
+pub(crate) fn normalize(path: &str) -> String {
     use path_clean::PathClean;
     // path-clean operates on std::path::Path. Round-trip is safe:
     // input is UTF-8, clean() only rearranges components.
@@ -61,13 +61,13 @@ pub fn normalize(path: &str) -> String {
 
 /// Compute relative path from `base` to `path`.
 /// Returns `None` when no relative path exists.
-pub fn relative(path: &str, base: &str) -> Option<String> {
+pub(crate) fn relative(path: &str, base: &str) -> Option<String> {
     pathdiff::diff_utf8_paths(Utf8Path::new(path), Utf8Path::new(base)).map(|p| p.into_string())
 }
 
 /// Split path into components.
 /// Root `/` appears as `"/"`, `.` and `..` appear literally.
-pub fn components(path: &str) -> Vec<String> {
+pub(crate) fn components(path: &str) -> Vec<String> {
     Utf8Path::new(path)
         .components()
         .map(|c| c.as_str().to_string())
@@ -75,12 +75,12 @@ pub fn components(path: &str) -> Vec<String> {
 }
 
 /// True if path is absolute.
-pub fn is_absolute(path: &str) -> bool {
+pub(crate) fn is_absolute(path: &str) -> bool {
     Utf8Path::new(path).is_absolute()
 }
 
 /// True if path is relative.
-pub fn is_relative(path: &str) -> bool {
+pub(crate) fn is_relative(path: &str) -> bool {
     Utf8Path::new(path).is_relative()
 }
 
@@ -89,7 +89,7 @@ pub fn is_relative(path: &str) -> bool {
 // =============================================================================
 
 /// Current working directory.
-pub fn cwd() -> Result<String, String> {
+pub(crate) fn cwd() -> Result<String, String> {
     std::env::current_dir()
         .map_err(|e| format!("failed to get current directory: {}", e))
         .and_then(|p| {
@@ -101,7 +101,7 @@ pub fn cwd() -> Result<String, String> {
 
 /// Compute absolute path: join with CWD if relative, then normalize.
 /// Does not require path to exist.
-pub fn absolute(path: &str) -> Result<String, String> {
+pub(crate) fn absolute(path: &str) -> Result<String, String> {
     if is_absolute(path) {
         Ok(normalize(path))
     } else {
@@ -111,7 +111,7 @@ pub fn absolute(path: &str) -> Result<String, String> {
 }
 
 /// Resolve path through the filesystem (symlinks resolved, must exist).
-pub fn canonicalize(path: &str) -> Result<String, String> {
+pub(crate) fn canonicalize(path: &str) -> Result<String, String> {
     std::fs::canonicalize(path)
         .map_err(|e| format!("failed to resolve '{}': {}", path, e))
         .and_then(|p| {
@@ -122,19 +122,19 @@ pub fn canonicalize(path: &str) -> Result<String, String> {
 }
 
 /// True if path exists (file, directory, or symlink target).
-pub fn exists(path: &str) -> bool {
+pub(crate) fn exists(path: &str) -> bool {
     Utf8Path::new(path).exists()
 }
 
 /// True if path exists and is a regular file.
-pub fn is_file(path: &str) -> bool {
+pub(crate) fn is_file(path: &str) -> bool {
     std::fs::metadata(path)
         .map(|m| m.is_file())
         .unwrap_or(false)
 }
 
 /// True if path exists and is a directory.
-pub fn is_dir(path: &str) -> bool {
+pub(crate) fn is_dir(path: &str) -> bool {
     std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
 }
 

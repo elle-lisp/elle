@@ -45,20 +45,20 @@ fn is_value_sendable(value: &Value) -> bool {
 
     match unsafe { deref(*value) } {
         // Strings are immutable and safe
-        HeapObject::String(_) => true,
+        HeapObject::LString(_) => true,
 
         // Immutable collections are safe
-        HeapObject::Array(vec) => {
+        HeapObject::LArrayMut(vec) => {
             if let Ok(borrowed) = vec.try_borrow() {
                 borrowed.iter().all(is_value_sendable)
             } else {
                 false
             }
         }
-        HeapObject::Struct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
+        HeapObject::LStruct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
 
         // Tuples are safe if their contents are
-        HeapObject::Tuple(elems) => elems.iter().all(is_value_sendable),
+        HeapObject::LArray(elems) => elems.iter().all(is_value_sendable),
 
         // Cons cells are safe if their contents are
         HeapObject::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
@@ -71,7 +71,7 @@ fn is_value_sendable(value: &Value) -> bool {
         }
 
         // Unsafe: mutable tables
-        HeapObject::Table(_) => false,
+        HeapObject::LStructMut(_) => false,
 
         // Native function pointers are inherently Send + Sync
         HeapObject::NativeFn(_) => true,
@@ -111,13 +111,13 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::FFIType(_) => true,
 
         // Buffers are sendable if we deep-copy
-        HeapObject::Buffer(buf) => buf.try_borrow().is_ok(),
+        HeapObject::LStringMut(buf) => buf.try_borrow().is_ok(),
 
         // Bytes are immutable and sendable
-        HeapObject::Bytes(_) => true,
+        HeapObject::LBytes(_) => true,
 
         // Blobs are sendable if we deep-copy
-        HeapObject::Blob(blob) => blob.try_borrow().is_ok(),
+        HeapObject::LBytesMut(blob) => blob.try_borrow().is_ok(),
 
         // Managed pointers are not sendable (Cell is not thread-safe)
         HeapObject::ManagedPointer(_) => false,
@@ -283,7 +283,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 /// The closure's bytecode is compiled and executed in that VM.
 ///
 /// For JIT-compiled closures, falls back to the source closure for thread-safe execution.
-pub fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -323,7 +323,7 @@ pub fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
 ///
 /// Blocks until the spawned thread completes and returns the actual Value result.
 /// If the thread produced an error, that error is propagated.
-pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -375,7 +375,7 @@ pub fn prim_join(args: &[Value]) -> (SignalBits, Value) {
 
 /// Returns the ID of the current thread
 /// (current-thread-id)
-pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
     let id = std::thread::current().id();
     // ThreadId debug format is "ThreadId(N)" — extract the integer
     let s = format!("{:?}", id);
@@ -388,7 +388,7 @@ pub fn prim_current_thread_id(_args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for concurrency operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/spawn",
         func: prim_spawn,

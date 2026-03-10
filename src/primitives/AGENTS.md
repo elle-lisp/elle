@@ -94,26 +94,35 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `buffer.rs` | `buffer`, `string->buffer`, `buffer->string` |
 | `string.rs` | `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/char-at`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
 | `format.rs` | `string/format` |
-| `table.rs` | `table`, `get`, `put`, `del`, `keys`, `values`, `has-key?` |
+| `table.rs` | `table`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
+| `access.rs` | `get`, `put` — polymorphic collection access |
 | `sets.rs` | `set`, `@set`, `set?`, `contains?`, `add`, `del`, `union`, `intersection`, `difference`, `set->array`, `seq->set` |
 | `structs.rs` | `struct` |
 | `fileio.rs` | `slurp`, `spit` |
 | `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
 | `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options` |
-| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from`, `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
+| `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from` |
+| `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `kwarg.rs` | `extract_keyword_timeout` helper function |
 | `display.rs` | `print`, `println`, `display`, `newline` |
 | `types.rs` | `nil?`, `pair?`, `list?`, `number?`, `integer?`, `float?`, `string?`, `boolean?`, `symbol?`, `keyword?`, `array?`, `tuple?`, `table?`, `struct?`, `buffer?`, `box?`, `bytes?`, `blob?`, `set?`, `type-of` |
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
-| `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value`, `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
+| `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value` |
+| `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
-| `debugging.rs` | `closure?`, `jit?`, `pure?`, `coro?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `captures`, `bytecode-size`, `call-count`, `doc`, `global?`, `string->keyword`, `disbit`, `disjit`, `vm/list-primitives`, `vm/primitive-meta` |
-| `debug.rs` | `debug-print`, `trace`, `memory-usage`, `arena/count`, `arena/stats`, `arena/scope-stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `arena/fiber-stats`, `environment` |
+| `introspection.rs` | `closure?`, `jit?`, `pure?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `string->keyword` |
+| `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
+| `arena.rs` | `arena/count`, `arena/stats`, `arena/scope-stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `arena/fiber-stats`, `environment` |
+| `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |
+| `ffi.rs` | `resolve_type_desc`, `extract_pointer_addr` helpers; FFI tests |
+| `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
+| `calling.rs` | `ffi/call` |
+| `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
 | `process.rs` | `exit`, `halt` |
 
 ## string/format primitive
@@ -264,11 +273,22 @@ Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is 
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 35 | Re-exports |
-| `registration.rs` | ~1390 | `register_primitives`, `register_fn` |
+| `mod.rs` | ~60 | Re-exports |
+| `registration.rs` | ~190 | `register_primitives`, `build_primitive_meta`, `cached_primitive_meta` |
 | `module_init.rs` | ~170 | `init_stdlib`, module initialization |
+| `introspection.rs` | ~384 | Function introspection predicates and metadata queries |
+| `disassembly.rs` | ~416 | Bytecode/JIT disassembly and CFG extraction |
+| `arena.rs` | ~577 | Heap arena management primitives |
+| `debug.rs` | ~221 | Debug print, trace, memory usage |
+| `ffi.rs` | ~340 | FFI type resolution helpers and tests |
+| `loading.rs` | ~330 | FFI library loading, symbol lookup, signatures, callbacks |
+| `calling.rs` | ~95 | FFI function call dispatch |
+| `memory.rs` | ~530 | FFI memory management, typed access, type construction |
 | `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `format.rs` | ~967 | `string/format` with positional/named modes, format specs, brace escaping |
-| `net.rs` | ~600 | 11 network primitives (TCP, UDP, Unix), PRIMITIVES array, tests |
+| `net.rs` | ~683 | TCP and UDP primitives, shared helpers, PRIMITIVES array, tests |
+| `unix.rs` | ~160 | Unix domain socket primitives |
+| `access.rs` | ~634 | Polymorphic `get`/`put` for all collection types |
+| `fiber_introspect.rs` | ~357 | Fiber introspection and management primitives, PRIMITIVES array |
 | `kwarg.rs` | ~100 | `extract_keyword_timeout` helper, tests |
 | (others) | varies | Individual primitive implementations |

@@ -182,7 +182,7 @@ impl Lowerer {
             return false;
         }
 
-        // Any spliced argument means generic CallArray, not intrinsic
+        // Any spliced argument means generic CallArrayMut, not intrinsic
         if args.iter().any(|a| a.spliced) {
             return false;
         }

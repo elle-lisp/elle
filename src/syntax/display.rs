@@ -29,7 +29,7 @@ impl fmt::Display for SyntaxKind {
                 }
                 write!(f, ")")
             }
-            SyntaxKind::Tuple(items) => {
+            SyntaxKind::Array(items) => {
                 write!(f, "[")?;
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
@@ -39,7 +39,7 @@ impl fmt::Display for SyntaxKind {
                 }
                 write!(f, "]")
             }
-            SyntaxKind::Array(items) => {
+            SyntaxKind::ArrayMut(items) => {
                 write!(f, "@[")?;
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {
@@ -59,7 +59,7 @@ impl fmt::Display for SyntaxKind {
                 }
                 write!(f, "}}")
             }
-            SyntaxKind::Table(items) => {
+            SyntaxKind::StructMut(items) => {
                 write!(f, "@{{")?;
                 for (i, item) in items.iter().enumerate() {
                     if i > 0 {

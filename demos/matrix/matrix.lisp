@@ -16,8 +16,8 @@
 # ============================================================================
 
 (defn make-matrix [rows cols initial-value]
-  "Create an m×n matrix (tuple of tuples, row-major)."
-  (tuple ;(map (fn [_] (tuple ;(map (fn [_] initial-value) (range cols))))
+  "Create an m×n matrix (@array of tuples, row-major)."
+  (@array ;(map (fn [_] (@array ;(map (fn [_] initial-value) (range cols))))
                (range rows))))
 
 (defn matrix-ref [m i j]
@@ -27,9 +27,9 @@
 (defn matrix-set [m i j val]
   "Return a new matrix with element at (i, j) set to val."
   (let* ([row (get m i)]
-         [new-row (tuple ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))]
+         [new-row (@array ;(map (fn [k v] (if (= k j) val v)) (range (length row)) row))]
          [rows (map (fn [k r] (if (= k i) new-row r)) (range (length m)) m)])
-    (tuple ;rows)))
+    (@array ;rows)))
 
 (defn matrix-rows [m]
   "Get number of rows."
@@ -43,14 +43,14 @@
 
 (defn matrix-map [f m]
   "Apply function f to every element, returning a new matrix."
-  (tuple ;(map (fn [row]
-                 (tuple ;(map f row)))
+  (@array ;(map (fn [row]
+                 (@array ;(map f row)))
                m)))
 
 (defn matrix-add [m1 m2]
   "Element-wise addition of two matrices."
-  (tuple ;(map (fn [r1 r2]
-                 (tuple ;(map + r1 r2)))
+  (@array ;(map (fn [r1 r2]
+                 (@array ;(map + r1 r2)))
                m1 m2)))
 
 # ============================================================================
@@ -70,8 +70,8 @@
   (let* ([rows (matrix-rows m)]
          [cols (matrix-cols m)]
          [coeff (- 1.0 (* 4.0 alpha))])
-    (tuple ;(map (fn [i]
-                   (tuple ;(map (fn [j]
+    (@array ;(map (fn [i]
+                   (@array ;(map (fn [j]
                                   (let* ([cell (matrix-ref m i j)]
                                          [up (get-neighbor m (- i 1) j rows cols 0.0)]
                                          [down (get-neighbor m (+ i 1) j rows cols 0.0)]
@@ -118,8 +118,8 @@
   "Create a grid with a hot spot in the center."
   (let* ([center-i (/ rows 2)]
          [center-j (/ cols 2)])
-    (tuple ;(map (fn [i]
-                   (tuple ;(map (fn [j]
+    (@array ;(map (fn [i]
+                   (@array ;(map (fn [j]
                                   (if (and (= i center-i) (= j center-j))
                                     1.0
                                     0.0))

@@ -16,7 +16,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// A known intrinsic operation that can be compiled to specialized instructions.
 #[derive(Debug, Clone, Copy)]
-pub enum IntrinsicOp {
+pub(crate) enum IntrinsicOp {
     Binary(BinOp),
     Compare(CmpOp),
     Unary(UnaryOp),
@@ -27,7 +27,7 @@ pub enum IntrinsicOp {
 /// Maps SymbolId to IntrinsicOp for known primitive operations.
 /// Only includes operators that are registered as global primitives
 /// and whose semantics match the corresponding LIR instruction exactly.
-pub fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, IntrinsicOp> {
+pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, IntrinsicOp> {
     let mut map = FxHashMap::default();
 
     let mut add = |name: &str, op: IntrinsicOp| {
@@ -83,12 +83,8 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "boolean?",
     "keyword?",
     "array?",
-    "tuple?",
-    "table?",
     "struct?",
-    "buffer?",
     "bytes?",
-    "blob?",
     "pointer?",
     "fiber?",
     "closure?",
@@ -98,7 +94,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "box?",
     // Collection predicates → bool
     "empty?",
-    "has-key?",
+    "has?",
     // String predicates → bool (canonical + aliases)
     "string/contains?",
     "string-contains?",
@@ -154,7 +150,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
 /// Used by escape analysis to accept `(let (...) (length x))` and
 /// similar patterns where the body result is a call to one of these
 /// primitives.
-pub fn build_immediate_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
+pub(crate) fn build_immediate_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
     let mut set = FxHashSet::default();
     for &name in IMMEDIATE_PRIMITIVES {
         if let Some(id) = symbols.get(name) {

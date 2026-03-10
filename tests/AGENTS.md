@@ -169,7 +169,7 @@ symbol table (e.g., calling `analyze()` or `compile()` directly).
 ```rust
 use crate::common::setup;
 let (mut symbols, mut vm) = setup();
-let result = analyze("(+ 1 2)", &mut symbols, &mut vm).unwrap();
+let result = analyze("(+ 1 2)", &mut symbols, &mut vm, "<test>").unwrap();
 ```
 
 Note: Some test files define their own local `setup()` that returns `(VM,

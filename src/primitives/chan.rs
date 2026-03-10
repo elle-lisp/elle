@@ -69,7 +69,7 @@ fn extract_receiver<'a>(
     })
 }
 
-/// `(chan/new)` or `(chan/new capacity)`
+/// `(chan)` or `(chan capacity)`
 ///
 /// Returns `[sender receiver]` as a tuple.
 fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
@@ -83,7 +83,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                         SIG_ERROR,
                         error_val(
                             "value-error",
-                            format!("chan/new: capacity must be non-negative, got {}", n),
+                            format!("chan: capacity must be non-negative, got {}", n),
                         ),
                     );
                 }
@@ -93,7 +93,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                         error_val(
                             "type-error",
                             format!(
-                                "chan/new: expected integer for capacity, got {}",
+                                "chan: expected integer for capacity, got {}",
                                 args[0].type_name()
                             ),
                         ),
@@ -107,7 +107,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "arity-error",
-                    format!("chan/new: expected 0 or 1 arguments, got {}", n),
+                    format!("chan: expected 0 or 1 arguments, got {}", n),
                 ),
             );
         }
@@ -115,7 +115,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
 
     let sender = Value::external("chan/sender", ChanSender(RefCell::new(Some(tx))));
     let receiver = Value::external("chan/receiver", ChanReceiver(RefCell::new(Some(rx))));
-    (SIG_OK, Value::tuple(vec![sender, receiver]))
+    (SIG_OK, Value::array(vec![sender, receiver]))
 }
 
 /// `(chan/send sender msg)` — non-blocking send.
@@ -140,14 +140,14 @@ fn prim_chan_send(args: &[Value]) -> (SignalBits, Value) {
     let inner = sender.0.borrow();
     let tx = match inner.as_ref() {
         Some(tx) => tx,
-        None => return (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")])),
+        None => return (SIG_OK, Value::array(vec![Value::keyword("disconnected")])),
     };
 
     match tx.try_send(SendableValue(args[1])) {
-        Ok(()) => (SIG_OK, Value::tuple(vec![Value::keyword("ok")])),
-        Err(TrySendError::Full(_)) => (SIG_OK, Value::tuple(vec![Value::keyword("full")])),
+        Ok(()) => (SIG_OK, Value::array(vec![Value::keyword("ok")])),
+        Err(TrySendError::Full(_)) => (SIG_OK, Value::array(vec![Value::keyword("full")])),
         Err(TrySendError::Disconnected(_)) => {
-            (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")]))
+            (SIG_OK, Value::array(vec![Value::keyword("disconnected")]))
         }
     }
 }
@@ -174,14 +174,14 @@ fn prim_chan_recv(args: &[Value]) -> (SignalBits, Value) {
     let inner = receiver.0.borrow();
     let rx = match inner.as_ref() {
         Some(rx) => rx,
-        None => return (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")])),
+        None => return (SIG_OK, Value::array(vec![Value::keyword("disconnected")])),
     };
 
     match rx.try_recv() {
-        Ok(SendableValue(v)) => (SIG_OK, Value::tuple(vec![Value::keyword("ok"), v])),
-        Err(TryRecvError::Empty) => (SIG_OK, Value::tuple(vec![Value::keyword("empty")])),
+        Ok(SendableValue(v)) => (SIG_OK, Value::array(vec![Value::keyword("ok"), v])),
+        Err(TryRecvError::Empty) => (SIG_OK, Value::array(vec![Value::keyword("empty")])),
         Err(TryRecvError::Disconnected) => {
-            (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")]))
+            (SIG_OK, Value::array(vec![Value::keyword("disconnected")]))
         }
     }
 }
@@ -281,7 +281,7 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Extract the array of receivers.
-    let receivers_cell = match args[0].as_array() {
+    let receivers_cell = match args[0].as_array_mut() {
         Some(arr) => arr,
         None => {
             return (
@@ -389,10 +389,10 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
             let oper = sel.select();
             let index = oper.index();
             match oper.recv(rxs[index]) {
-                Ok(SendableValue(v)) => (SIG_OK, Value::tuple(vec![Value::int(index as i64), v])),
+                Ok(SendableValue(v)) => (SIG_OK, Value::array(vec![Value::int(index as i64), v])),
                 Err(_) => {
                     // Channel disconnected during select.
-                    (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")]))
+                    (SIG_OK, Value::array(vec![Value::keyword("disconnected")]))
                 }
             }
         }
@@ -401,27 +401,27 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
                 let index = oper.index();
                 match oper.recv(rxs[index]) {
                     Ok(SendableValue(v)) => {
-                        (SIG_OK, Value::tuple(vec![Value::int(index as i64), v]))
+                        (SIG_OK, Value::array(vec![Value::int(index as i64), v]))
                     }
-                    Err(_) => (SIG_OK, Value::tuple(vec![Value::keyword("disconnected")])),
+                    Err(_) => (SIG_OK, Value::array(vec![Value::keyword("disconnected")])),
                 }
             }
-            Err(_) => (SIG_OK, Value::tuple(vec![Value::keyword("timeout")])),
+            Err(_) => (SIG_OK, Value::array(vec![Value::keyword("timeout")])),
         },
     }
 }
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "chan/new",
+        name: "chan",
         func: prim_chan_new,
         effect: Effect::errors(),
         arity: Arity::Range(0, 1),
         doc: "Create a channel. Returns [sender receiver]. Optional capacity for bounded channel.",
         params: &["&opt capacity"],
         category: "chan",
-        example: "(chan/new)",
-        aliases: &[],
+        example: "(chan)",
+        aliases: &["chan/new"],
     },
     PrimitiveDef {
         name: "chan/send",

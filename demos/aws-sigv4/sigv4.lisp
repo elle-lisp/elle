@@ -23,12 +23,12 @@
 ## Format: 2023-02-08T15:30:45Z
 ## Returns: (year month day hour minute second)
 (defn parse-timestamp-simple (timestamp-str)
-  (let ((year   (string->int (substring timestamp-str 0 4)))
-        (month  (string->int (substring timestamp-str 5 7)))
-        (day    (string->int (substring timestamp-str 8 10)))
-        (hour   (string->int (substring timestamp-str 11 13)))
-        (minute (string->int (substring timestamp-str 14 16)))
-        (second (string->int (substring timestamp-str 17 19))))
+  (let ((year   (string->int (slice timestamp-str 0 4)))
+        (month  (string->int (slice timestamp-str 5 7)))
+        (day    (string->int (slice timestamp-str 8 10)))
+        (hour   (string->int (slice timestamp-str 11 13)))
+        (minute (string->int (slice timestamp-str 14 16)))
+        (second (string->int (slice timestamp-str 17 19))))
     (list year month day hour minute second)))
 
 ## Format timestamp as AWS date (YYYYMMDD)

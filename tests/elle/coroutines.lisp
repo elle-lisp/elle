@@ -121,30 +121,30 @@
 (begin
   (def gen5 (fn [] (yield 1) (yield 2) 3))
   (var co5 (make-coroutine gen5))
-  (assert-eq (keyword->string (coro/status co5)) "created"
-    "state: initial is created")
+  (assert-eq (string (coro/status co5)) "new"
+    "state: initial is new")
   (coro/resume co5)
-  (assert-eq (keyword->string (coro/status co5)) "suspended"
-    "state: after first yield is suspended")
+  (assert-eq (string (coro/status co5)) "paused"
+    "state: after first yield is paused")
   (coro/resume co5)
-  (assert-eq (keyword->string (coro/status co5)) "suspended"
-    "state: after second yield is suspended")
+  (assert-eq (string (coro/status co5)) "paused"
+    "state: after second yield is paused")
   (coro/resume co5)
-  (assert-eq (keyword->string (coro/status co5)) "done"
-    "state: after final return is done"))
+  (assert-eq (string (coro/status co5)) "dead"
+    "state: after final return is dead"))
 
 # single yield state transitions
 (begin
   (def gen5b (fn [] (yield 1) 2))
   (var co5b (make-coroutine gen5b))
-  (assert-eq (keyword->string (coro/status co5b)) "created"
-    "state single: initial is created")
+  (assert-eq (string (coro/status co5b)) "new"
+    "state single: initial is new")
   (coro/resume co5b)
-  (assert-eq (keyword->string (coro/status co5b)) "suspended"
-    "state single: after yield is suspended")
+  (assert-eq (string (coro/status co5b)) "paused"
+    "state single: after yield is paused")
   (coro/resume co5b)
-  (assert-eq (keyword->string (coro/status co5b)) "done"
-    "state single: after return is done"))
+  (assert-eq (string (coro/status co5b)) "dead"
+    "state single: after return is dead"))
 
 # ============================================================================
 # Interleaved coroutines
@@ -185,16 +185,16 @@
   (var co7 (make-coroutine gen7))
   (assert-eq (coro/resume co7) 42
     "effect threading: first resume yields value")
-  (assert-eq (keyword->string (coro/status co7)) "suspended"
-    "effect threading: status is suspended after yield"))
+  (assert-eq (string (coro/status co7)) "paused"
+    "effect threading: status is paused after yield"))
 
 (begin
   (def gen7b (fn [] (yield -100) 0))
   (var co7b (make-coroutine gen7b))
   (assert-eq (coro/resume co7b) -100
     "effect threading: negative yield value")
-  (assert-eq (keyword->string (coro/status co7b)) "suspended"
-     "effect threading: suspended after negative yield"))
+  (assert-eq (string (coro/status co7b)) "paused"
+     "effect threading: paused after negative yield"))
 
 # ============================================================================
 # Basic yield/resume tests (from integration/coroutines.rs)
@@ -226,13 +226,13 @@
 # test_coroutine_status_created
 (begin
   (var co (make-coroutine (fn [] 42)))
-  (assert-eq (keyword->string (coro/status co)) "created" "status: created"))
+  (assert-eq (string (coro/status co)) "new" "status: new"))
 
 # test_coroutine_status_done
 (begin
   (var co (make-coroutine (fn [] 42)))
   (coro/resume co)
-  (assert-eq (keyword->string (coro/status co)) "done" "status: done"))
+  (assert-eq (string (coro/status co)) "dead" "status: dead"))
 
 # test_coroutine_done_predicate
 (begin
@@ -246,7 +246,7 @@
   (def gen (fn [] (yield 1) (yield 2)))
   (var co (make-coroutine gen))
   (coro/resume co)
-  (assert-eq (keyword->string (coro/status co)) "suspended" "status: suspended after yield"))
+  (assert-eq (string (coro/status co)) "paused" "status: paused after yield"))
 
 # test_coroutine_value_after_yield
 (begin
@@ -654,7 +654,7 @@
 (begin
   (var co (make-coroutine (fn [] (+ 1 2 3))))
   (assert-eq (coro/resume co) 6 "pure closure completes: value")
-  (assert-eq (keyword->string (coro/status co)) "done" "pure closure completes: status"))
+  (assert-eq (string (coro/status co)) "dead" "pure closure completes: status"))
 
 # ============================================================================
 # Deep cross-call yield tests
@@ -676,9 +676,9 @@
     (yield 2))))
   (assert-eq (coro/resume co) 1 "tail position: first")
   (assert-eq (coro/resume co) 2 "tail position: second")
-  (assert-eq (keyword->string (coro/status co)) "suspended" "tail position: suspended after second yield")
+  (assert-eq (string (coro/status co)) "paused" "tail position: paused after second yield")
   (coro/resume co)
-  (assert-eq (keyword->string (coro/status co)) "done" "tail position: done after final resume"))
+  (assert-eq (string (coro/status co)) "dead" "tail position: dead after final resume"))
 
 # test_deep_call_chain_with_multiple_yields
 (begin

@@ -4,7 +4,7 @@ The JIT subsystem compiles Elle bytecode to native machine code using Cranelift,
 
 ## How JIT Works
 
-1. **Eligibility Check**: Only `Pure` functions (no `yield`) can be JIT-compiled
+1. **Eligibility Check**: Only `Inert` functions (no `yield`) can be JIT-compiled
 2. **Compilation**: Bytecode is translated to Cranelift IR and compiled to native code
 3. **Caching**: Compiled code is cached on the `Closure` object
 4. **Execution**: The VM dispatches to native code instead of interpreting bytecode

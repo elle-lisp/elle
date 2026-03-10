@@ -13,17 +13,15 @@ use crate::{analyze_file, init_stdlib, register_primitives, VM};
 use std::collections::HashMap;
 
 /// Document state: source + diagnostics + symbol index
-pub struct DocumentState {
-    pub uri: String,
+pub(crate) struct DocumentState {
     pub source_text: String,
     pub symbol_index: SymbolIndex,
     pub diagnostics: Vec<Diagnostic>,
 }
 
 impl DocumentState {
-    fn new(uri: String) -> Self {
+    fn new() -> Self {
         Self {
-            uri,
             source_text: String::new(),
             symbol_index: SymbolIndex::new(),
             diagnostics: Vec::new(),
@@ -62,7 +60,7 @@ impl CompilerState {
 
     /// Handle document open
     pub fn on_document_open(&mut self, uri: String, text: String) {
-        let mut doc = DocumentState::new(uri.clone());
+        let mut doc = DocumentState::new();
         doc.update(text);
         self.documents.insert(uri, doc);
     }
@@ -90,7 +88,12 @@ impl CompilerState {
         doc.symbol_index = SymbolIndex::new();
 
         // Analyze using the file-as-letrec pipeline
-        let analysis = match analyze_file(&doc.source_text, &mut self.symbol_table, &mut self.vm) {
+        let analysis = match analyze_file(
+            &doc.source_text,
+            &mut self.symbol_table,
+            &mut self.vm,
+            "<lsp>",
+        ) {
             Ok(result) => result,
             Err(e) => {
                 // Analysis error - add as diagnostic
@@ -117,7 +120,7 @@ impl CompilerState {
     }
 
     /// Get document state
-    pub fn get_document(&self, uri: &str) -> Option<&DocumentState> {
+    pub(crate) fn get_document(&self, uri: &str) -> Option<&DocumentState> {
         self.documents.get(uri)
     }
 
@@ -129,11 +132,6 @@ impl CompilerState {
     /// Get the VM's documentation map
     pub fn docs(&self) -> &std::collections::HashMap<String, Doc> {
         &self.vm.docs
-    }
-
-    /// Get all open documents
-    pub fn documents(&self) -> impl Iterator<Item = &DocumentState> {
-        self.documents.values()
     }
 }
 

@@ -15,7 +15,7 @@ use crate::value::fiber_heap::needs_drop;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
-pub struct SharedAllocator {
+pub(crate) struct SharedAllocator {
     bump: bumpalo::Bump,
     /// Raw pointers to bump-allocated HeapObjects that need Drop.
     /// Ordered by allocation time (oldest first).
@@ -57,16 +57,19 @@ impl SharedAllocator {
         self.bump.reset();
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn len(&self) -> usize {
         self.alloc_count
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_empty(&self) -> bool {
         self.alloc_count == 0
     }
 
     /// Access the underlying bump allocator.
     /// Needed for future `active_allocator` tightening phases.
+    #[allow(dead_code)]
     pub fn bump(&self) -> &bumpalo::Bump {
         &self.bump
     }
@@ -97,13 +100,13 @@ mod tests {
     #[test]
     fn test_shared_alloc_basic() {
         let mut sa = SharedAllocator::new();
-        let v = sa.alloc(HeapObject::String("hello".into()));
+        let v = sa.alloc(HeapObject::LString("hello".into()));
         assert_eq!(sa.len(), 1);
         assert!(v.is_heap());
         unsafe {
             let obj = crate::value::heap::deref(v);
             match obj {
-                HeapObject::String(s) => assert_eq!(&**s, "hello"),
+                HeapObject::LString(s) => assert_eq!(&**s, "hello"),
                 _ => panic!("Expected String"),
             }
         }
@@ -120,7 +123,7 @@ mod tests {
     #[test]
     fn test_shared_alloc_drop_types_tracked() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::String("tracked".into()));
+        sa.alloc(HeapObject::LString("tracked".into()));
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
         assert_eq!(sa.dtors.len(), 1); // only String
@@ -129,8 +132,8 @@ mod tests {
     #[test]
     fn test_shared_alloc_teardown_runs_dtors() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::String("a".into()));
-        sa.alloc(HeapObject::String("b".into()));
+        sa.alloc(HeapObject::LString("a".into()));
+        sa.alloc(HeapObject::LString("b".into()));
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 3);
         assert_eq!(sa.dtors.len(), 2);
@@ -144,16 +147,16 @@ mod tests {
     #[test]
     fn test_shared_alloc_teardown_resets_bump() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::String("first".into()));
+        sa.alloc(HeapObject::LString("first".into()));
         sa.teardown();
 
         // Allocate again after teardown — should work fine
-        let v = sa.alloc(HeapObject::String("second".into()));
+        let v = sa.alloc(HeapObject::LString("second".into()));
         assert_eq!(sa.len(), 1);
         unsafe {
             let obj = crate::value::heap::deref(v);
             match obj {
-                HeapObject::String(s) => assert_eq!(&**s, "second"),
+                HeapObject::LString(s) => assert_eq!(&**s, "second"),
                 _ => panic!("Expected String"),
             }
         }
@@ -169,7 +172,7 @@ mod tests {
         assert_eq!(sa.len(), 1);
         assert!(!sa.is_empty());
 
-        sa.alloc(HeapObject::String("x".into()));
+        sa.alloc(HeapObject::LString("x".into()));
         assert_eq!(sa.len(), 2);
 
         sa.alloc(HeapObject::Float(42.5));

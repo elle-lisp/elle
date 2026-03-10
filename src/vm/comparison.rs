@@ -1,7 +1,7 @@
 use super::core::VM;
 use crate::value::{error_val, Value, SIG_ERROR};
 
-pub fn handle_eq(vm: &mut VM) {
+pub(crate) fn handle_eq(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Eq");
     // Fast path: bitwise identical
@@ -21,7 +21,7 @@ pub fn handle_eq(vm: &mut VM) {
     vm.fiber.stack.push(Value::FALSE);
 }
 
-pub fn handle_lt(vm: &mut VM) {
+pub(crate) fn handle_lt(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Lt");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Lt");
     let result = match (a.as_int(), b.as_int()) {
@@ -68,7 +68,7 @@ pub fn handle_lt(vm: &mut VM) {
     vm.fiber.stack.push(result);
 }
 
-pub fn handle_gt(vm: &mut VM) {
+pub(crate) fn handle_gt(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Gt");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Gt");
     let result = match (a.as_int(), b.as_int()) {
@@ -115,7 +115,7 @@ pub fn handle_gt(vm: &mut VM) {
     vm.fiber.stack.push(result);
 }
 
-pub fn handle_le(vm: &mut VM) {
+pub(crate) fn handle_le(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Le");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Le");
     let result = match (a.as_int(), b.as_int()) {
@@ -162,7 +162,7 @@ pub fn handle_le(vm: &mut VM) {
     vm.fiber.stack.push(result);
 }
 
-pub fn handle_ge(vm: &mut VM) {
+pub(crate) fn handle_ge(vm: &mut VM) {
     let b = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Ge");
     let a = vm.fiber.stack.pop().expect("VM bug: Stack underflow on Ge");
     let result = match (a.as_int(), b.as_int()) {

@@ -48,7 +48,7 @@ pub fn check_naming_convention(
 }
 
 /// Check arity of a function call
-pub fn check_call_arity(
+pub(crate) fn check_call_arity(
     func_sym: SymbolId,
     arg_count: usize,
     location: &Option<SourceLoc>,
@@ -112,7 +112,7 @@ fn to_kebab_case(s: &str) -> String {
 }
 
 /// Get arity of built-in functions
-pub fn builtin_arity(name: &str) -> Option<usize> {
+pub(crate) fn builtin_arity(name: &str) -> Option<usize> {
     match name {
         // Arithmetic - these are actually variadic but min 2
         "+" | "-" | "*" | "/" | "mod" | "rem" => Some(2),

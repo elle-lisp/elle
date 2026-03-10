@@ -41,7 +41,7 @@ impl<'a> Analyzer<'a> {
 
         for arm in &items[2..] {
             let parts = arm.as_list_or_tuple().ok_or_else(|| {
-                if matches!(arm.kind, SyntaxKind::Array(_)) {
+                if matches!(arm.kind, SyntaxKind::ArrayMut(_)) {
                     format!(
                         "{}: match arm must use (...) or [...], not @[...]",
                         arm.span
@@ -197,7 +197,7 @@ impl<'a> Analyzer<'a> {
                     rest,
                 })
             }
-            SyntaxKind::Tuple(items) => {
+            SyntaxKind::Array(items) => {
                 // Tuple pattern [...] - matches tuples (immutable)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
                 let elements: Result<Vec<_>, _> = fixed
@@ -213,7 +213,7 @@ impl<'a> Analyzer<'a> {
                     rest,
                 })
             }
-            SyntaxKind::Array(items) => {
+            SyntaxKind::ArrayMut(items) => {
                 // Array pattern @[...] - matches arrays (mutable)
                 let (fixed, rest_syntax) = Self::split_rest_pattern(items, &syntax.span)?;
                 let elements: Result<Vec<_>, _> = fixed
@@ -264,11 +264,11 @@ impl<'a> Analyzer<'a> {
                 }
                 Ok(HirPattern::Struct { entries })
             }
-            SyntaxKind::Table(items) => {
-                // Table pattern @{...} - matches tables (mutable)
+            SyntaxKind::StructMut(items) => {
+                // StructMut pattern @{...} - matches @structs (mutable)
                 if items.len() % 2 != 0 {
                     return Err(format!(
-                        "{}: table pattern requires keyword-pattern pairs",
+                        "{}: struct pattern requires keyword-pattern pairs",
                         syntax.span
                     ));
                 }
@@ -282,14 +282,14 @@ impl<'a> Analyzer<'a> {
                             }
                             _ => {
                                 return Err(format!(
-                                "{}: table pattern key must be a keyword or quoted symbol, got {}",
+                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
                                 syntax.span, pair[0]
                             ))
                             }
                         },
                         _ => {
                             return Err(format!(
-                                "{}: table pattern key must be a keyword or quoted symbol, got {}",
+                                "{}: struct pattern key must be a keyword or quoted symbol, got {}",
                                 syntax.span, pair[0]
                             ))
                         }

@@ -258,8 +258,8 @@ pub enum FiberStatus {
     New,
     /// Currently executing (on the VM's run stack)
     Alive,
-    /// Suspended by a signal (waiting for resume)
-    Suspended,
+    /// Paused by a signal (waiting for resume)
+    Paused,
     /// Completed normally (returned a value)
     Dead,
     /// Terminated by an unhandled error signal
@@ -272,7 +272,7 @@ impl FiberStatus {
         match self {
             FiberStatus::New => "new",
             FiberStatus::Alive => "alive",
-            FiberStatus::Suspended => "suspended",
+            FiberStatus::Paused => "paused",
             FiberStatus::Dead => "dead",
             FiberStatus::Error => "error",
         }
@@ -449,9 +449,9 @@ mod tests {
         fiber.status = FiberStatus::Alive;
         assert_eq!(fiber.status, FiberStatus::Alive);
 
-        fiber.status = FiberStatus::Suspended;
+        fiber.status = FiberStatus::Paused;
         fiber.signal = Some((SIG_YIELD, Value::int(42)));
-        assert_eq!(fiber.status, FiberStatus::Suspended);
+        assert_eq!(fiber.status, FiberStatus::Paused);
         assert_eq!(fiber.signal, Some((SIG_YIELD, Value::int(42))));
 
         fiber.status = FiberStatus::Dead;
@@ -597,7 +597,7 @@ mod tests {
     fn test_fiber_status_display() {
         assert_eq!(FiberStatus::New.as_str(), "new");
         assert_eq!(FiberStatus::Alive.as_str(), "alive");
-        assert_eq!(FiberStatus::Suspended.as_str(), "suspended");
+        assert_eq!(FiberStatus::Paused.as_str(), "paused");
         assert_eq!(FiberStatus::Dead.as_str(), "dead");
         assert_eq!(FiberStatus::Error.as_str(), "error");
     }

@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use crate::jit::JitCode;
 
-pub struct TailCallInfo {
+pub(crate) struct TailCallInfo {
     pub bytecode: Rc<Vec<u8>>,
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
@@ -33,7 +33,7 @@ pub struct VM {
     /// fiber. Used to set `child.parent_value` during resume chain wiring,
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,
-    pub ffi: FFISubsystem,
+    pub(crate) ffi: FFISubsystem,
     /// Modules currently being loaded (circular-import guard).
     /// Added before execution, removed after. If a module is in this set
     /// when import-file is called, it's a circular dependency.
@@ -42,7 +42,7 @@ pub struct VM {
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
-    pub pending_tail_call: Option<TailCallInfo>,
+    pub(crate) pending_tail_call: Option<TailCallInfo>,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -152,34 +152,34 @@ impl VM {
         &self.location_map
     }
 
-    /// Set the current source location for error reporting
     /// Format a runtime error value with source location.
     pub(crate) fn format_error_with_location(&self, err_value: Value) -> String {
-        let mut result = format!("{}", err_value);
+        let mut result = String::new();
 
-        // Add stack trace (shallowest frame first, drilling down to error origin)
+        // Stack trace first (shallowest frame first, drilling down to error origin)
         let trace = self.capture_stack_trace();
         if !trace.is_empty() {
             const MAX_TRACE_DEPTH: usize = 20;
             for frame in trace.iter().rev().take(MAX_TRACE_DEPTH) {
                 if let Some(name) = &frame.function_name {
-                    result.push_str(&format!("\n  in {}", name));
+                    result.push_str(&format!("  in {}", name));
                     if let Some(loc) = &frame.location {
                         result.push_str(&format!(" at {}", loc));
                     }
+                    result.push('\n');
                 }
             }
             if trace.len() > MAX_TRACE_DEPTH {
                 result.push_str(&format!(
-                    "\n  ... {} more frames",
+                    "  ... {} more frames\n",
                     trace.len() - MAX_TRACE_DEPTH
                 ));
             }
         }
 
-        // Error location and source context come last (the exact error origin)
+        // Error location and source context
         if let Some(loc) = &self.error_loc {
-            result.push_str(&format!("\n  at {}", loc));
+            result.push_str(&format!("  at {}\n", loc));
 
             // Add source context if available
             if let Some(source) = crate::error::formatting::load_source_for_loc(loc) {
@@ -190,17 +190,16 @@ impl VM {
                     } else {
                         line.to_string()
                     };
-                    result.push_str(&format!("\n   {} | {}", loc.line, truncated));
+                    result.push_str(&format!("   {}\n", truncated));
 
                     let caret = crate::error::formatting::highlight_column(&line, loc.col);
-                    result.push_str(&format!(
-                        "\n   {} | {}",
-                        " ".repeat(loc.line.to_string().len()),
-                        caret
-                    ));
+                    result.push_str(&format!("   {}\n", caret));
                 }
             }
         }
+
+        // Error value last
+        result.push_str(&format!("✗ Runtime error: {:?}", err_value));
 
         result
     }
@@ -354,11 +353,11 @@ impl VM {
         self.read_u16(bytecode, ip) as i16
     }
 
-    pub fn ffi(&self) -> &FFISubsystem {
+    pub(crate) fn ffi(&self) -> &FFISubsystem {
         &self.ffi
     }
 
-    pub fn ffi_mut(&mut self) -> &mut FFISubsystem {
+    pub(crate) fn ffi_mut(&mut self) -> &mut FFISubsystem {
         &mut self.ffi
     }
 

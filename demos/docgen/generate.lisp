@@ -28,7 +28,7 @@
 (def find-closing-helper (fn (text pos tlen delimiter dlen)
   (if (> (+ pos dlen) tlen)
     nil
-    (if (= (substring text pos (+ pos dlen)) delimiter)
+    (if (= (slice text pos (+ pos dlen)) delimiter)
       pos
       (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
 
@@ -604,10 +604,10 @@ tbody tr:nth-child(even) {
                        (items (if (nil? existing) (list) existing)))
                   (put groups cat (append items (list meta)))
                   groups))))
-          (table)
+          (@struct)
           names)))
 
-## Build a section (table with heading) for one category
+## Build a section (@struct with heading) for one category
 (var build-category-section
   (fn (cat-name metas)
     (let* ((rows (map (fn (meta)
@@ -615,10 +615,10 @@ tbody tr:nth-child(even) {
                               (build-description meta)
                               (get meta :example)))
                       metas))
-           (tbl (table "type" "table"
+           (tbl (@struct "type" "table"
                        "headers" (list "Function" "Description" "Example")
                        "rows" rows)))
-      (table "heading" (category-display-name cat-name)
+      (@struct "heading" (category-display-name cat-name)
              "level" 2
              "content" (list tbl)))))
 
@@ -707,7 +707,7 @@ tbody tr:nth-child(even) {
         (var page-data
           (if (= slug "stdlib-reference")
             (begin
-              (var pd (table))
+              (var pd (@struct))
               (put pd "title" title)
               (put pd "description" "Built-in functions and operations in Elle")
               (put pd "sections" (generate-stdlib-sections))

@@ -42,7 +42,7 @@ bytecode. Error messages include file:line:col information.
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
-| `effects` | Effect type (`Pure`, `Yields`, `Polymorphic`) |
+| `effects` | Effect type (`Inert`, `Yields`, `Polymorphic`) |
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
@@ -114,7 +114,7 @@ These must remain true. Violating them breaks the system:
    use `LocalCell` for indirection. The `cell_params_mask` on `Closure` tracks
    which parameters need cell wrapping.
 
-3. **Effects are inferred, not declared.** The `Effect` enum (`Pure`, `Yields`,
+3. **Effects are inferred, not declared.** The `Effect` enum (`Inert`, `Yields`,
    `Polymorphic`) propagates from leaves to root during analysis.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
@@ -139,9 +139,9 @@ Things that look wrong but aren't. The 4 most critical (agents get these wrong):
 - **`assign` not `set` for mutation.** `(assign var value)` mutates. `(set x val)` creates
   a set value. Agents reflexively write `(set x val)` — this is wrong.
 
-- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → tuple, `@[...]` → array.
-  `{...}` → struct, `@{...}` → table. `|...|` → set, `@|...|` → mutable set.
-  `"..."` → string, `@"..."` → buffer.
+- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array, `@[...]` → @array.
+  `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.
+  `"..."` → string, `@"..."` → @string.
 
 For the full list of oddities (17 items): [`docs/oddities.md`](docs/oddities.md).
 

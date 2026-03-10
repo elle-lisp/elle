@@ -11,7 +11,7 @@ use crate::value::{error_val, Value};
 /// (exit 0)     ; exits with code 0
 /// (exit 1)     ; exits with code 1
 /// (exit 42)    ; exits with code 42
-pub fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
     let code = if args.is_empty() {
         0
     } else if args.len() == 1 {
@@ -57,7 +57,7 @@ pub fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
 /// VM to stop execution and return the value to the caller. The signal
 /// is maskable by fiber signal masks but non-resumable: once a fiber
 /// halts, it is Dead.
-pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     if args.len() > 1 {
         return (
             SIG_ERROR,
@@ -75,13 +75,13 @@ pub fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
 /// and script path (argv\[0\] and argv\[1\]).
 ///
 /// (sys/args) => ["arg1" "arg2" ...]
-pub fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
     let args: Vec<Value> = std::env::args().skip(2).map(Value::string).collect();
-    (SIG_OK, Value::tuple(args))
+    (SIG_OK, Value::array(args))
 }
 
 /// Declarative primitive definitions for process operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/exit",
         func: prim_exit,

@@ -56,8 +56,9 @@ pub fn eval(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let syntax = read_syntax(source)?;
+    let syntax = read_syntax(source, source_name)?;
 
     // Get cached expander and meta (uses throwaway cache VM only for init)
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
@@ -96,8 +97,9 @@ pub fn eval_all(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let result = compile_file(source, symbols)?;
+    let result = compile_file(source, symbols, source_name)?;
     vm.execute(&result.bytecode).map_err(|e| e.to_string())
 }
 
@@ -109,7 +111,8 @@ pub fn eval_file(
     source: &str,
     symbols: &mut SymbolTable,
     vm: &mut VM,
+    source_name: &str,
 ) -> Result<crate::value::Value, String> {
-    let result = super::compile::compile_file(source, symbols)?;
+    let result = super::compile::compile_file(source, symbols, source_name)?;
     vm.execute(&result.bytecode).map_err(|e| e.to_string())
 }

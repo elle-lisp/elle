@@ -38,10 +38,10 @@
 ## rest_preserves_tuple_type
 ## Verify that rest of a tuple is a tuple
 
-(assert-true (tuple? (rest [1 2]))
+(assert-true (array? (rest [1 2]))
   "rest preserves tuple type: [1 2]")
 
-(assert-true (tuple? (rest [1 2 3]))
+(assert-true (array? (rest [1 2 3]))
   "rest preserves tuple type: [1 2 3]")
 
 ## rest_preserves_array_type

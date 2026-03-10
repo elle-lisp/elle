@@ -17,9 +17,6 @@ mod bytecode_debug {
 mod hir_debug {
     include!("hir_debug.rs");
 }
-mod lir_debug {
-    include!("lir_debug.rs");
-}
 mod jit {
     include!("jit.rs");
 }

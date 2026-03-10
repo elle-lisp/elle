@@ -69,7 +69,7 @@ use super::core::VM;
 /// When a tail call occurs before a signal, the active context differs from
 /// the original closure — callers that create `SuspendedFrame`s must use
 /// these fields, not the original closure's bytecode/constants.
-pub struct ExecResult {
+pub(crate) struct ExecResult {
     pub bits: SignalBits,
     pub ip: usize,
     pub bytecode: Rc<Vec<u8>>,
@@ -85,7 +85,7 @@ impl VM {
     /// Returns `ExecResult` containing the signal, IP, and the active
     /// bytecode/constants/env at exit. The active context may differ from
     /// the input if a tail call occurred before the signal.
-    pub fn execute_bytecode_from_ip(
+    pub(crate) fn execute_bytecode_from_ip(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
@@ -149,7 +149,7 @@ impl VM {
     /// the input if a tail call occurred before the signal — callers that
     /// create `SuspendedFrame`s must use the returned context, not the
     /// original closure fields.
-    pub fn execute_bytecode_saving_stack(
+    pub(crate) fn execute_bytecode_saving_stack(
         &mut self,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,

@@ -8,7 +8,7 @@ use crate::value::{error_val, Value};
 /// Create a buffer from byte arguments
 /// (buffer) => empty buffer
 /// (buffer 72 101 108) => buffer with those bytes
-pub fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
     let mut bytes = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         match arg.as_int() {
@@ -37,11 +37,11 @@ pub fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
             }
         }
     }
-    (SIG_OK, Value::buffer(bytes))
+    (SIG_OK, Value::string_mut(bytes))
 }
 
 /// Convert a string to a buffer (UTF-8 bytes)
-pub fn prim_string_to_buffer(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -52,7 +52,7 @@ pub fn prim_string_to_buffer(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::buffer(bytes))
+        (SIG_OK, Value::string_mut(bytes))
     } else {
         (
             SIG_ERROR,
@@ -68,7 +68,7 @@ pub fn prim_string_to_buffer(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Convert a buffer to a string (UTF-8)
-pub fn prim_buffer_to_string(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_buffer_to_string(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -78,7 +78,7 @@ pub fn prim_buffer_to_string(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
+    match args[0].as_string_mut() {
         Some(buf_ref) => {
             let borrowed = buf_ref.borrow();
             match String::from_utf8(borrowed.clone()) {
@@ -102,17 +102,17 @@ pub fn prim_buffer_to_string(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "buffer",
+        name: "@string",
         func: prim_buffer,
         effect: Effect::inert(),
         arity: Arity::AtLeast(0),
-        doc: "Create a mutable buffer from byte arguments.",
+        doc: "Create a mutable string from byte arguments.",
         params: &[],
         category: "buffer",
-        example: "(buffer 72 101 108 108 111)",
-        aliases: &[],
+        example: "(@string 72 101 108 108 111)",
+        aliases: &["buffer"],
     },
     PrimitiveDef {
         name: "string->buffer",

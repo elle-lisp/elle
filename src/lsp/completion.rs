@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Get completion items at the given position
-pub fn get_completions(
+pub(crate) fn get_completions(
     _line: u32,
     _character: u32,
     prefix: &str,

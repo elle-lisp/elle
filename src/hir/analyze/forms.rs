@@ -7,7 +7,7 @@ use crate::syntax::{Syntax, SyntaxKind};
 impl<'a> Analyzer<'a> {
     /// Resolve a primitive name to its binding via scope lookup.
     ///
-    /// Used by collection literal desugaring (Tuple, Array, Struct, Table)
+    /// Used by collection literal desugaring (Array, ArrayMut, Struct, StructMut)
     /// and qualified symbol desugaring to find the primitive binding
     /// registered by `bind_primitives`. Falls back to a fresh binding
     /// if the name isn't in scope (e.g., in tests without primitives).
@@ -55,8 +55,8 @@ impl<'a> Analyzer<'a> {
                 }
             }
 
-            // Tuple literal [...] - call tuple primitive
-            SyntaxKind::Tuple(items) => {
+            // Immutable array literal [...] - call array primitive
+            SyntaxKind::Array(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::inert();
                 for item in items {
@@ -65,7 +65,7 @@ impl<'a> Analyzer<'a> {
                     effect = effect.combine(hir.effect);
                     args.push(CallArg { expr: hir, spliced });
                 }
-                let binding = self.resolve_primitive("tuple");
+                let binding = self.resolve_primitive("array");
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
@@ -78,8 +78,8 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
-            // Array literal @[...] - call array primitive
-            SyntaxKind::Array(items) => {
+            // Mutable array literal @[...] - call @array primitive
+            SyntaxKind::ArrayMut(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::inert();
                 for item in items {
@@ -88,7 +88,7 @@ impl<'a> Analyzer<'a> {
                     effect = effect.combine(hir.effect);
                     args.push(CallArg { expr: hir, spliced });
                 }
-                let binding = self.resolve_primitive("array");
+                let binding = self.resolve_primitive("@array");
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
@@ -134,8 +134,8 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
-            // Table literal @{...} - call table primitive
-            SyntaxKind::Table(items) => {
+            // Mutable struct literal @{...} - call @struct primitive
+            SyntaxKind::StructMut(items) => {
                 let mut args = Vec::new();
                 let mut effect = Effect::inert();
                 for item in items {
@@ -143,7 +143,7 @@ impl<'a> Analyzer<'a> {
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
                     {
                         return Err(format!(
-                            "{}: splice is not supported in table constructors (key-value types require key-value pairs)",
+                            "{}: splice is not supported in struct constructors (key-value types require key-value pairs)",
                             item.span
                         ));
                     }
@@ -154,7 +154,7 @@ impl<'a> Analyzer<'a> {
                         spliced: false,
                     });
                 }
-                let binding = self.resolve_primitive("table");
+                let binding = self.resolve_primitive("@struct");
                 let func = Hir::new(HirKind::Var(binding), span.clone(), Effect::inert());
                 Ok(Hir::new(
                     HirKind::Call {
@@ -713,7 +713,7 @@ impl<'a> Analyzer<'a> {
 
         for clause in &items[1..] {
             let parts = clause.as_list_or_tuple().ok_or_else(|| {
-                if matches!(clause.kind, SyntaxKind::Array(_)) {
+                if matches!(clause.kind, SyntaxKind::ArrayMut(_)) {
                     format!(
                         "{}: cond clause must use (...) or [...], not @[...]",
                         clause.span
@@ -761,8 +761,8 @@ impl<'a> Analyzer<'a> {
     /// All synthesized HIR nodes carry the original symbol's span.
     ///
     /// The `get` binding always resolves to the global primitive,
-    /// matching the pattern used for tuple/array/struct/table literal
-    /// desugaring (see SyntaxKind::Tuple/Array/Struct/Table arms above).
+    /// matching the pattern used for array/struct literal
+    /// desugaring (see SyntaxKind::Array/ArrayMut/Struct/StructMut arms above).
     fn desugar_qualified_symbol(
         &mut self,
         name: &str,
