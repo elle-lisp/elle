@@ -26,6 +26,8 @@ Does NOT:
 | `CaptureInfo` | What a closure captures and how (`Local`, `Capture`, or `Global`) |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `EffectSources` | Tracks Yields sources within a lambda body for polymorphic inference |
+| `current_param_bounds` | Maps `Binding` → `Effects` for parameters with declared bounds (during lambda analysis) |
+| `param_bounds_env` | Maps `Binding` → `Vec<(usize, Effects)>` for call-site checking of bounded parameters |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
@@ -116,15 +118,18 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
 
-16. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
+16. **Effect bounds are parsed from `restrict` preambles.** After docstring extraction and before body analysis, the analyzer scans for `restrict` forms in the lambda body preamble. `(restrict)` declares the function is inert. `(restrict :kw ...)` declares the function may emit only these signals. `(restrict param)` declares the parameter must be inert. `(restrict param :kw ...)` declares the parameter may emit at most these signals. Multiple `restrict` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. Duplicate restrictions for the same parameter or function-level are compile-time errors. The first non-restrict form ends the preamble.
 
-17. **`Parameterize` creates dynamic binding frames.** `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }` is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`. Each binding is a (parameter, value) pair. The analyzer validates that each parameter expression is a parameter (or will be at runtime). The lowerer emits `PushParamFrame` before evaluating bindings, stores them in the frame, then emits `PopParamFrame` after the body.
+17. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
+
+18. **`Parameterize` creates dynamic binding frames.** `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }` is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`. Each binding is a (parameter, value) pair. The analyzer validates that each parameter expression is a parameter (or will be at runtime). The lowerer emits `PushParamFrame` before evaluating bindings, stores them in the frame, then emits `PopParamFrame` after the body.
 
 ## When to modify
 
 - **Adding a new special form**: Add a case in `forms.rs::analyze_expr`, implement `analyze_your_form` method
 - **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
 - **Changing effect inference**: Update `call.rs` and `lambda.rs`
+- **Changing effect bounds**: Update `lambda.rs::parse_restrict_preamble()` and `call.rs` for call-site checking
 - **Changing pattern matching**: Update `special.rs` and `destructure.rs`
 - **Changing scope resolution**: Update `mod.rs::lookup()` and `bind()`
 
@@ -135,3 +140,5 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating effects**: When combining sub-expressions, use `effect.combine()` to merge effects upward
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node
+- **Forgetting to include bounded parameter bits in inferred_effect**: When a parameter has a `restrict` bound, its bits must be included in the lambda's `inferred_effect`, not tracked as polymorphic
+- **Not checking effect bounds at call sites**: When a concrete function is passed to a parameter with a bound, the analyzer must check the argument's effect against the bound
