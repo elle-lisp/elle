@@ -85,25 +85,30 @@ jobs:
             ./target/release/elle "$f" || exit 1
           done
           echo "✓ All Elle script tests passed"
-
-  tests-plugins:
-    name: Plugin Tests
-    runs-on: ubuntu-latest
-    needs: test-examples
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build release binary
-        run: cargo build --release
       - name: Build plugins
         run: make plugins
       - name: Run plugin tests
         run: |
+          echo "Running plugin tests:"
+          echo "===================="
           for f in tests/elle/plugins/*.lisp; do
             echo "  $f"
             ./target/release/elle "$f" || exit 1
           done
+          echo "✓ All plugin tests passed"
+
+  audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install and run cargo-audit
+        run: |
+          cargo install cargo-audit
+          cargo audit
 
   docs:
     name: Build Documentation
