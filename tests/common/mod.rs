@@ -21,7 +21,7 @@ pub fn eval_source_bare(input: &str) -> Result<Value, String> {
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     // No init_stdlib — tests using this must not depend on stdlib functions
-    let result = eval_all(input, &mut symbols, &mut vm);
+    let result = eval_all(input, &mut symbols, &mut vm, "<test>");
     set_vm_context(std::ptr::null_mut());
     result
 }
@@ -42,7 +42,7 @@ pub fn eval_source(input: &str) -> Result<Value, String> {
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
-    let result = eval_all(input, &mut symbols, &mut vm);
+    let result = eval_all(input, &mut symbols, &mut vm, "<test>");
     // Clear context to avoid affecting other tests
     set_vm_context(std::ptr::null_mut());
     result
@@ -142,7 +142,7 @@ fn eval_with_cache(
         set_vm_context(&mut c.vm as *mut VM);
         set_symbol_table(&mut c.symbols as *mut SymbolTable);
 
-        let result = eval_all(input, &mut c.symbols, &mut c.vm);
+        let result = eval_all(input, &mut c.symbols, &mut c.vm, "<test>");
 
         set_vm_context(std::ptr::null_mut());
 

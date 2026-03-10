@@ -41,7 +41,7 @@ pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String>
 }
 
 /// Parse source code into a Syntax tree
-pub fn read_syntax(input: &str) -> Result<Syntax, String> {
+pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
     // Strip shebang if present
     let input_owned = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -49,7 +49,7 @@ pub fn read_syntax(input: &str) -> Result<Syntax, String> {
         input.to_string()
     };
 
-    let mut lexer = Lexer::new(&input_owned);
+    let mut lexer = Lexer::with_file(&input_owned, source_name);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
     let mut lengths = Vec::new();
@@ -76,7 +76,7 @@ pub fn read_syntax(input: &str) -> Result<Syntax, String> {
 }
 
 /// Parse source code into multiple Syntax trees
-pub fn read_syntax_all(input: &str) -> Result<Vec<Syntax>, String> {
+pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
     // Strip shebang if present
     let input_owned = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -84,7 +84,7 @@ pub fn read_syntax_all(input: &str) -> Result<Vec<Syntax>, String> {
         input.to_string()
     };
 
-    let mut lexer = Lexer::new(&input_owned);
+    let mut lexer = Lexer::with_file(&input_owned, source_name);
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
     let mut lengths = Vec::new();

@@ -76,7 +76,7 @@
 # debug-print with nested structures
 (assert-true (fn () (debug-print (list (list 1 2) (list 3 4))))
   "debug-print with nested lists")
-(assert-true (fn () (debug-print (array 1 2 3)))
+(assert-true (fn () (debug-print (@array 1 2 3)))
   "debug-print with arrays")
 
 # phase 5 feature availability

@@ -5,7 +5,7 @@ use crate::value::types::Arity;
 use crate::value::Value;
 
 /// (display val ...) — human-readable output, no quotes on strings
-pub fn prim_display(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_display(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         print!("{}", arg);
     }
@@ -13,7 +13,7 @@ pub fn prim_display(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (print val ...) — human-readable output with newline, no quotes on strings
-pub fn prim_print(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_print(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         print!("{}", arg);
     }
@@ -22,7 +22,7 @@ pub fn prim_print(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (write val ...) — readable literal form, strings quoted
-pub fn prim_write(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_write(args: &[Value]) -> (SignalBits, Value) {
     for arg in args {
         print!("{:?}", arg);
     }
@@ -30,7 +30,7 @@ pub fn prim_write(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (newline) — print a newline
-pub fn prim_newline(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_newline(_args: &[Value]) -> (SignalBits, Value) {
     println!();
     (SIG_OK, Value::NIL)
 }
@@ -97,14 +97,14 @@ fn flat_repr(val: Value, depth: usize) -> String {
     }
 
     // Arrays
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         let parts: Vec<String> = vec.iter().map(|v| flat_repr(*v, depth + 1)).collect();
         return format!("[{}]", parts.join(" "));
     }
 
     // Tables
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
@@ -214,7 +214,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Arrays: break with elements indented
-    if let Some(vec_ref) = val.as_array() {
+    if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         if vec.is_empty() {
             return "[]".to_string();
@@ -228,7 +228,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
     }
 
     // Tables: break with key-value pairs indented
-    if let Some(table_ref) = val.as_table() {
+    if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         if table.is_empty() {
             return "{}".to_string();
@@ -259,7 +259,7 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
 }
 
 /// (pp value) — Pretty-print a value with indentation, returns the value
-pub fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (SIG_OK, Value::NIL);
     }
@@ -273,7 +273,7 @@ pub fn prim_pp(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// (describe value) — Return a string describing a value's type and content
-pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (SIG_OK, Value::string("<error>"));
     }
@@ -311,6 +311,21 @@ pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, r);
     }
 
+    if let Some(buf_ref) = val.as_string_mut() {
+        let buf = buf_ref.borrow();
+        let display = if buf.len() > 20 {
+            let s = String::from_utf8_lossy(&buf[..20]);
+            format!("\"{}...\"", s)
+        } else {
+            let s = String::from_utf8_lossy(&buf);
+            format!("\"{}\"", s)
+        };
+        return (
+            SIG_OK,
+            Value::string(format!("<@string {} ({} bytes)>", display, buf.len())),
+        );
+    }
+
     if let Some(_id) = val.as_symbol() {
         return (SIG_OK, Value::string(format!("<symbol {}>", val)));
     }
@@ -333,26 +348,71 @@ pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Array
-    if let Some(vec_ref) = val.as_array() {
-        let vec = vec_ref.borrow();
-        return (SIG_OK, Value::string(format!("<array [{}]>", vec.len())));
-    }
-
-    // Table
-    if let Some(table_ref) = val.as_table() {
-        let table = table_ref.borrow();
+    // Immutable array
+    if let Some(elems) = val.as_array() {
         return (
             SIG_OK,
-            Value::string(format!("<table {{{} entries}}>", table.len())),
+            Value::string(format!("<array ({} elements)>", elems.len())),
         );
     }
 
-    // Struct
+    // Mutable array
+    if let Some(vec_ref) = val.as_array_mut() {
+        let vec = vec_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@array ({} elements)>", vec.len())),
+        );
+    }
+
+    // Immutable struct
     if let Some(struct_map) = val.as_struct() {
         return (
             SIG_OK,
-            Value::string(format!("<struct {{{} entries}}>", struct_map.len())),
+            Value::string(format!("<struct ({} entries)>", struct_map.len())),
+        );
+    }
+
+    // Mutable struct
+    if let Some(table_ref) = val.as_struct_mut() {
+        let table = table_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@struct ({} entries)>", table.len())),
+        );
+    }
+
+    // Immutable set
+    if let Some(set) = val.as_set() {
+        return (
+            SIG_OK,
+            Value::string(format!("<set ({} elements)>", set.len())),
+        );
+    }
+
+    // Mutable set
+    if let Some(set_ref) = val.as_set_mut() {
+        let set = set_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@set ({} elements)>", set.len())),
+        );
+    }
+
+    // Immutable bytes
+    if let Some(bytes) = val.as_bytes() {
+        return (
+            SIG_OK,
+            Value::string(format!("<bytes ({} bytes)>", bytes.len())),
+        );
+    }
+
+    // Mutable bytes
+    if let Some(bytes_ref) = val.as_bytes_mut() {
+        let bytes = bytes_ref.borrow();
+        return (
+            SIG_OK,
+            Value::string(format!("<@bytes ({} bytes)>", bytes.len())),
         );
     }
 
@@ -383,7 +443,7 @@ pub fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::string("<unknown>"))
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "display",
         func: prim_display,

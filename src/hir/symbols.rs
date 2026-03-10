@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_extract_define_variable() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(var x 42)", &mut symbols, &mut vm);
+        let result = analyze("(var x 42)", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -302,7 +302,12 @@ mod tests {
     #[test]
     fn test_extract_define_function() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(def add-one (fn (x) (+ x 1)))", &mut symbols, &mut vm);
+        let result = analyze(
+            "(def add-one (fn (x) (+ x 1)))",
+            &mut symbols,
+            &mut vm,
+            "<test>",
+        );
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -320,7 +325,12 @@ mod tests {
     #[test]
     fn test_extract_let_bindings() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(let ((a 1) (b 2)) (+ a b))", &mut symbols, &mut vm);
+        let result = analyze(
+            "(let ((a 1) (b 2)) (+ a b))",
+            &mut symbols,
+            &mut vm,
+            "<test>",
+        );
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -336,7 +346,7 @@ mod tests {
     #[test]
     fn test_extract_lambda_params() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(fn (x y) (+ x y))", &mut symbols, &mut vm);
+        let result = analyze("(fn (x y) (+ x y))", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -352,7 +362,7 @@ mod tests {
     #[test]
     fn test_extract_usages() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(let ((x 1)) (+ x x))", &mut symbols, &mut vm);
+        let result = analyze("(let ((x 1)) (+ x x))", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -368,7 +378,12 @@ mod tests {
     #[test]
     fn test_available_symbols() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(begin (var a 1) (var b 2))", &mut symbols, &mut vm);
+        let result = analyze(
+            "(begin (var a 1) (var b 2))",
+            &mut symbols,
+            &mut vm,
+            "<test>",
+        );
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -388,6 +403,7 @@ mod tests {
             r#"(def my-fn (fn (x) "Adds one to x" (+ x 1)))"#,
             &mut symbols,
             &mut vm,
+            "<test>",
         )
         .unwrap();
         let index = extract_symbols_from_hir(&result.hir, &symbols);
@@ -402,7 +418,13 @@ mod tests {
     #[test]
     fn test_symbol_def_no_documentation_without_docstring() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze(r#"(def my-fn (fn (x) (+ x 1)))"#, &mut symbols, &mut vm).unwrap();
+        let result = analyze(
+            r#"(def my-fn (fn (x) (+ x 1)))"#,
+            &mut symbols,
+            &mut vm,
+            "<test>",
+        )
+        .unwrap();
         let index = extract_symbols_from_hir(&result.hir, &symbols);
         let def = index
             .definitions
@@ -419,6 +441,7 @@ mod tests {
             r#"(defn greet (name) "Greets someone by name" (string/append "Hello, " name))"#,
             &mut symbols,
             &mut vm,
+            "<test>",
         )
         .unwrap();
         let index = extract_symbols_from_hir(&result.hir, &symbols);

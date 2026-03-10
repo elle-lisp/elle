@@ -227,7 +227,7 @@ pub enum LirInstr {
     /// Construct a cons cell
     Cons { dst: Reg, head: Reg, tail: Reg },
     /// Construct an array
-    MakeArray { dst: Reg, elements: Vec<Reg> },
+    MakeArrayMut { dst: Reg, elements: Vec<Reg> },
     /// Get car of cons
     Car { dst: Reg, pair: Reg },
     /// Get cdr of cons
@@ -257,9 +257,9 @@ pub enum LirInstr {
     /// Check if value is a pair
     IsPair { dst: Reg, src: Reg },
     /// Check if value is a tuple (for pattern matching)
-    IsTuple { dst: Reg, src: Reg },
-    /// Check if value is an array (for pattern matching)
     IsArray { dst: Reg, src: Reg },
+    /// Check if value is an array (for pattern matching)
+    IsArrayMut { dst: Reg, src: Reg },
     /// Check if value is a struct (for pattern matching)
     IsStruct { dst: Reg, src: Reg },
     /// Check if value is a table (for pattern matching)
@@ -269,7 +269,7 @@ pub enum LirInstr {
     /// Check if value is a mutable set (for pattern matching)
     IsSetMut { dst: Reg, src: Reg },
     /// Get array length (for pattern matching)
-    ArrayLen { dst: Reg, src: Reg },
+    ArrayMutLen { dst: Reg, src: Reg },
 
     // === Cell Operations (for mutable captures) ===
     /// Create a cell containing a value
@@ -285,9 +285,9 @@ pub enum LirInstr {
     /// Cdr with silent nil: returns nil if not a cons cell
     CdrOrNil { dst: Reg, src: Reg },
     /// Array/tuple ref with silent nil: returns nil if out of bounds or not an array/tuple
-    ArrayRefOrNil { dst: Reg, src: Reg, index: u16 },
+    ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
     /// Array/tuple slice from index: returns a new array from index to end, or empty array
-    ArraySliceFrom { dst: Reg, src: Reg, index: u16 },
+    ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
     /// Table/struct get with silent nil: returns nil if key not found or wrong type.
     /// `key` is a constant pool index holding a keyword Value.
     TableGetOrNil { dst: Reg, src: Reg, key: LirConst },
@@ -307,15 +307,15 @@ pub enum LirInstr {
     // === Splice Support ===
     /// Extend an array with all elements of an indexed type (array or tuple).
     /// Used by splice path: builds the args array incrementally.
-    ArrayExtend { dst: Reg, array: Reg, source: Reg },
+    ArrayMutExtend { dst: Reg, array: Reg, source: Reg },
     /// Append a single value to an array.
     /// Used by splice path: adds non-spliced args to the args array.
-    ArrayPush { dst: Reg, array: Reg, value: Reg },
+    ArrayMutPush { dst: Reg, array: Reg, value: Reg },
     /// Call a function with elements of an array as arguments.
     /// The array is unpacked into individual arguments at runtime.
-    CallArray { dst: Reg, func: Reg, args: Reg },
+    CallArrayMut { dst: Reg, func: Reg, args: Reg },
     /// Tail call with elements of an array as arguments.
-    TailCallArray { func: Reg, args: Reg },
+    TailCallArrayMut { func: Reg, args: Reg },
 
     // === Allocation Regions ===
     /// Enter an allocation region (scope boundary for allocator).

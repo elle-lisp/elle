@@ -7,7 +7,7 @@ use crate::value::{error_val, Value};
 use std::collections::BTreeMap;
 
 /// Logical NOT operation
-pub fn prim_not(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_not(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -25,7 +25,7 @@ pub fn prim_not(args: &[Value]) -> (SignalBits, Value) {
 /// (and) => true
 /// (and x) => x
 /// (and x y z) => z if all truthy, else first falsy
-pub fn prim_and(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_and(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (SIG_OK, Value::bool(true));
     }
@@ -44,7 +44,7 @@ pub fn prim_and(args: &[Value]) -> (SignalBits, Value) {
 /// (or) => false
 /// (or x) => x
 /// (or x y z) => x if truthy, else next truthy or z
-pub fn prim_or(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_or(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (SIG_OK, Value::bool(false));
     }
@@ -63,7 +63,7 @@ pub fn prim_or(args: &[Value]) -> (SignalBits, Value) {
 /// (xor) => false
 /// (xor x) => x as bool
 /// (xor x y z) => true if odd number of truthy values, else false
-pub fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (SIG_OK, Value::bool(false));
     }
@@ -76,7 +76,7 @@ pub fn prim_xor(args: &[Value]) -> (SignalBits, Value) {
 /// Assert that a value is truthy
 /// (assert value) => value if truthy, else signal error
 /// (assert value message) => value if truthy, else signal error with message
-pub fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
@@ -106,7 +106,7 @@ pub fn prim_assert(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for logic operations.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "not",
         func: prim_not,

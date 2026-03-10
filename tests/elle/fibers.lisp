@@ -138,7 +138,7 @@
 (let ([f (fiber/new (fn [] (fiber/signal 1 99)) 1)])
   (fiber/resume f)
   (fiber/cancel f "cancelling suspended")
-  (assert-eq (keyword->string (fiber/status f)) "error"
+  (assert-eq (string (fiber/status f)) "error"
     "cancelled suspended fiber is in error status"))
 
 # cancel_rejects_errored_fibers: cancel fails for errored fibers
@@ -275,14 +275,14 @@
   (let ((f (fiber/new (fn [] (fiber/signal 2 "waiting") 99) 3)))
     (fiber/resume f)
     (fiber/cancel f "cancelled")
-    (assert-eq (keyword->string (fiber/status f)) "error"
+    (assert-eq (string (fiber/status f)) "error"
       "fiber cancel: suspended fiber becomes error")))
 
 # test_fiber_cancel_new_fiber
 (begin
   (let ((f (fiber/new (fn [] 42) 1)))
     (fiber/cancel f "never started")
-    (assert-eq (keyword->string (fiber/status f)) "error"
+    (assert-eq (string (fiber/status f)) "error"
       "fiber cancel: new fiber becomes error")))
 
 # test_fiber_cancel_returns_error_value
@@ -420,7 +420,7 @@
                        (fn [] (fiber/cancel target "stop"))
                        0)))
       (fiber/resume canceller)
-      (assert-eq (keyword->string (fiber/status target)) "error"
+      (assert-eq (string (fiber/status target)) "error"
         "fiber cancel suspended: tail position"))))
 
 # ============================================================================
@@ -489,8 +489,8 @@
 (begin
   (let ((f (fiber/new (fn [] (fiber/signal 1 "oops") "recovered") 1)))
     (fiber/resume f)
-    (assert-eq (keyword->string (fiber/status f)) "suspended"
-      "caught SIG_ERROR: leaves fiber suspended")))
+    (assert-eq (string (fiber/status f)) "paused"
+      "caught SIG_ERROR: leaves fiber paused")))
 
 # test_caught_sig_error_fiber_is_resumable
 (begin
@@ -504,7 +504,7 @@
   (let ((f (fiber/new (fn [] (fiber/signal 2 "waiting") 99) 3)))
     (fiber/resume f)
     (fiber/cancel f "stop")
-    (assert-eq (keyword->string (fiber/status f)) "error"
+    (assert-eq (string (fiber/status f)) "error"
       "cancel: always produces error status")))
 
 # ============================================================================

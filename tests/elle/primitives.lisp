@@ -36,7 +36,6 @@
 
 (assert-eq (number->string 42) "42" "number->string int")
 (assert-true (string? (number->string 3.14)) "number->string float")
-(assert-err (fn () (number->string "hello")) "number->string type error")
 
 (assert-eq (string->integer "42") 42 "string->integer")
 (assert-eq (string->integer "-7") -7 "string->integer negative")
@@ -45,11 +44,10 @@
 (assert-eq (any->string 42) "42" "any->string int")
 (assert-eq (any->string true) "true" "any->string bool")
 
-(assert-eq (keyword->string :foo) "foo" "keyword->string")
-(assert-err (fn () (keyword->string 42)) "keyword->string type error")
+(assert-eq (string :foo) "foo" "string keyword")
+(assert-eq (string 42) "42" "string int")
 
 (assert-eq (symbol->string 'foo) "foo" "symbol->string")
-(assert-err (fn () (symbol->string 42)) "symbol->string type error")
 
 ## === Path primitives ===
 
@@ -107,7 +105,7 @@
 
 ## === Read edge cases ===
 
-(assert-eq (keyword->string (read ":hello")) "hello" "read keyword")
+(assert-eq (string (read ":hello")) "hello" "read keyword")
 (assert-eq (read "2.5") 2.5 "read float")
 (assert-eq (read "nil") nil "read nil")
 (assert-err (fn () (read "(+ 1")) "read parse error")
@@ -117,7 +115,7 @@
 (assert-eq (integer 0) 0 "integer zero")
 (assert-eq (integer -42) -42 "integer negative")
 (assert-eq (float 0) 0.0 "float zero")
-(assert-eq (string :hello) ":hello" "string from keyword")
+(assert-eq (string :hello) "hello" "string from keyword")
 (assert-true (string? (string (list))) "string from empty list")
 
 ## === Alias tests ===
@@ -127,24 +125,15 @@
 
 ## === Type predicates for collections ===
 
-(assert-eq (array? @[1 2 3]) true "array? true")
-(assert-eq (array? [1 2 3]) false "array? false tuple")
-(assert-eq (array? 42) false "array? false other")
-(assert-eq (array? "hello") false "array? false string")
+(assert-eq (array? @[1 2 3]) true "array? true for mutable array")
+(assert-eq (array? [1 2 3]) true "array? true for immutable array")
+(assert-eq (array? 42) false "array? false for other")
+(assert-eq (array? "hello") false "array? false for string")
 
-(assert-eq (tuple? [1 2 3]) true "tuple? true")
-(assert-eq (tuple? @[1 2 3]) false "tuple? false array")
-(assert-eq (tuple? 42) false "tuple? false other")
-(assert-eq (tuple? "hello") false "tuple? false string")
-
-(assert-eq (table? @{:a 1 :b 2}) true "table? true")
-(assert-eq (table? {:a 1 :b 2}) false "table? false struct")
-(assert-eq (table? 42) false "table? false other")
-(assert-eq (table? "hello") false "table? false string")
-
-(assert-eq (struct? {:a 1 :b 2}) true "struct? true")
-(assert-eq (struct? @{:a 1 :b 2}) false "struct? false table")
-(assert-eq (struct? 42) false "struct? false other")
+(assert-eq (struct? @{:a 1 :b 2}) true "struct? true for mutable struct")
+(assert-eq (struct? {:a 1 :b 2}) true "struct? true for immutable struct")
+(assert-eq (struct? 42) false "struct? false for other")
+(assert-eq (struct? "hello") false "struct? false for string")
 (assert-eq (struct? "hello") false "struct? false string")
 
 (assert-eq (empty? []) true "empty? tuple true")
@@ -200,9 +189,9 @@
 (assert-eq (rest (list 1)) () "rest single list")
 
 (assert-eq (length (rest [1 2 3])) 2 "rest tuple length")
-(assert-eq (tuple? (rest [1 2 3])) true "rest tuple type")
+(assert-eq (array? (rest [1 2 3])) true "rest tuple type")
 
-(assert-eq (tuple? (rest [])) true "rest empty tuple type")
+(assert-eq (array? (rest [])) true "rest empty tuple type")
 (assert-eq (length (rest [])) 0 "rest empty tuple length")
 
 (assert-eq (length (rest @[1 2 3])) 2 "rest array length")
@@ -222,10 +211,10 @@
 (assert-eq (first (reverse (list 1 2 3))) 3 "reverse list")
 (assert-eq (reverse (list)) () "reverse empty list")
 
-(assert-eq (tuple? (reverse [1 2 3])) true "reverse tuple type")
+(assert-eq (array? (reverse [1 2 3])) true "reverse tuple type")
 (assert-eq (get (reverse [1 2 3]) 0) 3 "reverse tuple first")
 
-(assert-eq (tuple? (reverse [])) true "reverse empty tuple type")
+(assert-eq (array? (reverse [])) true "reverse empty tuple type")
 
 (assert-eq (array? (reverse @[1 2 3])) true "reverse array type")
 (assert-eq (get (reverse @[1 2 3]) 0) 3 "reverse array first")

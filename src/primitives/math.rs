@@ -5,7 +5,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::f64::consts::{E, PI};
 
-pub fn prim_sqrt(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_sqrt(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -31,7 +31,7 @@ pub fn prim_sqrt(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_sin(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_sin(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -57,7 +57,7 @@ pub fn prim_sin(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_cos(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_cos(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -83,7 +83,7 @@ pub fn prim_cos(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_tan(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_tan(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -109,7 +109,7 @@ pub fn prim_tan(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_log(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_log(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
@@ -160,7 +160,7 @@ pub fn prim_log(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_exp(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_exp(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -186,7 +186,7 @@ pub fn prim_exp(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -218,7 +218,7 @@ pub fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_floor(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_floor(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -244,7 +244,7 @@ pub fn prim_floor(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_ceil(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_ceil(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -270,7 +270,7 @@ pub fn prim_ceil(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_round(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_round(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -296,15 +296,15 @@ pub fn prim_round(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub fn prim_pi(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_pi(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::float(PI))
 }
 
-pub fn prim_e(_args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_e(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::float(E))
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sqrt",
         func: prim_sqrt,

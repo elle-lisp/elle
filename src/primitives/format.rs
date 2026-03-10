@@ -645,7 +645,7 @@ fn format_named(
 // Entry point
 // ============================================================================
 
-pub fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
     // Template is the first argument — arity enforced by VM (AtLeast(1))
     let template = match args[0].with_string(|s| s.to_string()) {
         Some(s) => s,
@@ -701,7 +701,7 @@ pub fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
 // Registration
 // ============================================================================
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "string/format",
     func: prim_string_format,
     effect: Effect::inert(),

@@ -42,7 +42,7 @@ impl Lowerer {
                 Ok(dst)
             }
         } else {
-            // === Splice path: build args array, then CallArray ===
+            // === Splice path: build args array, then CallArrayMut ===
             // Lower all args first
             let mut lowered: Vec<(Reg, bool)> = Vec::new();
             for arg in args {
@@ -52,7 +52,7 @@ impl Lowerer {
             let func_reg = self.lower_expr(func)?;
 
             // Build the args array incrementally
-            // Start with MakeArray of the first run of non-spliced args
+            // Start with MakeArrayMut of the first run of non-spliced args
             let mut args_reg: Option<Reg> = None;
 
             for (reg, spliced) in &lowered {
@@ -60,7 +60,7 @@ impl Lowerer {
                     (None, false) => {
                         // First arg, not spliced: create array with one element
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::MakeArray {
+                        self.emit(LirInstr::MakeArrayMut {
                             dst,
                             elements: vec![*reg],
                         });
@@ -69,12 +69,12 @@ impl Lowerer {
                     (None, true) => {
                         // First arg, spliced: create empty array, then extend
                         let empty = self.fresh_reg();
-                        self.emit(LirInstr::MakeArray {
+                        self.emit(LirInstr::MakeArrayMut {
                             dst: empty,
                             elements: vec![],
                         });
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayExtend {
+                        self.emit(LirInstr::ArrayMutExtend {
                             dst,
                             array: empty,
                             source: *reg,
@@ -83,7 +83,7 @@ impl Lowerer {
                     }
                     (Some(arr), false) => {
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayPush {
+                        self.emit(LirInstr::ArrayMutPush {
                             dst,
                             array: arr,
                             value: *reg,
@@ -92,7 +92,7 @@ impl Lowerer {
                     }
                     (Some(arr), true) => {
                         let dst = self.fresh_reg();
-                        self.emit(LirInstr::ArrayExtend {
+                        self.emit(LirInstr::ArrayMutExtend {
                             dst,
                             array: arr,
                             source: *reg,
@@ -104,7 +104,7 @@ impl Lowerer {
 
             let final_args = args_reg.unwrap_or_else(|| {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::MakeArray {
+                self.emit(LirInstr::MakeArrayMut {
                     dst,
                     elements: vec![],
                 });
@@ -112,14 +112,14 @@ impl Lowerer {
             });
 
             if is_tail {
-                self.emit(LirInstr::TailCallArray {
+                self.emit(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,
                 });
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::CallArray {
+                self.emit(LirInstr::CallArrayMut {
                     dst,
                     func: func_reg,
                     args: final_args,

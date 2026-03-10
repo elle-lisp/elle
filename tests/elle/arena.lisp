@@ -35,11 +35,11 @@
        (after (arena/count)))
   (assert-eq (> after before) true "arena count increases after allocation"))
 
-# test_arena_count_overhead_is_one
-# Each arena/count call allocates exactly 1 cons (SIG_QUERY message)
+# test_arena_count_overhead_is_zero
+# arena/count operates directly on thread-local state (no SIG_QUERY)
 (let* ((a (arena/count))
        (b (arena/count)))
-  (assert-eq (- b a) 1 "arena/count overhead is exactly 1"))
+  (assert-eq (- b a) 0 "arena/count has zero overhead"))
 
 # ── arena/allocs (primitive) ────────────────────────────────────────
 
@@ -104,10 +104,10 @@
                     (after (arena/count)))
                (- after before)))
            1)))
-  (let ((allocs (fiber/resume f)))
-    # list of 5 = 5 cons cells, plus 1 overhead for the arena-count query
-    (assert-true (and (>= allocs 5) (<= allocs 7))
-      "child sees 5-7 allocations from list")))
+   (let ((allocs (fiber/resume f)))
+     # list of 5 = 5 cons cells (arena/count has zero overhead)
+     (assert-eq allocs 5
+       "child sees exactly 5 allocations from list")))
 
 # test_nested_fiber_heap_isolation
 # Three levels: root → outer fiber → inner fiber.
@@ -149,7 +149,7 @@
                                 (eval '(defn temp (x) (+ x 1)))
                                 (loop (+ i 1))))))
                (loop 0))
-             (/ (- (arena/count) before 1) n))))
+             (/ (- (arena/count) before) n))))
        (p10 (measure 10))
        (p50 (measure 50)))
   (assert-eq (= p10 p50) true
@@ -329,7 +329,7 @@
             3))
        (v1 (fiber/resume f)))      # child suspends
   (fiber/cancel f "cancelled")
-  (let ((status (keyword->string (fiber/status f))))
+  (let ((status (string (fiber/status f))))
     (assert-string-eq v1 "yielded" "cancel child: yielded value")
     (assert-string-eq status "error" "cancel child: status is error")))
 

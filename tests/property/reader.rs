@@ -34,16 +34,13 @@ fn kind_eq(a: &SyntaxKind, b: &SyntaxKind) -> bool {
         (SyntaxKind::List(a), SyntaxKind::List(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
-        (SyntaxKind::Tuple(a), SyntaxKind::Tuple(b)) => {
-            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
-        }
         (SyntaxKind::Array(a), SyntaxKind::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
         (SyntaxKind::Struct(a), SyntaxKind::Struct(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
-        (SyntaxKind::Table(a), SyntaxKind::Table(b)) => {
+        (SyntaxKind::StructMut(a), SyntaxKind::StructMut(b)) => {
             a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
         }
         (SyntaxKind::Quote(a), SyntaxKind::Quote(b)) => syntax_eq(a, b),
@@ -54,6 +51,16 @@ fn kind_eq(a: &SyntaxKind, b: &SyntaxKind) -> bool {
             // SyntaxLiteral is internal-only, shouldn't appear in normal roundtrips
             true
         }
+        (SyntaxKind::ArrayMut(a), SyntaxKind::ArrayMut(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::Set(a), SyntaxKind::Set(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::SetMut(a), SyntaxKind::SetMut(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| syntax_eq(x, y))
+        }
+        (SyntaxKind::Splice(a), SyntaxKind::Splice(b)) => syntax_eq(a, b),
         _ => false,
     }
 }
@@ -133,9 +140,9 @@ proptest! {
     #[test]
     fn integer_roundtrip(n in INT_MIN..=INT_MAX) {
         let source = format!("{}", n);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Integer roundtrip failed: {} -> {} -> {:?}", source, displayed, reparsed.kind);
     }
@@ -143,9 +150,9 @@ proptest! {
     #[test]
     fn bool_roundtrip(b in prop::bool::ANY) {
         let source = if b { "true" } else { "false" };
-        let parsed = read_syntax(source).unwrap();
+        let parsed = read_syntax(source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Bool roundtrip failed: {} -> {}", source, displayed);
     }
@@ -153,18 +160,18 @@ proptest! {
     #[test]
     fn string_roundtrip(s in "[a-zA-Z0-9 ]{0,30}") {
         let source = format!("\"{}\"", s);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "String roundtrip failed: {} -> {}", source, displayed);
     }
 
     #[test]
     fn symbol_roundtrip(s in "[a-z][a-z0-9\\-]{0,8}") {
-        let parsed = read_syntax(&s).unwrap();
+        let parsed = read_syntax(&s, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Symbol roundtrip failed: {} -> {}", s, displayed);
     }
@@ -172,18 +179,18 @@ proptest! {
     #[test]
     fn keyword_roundtrip(s in "[a-z][a-z0-9\\-]{0,8}") {
         let source = format!(":{}", s);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Keyword roundtrip failed: {} -> {}", source, displayed);
     }
 
     #[test]
     fn float_roundtrip(source in arb_roundtrippable_float()) {
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Float roundtrip failed: {} -> {}", source, displayed);
     }
@@ -191,9 +198,9 @@ proptest! {
     #[test]
     fn list_roundtrip(source in arb_source()) {
         // Only test sources that parse successfully
-        if let Ok(parsed) = read_syntax(&source) {
+        if let Ok(parsed) = read_syntax(&source, "<test>") {
             let displayed = format!("{}", parsed);
-            if let Ok(reparsed) = read_syntax(&displayed) {
+            if let Ok(reparsed) = read_syntax(&displayed, "<test>") {
                 prop_assert!(syntax_eq(&parsed, &reparsed),
                     "Roundtrip failed:\n  source:    {}\n  displayed: {}\n  original:  {:?}\n  reparsed:  {:?}",
                     source, displayed, parsed.kind, reparsed.kind);
@@ -208,12 +215,12 @@ proptest! {
     #[test]
     fn reader_never_panics(s in "[ -~]{0,50}") {
         // Any printable ASCII — reader must return Ok or Err, never panic
-        let _ = read_syntax(&s);
+        let _ = read_syntax(&s, "<test>");
     }
 
     #[test]
     fn reader_never_panics_with_delimiters(s in "[\\(\\)\\[\\]\\{\\} a-z0-9\"':,`@#]{0,30}") {
-        let _ = read_syntax(&s);
+        let _ = read_syntax(&s, "<test>");
     }
 
     // =========================================================================
@@ -222,25 +229,25 @@ proptest! {
 
     #[test]
     fn nil_roundtrip(_dummy in 0..1i32) {
-        let parsed = read_syntax("nil").unwrap();
+        let parsed = read_syntax("nil", "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed));
     }
 
     #[test]
     fn empty_list_roundtrip(_dummy in 0..1i32) {
-        let parsed = read_syntax("()").unwrap();
+        let parsed = read_syntax("()", "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed));
     }
 
     #[test]
     fn empty_array_roundtrip(_dummy in 0..1i32) {
-        let parsed = read_syntax("@[]").unwrap();
+        let parsed = read_syntax("@[]", "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed));
     }
 
@@ -250,9 +257,9 @@ proptest! {
         for _ in 0..depth {
             source = format!("({})", source);
         }
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Nested list roundtrip failed at depth {}", depth);
     }
@@ -260,9 +267,9 @@ proptest! {
     #[test]
     fn quoted_roundtrip(source in arb_source_depth(1)) {
         let quoted = format!("'{}", source);
-        if let Ok(parsed) = read_syntax(&quoted) {
+        if let Ok(parsed) = read_syntax(&quoted, "<test>") {
             let displayed = format!("{}", parsed);
-            if let Ok(reparsed) = read_syntax(&displayed) {
+            if let Ok(reparsed) = read_syntax(&displayed, "<test>") {
                 prop_assert!(syntax_eq(&parsed, &reparsed),
                     "Quote roundtrip failed: {} -> {}", quoted, displayed);
             }
@@ -275,9 +282,9 @@ proptest! {
     ) {
         let inner = elems.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
         let source = format!("({})", inner);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Multi-element list roundtrip failed: {} -> {}", source, displayed);
     }
@@ -288,9 +295,9 @@ proptest! {
     ) {
         let inner = elems.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
         let source = format!("@[{}]", inner);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Array roundtrip failed: {} -> {}", source, displayed);
     }
@@ -307,9 +314,9 @@ proptest! {
             .collect::<Vec<_>>()
             .join(" ");
         let source = format!("@{{{}}}", inner);
-        let parsed = read_syntax(&source).unwrap();
+        let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);
-        let reparsed = read_syntax(&displayed).unwrap();
+        let reparsed = read_syntax(&displayed, "<test>").unwrap();
         prop_assert!(syntax_eq(&parsed, &reparsed),
             "Table roundtrip failed: {} -> {}", source, displayed);
     }

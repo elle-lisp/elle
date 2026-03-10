@@ -22,7 +22,7 @@ use super::core::VM;
 /// Accesses the symbol table via the thread-local context (same pattern
 /// as FFI primitives). The symbol table must be set via
 /// `set_symbol_table()` before execution.
-pub fn handle_eval_instruction(vm: &mut VM) {
+pub(crate) fn handle_eval_instruction(vm: &mut VM) {
     let expr_value = vm
         .fiber
         .stack

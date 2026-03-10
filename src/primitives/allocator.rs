@@ -1,6 +1,6 @@
 //! Custom allocator primitives for `with-allocator`.
 //!
-//! `%install-allocator` and `%uninstall-allocator` are internal primitives
+//! `allocator/install` and `allocator/uninstall` are internal primitives
 //! that push/pop custom allocators on the current fiber's `FiberHeap`.
 //!
 //! # Safety
@@ -10,8 +10,8 @@
 //! (innermost) custom allocator's `custom_ptrs` at `RegionEnter` time. This is
 //! safe because `with-allocator` desugars to `defer`, which wraps the body in
 //! a fiber — the body's scope marks live on the child fiber's `FiberHeap`,
-//! separate from the parent's. If anyone calls `%install-allocator`/
-//! `%uninstall-allocator` directly without a fiber boundary between install
+//! separate from the parent's. If anyone calls `allocator/install`/
+//! `allocator/uninstall` directly without a fiber boundary between install
 //! and scope marks, `RegionExit` may dealloc from a popped allocator
 //! (use-after-free). **These primitives must only be used via the
 //! `with-allocator` macro.**
@@ -27,7 +27,7 @@ use crate::value::fiber_heap::with_current_heap_mut;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
-/// (%install-allocator allocator-value)
+/// (allocator/install allocator-value)
 ///
 /// Takes one argument: an ExternalObject wrapping an `AllocatorBox`.
 /// Extracts the `Rc<AllocatorBox>` and pushes a `CustomAllocState` onto
@@ -42,10 +42,7 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!(
-                    "%install-allocator: expected 1 argument, got {}",
-                    args.len()
-                ),
+                format!("allocator/install: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -65,7 +62,7 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "%install-allocator: expected an allocator (ExternalObject \
+                        "allocator/install: expected an allocator (ExternalObject \
                          wrapping AllocatorBox), got {}",
                         args[0].type_name()
                     ),
@@ -82,13 +79,13 @@ fn prim_install_allocator(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "state-error",
-                "%install-allocator: no fiber heap installed (root fiber?)".to_string(),
+                "allocator/install: no fiber heap installed (root fiber?)".to_string(),
             ),
         ),
     }
 }
 
-/// (%uninstall-allocator)
+/// (allocator/uninstall)
 ///
 /// Takes no arguments. Pops the top custom allocator from the current fiber's
 /// `FiberHeap`, runs Drop for remaining custom objects, then calls dealloc
@@ -104,7 +101,7 @@ fn prim_uninstall_allocator(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "%uninstall-allocator: expected 0 arguments, got {}",
+                    "allocator/uninstall: expected 0 arguments, got {}",
                     args.len()
                 ),
             ),
@@ -117,14 +114,14 @@ fn prim_uninstall_allocator(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "state-error",
-                "%uninstall-allocator: no custom allocator installed".to_string(),
+                "allocator/uninstall: no custom allocator installed".to_string(),
             ),
         ),
         None => (
             SIG_ERROR,
             error_val(
                 "state-error",
-                "%uninstall-allocator: no fiber heap installed (root fiber?)".to_string(),
+                "allocator/uninstall: no fiber heap installed (root fiber?)".to_string(),
             ),
         ),
     }
@@ -152,26 +149,26 @@ fn extract_allocator_rc(value: Value) -> Option<Rc<AllocatorBox>> {
     }
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "%install-allocator",
+        name: "allocator/install",
         func: prim_install_allocator,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Install a custom allocator on the current fiber's heap. \
-              INTERNAL: use via with-allocator macro only.",
+               INTERNAL: use via with-allocator macro only.",
         params: &["allocator"],
         category: "allocator",
         example: "",
         aliases: &[],
     },
     PrimitiveDef {
-        name: "%uninstall-allocator",
+        name: "allocator/uninstall",
         func: prim_uninstall_allocator,
         effect: Effect::inert(),
         arity: Arity::Exact(0),
         doc: "Uninstall the current custom allocator, freeing remaining \
-              custom objects. INTERNAL: use via with-allocator macro only.",
+               custom objects. INTERNAL: use via with-allocator macro only.",
         params: &[],
         category: "allocator",
         example: "",

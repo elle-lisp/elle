@@ -9,17 +9,17 @@
 # Buffer literals and constructors
 # ============================================================================
 
-(assert-true (buffer? @"hello") "buffer literal is buffer")
-(assert-true (buffer? @"") "empty buffer literal is buffer")
-(assert-true (buffer? (buffer)) "buffer constructor creates buffer")
-(assert-true (buffer? (buffer 72 101 108 108 111)) "buffer with bytes is buffer")
+(assert-true (string? @"hello") "buffer literal is buffer")
+(assert-true (string? @"") "empty buffer literal is buffer")
+(assert-true (string? (@string)) "buffer constructor creates buffer")
+(assert-true (string? (@string 72 101 108 108 111)) "buffer with bytes is buffer")
 
 # ============================================================================
 # Buffer predicates
 # ============================================================================
 
-(assert-true (buffer? @"hello") "buffer? true for buffer")
-(assert-false (buffer? "hello") "buffer? false for string")
+(assert-true (string? @"hello") "string? true for buffer")
+(assert-true (string? "hello") "string? true for string")
 
 # ============================================================================
 # Buffer length
@@ -65,19 +65,19 @@
 # Buffer push
 # ============================================================================
 
-(assert-true (buffer? (begin (var b @"hi") (push b 33) b)) "push returns buffer")
+(assert-true (string? (begin (var b @"hi") (push b 33) b)) "push returns buffer")
 
 # ============================================================================
 # Buffer append
 # ============================================================================
 
-(assert-true (buffer? (begin (var b @"hello") (append b @" world") b)) "append returns buffer")
+(assert-true (string? (begin (var b @"hello") (append b @" world") b)) "append returns buffer")
 
 # ============================================================================
 # Buffer concat
 # ============================================================================
 
-(assert-true (buffer? (concat @"hello" @" world")) "concat returns buffer")
+(assert-true (string? (concat @"hello" @" world")) "concat returns buffer")
 
 # ============================================================================
 # Buffer roundtrip conversions
@@ -90,20 +90,20 @@
 # Buffer insert
 # ============================================================================
 
-(assert-true (buffer? (begin (var b @"hllo") (insert b 1 101) b)) "insert returns buffer")
+(assert-true (string? (begin (var b @"hllo") (insert b 1 101) b)) "insert returns buffer")
 
 # ============================================================================
 # Buffer remove
 # ============================================================================
 
-(assert-true (buffer? (begin (var b @"hello") (remove b 1) b)) "remove returns buffer")
-(assert-true (buffer? (begin (var b @"hello") (remove b 1 2) b)) "remove multiple returns buffer")
+(assert-true (string? (begin (var b @"hello") (remove b 1) b)) "remove returns buffer")
+(assert-true (string? (begin (var b @"hello") (remove b 1 2) b)) "remove multiple returns buffer")
 
 # ============================================================================
 # Buffer popn
 # ============================================================================
 
-(assert-true (buffer? (begin (var b @"hello") (popn b 2))) "popn returns buffer")
+(assert-true (string? (begin (var b @"hello") (popn b 2))) "popn returns buffer")
 
 # ============================================================================
 # String operations on buffers
@@ -121,12 +121,12 @@
 (assert-eq (string/index @"hello" "l") 2 "buffer index of substring")
 (assert-eq (string/index @"hello" "z") nil "buffer index not found")
 
-(assert-eq (substring @"hello" 1 4) "ell" "substring of buffer")
+(assert-eq (buffer->string (slice @"hello" 1 4)) "ell" "slice of buffer")
 
-(assert-true (buffer? (string/upcase @"hello")) "upcase buffer returns buffer")
-(assert-true (buffer? (string/downcase @"HELLO")) "downcase buffer returns buffer")
+(assert-true (string? (string/upcase @"hello")) "upcase buffer returns buffer")
+(assert-true (string? (string/downcase @"HELLO")) "downcase buffer returns buffer")
 
-(assert-true (buffer? (string/trim @"  hello  ")) "trim buffer returns buffer")
+(assert-true (string? (string/trim @"  hello  ")) "trim buffer returns buffer")
 
 (assert-eq (string/char-at @"hello" 1) "e" "char-at on buffer returns e")
 
@@ -140,7 +140,7 @@
 # Buffer replace
 # ============================================================================
 
-(assert-true (buffer? (string/replace @"hello" "l" "L")) "replace on buffer returns buffer")
+(assert-true (string? (string/replace @"hello" "l" "L")) "replace on buffer returns buffer")
 
 # ============================================================================
 # Concat on lists

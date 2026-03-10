@@ -3,23 +3,8 @@
 use crate::formatter::{format_code, FormatterConfig};
 use serde_json::{json, Value};
 
-/// Result of a formatting operation
-pub struct TextEdit {
-    pub range: Range,
-    pub new_text: String,
-}
-
-/// A range in a document
-#[derive(Debug, Clone)]
-pub struct Range {
-    pub start_line: u32,
-    pub start_character: u32,
-    pub end_line: u32,
-    pub end_character: u32,
-}
-
 /// Format an entire document
-pub fn format_document(
+pub(crate) fn format_document(
     source: &str,
     end_line: u32,
     end_character: u32,
@@ -40,7 +25,7 @@ pub fn format_document(
 }
 
 /// Calculate the line and character position at the end of a document
-pub fn document_end_position(source: &str) -> (u32, u32) {
+pub(crate) fn document_end_position(source: &str) -> (u32, u32) {
     let lines: Vec<&str> = source.lines().collect();
 
     if lines.is_empty() {

@@ -4,6 +4,7 @@
 //! a technique that encodes multiple types into a single 64-bit IEEE 754 double.
 
 pub mod allocator;
+pub mod arena;
 pub mod closure;
 pub mod display;
 pub mod error;

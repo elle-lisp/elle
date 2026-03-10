@@ -6,7 +6,7 @@ use elle::Value;
 
 fn bytecode_contains(source: &str, needle: &str) -> bool {
     let mut symbols = SymbolTable::new();
-    let compiled = compile(source, &mut symbols).expect("compilation failed");
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
     let lines = disassemble_lines(&compiled.bytecode.instructions);
     lines.iter().any(|line| line.contains(needle))
 }
@@ -141,8 +141,8 @@ fn region_emitted_for_floor() {
 
 #[test]
 fn region_emitted_for_has_key() {
-    // has-key? returns bool → immediate
-    assert!(has_region("(let ((t @{:a 1})) (has-key? t :a))"));
+    // has? returns bool → immediate
+    assert!(has_region("(let ((t @{:a 1})) (has? t :a))"));
 }
 
 #[test]
@@ -681,7 +681,7 @@ fn no_region_for_inner_let_with_outward_set() {
 
 #[test]
 fn no_region_when_intrinsic_has_spliced_args() {
-    // Spliced args to an intrinsic cause a CallArray (not intrinsic lowering),
+    // Spliced args to an intrinsic cause a CallArrayMut (not intrinsic lowering),
     // so the result type is unknown → unsafe.
     assert!(!has_region("(let ((a @[1 2])) (+ ;a))"));
 }
@@ -1194,7 +1194,7 @@ fn correct_while_as_let_body() {
 
 fn count_in_bytecode(source: &str, needle: &str) -> usize {
     let mut symbols = SymbolTable::new();
-    let compiled = compile(source, &mut symbols).expect("compilation failed");
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
     let lines = disassemble_lines(&compiled.bytecode.instructions);
     lines.iter().filter(|line| line.contains(needle)).count()
 }

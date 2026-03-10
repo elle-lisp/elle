@@ -6,7 +6,7 @@ The effect system tracks what operations a function can perform, enabling the co
 
 | Effect | Meaning | Examples |
 |--------|---------|----------|
-| `Pure` | No side effects, deterministic | Arithmetic, list operations, closures |
+| `Inert` | No side effects, deterministic | Arithmetic, list operations, closures |
 | `Yields` | May suspend execution via `yield` | Coroutines, generators, async operations |
 | `Polymorphic` | Effect depends on arguments | Calls to functions with unknown effects |
 
@@ -14,21 +14,21 @@ The effect system tracks what operations a function can perform, enabling the co
 
 Effects are inferred bottom-up during analysis:
 
-1. **Literals and variables** are `Pure`
-2. **Operators** (`+`, `-`, etc.) are `Pure`
+1. **Literals and variables** are `Inert`
+2. **Operators** (`+`, `-`, etc.) are `Inert`
 3. **Control flow** (`if`, `begin`) combines effects of branches
 4. **Function calls** inherit the callee's effect (or `Polymorphic` if unknown)
 5. **Yield expressions** are `Yields`
-6. **Lambda bodies** are analyzed, but the lambda itself is `Pure` (the effect is stored for later)
+6. **Lambda bodies** are analyzed, but the lambda itself is `Inert` (the effect is stored for later)
 
 ## Usage in the Compiler
 
 The effect system enables:
 
-- **Tail-call optimization**: Only in `Pure` contexts (no yield between call and return)
-- **Dead code elimination**: `Pure` expressions with unused results can be removed
-- **Scope allocation**: Scopes with `Pure` bodies can use region-based allocation
-- **JIT compilation**: Only `Pure` functions can be JIT-compiled (no yield)
+- **Tail-call optimization**: Only in `Inert` contexts (no yield between call and return)
+- **Dead code elimination**: `Inert` expressions with unused results can be removed
+- **Scope allocation**: Scopes with `Inert` bodies can use region-based allocation
+- **JIT compilation**: Only `Inert` functions can be JIT-compiled (no yield)
 
 ## See Also
 

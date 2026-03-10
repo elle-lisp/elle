@@ -85,8 +85,8 @@
 (defn make-adam [params lr beta1 beta2 eps]
   "Create Adam optimizer state."
   (let* ([n (length params)]
-         [m (array/new n 0.0)]
-         [v (array/new n 0.0)])
+         [m (@array/new n 0.0)]
+         [v (@array/new n 0.0)])
     @{:params params :lr lr :beta1 beta1 :beta2 beta2 :eps eps
       :m m :v v :step 0}))
 

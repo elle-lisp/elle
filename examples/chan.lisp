@@ -3,7 +3,7 @@
 # Channels — inter-fiber message passing with crossbeam-channel
 #
 # Demonstrates:
-#   chan/new              — create bounded and unbounded channels
+#   chan              — create bounded and unbounded channels
 #   chan/send, chan/recv   — non-blocking send/receive with status tuples
 #   chan/clone            — multiple senders feeding one receiver
 #   chan/close            — explicit disconnect
@@ -17,10 +17,10 @@
 # 1. Unbounded channel basics
 # ========================================
 
-# chan/new returns [sender receiver] as a tuple.
+# chan returns [sender receiver] as a tuple.
 # chan/send is non-blocking: returns [:ok], [:full], or [:disconnected].
 # chan/recv is non-blocking: returns [:ok msg], [:empty], or [:disconnected].
-(let* (([s r] (chan/new))
+(let* (([s r] (chan))
        (send-result (chan/send s 42))
        (recv-result (chan/recv r)))
   (display "  send result: ") (print send-result)
@@ -34,7 +34,7 @@
 # 2. Bounded channel with backpressure
 # ========================================
 
-(let* (([s r] (chan/new 1))
+(let* (([s r] (chan 1))
        (first (chan/send s "hello"))
        (second (chan/send s "world")))
   (display "  bounded(1) first send: ") (print first)
@@ -47,7 +47,7 @@
 # 3. Empty and disconnected states
 # ========================================
 
-(let (([s r] (chan/new)))
+(let (([s r] (chan)))
   (let ((empty-result (chan/recv r)))
     (display "  recv from empty: ") (print empty-result)
     (assert-eq (get empty-result 0) :empty "empty channel returns :empty"))
@@ -64,7 +64,7 @@
 
 # This is the critical test: sending :empty, :ok, :full, :disconnected
 # as message values. The tuple protocol keeps status and message separate.
-(let (([s r] (chan/new)))
+(let (([s r] (chan)))
   (chan/send s :empty)
   (chan/send s :ok)
   (chan/send s :disconnected)
@@ -84,7 +84,7 @@
 # 5. Multiple senders via chan/clone
 # ========================================
 
-(let* (([s r] (chan/new))
+(let* (([s r] (chan))
        (s2 (chan/clone s)))
   (chan/send s "from-original")
   (chan/send s2 "from-clone")
@@ -100,8 +100,8 @@
 # 6. chan/select — multiplexed receive
 # ========================================
 
-(let* (([s1 r1] (chan/new))
-       ([s2 r2] (chan/new)))
+(let* (([s1 r1] (chan))
+       ([s2 r2] (chan)))
   (chan/send s2 "second-wins")
   # r1 is empty, r2 has a message — select should pick r2 (index 1).
   (let ((result (chan/select @[r1 r2] 1000)))
@@ -111,7 +111,7 @@
     (assert-eq (get result 1) "second-wins" "select returns the message")))
 
 # Timeout when nothing is ready.
-(let (([s r] (chan/new)))
+(let (([s r] (chan)))
   (let ((result (chan/select @[r] 10)))
     (display "  select timeout: ") (print result)
     (assert-eq (get result 0) :timeout "select times out on empty channel")))

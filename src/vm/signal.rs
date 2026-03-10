@@ -359,10 +359,6 @@ impl VM {
                 fields.insert(TableKey::Keyword("peak".to_string()), Value::int(peak));
                 (SIG_OK, Value::struct_from(fields))
             }
-            "arena/count" => {
-                use crate::value::heap::heap_arena_len;
-                (SIG_OK, Value::int(heap_arena_len() as i64))
-            }
             "arena/scope-stats" => {
                 use crate::value::fiber_heap::with_current_heap_mut;
                 use crate::value::heap::TableKey;

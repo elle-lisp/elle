@@ -132,13 +132,13 @@
 # === io/reap returns tuple ===
 
 (assert-true
-  (tuple? (io/reap (io/backend :async)))
+  (array? (io/reap (io/backend :async)))
   "io/reap returns tuple")
 
 # === io/wait returns tuple ===
 
 (assert-true
-  (tuple? (io/wait (io/backend :async) 0))
+  (array? (io/wait (io/backend :async) 0))
   "io/wait returns tuple")
 
 # === io/submit on sync backend errors ===

@@ -43,7 +43,7 @@ impl Linter {
     }
 
     /// Lint Elle code from a string
-    pub fn lint_str(&mut self, code: &str, _filename: &str) -> Result<(), String> {
+    pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
         let _effects = register_primitives(&mut vm, &mut symbols);
@@ -51,7 +51,12 @@ impl Linter {
         init_stdlib(&mut vm, &mut symbols);
 
         // Use pipeline: parse -> expand -> analyze -> HIR
-        let analysis = analyze_file(code, &mut symbols, &mut vm)
+        let source_name = if filename.is_empty() {
+            "<lint>"
+        } else {
+            filename
+        };
+        let analysis = analyze_file(code, &mut symbols, &mut vm, source_name)
             .map_err(|e| format!("Analysis error: {}", e))?;
 
         // Lint the analyzed file

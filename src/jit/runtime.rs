@@ -365,7 +365,7 @@ pub(super) fn elle_jit_type_error_str(expected: &str) -> u64 {
 /// Returns the raw i64 value, sign-extended from 48 bits
 #[allow(dead_code)]
 #[inline]
-pub fn extract_int(bits: u64) -> i64 {
+pub(crate) fn extract_int(bits: u64) -> i64 {
     let raw = (bits & PAYLOAD_MASK) as i64;
     // Sign-extend from 48 bits
     if raw & (1 << 47) != 0 {
@@ -378,7 +378,7 @@ pub fn extract_int(bits: u64) -> i64 {
 /// Encode an integer as NaN-boxed representation
 #[allow(dead_code)]
 #[inline]
-pub fn encode_int(n: i64) -> u64 {
+pub(crate) fn encode_int(n: i64) -> u64 {
     TAG_INT | ((n as u64) & PAYLOAD_MASK)
 }
 

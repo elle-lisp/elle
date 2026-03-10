@@ -32,10 +32,13 @@
 
 mod code;
 mod compiler;
+mod data;
 pub(crate) mod dispatch;
 mod fastpath;
 mod group;
+mod helpers;
 mod runtime;
+mod suspend;
 mod translate;
 
 pub use code::JitCode;

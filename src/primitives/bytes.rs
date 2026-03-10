@@ -7,7 +7,7 @@ use crate::value::{error_val, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Create immutable bytes from integer arguments
-pub fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
     let mut data = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         match arg.as_int() {
@@ -40,7 +40,7 @@ pub fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Create mutable blob from integer arguments
-pub fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
     let mut data = Vec::with_capacity(args.len());
     for (i, arg) in args.iter().enumerate() {
         match arg.as_int() {
@@ -69,11 +69,11 @@ pub fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
             }
         }
     }
-    (SIG_OK, Value::blob(data))
+    (SIG_OK, Value::bytes_mut(data))
 }
 
 /// string->bytes: encode string as UTF-8 bytes (immutable)
-pub fn prim_string_to_bytes(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_to_bytes(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -100,7 +100,7 @@ pub fn prim_string_to_bytes(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// string->blob: encode string as UTF-8 blob (mutable)
-pub fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -111,7 +111,7 @@ pub fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(bytes) = args[0].with_string(|s| s.as_bytes().to_vec()) {
-        (SIG_OK, Value::blob(bytes))
+        (SIG_OK, Value::bytes_mut(bytes))
     } else {
         (
             SIG_ERROR,
@@ -124,7 +124,7 @@ pub fn prim_string_to_blob(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// bytes->string: decode UTF-8 bytes to string (fallible)
-pub fn prim_bytes_to_string(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_to_string(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -153,7 +153,7 @@ pub fn prim_bytes_to_string(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// blob->string: decode UTF-8 blob to string (fallible)
-pub fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -163,7 +163,7 @@ pub fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             match std::str::from_utf8(&borrowed) {
@@ -185,7 +185,7 @@ pub fn prim_blob_to_string(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// blob->bytes: freeze blob to immutable bytes (copies)
-pub fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -195,7 +195,7 @@ pub fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             (SIG_OK, Value::bytes(borrowed.clone()))
@@ -211,7 +211,7 @@ pub fn prim_blob_to_bytes(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// bytes->blob: thaw bytes to mutable blob (copies)
-pub fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -222,7 +222,7 @@ pub fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     match args[0].as_bytes() {
-        Some(b) => (SIG_OK, Value::blob(b.to_vec())),
+        Some(b) => (SIG_OK, Value::bytes_mut(b.to_vec())),
         None => (
             SIG_ERROR,
             error_val(
@@ -234,7 +234,7 @@ pub fn prim_bytes_to_blob(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// bytes->hex: convert bytes to lowercase hex string
-pub fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -260,7 +260,7 @@ pub fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// blob->hex: convert blob to lowercase hex string
-pub fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -270,7 +270,7 @@ pub fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             let hex: String = borrowed
@@ -289,162 +289,12 @@ pub fn prim_blob_to_hex(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Append a byte (int 0-255) to a blob. Returns the blob.
-pub fn prim_blob_push(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob/push: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    let blob_ref = match args[0].as_blob() {
-        Some(b) => b,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("blob/push: expected blob, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    let byte = match args[1].as_int() {
-        Some(n) if (0..=255).contains(&n) => n as u8,
-        Some(n) => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("blob/push: byte out of range 0-255: {}", n),
-                ),
-            )
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("blob/push: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    blob_ref.borrow_mut().push(byte);
-    (SIG_OK, args[0])
-}
-
-/// Remove and return last byte from blob as int. Error on empty.
-pub fn prim_blob_pop(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob/pop: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    let blob_ref = match args[0].as_blob() {
-        Some(b) => b,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("blob/pop: expected blob, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    match blob_ref.borrow_mut().pop() {
-        Some(byte) => (SIG_OK, Value::int(byte as i64)),
-        None => (
-            SIG_ERROR,
-            error_val("error", "blob/pop: empty blob".to_string()),
-        ),
-    }
-}
-
-/// Set byte at index in blob. Error on OOB.
-pub fn prim_blob_put(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("blob/put: expected 3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    let blob_ref = match args[0].as_blob() {
-        Some(b) => b,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("blob/put: expected blob, got {}", args[0].type_name()),
-                ),
-            )
-        }
-    };
-    let index = match args[1].as_int() {
-        Some(i) => i,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "blob/put: index must be integer, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
-    let byte = match args[2].as_int() {
-        Some(n) if (0..=255).contains(&n) => n as u8,
-        Some(n) => {
-            return (
-                SIG_ERROR,
-                error_val("error", format!("blob/put: byte out of range 0-255: {}", n)),
-            )
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("blob/put: expected integer, got {}", args[2].type_name()),
-                ),
-            )
-        }
-    };
-    let len = blob_ref.borrow().len();
-    if index < 0 || (index as usize) >= len {
-        return (
-            SIG_ERROR,
-            error_val(
-                "error",
-                format!("blob/put: index {} out of bounds (length {})", index, len),
-            ),
-        );
-    }
-    blob_ref.borrow_mut()[index as usize] = byte;
-    (SIG_OK, args[0])
-}
-
 /// Slice a sequence. Returns same type as input.
 /// (slice coll start end)
 ///
 /// Supports: bytes, blob, tuple, array, list, string, buffer.
 /// Indices are 0-based, clamped to length. start >= end returns empty.
-pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 3 {
         return (
             SIG_ERROR,
@@ -508,43 +358,43 @@ pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Blob (mutable)
-    if let Some(blob_ref) = args[0].as_blob() {
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
         let clamped_start = start.min(borrowed.len());
         let clamped_end = end.min(borrowed.len());
         if clamped_start >= clamped_end {
-            return (SIG_OK, Value::blob(vec![]));
+            return (SIG_OK, Value::bytes_mut(vec![]));
         }
         return (
             SIG_OK,
-            Value::blob(borrowed[clamped_start..clamped_end].to_vec()),
+            Value::bytes_mut(borrowed[clamped_start..clamped_end].to_vec()),
         );
     }
 
     // Tuple (immutable)
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let clamped_start = start.min(elems.len());
         let clamped_end = end.min(elems.len());
-        if clamped_start >= clamped_end {
-            return (SIG_OK, Value::tuple(vec![]));
-        }
-        return (
-            SIG_OK,
-            Value::tuple(elems[clamped_start..clamped_end].to_vec()),
-        );
-    }
-
-    // Array (mutable)
-    if let Some(arr_ref) = args[0].as_array() {
-        let borrowed = arr_ref.borrow();
-        let clamped_start = start.min(borrowed.len());
-        let clamped_end = end.min(borrowed.len());
         if clamped_start >= clamped_end {
             return (SIG_OK, Value::array(vec![]));
         }
         return (
             SIG_OK,
-            Value::array(borrowed[clamped_start..clamped_end].to_vec()),
+            Value::array(elems[clamped_start..clamped_end].to_vec()),
+        );
+    }
+
+    // Array (mutable)
+    if let Some(arr_ref) = args[0].as_array_mut() {
+        let borrowed = arr_ref.borrow();
+        let clamped_start = start.min(borrowed.len());
+        let clamped_end = end.min(borrowed.len());
+        if clamped_start >= clamped_end {
+            return (SIG_OK, Value::array_mut(vec![]));
+        }
+        return (
+            SIG_OK,
+            Value::array_mut(borrowed[clamped_start..clamped_end].to_vec()),
         );
     }
 
@@ -556,7 +406,7 @@ pub fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Buffer (mutable, grapheme-aware)
-    if let Some(buf_ref) = args[0].as_buffer() {
+    if let Some(buf_ref) = args[0].as_string_mut() {
         let borrowed = buf_ref.borrow();
         // Buffer is valid UTF-8 by construction
         let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
@@ -609,21 +459,21 @@ fn slice_graphemes(s: &str, start: usize, end: usize, is_buffer: bool) -> (Signa
     let clamped_end = end.min(graphemes.len());
     if clamped_start >= clamped_end {
         if is_buffer {
-            return (SIG_OK, Value::buffer(vec![]));
+            return (SIG_OK, Value::string_mut(vec![]));
         } else {
             return (SIG_OK, Value::string(""));
         }
     }
     let result: String = graphemes[clamped_start..clamped_end].concat();
     if is_buffer {
-        (SIG_OK, Value::buffer(result.into_bytes()))
+        (SIG_OK, Value::string_mut(result.into_bytes()))
     } else {
         (SIG_OK, Value::string(result))
     }
 }
 
 /// buffer->bytes: convert buffer to immutable bytes
-pub fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -633,7 +483,7 @@ pub fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
+    match args[0].as_string_mut() {
         Some(buf_ref) => (SIG_OK, Value::bytes(buf_ref.borrow().clone())),
         None => (
             SIG_ERROR,
@@ -649,7 +499,7 @@ pub fn prim_buffer_to_bytes(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// buffer->blob: convert buffer to mutable blob
-pub fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -659,8 +509,8 @@ pub fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_buffer() {
-        Some(buf_ref) => (SIG_OK, Value::blob(buf_ref.borrow().clone())),
+    match args[0].as_string_mut() {
+        Some(buf_ref) => (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone())),
         None => (
             SIG_ERROR,
             error_val(
@@ -672,7 +522,7 @@ pub fn prim_buffer_to_blob(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// bytes->buffer: convert bytes to buffer. Error on invalid UTF-8.
-pub fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -684,7 +534,7 @@ pub fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     }
     match args[0].as_bytes() {
         Some(b) => match std::str::from_utf8(b) {
-            Ok(_) => (SIG_OK, Value::buffer(b.to_vec())),
+            Ok(_) => (SIG_OK, Value::string_mut(b.to_vec())),
             Err(e) => (
                 SIG_ERROR,
                 error_val("error", format!("bytes->buffer: invalid UTF-8: {}", e)),
@@ -701,7 +551,7 @@ pub fn prim_bytes_to_buffer(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// blob->buffer: convert blob to buffer. Error on invalid UTF-8.
-pub fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -711,11 +561,11 @@ pub fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_blob() {
+    match args[0].as_bytes_mut() {
         Some(blob_ref) => {
             let borrowed = blob_ref.borrow();
             match std::str::from_utf8(&borrowed) {
-                Ok(_) => (SIG_OK, Value::buffer(borrowed.clone())),
+                Ok(_) => (SIG_OK, Value::string_mut(borrowed.clone())),
                 Err(e) => (
                     SIG_ERROR,
                     error_val("error", format!("blob->buffer: invalid UTF-8: {}", e)),
@@ -732,7 +582,7 @@ pub fn prim_blob_to_buffer(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes",
         func: prim_bytes,
@@ -745,15 +595,15 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "blob",
+        name: "@bytes",
         func: prim_blob,
         effect: Effect::inert(),
         arity: Arity::AtLeast(0),
-        doc: "Create a mutable blob from integer arguments (0-255).",
+        doc: "Create a mutable bytes from integer arguments (0-255).",
         params: &[],
         category: "bytes",
-        example: "(blob 72 101 108 108 111)",
-        aliases: &[],
+        example: "(@bytes 72 101 108 108 111)",
+        aliases: &["blob"],
     },
     PrimitiveDef {
         name: "string->bytes",

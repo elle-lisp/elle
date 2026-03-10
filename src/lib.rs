@@ -14,7 +14,7 @@
 //! register_primitives(&mut vm, &mut symbols);
 //!
 //! let code = "(+ 1 2 3)";
-//! let result = eval(code, &mut symbols, &mut vm).unwrap();
+//! let result = eval(code, &mut symbols, &mut vm, "<example>").unwrap();
 //! ```
 //!
 //! ## Architecture

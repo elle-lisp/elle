@@ -11,7 +11,7 @@ use libffi::middle::{Cif, CodePtr, Type};
 use std::ffi::c_void;
 
 /// Prepare a libffi CIF from our Signature.
-pub fn prepare_cif(sig: &Signature) -> Cif {
+pub(crate) fn prepare_cif(sig: &Signature) -> Cif {
     let arg_types: Vec<Type> = sig.args.iter().map(to_libffi_type).collect();
     let ret_type = to_libffi_type(&sig.ret);
     match sig.fixed_args {

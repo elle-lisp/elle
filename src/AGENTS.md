@@ -33,8 +33,8 @@ Provide the complete Elle implementation:
 | `lir` | SSA form with virtual registers, basic blocks, source tracking |
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
-| `value` | Runtime value representation (NaN-boxed) |
-| `effects` | Effect type system (`Pure`, `Yields`, `Polymorphic`) |
+| `value` | Runtime value representation (NaN-boxed) with types: LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
+| `effects` | Effect type system (`Inert`, `Yields`, `Polymorphic`) |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
 | `error` | Error types and source location mapping |

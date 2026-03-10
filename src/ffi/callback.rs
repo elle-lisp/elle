@@ -40,7 +40,7 @@ thread_local! {
 }
 
 /// Take the pending callback error, if any.
-pub fn take_callback_error() -> Option<Value> {
+pub(crate) fn take_callback_error() -> Option<Value> {
     CALLBACK_ERROR.with(|e| e.borrow_mut().take())
 }
 
@@ -65,7 +65,7 @@ struct CallbackData {
 /// An active callback that keeps the libffi closure alive.
 ///
 /// Stored in `FFISubsystem::callbacks` keyed by code pointer address.
-pub struct ActiveCallback {
+pub(crate) struct ActiveCallback {
     /// The libffi closure (owns the trampoline code page).
     _closure: libffi::middle::Closure<'static>,
     /// The leaked userdata box (recovered on free).
@@ -337,7 +337,7 @@ unsafe fn zero_result(result: &mut c_void, ret: &TypeDesc) {
 ///
 /// Returns an `ActiveCallback` whose `code_ptr` can be passed to C
 /// functions expecting a function pointer.
-pub fn create_callback(
+pub(crate) fn create_callback(
     closure: Rc<Closure>,
     signature: Signature,
 ) -> Result<ActiveCallback, String> {
@@ -376,7 +376,7 @@ pub fn create_callback(
 ///
 /// The caller must ensure that no C code still holds or will call
 /// the function pointer after this returns.
-pub fn free_callback(callback: ActiveCallback) {
+pub(crate) fn free_callback(callback: ActiveCallback) {
     // Recover the leaked Box and drop it
     unsafe {
         drop(Box::from_raw(callback.userdata_ptr));
@@ -388,7 +388,7 @@ pub fn free_callback(callback: ActiveCallback) {
 
 /// Storage for active callbacks, keyed by code pointer address.
 #[derive(Default)]
-pub struct CallbackStore {
+pub(crate) struct CallbackStore {
     callbacks: HashMap<usize, ActiveCallback>,
 }
 

@@ -6,7 +6,7 @@
 #   Silent nil semantics — missing elements become nil, not an error
 #   Wildcard _           — discarding elements you don't need
 #   List & rest          — collecting remaining list elements
-#   Tuple/array & rest   — rest collects into an array
+#   Array & rest         — rest collects into an array
 #   Nested patterns      — list-in-list, tuple-in-list, struct-in-struct
 #   Mutable destructuring — var + set on destructured bindings
 #   let / let*           — destructuring with sequential dependencies
@@ -96,23 +96,23 @@
 # 4. Tuple/array & rest
 # ========================================
 
-# Tuple rest collects remaining elements into a *tuple* (not an array).
-(def [tr-first & tr-rest] [10 20 30])
-(assert-eq tr-first 10 "tuple rest: first")
-(assert-eq (get tr-rest 0) 20 "tuple rest: rest[0]")
-(assert-true (tuple? tr-rest) "tuple rest: rest is tuple, not array")
+# Array rest collects remaining elements into an array.
+(def [ar-first & ar-rest] [10 20 30])
+(assert-eq ar-first 10 "array rest: first")
+(assert-eq (get ar-rest 0) 20 "array rest: rest[0]")
+(assert-true (array? ar-rest) "array rest: rest is array")
 
-# Array rest also collects into array
-(def [ar-first & ar-rest] @[100 200 300])
-(assert-eq ar-first 100 "array rest: first")
+# Mutable array rest also collects into array
+(def [mar-first & mar-rest] @[100 200 300])
+(assert-eq mar-first 100 "mutable array rest: first")
 
 # Empty rest
-(def [tr-only & tr-none] [42])
-(assert-eq (length tr-none) 0 "tuple rest empty: no remaining")
+(def [ar-only & ar-none] [42])
+(assert-eq (length ar-none) 0 "array rest empty: no remaining")
 
-(display "  [a & r] from [10 20 30] → a=") (display tr-first)
-  (display " r=") (display tr-rest)
-  (display " tuple?=") (print (tuple? tr-rest))
+(display "  [a & r] from [10 20 30] → a=") (display ar-first)
+  (display " r=") (display ar-rest)
+  (display " array?=") (print (array? ar-rest))
 
 
 # ========================================
@@ -124,18 +124,18 @@
 (assert-eq np-a 1 "nested: list-in-list inner")
 (assert-eq np-c 3 "nested: list-in-list outer")
 
-# Tuple inside list
+# Array inside list
 (def ([np-x np-y] np-z) (list [10 20] 30))
-(assert-eq np-x 10 "nested: tuple-in-list inner")
-(assert-eq np-z 30 "nested: tuple-in-list outer")
+(assert-eq np-x 10 "nested: array-in-list inner")
+(assert-eq np-z 30 "nested: array-in-list outer")
 
 # Struct inside struct
 (def {:outer {:inner np-val}} {:outer {:inner 42}})
 (assert-eq np-val 42 "nested: struct-in-struct")
 
-# Three levels: struct containing tuple containing a value we want
+# Three levels: struct containing array containing a value we want
 (def {:point [_ np-second]} {:point [:skip :target]})
-(assert-eq np-second :target "nested: struct → tuple → element")
+(assert-eq np-second :target "nested: struct → array → element")
 
 # Mixed: list of [name, {metadata}]
 (def (np-name {:role np-role}) (list "Alice" {:role :admin :id 7}))

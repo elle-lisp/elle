@@ -34,7 +34,7 @@ fn coerce_to_int(val: &Value, name: &str) -> Result<i64, (SignalBits, Value)> {
 }
 
 /// Bitwise AND: fold all arguments with &
-pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
             SIG_ERROR,
@@ -61,7 +61,7 @@ pub fn prim_bit_and(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Bitwise OR: fold all arguments with |
-pub fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
             SIG_ERROR,
@@ -88,7 +88,7 @@ pub fn prim_bit_or(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Bitwise XOR: fold all arguments with ^
-pub fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
             SIG_ERROR,
@@ -115,7 +115,7 @@ pub fn prim_bit_xor(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Bitwise NOT: apply ! to single integer argument
-pub fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -133,7 +133,7 @@ pub fn prim_bit_not(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Left shift: shift first argument left by second argument (clamped to 0-63)
-pub fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -178,7 +178,7 @@ pub fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Arithmetic right shift: shift first argument right by second argument (clamped to 0-63)
-pub fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
             SIG_ERROR,
@@ -226,7 +226,7 @@ pub fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for bitwise functions.
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/and",
         func: prim_bit_and,

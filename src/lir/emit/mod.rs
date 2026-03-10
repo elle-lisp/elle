@@ -432,11 +432,11 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeArray { dst, elements } => {
+            LirInstr::MakeArrayMut { dst, elements } => {
                 for elem in elements {
                     self.ensure_on_top(*elem);
                 }
-                self.bytecode.emit(Instruction::MakeArray);
+                self.bytecode.emit(Instruction::MakeArrayMut);
                 self.bytecode.emit_byte(elements.len() as u8);
                 for _ in elements {
                     self.pop();
@@ -472,17 +472,17 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayRefOrNil { dst, src, index } => {
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayRefOrNil);
+                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArraySliceFrom { dst, src, index } => {
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArraySliceFrom);
+                self.bytecode.emit(Instruction::ArrayMutSliceFrom);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
@@ -583,16 +583,16 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsTuple { dst, src } => {
+            LirInstr::IsArray { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsTuple);
+                self.bytecode.emit(Instruction::IsArray);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsArray { dst, src } => {
+            LirInstr::IsArrayMut { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsArray);
+                self.bytecode.emit(Instruction::IsArrayMut);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -625,9 +625,9 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayLen { dst, src } => {
+            LirInstr::ArrayMutLen { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayLen);
+                self.bytecode.emit(Instruction::ArrayMutLen);
                 self.pop();
                 self.push_reg(*dst);
             }
@@ -679,37 +679,37 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayExtend { dst, array, source } => {
+            LirInstr::ArrayMutExtend { dst, array, source } => {
                 // Stack: [array, source] → [extended_array]
                 self.ensure_binary_on_top(*array, *source);
-                self.bytecode.emit(Instruction::ArrayExtend);
+                self.bytecode.emit(Instruction::ArrayMutExtend);
                 self.pop(); // source
                 self.pop(); // array
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayPush { dst, array, value } => {
+            LirInstr::ArrayMutPush { dst, array, value } => {
                 // Stack: [array, value] → [extended_array]
                 self.ensure_binary_on_top(*array, *value);
-                self.bytecode.emit(Instruction::ArrayPush);
+                self.bytecode.emit(Instruction::ArrayMutPush);
                 self.pop(); // value
                 self.pop(); // array
                 self.push_reg(*dst);
             }
 
-            LirInstr::CallArray { dst, func, args } => {
+            LirInstr::CallArrayMut { dst, func, args } => {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::CallArray);
+                self.bytecode.emit(Instruction::CallArrayMut);
                 self.pop(); // args
                 self.pop(); // func
                 self.push_reg(*dst);
             }
 
-            LirInstr::TailCallArray { func, args } => {
+            LirInstr::TailCallArrayMut { func, args } => {
                 // Stack: [func, args_array] → (tail call, no push)
                 self.ensure_binary_on_top(*func, *args);
-                self.bytecode.emit(Instruction::TailCallArray);
+                self.bytecode.emit(Instruction::TailCallArrayMut);
                 self.pop(); // args
                 self.pop(); // func
             }
@@ -1000,147 +1000,4 @@ impl Default for Emitter {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::syntax::Span;
-    use crate::value::Arity;
-
-    fn synthetic_span() -> Span {
-        Span::synthetic()
-    }
-
-    #[test]
-    fn test_emit_simple() {
-        let mut emitter = Emitter::new();
-
-        let mut func = LirFunction::new(Arity::Exact(0));
-        let mut block = BasicBlock::new(Label(0));
-        block.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Int(42),
-            },
-            synthetic_span(),
-        ));
-        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(0)), synthetic_span());
-        func.blocks.push(block);
-        func.entry = Label(0);
-
-        let (bytecode, _, _) = emitter.emit(&func);
-        assert!(!bytecode.instructions.is_empty());
-    }
-
-    #[test]
-    fn test_emit_branch() {
-        let mut emitter = Emitter::new();
-
-        let mut func = LirFunction::new(Arity::Exact(0));
-
-        // Entry block
-        let mut entry = BasicBlock::new(Label(0));
-        entry.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Bool(true),
-            },
-            synthetic_span(),
-        ));
-        entry.terminator = SpannedTerminator::new(
-            Terminator::Branch {
-                cond: Reg(0),
-                then_label: Label(1),
-                else_label: Label(2),
-            },
-            synthetic_span(),
-        );
-        func.blocks.push(entry);
-
-        // Then block
-        let mut then_block = BasicBlock::new(Label(1));
-        then_block.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(1),
-                value: LirConst::Int(1),
-            },
-            synthetic_span(),
-        ));
-        then_block.terminator =
-            SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
-        func.blocks.push(then_block);
-
-        // Else block
-        let mut else_block = BasicBlock::new(Label(2));
-        else_block.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(2),
-                value: LirConst::Int(2),
-            },
-            synthetic_span(),
-        ));
-        else_block.terminator =
-            SpannedTerminator::new(Terminator::Return(Reg(2)), synthetic_span());
-        func.blocks.push(else_block);
-
-        func.entry = Label(0);
-
-        let (bytecode, _, _) = emitter.emit(&func);
-        assert!(!bytecode.instructions.is_empty());
-        // Should have Jump instructions for control flow
-        assert!(bytecode
-            .instructions
-            .iter()
-            .any(|&b| b == Instruction::Jump as u8 || b == Instruction::JumpIfFalse as u8));
-    }
-
-    #[test]
-    fn test_yield_point_info_collected() {
-        let mut emitter = Emitter::new();
-
-        // fn() { yield 42; resume_value }
-        let mut func = LirFunction::new(Arity::Exact(0));
-        func.num_regs = 2;
-        func.effect = crate::effects::Effect::yields();
-
-        let mut b0 = BasicBlock::new(Label(0));
-        b0.instructions.push(SpannedInstr::new(
-            LirInstr::Const {
-                dst: Reg(0),
-                value: LirConst::Int(42),
-            },
-            synthetic_span(),
-        ));
-        b0.terminator = SpannedTerminator::new(
-            Terminator::Yield {
-                value: Reg(0),
-                resume_label: Label(1),
-            },
-            synthetic_span(),
-        );
-
-        let mut b1 = BasicBlock::new(Label(1));
-        b1.instructions.push(SpannedInstr::new(
-            LirInstr::LoadResumeValue { dst: Reg(1) },
-            synthetic_span(),
-        ));
-        b1.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), synthetic_span());
-
-        func.blocks = vec![b0, b1];
-        func.entry = Label(0);
-
-        let (bytecode, yield_points, _call_sites) = emitter.emit(&func);
-        assert!(!bytecode.instructions.is_empty());
-        assert_eq!(yield_points.len(), 1);
-        assert!(yield_points[0].resume_ip > 0);
-        // stack_regs should be empty — only Reg(0) was on stack, but it was
-        // popped by the Yield. The remaining stack is empty.
-        assert!(yield_points[0].stack_regs.is_empty());
-    }
-
-    #[test]
-    fn test_yield_sentinel_distinct() {
-        use crate::jit::dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
-        use crate::value::repr::TAG_NIL;
-        assert_ne!(YIELD_SENTINEL, TAIL_CALL_SENTINEL);
-        assert_ne!(YIELD_SENTINEL, TAG_NIL);
-    }
-}
+mod tests;

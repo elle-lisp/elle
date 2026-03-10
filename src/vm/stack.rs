@@ -1,12 +1,12 @@
 use super::core::VM;
 use crate::value::Value;
 
-pub fn handle_load_const(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
+pub(crate) fn handle_load_const(vm: &mut VM, bytecode: &[u8], ip: &mut usize, constants: &[Value]) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     vm.fiber.stack.push(constants[idx]);
 }
 
-pub fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let frame_base = vm.current_frame_base();
     let abs_idx = frame_base + idx;
@@ -23,14 +23,14 @@ pub fn handle_load_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     vm.fiber.stack.push(val);
 }
 
-pub fn handle_pop(vm: &mut VM) {
+pub(crate) fn handle_pop(vm: &mut VM) {
     vm.fiber
         .stack
         .pop()
         .expect("VM bug: Stack underflow on Pop");
 }
 
-pub fn handle_dup(vm: &mut VM) {
+pub(crate) fn handle_dup(vm: &mut VM) {
     let val = *vm
         .fiber
         .stack
@@ -39,7 +39,7 @@ pub fn handle_dup(vm: &mut VM) {
     vm.fiber.stack.push(val);
 }
 
-pub fn handle_dup_n(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_dup_n(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let offset = vm.read_u8(bytecode, ip) as usize;
     let stack_len = vm.fiber.stack.len();
     if offset >= stack_len {

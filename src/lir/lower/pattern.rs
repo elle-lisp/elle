@@ -237,7 +237,7 @@ impl Lowerer {
             AccessPath::Index(inner, idx) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayRefOrNil {
+                self.emit(LirInstr::ArrayMutRefOrNil {
                     dst,
                     src: parent,
                     index: *idx as u16,
@@ -247,7 +247,7 @@ impl Lowerer {
             AccessPath::Slice(inner, start) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArraySliceFrom {
+                self.emit(LirInstr::ArrayMutSliceFrom {
                     dst,
                     src: parent,
                     index: *start as u16,
@@ -326,14 +326,14 @@ impl Lowerer {
                 });
                 Ok(dst)
             }
-            Constructor::Tuple(n) => self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Eq),
-            Constructor::TupleRest(n) => {
+            Constructor::Array(n) => self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Eq),
+            Constructor::ArrayRest(n) => {
                 self.emit_type_and_length_test(value_reg, *n, true, CmpOp::Ge)
             }
-            Constructor::Array(n) => {
+            Constructor::ArrayMut(n) => {
                 self.emit_type_and_length_test(value_reg, *n, false, CmpOp::Eq)
             }
-            Constructor::ArrayRest(n) => {
+            Constructor::ArrayMutRest(n) => {
                 self.emit_type_and_length_test(value_reg, *n, false, CmpOp::Ge)
             }
             Constructor::Struct(_) => {
@@ -399,12 +399,12 @@ impl Lowerer {
 
         let type_check_reg = self.fresh_reg();
         if is_tuple {
-            self.emit(LirInstr::IsTuple {
+            self.emit(LirInstr::IsArray {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
         } else {
-            self.emit(LirInstr::IsArray {
+            self.emit(LirInstr::IsArrayMut {
                 dst: type_check_reg,
                 src: reloaded_for_type,
             });
@@ -428,7 +428,7 @@ impl Lowerer {
             slot: val_slot,
         });
         let len_reg = self.fresh_reg();
-        self.emit(LirInstr::ArrayLen {
+        self.emit(LirInstr::ArrayMutLen {
             dst: len_reg,
             src: reloaded,
         });
@@ -821,7 +821,7 @@ impl Lowerer {
             }
             HirPattern::Tuple { elements, rest } => {
                 // Tuple [...] pattern matching for `match`.
-                // Check if value is a tuple, then use ArrayRefOrNil for each element.
+                // Check if value is a tuple, then use ArrayMutRefOrNil for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -843,7 +843,7 @@ impl Lowerer {
 
                 // Step 2: Check if value is a tuple
                 let is_tuple_reg = self.fresh_reg();
-                self.emit(LirInstr::IsTuple {
+                self.emit(LirInstr::IsArray {
                     dst: is_tuple_reg,
                     src: value_reg,
                 });
@@ -873,7 +873,7 @@ impl Lowerer {
                 }
 
                 let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayLen {
+                self.emit(LirInstr::ArrayMutLen {
                     dst: len_reg,
                     src: reloaded_for_len,
                 });
@@ -908,7 +908,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(len_ok_label);
 
-                // Step 4: Match each element using ArrayRefOrNil
+                // Step 4: Match each element using ArrayMutRefOrNil
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the tuple from temp slot for each element
                     let reloaded = self.fresh_reg();
@@ -925,7 +925,7 @@ impl Lowerer {
                     }
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefOrNil {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -951,7 +951,7 @@ impl Lowerer {
                     }
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArraySliceFrom {
+                    self.emit(LirInstr::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -964,7 +964,7 @@ impl Lowerer {
             }
             HirPattern::Array { elements, rest } => {
                 // Array @[...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayRefOrNil for each element.
+                // Check if value is an array, then use ArrayMutRefOrNil for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -986,7 +986,7 @@ impl Lowerer {
 
                 // Step 2: Check if value is an array
                 let is_array_reg = self.fresh_reg();
-                self.emit(LirInstr::IsArray {
+                self.emit(LirInstr::IsArrayMut {
                     dst: is_array_reg,
                     src: value_reg,
                 });
@@ -1016,7 +1016,7 @@ impl Lowerer {
                 }
 
                 let len_reg = self.fresh_reg();
-                self.emit(LirInstr::ArrayLen {
+                self.emit(LirInstr::ArrayMutLen {
                     dst: len_reg,
                     src: reloaded_for_len,
                 });
@@ -1051,7 +1051,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(len_ok_label);
 
-                // Step 4: Match each element using ArrayRefOrNil
+                // Step 4: Match each element using ArrayMutRefOrNil
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
@@ -1068,7 +1068,7 @@ impl Lowerer {
                     }
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefOrNil {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -1094,7 +1094,7 @@ impl Lowerer {
                     }
 
                     let slice_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArraySliceFrom {
+                    self.emit(LirInstr::ArrayMutSliceFrom {
                         dst: slice_reg,
                         src: reloaded,
                         index: elements.len() as u16,
@@ -1174,8 +1174,8 @@ impl Lowerer {
                 Ok(())
             }
             HirPattern::Table { entries } => {
-                // Table @{...} pattern matching for `match`.
-                // Check if value is a table, then use TableGetOrNil for each key.
+                // @struct @{...} pattern matching for `match`.
+                // Check if value is a @struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -1195,7 +1195,7 @@ impl Lowerer {
                     });
                 }
 
-                // Type guard: reject non-table values
+                // Type guard: reject non-@struct values
                 let is_table_reg = self.fresh_reg();
                 self.emit(LirInstr::IsTable {
                     dst: is_table_reg,

@@ -10,7 +10,7 @@ use crate::value::{error_val, list, Value};
 /// Type-preserving: lists return new sorted lists, arrays are mutated
 /// in place and returned, tuples return new sorted tuples.
 /// All elements must be numbers.
-pub fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -22,7 +22,7 @@ pub fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Array — mutate in place
-    if let Some(arr) = args[0].as_array() {
+    if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow_mut();
         // Validate all elements are numbers
         for (i, v) in vec.iter().enumerate() {
@@ -50,7 +50,7 @@ pub fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     }
 
     // Tuple — return new sorted tuple
-    if let Some(elems) = args[0].as_tuple() {
+    if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
         for (i, v) in vec.iter().enumerate() {
             if v.as_number().is_none() {
@@ -72,7 +72,7 @@ pub fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
             let fb = b.as_number().unwrap();
             fa.total_cmp(&fb)
         });
-        return (SIG_OK, Value::tuple(vec));
+        return (SIG_OK, Value::array(vec));
     }
 
     // Empty list
@@ -127,7 +127,7 @@ pub fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
 /// `(range end)` — 0 to end-1
 /// `(range start end)` — start to end-1
 /// `(range start end step)` — start, start+step, ... while < end (or > end for negative step)
-pub fn prim_range(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 3 {
         return (
             SIG_ERROR,
@@ -253,10 +253,10 @@ pub fn prim_range(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    (SIG_OK, Value::array(result))
+    (SIG_OK, Value::array_mut(result))
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sort",
         func: prim_sort,

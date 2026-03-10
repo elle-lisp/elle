@@ -16,7 +16,7 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Parse a JSON string into Elle values
-pub fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -44,7 +44,7 @@ pub fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Serialize an Elle value to compact JSON
-pub fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -63,7 +63,7 @@ pub fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Serialize an Elle value to pretty-printed JSON with 2-space indentation
-pub fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
+pub(crate) fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -82,7 +82,7 @@ pub fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Declarative primitive definitions for JSON operations
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/parse",
         func: prim_json_parse,
@@ -102,7 +102,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Serialize an Elle value to compact JSON",
         params: &["value"],
         category: "json",
-        example: "(json/serialize (table :name \"Bob\" :age 25))",
+        example: "(json/serialize (@struct :name \"Bob\" :age 25))",
         aliases: &["json-serialize"],
     },
     PrimitiveDef {
@@ -244,26 +244,26 @@ mod tests {
     #[test]
     fn test_parse_objects() {
         let mut parser = JsonParser::new("{}");
-        if let Some(t) = parser.parse().unwrap().as_table() {
+        if let Some(t) = parser.parse().unwrap().as_struct_mut() {
             assert_eq!(t.borrow().len(), 0);
         } else {
-            panic!("Expected table");
+            panic!("Expected @struct");
         }
 
         let mut parser = JsonParser::new("{\"name\":\"Alice\",\"age\":30}");
-        if let Some(t) = parser.parse().unwrap().as_table() {
-            let table = t.borrow();
-            assert_eq!(table.len(), 2);
+        if let Some(t) = parser.parse().unwrap().as_struct_mut() {
+            let mstruct = t.borrow();
+            assert_eq!(mstruct.len(), 2);
             assert_eq!(
-                table.get(&crate::value::TableKey::String("name".to_string())),
+                mstruct.get(&crate::value::TableKey::String("name".to_string())),
                 Some(&Value::string("Alice"))
             );
             assert_eq!(
-                table.get(&crate::value::TableKey::String("age".to_string())),
+                mstruct.get(&crate::value::TableKey::String("age".to_string())),
                 Some(&Value::int(30))
             );
         } else {
-            panic!("Expected table");
+            panic!("Expected @struct");
         }
     }
     #[test]
@@ -331,8 +331,8 @@ mod tests {
             crate::value::TableKey::String("age".to_string()),
             Value::int(30),
         );
-        let table = Value::table_from(map);
-        let serialized = serialize_value(&table).unwrap();
+        let mstruct = Value::struct_mut_from(map);
+        let serialized = serialize_value(&mstruct).unwrap();
         assert!(serialized.contains("\"name\":\"Alice\""));
         assert!(serialized.contains("\"age\":30"));
     }
@@ -388,8 +388,8 @@ mod tests {
             crate::value::TableKey::String("key".to_string()),
             Value::int(42),
         );
-        let table = Value::table_from(map);
-        let pretty = serialize_value_pretty(&table, 0).unwrap();
+        let mstruct = Value::struct_mut_from(map);
+        let pretty = serialize_value_pretty(&mstruct, 0).unwrap();
         assert!(pretty.contains('\n'));
         assert!(pretty.contains("  "));
     }
@@ -495,10 +495,10 @@ mod tests {
     fn test_serialize_non_string_table_key() {
         let mut map = BTreeMap::new();
         map.insert(crate::value::TableKey::Int(42), Value::string("value"));
-        let table = Value::table_from(map);
+        let mstruct = Value::struct_mut_from(map);
 
         // Should error because key is not a string
-        assert!(serialize_value(&table).is_err());
+        assert!(serialize_value(&mstruct).is_err());
     }
 
     #[test]
@@ -551,9 +551,9 @@ mod tests {
             crate::value::TableKey::Keyword("y".to_string()),
             Value::int(2),
         );
-        let table = Value::table_from(map);
+        let mstruct = Value::struct_mut_from(map);
 
-        let result = serialize_value(&table).unwrap();
+        let result = serialize_value(&mstruct).unwrap();
         assert!(result.contains("\"x\""));
         assert!(result.contains("\"y\""));
     }
@@ -565,9 +565,9 @@ mod tests {
             crate::value::TableKey::Keyword("name".to_string()),
             Value::string("Alice"),
         );
-        let table = Value::table_from(map);
+        let mstruct = Value::struct_mut_from(map);
 
-        let result = serialize_value_pretty(&table, 0).unwrap();
+        let result = serialize_value_pretty(&mstruct, 0).unwrap();
         assert!(result.contains("\"name\": \"Alice\""));
     }
 
@@ -596,9 +596,9 @@ mod tests {
             crate::value::TableKey::Keyword("b".to_string()),
             Value::int(2),
         );
-        let table = Value::table_from(map);
+        let mstruct = Value::struct_mut_from(map);
 
-        let result = serialize_value(&table).unwrap();
+        let result = serialize_value(&mstruct).unwrap();
         assert!(result.contains("\"a\""));
         assert!(result.contains("\"b\""));
     }

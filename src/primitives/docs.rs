@@ -306,11 +306,11 @@ pub(crate) fn register_builtin_docs(docs: &mut std::collections::HashMap<String,
         Doc {
             name: "try",
             doc: "Error handling. Evaluates body; if an error is signaled, evaluates catch handler with the error value.",
-            params: &["body", "(catch (e) handler)"],
+            params: &["body", "(catch e handler)"],
             arity: Arity::Exact(2),
             effect: Effect::inert(),
             category: "syntax sugar",
-            example: "(try (/ 1 0) (catch (e) (display e)))",
+            example: "(try (/ 1 0) (catch e (display e)))",
             aliases: &[],
         },
         Doc {

@@ -104,7 +104,7 @@ impl SendValue {
 
         match unsafe { deref(value) } {
             // Strings are immutable and safe
-            HeapObject::String(s) => Ok(SendValue::String(s.to_string())),
+            HeapObject::LString(s) => Ok(SendValue::String(s.to_string())),
 
             // Cons cells - deep copy both first and rest
             HeapObject::Cons(cons) => {
@@ -114,7 +114,7 @@ impl SendValue {
             }
 
             // Arrays - deep copy all elements
-            HeapObject::Array(vec_ref) => {
+            HeapObject::LArrayMut(vec_ref) => {
                 let borrowed = vec_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow array for sending".to_string())?;
@@ -124,7 +124,7 @@ impl SendValue {
             }
 
             // Structs - deep copy all values
-            HeapObject::Struct(s) => {
+            HeapObject::LStruct(s) => {
                 let mut copied = BTreeMap::new();
                 for (k, v) in s.iter() {
                     if !k.is_sendable() {
@@ -136,14 +136,14 @@ impl SendValue {
             }
 
             // Tuples - deep copy all elements
-            HeapObject::Tuple(elems) => {
+            HeapObject::LArray(elems) => {
                 let copied: Result<Vec<SendValue>, String> =
                     elems.iter().map(|v| SendValue::from_value(*v)).collect();
                 Ok(SendValue::Tuple(copied?))
             }
 
             // Buffers - deep copy the bytes
-            HeapObject::Buffer(buf_ref) => {
+            HeapObject::LStringMut(buf_ref) => {
                 let borrowed = buf_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow buffer for sending".to_string())?;
@@ -162,8 +162,8 @@ impl SendValue {
             // Float values that couldn't be stored inline
             HeapObject::Float(f) => Ok(SendValue::Float(*f)),
 
-            // Unsafe: mutable tables
-            HeapObject::Table(_) => Err("Cannot send mutable table".to_string()),
+            // Unsafe: mutable structs
+            HeapObject::LStructMut(_) => Err("Cannot send mutable struct".to_string()),
 
             // Unsafe: closures (contain function pointers and mutable state)
             HeapObject::Closure(_) => Err("Cannot send closure directly".to_string()),
@@ -202,10 +202,10 @@ impl SendValue {
             HeapObject::FFIType(desc) => Ok(SendValue::FFIType(desc.clone())),
 
             // Bytes - immutable and safe to send
-            HeapObject::Bytes(b) => Ok(SendValue::Bytes(b.clone())),
+            HeapObject::LBytes(b) => Ok(SendValue::Bytes(b.clone())),
 
             // Blobs - deep copy the bytes
-            HeapObject::Blob(blob_ref) => {
+            HeapObject::LBytesMut(blob_ref) => {
                 let borrowed = blob_ref
                     .try_borrow()
                     .map_err(|_| "Cannot borrow blob for sending".to_string())?;
@@ -245,22 +245,24 @@ impl SendValue {
             }
             SendValue::Array(items) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                alloc(HeapObject::Array(std::cell::RefCell::new(values)))
+                alloc(HeapObject::LArrayMut(std::cell::RefCell::new(values)))
             }
             SendValue::Struct(map) => {
                 let values: BTreeMap<_, _> = map
                     .into_iter()
                     .map(|(k, sv)| (k, sv.into_value()))
                     .collect();
-                alloc(HeapObject::Struct(values))
+                alloc(HeapObject::LStruct(values))
             }
             SendValue::Tuple(items) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
-                alloc(HeapObject::Tuple(values))
+                alloc(HeapObject::LArray(values))
             }
-            SendValue::Buffer(bytes) => alloc(HeapObject::Buffer(std::cell::RefCell::new(bytes))),
-            SendValue::Bytes(bytes) => alloc(HeapObject::Bytes(bytes)),
-            SendValue::Blob(bytes) => alloc(HeapObject::Blob(std::cell::RefCell::new(bytes))),
+            SendValue::Buffer(bytes) => {
+                alloc(HeapObject::LStringMut(std::cell::RefCell::new(bytes)))
+            }
+            SendValue::Bytes(bytes) => alloc(HeapObject::LBytes(bytes)),
+            SendValue::Blob(bytes) => alloc(HeapObject::LBytesMut(std::cell::RefCell::new(bytes))),
             SendValue::Cell(contents, is_local) => {
                 let val = contents.into_value();
                 // Preserve the cell type (local vs user) across thread boundary

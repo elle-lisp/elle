@@ -25,30 +25,34 @@ impl PartialEq for Value {
 
             match (self_obj, other_obj) {
                 // String comparison
-                (HeapObject::String(s1), HeapObject::String(s2)) => s1 == s2,
+                (HeapObject::LString(s1), HeapObject::LString(s2)) => s1 == s2,
 
                 // Cons cell comparison
                 (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
 
                 // Array comparison (compare contents)
-                (HeapObject::Array(v1), HeapObject::Array(v2)) => {
+                (HeapObject::LArrayMut(v1), HeapObject::LArrayMut(v2)) => {
                     v1.borrow().as_slice() == v2.borrow().as_slice()
                 }
 
                 // Table comparison (compare contents)
-                (HeapObject::Table(t1), HeapObject::Table(t2)) => *t1.borrow() == *t2.borrow(),
+                (HeapObject::LStructMut(t1), HeapObject::LStructMut(t2)) => {
+                    *t1.borrow() == *t2.borrow()
+                }
 
                 // Struct comparison (compare contents)
-                (HeapObject::Struct(s1), HeapObject::Struct(s2)) => s1 == s2,
+                (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1 == s2,
 
                 // Closure comparison (compare by reference)
                 (HeapObject::Closure(c1), HeapObject::Closure(c2)) => std::rc::Rc::ptr_eq(c1, c2),
 
                 // Tuple comparison (compare contents element-wise)
-                (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1 == t2,
+                (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1 == t2,
 
                 // Buffer comparison (compare contents)
-                (HeapObject::Buffer(b1), HeapObject::Buffer(b2)) => *b1.borrow() == *b2.borrow(),
+                (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
+                    *b1.borrow() == *b2.borrow()
+                }
 
                 // Cell comparison (compare contents)
                 (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => *c1.borrow() == *c2.borrow(),
@@ -104,10 +108,12 @@ impl PartialEq for Value {
                 }
 
                 // Bytes comparison (compare contents)
-                (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1 == b2,
+                (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1 == b2,
 
                 // Blob comparison (compare contents)
-                (HeapObject::Blob(b1), HeapObject::Blob(b2)) => *b1.borrow() == *b2.borrow(),
+                (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
+                    *b1.borrow() == *b2.borrow()
+                }
 
                 // Set comparison (compare contents)
                 (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1 == s2,
@@ -156,11 +162,11 @@ impl Hash for Value {
 
             match obj {
                 // Structural content types (immutable)
-                HeapObject::String(s) => s.hash(state),
+                HeapObject::LString(s) => s.hash(state),
                 HeapObject::Cons(c) => c.hash(state),
-                HeapObject::Tuple(elems) => elems.hash(state),
-                HeapObject::Bytes(b) => b.hash(state),
-                HeapObject::Struct(map) => {
+                HeapObject::LArray(elems) => elems.hash(state),
+                HeapObject::LBytes(b) => b.hash(state),
+                HeapObject::LStruct(map) => {
                     for (k, v) in map {
                         k.hash(state);
                         v.hash(state);
@@ -168,14 +174,14 @@ impl Hash for Value {
                 }
 
                 // Structural content types (mutable — hash current contents)
-                HeapObject::Array(rc) => {
+                HeapObject::LArrayMut(rc) => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for v in borrowed.iter() {
                         v.hash(state);
                     }
                 }
-                HeapObject::Table(rc) => {
+                HeapObject::LStructMut(rc) => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for (k, v) in borrowed.iter() {
@@ -183,8 +189,8 @@ impl Hash for Value {
                         v.hash(state);
                     }
                 }
-                HeapObject::Buffer(rc) => rc.borrow().hash(state),
-                HeapObject::Blob(rc) => rc.borrow().hash(state),
+                HeapObject::LStringMut(rc) => rc.borrow().hash(state),
+                HeapObject::LBytesMut(rc) => rc.borrow().hash(state),
                 HeapObject::Cell(rc, _) => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
@@ -256,16 +262,16 @@ fn type_rank(v: &Value) -> u8 {
         8
     } else if v.is_heap() {
         match unsafe { deref(*v).tag() } {
-            HeapTag::String => 8, // same rank as SSO
-            HeapTag::Float => 3,  // same rank as inline float
+            HeapTag::LString => 8, // same rank as SSO
+            HeapTag::Float => 3,   // same rank as inline float
             HeapTag::Cons => 9,
-            HeapTag::Tuple => 10,
-            HeapTag::Array => 11,
-            HeapTag::Bytes => 12,
-            HeapTag::Buffer => 13,
-            HeapTag::Blob => 14,
-            HeapTag::Struct => 15,
-            HeapTag::Table => 16,
+            HeapTag::LArray => 10,
+            HeapTag::LArrayMut => 11,
+            HeapTag::LBytes => 12,
+            HeapTag::LStringMut => 13,
+            HeapTag::LBytesMut => 14,
+            HeapTag::LStruct => 15,
+            HeapTag::LStructMut => 16,
             HeapTag::Closure => 17,
             HeapTag::Cell => 18,
             HeapTag::NativeFn => 19,
@@ -360,34 +366,34 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1.cmp(c2),
 
         // Tuple — element-wise lexicographic
-        (HeapObject::Tuple(t1), HeapObject::Tuple(t2)) => t1.cmp(t2),
+        (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1.cmp(t2),
 
         // Array — element-wise lexicographic (borrow)
-        (HeapObject::Array(a1), HeapObject::Array(a2)) => {
+        (HeapObject::LArrayMut(a1), HeapObject::LArrayMut(a2)) => {
             let b1 = a1.borrow();
             let b2 = a2.borrow();
             b1.as_slice().cmp(b2.as_slice())
         }
 
         // Bytes — byte-wise lexicographic
-        (HeapObject::Bytes(b1), HeapObject::Bytes(b2)) => b1.cmp(b2),
+        (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1.cmp(b2),
 
         // Buffer — byte-wise lexicographic (borrow)
-        (HeapObject::Buffer(b1), HeapObject::Buffer(b2)) => {
+        (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
         // Blob — byte-wise lexicographic (borrow)
-        (HeapObject::Blob(b1), HeapObject::Blob(b2)) => {
+        (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
         // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
-        (HeapObject::Struct(s1), HeapObject::Struct(s2)) => s1.iter().cmp(s2.iter()),
+        (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1.iter().cmp(s2.iter()),
 
         // Cell — by contained value (borrow)
         (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => {

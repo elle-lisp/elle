@@ -188,7 +188,7 @@ pub fn arb_struct_and_values() -> BoxedStrategy<(StructDesc, Value)> {
             let field_strats: Vec<BoxedStrategy<Value>> =
                 sd.fields.iter().map(arb_value_for_type).collect();
             let sd_clone = sd.clone();
-            field_strats.prop_map(move |vals| (sd_clone.clone(), Value::array(vals)))
+            field_strats.prop_map(move |vals| (sd_clone.clone(), Value::array_mut(vals)))
         })
         .boxed()
 }

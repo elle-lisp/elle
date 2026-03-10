@@ -6,18 +6,16 @@ Demonstration programs that dogfood Elle with non-trivial algorithms and serve a
 
 | Demo | Purpose |
 |------|---------|
-| [fib/](fib/) | Recursive Fibonacci benchmark measuring function call overhead |
-| [nqueens/](nqueens/) | N-Queens backtracking algorithm solving the classic chess puzzle |
-| [matrix-ops/](matrix-ops/) | Pure Lisp matrix operations (multiply, transpose, LU decomposition) |
 | [aws-sigv4/](aws-sigv4/) | AWS API authentication with string manipulation, datetime handling, and cryptographic hashing |
-| [blas/](blas/) | BLAS-style linear algebra operations (planned) |
-| [logo/](logo/) | Logo turtle graphics implementation (planned) |
+| [blas/](blas/) | BLAS-style linear algebra operations |
 | [cfgviz/](cfgviz/) | Configuration visualization generating control flow graphs |
 | [docgen/](docgen/) | Documentation site generator written in Elle |
+| [fib/](fib/) | Recursive Fibonacci benchmark measuring function call overhead |
+| [logo/](logo/) | Logo turtle graphics implementation |
+| [matrix/](matrix/) | Matrix operations reference implementation |
+| [microgpt/](microgpt/) | Micro GPT autograd engine and neural network |
+| [nqueens/](nqueens/) | N-Queens backtracking algorithm solving the classic chess puzzle |
 | [scope-alloc/](scope-alloc/) | Allocator scope testing for memory management |
-| [matrix.lisp](matrix.lisp) | Matrix operations reference implementation |
-| [blas.lisp](blas.lisp) | BLAS operations reference implementation |
-| [logo.lisp](logo.lisp) | Logo turtle graphics reference implementation |
 
 ## Running Demos
 
@@ -39,6 +37,11 @@ cargo build --release && ./target/release/elle demos/docgen/generate.lisp
 
 # Scope allocator
 cargo run --release -- demos/scope-alloc/scope-alloc.lisp
+
+# Other demos
+cargo run --release -- demos/blas/blas.lisp
+cargo run --release -- demos/logo/logo.lisp
+cargo run --release -- demos/matrix/matrix.lisp
 ```
 
 ## Purpose

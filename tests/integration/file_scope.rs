@@ -18,7 +18,7 @@ fn eval_file_source(input: &str) -> Result<Value, String> {
     let _meta = register_primitives(&mut vm, &mut symbols);
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
-    let result = elle::eval_file(input, &mut symbols, &mut vm);
+    let result = elle::eval_file(input, &mut symbols, &mut vm, "<test>");
     set_vm_context(std::ptr::null_mut());
     result
 }
@@ -30,7 +30,7 @@ fn compile_file_source(input: &str) -> Result<elle::CompileResult, String> {
     let mut _vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _meta = register_primitives(&mut _vm, &mut symbols);
-    elle::compile_file(input, &mut symbols)
+    elle::compile_file(input, &mut symbols, "<test>")
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn test_file_side_effect_ordering() {
     "#;
     let result = eval_file_source(code).unwrap();
     // log should be @[1, 2]
-    let items = result.as_array().expect("expected array");
+    let items = result.as_array_mut().expect("expected array");
     let items = items.borrow();
     assert_eq!(items.len(), 2);
     assert_eq!(items[0], Value::int(1));
@@ -182,7 +182,7 @@ fn test_file_analyze_produces_single_result() {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
     let _meta = register_primitives(&mut vm, &mut symbols);
-    let result = elle::analyze_file("(def x 1) (def y 2)", &mut symbols, &mut vm);
+    let result = elle::analyze_file("(def x 1) (def y 2)", &mut symbols, &mut vm, "<test>");
     assert!(result.is_ok());
 }
 
@@ -201,7 +201,7 @@ fn eval_file_source_with_stdlib(input: &str) -> Result<Value, String> {
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
-    let result = elle::eval_file(input, &mut symbols, &mut vm);
+    let result = elle::eval_file(input, &mut symbols, &mut vm, "<test>");
     set_vm_context(std::ptr::null_mut());
     result
 }

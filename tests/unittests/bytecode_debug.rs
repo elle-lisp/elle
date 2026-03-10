@@ -21,7 +21,7 @@ fn test_print_raw_bytecode() {
                 (my-fold f (f init (first lst)) (rest lst)))))
         (my-fold process 0 (list 1 2)))"#;
 
-    let result = compile(code, &mut symbols).expect("compile failed");
+    let result = compile(code, &mut symbols, "<test>").expect("compile failed");
 
     println!("=== RAW BYTES ===");
     for (i, byte) in result.bytecode.instructions.iter().enumerate() {

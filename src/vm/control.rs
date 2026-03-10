@@ -1,12 +1,12 @@
 use super::core::VM;
 use crate::value::Value;
 
-pub fn handle_jump(bytecode: &[u8], ip: &mut usize, vm: &VM) {
+pub(crate) fn handle_jump(bytecode: &[u8], ip: &mut usize, vm: &VM) {
     let offset = vm.read_i16(bytecode, ip);
     *ip = ((*ip as i32) + (offset as i32)) as usize;
 }
 
-pub fn handle_jump_if_false(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
+pub(crate) fn handle_jump_if_false(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
     let offset = vm.read_i16(bytecode, ip);
     let val = vm
         .fiber
@@ -18,7 +18,7 @@ pub fn handle_jump_if_false(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
     }
 }
 
-pub fn handle_jump_if_true(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
+pub(crate) fn handle_jump_if_true(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
     let offset = vm.read_i16(bytecode, ip);
     let val = vm
         .fiber
@@ -30,7 +30,7 @@ pub fn handle_jump_if_true(bytecode: &[u8], ip: &mut usize, vm: &mut VM) {
     }
 }
 
-pub fn handle_return(vm: &mut VM) -> Value {
+pub(crate) fn handle_return(vm: &mut VM) -> Value {
     let value = vm
         .fiber
         .stack

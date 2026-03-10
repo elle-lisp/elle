@@ -160,64 +160,6 @@ fn test_sourceloc_unknown_check() {
     assert!(!known.is_unknown());
 }
 
-#[test]
-fn test_error_formatting_extract_source_line() {
-    use elle::error::formatting;
-
-    let source = "line 1\nline 2\nline 3";
-
-    assert_eq!(
-        formatting::extract_source_line(source, 1),
-        Some("line 1".to_string())
-    );
-    assert_eq!(
-        formatting::extract_source_line(source, 2),
-        Some("line 2".to_string())
-    );
-    assert_eq!(
-        formatting::extract_source_line(source, 3),
-        Some("line 3".to_string())
-    );
-    assert_eq!(formatting::extract_source_line(source, 4), None);
-    assert_eq!(formatting::extract_source_line(source, 0), None);
-}
-
-#[test]
-fn test_error_formatting_highlight_column() {
-    use elle::error::formatting;
-
-    let line = "(+ x 1)";
-
-    // Column 1
-    let result = formatting::highlight_column(line, 1);
-    assert_eq!(result, "^");
-
-    // Column 4 (at 'x')
-    let result = formatting::highlight_column(line, 4);
-    assert!(result.ends_with('^'));
-    assert_eq!(result.len(), 4); // 3 spaces + caret
-
-    // Column 7 (at '1')
-    let result = formatting::highlight_column(line, 7);
-    assert!(result.ends_with('^'));
-    assert_eq!(result.len(), 7); // 6 spaces + caret
-}
-
-#[test]
-fn test_error_formatting_context() {
-    use elle::error::formatting;
-    use elle::reader::SourceLoc;
-
-    let source = "line 1\nline 2 with error\nline 3";
-    let loc = SourceLoc::new("test.lisp", 2, 6);
-
-    let context = formatting::format_source_context(source, &loc);
-
-    assert!(context.contains("line 2 with error"));
-    assert!(context.contains("^"));
-    assert!(context.contains("2 |")); // Line number
-}
-
 // ============================================================================
 // LocationMap Tests - Verify bytecode offset to source location mapping
 // ============================================================================
@@ -230,7 +172,7 @@ fn test_location_map_populated_for_simple_expression() {
     let mut symbols = SymbolTable::new();
     let source = "(+ 1 2)";
 
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
@@ -250,7 +192,7 @@ fn test_location_map_has_correct_line_numbers() {
     // Single expression with nested structure
     let source = "(if true\n  (+ 1 2)\n  (- 3 4))";
 
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
     let compiled = result.unwrap();
@@ -278,7 +220,7 @@ fn test_closure_has_location_map() {
     let mut symbols = SymbolTable::new();
     let source = "(fn (x) (+ x 1))";
 
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok());
 
     let compiled = result.unwrap();
@@ -312,7 +254,7 @@ fn test_vm_uses_location_map_for_stack_trace() {
 
     // Compile a simple expression
     let source = "(+ 1 2)";
-    let result = compile(source, &mut symbols);
+    let result = compile(source, &mut symbols, "<test>");
     assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
 
     let compiled = result.unwrap();

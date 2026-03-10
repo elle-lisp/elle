@@ -19,15 +19,15 @@ The `value` module defines the `Value` type — an 8-byte NaN-boxed representati
 | Symbol | `name` | — | Interned symbol |
 | String | `"hello"` | — | Immutable UTF-8 string |
 | Cons | `(1 . 2)` | — | List pair |
-| Tuple | `[1 2 3]` | — | Immutable fixed-length sequence |
-| Array | `@[1 2 3]` | ✓ | Mutable variable-length sequence |
+| Array | `[1 2 3]` | — | Immutable fixed-length sequence |
+| @Array | `@[1 2 3]` | ✓ | Mutable variable-length sequence |
 | Struct | `{:key val}` | — | Immutable key-value map |
-| Table | `@{:key val}` | ✓ | Mutable key-value map |
+| @Struct | `@{:key val}` | ✓ | Mutable key-value map |
 | Set | `\|1 2 3\|` | — | Immutable set |
-| Mutable set | `@\|1 2 3\|` | ✓ | Mutable set |
-| Buffer | `@"bytes"` | ✓ | Mutable byte sequence |
+| @Set | `@\|1 2 3\|` | ✓ | Mutable set |
+| @String | `@"bytes"` | ✓ | Mutable byte sequence |
 | Bytes | `#bytes[...]` | — | Immutable binary data |
-| Blob | `#blob[...]` | ✓ | Mutable binary data |
+| @Bytes | `#@bytes[...]` | ✓ | Mutable binary data |
 | Closure | `<closure>` | — | Function with captured environment |
 | Fiber | `<fiber:alive>` | — | Independent execution context |
 | Cell | `<cell 42>` | ✓ | Mutable box for captured variables |
@@ -90,7 +90,7 @@ value.is_fiber()
 Two set types exist, following the immutable/mutable split:
 
 - **Immutable set** (`LSet`): `BTreeSet<Value>`, no `RefCell`. Display: `|1 2 3|`. Type name: `"set"`.
-- **Mutable set** (`LSetMut`): `RefCell<BTreeSet<Value>>`. Display: `@|1 2 3|`. Type name: `"@set"`.
+- **Mutable set** (`LSetMut`): `RefCell<BTreeSet<Value>>`. Display: `@|1 2 3|`. Type name: `"@set"` (or `:@set` as keyword).
 
 Set membership uses structural equality. When a mutable value is inserted into a set, it is frozen (converted to its immutable equivalent) to prevent mutation from breaking set invariants.
 
@@ -99,13 +99,13 @@ Set membership uses structural equality. When a mutable value is inserted into a
 All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `RefCell` for interior mutability:
 
 - `Cons` — list pair
-- `Array` — mutable vector
-- `Table` — mutable BTreeMap
-- `Struct` — immutable BTreeMap
-- `Tuple` — immutable vector
-- `Buffer` — mutable byte vector
-- `Bytes` — immutable byte vector
-- `Blob` — mutable byte vector
+- `LArrayMut` — mutable vector
+- `LStructMut` — mutable BTreeMap
+- `LStruct` — immutable BTreeMap
+- `LArray` — immutable vector
+- `LStringMut` — mutable byte vector
+- `LBytes` — immutable byte vector
+- `LBytesMut` — mutable byte vector
 - `Closure` — bytecode + environment
 - `Fiber` — execution context
 - `Cell` — mutable box

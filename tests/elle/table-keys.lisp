@@ -1,4 +1,4 @@
-# Tests for using fibers and closures as table keys
+# Tests for using fibers and closures as @struct keys
 
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
@@ -12,7 +12,7 @@
       (put t f :running)
       (get t f)))
   :running
-  "fiber as table key")
+  "fiber as @struct key")
 
 (assert-eq
   (let ((f (fiber/new (fn () 1) 0)))
@@ -37,7 +37,7 @@
   (let ((f (fiber/new (fn () 1) 0)))
     (let ((t @{}))
       (put t f 1)
-      (has-key? t f)))
+      (has? t f)))
   true
   "has-key with fiber")
 
@@ -46,7 +46,7 @@
     (let ((t @{}))
       (put t f 1)
       (del t f)
-      (has-key? t f)))
+      (has? t f)))
   false
   "del with fiber key")
 
@@ -75,7 +75,7 @@
       (put t c :meta)
       (get t c)))
   :meta
-  "closure as table key")
+  "closure as @struct key")
 
 (assert-eq
   (let ((c (fn () 1)))
@@ -144,4 +144,4 @@
 (assert-err (fn ()
   (let ((t @{}))
     (put t @[1 2] :val)))
-  "unhashable array as table key errors")
+  "unhashable @array as @struct key errors")

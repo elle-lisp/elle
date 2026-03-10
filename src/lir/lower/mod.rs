@@ -175,7 +175,7 @@ impl Lowerer {
     }
 
     /// Set intrinsic operations for operator specialization
-    pub fn with_intrinsics(mut self, intrinsics: FxHashMap<SymbolId, IntrinsicOp>) -> Self {
+    pub(crate) fn with_intrinsics(mut self, intrinsics: FxHashMap<SymbolId, IntrinsicOp>) -> Self {
         self.intrinsics = intrinsics;
         self
     }

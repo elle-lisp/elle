@@ -579,18 +579,18 @@ fn list_roundtrip_negative() {
 
 #[test]
 fn array_roundtrip_empty() {
-    let arr = Value::array(vec![]);
-    assert!(arr.is_array());
-    let borrowed = arr.as_array().unwrap().borrow();
+    let arr = Value::array_mut(vec![]);
+    assert!(arr.is_array_mut());
+    let borrowed = arr.as_array_mut().unwrap().borrow();
     assert_eq!(borrowed.len(), 0);
 }
 
 #[test]
 fn array_roundtrip_single() {
     let values = vec![Value::int(42)];
-    let arr = Value::array(values.clone());
-    assert!(arr.is_array());
-    let borrowed = arr.as_array().unwrap().borrow();
+    let arr = Value::array_mut(values.clone());
+    assert!(arr.is_array_mut());
+    let borrowed = arr.as_array_mut().unwrap().borrow();
     assert_eq!(borrowed.len(), 1);
     assert_eq!(borrowed[0], Value::int(42));
 }
@@ -598,9 +598,9 @@ fn array_roundtrip_single() {
 #[test]
 fn array_roundtrip_multiple() {
     let values = vec![Value::int(1), Value::int(2), Value::int(3)];
-    let arr = Value::array(values.clone());
-    assert!(arr.is_array());
-    let borrowed = arr.as_array().unwrap().borrow();
+    let arr = Value::array_mut(values.clone());
+    assert!(arr.is_array_mut());
+    let borrowed = arr.as_array_mut().unwrap().borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0], Value::int(1));
     assert_eq!(borrowed[1], Value::int(2));
@@ -610,9 +610,9 @@ fn array_roundtrip_multiple() {
 #[test]
 fn array_roundtrip_negative() {
     let values = vec![Value::int(-5), Value::int(0), Value::int(7)];
-    let arr = Value::array(values.clone());
-    assert!(arr.is_array());
-    let borrowed = arr.as_array().unwrap().borrow();
+    let arr = Value::array_mut(values.clone());
+    assert!(arr.is_array_mut());
+    let borrowed = arr.as_array_mut().unwrap().borrow();
     assert_eq!(borrowed.len(), 3);
     assert_eq!(borrowed[0], Value::int(-5));
     assert_eq!(borrowed[1], Value::int(0));

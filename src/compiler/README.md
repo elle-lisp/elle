@@ -42,7 +42,7 @@ resolution, capture analysis, and source location tracking.
 
 The `Effect` type (in `src/effects/`) tracks computational effects:
 
-- `Pure` - no side effects, can be optimized
+- `Inert` - no side effects, can be optimized
 - `Yields` - may yield (for coroutines)
 - `Polymorphic` - effect depends on arguments
 

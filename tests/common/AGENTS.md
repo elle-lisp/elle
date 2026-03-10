@@ -40,7 +40,7 @@ assert_eq!(result, Value::int(3));
 ```rust
 use crate::common::setup;
 let (mut symbols, mut vm) = setup();
-let result = analyze("(+ 1 2)", &mut symbols, &mut vm).unwrap();
+let result = analyze("(+ 1 2)", &mut symbols, &mut vm, "<test>").unwrap();
 ```
 
 ### Cached VM reuse (for property tests)

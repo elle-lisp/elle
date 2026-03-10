@@ -299,7 +299,7 @@
 # Freezing on Insert
 # ============================================================================
 
-(assert-eq (type-of (get (set->array (set @[1 2])) 0)) :tuple
+(assert-eq (type-of (get (set->array (set @[1 2])) 0)) :array
   "mutable array is frozen when inserted into set")
 
 (assert-eq (type-of (get (set->array (set @{:a 1})) 0)) :struct
@@ -308,11 +308,11 @@
 (assert-eq (type-of (get (set->array (set @"hello")) 0)) :string
   "mutable buffer is frozen when inserted into set")
 
-(assert-false (array? (get (set->array (set @[1 2])) 0))
-  "frozen array is not an array")
+(assert-true (array? (get (set->array (set @[1 2])) 0))
+  "frozen array is an array")
 
-(assert-false (table? (get (set->array (set @{:a 1})) 0))
-  "frozen table is not a table")
+(assert-true (struct? (get (set->array (set @{:a 1})) 0))
+  "frozen table is a struct")
 
 # ============================================================================
 # Length and Empty
@@ -386,7 +386,7 @@
 # Conversions: set->array
 # ============================================================================
 
-(assert-true (tuple? (set->array (set 1 2 3)))
+(assert-true (array? (set->array (set 1 2 3)))
   "set->array on immutable set returns a tuple")
 
 (assert-eq (length (set->array (set 1 2 3))) 3
@@ -395,7 +395,7 @@
 (assert-eq (length (set->array ||)) 0
   "set->array of empty set returns empty tuple")
 
-(assert-true (tuple? (set->array (set 1 2 3)))
+(assert-true (array? (set->array (set 1 2 3)))
   "set->array works with constructor-created sets")
 
 (assert-true (array? (set->array @|1 2 3|))

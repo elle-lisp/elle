@@ -241,7 +241,7 @@ fn prim_path_is_dir(args: &[Value]) -> (SignalBits, Value) {
     })
 }
 
-pub const PRIMITIVES: &[PrimitiveDef] = &[
+pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/join",
         func: prim_path_join,

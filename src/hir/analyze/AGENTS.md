@@ -39,7 +39,7 @@ Analyzer
     ├─► resolve variables → Binding (heap-allocated, shared by reference)
     ├─► track mutations → binding.mark_mutated()
     ├─► track captures → binding.mark_captured() + CaptureInfo
-    ├─► infer effects → Effect (Pure, Yields, Polymorphic)
+    ├─► infer effects → Effect (Inert, Yields, Polymorphic)
     ├─► validate scope rules (hygienic resolution)
     ├─► validate control flow (break targeting)
     └─► extract docstrings → Option<Value>
@@ -77,7 +77,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
 |------|-------|---------|
 | `mod.rs` | ~620 | `Analyzer` struct, scope management, entry point, binding resolution |
 | `forms.rs` | ~725 | Core form analysis: `analyze_expr`, literals, operators, collections |
-| `binding.rs` | ~520 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
+| `binding.rs` | ~530 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
+| `fileletrec.rs` | ~360 | File-scope letrec compilation for top-level forms |
 | `destructure.rs` | ~415 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
 | `lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects, docstrings |
 | `special.rs` | ~345 | Special forms: `match`, `yield`, pattern matching |
@@ -91,7 +92,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 3. **`needs_cell()` determines cell boxing.** A local binding needs a cell if captured. A parameter needs a cell if mutated. Globals never need cells.
 
-4. **Effects combine upward.** A `begin` has the combined effect of its children. A `fn` body's effect is stored but the fn itself is Pure.
+4. **Effects combine upward.** A `begin` has the combined effect of its children. A `fn` body's effect is stored but the fn itself is Inert.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its own `Vec<CaptureInfo>` listing what it captures and how.
 
@@ -105,9 +106,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 10. **`Destructure` decomposes values into pattern bindings.** `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is produced by the analyzer for `def`, `var`, `let`, and `fn` parameter destructuring. The pattern's leaf `Var` bindings are created in the current scope. `let*` is desugared to nested `let` in the expander, so the analyzer never sees `let*`.
 
-11. **Destructured bindings use silent nil semantics.** Missing list/array/table elements produce `nil`, not errors. Wrong-type values produce `nil` for all bindings. No runtime type checks.
+11. **Destructured bindings use silent nil semantics.** Missing list/@array/@struct elements produce `nil`, not errors. Wrong-type values produce `nil` for all bindings. No runtime type checks.
 
-12. **`HirPattern::Table` supports table/struct destructuring.** `HirPattern::Table { entries: Vec<(PatternKey, HirPattern)> }` maps keyword or symbol keys to sub-patterns. `PatternKey::Keyword(String)` for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys. In binding forms (`def`, `var`, `let`, `fn` params), uses `TableGetOrNil` with silent nil. In `match` patterns, emits an `IsTable` type guard first so non-table values fall through to the next arm.
+12. **`HirPattern::Table` supports @struct/struct destructuring.** `HirPattern::Table { entries: Vec<(PatternKey, HirPattern)> }` maps keyword or symbol keys to sub-patterns. `PatternKey::Keyword(String)` for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys. In binding forms (`def`, `var`, `let`, `fn` params), uses `TableGetOrNil` with silent nil. In `match` patterns, emits an `IsStructMut` type guard first so non-@struct values fall through to the next arm.
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block` has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`. The analyzer validates: break outside block → error, unknown block name → error, break across function boundary → error. The lowerer compiles break to `Move` + `Jump` — no new bytecode instructions needed. `while` wraps its `While` node in an implicit `Block` named `"while"`, so `(break :while val)` or unnamed `(break)` can exit a while loop.
 
@@ -115,7 +116,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
 
-16. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for tuple/array/struct/table literal desugaring. All synthesized nodes carry the original symbol's span.
+16. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
 
 17. **`Parameterize` creates dynamic binding frames.** `HirKind::Parameterize { bindings: Vec<(Hir, Hir)>, body: Box<Hir> }` is produced by the analyzer for `(parameterize ((p1 v1) (p2 v2) ...) body ...)`. Each binding is a (parameter, value) pair. The analyzer validates that each parameter expression is a parameter (or will be at runtime). The lowerer emits `PushParamFrame` before evaluating bindings, stores them in the frame, then emits `PopParamFrame` after the body.
 

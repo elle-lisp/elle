@@ -2,7 +2,7 @@
 
 /// A source edit: replace bytes at [byte_offset..byte_offset+byte_len] with replacement.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Edit {
+pub(crate) struct Edit {
     pub byte_offset: usize,
     pub byte_len: usize,
     pub replacement: String,
@@ -10,7 +10,7 @@ pub struct Edit {
 
 /// Apply edits to source text. Sorts back-to-front so byte offsets remain valid.
 /// Returns Err if any edits overlap.
-pub fn apply_edits(source: &str, edits: &mut [Edit]) -> Result<String, String> {
+pub(crate) fn apply_edits(source: &str, edits: &mut [Edit]) -> Result<String, String> {
     edits.sort_by(|a, b| b.byte_offset.cmp(&a.byte_offset));
 
     // Check for overlaps (edits are now sorted descending by offset)

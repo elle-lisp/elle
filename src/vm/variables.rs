@@ -1,7 +1,7 @@
 use super::core::VM;
 use crate::value::Value;
 
-pub fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let idx = vm.read_u16(bytecode, ip) as usize;
     let value = vm
         .fiber
@@ -21,7 +21,7 @@ pub fn handle_store_local(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     vm.fiber.stack.push(value);
 }
 
-pub fn handle_load_upvalue(
+pub(crate) fn handle_load_upvalue(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
@@ -59,7 +59,7 @@ pub fn handle_load_upvalue(
     }
 }
 
-pub fn handle_load_upvalue_raw(
+pub(crate) fn handle_load_upvalue_raw(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
@@ -81,7 +81,7 @@ pub fn handle_load_upvalue_raw(
     vm.fiber.stack.push(env[idx]);
 }
 
-pub fn handle_store_upvalue(
+pub(crate) fn handle_store_upvalue(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,

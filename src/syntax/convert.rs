@@ -14,10 +14,10 @@ fn contains_syntax_literal(s: &Syntax) -> bool {
     match &s.kind {
         SyntaxKind::SyntaxLiteral(_) => true,
         SyntaxKind::List(items)
-        | SyntaxKind::Tuple(items)
         | SyntaxKind::Array(items)
+        | SyntaxKind::ArrayMut(items)
         | SyntaxKind::Struct(items)
-        | SyntaxKind::Table(items)
+        | SyntaxKind::StructMut(items)
         | SyntaxKind::Set(items)
         | SyntaxKind::SetMut(items) => items.iter().any(contains_syntax_literal),
         SyntaxKind::Quote(inner)
@@ -71,13 +71,13 @@ impl Syntax {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 crate::value::list(values)
             }
-            SyntaxKind::Tuple(items) => {
-                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
-                Value::tuple(values)
-            }
             SyntaxKind::Array(items) => {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 Value::array(values)
+            }
+            SyntaxKind::ArrayMut(items) => {
+                let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
+                Value::array_mut(values)
             }
             SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
@@ -86,7 +86,7 @@ impl Syntax {
                 values.extend(items.iter().map(|item| item.to_value(symbols)));
                 crate::value::list(values)
             }
-            SyntaxKind::Table(items) => {
+            SyntaxKind::StructMut(items) => {
                 // Convert to (table k1 v1 k2 v2 ...) list
                 let table_sym = symbols.intern("table");
                 let mut values = vec![Value::symbol(table_sym.0)];
@@ -182,19 +182,19 @@ impl Syntax {
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
             SyntaxKind::List(syntaxes?)
-        } else if let Some(elems) = value.as_tuple() {
+        } else if let Some(elems) = value.as_array() {
             let syntaxes: Result<Vec<Syntax>, String> = elems
                 .iter()
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
-            SyntaxKind::Tuple(syntaxes?)
-        } else if let Some(vec_ref) = value.as_array() {
+            SyntaxKind::Array(syntaxes?)
+        } else if let Some(vec_ref) = value.as_array_mut() {
             let items = vec_ref.borrow().clone();
             let syntaxes: Result<Vec<Syntax>, String> = items
                 .iter()
                 .map(|v| Syntax::from_value(v, symbols, span.clone()))
                 .collect();
-            SyntaxKind::Array(syntaxes?)
+            SyntaxKind::ArrayMut(syntaxes?)
         } else if let Some(struct_ref) = value.as_struct() {
             let mut syntaxes = Vec::with_capacity(struct_ref.len() * 2);
             for (k, v) in struct_ref.iter() {
@@ -202,14 +202,14 @@ impl Syntax {
                 syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
             }
             SyntaxKind::Struct(syntaxes)
-        } else if let Some(table_ref) = value.as_table() {
+        } else if let Some(table_ref) = value.as_struct_mut() {
             let items = table_ref.borrow();
             let mut syntaxes = Vec::with_capacity(items.len() * 2);
             for (k, v) in items.iter() {
                 syntaxes.push(table_key_to_syntax(k, symbols, &span)?);
                 syntaxes.push(Syntax::from_value(v, symbols, span.clone())?);
             }
-            SyntaxKind::Table(syntaxes)
+            SyntaxKind::StructMut(syntaxes)
         } else {
             return Err(format!("Cannot convert {:?} to Syntax", value));
         };
@@ -333,24 +333,6 @@ mod tests {
     fn test_roundtrip_tuple() {
         let mut symbols = SymbolTable::new();
         let syntax = Syntax::new(
-            SyntaxKind::Tuple(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
-            test_span(),
-        );
-        let value = syntax.to_value(&mut symbols);
-        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
-        match result.kind {
-            SyntaxKind::Tuple(items) => {
-                assert_eq!(items.len(), 1);
-                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
-            }
-            other => panic!("expected Tuple, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn test_roundtrip_array() {
-        let mut symbols = SymbolTable::new();
-        let syntax = Syntax::new(
             SyntaxKind::Array(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
             test_span(),
         );
@@ -362,6 +344,24 @@ mod tests {
                 assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
             }
             other => panic!("expected Array, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_array() {
+        let mut symbols = SymbolTable::new();
+        let syntax = Syntax::new(
+            SyntaxKind::ArrayMut(vec![Syntax::new(SyntaxKind::Int(1), test_span())]),
+            test_span(),
+        );
+        let value = syntax.to_value(&mut symbols);
+        let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
+        match result.kind {
+            SyntaxKind::ArrayMut(items) => {
+                assert_eq!(items.len(), 1);
+                assert!(matches!(items[0].kind, SyntaxKind::Int(1)));
+            }
+            other => panic!("expected ArrayMut, got {:?}", other),
         }
     }
 
@@ -481,11 +481,11 @@ mod tests {
         // Build a table Value directly (to_value produces a list, not a table)
         let mut entries = BTreeMap::new();
         entries.insert(TableKey::Keyword("charlie".to_string()), Value::int(3));
-        let value = Value::table_from(entries);
+        let value = Value::struct_mut_from(entries);
 
         let result = Syntax::from_value(&value, &symbols, test_span()).unwrap();
         match result.kind {
-            SyntaxKind::Table(items) => {
+            SyntaxKind::StructMut(items) => {
                 assert_eq!(
                     items.len(),
                     2,
@@ -495,7 +495,7 @@ mod tests {
                 assert!(matches!(&items[0].kind, SyntaxKind::Keyword(s) if s == "charlie"));
                 assert!(matches!(&items[1].kind, SyntaxKind::Int(3)));
             }
-            other => panic!("expected Table, got {:?}", other),
+            other => panic!("expected StructMut, got {:?}", other),
         }
     }
 }

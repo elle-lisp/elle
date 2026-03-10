@@ -176,10 +176,10 @@ fn prim_random_bytes(args: &[Value]) -> (SignalBits, Value) {
 
 /// Extract elements from an array (mutable) or tuple (immutable).
 fn extract_elements(val: &Value) -> Option<Vec<Value>> {
-    if let Some(arr) = val.as_array() {
+    if let Some(arr) = val.as_array_mut() {
         return Some(arr.borrow().clone());
     }
-    if let Some(tup) = val.as_tuple() {
+    if let Some(tup) = val.as_array() {
         return Some(tup.to_vec());
     }
     None
@@ -204,7 +204,7 @@ fn prim_random_shuffle(args: &[Value]) -> (SignalBits, Value) {
     RNG.with(|rng| {
         rng.borrow_mut().shuffle(&mut elements);
     });
-    (SIG_OK, Value::array(elements))
+    (SIG_OK, Value::array_mut(elements))
 }
 
 fn prim_random_choice(args: &[Value]) -> (SignalBits, Value) {

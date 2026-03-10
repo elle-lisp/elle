@@ -429,7 +429,7 @@ Operations:
 
 - **Combine**: `a | b` (union — a block's effect is the union of its parts)
 - **Check**: `actual & ~permitted == 0` (subset — are all actual effects permitted?)
-- **Pure**: `bits == 0` (no effects)
+- **Inert**: `bits == 0` (no effects)
 - **Has**: `bits & YIELD != 0` (membership test)
 
 ### Compile-Time Inference
