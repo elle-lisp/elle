@@ -77,7 +77,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | `Value::@bytes(bytes)` | @bytes | Heap-allocated mutable @bytes |
 | `Value::closure(c)` | Closure | Bytecode + env + arity + effect + location_map |
 | `Value::fiber(f)` | Fiber | Independent execution context |
-| `Value::cell(v)` | Cell | Mutable cell (user-created via `box`) |
+| `Value::lbox(v)` | LBox | Mutable lbox (user-created via `box`) |
 | `Value::binding(name, scope)` | Binding | Compile-time binding metadata (never at runtime) |
 | `Value::syntax(s)` | Syntax | Syntax object with scope sets (for macro expansion) |
 | `Value::parameter(id, default)` | Parameter | Dynamic binding |
@@ -120,7 +120,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 
 2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-3. **Two cell types exist.** `Cell` (user-created via `box`, explicit deref) and `LocalCell` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::Cell`.
+3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
 
 4. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
 

@@ -330,14 +330,14 @@ impl VM {
                 }
 
                 // Box operations
-                Instruction::MakeCell => {
-                    cell::handle_make_cell(self);
+                Instruction::MakeLBox => {
+                    cell::handle_make_lbox(self);
                 }
-                Instruction::UnwrapCell => {
-                    cell::handle_unwrap_cell(self);
+                Instruction::UnlBox => {
+                    cell::handle_unlbox(self);
                 }
-                Instruction::UpdateCell => {
-                    cell::handle_update_cell(self);
+                Instruction::UpdateLBox => {
+                    cell::handle_update_lbox(self);
                 }
 
                 // Yield — capture suspended frame and suspend

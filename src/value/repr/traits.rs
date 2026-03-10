@@ -55,7 +55,7 @@ impl PartialEq for Value {
                 }
 
                 // Box comparison (compare contents)
-                (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => *c1.borrow() == *c2.borrow(),
+                (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => *c1.borrow() == *c2.borrow(),
 
                 // Float comparison — bitwise, not IEEE, so NaN == NaN (same bits)
                 (HeapObject::Float(f1), HeapObject::Float(f2)) => f1.to_bits() == f2.to_bits(),
@@ -191,7 +191,7 @@ impl Hash for Value {
                 }
                 HeapObject::LStringMut(rc) => rc.borrow().hash(state),
                 HeapObject::LBytesMut(rc) => rc.borrow().hash(state),
-                HeapObject::Cell(rc, _) => rc.borrow().hash(state),
+                HeapObject::LBox(rc, _) => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
                 HeapObject::Float(f) => f.to_bits().hash(state),
@@ -273,7 +273,7 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::LStruct => 15,
             HeapTag::LStructMut => 16,
             HeapTag::Closure => 17,
-            HeapTag::Cell => 18,
+            HeapTag::LBox => 18,
             HeapTag::NativeFn => 19,
             HeapTag::LibHandle => 20,
             HeapTag::ThreadHandle => 21,
@@ -396,7 +396,7 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1.iter().cmp(s2.iter()),
 
         // Box — by contained value (borrow)
-        (HeapObject::Cell(c1, _), HeapObject::Cell(c2, _)) => {
+        (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => {
             let v1 = c1.borrow();
             let v2 = c2.borrow();
             v1.cmp(&*v2)

@@ -217,21 +217,21 @@ impl Value {
         alloc(HeapObject::Closure(Rc::new(c)))
     }
 
-    /// Create a user cell (mutable box) — NOT auto-unwrapped by LoadUpvalue.
+    /// Create a user box (mutable LBox) — NOT auto-unwrapped by LoadUpvalue.
     #[inline]
-    pub fn cell(value: Value) -> Self {
+    pub fn lbox(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::Cell(RefCell::new(value), false))
+        alloc(HeapObject::LBox(RefCell::new(value), false))
     }
 
-    /// Create a compiler local cell — auto-unwrapped by LoadUpvalue.
+    /// Create a compiler local box — auto-unwrapped by LoadUpvalue.
     /// Used for mutable captured variables.
     #[inline]
-    pub fn local_cell(value: Value) -> Self {
+    pub fn local_lbox(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::Cell(RefCell::new(value), true))
+        alloc(HeapObject::LBox(RefCell::new(value), true))
     }
 
     /// Create a native function value.

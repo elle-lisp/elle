@@ -98,12 +98,12 @@ impl<'a> FunctionTranslator<'a> {
         use crate::value::Value;
 
         let nil_bits = builder.ins().iconst(I64, Value::NIL.to_bits() as i64);
-        let cell_locals_mask = self.lir.cell_locals_mask;
+        let lbox_locals_mask = self.lir.lbox_locals_mask;
 
         for i in 0..num_locally_defined {
-            if i < 64 && (cell_locals_mask & (1 << i)) != 0 {
+            if i < 64 && (lbox_locals_mask & (1 << i)) != 0 {
                 // This local needs a cell (captured or mutated)
-                let cell = self.call_helper_unary(builder, self.helpers.make_cell, nil_bits)?;
+                let cell = self.call_helper_unary(builder, self.helpers.make_lbox, nil_bits)?;
                 builder.def_var(var(self.local_var_base + i), cell);
             } else {
                 // No cell needed — store value directly
@@ -174,11 +174,11 @@ impl<'a> FunctionTranslator<'a> {
                     let local_index = *index - num_captures - arity;
                     let local_val = builder.use_var(var(self.local_var_base + local_index as u32));
                     if (local_index as u32) < 64
-                        && (self.lir.cell_locals_mask & (1 << local_index)) != 0
+                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
                     {
-                        // cell-wrapped: auto-unwrap via load_cell
+                        // cell-wrapped: auto-unwrap via load_lbox
                         let result =
-                            self.call_helper_unary(builder, self.helpers.load_cell, local_val)?;
+                            self.call_helper_unary(builder, self.helpers.load_lbox, local_val)?;
                         builder.def_var(var(dst.0), result);
                     } else {
                         // Direct value: no cell indirection
@@ -301,23 +301,23 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             // === Phase 3: Cell operations ===
-            LirInstr::MakeCell { dst, value } => {
+            LirInstr::MakeLBox { dst, value } => {
                 let val = builder.use_var(var(value.0));
-                let result = self.call_helper_unary(builder, self.helpers.make_cell, val)?;
+                let result = self.call_helper_unary(builder, self.helpers.make_lbox, val)?;
                 builder.def_var(var(dst.0), result);
             }
 
-            LirInstr::LoadCell { dst, cell } => {
+            LirInstr::LoadLBox { dst, cell } => {
                 let cell_val = builder.use_var(var(cell.0));
-                let result = self.call_helper_unary(builder, self.helpers.load_cell, cell_val)?;
+                let result = self.call_helper_unary(builder, self.helpers.load_lbox, cell_val)?;
                 builder.def_var(var(dst.0), result);
             }
 
-            LirInstr::StoreCell { cell, value } => {
+            LirInstr::StoreLBox { cell, value } => {
                 let cell_val = builder.use_var(var(cell.0));
                 let val = builder.use_var(var(value.0));
                 let _result =
-                    self.call_helper_binary(builder, self.helpers.store_cell, cell_val, val)?;
+                    self.call_helper_binary(builder, self.helpers.store_lbox, cell_val, val)?;
                 // Result is NIL, we don't need to store it
             }
 
@@ -343,14 +343,14 @@ impl<'a> FunctionTranslator<'a> {
                     // Locally-defined variable
                     let local_index = *index - num_captures - arity;
                     if (local_index as u32) < 64
-                        && (self.lir.cell_locals_mask & (1 << local_index)) != 0
+                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
                     {
                         // cell-wrapped: store into the cell
                         let cell_val =
                             builder.use_var(var(self.local_var_base + local_index as u32));
                         let _result = self.call_helper_binary(
                             builder,
-                            self.helpers.store_cell,
+                            self.helpers.store_lbox,
                             cell_val,
                             val,
                         )?;

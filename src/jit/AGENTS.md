@@ -63,7 +63,7 @@ The JIT was built incrementally:
 |-------|-------|
 | Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
 | Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
-| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), cells (`MakeCell`, `LoadCell`, `StoreCell`), globals (`LoadGlobal`, `StoreGlobal`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. |
+| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), globals (`LoadGlobal`, `StoreGlobal`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. |
 | Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
 
 ## Phase 4 Scope (Current)
@@ -74,7 +74,7 @@ Supported instructions:
 - **Comparison**: `Compare` (inline integer fast path, extern fallback)
 - **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
-- **Cells**: `MakeCell`, `LoadCell`, `StoreCell`, `StoreCapture`
+- **LBoxes**: `MakeLBox`, `LoadLBox`, `StoreLBox`, `StoreCapture`
 - **Globals**: `LoadGlobal`, `StoreGlobal`
 - **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`
@@ -95,7 +95,7 @@ Supported in yielding functions (via side-exit):
 | `compiler.rs` | ~910 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
 | `translate.rs` | ~940 | `FunctionTranslator`, LIR instruction translation |
 | `runtime.rs` | ~460 | Arithmetic, comparison, type-checking helpers |
-| `dispatch.rs` | ~640 | Data structure, cell, global, function call helpers (incl. JIT-to-JIT) |
+| `dispatch.rs` | ~640 | Data structure, lbox, global, function call helpers (incl. JIT-to-JIT) |
 | `code.rs` | ~100 | `JitCode` wrapper type |
 | `fastpath.rs` | ~250 | Inline integer fast paths for arithmetic/comparison |
 | `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
@@ -116,7 +116,7 @@ These handle type checking and NaN-boxing.
 ### dispatch.rs (heap/VM interaction)
 
 - **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_vector`, `elle_jit_is_pair`
-- **Cells**: `elle_jit_make_cell`, `elle_jit_load_cell`, `elle_jit_store_cell`, `elle_jit_store_capture`
+- **LBoxes**: `elle_jit_make_lbox`, `elle_jit_load_lbox`, `elle_jit_store_lbox`, `elle_jit_store_capture`
 - **Globals**: `elle_jit_load_global`, `elle_jit_store_global` (require VM pointer)
 - **Function calls**: `elle_jit_call` (dispatches to native functions, JIT-cached closures, or interpreter fallback)
 
@@ -328,27 +328,27 @@ No errors are silently swallowed.
 13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block emits a Cranelift cons-building loop that iterates over
      `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
-     rest-arg list. `cell_params_mask` is checked for the rest param slot.
+     rest-arg list. `lbox_params_mask` is checked for the rest param slot.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.
 
-## Cell Optimization for Locally-Defined Variables
+## LBox Optimization for Locally-Defined Variables
 
-The JIT uses `LirFunction.cell_locals_mask` to avoid unnecessary `LocalCell`
+The JIT uses `LirFunction.lbox_locals_mask` to avoid unnecessary `LocalLBox`
 heap allocations. In the VM interpreter, every locally-defined variable inside
-a lambda gets a `LocalCell(NIL)` at function entry (because `StoreUpvalue`
-requires cell indirection to write through `Rc<Vec<Value>>`). In JIT code,
+a lambda gets a `LocalLBox(NIL)` at function entry (because `StoreUpvalue`
+requires lbox indirection to write through `Rc<Vec<Value>>`). In JIT code,
 locally-defined variables are Cranelift variables (CPU registers/stack), so
-cell wrapping is only needed when `binding.needs_cell()` is true (captured by
+lbox wrapping is only needed when `binding.needs_lbox()` is true (captured by
 nested closure or mutated via `set!`).
 
 The optimization applies to three code paths in `translate.rs`:
 
-1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_cell` when the
-   bit is set in `cell_locals_mask`; others get NIL directly.
-2. **`LoadCapture` for locals**: Skips `load_cell` unwrapping when bit not set.
-3. **`StoreCapture` for locals**: Skips `store_cell` when bit not set, uses
+1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_lbox` when the
+   bit is set in `lbox_locals_mask`; others get NIL directly.
+2. **`LoadCapture` for locals**: Skips `load_lbox` unwrapping when bit not set.
+3. **`StoreCapture` for locals**: Skips `store_lbox` when bit not set, uses
    `def_var` directly.
 
 Impact: 3.2x speedup on N-Queens N=12 (4.4s → 1.38s), 30x reduction in

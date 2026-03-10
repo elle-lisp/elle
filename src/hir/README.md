@@ -18,7 +18,7 @@ locals, transitively through parent's captures, or from globals).
 
 **Mutation Tracking**: Variables modified with `set` are marked as mutated
 via `binding.mark_mutated()`. Combined with capture information, this
-determines which variables need cell boxing for correct semantics.
+determines which variables need lbox boxing for correct semantics.
 
 **Effect Inference**: Each expression is tagged with its effect (`Inert`, `Yields`,
 or `Polymorphic`). Effects propagate upward through the tree.
@@ -34,7 +34,7 @@ The analyzer produces:
 - `x` gets a `Binding` with scope `Local`, marked as captured
 - The inner lambda has `CaptureInfo` showing it captures `x`'s Binding from
   parent's local slot
-- Since `x` is captured but not mutated, it doesn't need cell boxing
+- Since `x` is captured but not mutated, it doesn't need lbox boxing
 
 ## Key Types
 

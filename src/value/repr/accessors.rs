@@ -158,11 +158,11 @@ impl Value {
         self.heap_tag() == Some(HeapTag::Closure)
     }
 
-    /// Check if this is a cell.
+    /// Check if this is a box (LBox).
     #[inline]
-    pub fn is_cell(&self) -> bool {
+    pub fn is_lbox(&self) -> bool {
         use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Cell)
+        self.heap_tag() == Some(HeapTag::LBox)
     }
 
     /// Check if this is a fiber.
@@ -352,27 +352,27 @@ impl Value {
         }
     }
 
-    /// Extract as cell if this is a cell.
+    /// Extract as box (LBox) if this is a box.
     #[inline]
-    pub fn as_cell(&self) -> Option<&std::cell::RefCell<Value>> {
+    pub fn as_lbox(&self) -> Option<&std::cell::RefCell<Value>> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Cell(c, _) => Some(c),
+            HeapObject::LBox(c, _) => Some(c),
             _ => None,
         }
     }
 
-    /// Check if this is a compiler-created local cell (auto-unwrapped by LoadUpvalue).
+    /// Check if this is a compiler-created local box (auto-unwrapped by LoadUpvalue).
     #[inline]
-    pub fn is_local_cell(&self) -> bool {
+    pub fn is_local_lbox(&self) -> bool {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_heap() {
             return false;
         }
-        unsafe { matches!(deref(*self), HeapObject::Cell(_, true)) }
+        unsafe { matches!(deref(*self), HeapObject::LBox(_, true)) }
     }
 
     /// Extract as native function if this is a native function.
@@ -561,7 +561,7 @@ impl Value {
             || self.is_bytes_mut()
             || self.is_struct_mut()
             || self.is_set_mut()
-            || self.is_cell()
+            || self.is_lbox()
             || self.is_parameter()
     }
 

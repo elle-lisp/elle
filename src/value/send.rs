@@ -51,9 +51,9 @@ pub enum SendValue {
     /// Deep copy of @bytes (mutable binary data)
     Blob(Vec<u8>),
 
-    /// Deep copy of mutable cells (if contents are sendable)
-    /// The bool indicates if it's a local cell (auto-unwrapped) or user cell
-    Cell(Box<SendValue>, bool),
+    /// Deep copy of mutable boxes (if contents are sendable)
+    /// The bool indicates if it's a local lbox (auto-unwrapped) or user box
+    LBox(Box<SendValue>, bool),
 
     /// Float values that couldn't be stored inline
     Float(f64),
@@ -151,12 +151,12 @@ impl SendValue {
             }
 
             // Boxes - deep copy the contents if sendable
-            HeapObject::Cell(cell_ref, is_local) => {
+            HeapObject::LBox(cell_ref, is_local) => {
                 let borrowed = cell_ref
                     .try_borrow()
-                    .map_err(|_| "Cannot borrow cell for sending".to_string())?;
+                    .map_err(|_| "Cannot borrow box for sending".to_string())?;
                 let contents = SendValue::from_value(*borrowed)?;
-                Ok(SendValue::Cell(Box::new(contents), *is_local))
+                Ok(SendValue::LBox(Box::new(contents), *is_local))
             }
 
             // Float values that couldn't be stored inline
@@ -263,10 +263,10 @@ impl SendValue {
             }
             SendValue::Bytes(bytes) => alloc(HeapObject::LBytes(bytes)),
             SendValue::Blob(bytes) => alloc(HeapObject::LBytesMut(std::cell::RefCell::new(bytes))),
-            SendValue::Cell(contents, is_local) => {
+            SendValue::LBox(contents, is_local) => {
                 let val = contents.into_value();
-                // Preserve the cell type (local vs user) across thread boundary
-                alloc(HeapObject::Cell(std::cell::RefCell::new(val), is_local))
+                // Preserve the lbox type (local vs user) across thread boundary
+                alloc(HeapObject::LBox(std::cell::RefCell::new(val), is_local))
             }
             SendValue::Float(f) => alloc(HeapObject::Float(f)),
             SendValue::FFIType(desc) => alloc(HeapObject::FFIType(desc)),

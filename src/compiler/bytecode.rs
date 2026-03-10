@@ -143,15 +143,15 @@ pub enum Instruction {
     /// Operands: symbol_idx u16
     DefineLocal,
 
-    /// Wrap value in a cell for shared mutable access (Phase 4)
-    /// Pops value from stack, wraps it in a cell, pushes the cell
-    MakeCell,
+    /// Wrap value in an lbox for shared mutable access (Phase 4)
+    /// Pops value from stack, wraps it in an lbox, pushes the lbox
+    MakeLBox,
 
-    /// Unwrap a cell to get its value
-    UnwrapCell,
+    /// Unwrap an lbox to get its value
+    UnlBox,
 
-    /// Update a cell's value
-    UpdateCell,
+    /// Update an lbox's value
+    UpdateLBox,
 
     /// Yield (suspends execution)
     Yield,

@@ -165,10 +165,10 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (c)  # => 2
   ```
 
-  <details><summary>More: Automatic Cell Wrapping</summary>
+   <details><summary>More: Automatic LBox Wrapping</summary>
 
-  The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in a cell automatically. No explicit `box` or `ref` needed.
-  </details>
+   The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in an lbox automatically. No explicit `box` or `ref` needed.
+   </details>
 
 - **Full tail-call optimisation.** All tail calls are optimised — not just self-recursion. Mutually recursive functions, continuation-passing style, and trampolining all work without stack overflow.
 
@@ -335,7 +335,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 
 **Parameter** — dynamic binding. `(parameter default)` creates one; calling it reads the current value. `parameterize` sets it within a scope. Child fibers inherit parent parameter frames.
 
-**Box** — mutable cell. User boxes are explicit (`box`/`unbox`/`rebox`). Local cells are compiler-created for mutable captures and auto-unwrapped — users never see them.
+**Box** — mutable box. User boxes are explicit (`box`/`unbox`/`rebox`). Local lboxes are compiler-created for mutable captures and auto-unwrapped — users never see them.
 
 ### Truthiness
 
@@ -374,7 +374,7 @@ Exactly two values are falsy. Everything else is truthy.
 | `closure?` | closure only |
 | `primitive?` | native function only |
 | `fiber?` | fiber |
-| `box?` | box (mutable cell) |
+| `box?` | box (mutable box) |
 | `parameter?` | dynamic parameter |
 | `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
 | `pointer?` | raw or managed C pointer |
@@ -405,7 +405,7 @@ Exactly two values are falsy. Everything else is truthy.
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
-| box | `<cell value>` |
+| box | `<box value>` |
 | @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 

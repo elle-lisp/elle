@@ -74,10 +74,10 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
     is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-3. **Two cell types exist.** `Cell` (user-created via `box`, explicit deref)
-     and `LocalCell` (compiler-created for mutable captures and mutated parameters,
-     auto-unwrapped). Distinguished by a bool flag on `HeapObject::Cell`.
-     Immutable captured locals do not need cells — they are captured by value.
+3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref)
+      and `LocalLBox` (compiler-created for mutable captures and mutated parameters,
+      auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
+      Immutable captured locals do not need lboxes — they are captured by value.
 
 4. **`Closure` has `location_map`, `doc`, and `syntax`.** The `location_map: Rc<LocationMap>`
     field maps bytecode offsets to source locations for error reporting. The
@@ -109,7 +109,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 NaN-boxing uses the NaN space of IEEE 754 doubles:
 
 - **Immediate**: nil, bool, int (i48), symbol, keyword, float
-- **Heap pointer**: cons, array, table, closure, fiber, cell, parameter, syntax, binding, etc.
+- **Heap pointer**: cons, array, table, closure, fiber, lbox, parameter, syntax, binding, etc.
 
 ### Syntax objects
 

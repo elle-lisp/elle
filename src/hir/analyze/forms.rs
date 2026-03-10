@@ -375,7 +375,7 @@ impl<'a> Analyzer<'a> {
             for item in items {
                 for (name, scopes) in Self::is_define_form(item) {
                     // Create local binding slot, marked prebound so that
-                    // needs_cell() knows the binding may be captured before
+                    // needs_lbox() knows the binding may be captured before
                     // its initializer runs (self-recursion, forward refs).
                     let binding = self.bind(name, scopes, BindingScope::Local);
                     binding.mark_prebound();

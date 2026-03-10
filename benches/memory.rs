@@ -48,7 +48,7 @@ fn bench_fib() -> stats_alloc::Stats {
     )
 }
 
-/// N-Queens N=8 — the workload that motivated cell_locals_mask.
+/// N-Queens N=8 — the workload that motivated lbox_locals_mask.
 /// Contains let bindings inside recursive lambdas.
 fn bench_nqueens() -> stats_alloc::Stats {
     measure_eval(

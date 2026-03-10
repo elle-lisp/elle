@@ -59,16 +59,16 @@ pub extern "C" fn elle_jit_is_pair(a: u64) -> u64 {
 
 /// Create a LocalCell wrapping a value
 #[no_mangle]
-pub extern "C" fn elle_jit_make_cell(value: u64) -> u64 {
+pub extern "C" fn elle_jit_make_lbox(value: u64) -> u64 {
     let val = unsafe { Value::from_bits(value) };
-    Value::local_cell(val).to_bits()
+    Value::local_lbox(val).to_bits()
 }
 
 /// Load value from a LocalCell
 #[no_mangle]
-pub extern "C" fn elle_jit_load_cell(cell_bits: u64) -> u64 {
+pub extern "C" fn elle_jit_load_lbox(cell_bits: u64) -> u64 {
     let cell = unsafe { Value::from_bits(cell_bits) };
-    if let Some(cell_ref) = cell.as_cell() {
+    if let Some(cell_ref) = cell.as_lbox() {
         cell_ref.borrow().to_bits()
     } else {
         super::runtime::elle_jit_type_error_str("cell")
@@ -82,8 +82,8 @@ pub extern "C" fn elle_jit_load_cell(cell_bits: u64) -> u64 {
 #[no_mangle]
 pub extern "C" fn elle_jit_load_capture(val_bits: u64) -> u64 {
     let val = unsafe { Value::from_bits(val_bits) };
-    if val.is_local_cell() {
-        if let Some(cell_ref) = val.as_cell() {
+    if val.is_local_lbox() {
+        if let Some(cell_ref) = val.as_lbox() {
             cell_ref.borrow().to_bits()
         } else {
             val_bits // shouldn't happen, but safe fallback
@@ -95,10 +95,10 @@ pub extern "C" fn elle_jit_load_capture(val_bits: u64) -> u64 {
 
 /// Store value into a LocalCell
 #[no_mangle]
-pub extern "C" fn elle_jit_store_cell(cell_bits: u64, value: u64) -> u64 {
+pub extern "C" fn elle_jit_store_lbox(cell_bits: u64, value: u64) -> u64 {
     let cell = unsafe { Value::from_bits(cell_bits) };
     let val = unsafe { Value::from_bits(value) };
-    if let Some(cell_ref) = cell.as_cell() {
+    if let Some(cell_ref) = cell.as_lbox() {
         *cell_ref.borrow_mut() = val;
         TAG_NIL
     } else {
@@ -115,9 +115,9 @@ pub extern "C" fn elle_jit_store_capture(env_ptr: *mut u64, index: u64, value: u
     let slot_bits = unsafe { *env_ptr.add(idx) };
     let slot = unsafe { Value::from_bits(slot_bits) };
 
-    if slot.is_local_cell() {
+    if slot.is_local_lbox() {
         // Store into the cell
-        if let Some(cell_ref) = slot.as_cell() {
+        if let Some(cell_ref) = slot.as_lbox() {
             let new_val = unsafe { Value::from_bits(value) };
             *cell_ref.borrow_mut() = new_val;
         }
@@ -182,20 +182,20 @@ mod tests {
     #[test]
     fn test_cell_operations() {
         // Make a cell
-        let cell_bits = elle_jit_make_cell(Value::int(42).to_bits());
+        let cell_bits = elle_jit_make_lbox(Value::int(42).to_bits());
         let cell = unsafe { Value::from_bits(cell_bits) };
-        assert!(cell.is_local_cell());
+        assert!(cell.is_local_lbox());
 
         // Load from cell
-        let loaded = elle_jit_load_cell(cell_bits);
+        let loaded = elle_jit_load_lbox(cell_bits);
         let loaded_val = unsafe { Value::from_bits(loaded) };
         assert_eq!(loaded_val.as_int(), Some(42));
 
         // Store to cell
-        elle_jit_store_cell(cell_bits, Value::int(100).to_bits());
+        elle_jit_store_lbox(cell_bits, Value::int(100).to_bits());
 
         // Load again
-        let loaded2 = elle_jit_load_cell(cell_bits);
+        let loaded2 = elle_jit_load_lbox(cell_bits);
         let loaded_val2 = unsafe { Value::from_bits(loaded2) };
         assert_eq!(loaded_val2.as_int(), Some(100));
     }

@@ -118,9 +118,9 @@ impl fmt::Display for Value {
         }
 
         // Box
-        if let Some(cell_ref) = self.as_cell() {
+        if let Some(cell_ref) = self.as_lbox() {
             let val = cell_ref.borrow();
-            return write!(f, "<cell {}>", val);
+            return write!(f, "<box {}>", val);
         }
 
         // Fiber

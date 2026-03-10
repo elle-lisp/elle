@@ -46,12 +46,12 @@ pub struct LirFunction {
     pub num_captures: u16,
     /// Bitmask indicating which parameters need to be wrapped in cells
     /// Bit i is set if parameter i needs a cell (for mutable parameters)
-    pub cell_params_mask: u64,
+    pub lbox_params_mask: u64,
     /// Bitmask indicating which locally-defined variables need cells.
     /// Bit i is set if locally-defined variable i needs a cell (captured or mutated).
     /// Variables without the bit set are stored directly without cell wrapping,
     /// avoiding heap allocation on every function call.
-    pub cell_locals_mask: u64,
+    pub lbox_locals_mask: u64,
     /// Effect of this function (Pure, Yields, or Polymorphic)
     pub effect: Effect,
     /// Optional docstring from the source lambda
@@ -129,8 +129,8 @@ impl LirFunction {
             num_regs: 0,
             num_locals: 0,
             num_captures: 0,
-            cell_params_mask: 0,
-            cell_locals_mask: 0,
+            lbox_params_mask: 0,
+            lbox_locals_mask: 0,
             effect: Effect::inert(),
             doc: None,
             syntax: None,
@@ -273,11 +273,11 @@ pub enum LirInstr {
 
     // === Cell Operations (for mutable captures) ===
     /// Create a cell containing a value
-    MakeCell { dst: Reg, value: Reg },
+    MakeLBox { dst: Reg, value: Reg },
     /// Load value from cell
-    LoadCell { dst: Reg, cell: Reg },
+    LoadLBox { dst: Reg, cell: Reg },
     /// Store value into cell
-    StoreCell { cell: Reg, value: Reg },
+    StoreLBox { cell: Reg, value: Reg },
 
     // === Destructuring (silent nil) ===
     /// Car with silent nil: returns nil if not a cons cell

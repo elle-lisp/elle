@@ -68,7 +68,7 @@ Source locations flow through the entire pipeline: Syntax spans â†’ HIR spans â†
 ## Key invariants
 
 1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed Value), not symbols.
-2. **Closures capture by value into their environment.** Mutable captures use `LocalCell`.
+2. **Closures capture by value into their environment.** Mutable captures use `LocalLBox`.
 3. **Effects are inferred, not declared.** The `Effect` enum propagates from leaves to root during analysis.
 4. **The VM is stack-based for operands, register-addressed for locals.** Instructions reference registers by index.
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is forbidden.

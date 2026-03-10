@@ -338,9 +338,9 @@ Compiled function with captured environment.
 (closure? x)            # predicate
 ```
 
-Closures capture by value. Mutable captures use `LocalCell` (compiler-
-managed, auto-unwrapped). The `cell_params_mask` tracks which parameters
-need cell wrapping.
+Closures capture by value. Mutable captures use `LocalLBox` (compiler-
+managed, auto-unwrapped). The `lbox_params_mask` tracks which parameters
+need lbox wrapping.
 
 #### native function
 
@@ -367,12 +367,12 @@ mask. See `docs/fibers.md` for the full fiber architecture.
 (fiber? x)                    # predicate
 ```
 
-#### box (cell)
+#### box (lbox)
 
-Mutable cell. Two variants:
+Mutable box. Two variants:
 
 - **User box** (`box`): explicit creation and dereferencing.
-- **Local cell**: compiler-created for mutable captures. Auto-unwrapped by
+- **Local lbox**: compiler-created for mutable captures. Auto-unwrapped by
   `LoadUpvalue`. Users never see these directly.
 
 ```janet
@@ -464,7 +464,7 @@ Created by `ffi/malloc`.
 | `struct?` | struct (immutable or @struct) |
 | `bytes?` | bytes (immutable or @bytes) |
 | `set?` | set (immutable or @set) |
-| `box?` | box (mutable cell) |
+| `box?` | box (mutable box) |
 | `parameter?` | dynamic parameter |
 | `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
 | `function?` | closure or native function |
@@ -497,7 +497,7 @@ Created by `ffi/malloc`.
 | @set | `@\|1 2 3\|` | |
 | bytes | `#bytes[01 02 03]` | |
 | @bytes | `#@bytes[01 02 03]` | |
-| box | `<cell value>` | |
+| box | `<box value>` | |
 | closure | `<closure>` | |
 | native fn | `<native-fn>` | |
 | fiber | `<fiber:status>` | |
@@ -531,9 +531,9 @@ strings/symbols/keywords. Identity is pointer equality for heap objects.
 | string `""` | @string `@""` | text |
 | bytes | @bytes | binary data |
 | set `\|\|` | @set `@\|\|` | unique values |
-| — | box | mutable cell (`box`/`unbox`/`rebox`) |
+| — | box | mutable box (`box`/`unbox`/`rebox`) |
 | — | parameter | dynamic binding |
 | cons/list | — | linked list (always immutable) |
 | nil, bool, int, float, symbol, keyword | — | immediates (always immutable) |
-| closure | — | always immutable (captures may be mutable via cells) |
+| closure | — | always immutable (captures may be mutable via lboxes) |
 | fiber | — | always immutable (internal state is mutable, but the value is not) |

@@ -120,7 +120,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 2. **Closure environments are immutable Rc<Vec>.** The vec is created at
    closure call time; mutations go through cells, not env modification.
 
-3. **`LocalCell` auto-unwraps on `LoadUpvalue`.** `Cell` (user's `box`) does
+3. **`LocalLBox` auto-unwraps on `LoadUpvalue`.** `LBox` (user's `box`) does
    NOT auto-unwrap. This distinction matters.
 
 4. **Tail calls don't grow call_depth.** `TailCall` stores pending call info
@@ -354,7 +354,7 @@ to see parent-established parameter bindings.
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
-| `cell.rs` | ~70 | Cell operations: MakeCell, UnwrapCell, UpdateCell |
+| `cell.rs` | ~70 | LBox operations: MakeLBox, UnlBox, UpdateLBox |
 
 ## Truthiness
 

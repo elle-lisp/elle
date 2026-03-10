@@ -492,11 +492,11 @@ pub extern "C" fn elle_jit_tail_call(
 // =============================================================================
 
 /// Push a parameter value into the environment buffer, wrapping in a
-/// LocalCell if the cell_params_mask indicates it's needed.
+/// LocalCell if the lbox_params_mask indicates it's needed.
 #[inline]
 fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-    if i < 64 && (closure.template.cell_params_mask & (1 << i)) != 0 {
-        buf.push(Value::local_cell(val));
+    if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
+        buf.push(Value::local_lbox(val));
     } else {
         buf.push(val);
     }
@@ -599,8 +599,8 @@ fn build_closure_env_for_jit(
     // cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
     // Beyond index 63, conservatively use LocalCell.
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.template.cell_locals_mask & (1 << i)) != 0 {
-            new_env.push(Value::local_cell(Value::NIL));
+        if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
+            new_env.push(Value::local_lbox(Value::NIL));
         } else {
             new_env.push(Value::NIL);
         }

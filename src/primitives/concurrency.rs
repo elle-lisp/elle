@@ -83,7 +83,7 @@ fn is_value_sendable(value: &Value) -> bool {
         HeapObject::ThreadHandle(_) => false,
 
         // Boxes are safe if their contents are sendable
-        HeapObject::Cell(cell, _) => {
+        HeapObject::LBox(cell, _) => {
             if let Ok(val) = cell.try_borrow() {
                 is_value_sendable(&val)
             } else {
@@ -192,7 +192,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
     // Extract closure metadata needed for proper environment setup
     let num_locals = closure.template.num_locals;
-    let cell_locals_mask = closure.template.cell_locals_mask;
+    let lbox_locals_mask = closure.template.lbox_locals_mask;
     let _num_captures = closure.template.num_captures;
     let arity = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
@@ -235,8 +235,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         let num_params = arity;
         let num_locally_defined = num_locals.saturating_sub(num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (cell_locals_mask & (1 << i)) != 0 {
-                env_values.push(Value::local_cell(Value::NIL));
+            if i >= 64 || (lbox_locals_mask & (1 << i)) != 0 {
+                env_values.push(Value::local_lbox(Value::NIL));
             } else {
                 env_values.push(Value::NIL);
             }

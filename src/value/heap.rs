@@ -65,7 +65,7 @@ pub enum HeapTag {
     Closure = 5,
     Syntax = 6,
     LArray = 7,
-    Cell = 8,
+    LBox = 8,
     Float = 9, // For NaN values that can't be inline
     NativeFn = 10,
     LibHandle = 12,
@@ -120,10 +120,10 @@ pub enum HeapObject {
     /// Mutable byte sequence (binary data workspace)
     LBytesMut(RefCell<Vec<u8>>),
 
-    /// Mutable cell for captured variables.
-    /// The boolean distinguishes compiler-created cells (true, auto-unwrapped
-    /// by LoadUpvalue) from user-created cells via `box` (false, not auto-unwrapped).
-    Cell(RefCell<Value>, bool),
+    /// Mutable box for captured variables.
+    /// The boolean distinguishes compiler-created boxes (true, auto-unwrapped
+    /// by LoadUpvalue) from user-created boxes via `box` (false, not auto-unwrapped).
+    LBox(RefCell<Value>, bool),
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
@@ -270,7 +270,7 @@ impl HeapObject {
             HeapObject::LStringMut(_) => HeapTag::LStringMut,
             HeapObject::LBytes(_) => HeapTag::LBytes,
             HeapObject::LBytesMut(_) => HeapTag::LBytesMut,
-            HeapObject::Cell(_, _) => HeapTag::Cell,
+            HeapObject::LBox(_, _) => HeapTag::LBox,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
@@ -301,7 +301,7 @@ impl HeapObject {
             HeapObject::LStringMut(_) => "@string",
             HeapObject::LBytes(_) => "bytes",
             HeapObject::LBytesMut(_) => "@bytes",
-            HeapObject::Cell(_, _) => "cell",
+            HeapObject::LBox(_, _) => "box",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
             HeapObject::LibHandle(_) => "library-handle",
@@ -376,7 +376,7 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "#@bytes[<borrowed>]")
                 }
             }
-            HeapObject::Cell(_, _) => write!(f, "<cell>"),
+            HeapObject::LBox(_, _) => write!(f, "<box>"),
             HeapObject::Float(n) => write!(f, "{}", n),
             HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
