@@ -62,7 +62,7 @@ jobs:
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-  examples:
+  elle-tests:
     name: Elle Tests
     needs: changes
     runs-on: ubuntu-latest
@@ -136,48 +136,6 @@ jobs:
             ./target/release/elle "$f" || exit 1
           done
           echo "✓ All Elle script tests passed"
-
-  tests-integration:
-    name: Integration Tests
-    needs: [changes, examples]
-    runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
-    env:
-      PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run integration and unit tests
-        run: cargo test --test '*' -- --skip property
-
-  tests-property:
-    name: Property Tests
-    needs: [changes, examples, tests-integration]
-    runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
-    env:
-      PROPTEST_CASES: 8
-      RUST_TEST_THREADS: 2
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Run property tests
-        run: "cargo test --test lib property::"
-
-  tests-plugins:
-    name: Plugin Tests
-    needs: [changes, tests-property]
-    runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Build release binary
-        run: cargo build --release
       - name: Build plugins
         run: make plugins
       - name: Run plugin tests
@@ -189,6 +147,23 @@ jobs:
             ./target/release/elle "$f" || exit 1
           done
           echo "✓ All plugin tests passed"
+
+  tests-combined:
+    name: Integration & Property Tests
+    needs: [changes, elle-tests]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      PROPTEST_CASES: 8
+      RUST_TEST_THREADS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run integration tests
+        run: cargo test --test '*' -- --skip property
+      - name: Run property tests
+        run: "cargo test --test lib property::"
 
   benchmarks:
     name: Benchmarks
@@ -235,7 +210,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, fmt, clippy, examples, tests-integration, tests-property, tests-plugins, benchmarks]
+    needs: [changes, fmt, clippy, elle-tests, tests-combined, benchmarks]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -246,16 +221,10 @@ jobs:
         if: needs.clippy.result == 'failure'
         run: exit 1
       - name: Check Elle Tests
-        if: needs.examples.result == 'failure'
+        if: needs.elle-tests.result == 'failure'
         run: exit 1
-      - name: Check integration tests
-        if: needs.tests-integration.result == 'failure'
-        run: exit 1
-      - name: Check property tests
-        if: needs.tests-property.result == 'failure'
-        run: exit 1
-      - name: Check plugin tests
-        if: needs.tests-plugins.result == 'failure'
+      - name: Check combined tests
+        if: needs.tests-combined.result == 'failure'
         run: exit 1
       - name: Check benchmarks
         if: needs.benchmarks.result == 'failure'
