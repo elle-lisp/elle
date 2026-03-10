@@ -7,14 +7,14 @@ use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
 /// Create a new parameter with a default value.
-/// (make-parameter default) → parameter
+/// (parameter default) → parameter
 pub(crate) fn prim_make_parameter(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("make-parameter: expected 1 argument, got {}", args.len()),
+                format!("parameter: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -38,15 +38,15 @@ pub(crate) fn prim_is_parameter(args: &[Value]) -> (SignalBits, Value) {
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "make-parameter",
+        name: "parameter",
         func: prim_make_parameter,
         effect: Effect::inert(),
         arity: Arity::Exact(1),
         doc: "Create a new dynamic parameter with a default value.",
         params: &["default"],
         category: "parameter",
-        example: "(def p (make-parameter 42))\n(p) #=> 42",
-        aliases: &[],
+        example: "(def p (parameter 42))\n(p) #=> 42",
+        aliases: &["make-parameter"],
     },
     PrimitiveDef {
         name: "parameter?",

@@ -6,14 +6,14 @@ use crate::value::{error_val, Value};
 
 /// Import a module file
 pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
-    // (import-file "path/to/module.elle")
+    // (import "path/to/module.elle")
     // Loads and compiles a .elle file as a module
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("import-file: expected 1 argument, got {}", args.len()),
+                format!("import: expected 1 argument, got {}", args.len()),
             ),
         );
     }
@@ -25,7 +25,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("import-file: expected string, got {}", args[0].type_name()),
+                format!("import: expected string, got {}", args[0].type_name()),
             ),
         );
     };
@@ -36,10 +36,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val(
-                    "error",
-                    "import-file: VM context not initialized".to_string(),
-                ),
+                error_val("error", "import: VM context not initialized".to_string()),
             );
         }
     };
@@ -53,7 +50,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "error",
-                    format!("import-file: circular dependency detected for '{}'", path),
+                    format!("import: circular dependency detected for '{}'", path),
                 ),
             );
         }
@@ -69,7 +66,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "error",
-                        "import-file: symbol table context not initialized".to_string(),
+                        "import: symbol table context not initialized".to_string(),
                     ),
                 );
             }
@@ -81,7 +78,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         if path.ends_with(".so") {
             return match crate::plugin::load_plugin(&path, vm, symbols) {
                 Ok(value) => (SIG_OK, value),
-                Err(e) => (SIG_ERROR, error_val("error", format!("import-file: {}", e))),
+                Err(e) => (SIG_ERROR, error_val("error", format!("import: {}", e))),
             };
         }
 
@@ -91,10 +88,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => {
                 return (
                     SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!("import-file: failed to read '{}': {}", path, e),
-                    ),
+                    error_val("error", format!("import: failed to read '{}': {}", path, e)),
                 );
             }
         };
@@ -106,13 +100,13 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "error",
-                        format!("import-file: compilation error in {}: {}", path, e),
+                        format!("import: compilation error in {}: {}", path, e),
                     ),
                 );
             }
         };
 
-        // Save/restore the caller's stack. import-file executes the
+        // Save/restore the caller's stack. import executes the
         // module's bytecode on the same VM, which would overwrite the
         // caller's local variable slots without this protection.
         vm.location_map = result.bytecode.location_map.clone();
@@ -147,7 +141,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "error",
-                        format!("import-file: runtime error in {}: {}", path, msg),
+                        format!("import: runtime error in {}: {}", path, msg),
                     ),
                 )
             }
@@ -155,7 +149,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "error",
-                    format!("import-file: unexpected signal {} in {}", bits, path),
+                    format!("import: unexpected signal {} in {}", bits, path),
                 ),
             ),
         }
@@ -164,13 +158,13 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 
 /// Declarative primitive definitions for module loading operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
-    name: "module/import",
+    name: "import",
     func: prim_import_file,
     effect: Effect::errors(),
     arity: Arity::Exact(1),
     doc: "Import a module file and execute it in the current context",
     params: &["path"],
-    category: "module",
-    example: "(module/import \"lib/utils.elle\")",
-    aliases: &["import-file", "import"],
+    category: "",
+    example: "(import \"lib/utils.elle\")",
+    aliases: &["import-file", "module/import"],
 }];

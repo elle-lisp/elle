@@ -145,7 +145,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1),
         doc: "Check if a value is a box.",
         params: &["value"],
-        category: "cell",
+        category: "predicate",
         example: "(box? (box 1)) #=> true\n(box? 42) #=> false",
         aliases: &[],
     },

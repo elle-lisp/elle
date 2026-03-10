@@ -84,65 +84,6 @@ pub(crate) fn prim_string_downcase(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Get a substring from a string or buffer
-pub(crate) fn prim_substring(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() < 2 || args.len() > 3 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("substring: expected 2-3 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let (s, _is_buffer) = match as_text(&args[0], "substring") {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let s = s.as_str();
-
-    let start = match args[1].as_int() {
-        Some(n) => n as usize,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("substring: expected integer, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-    let graphemes: Vec<&str> = s.graphemes(true).collect();
-    let grapheme_count = graphemes.len();
-    let end = if args.len() == 3 {
-        match args[2].as_int() {
-            Some(n) => n as usize,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("substring: expected integer, got {}", args[2].type_name()),
-                    ),
-                )
-            }
-        }
-    } else {
-        grapheme_count
-    };
-
-    if start > grapheme_count || end > grapheme_count || start > end {
-        return (SIG_OK, Value::NIL);
-    }
-
-    // Convert grapheme indices to byte indices
-    let byte_start: usize = graphemes[..start].iter().map(|g| g.len()).sum();
-    let byte_end: usize = graphemes[..end].iter().map(|g| g.len()).sum();
-    (SIG_OK, Value::string(&s[byte_start..byte_end]))
-}
-
 /// Find the grapheme index of a substring, with optional start offset
 pub(crate) fn prim_string_find(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
@@ -686,17 +627,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/downcase \"HELLO\") #=> \"hello\"",
         aliases: &["string-downcase"],
-    },
-    PrimitiveDef {
-        name: "string/slice",
-        func: prim_substring,
-        effect: Effect::inert(),
-        arity: Arity::Range(2, 3),
-        doc: "Extract substring from start to end (exclusive). End defaults to string length.",
-        params: &["s", "start", "end"],
-        category: "string",
-        example: "(string/slice \"hello\" 1 4) #=> \"ell\"",
-        aliases: &["substring"],
     },
     PrimitiveDef {
         name: "string/find",

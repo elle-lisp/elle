@@ -69,7 +69,7 @@ fn extract_receiver<'a>(
     })
 }
 
-/// `(chan/new)` or `(chan/new capacity)`
+/// `(chan)` or `(chan capacity)`
 ///
 /// Returns `[sender receiver]` as a tuple.
 fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
@@ -83,7 +83,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                         SIG_ERROR,
                         error_val(
                             "value-error",
-                            format!("chan/new: capacity must be non-negative, got {}", n),
+                            format!("chan: capacity must be non-negative, got {}", n),
                         ),
                     );
                 }
@@ -93,7 +93,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                         error_val(
                             "type-error",
                             format!(
-                                "chan/new: expected integer for capacity, got {}",
+                                "chan: expected integer for capacity, got {}",
                                 args[0].type_name()
                             ),
                         ),
@@ -107,7 +107,7 @@ fn prim_chan_new(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "arity-error",
-                    format!("chan/new: expected 0 or 1 arguments, got {}", n),
+                    format!("chan: expected 0 or 1 arguments, got {}", n),
                 ),
             );
         }
@@ -413,15 +413,15 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "chan/new",
+        name: "chan",
         func: prim_chan_new,
         effect: Effect::errors(),
         arity: Arity::Range(0, 1),
         doc: "Create a channel. Returns [sender receiver]. Optional capacity for bounded channel.",
         params: &["&opt capacity"],
         category: "chan",
-        example: "(chan/new)",
-        aliases: &[],
+        example: "(chan)",
+        aliases: &["chan/new"],
     },
     PrimitiveDef {
         name: "chan/send",

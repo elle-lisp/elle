@@ -28,7 +28,7 @@
 (def find-closing-helper (fn (text pos tlen delimiter dlen)
   (if (> (+ pos dlen) tlen)
     nil
-    (if (= (substring text pos (+ pos dlen)) delimiter)
+    (if (= (slice text pos (+ pos dlen)) delimiter)
       pos
       (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
 

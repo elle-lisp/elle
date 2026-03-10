@@ -307,10 +307,10 @@
 # String functions
 # ============================================================================
 
-# test_substring
-(assert-string-eq (substring "hello" 1 4) "ell" "substring middle")
-(assert-string-eq (substring "hello" 2) "llo" "substring to end")
-(assert-string-eq (substring "hello" 0 2) "he" "substring from start")
+# test_slice
+(assert-string-eq (slice "hello" 1 4) "ell" "slice middle")
+(assert-string-eq (slice "hello" 2 5) "llo" "slice to end")
+(assert-string-eq (slice "hello" 0 2) "he" "slice from start")
 
 # test_string_index
 (assert-eq (string-index "hello" "l") 2 "string-index found")

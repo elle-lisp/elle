@@ -78,17 +78,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(values (table :a 1 :b 2))",
         aliases: &[],
     },
-    PrimitiveDef {
-        name: "has-key?",
-        func: prim_has_key,
-        effect: Effect::inert(),
-        arity: Arity::Exact(2),
-        doc: "Check if a table or struct has a key",
-        params: &["collection", "key"],
-        category: "table",
-        example: "(has-key? (table :a 1) :a)",
-        aliases: &[],
-    },
+     PrimitiveDef {
+         name: "has?",
+         func: prim_has_key,
+         effect: Effect::inert(),
+         arity: Arity::Exact(2),
+         doc: "Check if a collection has a key or element",
+         params: &["collection", "key"],
+         category: "table",
+         example: "(has? (table :a 1) :a)",
+         aliases: &["has-key?"],
+     },
 ];
 
 /// Create a mutable table from key-value pairs

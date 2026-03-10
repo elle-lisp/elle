@@ -20,17 +20,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "struct/del",
-        func: prim_struct_del,
-        effect: Effect::inert(),
-        arity: Arity::Exact(2),
-        doc: "Create a new struct without a key (immutable)",
-        params: &["struct", "key"],
-        category: "struct",
-        example: "(struct/del (struct :a 1 :b 2) :a)",
-        aliases: &["struct-del"],
-    },
-    PrimitiveDef {
         name: "freeze",
         func: prim_freeze,
         effect: Effect::inert(),
@@ -86,50 +75,6 @@ pub(crate) fn prim_struct(args: &[Value]) -> (SignalBits, Value) {
     }
 
     (SIG_OK, Value::struct_from(map))
-}
-
-/// Create a new struct without a key (immutable)
-/// (struct-del struct key) returns a new struct
-pub(crate) fn prim_struct_del(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("struct-del: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-
-    let s = match args[0].as_struct() {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("struct-del: expected struct, got {}", args[0].type_name()),
-                ),
-            );
-        }
-    };
-
-    let key = match TableKey::from_value(&args[1]) {
-        Some(k) => k,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("expected hashable value, got {}", args[1].type_name()),
-                ),
-            )
-        }
-    };
-
-    let mut new_map = s.clone();
-    new_map.remove(&key);
-    (SIG_OK, Value::struct_from(new_map))
 }
 
 /// Convert a mutable collection to its immutable equivalent

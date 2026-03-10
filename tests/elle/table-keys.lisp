@@ -37,7 +37,7 @@
   (let ((f (fiber/new (fn () 1) 0)))
     (let ((t @{}))
       (put t f 1)
-      (has-key? t f)))
+      (has? t f)))
   true
   "has-key with fiber")
 
@@ -46,7 +46,7 @@
     (let ((t @{}))
       (put t f 1)
       (del t f)
-      (has-key? t f)))
+      (has? t f)))
   false
   "del with fiber key")
 

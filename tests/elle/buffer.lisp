@@ -121,7 +121,7 @@
 (assert-eq (string/index @"hello" "l") 2 "buffer index of substring")
 (assert-eq (string/index @"hello" "z") nil "buffer index not found")
 
-(assert-eq (substring @"hello" 1 4) "ell" "substring of buffer")
+(assert-eq (buffer->string (slice @"hello" 1 4)) "ell" "slice of buffer")
 
 (assert-true (buffer? (string/upcase @"hello")) "upcase buffer returns buffer")
 (assert-true (buffer? (string/downcase @"HELLO")) "downcase buffer returns buffer")

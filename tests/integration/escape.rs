@@ -141,8 +141,8 @@ fn region_emitted_for_floor() {
 
 #[test]
 fn region_emitted_for_has_key() {
-    // has-key? returns bool → immediate
-    assert!(has_region("(let ((t @{:a 1})) (has-key? t :a))"));
+    // has? returns bool → immediate
+    assert!(has_region("(let ((t @{:a 1})) (has? t :a))"));
 }
 
 #[test]

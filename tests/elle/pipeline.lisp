@@ -102,14 +102,14 @@
            "struct with string keys")
 
 (assert-eq (let ((t (table "a" 1)))
-             (has-key? t "a"))
+             (has? t "a"))
            true
-           "table has-key? true")
+           "table has? true")
 
 (assert-eq (let ((t (table "a" 1)))
-             (has-key? t "b"))
+             (has? t "b"))
            false
-           "table has-key? missing")
+           "table has? missing")
 
 ## === Table Mutation ===
 
@@ -153,7 +153,7 @@
 
 (assert-eq (let ((t (table "a" 1 "b" 2)))
              (del t "a")
-             (has-key? t "a"))
+             (has? t "a"))
            false
            "table del")
 

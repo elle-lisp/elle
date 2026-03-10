@@ -301,7 +301,7 @@
       ((dist-list (fn (lst)
          (if (empty? lst)
            ()
-           (if (has-key? seen (first lst))
+           (if (has? seen (first lst))
              (dist-list (rest lst))
              (begin (put seen (first lst) true)
                     (cons (first lst) (dist-list (rest lst)))))))))
@@ -310,7 +310,7 @@
         ((array? coll)
          (let ((result @[]))
            (each x in coll
-             (unless (has-key? seen x)
+             (unless (has? seen x)
                (put seen x true)
                (push result x)))
            result))
@@ -326,7 +326,7 @@
 (def frequencies (fn (coll)
   (let ((counts @{}))
     (each x in coll
-      (put counts x (+ 1 (if (has-key? counts x) (get counts x) 0))))
+      (put counts x (+ 1 (if (has? counts x) (get counts x) 0))))
     (freeze counts))))
 
 (def mapcat (fn (f coll)
@@ -351,7 +351,7 @@
   (let ((groups @{}))
     (each x in coll
       (let ((k (f x)))
-        (if (has-key? groups k)
+        (if (has? groups k)
           (push (get groups k) x)
           (put groups k @[x]))))
     groups)))
@@ -460,7 +460,7 @@
   (let ((cache @{}))
     (fn (& args)
       (let ((key (if (= (length args) 1) (first args) (string args))))
-        (if (has-key? cache key)
+        (if (has? cache key)
           (get cache key)
           (let ((result (f ;args)))
             (put cache key result)
@@ -701,9 +701,9 @@
 
 ## ── Standard port parameters ────────────────────────────────────────
 
-(def *stdin*  (make-parameter (port/stdin)))
-(def *stdout* (make-parameter (port/stdout)))
-(def *stderr* (make-parameter (port/stderr)))
+(def *stdin*  (parameter (port/stdin)))
+(def *stdout* (parameter (port/stdout)))
+(def *stderr* (parameter (port/stderr)))
 
 ## ── Scheduler ───────────────────────────────────────────────────────
 
@@ -724,7 +724,7 @@
                        (true
                         (fiber/resume fiber))))))))
 
-(def *scheduler* (make-parameter sync-scheduler))
+(def *scheduler* (parameter sync-scheduler))
 
 (def ev/spawn
   (fn [closure]

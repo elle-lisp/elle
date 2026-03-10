@@ -256,7 +256,7 @@
 ## Do not retain references to these objects beyond the form's dynamic extent.
 (defmacro with-allocator (allocator & body)
   `(begin
-     (%install-allocator ,allocator)
-     (defer (%uninstall-allocator)
+     (allocator/install ,allocator)
+     (defer (allocator/uninstall)
        ,;body)))
 
