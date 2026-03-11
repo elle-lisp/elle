@@ -11,6 +11,7 @@ This directory contains design documents, language references, and contributor g
 | [semantics.md](semantics.md) | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring |
 | [macros.md](macros.md) | Macro system: current state, architecture, hygiene, scope sets |
 | [except.md](except.md) | Exception handling: error structs, try/catch, error propagation |
+| [modules.md](modules.md) | Module system: closure-as-module, parametric imports, qualified symbols, trade-offs |
 
 ## Contributor Guides
 
@@ -40,6 +41,7 @@ This directory contains design documents, language references, and contributor g
 ## Quick Navigation
 
 - **Starting out?** Read [language.md](language.md) first, then [pipeline.md](pipeline.md)
+- **Working with modules?** Read [modules.md](modules.md)
 - **Adding a feature?** Check [cookbook.md](cookbook.md) for the recipe
 - **Understanding effects?** Read [effects.md](effects.md)
 - **Working with concurrency?** Read [fibers.md](fibers.md)
