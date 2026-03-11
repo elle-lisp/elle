@@ -42,6 +42,8 @@ pub enum FileForm<'a> {
     Def(&'a Syntax, &'a Syntax),
     /// `(var name value)` or `(var pattern value)` — mutable binding
     Var(&'a Syntax, &'a Syntax),
+    /// `(effect :keyword)` — user-defined effect declaration
+    Effect(&'a Syntax),
     /// Bare expression — gets a gensym name
     Expr(&'a Syntax),
 }

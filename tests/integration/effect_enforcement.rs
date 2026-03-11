@@ -523,11 +523,11 @@ fn test_polymorphic_inference_single_param() {
     // Check the lambda's inferred effect
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effect, ..
+            inferred_effects, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effect,
+                *inferred_effects,
                 Effect::polymorphic(0),
                 "apply-fn should have Polymorphic(0) effect"
             );
@@ -621,11 +621,11 @@ fn test_polymorphic_inference_direct_yield_prevents() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effect, ..
+            inferred_effects, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effect,
+                *inferred_effects,
                 Effect::yields(),
                 "Function with direct yield should be Yields, not Polymorphic"
             );
@@ -651,11 +651,11 @@ fn test_polymorphic_inference_two_params() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effect, ..
+            inferred_effects, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effect,
+                *inferred_effects,
                 Effect {
                     bits: elle::value::SignalBits(0),
                     propagates: 0b11, // params 0 and 1
@@ -715,11 +715,11 @@ fn test_polymorphic_inference_second_param() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effect, ..
+            inferred_effects, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effect,
+                *inferred_effects,
                 Effect::polymorphic(1),
                 "apply-second should have Polymorphic(1) effect"
             );
@@ -758,11 +758,11 @@ fn test_polymorphic_inference_with_known_yielding_call() {
     if let HirKind::Begin(exprs) = &result.hir.kind {
         if let HirKind::Define { value, .. } = &exprs[1].kind {
             if let HirKind::Lambda {
-                inferred_effect, ..
+                inferred_effects, ..
             } = &value.kind
             {
                 assert_eq!(
-                    *inferred_effect,
+                    *inferred_effects,
                     Effect::yields(),
                     "Function calling known yielding function should be Yields"
                 );
@@ -791,11 +791,11 @@ fn test_polymorphic_inference_pure_function() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effect, ..
+            inferred_effects, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effect,
+                *inferred_effects,
                 Effect::inert(),
                 "Pure function should have Pure effect"
             );

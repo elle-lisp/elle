@@ -7,8 +7,8 @@
 
 use crate::value::error_val;
 use crate::value::{
-    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK,
-    SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_YIELD,
+    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE,
+    SIG_QUERY, SIG_RESUME,
 };
 use std::rc::Rc;
 
@@ -95,27 +95,22 @@ impl VM {
             return Some(bits);
         }
 
-        // Any yielding/suspending signal (SIG_YIELD, SIG_YIELD|SIG_IO,
-        // SIG_IO alone, user-defined suspension). Save the stack into a
-        // SuspendedFrame so call.rs can build the caller frame chain.
-        if bits.contains(SIG_YIELD) || bits.contains(SIG_IO) {
-            let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-            let frame = SuspendedFrame {
-                bytecode: bytecode.clone(),
-                constants: constants.clone(),
-                env: closure_env.clone(),
-                ip: *ip,
-                stack: saved_stack,
-                active_allocator: crate::value::fiber_heap::save_active_allocator(),
-                location_map: location_map.clone(),
-            };
-            self.fiber.signal = Some((bits, value));
-            self.fiber.suspended = Some(vec![frame]);
-            return Some(bits);
-        }
-
-        // Unknown signal — store and propagate
+        // Any suspending signal: SIG_YIELD, user-defined (bits 16+),
+        // or any combination. All remaining signals after the checks above
+        // are suspension signals — save the stack into a SuspendedFrame so
+        // call.rs can build the caller frame chain on resume.
+        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+        let frame = SuspendedFrame {
+            bytecode: bytecode.clone(),
+            constants: constants.clone(),
+            env: closure_env.clone(),
+            ip: *ip,
+            stack: saved_stack,
+            active_allocator: crate::value::fiber_heap::save_active_allocator(),
+            location_map: location_map.clone(),
+        };
         self.fiber.signal = Some((bits, value));
+        self.fiber.suspended = Some(vec![frame]);
         Some(bits)
     }
 

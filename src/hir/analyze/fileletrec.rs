@@ -88,6 +88,34 @@ impl<'a> Analyzer<'a> {
                         ));
                     }
                 }
+                FileForm::Effect(keyword_syntax) => {
+                    let keyword = match &keyword_syntax.kind {
+                        crate::syntax::SyntaxKind::Keyword(k) => k.clone(),
+                        _ => {
+                            return Err(format!(
+                                "{}: effect requires a keyword argument, got {}",
+                                keyword_syntax.span,
+                                keyword_syntax.kind_label()
+                            ));
+                        }
+                    };
+                    crate::effects::registry::global_registry()
+                        .lock()
+                        .unwrap()
+                        .register(&keyword)
+                        .map_err(|e| format!("{}: {}", keyword_syntax.span, e))?;
+                    // Effect declarations produce the keyword value.
+                    // Create a gensym binding whose initializer is the keyword literal.
+                    let gensym_name = format!("__effect_{}", gensym_counter);
+                    gensym_counter += 1;
+                    let binding = self.bind(&gensym_name, &[], BindingScope::Local);
+                    binding.mark_prebound();
+                    entries.push(PreBound::Simple {
+                        binding,
+                        value_syntax: keyword_syntax,
+                        deferred: None,
+                    });
+                }
                 FileForm::Expr(expr_syntax) => {
                     let gensym_name = format!("__file_expr_{}", gensym_counter);
                     gensym_counter += 1;
@@ -128,11 +156,11 @@ impl<'a> Analyzer<'a> {
                         params: lambda_params,
                         num_required,
                         rest_param,
-                        inferred_effect,
+                        inferred_effects,
                         ..
                     } = &value.kind
                     {
-                        self.effect_env.insert(*binding, *inferred_effect);
+                        self.effect_env.insert(*binding, *inferred_effects);
                         let arity = Arity::for_lambda(
                             rest_param.is_some(),
                             *num_required,
@@ -218,11 +246,11 @@ impl<'a> Analyzer<'a> {
                         .unwrap_or_else(Effect::inert);
                     let new_hir = self.analyze_expr(value_syntax)?;
                     if let HirKind::Lambda {
-                        inferred_effect, ..
+                        inferred_effects, ..
                     } = &new_hir.kind
                     {
-                        if *inferred_effect != old_effect {
-                            self.effect_env.insert(binding, *inferred_effect);
+                        if *inferred_effects != old_effect {
+                            self.effect_env.insert(binding, *inferred_effects);
                             changed = true;
                         }
                     }

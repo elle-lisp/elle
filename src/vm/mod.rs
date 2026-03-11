@@ -98,18 +98,23 @@ impl VM {
                 return if bits.is_ok() || bits == SIG_HALT {
                     let (_, value) = self.fiber.signal.take().unwrap();
                     Ok(value)
-                } else if bits.contains(SIG_IO) {
-                    self.fiber.signal.take();
-                    Err("Unexpected SIG_IO outside scheduler context".to_string())
-                } else if bits.contains(SIG_YIELD) {
-                    Err("Unexpected yield outside coroutine context".to_string())
                 } else if bits.contains(SIG_ERROR) {
                     // Extract the error from fiber.signal
                     let (_, err_value) =
                         self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
                     Err(self.format_error_with_location(err_value))
+                } else if bits.contains(SIG_YIELD) {
+                    // SIG_YIELD may also have SIG_IO set — that's fine,
+                    // it's still a yield. The scheduler catches it.
+                    Err("Unexpected yield outside coroutine context".to_string())
                 } else {
-                    panic!("VM bug: Unexpected signal: {}", bits);
+                    // Any other suspending signal (user-defined bits 16+,
+                    // bare SIG_IO, etc.) — unexpected outside a fiber.
+                    self.fiber.signal.take();
+                    Err(format!(
+                        "Unexpected signal outside coroutine context: 0x{:x}",
+                        bits.0
+                    ))
                 };
             }
         }
@@ -186,7 +191,11 @@ impl VM {
             if bits.is_ok() || bits == SIG_HALT {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 return Ok(value);
-            } else if bits.contains(SIG_IO) {
+            } else if bits.contains(SIG_ERROR) {
+                let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+                return Err(self.format_error_with_location(err_value));
+            } else if bits.contains(SIG_YIELD) && bits.contains(SIG_IO) {
+                // SIG_YIELD | SIG_IO — an I/O request from a fiber.
                 // Extract the IoRequest, execute I/O, then resume the
                 // suspended frame chain with the result.
                 let (_, request_val) = self.fiber.signal.take().unwrap();
@@ -232,12 +241,16 @@ impl VM {
                 let frames = self.fiber.suspended.take().unwrap_or_default();
                 bits = self.resume_suspended(frames, io_result);
             } else if bits.contains(SIG_YIELD) {
+                // SIG_YIELD without SIG_IO — unexpected outside coroutine.
                 return Err("Unexpected yield outside coroutine context".to_string());
-            } else if bits.contains(SIG_ERROR) {
-                let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                return Err(self.format_error_with_location(err_value));
             } else {
-                panic!("VM bug: Unexpected signal: {}", bits);
+                // Any other suspending signal (user-defined bits 16+, bare
+                // SIG_IO, etc.) — unexpected outside a fiber/scheduler.
+                self.fiber.signal.take();
+                return Err(format!(
+                    "Unexpected signal outside coroutine context: 0x{:x}",
+                    bits.0
+                ));
             }
         }
     }

@@ -25,14 +25,14 @@
 
 # restrict with inert function passes at runtime
 (begin
-  (def apply-inert (fn (f x) (restrict f) (f x)))
-  (assert-eq (apply-inert + 42) 43
+  (def apply-inert (fn (f x y) (restrict f) (f x y)))
+  (assert-eq (apply-inert + 42 1) 43
     "restrict runtime: inert function passes"))
 
 # restrict with non-closure (primitive) passes at runtime
 (begin
-  (def apply-inert2 (fn (f x) (restrict f) (f x)))
-  (assert-eq (apply-inert2 + 42) 43
+  (def apply-inert2 (fn (f x y) (restrict f) (f x y)))
+  (assert-eq (apply-inert2 + 42 1) 43
     "restrict runtime: non-closure passes"))
 
 # restrict with bounded keyword passes for inert closure
@@ -44,9 +44,9 @@
 
 # restrict with dynamic variable passes for inert function
 (begin
-  (def apply-inert3 (fn (f x) (restrict f) (f x)))
+  (def apply-inert3 (fn (f x y) (restrict f) (f x y)))
   (var g +)
-  (assert-eq (apply-inert3 g 42) 43
+  (assert-eq (apply-inert3 g 42 1) 43
     "restrict runtime: dynamic inert passes"))
 
 # ============================================================================
@@ -58,11 +58,14 @@
   "effects primitive returns struct")
 
 # effects contains builtin :error at bit 0
-(assert-eq ((effects) :error) 0
+(def registry (effects))
+(assert-eq (get registry :error) 0
   "effects contains builtin :error")
 
 # effects contains user-defined effects
 (begin
   (effect :intro_c6a)
-  (assert-eq ((effects) :intro_c6a) 16
-    "effects contains user-defined effect"))
+  (def reg2 (effects))
+  # bit position depends on how many user effects were registered before this one
+  (assert-true (>= (get reg2 :intro_c6a) 16)
+    "effects contains user-defined effect at bit >= 16"))

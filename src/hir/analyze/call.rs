@@ -121,8 +121,8 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn get_raw_callee_effect(&self, func: &Hir) -> Effect {
         match &func.kind {
             HirKind::Lambda {
-                inferred_effect, ..
-            } => *inferred_effect,
+                inferred_effects, ..
+            } => *inferred_effects,
             HirKind::Var(binding) => {
                 if let Some(effect) = self.effect_env.get(binding) {
                     *effect
@@ -209,8 +209,8 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn resolve_arg_effect(&self, arg: &Hir) -> Effect {
         match &arg.kind {
             HirKind::Lambda {
-                inferred_effect, ..
-            } => *inferred_effect,
+                inferred_effects, ..
+            } => *inferred_effects,
             HirKind::Var(binding) => self
                 .effect_env
                 .get(binding)

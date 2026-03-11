@@ -437,6 +437,47 @@ impl VM {
                 Instruction::IsSetMut => {
                     types::handle_is_set_mut(self);
                 }
+                Instruction::CheckEffectBound => {
+                    // Read u32 as two u16s (low half first, then high half)
+                    let lo = self.read_u16(bc, &mut ip) as u32;
+                    let hi = self.read_u16(bc, &mut ip) as u32;
+                    let mut allowed_bits = lo | (hi << 16);
+                    // SIG_YIELD is the delivery mechanism for all suspension
+                    // signals. If the bound allows any suspension signal
+                    // (anything other than SIG_ERROR alone), implicitly allow
+                    // SIG_YIELD — otherwise every restrict with a user-defined
+                    // signal would also need to list :yield explicitly.
+                    // When allowed_bits is 0 (inert bound), SIG_YIELD is NOT
+                    // added — the closure must be truly inert.
+                    let non_error_allowed = allowed_bits & !SIG_ERROR.0;
+                    if non_error_allowed != 0 {
+                        allowed_bits |= SIG_YIELD.0;
+                    }
+                    let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
+                    if let Some(closure) = val.as_closure() {
+                        let effect_bits = closure.effect().bits.0;
+                        let excess = effect_bits & !allowed_bits;
+                        if excess != 0 {
+                            let registry =
+                                crate::effects::registry::global_registry().lock().unwrap();
+                            let excess_str = registry
+                                .format_signal_bits(crate::value::fiber::SignalBits(excess));
+                            let allowed_str = registry
+                                .format_signal_bits(crate::value::fiber::SignalBits(allowed_bits));
+                            let err = crate::value::error_val(
+                                "effect-violation",
+                                format!(
+                                    "restrict: closure may emit {} but parameter is restricted to {}",
+                                    excess_str, allowed_str
+                                ),
+                            );
+                            self.fiber.signal = Some((SIG_ERROR, err));
+                        }
+                    } else {
+                        // Non-closure values (primitives, etc.) are inert — they pass
+                        // any effect bound check. Only closures carry effect metadata.
+                    }
+                }
             }
 
             // Check for error signal set by this instruction's handler

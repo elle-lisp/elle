@@ -292,6 +292,31 @@ impl<'a> Analyzer<'a> {
                         "eval" => return self.analyze_eval(items, span),
                         "parameterize" => return self.analyze_parameterize(items, span),
 
+                        "effect" => {
+                            if items.len() != 2 {
+                                return Err(format!(
+                                    "{}: effect requires exactly 1 argument",
+                                    span
+                                ));
+                            }
+                            let keyword = match &items[1].kind {
+                                SyntaxKind::Keyword(k) => k.clone(),
+                                _ => {
+                                    return Err(format!(
+                                        "{}: effect requires a keyword argument, got {}",
+                                        items[1].span,
+                                        items[1].kind_label()
+                                    ));
+                                }
+                            };
+                            crate::effects::registry::global_registry()
+                                .lock()
+                                .unwrap()
+                                .register(&keyword)
+                                .map_err(|e| format!("{}: {}", items[1].span, e))?;
+                            return Ok(Hir::inert(HirKind::Keyword(keyword.to_string()), span));
+                        }
+
                         // (doc <symbol>) — if the symbol resolves to a
                         // user-defined binding (closure with docstring),
                         // evaluate it normally so prim_doc receives the

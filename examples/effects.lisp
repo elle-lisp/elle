@@ -179,7 +179,7 @@
   (* x x))  # pure arithmetic, no signals
 
 (def squares (safe-map square [1 2 3 4 5]))  # works fine
-(assert (= squares [1 4 9 16 25]) "safe-map: inert callback works")
+(assert (= squares (list 1 4 9 16 25)) "safe-map: inert callback works")
 (display "  squares: ") # display prompt
 (print squares)         # print the squares
 
@@ -204,47 +204,41 @@
   (_ (error err)))
 
 # ========================================
-# 6. restrict — plugin sandboxing
+# 6. restrict — ensuring callbacks are inert
 # ========================================
 
-# run-plugin allows plugins to emit :log but nothing else.
-# A plugin that tries to signal :abort cannot escape the sandbox.
-(defn run-plugin [plugin data]
-  "Run plugin on data. plugin may emit :log only — all other signals are violations."
-  # restrict plugin to :log — any other signal becomes :effect-violation
-  (restrict plugin :log)
-  (plugin data))  # call the plugin with its input
+# run-pure requires its plugin to be inert — no signals at all.
+# This is the strongest guarantee: the plugin cannot interrupt execution.
+(defn run-pure [plugin data]
+  "Run plugin on data. plugin must be inert — no signals allowed."
+  (restrict plugin)
+  (plugin data))
 
-# good-plugin only logs — stays within its allowed signal set
+# good-plugin is inert — just arithmetic, no signals
 (defn good-plugin [data]
-  "A well-behaved plugin: logs its activity, returns a result."
-  # :log is allowed by run-plugin's restrict bound
-  (fiber/signal :log {:msg "plugin running"})
-  (* data 2))  # return a result
+  "A well-behaved plugin: pure computation, returns a result."
+  (* data 2))
 
-(def plugin-result (run-plugin good-plugin 21))  # 21 * 2 = 42
-(assert (= plugin-result 42) "plugin: well-behaved plugin works")
+(def plugin-result (run-pure good-plugin 21))
+(assert (= plugin-result 42) "plugin: inert plugin works")
 (display "  good plugin result: ") # display prompt
 (print plugin-result)              # print the result
 
-# bad-plugin tries to signal :abort — outside its allowed set
+# bad-plugin yields — violates the inert restriction
 (defn bad-plugin [data]
-  "A misbehaving plugin: attempts to signal :abort to escape the sandbox."
-  # :abort is not in the allowed set — this becomes :effect-violation
-  (fiber/signal :abort :escape-attempt)
+  "A misbehaving plugin: attempts to yield, violating the inert bound."
+  (yield :escape-attempt)
   data)  # never reached
 
-# protect catches the sandbox violation as data
-(def [ok? err] (protect (run-plugin bad-plugin 21)))
+# protect catches the :effect-violation error as data
+(def [ok? err] (protect (run-pure bad-plugin 21)))
 (display "  sandbox violation: ") # display prompt
 (print err)                        # print the error
-# err is {:error :effect-violation :message "..."} — inspect with ->
-(assert (not ok?) "plugin: misbehaving plugin caught")
+(assert (not ok?) "plugin: yielding plugin caught")
 (assert (= (-> err (get :error)) :effect-violation) "plugin: effect-violation error")
 
-# match on the error kind to handle sandbox escapes distinctly
-(match err:error  # syntax-sugar for (get err :error)
-  (:effect-violation (display "  plugin: attempted to signal outside sandbox\n"))
+(match err:error
+  (:effect-violation (display "  plugin: callback tried to yield — rejected by restrict\n"))
   (_ (error err)))
 
 # ========================================

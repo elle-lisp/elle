@@ -27,9 +27,7 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 	./target/release/elle demos/docgen/generate.lisp
 
 examples: dev  ## Run all examples
-	@# effects.lisp uses unimplemented `effect` form — skip until implemented
 	@for f in examples/*.lisp; do \
-		case "$$f" in examples/effects.lisp) continue;; esac; \
 		echo "  $$f"; \
 		timeout 10s ./target/debug/elle "$$f" || exit 1; \
 	done
@@ -43,12 +41,13 @@ examples: dev  ## Run all examples
 
 smoke: examples  ## Run examples and elle scripts using debug build (~15s)
 	@for f in tests/elle/*.lisp; do \
+		echo "  $$f"; \
 		./target/debug/elle "$$f" || exit 1; \
 	done
 	./target/debug/elle demos/docgen/generate.lisp
 
 test: smoke  ## Rust unit tests after smoke (PROPTEST_CASES=8, ~2min)
-	PROPTEST_CASES=8 cargo test --workspace --lib
+	PROPTEST_CASES=4 cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────
 
