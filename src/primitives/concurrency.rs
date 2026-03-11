@@ -10,164 +10,10 @@ use crate::vm::VM;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-/// Check if a value is safe to send across thread boundaries.
-///
-/// A value is safe to send if it contains only immutable data:
-/// - Primitives (nil, bool, int, float, symbol, keyword, string)
-/// - Immutable collections (array, struct)
-/// - Closures (if their captured environment is safe)
-///
-/// Unsafe values:
-/// - Tables (mutable)
-/// - Native functions (contain function pointers)
-/// - FFI handles
-/// - Thread handles
-fn is_value_sendable(value: &Value) -> bool {
-    use crate::value::heap::{deref, HeapObject};
-
-    // Check immediate values
-    if value.is_nil()
-        || value.is_empty_list()
-        || value.is_bool()
-        || value.is_int()
-        || value.is_float()
-        || value.is_symbol()
-        || value.is_keyword()
-        || value.is_string()
-    {
-        return true;
-    }
-
-    // Check heap values
-    if !value.is_heap() {
-        return false;
-    }
-
-    match unsafe { deref(*value) } {
-        // Strings are immutable and safe
-        HeapObject::LString(_) => true,
-
-        // Immutable collections are safe
-        HeapObject::LArrayMut(vec) => {
-            if let Ok(borrowed) = vec.try_borrow() {
-                borrowed.iter().all(is_value_sendable)
-            } else {
-                false
-            }
-        }
-        HeapObject::LStruct(s) => s.iter().all(|(_, v)| is_value_sendable(v)),
-
-        // Arrays (immutable) are safe if their contents are
-        HeapObject::LArray(elems) => elems.iter().all(is_value_sendable),
-
-        // Cons cells are safe if their contents are
-        HeapObject::Cons(cons) => is_value_sendable(&cons.first) && is_value_sendable(&cons.rest),
-
-        // Closures are safe if their captured environment is safe
-        // Note: Closure uses new Value type
-        HeapObject::Closure(closure) => {
-            closure.env.iter().all(is_value_sendable)
-                && closure.template.constants.iter().all(is_value_sendable)
-        }
-
-        // Unsafe: mutable @structs
-        HeapObject::LStructMut(_) => false,
-
-        // Native function pointers are inherently Send + Sync
-        HeapObject::NativeFn(_) => true,
-
-        // Unsafe: FFI handles
-        HeapObject::LibHandle(_) => false,
-
-        // Unsafe: thread handles
-        HeapObject::ThreadHandle(_) => false,
-
-        // Boxes are safe if their contents are sendable
-        HeapObject::LBox(cell, _) => {
-            if let Ok(val) = cell.try_borrow() {
-                is_value_sendable(&val)
-            } else {
-                // If we can't borrow, assume it's not sendable (to be safe)
-                false
-            }
-        }
-
-        // Float values that couldn't be stored inline
-        HeapObject::Float(_) => true,
-
-        // Fibers are not sendable (contain execution state with closures)
-        HeapObject::Fiber(_) => false,
-
-        // Syntax objects are not sendable (contain Rc)
-        HeapObject::Syntax(_) => false,
-
-        // Bindings are compile-time only, not sendable
-        HeapObject::Binding(_) => false,
-
-        // FFI signatures are not sendable
-        HeapObject::FFISignature(_, _) => false,
-
-        // FFI type descriptors are pure data — safe to send
-        HeapObject::FFIType(_) => true,
-
-        // @string values are sendable if we deep-copy
-        HeapObject::LStringMut(buf) => buf.try_borrow().is_ok(),
-
-        // Bytes are immutable and sendable
-        HeapObject::LBytes(_) => true,
-
-        // @bytes values are sendable if we deep-copy
-        HeapObject::LBytesMut(blob) => blob.try_borrow().is_ok(),
-
-        // Managed pointers are not sendable (Cell is not thread-safe)
-        HeapObject::ManagedPointer(_) => false,
-
-        // External objects are not sendable (contain Rc<dyn Any>)
-        HeapObject::External(_) => false,
-
-        // Parameters are not sendable (fiber-local state)
-        HeapObject::Parameter { .. } => false,
-
-        // Sets (immutable) are safe if their contents are
-        HeapObject::LSet(s) => s.iter().all(is_value_sendable),
-
-        // Sets (mutable) are sendable if we deep-copy
-        HeapObject::LSetMut(s_ref) => {
-            if let Ok(s) = s_ref.try_borrow() {
-                s.iter().all(is_value_sendable)
-            } else {
-                false
-            }
-        }
-    }
-}
-
 /// Helper function to spawn a closure in a new thread
 /// Extracts closure data, validates sendability, and executes in a fresh VM
 fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     use crate::value::SendValue;
-
-    // Check that all captured values are sendable
-    for (i, captured) in closure.env.iter().enumerate() {
-        if !is_value_sendable(captured) {
-            return Err(LError::generic(format!(
-                "spawn: closure captures mutable or unsafe value at position {} ({})",
-                i,
-                captured.type_name()
-            )));
-        }
-    }
-
-    // Also check constants for sendability
-    for (i, constant) in closure.template.constants.iter().enumerate() {
-        if !is_value_sendable(constant) {
-            return Err(LError::generic(format!(
-                "spawn: closure has non-sendable constant at position {} ({})",
-                i,
-                constant.type_name()
-            )));
-        }
-    }
 
     // Deep-copy environment and constants using SendValue
     let env_send: Result<Vec<SendValue>, String> = closure
@@ -251,11 +97,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
 
         let send_result: Result<crate::value::SendBundle, String> = match result {
-            Ok(val) => SendValue::from_value(val)
-                .map(|sv| crate::value::SendBundle {
-                    root: sv,
-                    closures: vec![],
-                })
+            Ok(val) => crate::value::SendBundle::from_value(val)
                 .map_err(|e| format!("Failed to serialize result: {}", e)),
             Err(e) => Err(e.to_string()),
         };
