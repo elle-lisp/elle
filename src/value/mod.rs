@@ -30,7 +30,8 @@ pub use heap::{ArenaGuard, ArenaMark};
 // Export error value construction
 pub use error::{error_val, format_error};
 
-// Export SendValue for thread-safe value transmission
+// Export SendValue and SendBundle for thread-safe value transmission
+pub use send::SendBundle;
 pub use send::SendValue;
 
 // Export core types

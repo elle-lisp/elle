@@ -205,7 +205,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         (*closure.template.location_map).clone();
 
     // Create a holder for the result
-    let result_holder: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>> =
+    let result_holder: Arc<Mutex<Option<Result<crate::value::SendBundle, String>>>> =
         Arc::new(Mutex::new(None));
     let result_clone = result_holder.clone();
 
@@ -250,10 +250,13 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
 
         let result = vm.execute_bytecode(&bytecode_rc, &constants_rc, Some(&env_rc));
 
-        let send_result = match result {
-            Ok(val) => {
-                SendValue::from_value(val).map_err(|e| format!("Failed to serialize result: {}", e))
-            }
+        let send_result: Result<crate::value::SendBundle, String> = match result {
+            Ok(val) => SendValue::from_value(val)
+                .map(|sv| crate::value::SendBundle {
+                    root: sv,
+                    closures: vec![],
+                })
+                .map_err(|e| format!("Failed to serialize result: {}", e)),
             Err(e) => Err(e.to_string()),
         };
 
@@ -345,7 +348,7 @@ pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
                 if let Some(result) = holder.as_ref() {
                     // Result is ready - convert from SendValue back to Value
                     return match result {
-                        Ok(send_val) => (SIG_OK, send_val.clone().into_value()),
+                        Ok(bundle) => (SIG_OK, bundle.clone().root.into_value()),
                         Err(e) => (SIG_ERROR, error_val("error", e.clone())),
                     };
                 }

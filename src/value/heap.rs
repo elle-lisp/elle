@@ -216,9 +216,8 @@ pub enum BindingScope {
 /// Uses `Arc<Mutex<>>` to safely share the result across threads.
 #[derive(Clone)]
 pub struct ThreadHandle {
-    /// The result of the spawned thread execution.
-    /// The `Result` is wrapped in `SendValue` to make it Send.
-    pub result: Arc<Mutex<Option<Result<crate::value::SendValue, String>>>>,
+    /// The result of the spawned thread execution, wrapped in `SendBundle` for Send.
+    pub result: Arc<Mutex<Option<Result<crate::value::send::SendBundle, String>>>>,
 }
 
 impl ThreadHandle {

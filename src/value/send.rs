@@ -11,7 +11,42 @@
 
 use super::heap::{alloc, deref, Cons, HeapObject};
 use super::repr::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use crate::effects::Effect;
+use crate::error::LocationMap;
+use crate::hir::VarargKind;
+use crate::value::types::Arity;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+/// Sendable snapshot of a closure.
+///
+/// All `Rc`-wrapped fields from `ClosureTemplate` are owned here.
+/// Fields that are not portable across thread boundaries (`jit_code`,
+/// `lir_function`, `syntax`) are absent — they are set to `None` on
+/// reconstruction.
+///
+/// `env` holds the captured environment (upvalues), converted recursively
+/// to `SendValue`. Constants are stored separately in `constants`.
+///
+/// This struct is `pub(crate)` — it is part of the public interface of
+/// `SendBundle` but not independently useful outside `send.rs`.
+#[derive(Clone)]
+pub struct SendableClosure {
+    pub bytecode: Vec<u8>,
+    pub arity: Arity,
+    pub num_locals: usize,
+    pub num_captures: usize,
+    pub num_params: usize,
+    pub constants: Vec<SendValue>,
+    pub effect: Effect,
+    pub lbox_params_mask: u64,
+    pub lbox_locals_mask: u64,
+    pub symbol_names: HashMap<u32, String>,
+    pub location_map: LocationMap,
+    pub doc: Option<Box<SendValue>>,
+    pub vararg_kind: VarargKind,
+    pub name: Option<String>,
+    pub env: Vec<SendValue>,
+}
 
 /// A thread-safe wrapper around Value that deep-copies heap data.
 ///
@@ -69,7 +104,35 @@ pub enum SendValue {
 
     /// Native function pointer (inherently Send + Sync)
     NativeFn(crate::value::types::NativeFn),
+
+    /// Deep copy of a closure (template + captured environment).
+    /// Only appears as an entry in `SendBundle::closures`.
+    /// The root `SendValue` tree and closure envs reference closures via `Ref(idx)`.
+    Closure(SendableClosure),
+
+    /// Back-reference into `SendBundle::closures` by index.
+    /// Meaningful only within a `SendBundle`; a bare `Ref` without a bundle is invalid.
+    Ref(usize),
 }
+
+/// Unit of cross-thread value transfer.
+///
+/// All closures reachable from `root` — including nested and mutually recursive
+/// ones — are stored flat in `closures`. The root value tree and all closure
+/// envs reference closures by index via `SendValue::Ref(idx)`.
+///
+/// This replaces bare `SendValue` as the type carried by `ThreadHandle::result`.
+#[derive(Clone)]
+pub struct SendBundle {
+    /// Root value. May contain `Ref(idx)` nodes pointing into `closures`.
+    pub root: SendValue,
+    /// Intern table of all closures reachable from `root`.
+    pub closures: Vec<SendableClosure>,
+}
+
+// SAFETY: SendBundle owns all its data — no Rc, no RefCell.
+unsafe impl Send for SendBundle {}
+unsafe impl Sync for SendBundle {}
 
 impl SendValue {
     /// Convert a Value to SendValue by deep-copying heap data.
@@ -279,6 +342,10 @@ impl SendValue {
                 alloc(HeapObject::LSetMut(std::cell::RefCell::new(set)))
             }
             SendValue::NativeFn(f) => Value::native_fn(f),
+            SendValue::Closure(_) => {
+                panic!("bug: bare SendValue::Closure; use SendBundle::into_value")
+            }
+            SendValue::Ref(_) => panic!("bug: bare SendValue::Ref; use SendBundle::into_value"),
         }
     }
 }
