@@ -35,18 +35,18 @@ examples: dev  ## Run all examples
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~15s   examples + elle scripts (debug build)
-#   make test     ~2min  smoke + rust unit tests (PROPTEST_CASES=8)
+#   make smoke    ~5min   examples + elle scripts (debug build)
+#   make test     ~10min  smoke + rust unit tests (PROPTEST_CASES=4)
 #   cargo test    ~30min full suite (unit + integration + property)
 
-smoke: examples  ## Run examples and elle scripts using debug build (~15s)
+smoke: examples  ## Run examples and elle scripts using debug build
 	@for f in tests/elle/*.lisp; do \
 		echo "  $$f"; \
 		./target/debug/elle "$$f" || exit 1; \
 	done
 	./target/debug/elle demos/docgen/generate.lisp
 
-test: smoke  ## Rust unit tests after smoke (PROPTEST_CASES=8, ~2min)
+test: smoke  ## Rust unit tests after smoke
 	PROPTEST_CASES=4 cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────

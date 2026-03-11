@@ -35,6 +35,10 @@ impl<'a> Analyzer<'a> {
         let saved_effect_sources = std::mem::take(&mut self.current_effect_sources);
         let saved_lambda_params = std::mem::take(&mut self.current_lambda_params);
 
+        // Save and reset restrict accumulators
+        let saved_param_bounds = std::mem::take(&mut self.current_param_bounds);
+        let saved_declared_ceiling = self.current_declared_ceiling.take();
+
         // For nested lambdas, the parent captures are the captures from the enclosing lambda
         self.parent_captures = saved_captures.clone();
 
@@ -172,10 +176,8 @@ impl<'a> Analyzer<'a> {
             (None, body_items)
         };
 
-        // Parse restrict preamble (after docstring, before body)
-        let (param_bounds, declared_ceiling, body_start) =
-            Self::parse_restrict_preamble(body_start, &params, &rest_param, &span, self.symbols)?;
-
+        // Analyze body — restrict forms within will populate
+        // current_param_bounds and current_declared_ceiling
         let body = self.analyze_body(body_start, span.clone())?;
 
         // If there are destructured parameters, wrap the body
@@ -201,18 +203,23 @@ impl<'a> Analyzer<'a> {
 
         let num_locals = self.current_local_count();
 
-        // Compute the inferred effect based on effect sources
+        // Compute the inferred effect based on effect sources.
+        // Must happen before draining current_param_bounds, since
+        // compute_inferred_effect reads them for bounded params.
         let inferred_effects = self.compute_inferred_effect(&body, &params);
+
+        // Read restrict accumulators (populated by analyze_restrict during body analysis)
+        let param_bounds: Vec<(Binding, Effect)> = self.current_param_bounds.drain().collect();
+        let declared_ceiling = self.current_declared_ceiling.take();
 
         // Check function-level ceiling if present
         if let Some(ceiling) = declared_ceiling {
             // SIG_YIELD is the delivery mechanism for all suspension signals.
-            // If the ceiling allows any non-error suspension signal, implicitly
+            // If the ceiling allows ANY signal (ceiling non-zero), implicitly
             // allow SIG_YIELD. When ceiling is 0 (inert), SIG_YIELD is NOT
             // added — the body must be truly inert.
             let mut ceiling_bits = ceiling.bits.0;
-            let non_error = ceiling_bits & !crate::value::fiber::SIG_ERROR.0;
-            if non_error != 0 {
+            if ceiling_bits != 0 {
                 ceiling_bits |= crate::value::fiber::SIG_YIELD.0;
             }
             let excess_bits = inferred_effects.bits.0 & !ceiling_bits;
@@ -233,9 +240,11 @@ impl<'a> Analyzer<'a> {
         let captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
 
-        // Restore effect sources
+        // Restore effect sources and restrict accumulators
         self.current_effect_sources = saved_effect_sources;
         self.current_lambda_params = saved_lambda_params;
+        self.current_param_bounds = saved_param_bounds;
+        self.current_declared_ceiling = saved_declared_ceiling;
 
         // No need to sync is_mutated — CaptureInfo reads from the shared Binding directly
 
@@ -286,162 +295,6 @@ impl<'a> Analyzer<'a> {
             },
             span,
             Effect::inert(),
-        ))
-    }
-
-    /// Parse `restrict` preamble forms from the start of a lambda body.
-    ///
-    /// Returns `(param_bounds, declared_ceiling, remaining_body)`.
-    /// - `param_bounds`: per-parameter effect bounds
-    /// - `declared_ceiling`: function-level effect ceiling (if any)
-    /// - `remaining_body`: body slice after all restrict forms
-    fn parse_restrict_preamble<'b>(
-        body: &'b [Syntax],
-        params: &[Binding],
-        rest_param: &Option<Binding>,
-        span: &Span,
-        symbols: &SymbolTable,
-    ) -> Result<(Vec<(Binding, Effect)>, Option<Effect>, &'b [Syntax]), String> {
-        let mut param_bounds_map: HashMap<Binding, Effect> = HashMap::new();
-        let mut declared_ceiling: Option<Effect> = None;
-        let mut body_start = 0;
-
-        for form in body {
-            let items = match &form.kind {
-                SyntaxKind::List(items) if !items.is_empty() => items,
-                _ => break,
-            };
-            if items[0].as_symbol() != Some("restrict") {
-                break;
-            }
-            body_start += 1;
-
-            let args = &items[1..];
-            if args.is_empty() {
-                // (restrict) — function-level ceiling = inert
-                declared_ceiling = Some(Effect::inert());
-                continue;
-            }
-
-            // Check first arg: keyword or symbol?
-            match &args[0].kind {
-                SyntaxKind::Keyword(_) => {
-                    // (restrict :kw1 :kw2 ...) — function-level ceiling
-                    let mut bits = 0u32;
-                    for arg in args {
-                        let kw = match &arg.kind {
-                            SyntaxKind::Keyword(k) => k,
-                            _ => {
-                                return Err(format!(
-                                    "{}: restrict: expected keyword, got {}",
-                                    arg.span,
-                                    arg.kind_label()
-                                ));
-                            }
-                        };
-                        let reg = registry::global_registry().lock().unwrap();
-                        let bit_pos = reg.lookup(kw).ok_or_else(|| {
-                            format!(
-                                "{}: restrict: effect :{} not registered (unknown effect keyword)",
-                                arg.span, kw
-                            )
-                        })?;
-                        bits |= 1 << bit_pos;
-                    }
-                    declared_ceiling = Some(Effect {
-                        bits: crate::value::fiber::SignalBits(bits),
-                        propagates: 0,
-                    });
-                }
-                SyntaxKind::Symbol(param_name) => {
-                    // (restrict param :kw1 :kw2 ...) — parameter-level bound
-                    // Find the binding for this parameter name
-                    let binding = Self::find_param_binding(
-                        param_name,
-                        params,
-                        rest_param,
-                        symbols,
-                        &args[0].span,
-                    )?;
-
-                    let keywords = &args[1..];
-                    let bound = if keywords.is_empty() {
-                        // (restrict param) — bound is inert
-                        Effect::inert()
-                    } else {
-                        let mut bits = 0u32;
-                        for kw_syntax in keywords {
-                            let kw = match &kw_syntax.kind {
-                                SyntaxKind::Keyword(k) => k,
-                                _ => {
-                                    return Err(format!(
-                                        "{}: restrict: expected keyword after parameter name, got {}",
-                                        kw_syntax.span,
-                                        kw_syntax.kind_label()
-                                    ));
-                                }
-                            };
-                            let reg = registry::global_registry().lock().unwrap();
-                            let bit_pos = reg.lookup(kw).ok_or_else(|| {
-                                format!(
-                                    "{}: restrict: effect :{} not registered (unknown effect keyword)",
-                                    kw_syntax.span, kw
-                                )
-                            })?;
-                            bits |= 1 << bit_pos;
-                        }
-                        Effect {
-                            bits: crate::value::fiber::SignalBits(bits),
-                            propagates: 0,
-                        }
-                    };
-
-                    // Last wins for duplicate parameter restricts
-                    param_bounds_map.insert(binding, bound);
-                }
-                _ => {
-                    return Err(format!(
-                        "{}: restrict: expected keyword or parameter name, got {}",
-                        args[0].span,
-                        args[0].kind_label()
-                    ));
-                }
-            }
-        }
-
-        let param_bounds: Vec<(Binding, Effect)> = param_bounds_map.into_iter().collect();
-        let remaining = &body[body_start..];
-        if remaining.is_empty() {
-            return Err(format!(
-                "{}: lambda body cannot consist solely of restrict declarations",
-                span
-            ));
-        }
-
-        Ok((param_bounds, declared_ceiling, remaining))
-    }
-
-    /// Find a parameter binding by name.
-    fn find_param_binding(
-        name: &str,
-        params: &[Binding],
-        rest_param: &Option<Binding>,
-        symbols: &SymbolTable,
-        span: &Span,
-    ) -> Result<Binding, String> {
-        for param in params {
-            if symbols.name(param.name()) == Some(name) {
-                return Ok(*param);
-            }
-        }
-        if let Some(rest) = rest_param {
-            if symbols.name(rest.name()) == Some(name) {
-                return Ok(*rest);
-            }
-        }
-        Err(format!(
-            "{}: restrict: '{}' is not a parameter of this function",
-            span, name
         ))
     }
 }

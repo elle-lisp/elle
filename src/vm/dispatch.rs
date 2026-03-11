@@ -442,15 +442,9 @@ impl VM {
                     let lo = self.read_u16(bc, &mut ip) as u32;
                     let hi = self.read_u16(bc, &mut ip) as u32;
                     let mut allowed_bits = lo | (hi << 16);
-                    // SIG_YIELD is the delivery mechanism for all suspension
-                    // signals. If the bound allows any suspension signal
-                    // (anything other than SIG_ERROR alone), implicitly allow
-                    // SIG_YIELD — otherwise every restrict with a user-defined
-                    // signal would also need to list :yield explicitly.
-                    // When allowed_bits is 0 (inert bound), SIG_YIELD is NOT
-                    // added — the closure must be truly inert.
-                    let non_error_allowed = allowed_bits & !SIG_ERROR.0;
-                    if non_error_allowed != 0 {
+                    // SIG_YIELD is the delivery mechanism for all signals.
+                    // If the bound allows ANY signal, implicitly allow SIG_YIELD.
+                    if allowed_bits != 0 {
                         allowed_bits |= SIG_YIELD.0;
                     }
                     let val = self.fiber.stack.pop().unwrap_or(Value::NIL);

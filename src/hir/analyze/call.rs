@@ -243,21 +243,23 @@ impl<'a> Analyzer<'a> {
             return body.effect;
         }
 
-        // All suspension comes from parameter calls - infer Polymorphic over them
+        // All suspension comes from parameter calls - infer Polymorphic over them.
+        // Bounded parameters contribute their bound's bits directly (not polymorphic).
         let mut propagates: u32 = 0;
+        let mut bound_bits: u32 = 0;
         for binding_id in &self.current_effect_sources.param_calls {
-            if let Some(idx) = params.iter().position(|p| p == binding_id) {
+            if let Some(bound) = self.current_param_bounds.get(binding_id) {
+                // Bounded: contribute bound's bits directly (not polymorphic)
+                bound_bits |= bound.bits.0;
+            } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
+                // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;
             }
         }
 
-        if propagates == 0 {
-            Effect::yields() // shouldn't happen
-        } else {
-            Effect {
-                bits: crate::value::fiber::SignalBits(0),
-                propagates,
-            }
+        Effect {
+            bits: crate::value::fiber::SignalBits(bound_bits),
+            propagates,
         }
     }
 }

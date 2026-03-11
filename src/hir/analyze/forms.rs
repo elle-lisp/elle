@@ -292,6 +292,8 @@ impl<'a> Analyzer<'a> {
                         "eval" => return self.analyze_eval(items, span),
                         "parameterize" => return self.analyze_parameterize(items, span),
 
+                        "restrict" => return self.analyze_restrict(items, span),
+
                         "effect" => {
                             if items.len() != 2 {
                                 return Err(format!(
