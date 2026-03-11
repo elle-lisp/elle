@@ -431,3 +431,138 @@ proptest! {
         );
     }
 }
+
+// ============================================================================
+// Test 16: Closure capturing another closure
+// ============================================================================
+
+#[test]
+fn test_closure_capturing_closure() {
+    let result = eval_source(
+        r#"
+        (let ((add1 (fn (x) (+ x 1))))
+          (join (spawn (fn () (add1 41)))))
+        "#,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Expected successful execution, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().as_int(), Some(42));
+}
+
+// ============================================================================
+// Test 17: Closure capturing nested closures (three levels)
+// ============================================================================
+
+#[test]
+fn test_closure_capturing_nested_closures() {
+    let result = eval_source(
+        r#"
+        (let ((add1 (fn (x) (+ x 1))))
+          (let ((add2 (fn (x) (add1 (add1 x)))))
+            (join (spawn (fn () (add2 40))))))
+        "#,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Expected successful execution, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().as_int(), Some(42));
+}
+
+// ============================================================================
+// Test 18: Closure capturing non-sendable value via inner closure is rejected
+// ============================================================================
+
+#[test]
+fn test_closure_capturing_non_sendable_rejected() {
+    // A closure that captures a mutable @struct (via an inner closure) is rejected.
+    let result = eval_source(
+        r#"
+        (let ((t (@struct)))
+          (let ((f (fn () t)))
+            (spawn (fn () (f)))))
+        "#,
+    );
+
+    // spawn should error because f captures a mutable @struct.
+    assert!(
+        result.is_err(),
+        "Expected spawn to fail for non-sendable transitive capture"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("@struct") || err.contains("struct") || err.contains("mutable"),
+        "Error should mention @struct: {}",
+        err
+    );
+}
+
+// ============================================================================
+// Test 19: Spawned closure returning a closure as its result
+// ============================================================================
+
+#[test]
+fn test_closure_result_is_closure() {
+    let result = eval_source(
+        r#"
+        (let ((f (join (spawn (fn () (fn (x) (+ x 1)))))))
+          (f 41))
+        "#,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Expected successful execution, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().as_int(), Some(42));
+}
+
+// ============================================================================
+// Test 20: Self-recursive closure via letrec (factorial)
+// ============================================================================
+
+#[test]
+fn test_self_recursive_closure() {
+    let result = eval_source(
+        r#"
+        (letrec ((fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1)))))))
+          (join (spawn (fn () (fact 5)))))
+        "#,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Expected successful execution, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().as_int(), Some(120));
+}
+
+// ============================================================================
+// Test 21: Mutually recursive closures via letrec (even?/odd?)
+// ============================================================================
+
+#[test]
+fn test_mutually_recursive_closures() {
+    let result = eval_source(
+        r#"
+        (letrec ((even? (fn (n) (if (= n 0) true (odd? (- n 1)))))
+                 (odd?  (fn (n) (if (= n 0) false (even? (- n 1))))))
+          (join (spawn (fn () (even? 10)))))
+        "#,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Expected successful execution, got: {:?}",
+        result.err()
+    );
+    assert_eq!(result.unwrap().as_bool(), Some(true));
+}
