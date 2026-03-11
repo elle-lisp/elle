@@ -559,7 +559,8 @@ mod tests {
     use crate::value::{SIG_DEBUG, SIG_HALT, SIG_IO, SIG_YIELD};
 
     /// Create minimal test fixtures for handle_primitive_signal.
-    fn test_fixtures() -> (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>, Rc<LocationMap>) {
+    type TestFixtures = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>, Rc<LocationMap>);
+    fn test_fixtures() -> TestFixtures {
         (
             Rc::new(vec![]),
             Rc::new(vec![]),

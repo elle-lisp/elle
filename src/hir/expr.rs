@@ -107,8 +107,8 @@ pub enum HirKind {
         /// - body.effect is the raw effect of the body expression
         /// - inferred_effects may be Polymorphic(i) if the Yields comes solely
         ///   from calling parameter i
-        /// When `restrict` bounds are present, bounded parameter calls contribute
-        /// their bound's bits directly (not polymorphic).
+        /// - When `restrict` bounds are present, bounded parameter calls contribute
+        ///   their bound's bits directly (not polymorphic).
         inferred_effects: Effect,
         /// Declared effect bounds for parameters (from `(restrict param :kw ...)`).
         /// Only parameters with explicit bounds appear here. These bounds feed
