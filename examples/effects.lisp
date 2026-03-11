@@ -53,7 +53,11 @@
 
 # Run in a fiber that catches :progress signals
 (def progress-log @[])
-(def f (fiber/new (fn [] (process-items [1 2 3 4 5])) (effect-mask :progress)))
+
+(defn run-process []
+  (process-items [1 2 3 4 5]))
+
+(def f (fiber/new run-process |:progress|))
 (var done false)
 (while (not done)
   (fiber/resume f nil)
@@ -82,9 +86,10 @@
   nil)
 
 # Catch :abort to get the found value
-(def search-fiber (fiber/new
-  (fn [] (find-first even? [1 3 5 4 7 9]))
-  (effect-mask :abort)))
+(defn find-even []
+  (find-first even? [1 3 5 4 7 9]))
+
+(def search-fiber (fiber/new find-even |:abort|))
 
 (fiber/resume search-fiber nil)
 (def found (if (= (fiber/status search-fiber) :paused)
@@ -112,7 +117,11 @@
 
 # Caller 1: collect log entries
 (def log-entries @[])
-(def log-fiber (fiber/new (fn [] (compute-with-log 5)) (effect-mask :log)))
+
+(defn compute-and-log []
+  (compute-with-log 5))
+
+(def log-fiber (fiber/new compute-and-log |:log|))
 (var log-done false)
 (while (not log-done)
   (fiber/resume log-fiber nil)
@@ -150,9 +159,13 @@
 # Fails at runtime when callback signals
 (def [ok? err] (protect
   (safe-map (fn [x] (fiber/signal :log {:msg "oops"}) x) [1 2 3])))
+(display "  effect violation caught: ") (print err)
+# err is {:error :effect-violation :message "..."} — handle by kind:
+# (match (get err :error)
+#   :effect-violation (display "callback tried to signal")
+#   _ (error err))
 (assert-false ok? "safe-map: signaling callback rejected")
 (assert-eq (get err :error) :effect-violation "safe-map: effect-violation error")
-(display "  safe-map with signaling callback: ") (print err)
 
 
 # ========================================
@@ -184,7 +197,11 @@
   data)
 
 (def [ok? err] (protect (run-plugin bad-plugin 21)))
-(display "  bad plugin caught: ") (print err)
+(display "  effect violation caught: ") (print err)
+# err is {:error :effect-violation :message "..."} — handle by kind:
+# (match (get err :error)
+#   :effect-violation (display "plugin tried to signal :abort")
+#   _ (error err))
 (assert-false ok? "plugin: misbehaving plugin caught")
 (assert-eq (get err :error) :effect-violation "plugin: effect-violation error")
 
