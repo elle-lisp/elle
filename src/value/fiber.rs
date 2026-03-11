@@ -221,34 +221,13 @@ impl From<SignalBits> for u32 {
     }
 }
 
-pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
-pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
-pub const SIG_YIELD: SignalBits = SignalBits::new(1 << 1); // cooperative suspension
-pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
-pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
-pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
-pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
-pub const SIG_CANCEL: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // inject error into fiber (VM-internal)
-pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
-pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
-pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
-pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
-
-// Signal bit partitioning:
-//
-//   Bits 0-2:   User-facing signals (error, yield, debug)
-//   Bit  3:     Resume - run a suspended fiber (VM-internal)
-//   Bit  4:     FFI — calls foreign code
-//   Bit  5:     Propagate — propagate caught signal (VM-internal)
-//   Bit  6:     Cancel — inject error into fiber (VM-internal)
-//   Bit  7:     Query — read VM state without fiber swap (VM-internal)
-//   Bit  8:     Halt — graceful VM termination with return value
-//   Bit  9:     IO — I/O request to scheduler
-//   Bits 10-15: Reserved for future use
-//   Bits 16-31: User-defined signal types
-//
-// The VM dispatch loop checks all bits. User code only sees
-// bits 0-2 and 16-31. Bits 3-15 are internal.
+// Signal constants are canonically defined in `crate::effects` (the semantic
+// owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
+// imports continue to work.
+pub use crate::effects::{
+    SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
+    SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
+};
 
 /// Fiber lifecycle status. Diverges from Janet: caught SIG_ERROR leaves
 /// fiber Suspended (resumable), not Error. See vm/fiber.rs for details.

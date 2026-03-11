@@ -17,6 +17,7 @@ impl Lowerer {
         body: &Hir,
         num_locals: u16,
         inferred_effect: &crate::effects::Effect,
+        param_bounds: &[(Binding, crate::effects::Effect)],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<Reg, String> {
@@ -99,6 +100,7 @@ impl Lowerer {
             body,
             num_locals,
             *inferred_effect,
+            param_bounds,
             doc,
             syntax,
         )?;
@@ -125,6 +127,7 @@ impl Lowerer {
         body: &Hir,
         _num_locals: u16,
         inferred_effect: crate::effects::Effect,
+        param_bounds: &[(Binding, crate::effects::Effect)],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<LirFunction, String> {
@@ -188,6 +191,24 @@ impl Lowerer {
             self.upvalue_bindings.insert(*param);
         }
         self.current_func.lbox_params_mask = lbox_params_mask;
+
+        // Emit CheckEffectBound for each bounded parameter
+        for (bound_binding, bound_effect) in param_bounds {
+            if let Some(&slot) = self.binding_to_slot.get(bound_binding) {
+                let src = self.fresh_reg();
+                // All params are upvalues in lambda body — use LoadCapture.
+                // LoadCapture auto-unwraps LocalCell, giving us the closure
+                // value (not the cell wrapper).
+                self.emit(LirInstr::LoadCapture {
+                    dst: src,
+                    index: slot,
+                });
+                self.emit(LirInstr::CheckEffectBound {
+                    src,
+                    allowed_bits: bound_effect.bits.0,
+                });
+            }
+        }
 
         // Lower body
         let result_reg = self.lower_expr(body)?;

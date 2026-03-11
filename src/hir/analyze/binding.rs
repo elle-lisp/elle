@@ -71,11 +71,11 @@ impl<'a> Analyzer<'a> {
                         params: lambda_params,
                         num_required,
                         rest_param,
-                        inferred_effect,
+                        inferred_effects,
                         ..
                     } = &value.kind
                     {
-                        self.effect_env.insert(binding, *inferred_effect);
+                        self.effect_env.insert(binding, *inferred_effects);
                         let arity = Arity::for_lambda(
                             rest_param.is_some(),
                             *num_required,
@@ -244,11 +244,11 @@ impl<'a> Analyzer<'a> {
                         params: lambda_params,
                         num_required,
                         rest_param,
-                        inferred_effect,
+                        inferred_effects,
                         ..
                     } = &value.kind
                     {
-                        self.effect_env.insert(*binding, *inferred_effect);
+                        self.effect_env.insert(*binding, *inferred_effects);
                         let arity = Arity::for_lambda(
                             rest_param.is_some(),
                             *num_required,
@@ -410,11 +410,11 @@ impl<'a> Analyzer<'a> {
                 params: lambda_params,
                 num_required,
                 rest_param,
-                inferred_effect,
+                inferred_effects,
                 ..
             } = &value.kind
             {
-                self.effect_env.insert(binding, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effects);
                 let arity =
                     Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);
@@ -462,11 +462,11 @@ impl<'a> Analyzer<'a> {
                 params: lambda_params,
                 num_required,
                 rest_param,
-                inferred_effect,
+                inferred_effects,
                 ..
             } = &value.kind
             {
-                self.effect_env.insert(binding, *inferred_effect);
+                self.effect_env.insert(binding, *inferred_effects);
                 let arity =
                     Arity::for_lambda(rest_param.is_some(), *num_required, lambda_params.len());
                 self.arity_env.insert(binding, arity);

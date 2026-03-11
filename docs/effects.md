@@ -244,7 +244,7 @@ does need FFI, it signals, and the caller handles the denial.
 
 **"This callback must be inert"**: The caller grants *no* capabilities. If the
 callback tries to do anything — yield, error, IO, allocate — it signals.
-The caller treats any signal as a contract violation.
+The caller treats any signal as a contract violation. (Note: inert functions are a superset of pure functions — inert means only that no signals are emitted, not that there are no side-effects.)
 
 ### Narrowing, Not Widening
 
@@ -338,26 +338,34 @@ The `run()` function returns only the `SignalBits`. The value is stored on the
 fiber's `signal` field — the canonical location. The fast path (normal return)
 is `bits == 0`, which is a single branch.
 
-### One Signal or Many?
+### Signal Composition
 
-**Open question.** Can a function emit multiple signal bits simultaneously?
+**`SignalBits` is a pure bitmask. Every bit is independent and orthogonal.**
+There are no "types" of signals — only bits. The VM and schedulers check for
+individual bits using `contains()`, never with equality. Any combination of
+bits is valid and meaningful — the caller decides what the combination means.
 
-The argument for single signals: a signal is a suspension point. The function
-stops executing, the handler runs, the function (maybe) resumes. Only one
-thing caused it to stop.
+Examples of valid composed signals:
 
-The argument for compound signals: a function might want to say "I need IO
-AND I'm yielding" or "this is an error AND it's user-signal-5." Compound
-signals carry more information.
+- `|:yield|` — suspend, return a value to the caller
+- `|:yield :io|` — suspend AND request I/O; the scheduler sees both bits and
+  handles accordingly
+- `|:io :error|` — I/O error; a scheduler might log it and halt
+- `|:io :error :halt|` — I/O error, halt the VM; the scheduler interprets all
+  three bits
+- `|:yield :audit|` — suspend AND emit an audit signal; a monitoring fiber
+  catches both
 
-**Current position**: Signals are primarily one-at-a-time because they
-represent suspension points. But we don't foreclose on compound signals. The
-bitfield representation supports them naturally. If we discover a need, we
-can allow them without redesigning.
+No bit has a predetermined relationship with any other bit. The design makes
+no pre-determinations on how bits are mixed. Users and schedulers define the
+semantics of combinations.
 
-The payload value can carry additional context that doesn't need to be in the
-signal bits. "I'm yielding, and here's a struct describing what IO I need" is
-a single yield signal with a rich payload.
+**Fiber masks work the same way.** A fiber mask like `|:yield :io|` catches
+fibers that have either bit set. The mask is a bitmask, not an enum.
+
+**User-defined effects (bits 16–31) compose freely** with built-in bits. A
+user-defined effect can be combined with `:yield`, `:error`, `:io`, or any
+other bit.
 
 ### Terminal vs Resumable Signals
 
@@ -472,22 +480,22 @@ have) are deferred to a future phase. When needed, they'll be tracked in the
 analysis environment, not on the Effect struct itself — keeping Effect as a
 simple Copy pair.
 
-### Effect Declarations
+### Effect Restrictions
 
-The programmer can declare effects on functions:
+The programmer can restrict effects on functions using the `restrict` form:
 
 ```janet
-(def (query db sql)
-  (declare (effects :io :errors))
+(defn query (db sql)
+  (restrict :io :error)
   ...)
 ```
 
 And effect bounds on parameters:
 
 ```janet
-(def (fast-map f xs)
-  (declare (param-effects f (not :yields :io)))
-  ...)
+(defn fast-map (f xs)
+  (restrict f)
+  (map f xs))
 ```
 
 These are contracts. The system enforces them — statically when possible,
@@ -543,16 +551,16 @@ The compiler's effect information guides JIT decisions:
   it just includes the propagation path
 - **Known inert callback**: when a higher-order function is called with a
    provably-inert callback, the JIT can specialize the inner loop to skip
-  signal checks
+   signal checks
 
 
 ## I/O Effects
 
 ### SIG_IO and the Scheduler
 
-I/O effects (`SIG_IO`) are distinct from yield effects (`SIG_YIELD`). This
-separation allows the scheduler to intercept I/O requests without interfering
-with coroutines.
+I/O effects use the `:io` signal bit (bit 9). A fiber performing I/O signals
+`|:yield :io|` because it wants to both suspend AND request I/O handling.
+This is a convention, not a language rule — the bits compose freely.
 
 **Signal bit**: Bit 9 (`SIG_IO = 1 << 9`)
 
@@ -569,24 +577,292 @@ Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
 perform I/O themselves. Instead, they:
 
 1. Build an `IoRequest` (typed descriptor of the I/O operation)
-2. Return `(SIG_IO, request)` to suspend the fiber
-3. Let the scheduler catch `SIG_IO` and dispatch to a backend
+2. Return `(|:yield :io|, request)` to suspend the fiber and signal I/O
+3. Let the scheduler catch the fiber (because `:yield` is in its mask), see
+   the `:io` bit, and dispatch the `IoRequest` payload to a backend
 
 The backend (`SyncBackend` in Phase 3) performs the actual I/O and returns
-`(SIG_OK, result)` or `(SIG_ERROR, error)`. The scheduler resumes the fiber
+`(|:ok|, result)` or `(|:error|, error)`. The scheduler resumes the fiber
 with the result.
 
-### Why Separate I/O from Yield?
+### Signal Composition in I/O
 
-Coroutines use `SIG_YIELD` to suspend and resume. I/O uses `SIG_IO` to
-request backend execution. Separating them allows:
+The `:io` bit is just a bit — it has no special relationship with `:yield`.
+A fiber can signal:
 
-- **Transparent I/O**: A function that does I/O can be called from a
-  coroutine without the coroutine seeing the I/O suspension.
-- **Scheduler control**: The scheduler can intercept I/O without intercepting
-  user-level yields.
-- **Capability-based dispatch**: Different schedulers can handle I/O
-  differently (sync, async, mock) without changing the function.
+- `|:yield|` — suspend without I/O
+- `|:yield :io|` — suspend and request I/O (the common case)
+- `|:io :error|` — I/O error; a scheduler might log it and halt
+- `|:yield :io :audit|` — suspend, request I/O, and emit an audit signal
+
+The scheduler's job is to check the bits it cares about. A scheduler that
+catches `:yield` will see fibers signaling `|:yield :io|` and can inspect the
+`:io` bit to decide how to handle the I/O request. A different scheduler might
+catch `|:yield :io|` directly. The semantics of combinations are defined by
+the scheduler, not by the language.
+
+## Signal Registry
+
+The signal registry maps effect keywords to bit positions. Built-in effects occupy bits 0–15; user-defined effects use bits 16–31.
+
+### Built-in Effects
+
+| Keyword | Bit | Meaning |
+|---------|-----|---------|
+| `:error` | 0 | Error/exception |
+| `:yield` | 1 | Cooperative suspension |
+| `:debug` | 2 | Breakpoint/trace |
+| `:ffi` | 4 | Calls foreign code |
+| `:halt` | 8 | Graceful VM termination |
+| `:io` | 9 | I/O request to scheduler |
+
+Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use and are not user-visible.
+
+### User-Defined Effects
+
+User-defined effects are registered via the `(effect :keyword)` form and allocated bits 16–31. Up to 16 user effects are supported per compilation unit.
+
+```janet
+# Register a user-defined effect
+(effect :heartbeat)
+(effect :rate-limit)
+
+# Effects are registered in order of appearance
+# :heartbeat gets bit 16, :rate-limit gets bit 17
+```
+
+Duplicate registration is a compile-time error. Typos in effect keywords used in `restrict` that don't match any registered effect are also compile-time errors.
+
+## Declaring User Effects
+
+### `(effect :keyword)` Form
+
+Registers a new user-defined effect keyword and returns the keyword value.
+
+**Syntax:**
+```janet
+(effect :keyword)
+```
+
+**Semantics:**
+- Registers `:keyword` in the global signal registry (if not already registered)
+- Returns the keyword value
+- Valid in any position (file scope or expression position)
+- Duplicate registration is a compile-time error
+- Built-in effects (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) cannot be re-registered
+
+**Examples:**
+```janet
+# File scope
+(effect :heartbeat)
+(effect :rate-limit)
+
+# Expression position
+(def my-effect (effect :custom))
+my-effect  # ⟹ :custom
+```
+
+## Effect Restrictions
+
+### `(restrict ...)` Form
+
+Declares effect bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
+
+**Syntax:**
+```janet
+# Function-level restriction (no signals)
+(restrict)
+
+# Function-level restriction (specific signals allowed)
+(restrict :kw1 :kw2)
+
+# Parameter-level restriction (parameter must be inert)
+(restrict param)
+
+# Parameter-level restriction (parameter may emit specific signals)
+(restrict param :kw1 :kw2)
+```
+
+**Semantics:**
+
+- `(restrict)` — This function emits no signals (inert)
+- `(restrict :kw1 :kw2)` — This function may emit only these signals
+- `(restrict param)` — Parameter `param` must be inert (no signals)
+- `(restrict param :kw1 :kw2)` — Parameter `param` may emit at most these signals
+- Multiple `restrict` forms allowed in one lambda (one per parameter + one function-level)
+- Keywords must be registered (via `effect` or built-in)
+- Parameter names must match declared parameters
+- Duplicate restrictions for the same parameter: the last one wins
+
+**Outside lambda bodies**, `restrict` is a call to the stdlib `restrict` function, which signals `:error` at runtime. `restrict` is implemented as:
+```
+(defn restrict [& _]
+  (error {:error :invalid-restrict
+          :message "restrict must appear in a function body preamble"}))
+```
+
+**Examples:**
+```janet
+# Inert function
+(defn add (x y)
+  (restrict)
+  (+ x y))
+
+# Function that may error
+(defn validate (x)
+  (restrict :error)
+  (if (< x 0) (error "negative") x))
+
+# Higher-order function with inert callback
+(defn apply-inert (f x)
+  "Apply f to x, requiring f to be inert."
+  (restrict f)
+  (f x))
+
+# Higher-order function with bounded callback
+(defn apply-safe (f x)
+  "Apply f to x, allowing only errors."
+  (restrict f :error)
+  (f x))
+
+# Multiple restrictions
+(defn map-safe (f xs)
+  "Map f over xs, f may only error."
+  (restrict f :error)
+  (restrict :error)
+  (map f xs))
+```
+
+## Compile-Time Verification
+
+### Effect Inference with Bounds
+
+Every lambda has an `inferred_effects` — the minimum guaranteed set of effects the lambda may produce. It is always present (never Optional) and is accumulated from:
+
+1. **Direct signal emissions** in the body (e.g., `(yield x)`, `(error "msg")`)
+2. **Effects of internal calls** to statically-known functions — their `inferred_effects` bits propagate upward
+3. **Effects contributed by parameter calls:**
+   - If a parameter has a `restrict` bound, its bound's bits are included in `inferred_effects`
+   - If a parameter has NO bound, it contributes conservatively (Yields)
+
+The `inferred_effects: Effects` field is always present and contains the minimum guaranteed set of effects the lambda may produce. The programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)` is a separate concept — the `restrict` form provides a bound that the compiler checks `inferred_effects` against. When a `restrict` bound is present, the compiler checks that `inferred_effects.bits ⊆ bound.bits`. If the check passes, the lambda's final effect is the declared bound (tighter). If it fails, compile-time error.
+
+**Example:**
+```janet
+# Function with parameter bound
+(defn apply-inert (f x)
+  (restrict f)  # f must be inert
+  (f x))
+
+# Inferred effect: inert (because f is bounded to inert)
+# No polymorphism — f's effect is known to be zero bits
+
+# This works: + is inert
+(apply-inert + 42)
+
+# This fails at compile time: yielding function violates bound
+(apply-inert (fn () (yield 1)) 42)
+```
+
+### Parameter Bounds Eliminate Polymorphism
+
+A function with `(restrict f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be inert, so the function's effect is determined by its own body only, not by what `f` might do.
+
+**Example:**
+```janet
+# Without bound: polymorphic
+(defn map-any (f xs)
+  (map f xs))
+# Effect: Polymorphic(0) — depends on f's effect
+
+# With bound: not polymorphic
+(defn map-inert (f xs)
+  (restrict f)
+  (map f xs))
+# Effect: inert — f is guaranteed inert, so map is inert
+```
+
+### Call-Site Checking
+
+When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's effect against the bound at compile time.
+
+**Example:**
+```janet
+(defn apply-inert (f x)
+  (restrict f)
+  (f x))
+
+# Compile-time check passes: + is inert
+(apply-inert + 42)
+
+# Compile-time check fails: yielding function violates bound
+(apply-inert (fn () (yield 1)) 42)
+# Error: argument violates effect bound
+```
+
+## Runtime Verification
+
+When a closure is passed to a function with an effect bound, the runtime checks that the closure's effect satisfies the bound. This is necessary for dynamic arguments where the effect cannot be determined at compile time.
+
+**Mechanism:**
+- The lowerer emits a `CheckEffectBound` instruction at function entry for each bounded parameter
+- The VM checks: `closure.effect.bits & ~allowed != 0`
+- If the check fails, the VM signals `:error` with a descriptive message
+
+**Example:**
+```janet
+(defn apply-inert (f x)
+  (restrict f)
+  (f x))
+
+# At runtime, if f's effect violates the bound, error is signaled
+(var f (eval '(fn () (yield 1))))
+(apply-inert f 42)
+# Runtime error: argument violates effect bound
+```
+
+## JIT Integration
+
+Effect bounds enable JIT optimizations:
+
+1. **Loop specialization**: When a higher-order function is called with a provably-inert callback, the JIT can specialize the inner loop to skip signal checks
+2. **Inlining**: Inert callbacks can be inlined more aggressively
+3. **Elimination of polymorphism**: Bounded parameters eliminate the need to track polymorphic effects, simplifying JIT compilation
+
+**Example:**
+```janet
+# Without bounds: JIT cannot specialize
+(defn map-any (f xs)
+  (map f xs))
+
+# With bounds: JIT can specialize for inert f
+(defn map-inert (f xs)
+  (restrict f)
+  (map f xs))
+```
+
+## `(effects)` Introspection Primitive
+
+Returns the full signal registry as a struct with effect keywords as keys and bit positions as values.
+
+**Syntax:**
+```janet
+(effects)
+```
+
+**Returns:**
+A struct mapping effect keywords to bit positions. Includes both built-in and user-defined effects.
+
+**Example:**
+```janet
+(effects)
+# ⟹ {:error 0 :yield 1 :debug 2 :ffi 4 :halt 8 :io 9 :heartbeat 16 :rate-limit 17}
+
+# After registering user effects
+(effect :custom)
+(effects)
+# ⟹ {:error 0 :yield 1 :debug 2 :ffi 4 :halt 8 :io 9 :heartbeat 16 :rate-limit 17 :custom 18}
+```
 
 ## Surface Syntax
 
@@ -658,19 +934,19 @@ request backend execution. Separating them allows:
 (coro/status co) → (fiber/status co)
 ```
 
-### Effect Declarations
+### Effect Restrictions
 
 ```janet
-(def (inert-add x y)
-  (declare (effects))           ;# no effects — inert
+(defn inert-add (x y)
+  (restrict)           ;# no effects — inert
   (+ x y))
 
-(def (may-fail x)
-  (declare (effects :errors))   ;# may error, nothing else
+(defn may-fail (x)
+  (restrict :error)   ;# may error, nothing else
   (/ 1 x))
 
-(def (callback-must-be-pure f xs)
-  (declare (param-effects f ())) ;# f must have no effects
+(defn callback-must-be-inert (f xs)
+  (restrict f) ;# f must have no effects
   (map f xs))
 ```
 
@@ -696,8 +972,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
 5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no
    allocation API.
 
-6. ❌ **Effect declarations.** `declare` forms for effect contracts not
-   yet implemented.
+6. ✅ **Effect restrictions.** `restrict` forms for effect contracts implemented.
 
 7. ❌ **Erlang-style processes.** Fibers on an event loop with a scheduler.
 

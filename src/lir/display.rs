@@ -218,6 +218,9 @@ impl fmt::Display for LirInstr {
             LirInstr::PopParamFrame => f.write_str("pop-param-frame"),
             LirInstr::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
             LirInstr::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
+            LirInstr::CheckEffectBound { src, allowed_bits } => {
+                write!(f, "check-effect-bound {} allowed=0x{:x}", src, allowed_bits)
+            }
         }
     }
 }

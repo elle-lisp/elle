@@ -22,6 +22,7 @@ pub struct CompileResult {
 
 /// Analysis-only result (no bytecode generation)
 /// Used by linter and LSP which need HIR but not bytecode
+#[derive(Debug)]
 pub struct AnalyzeResult {
     pub hir: crate::hir::Hir,
 }

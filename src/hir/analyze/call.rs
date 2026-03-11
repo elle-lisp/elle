@@ -42,6 +42,22 @@ impl<'a> Analyzer<'a> {
         // First, get the raw callee effect (before polymorphic resolution)
         let raw_callee_effect = self.get_raw_callee_effect(&func);
 
+        // Refine fiber/signal effect when first arg is a constant integer.
+        // fiber/signal's registered effect is yields_errors() (conservative),
+        // but when the signal bits are known at compile time, use them directly.
+        let raw_callee_effect = if self.is_fiber_signal(&func) {
+            if let Some(HirKind::Int(bits)) = args.first().map(|a| &a.expr.kind) {
+                Effect {
+                    bits: crate::value::fiber::SignalBits(*bits as u32),
+                    propagates: 0,
+                }
+            } else {
+                raw_callee_effect
+            }
+        } else {
+            raw_callee_effect
+        };
+
         // Track effect sources for polymorphic inference BEFORE resolving
         // This handles the case where we call a polymorphic function with a parameter
         let arg_exprs: Vec<&Hir> = args.iter().map(|a| &a.expr).collect();
@@ -117,12 +133,21 @@ impl<'a> Analyzer<'a> {
         }
     }
 
+    /// Check if the callee is the `fiber/signal` primitive.
+    fn is_fiber_signal(&self, func: &Hir) -> bool {
+        if let HirKind::Var(binding) = &func.kind {
+            self.symbols.name(binding.name()) == Some("fiber/signal")
+        } else {
+            false
+        }
+    }
+
     /// Get the raw callee effect without resolving polymorphic effects.
     pub(crate) fn get_raw_callee_effect(&self, func: &Hir) -> Effect {
         match &func.kind {
             HirKind::Lambda {
-                inferred_effect, ..
-            } => *inferred_effect,
+                inferred_effects, ..
+            } => *inferred_effects,
             HirKind::Var(binding) => {
                 if let Some(effect) = self.effect_env.get(binding) {
                     *effect
@@ -209,8 +234,8 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn resolve_arg_effect(&self, arg: &Hir) -> Effect {
         match &arg.kind {
             HirKind::Lambda {
-                inferred_effect, ..
-            } => *inferred_effect,
+                inferred_effects, ..
+            } => *inferred_effects,
             HirKind::Var(binding) => self
                 .effect_env
                 .get(binding)
@@ -243,21 +268,23 @@ impl<'a> Analyzer<'a> {
             return body.effect;
         }
 
-        // All suspension comes from parameter calls - infer Polymorphic over them
+        // All suspension comes from parameter calls - infer Polymorphic over them.
+        // Bounded parameters contribute their bound's bits directly (not polymorphic).
         let mut propagates: u32 = 0;
+        let mut bound_bits: u32 = 0;
         for binding_id in &self.current_effect_sources.param_calls {
-            if let Some(idx) = params.iter().position(|p| p == binding_id) {
+            if let Some(bound) = self.current_param_bounds.get(binding_id) {
+                // Bounded: contribute bound's bits directly (not polymorphic)
+                bound_bits |= bound.bits.0;
+            } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
+                // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;
             }
         }
 
-        if propagates == 0 {
-            Effect::yields() // shouldn't happen
-        } else {
-            Effect {
-                bits: crate::value::fiber::SignalBits(0),
-                propagates,
-            }
+        Effect {
+            bits: crate::value::fiber::SignalBits(bound_bits),
+            propagates,
         }
     }
 }

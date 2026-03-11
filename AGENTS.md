@@ -42,7 +42,7 @@ bytecode. Error messages include file:line:col information.
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
-| `effects` | Effect type (`Inert`, `Yields`, `Polymorphic`) |
+| `effects` | Effect type (`Inert`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping |
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
@@ -114,8 +114,7 @@ These must remain true. Violating them breaks the system:
    use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
    which parameters need lbox wrapping.
 
-3. **Effects are inferred, not declared.** The `Effect` enum (`Inert`, `Yields`,
-   `Polymorphic`) propagates from leaves to root during analysis.
+3. **Effects are inferred, not declared — except when `restrict` provides explicit bounds.** The `Effect` enum (`Inert`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. The `restrict` form constrains inference; it doesn't replace it. The inferred effect must be a subset of the declared bound. When a parameter has a `restrict` bound, it is no longer polymorphic — its effect is known to be at most the bound.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the

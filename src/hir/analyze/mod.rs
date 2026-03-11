@@ -42,6 +42,8 @@ pub enum FileForm<'a> {
     Def(&'a Syntax, &'a Syntax),
     /// `(var name value)` or `(var pattern value)` — mutable binding
     Var(&'a Syntax, &'a Syntax),
+    /// `(effect :keyword)` — user-defined effect declaration
+    Effect(&'a Syntax),
     /// Bare expression — gets a gensym name
     Expr(&'a Syntax),
 }
@@ -147,7 +149,14 @@ pub struct Analyzer<'a> {
     /// Populated by `bind_primitives`. The lowerer seeds its
     /// `immutable_values` map from this so primitive references
     /// emit `LoadConst` instead of `LoadGlobal`.
+    /// No slot allocation is needed.
     primitive_values: HashMap<Binding, Value>,
+    /// Accumulated parameter bounds from restrict forms in current lambda.
+    /// Populated by `analyze_restrict`, consumed by `analyze_lambda`.
+    current_param_bounds: HashMap<Binding, Effect>,
+    /// Accumulated function-level ceiling from restrict forms in current lambda.
+    /// Populated by `analyze_restrict`, consumed by `analyze_lambda`.
+    current_declared_ceiling: Option<Effect>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -187,6 +196,8 @@ impl<'a> Analyzer<'a> {
             fn_depth: 0,
             pre_bindings: HashMap::new(),
             primitive_values: HashMap::new(),
+            current_param_bounds: HashMap::new(),
+            current_declared_ceiling: None,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);

@@ -15,6 +15,161 @@ fn status_keyword(status: FiberStatus) -> Value {
     Value::keyword(status.as_str())
 }
 
+/// Resolve a Value to SignalBits.
+///
+/// Accepts three forms:
+/// - Integer: passthrough as `SignalBits(value as u32)`
+/// - Keyword: lookup in global registry, return `SignalBits(1 << bit_position)`
+/// - Set of keywords: iterate elements, look up each, OR the bits together
+///
+/// `context` is used in error messages (e.g., "fiber/new", "fiber/signal").
+/// Resolve a slice of Values (from array) to SignalBits by OR-ing keyword bits.
+fn resolve_keyword_slice(
+    elems: &[Value],
+    context: &str,
+) -> Result<SignalBits, (SignalBits, Value)> {
+    let reg = crate::effects::registry::global_registry().lock().unwrap();
+    let mut bits = SignalBits::new(0);
+    for elem in elems {
+        let name = elem.as_keyword_name().ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "{}: array elements must be keywords, got {}",
+                        context,
+                        elem.type_name()
+                    ),
+                ),
+            )
+        })?;
+        let b = reg.to_signal_bits(name).ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("{}: unknown effect keyword :{}", context, name),
+                ),
+            )
+        })?;
+        bits = SignalBits::new(bits.0 | b.0);
+    }
+    Ok(bits)
+}
+
+fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (SignalBits, Value)> {
+    // 1. Integer passthrough (existing behavior)
+    if let Some(i) = val.as_int() {
+        return Ok(SignalBits::new(i as u32));
+    }
+
+    // 2. Single keyword
+    if let Some(name) = val.as_keyword_name() {
+        let reg = crate::effects::registry::global_registry().lock().unwrap();
+        return match reg.to_signal_bits(name) {
+            Some(bits) => Ok(bits),
+            None => Err((
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("{}: unknown effect keyword :{}", context, name),
+                ),
+            )),
+        };
+    }
+
+    // 3. Set of keywords
+    if let Some(set) = val.as_set() {
+        let reg = crate::effects::registry::global_registry().lock().unwrap();
+        let mut bits = SignalBits::new(0);
+        for elem in set.iter() {
+            let name = elem.as_keyword_name().ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "{}: set elements must be keywords, got {}",
+                            context,
+                            elem.type_name()
+                        ),
+                    ),
+                )
+            })?;
+            let b = reg.to_signal_bits(name).ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("{}: unknown effect keyword :{}", context, name),
+                    ),
+                )
+            })?;
+            bits = SignalBits::new(bits.0 | b.0);
+        }
+        return Ok(bits);
+    }
+
+    // 4. Array of keywords (immutable [...])
+    if let Some(elems) = val.as_array() {
+        return resolve_keyword_slice(elems, context);
+    }
+
+    // 5. Mutable array of keywords (@[...])
+    if let Some(arr) = val.as_array_mut() {
+        let elems = arr.borrow();
+        return resolve_keyword_slice(&elems, context);
+    }
+
+    // 6. List of keywords (cons chain)
+    if val.as_cons().is_some() {
+        let reg = crate::effects::registry::global_registry().lock().unwrap();
+        let mut bits = SignalBits::new(0);
+        let mut current = *val;
+        while let Some(cons) = current.as_cons() {
+            let name = cons.first.as_keyword_name().ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "{}: list elements must be keywords, got {}",
+                            context,
+                            cons.first.type_name()
+                        ),
+                    ),
+                )
+            })?;
+            let b = reg.to_signal_bits(name).ok_or_else(|| {
+                (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("{}: unknown effect keyword :{}", context, name),
+                    ),
+                )
+            })?;
+            bits = SignalBits::new(bits.0 | b.0);
+            current = cons.rest;
+        }
+        return Ok(bits);
+    }
+
+    // 7. None of the above
+    Err((
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "{}: expected integer, keyword, or collection of keywords, got {}",
+                context,
+                val.type_name()
+            ),
+        ),
+    ))
+}
+
 /// (fiber/new fn mask) → fiber
 ///
 /// Create a fiber from a closure and a signal mask. The mask determines
@@ -43,20 +198,9 @@ pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let mask = match args[1].as_int() {
-        Some(m) => SignalBits::new(m as u32),
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "fiber/new: expected integer mask, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
+    let mask = match resolve_signal_bits(&args[1], "fiber/new") {
+        Ok(bits) => bits,
+        Err(err) => return err,
     };
 
     let fiber = Fiber::new(closure, mask);
@@ -137,20 +281,9 @@ pub(crate) fn prim_fiber_signal(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let bits = match args[0].as_int() {
-        Some(b) => SignalBits::new(b as u32),
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "fiber/signal: expected integer bits, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let bits = match resolve_signal_bits(&args[0], "fiber/signal") {
+        Ok(bits) => bits,
+        Err(err) => return err,
     };
 
     // Return the signal bits and value directly.

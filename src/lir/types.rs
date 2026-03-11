@@ -332,6 +332,13 @@ pub enum LirInstr {
     /// Pop the top parameter frame.
     /// No registers produced or consumed.
     PopParamFrame,
+
+    // === Effect Checking ===
+    /// Check that a closure's effect satisfies a bound.
+    /// If the value in `src` is a closure whose `effect.bits & !allowed_bits != 0`,
+    /// signal `:error`. If the value is not a closure, signal `:error`.
+    /// If the check passes, execution continues.
+    CheckEffectBound { src: Reg, allowed_bits: u32 },
 }
 
 /// Binary operations

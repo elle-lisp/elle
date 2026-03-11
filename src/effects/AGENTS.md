@@ -1,12 +1,14 @@
 # effects
 
-Effect system for tracking which signals a function may emit.
+Effect system for tracking which signals a function may emit. Includes the global signal registry for mapping effect keywords to bit positions.
 
 ## Responsibility
 
-Define the `Effect` type and provide effect inference for the fiber/signal
-system. Effects track which signals a function might emit (error, yield,
-debug, ffi) and which parameter indices propagate their callee's effects.
+1. Define the `Effect` type and provide effect inference for the fiber/signal system
+2. Maintain the global signal registry mapping effect keywords to bit positions
+3. Track which signals a function might emit (error, yield, debug, ffi, io, halt, user-defined)
+4. Track which parameter indices propagate their callee's effects
+5. Support effect bounds on functions and parameters via `restrict` declarations
 
 ## Interface
 
@@ -26,7 +28,7 @@ debug, ffi) and which parameter indices propagate their callee's effects.
 
 ## Predicates
 
-Each predicate asks a specific question. No vague "is_pure".
+Each predicate asks a specific question. No vague "is_inert".
 
 | Predicate | Meaning |
 |-----------|---------|
@@ -45,18 +47,65 @@ Each predicate asks a specific question. No vague "is_pure".
 | `Effect::INERT` | `Effect::inert()` |
 | `Effect::YIELDS` | `Effect::yields()` |
 
+## Signal Registry
+
+The global signal registry maps effect keywords to bit positions. It is a process-global singleton initialized with built-in effects and extended with user-defined effects via `(effect :keyword)` forms.
+
+### Built-in Effects
+
+| Keyword | Bit | Meaning |
+|---------|-----|---------|
+| `:error` | 0 | Error/exception |
+| `:yield` | 1 | Cooperative suspension |
+| `:debug` | 2 | Breakpoint/trace |
+| `:ffi` | 4 | Calls foreign code |
+| `:halt` | 8 | Graceful VM termination |
+| `:io` | 9 | I/O request to scheduler |
+
+Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use.
+
+### User-Defined Effects
+
+User effects are allocated bits 16–31 (up to 16 user effects per compilation unit). The registry is append-only — once a keyword is registered, its bit position is fixed for the lifetime of the process.
+
+### Registry Interface
+
+- `global_registry()` — Access the process-global registry
+- `register(&mut self, name: &str) -> Result<u32, String>` — Register a new effect, returns bit position
+- `lookup(&self, name: &str) -> Option<u32>` — Look up bit position for a keyword
+- `to_signal_bits(&self, name: &str) -> Option<SignalBits>` — Convenience: keyword → SignalBits
+- `format_signal_bits(&self, bits: SignalBits) -> String` — Human-readable representation for error messages
+
+## Inferred Effects
+
+Every lambda has an effect-related field:
+
+1. **`inferred_effects: Effects`** (always present, never Optional) — The minimum guaranteed set of effects the lambda may produce, accumulated from:
+   - Direct signal emissions in the body
+   - Effects of internal calls to statically-known functions
+   - Effects contributed by bounded parameters (their bound's bits are included)
+   - Unbounded callable parameters contribute conservatively (Yields)
+
+The programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)` is a separate concept — the `restrict` form provides a bound that the compiler checks `inferred_effects` against. When a `restrict` bound is present, the compiler checks `inferred_effects.bits ⊆ bound.bits`. If the check passes, the lambda's final effect is the declared bound (tighter). If it fails, compile-time error.
+
+### Parameter Bounds
+
+Parameter bounds are stored as `param_bounds: Vec<(Binding, Effects)>` on the Lambda node. When a parameter has a bound, it is no longer polymorphic — its effect contribution to the lambda is the bound's bits, not a polymorphic reference.
+
 ## Interprocedural Effect Tracking
 
 The analyzer performs interprocedural effect tracking:
 
 1. **effect_env**: Maps `Binding` → `Effect` for locally-defined functions
 2. **primitive_effects**: Maps `SymbolId` → `Effect` for primitive functions
+3. **current_param_bounds**: Maps `Binding` → `Effects` for parameters with declared bounds (during lambda analysis)
+4. **param_bounds_env**: Maps `Binding` → `Vec<(usize, Effects)>` for call-site checking of bounded parameters
 
 When analyzing a call:
 - Direct fn calls: use the fn body's effect
 - Variable calls: look up in `effect_env` (local) or `primitive_effects` (global)
-- Polymorphic effects: resolve by examining the argument's effect via
-  `propagated_params()` iterator over the `propagates` bitmask
+- Polymorphic effects: resolve by examining the argument's effect via `propagated_params()` iterator over the `propagates` bitmask
+- Bounded parameters: their effect contribution is the bound's bits, not polymorphic
 
 ### Limitations
 
@@ -96,6 +145,7 @@ Used across the pipeline and the runtime:
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~350 | `Effect` struct, constructors, predicates, Display, combine, tests |
+| `registry.rs` | ~200 | `SignalRegistry` struct, global singleton, built-in registration, user effect allocation |
 
 ## Invariants
 
