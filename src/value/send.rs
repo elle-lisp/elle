@@ -450,6 +450,172 @@ impl SendValue {
 unsafe impl Send for SendValue {}
 unsafe impl Sync for SendValue {}
 
+/// Reconstruction state for a single intern table entry.
+enum ReconState {
+    NotStarted,
+    InProgress,
+    Done(Value),
+}
+
+/// Per-call deserialization context for `SendBundle::into_value`.
+struct DeserContext {
+    /// Owned closure data. Entries are `take`n as they are reconstructed.
+    closures: Vec<Option<SendableClosure>>,
+    /// Reconstruction state per intern table index.
+    states: Vec<ReconState>,
+    /// Deferred fixups: (LBox Value that holds a NIL placeholder, intern index).
+    /// After all closures are built, each LBox's RefCell is overwritten with
+    /// the actual closure value.
+    fixups: Vec<(Value, usize)>,
+}
+
+/// Recursive worker for deserialization. Threads DeserContext through all recursive calls.
+fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
+    use crate::value::closure::{Closure, ClosureTemplate};
+    use crate::value::heap::{alloc, Cons, HeapObject};
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::rc::Rc;
+
+    match sv {
+        SendValue::Immediate(v) => v,
+        SendValue::Keyword(name) => Value::keyword(&name),
+        SendValue::String(s) => Value::string_no_intern(s),
+        SendValue::Cons(first, rest) => {
+            let f = into_value_inner(*first, ctx);
+            let r = into_value_inner(*rest, ctx);
+            alloc(HeapObject::Cons(Cons::new(f, r)))
+        }
+        SendValue::Array(items) => {
+            let values: Vec<Value> = items
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+            alloc(HeapObject::LArrayMut(RefCell::new(values)))
+        }
+        SendValue::Struct(map) => {
+            let values: std::collections::BTreeMap<_, _> = map
+                .into_iter()
+                .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
+                .collect();
+            alloc(HeapObject::LStruct(values))
+        }
+        SendValue::Tuple(items) => {
+            let values: Vec<Value> = items
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+            alloc(HeapObject::LArray(values))
+        }
+        SendValue::Buffer(bytes) => alloc(HeapObject::LStringMut(RefCell::new(bytes))),
+        SendValue::Bytes(bytes) => alloc(HeapObject::LBytes(bytes)),
+        SendValue::Blob(bytes) => alloc(HeapObject::LBytesMut(RefCell::new(bytes))),
+
+        SendValue::LBox(contents, is_local) => {
+            // Special case: if contents is a Ref to an InProgress closure,
+            // emit NIL placeholder and record a fixup.
+            let fixup_idx = match *contents {
+                SendValue::Ref(idx) => {
+                    if matches!(ctx.states[idx], ReconState::InProgress) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            let inner_val = into_value_inner(*contents, ctx);
+            let lbox_val = alloc(HeapObject::LBox(RefCell::new(inner_val), is_local));
+            if let Some(idx) = fixup_idx {
+                ctx.fixups.push((lbox_val, idx));
+            }
+            lbox_val
+        }
+
+        SendValue::Float(f) => alloc(HeapObject::Float(f)),
+        SendValue::FFIType(desc) => alloc(HeapObject::FFIType(desc)),
+        SendValue::LSet(items) => {
+            let set: BTreeSet<Value> = items
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+            alloc(HeapObject::LSet(set))
+        }
+        SendValue::LSetMut(items) => {
+            let set: BTreeSet<Value> = items
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+            alloc(HeapObject::LSetMut(RefCell::new(set)))
+        }
+        SendValue::NativeFn(f) => Value::native_fn(f),
+
+        // Closure variant: only appears stored directly in SendBundle::closures.
+        // At the top-level call it means the bundle was constructed incorrectly.
+        // In practice root is always a Ref when the value is a closure.
+        SendValue::Closure(_) => panic!("bug: bare Closure in SendValue tree; use Ref"),
+
+        SendValue::Ref(idx) => {
+            if let ReconState::Done(v) = ctx.states[idx] {
+                return v;
+            }
+            if matches!(ctx.states[idx], ReconState::InProgress) {
+                return Value::NIL; // placeholder; fixup will correct it
+            }
+            // NotStarted — fall through to reconstruct
+
+            ctx.states[idx] = ReconState::InProgress;
+            let sc = ctx.closures[idx]
+                .take()
+                .expect("bug: closure already taken from DeserContext");
+
+            // Reconstruct constants (no closures expected in constants,
+            // but thread the context for completeness).
+            let constants: Vec<Value> = sc
+                .constants
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+
+            // Reconstruct env (may encounter InProgress Refs → NIL placeholders).
+            let env: Vec<Value> = sc
+                .env
+                .into_iter()
+                .map(|sv| into_value_inner(sv, ctx))
+                .collect();
+
+            let doc = sc.doc.map(|sv| into_value_inner(*sv, ctx));
+
+            let template = Rc::new(ClosureTemplate {
+                bytecode: Rc::new(sc.bytecode),
+                arity: sc.arity,
+                num_locals: sc.num_locals,
+                num_captures: sc.num_captures,
+                num_params: sc.num_params,
+                constants: Rc::new(constants),
+                effect: sc.effect,
+                lbox_params_mask: sc.lbox_params_mask,
+                lbox_locals_mask: sc.lbox_locals_mask,
+                symbol_names: Rc::new(sc.symbol_names),
+                location_map: Rc::new(sc.location_map),
+                jit_code: None,
+                lir_function: None,
+                doc,
+                syntax: None,
+                vararg_kind: sc.vararg_kind,
+                name: sc.name.map(|s| Rc::from(s.as_str())),
+            });
+
+            let val = Value::closure(Closure {
+                template,
+                env: Rc::new(env),
+            });
+            ctx.states[idx] = ReconState::Done(val);
+            val
+        }
+    }
+}
+
 impl SendBundle {
     /// Serialize a `Value` into a `SendBundle`.
     ///
@@ -469,5 +635,37 @@ impl SendBundle {
             root,
             closures: ctx.closures,
         })
+    }
+
+    /// Reconstruct a `Value` from this bundle.
+    ///
+    /// Mutually recursive closures are handled via LBox fixups: if a closure's
+    /// env contains an LBox wrapping a not-yet-built closure, the LBox is
+    /// allocated with a NIL placeholder and updated after all closures are built.
+    pub fn into_value(self) -> Value {
+        let n = self.closures.len();
+        let mut ctx = DeserContext {
+            closures: self.closures.into_iter().map(Some).collect(),
+            states: (0..n).map(|_| ReconState::NotStarted).collect(),
+            fixups: Vec::new(),
+        };
+
+        let result = into_value_inner(self.root, &mut ctx);
+
+        // Fixup pass: patch LBox cells that were given NIL placeholders.
+        for (lbox_val, idx) in &ctx.fixups {
+            let closure_val = match ctx.states[*idx] {
+                ReconState::Done(v) => v,
+                _ => panic!(
+                    "bug: fixup references closure that was never built (idx={})",
+                    idx
+                ),
+            };
+            if let Some(cell) = lbox_val.as_lbox() {
+                *cell.borrow_mut() = closure_val;
+            }
+        }
+
+        result
     }
 }

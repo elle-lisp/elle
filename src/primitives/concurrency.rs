@@ -190,7 +190,7 @@ pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
                 if let Some(result) = holder.as_ref() {
                     // Result is ready - convert from SendValue back to Value
                     return match result {
-                        Ok(bundle) => (SIG_OK, bundle.clone().root.into_value()),
+                        Ok(bundle) => (SIG_OK, bundle.clone().into_value()),
                         Err(e) => (SIG_ERROR, error_val("error", e.clone())),
                     };
                 }
