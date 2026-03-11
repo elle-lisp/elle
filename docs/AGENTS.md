@@ -13,6 +13,7 @@ Design documents, language references, and contributor guides for Elle.
 | `semantics.md` | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring | Root AGENTS.md |
 | `macros.md` | Macro system: current state, architecture, hygiene, scope sets | Root AGENTS.md |
 | `except.md` | Exception handling: error structs, try/catch, error propagation | Root AGENTS.md |
+| `modules.md` | Module system: closure-as-module, parametric imports, qualified symbols, trade-offs | Root AGENTS.md |
 
 ### Contributor Guides
 
@@ -77,6 +78,7 @@ These documents are authoritative and should be kept in sync with implementation
 - `pipeline.md` — compilation pipeline
 - `testing.md` — testing strategy
 - `cookbook.md` — recipes for common changes
+- `modules.md` — module system design
 
 When code contradicts these documents, **update the document** (or file an issue if the code is wrong).
 
@@ -125,6 +127,7 @@ Root AGENTS.md references these docs:
 | `effects.md` | 761 | Effect system design |
 | `fibers.md` | 312 | Fiber architecture |
 | `ffi.md` | 455 | FFI design |
+| `modules.md` | ~240 | Module system design |
 | `reference/janet.md` | ~200 | Janet language reference |
 | `reference/janet-compiler.md` | ~150 | Janet compiler design |
 | `reference/janet-destructuring.md` | ~100 | Janet destructuring patterns |
