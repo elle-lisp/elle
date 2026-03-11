@@ -145,9 +145,9 @@ stored in `Closure.location_map` and used by the VM for error reporting.
     to generate side-exit code.
 
 10. **Call site metadata is only populated for may_suspend functions.**
-    `Emitter.current_func_may_suspend` gates call site recording. For
-    non-suspending functions, `call_sites` is empty. This avoids overhead
-    for inert functions that can never yield.
+     `Emitter.current_func_may_suspend` gates call site recording. For
+     non-suspending functions, `call_sites` is empty. This avoids overhead
+     for inert functions that can never yield.
 
 ## Key instructions
 

@@ -26,7 +26,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   The compilation pipeline is: Source → Reader → Syntax → Expander → Analyzer → HIR → Lowerer → LIR → Emitter → Bytecode → VM. Each stage infers more than the last. The analyzer resolves all bindings to their definitions, computes which variables each closure captures, infers the effect of every expression, and flags lint violations — all before bytecode is emitted. This is why the linter catches errors at compile time, why the effect system is sound, and why the JIT can make intelligent decisions about what to compile natively.
   </details>
 
-- **A sound effect system, inferred not declared.** Every function is automatically classified as `Inert`, `Yields`, or `Polymorphic`. The compiler enforces this:   an inert context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
+- **A sound effect system, inferred not declared.** Every function is automatically classified as `Inert`, `Yields`, or `Polymorphic`. The compiler enforces this: an inert context cannot call a yielding function. No annotations required. This is what makes the fiber/concurrency story coherent — the compiler knows which functions can suspend.
 
   ```janet
   # Inert function — inferred automatically

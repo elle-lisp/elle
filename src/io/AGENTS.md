@@ -114,8 +114,8 @@ State machine:
 
 | Primitive | Effect | Purpose |
 |-----------|--------|---------|
-| `io-request?` | pure | Check if value is an I/O request |
-| `io-backend?` | pure | Check if value is an I/O backend |
+| `io-request?` | inert | Check if value is an I/O request |
+| `io-backend?` | inert | Check if value is an I/O backend |
 | `io/backend` | errors | Create an I/O backend (`:sync` for synchronous, `:async` for asynchronous) |
 | `io/execute` | errors | Execute an I/O request on a backend (blocking) |
 | `io/submit` | errors | Submit async I/O request, return submission ID |

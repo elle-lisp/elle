@@ -218,6 +218,26 @@ pub(crate) fn prim_vm_query(args: &[Value]) -> (SignalBits, Value) {
     (SIG_QUERY, Value::cons(args[0], args[1]))
 }
 
+/// (effects) — return the effect registry as a struct mapping keywords to bit positions
+pub(crate) fn prim_effects(args: &[Value]) -> (SignalBits, Value) {
+    if !args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("effects: expected 0 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let reg = crate::effects::registry::global_registry().lock().unwrap();
+    let mut map = std::collections::BTreeMap::new();
+    for entry in reg.entries() {
+        let key = crate::value::TableKey::from_value(&Value::keyword(&entry.name)).unwrap();
+        map.insert(key, Value::int(entry.bit_position as i64));
+    }
+    (SIG_OK, Value::struct_from(map))
+}
+
 /// (keyword str) — convert a string to a keyword
 ///
 /// Creates a content-addressed keyword from the string name.
@@ -365,6 +385,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["op", "arg"],
         category: "meta",
         example: "(vm/query \"call-count\" some-fn)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "effects",
+        func: prim_effects,
+        effect: Effect::inert(),
+        arity: Arity::Exact(0),
+        doc: "Return the effect registry as a struct mapping keywords to bit positions.",
+        params: &[],
+        category: "meta",
+        example: "(effects)",
         aliases: &[],
     },
     PrimitiveDef {

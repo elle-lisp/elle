@@ -71,6 +71,13 @@ pub fn compile(
 /// - anything else → `FileForm::Expr(syntax)`
 pub(super) fn classify_form(syntax: &Syntax) -> FileForm<'_> {
     if let SyntaxKind::List(items) = &syntax.kind {
+        if items.len() == 2 {
+            if let Some(head) = items[0].as_symbol() {
+                if head == "effect" {
+                    return FileForm::Effect(&items[1]);
+                }
+            }
+        }
         if items.len() == 3 {
             if let Some(head) = items[0].as_symbol() {
                 match head {

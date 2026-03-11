@@ -4,8 +4,7 @@ use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_HALT, SIG_IO, SIG_OK,
-    SIG_YIELD,
+    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -427,8 +426,9 @@ impl VM {
                     }]);
                 }
 
-                // For yield/IO signals, merge remaining outer frames
-                if (exec.bits.contains(SIG_YIELD) || exec.bits.contains(SIG_IO))
+                // For suspending signals (any bits except error/halt), merge remaining outer frames
+                if !exec.bits.contains(SIG_ERROR)
+                    && !exec.bits.contains(SIG_HALT)
                     && i + 1 < frames.len()
                 {
                     if let Some(ref mut new_frames) = self.fiber.suspended {

@@ -1,6 +1,7 @@
-//! Special forms: yield, match
+//! Special forms: yield, match, restrict
 
 use super::*;
+use crate::effects::registry;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
 use crate::syntax::{Syntax, SyntaxKind};
 
@@ -10,6 +11,126 @@ type ResolveVar<'a> =
     dyn Fn(&mut Analyzer<'_>, &str, &[ScopeId], &Span) -> Result<HirPattern, String> + 'a;
 
 impl<'a> Analyzer<'a> {
+    /// Analyze a `(restrict ...)` form.
+    ///
+    /// restrict is a declaration, not an expression. It must appear inside
+    /// a lambda body. It accumulates into `current_param_bounds` and
+    /// `current_declared_ceiling`, which `analyze_lambda` reads after
+    /// analyzing the body.
+    ///
+    /// Forms:
+    /// - `(restrict)` — function-level ceiling = inert
+    /// - `(restrict :kw ...)` — function-level ceiling with specific signals
+    /// - `(restrict param)` — parameter bound = inert
+    /// - `(restrict param :kw ...)` — parameter bound with specific signals
+    pub(crate) fn analyze_restrict(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: restrict must appear inside a function body",
+                span
+            ));
+        }
+
+        let args = &items[1..];
+        if args.is_empty() {
+            // (restrict) — function-level ceiling = inert
+            self.current_declared_ceiling = Some(Effect::inert());
+            return Ok(Hir::inert(HirKind::Nil, span));
+        }
+
+        match &args[0].kind {
+            SyntaxKind::Keyword(_) => {
+                // (restrict :kw1 :kw2 ...) — function-level ceiling
+                let mut bits = 0u32;
+                for arg in args {
+                    let kw = match &arg.kind {
+                        SyntaxKind::Keyword(k) => k,
+                        _ => {
+                            return Err(format!(
+                                "{}: restrict: expected keyword, got {}",
+                                arg.span,
+                                arg.kind_label()
+                            ));
+                        }
+                    };
+                    let reg = registry::global_registry().lock().unwrap();
+                    let bit_pos = reg.lookup(kw).ok_or_else(|| {
+                        format!(
+                            "{}: restrict: effect :{} not registered (unknown effect keyword)",
+                            arg.span, kw
+                        )
+                    })?;
+                    bits |= 1 << bit_pos;
+                }
+                self.current_declared_ceiling = Some(Effect {
+                    bits: crate::value::fiber::SignalBits(bits),
+                    propagates: 0,
+                });
+            }
+            SyntaxKind::Symbol(param_name) => {
+                // (restrict param :kw1 :kw2 ...) — parameter-level bound
+                let binding = self.find_current_param_binding(param_name, &args[0].span)?;
+
+                let keywords = &args[1..];
+                let bound = if keywords.is_empty() {
+                    // (restrict param) — bound is inert
+                    Effect::inert()
+                } else {
+                    let mut bits = 0u32;
+                    for kw_syntax in keywords {
+                        let kw = match &kw_syntax.kind {
+                            SyntaxKind::Keyword(k) => k,
+                            _ => {
+                                return Err(format!(
+                                    "{}: restrict: expected keyword after parameter name, got {}",
+                                    kw_syntax.span,
+                                    kw_syntax.kind_label()
+                                ));
+                            }
+                        };
+                        let reg = registry::global_registry().lock().unwrap();
+                        let bit_pos = reg.lookup(kw).ok_or_else(|| {
+                            format!(
+                                "{}: restrict: effect :{} not registered (unknown effect keyword)",
+                                kw_syntax.span, kw
+                            )
+                        })?;
+                        bits |= 1 << bit_pos;
+                    }
+                    Effect {
+                        bits: crate::value::fiber::SignalBits(bits),
+                        propagates: 0,
+                    }
+                };
+
+                // Last wins for duplicate parameter restricts
+                self.current_param_bounds.insert(binding, bound);
+            }
+            _ => {
+                return Err(format!(
+                    "{}: restrict: expected keyword or parameter name, got {}",
+                    args[0].span,
+                    args[0].kind_label()
+                ));
+            }
+        }
+
+        Ok(Hir::inert(HirKind::Nil, span))
+    }
+
+    /// Find a parameter binding by name in the current lambda's params.
+    fn find_current_param_binding(&self, name: &str, span: &Span) -> Result<Binding, String> {
+        for param in &self.current_lambda_params {
+            if self.symbols.name(param.name()) == Some(name) {
+                return Ok(*param);
+            }
+        }
+        Err(format!(
+            "{}: restrict: '{}' is not a parameter of this function",
+            span, name
+        ))
+    }
+
     pub(crate) fn analyze_yield(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() != 2 {
             return Err(format!("{}: yield requires 1 argument", span));

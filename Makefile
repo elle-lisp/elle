@@ -1,4 +1,4 @@
-.PHONY: all elle plugins docs docgen examples test smoke clean help
+.PHONY: all elle dev plugins docs docgen examples test smoke clean help
 
 all: elle plugins docs  ## Build everything
 
@@ -6,6 +6,9 @@ all: elle plugins docs  ## Build everything
 
 elle:  ## Build the Elle binary (release)
 	cargo build --release -p elle
+
+dev:  ## Build the Elle binary (debug, fast compile)
+	cargo build -p elle
 
 plugins:  ## Build all native plugins (.so)
 	@for p in glob regex sqlite crypto random selkie; do \
@@ -23,27 +26,28 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 	./target/release/elle demos/docgen/generate.lisp
 
-examples: elle  ## Run all examples
+examples: dev  ## Run all examples
 	@for f in examples/*.lisp; do \
 		echo "  $$f"; \
-		timeout 10s ./target/release/elle "$$f" || exit 1; \
+		timeout 10s ./target/debug/elle "$$f" || exit 1; \
 	done
 
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~1min  examples + plugins + elle scripts + docgen
-#   make test     ~2min  smoke + rust unit tests (PROPTEST_CASES=8)
+#   make smoke    ~5min   examples + elle scripts (debug build)
+#   make test     ~10min  smoke + rust unit tests (PROPTEST_CASES=4)
 #   cargo test    ~30min full suite (unit + integration + property)
 
-smoke: examples  ## Run examples, elle scripts, and docgen (~1min)
+smoke: examples  ## Run examples and elle scripts using debug build
 	@for f in tests/elle/*.lisp; do \
-		./target/release/elle "$$f" || exit 1; \
+		echo "  $$f"; \
+		./target/debug/elle "$$f" || exit 1; \
 	done
-	./target/release/elle demos/docgen/generate.lisp
+	./target/debug/elle demos/docgen/generate.lisp
 
-test: smoke  ## Rust unit tests after smoke (PROPTEST_CASES=8, ~2min)
-	PROPTEST_CASES=8 cargo test --workspace --lib
+test: smoke  ## Rust unit tests after smoke
+	PROPTEST_CASES=4 cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────
 

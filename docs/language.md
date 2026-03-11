@@ -628,6 +628,47 @@ Inner functions access outer scope:
 
 ---
 
+## Effects and Restrictions
+
+### `effect` — Register User-Defined Effects
+
+Registers a new user-defined effect keyword. See `docs/effects.md` for full details.
+
+```janet
+(effect :heartbeat)    # Register :heartbeat effect
+(effect :rate-limit)   # Register :rate-limit effect
+```
+
+### `restrict` — Declare Effect Bounds
+
+Declares effect bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
+
+```janet
+# Function-level: this function is inert
+(fn (x y)
+  (restrict)
+  (+ x y))
+
+# Function-level: this function may only error
+(fn (x)
+  (restrict :error)
+  (if (< x 0) (error "negative") x))
+
+# Parameter-level: parameter f must be inert
+(fn (f x)
+  (restrict f)
+  (f x))
+
+# Parameter-level: parameter f may only error
+(fn (f x)
+  (restrict f :error)
+  (f x))
+```
+
+See `docs/effects.md` for full semantics and examples.
+
+---
+
 ## Functions and Closures
 
 ### Defining Functions
