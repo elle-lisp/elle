@@ -105,9 +105,16 @@ pub enum HirKind {
         /// The inferred effect of CALLING this lambda.
         /// This may differ from body.effect for higher-order functions:
         /// - body.effect is the raw effect of the body expression
-        /// - inferred_effect may be Polymorphic(i) if the Yields comes solely
+        /// - inferred_effects may be Polymorphic(i) if the Yields comes solely
         ///   from calling parameter i
-        inferred_effect: Effect,
+        /// - When `restrict` bounds are present, bounded parameter calls contribute
+        ///   their bound's bits directly (not polymorphic).
+        inferred_effects: Effect,
+        /// Declared effect bounds for parameters (from `(restrict param :kw ...)`).
+        /// Only parameters with explicit bounds appear here. These bounds feed
+        /// into inferred_effects computation (bounded param's bits are included)
+        /// and into runtime checking (CheckEffectBound instruction).
+        param_bounds: Vec<(Binding, Effect)>,
         /// Optional docstring extracted from the lambda body
         doc: Option<Value>,
         /// Original lambda Syntax node for eval environment reconstruction

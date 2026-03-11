@@ -5,9 +5,45 @@
 //! parameter indices propagate their callee's effects (for higher-order
 //! functions like map/filter/fold).
 
+pub mod registry;
+
 use crate::value::fiber::SignalBits;
-use crate::value::fiber::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_YIELD};
 use std::fmt;
+
+// ---------------------------------------------------------------------------
+// Signal constants — canonical definitions
+// ---------------------------------------------------------------------------
+//
+// These are the semantic signal definitions for the effect system. They live
+// here because the effect/signal registry is the semantic owner; fiber.rs
+// is a runtime data structure that consumes them.
+//
+// Signal bit partitioning:
+//
+//   Bits 0-2:   User-facing signals (error, yield, debug)
+//   Bit  3:     Resume - run a suspended fiber (VM-internal)
+//   Bit  4:     FFI — calls foreign code
+//   Bit  5:     Propagate — propagate caught signal (VM-internal)
+//   Bit  6:     Cancel — inject error into fiber (VM-internal)
+//   Bit  7:     Query — read VM state without fiber swap (VM-internal)
+//   Bit  8:     Halt — graceful VM termination with return value
+//   Bit  9:     IO — I/O request to scheduler
+//   Bit  10:    Terminal — non-resumable signal
+//   Bits 11-15: Reserved for future use
+//   Bits 16-31: User-defined signal types
+
+pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
+pub const SIG_ERROR: SignalBits = SignalBits::new(1 << 0); // exception / panic
+pub const SIG_YIELD: SignalBits = SignalBits::new(1 << 1); // cooperative suspension
+pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
+pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
+pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
+pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
+pub const SIG_CANCEL: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // inject error into fiber (VM-internal)
+pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
+pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
+pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
+pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
 
 /// Effect classification for expressions and functions.
 ///

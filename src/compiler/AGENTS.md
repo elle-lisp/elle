@@ -27,7 +27,7 @@ Bytecode instruction definitions and debug formatting.
    bytecode. Add new instructions at the end.
 
 2. **Effect inference is conservative.** Unknown calls are `IO`. Only proven
-   pure code is `Inert`.
+   inert code is `Inert`.
 
 ## Key types
 

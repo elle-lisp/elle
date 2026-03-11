@@ -648,6 +648,11 @@ impl<'a> FunctionTranslator<'a> {
                     instr
                 )));
             }
+            LirInstr::CheckEffectBound { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "CheckEffectBound".to_string(),
+                ));
+            }
         }
         Ok(false)
     }

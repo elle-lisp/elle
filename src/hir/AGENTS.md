@@ -136,25 +136,32 @@ HIR (bindings are inline — no separate HashMap)
     context and caches the Expander on the VM for reuse.
 
 15. **Docstrings are extracted from leading string literals.**
-      `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
-      extracts the first string literal in a function body and stores it
-      in `doc`. This field is threaded through LIR into `Closure.doc` and
-      used by the `(doc name)` primitive and LSP hover.
+       `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer
+       extracts the first string literal in a function body and stores it
+       in `doc`. This field is threaded through LIR into `Closure.doc` and
+       used by the `(doc name)` primitive and LSP hover.
 
-16. **Set literals are desugared to constructor calls.**
+16. **Effect bounds are declared via `restrict` preambles.**
+        `HirKind::Lambda` has effect-related fields:
+        - `inferred_effects: Effects` (always present) — the minimum guaranteed set of effects the lambda may produce
+        - `param_bounds: Vec<(Binding, Effects)>` (from `(restrict param :kw ...)`) — bounds on parameters
+        The programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)` is a separate concept — the `restrict` form provides a bound that the compiler checks `inferred_effects` against.
+        When a parameter has a bound, it is no longer polymorphic — its effect contribution is the bound's bits.
+
+17. **Set literals are desugared to constructor calls.**
       `SyntaxKind::Set` (immutable set `|1 2 3|`) desugars to `(set ;elems)`.
       `SyntaxKind::SetMut` (mutable set `@|1 2 3|`) desugars to `(mutable-set ;elems)`.
       The `set` and `mutable-set` bindings resolve to global primitives.
       All synthesized nodes carry the original set literal's span.
 
-17. **Original syntax is captured for eval reconstruction.**
-      `HirKind::Lambda` has a `syntax: Option<Rc<Syntax>>` field that stores
-      the original lambda `Syntax` node, captured in `analyze_lambda` from
-      the input `Syntax`. This enables `eval` to reconstruct closures in the
-      environment. The field is threaded through LIR and set on `Closure.syntax`
-      by the emitter.
+18. **Original syntax is captured for eval reconstruction.**
+       `HirKind::Lambda` has a `syntax: Option<Rc<Syntax>>` field that stores
+       the original lambda `Syntax` node, captured in `analyze_lambda` from
+       the input `Syntax`. This enables `eval` to reconstruct closures in the
+       environment. The field is threaded through LIR and set on `Closure.syntax`
+       by the emitter.
 
-18. **Qualified symbols are desugared to nested `get` calls.**
+19. **Qualified symbols are desugared to nested `get` calls.**
       `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to
       `(get (get a :b) :c)`. The first segment is resolved as a variable
       (local or global). Subsequent segments become keyword arguments to

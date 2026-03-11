@@ -136,7 +136,7 @@ count of 10 within phase 4):
 
 2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
    For each match, seed `global_effects` with `Effect::inert()` (optimistic —
-   assume pure) and extract syntactic arity into `global_arities`.
+   assume inert) and extract syntactic arity into `global_arities`.
 
 3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
    `def` bindings as immutable globals for cross-form immutability checking.

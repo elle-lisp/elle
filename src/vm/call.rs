@@ -10,7 +10,7 @@
 use crate::error::LocationMap;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
+use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -209,10 +209,11 @@ impl VM {
                 if let Some(bits) = self.try_jit_call(closure, &args, func) {
                     self.fiber.call_depth -= 1;
                     match bits {
-                        Some(sig) if sig.contains(SIG_YIELD) || sig.contains(SIG_IO) => {
-                            // JIT function yielded or signaled I/O. fiber.signal
-                            // and fiber.suspended are set by the JIT yield helpers.
-                            // Build the interpreter-level caller frame.
+                        Some(sig) if !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) => {
+                            // JIT function suspended — any bits except SIG_ERROR/SIG_HALT
+                            // cause the caller frame to be appended for resumption.
+                            // fiber.signal and fiber.suspended are set by the JIT yield
+                            // helpers. Build the interpreter-level caller frame.
                             if let Some(mut frames) = self.fiber.suspended.take() {
                                 let (_, value) = self.fiber.signal.take().unwrap();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
@@ -263,15 +264,10 @@ impl VM {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 self.fiber.stack.push(value);
                 self.fiber.call_stack.pop();
-            } else if bits.contains(SIG_YIELD) || bits.contains(SIG_IO) {
-                // Yield/IO propagated from a nested call. Two cases:
-                //
-                // 1. yield/IO instruction: suspended frames exist — append
-                //    the caller's frame so resume replays the full call
-                //    stack.
-                //
-                // 2. fiber/signal: no suspended frames — just propagate the
-                //    signal. The fiber saves its own context for resumption.
+            } else if !bits.contains(SIG_ERROR) && !bits.contains(SIG_HALT) {
+                // Suspending signal — any bits except SIG_ERROR/SIG_HALT
+                // cause the caller frame to be appended for resumption.
+                // Propagated from a nested call.
                 if let Some(mut frames) = self.fiber.suspended.take() {
                     let (_, value) = self.fiber.signal.take().unwrap();
 

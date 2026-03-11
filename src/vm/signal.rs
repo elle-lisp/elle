@@ -7,8 +7,8 @@
 
 use crate::value::error_val;
 use crate::value::{
-    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
-    SIG_RESUME, SIG_YIELD,
+    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE,
+    SIG_QUERY, SIG_RESUME,
 };
 use std::rc::Rc;
 
@@ -30,77 +30,88 @@ impl VM {
         ip: &mut usize,
         location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
-        match bits {
-            SIG_OK => {
-                self.fiber.stack.push(value);
-                None
-            }
-            SIG_ERROR => {
-                // Store the error in fiber.signal. The dispatch loop will
-                // see it and return SIG_ERROR.
-                self.fiber.signal = Some((SIG_ERROR, value));
-                self.fiber.stack.push(Value::NIL);
-                None
-            }
-            SIG_RESUME => {
-                // Primitive returned SIG_RESUME — dispatch to fiber handler
-                self.handle_fiber_resume_signal(value, bytecode, constants, closure_env, ip)
-            }
-            SIG_PROPAGATE => {
-                // fiber/propagate: propagate the child fiber's signal
-                self.handle_fiber_propagate_signal(value)
-            }
-            SIG_CANCEL => {
-                // fiber/cancel: inject error into suspended fiber
-                self.handle_fiber_cancel_signal(value, bytecode, constants, closure_env, ip)
-            }
-            SIG_QUERY => {
-                // arena/allocs needs mutable VM access to call the thunk —
-                // handle before dispatch_query (which takes &self).
-                if let Some(cons) = value.as_cons() {
-                    if cons.first.as_keyword_name() == Some("arena/allocs") {
-                        let thunk = cons.rest;
-                        match self.handle_arena_allocs(thunk) {
-                            Ok(val) => {
-                                self.fiber.stack.push(val);
-                                return None;
-                            }
-                            Err(bits) => return Some(bits),
+        // Dispatch uses exact equality for VM-internal signals (which are
+        // produced by specific primitives with known bit patterns) and
+        // contains() for user-facing signals (which can be composed, e.g.
+        // SIG_ERROR | SIG_IO from an I/O primitive that errors).
+
+        if bits.is_ok() {
+            // SIG_OK — normal return, push result
+            self.fiber.stack.push(value);
+            return None;
+        }
+
+        // --- VM-internal signals (exact match — never composed) ---
+
+        if bits == SIG_RESUME {
+            return self.handle_fiber_resume_signal(value, bytecode, constants, closure_env, ip);
+        }
+
+        if bits == SIG_PROPAGATE {
+            return self.handle_fiber_propagate_signal(value);
+        }
+
+        if bits == SIG_CANCEL {
+            return self.handle_fiber_cancel_signal(value, bytecode, constants, closure_env, ip);
+        }
+
+        if bits == SIG_QUERY {
+            // arena/allocs needs mutable VM access to call the thunk —
+            // handle before dispatch_query (which takes &self).
+            if let Some(cons) = value.as_cons() {
+                if cons.first.as_keyword_name() == Some("arena/allocs") {
+                    let thunk = cons.rest;
+                    match self.handle_arena_allocs(thunk) {
+                        Ok(val) => {
+                            self.fiber.stack.push(val);
+                            return None;
                         }
+                        Err(bits) => return Some(bits),
                     }
                 }
-                let (sig, result) = self.dispatch_query(value);
-                if sig == SIG_ERROR {
-                    self.fiber.signal = Some((SIG_ERROR, result));
-                    self.fiber.stack.push(Value::NIL);
-                } else {
-                    self.fiber.stack.push(result);
-                }
-                None
             }
-            _ => {
-                // Any yielding signal (SIG_YIELD, SIG_YIELD|SIG_IO, user-defined suspension).
-                // Save the stack into a SuspendedFrame so call.rs can build the caller
-                // frame chain on the way out. Non-yielding signals don't need a frame.
-                if bits.contains(SIG_YIELD) {
-                    let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    let frame = SuspendedFrame {
-                        bytecode: bytecode.clone(),
-                        constants: constants.clone(),
-                        env: closure_env.clone(),
-                        ip: *ip,
-                        stack: saved_stack,
-                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
-                        location_map: location_map.clone(),
-                    };
-                    self.fiber.signal = Some((bits, value));
-                    self.fiber.suspended = Some(vec![frame]);
-                } else {
-                    self.fiber.signal = Some((bits, value));
-                }
-                Some(bits)
+            let (sig, result) = self.dispatch_query(value);
+            if sig == SIG_ERROR {
+                self.fiber.signal = Some((SIG_ERROR, result));
+                self.fiber.stack.push(Value::NIL);
+            } else {
+                self.fiber.stack.push(result);
             }
+            return None;
         }
+
+        // --- User-facing signals (contains — handles composed bits) ---
+
+        if bits.contains(SIG_ERROR) {
+            // Store the error in fiber.signal. The dispatch loop will
+            // see it and return the full bits (preserving SIG_IO etc.).
+            self.fiber.signal = Some((bits, value));
+            self.fiber.stack.push(Value::NIL);
+            return None;
+        }
+
+        if bits.contains(SIG_HALT) {
+            self.fiber.signal = Some((bits, value));
+            return Some(bits);
+        }
+
+        // Any suspending signal: SIG_YIELD, user-defined (bits 16+),
+        // or any combination. All remaining signals after the checks above
+        // are suspension signals — save the stack into a SuspendedFrame so
+        // call.rs can build the caller frame chain on resume.
+        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+        let frame = SuspendedFrame {
+            bytecode: bytecode.clone(),
+            constants: constants.clone(),
+            env: closure_env.clone(),
+            ip: *ip,
+            stack: saved_stack,
+            active_allocator: crate::value::fiber_heap::save_active_allocator(),
+            location_map: location_map.clone(),
+        };
+        self.fiber.signal = Some((bits, value));
+        self.fiber.suspended = Some(vec![frame]);
+        Some(bits)
     }
 
     /// Handle signal bits returned by a primitive in a TailCall position.
@@ -111,42 +122,66 @@ impl VM {
         bits: SignalBits,
         value: Value,
     ) -> SignalBits {
-        match bits {
-            SIG_OK => {
-                self.fiber.signal = Some((SIG_OK, value));
-                SIG_OK
-            }
-            SIG_ERROR => {
-                self.fiber.signal = Some((SIG_ERROR, value));
-                SIG_ERROR
-            }
-            SIG_RESUME => self.handle_fiber_resume_signal_tail(value),
-            SIG_PROPAGATE => self.handle_fiber_propagate_signal_tail(value),
-            SIG_CANCEL => self.handle_fiber_cancel_signal_tail(value),
-            SIG_QUERY => {
-                // arena/allocs needs mutable VM access to call the thunk —
-                // handle before dispatch_query (which takes &self).
-                if let Some(cons) = value.as_cons() {
-                    if cons.first.as_keyword_name() == Some("arena/allocs") {
-                        let thunk = cons.rest;
-                        match self.handle_arena_allocs(thunk) {
-                            Ok(val) => {
-                                self.fiber.signal = Some((SIG_OK, val));
-                                return SIG_OK;
-                            }
-                            Err(bits) => return bits,
+        // Mirrors handle_primitive_signal but for tail position
+        // (always returns SignalBits, never None). Same dispatch
+        // strategy: exact match for VM-internal, contains() for
+        // user-facing composed signals.
+
+        if bits.is_ok() {
+            self.fiber.signal = Some((SIG_OK, value));
+            return SIG_OK;
+        }
+
+        // --- VM-internal signals (exact match — never composed) ---
+
+        if bits == SIG_RESUME {
+            return self.handle_fiber_resume_signal_tail(value);
+        }
+
+        if bits == SIG_PROPAGATE {
+            return self.handle_fiber_propagate_signal_tail(value);
+        }
+
+        if bits == SIG_CANCEL {
+            return self.handle_fiber_cancel_signal_tail(value);
+        }
+
+        if bits == SIG_QUERY {
+            // arena/allocs needs mutable VM access to call the thunk —
+            // handle before dispatch_query (which takes &self).
+            if let Some(cons) = value.as_cons() {
+                if cons.first.as_keyword_name() == Some("arena/allocs") {
+                    let thunk = cons.rest;
+                    match self.handle_arena_allocs(thunk) {
+                        Ok(val) => {
+                            self.fiber.signal = Some((SIG_OK, val));
+                            return SIG_OK;
                         }
+                        Err(bits) => return bits,
                     }
                 }
-                let (sig, result) = self.dispatch_query(value);
-                self.fiber.signal = Some((sig, result));
-                sig
             }
-            _ => {
-                self.fiber.signal = Some((bits, value));
-                bits
-            }
+            let (sig, result) = self.dispatch_query(value);
+            self.fiber.signal = Some((sig, result));
+            return sig;
         }
+
+        // --- User-facing signals (contains — handles composed bits) ---
+
+        if bits.contains(SIG_ERROR) {
+            self.fiber.signal = Some((bits, value));
+            return bits;
+        }
+
+        if bits.contains(SIG_HALT) {
+            self.fiber.signal = Some((bits, value));
+            return bits;
+        }
+
+        // --- Suspending and unknown signals ---
+
+        self.fiber.signal = Some((bits, value));
+        bits
     }
 }
 
@@ -514,5 +549,246 @@ impl VM {
 
         let net = (after as i64) - (before as i64);
         Ok(Value::cons(result, Value::int(net)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::LocationMap;
+    use crate::value::{SIG_DEBUG, SIG_HALT, SIG_IO, SIG_YIELD};
+
+    /// Create minimal test fixtures for handle_primitive_signal.
+    type TestFixtures = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>, Rc<LocationMap>);
+    fn test_fixtures() -> TestFixtures {
+        (
+            Rc::new(vec![]),
+            Rc::new(vec![]),
+            Rc::new(vec![]),
+            Rc::new(LocationMap::new()),
+        )
+    }
+
+    // -- handle_primitive_signal (Call position) --
+
+    #[test]
+    fn composed_error_io_treated_as_error() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+        let bits = SIG_ERROR | SIG_IO;
+
+        let result = vm.handle_primitive_signal(
+            bits,
+            Value::string("boom"),
+            &bc,
+            &consts,
+            &env,
+            &mut ip,
+            &loc,
+        );
+
+        // SIG_ERROR handler returns None (continue dispatch loop)
+        assert!(
+            result.is_none(),
+            "SIG_ERROR|SIG_IO should return None (error path)"
+        );
+        // Error stored in fiber.signal with full composed bits
+        let (sig, val) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR), "signal should contain SIG_ERROR");
+        assert!(sig.contains(SIG_IO), "signal should preserve SIG_IO bit");
+        // NIL pushed to stack (error convention)
+        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
+        // The value is preserved
+        assert_eq!(val.with_string(|s| s.to_string()), Some("boom".to_string()));
+    }
+
+    #[test]
+    fn composed_yield_io_creates_suspended_frame() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+        let bits = SIG_YIELD | SIG_IO;
+
+        let result =
+            vm.handle_primitive_signal(bits, Value::int(42), &bc, &consts, &env, &mut ip, &loc);
+
+        // Should return Some(bits) to exit dispatch loop
+        assert_eq!(result, Some(SIG_YIELD | SIG_IO));
+        // Should create a suspended frame
+        assert!(
+            vm.fiber.suspended.is_some(),
+            "should create suspended frame"
+        );
+        let frames = vm.fiber.suspended.take().unwrap();
+        assert_eq!(frames.len(), 1);
+        // Signal stored with full composed bits
+        let (sig, val) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_YIELD | SIG_IO);
+        assert_eq!(val, Value::int(42));
+    }
+
+    #[test]
+    fn bare_io_creates_suspended_frame() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result =
+            vm.handle_primitive_signal(SIG_IO, Value::int(99), &bc, &consts, &env, &mut ip, &loc);
+
+        // SIG_IO alone should also create a suspended frame
+        assert_eq!(result, Some(SIG_IO));
+        assert!(
+            vm.fiber.suspended.is_some(),
+            "SIG_IO alone should create suspended frame"
+        );
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_IO);
+    }
+
+    #[test]
+    fn sig_ok_pushes_value() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result =
+            vm.handle_primitive_signal(SIG_OK, Value::int(7), &bc, &consts, &env, &mut ip, &loc);
+
+        assert!(result.is_none());
+        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(7)));
+        assert!(vm.fiber.signal.is_none());
+    }
+
+    #[test]
+    fn bare_error_stores_signal() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result = vm.handle_primitive_signal(
+            SIG_ERROR,
+            Value::string("err"),
+            &bc,
+            &consts,
+            &env,
+            &mut ip,
+            &loc,
+        );
+
+        assert!(result.is_none());
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_ERROR);
+        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
+    }
+
+    #[test]
+    fn halt_returns_immediately() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+
+        let result =
+            vm.handle_primitive_signal(SIG_HALT, Value::int(0), &bc, &consts, &env, &mut ip, &loc);
+
+        assert_eq!(result, Some(SIG_HALT));
+    }
+
+    #[test]
+    fn error_takes_priority_over_yield() {
+        // SIG_ERROR | SIG_YIELD should be handled as error (higher priority)
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+        let bits = SIG_ERROR | SIG_YIELD;
+
+        let result = vm.handle_primitive_signal(
+            bits,
+            Value::string("err"),
+            &bc,
+            &consts,
+            &env,
+            &mut ip,
+            &loc,
+        );
+
+        // Error path returns None
+        assert!(result.is_none());
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR));
+        // NIL pushed (error convention)
+        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
+        // No suspended frame created
+        assert!(vm.fiber.suspended.is_none());
+    }
+
+    #[test]
+    fn unknown_signal_propagates() {
+        let mut vm = VM::new();
+        let (bc, consts, env, loc) = test_fixtures();
+        let mut ip = 0usize;
+        let bits = SIG_DEBUG; // not handled by any specific branch
+
+        let result =
+            vm.handle_primitive_signal(bits, Value::int(1), &bc, &consts, &env, &mut ip, &loc);
+
+        assert_eq!(result, Some(SIG_DEBUG));
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_DEBUG);
+    }
+
+    // -- handle_primitive_signal_tail (TailCall position) --
+
+    #[test]
+    fn tail_composed_error_io_treated_as_error() {
+        let mut vm = VM::new();
+        let bits = SIG_ERROR | SIG_IO;
+
+        let result = vm.handle_primitive_signal_tail(bits, Value::string("boom"));
+
+        // Should return the full composed bits
+        assert!(result.contains(SIG_ERROR));
+        assert!(result.contains(SIG_IO));
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR));
+        assert!(sig.contains(SIG_IO));
+    }
+
+    #[test]
+    fn tail_composed_yield_io_propagates() {
+        let mut vm = VM::new();
+        let bits = SIG_YIELD | SIG_IO;
+
+        let result = vm.handle_primitive_signal_tail(bits, Value::int(42));
+
+        assert_eq!(result, SIG_YIELD | SIG_IO);
+        let (sig, val) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_YIELD | SIG_IO);
+        assert_eq!(val, Value::int(42));
+    }
+
+    #[test]
+    fn tail_sig_ok_stores_ok() {
+        let mut vm = VM::new();
+
+        let result = vm.handle_primitive_signal_tail(SIG_OK, Value::int(5));
+
+        assert_eq!(result, SIG_OK);
+        let (sig, val) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val, Value::int(5));
+    }
+
+    #[test]
+    fn tail_error_priority_over_yield() {
+        let mut vm = VM::new();
+        let bits = SIG_ERROR | SIG_YIELD;
+
+        let result = vm.handle_primitive_signal_tail(bits, Value::string("err"));
+
+        assert!(result.contains(SIG_ERROR));
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR));
     }
 }

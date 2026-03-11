@@ -14,7 +14,7 @@ fn test_stream_read_line_outside_scheduler_errors() {
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
-        err.contains("SIG_IO") || err.contains("outside scheduler"),
+        err.contains("SIG_IO") || err.contains("outside scheduler") || err.contains("yield"),
         "expected SIG_IO error, got: {}",
         err
     );
