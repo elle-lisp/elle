@@ -407,7 +407,7 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     builder.def_var(var(dst.0), resolved);
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.effect.may_suspend() {
+                    if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -420,7 +420,7 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.effect.may_suspend() {
+                    if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -444,7 +444,7 @@ impl<'a> FunctionTranslator<'a> {
                     builder.def_var(var(dst.0), result);
                     // Check for exception after call - if set, bail out to interpreter
                     self.emit_exception_check_after_call(builder)?;
-                    if self.lir.effect.may_suspend() {
+                    if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
                         self.call_site_index += 1;
                         self.emit_yield_check_after_call(builder, idx)?;
@@ -648,9 +648,9 @@ impl<'a> FunctionTranslator<'a> {
                     instr
                 )));
             }
-            LirInstr::CheckEffectBound { .. } => {
+            LirInstr::CheckSignalBound { .. } => {
                 return Err(JitError::UnsupportedInstruction(
-                    "CheckEffectBound".to_string(),
+                    "CheckSignalBound".to_string(),
                 ));
             }
         }

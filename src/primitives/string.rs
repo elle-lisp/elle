@@ -1,6 +1,6 @@
 //! String manipulation primitives
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -585,7 +585,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@string",
         func: prim_buffer,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable string from byte arguments.",
         params: &[],
@@ -596,7 +596,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/upcase",
         func: prim_string_upcase,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Convert string to uppercase.",
         params: &["s"],
@@ -607,7 +607,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/downcase",
         func: prim_string_downcase,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Convert string to lowercase.",
         params: &["s"],
@@ -618,7 +618,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/find",
         func: prim_string_find,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(2, 3),
         doc: "Find the grapheme index of a substring, with optional start offset.",
         params: &["haystack", "needle", "offset"],
@@ -629,7 +629,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/split",
         func: prim_string_split,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Split string by delimiter, returning an array of substrings.",
         params: &["s", "delim"],
@@ -640,7 +640,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/replace",
         func: prim_string_replace,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(3),
         doc: "Replace all occurrences of old substring with new.",
         params: &["s", "old", "new"],
@@ -651,7 +651,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/trim",
         func: prim_string_trim,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Remove leading and trailing whitespace.",
         params: &["s"],
@@ -662,7 +662,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/contains?",
         func: prim_string_contains,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
@@ -673,7 +673,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/starts-with?",
         func: prim_string_starts_with,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string starts with prefix.",
         params: &["s", "prefix"],
@@ -684,7 +684,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/ends-with?",
         func: prim_string_ends_with,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Check if string ends with suffix.",
         params: &["s", "suffix"],
@@ -695,7 +695,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/join",
         func: prim_string_join,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Join list of strings with separator.",
         params: &["lst", "sep"],
@@ -706,7 +706,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "uri-encode",
         func: prim_uri_encode,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Percent-encode a string per RFC 3986.",
         params: &["str"],

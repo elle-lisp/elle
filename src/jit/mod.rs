@@ -1,7 +1,7 @@
 //! JIT compilation for Elle
 //!
 //! This module provides JIT compilation of LIR functions to native code
-//! using Cranelift. Functions with `Effect::inert()` or `Effect::yields()` are
+//! using Cranelift. Functions with `Signal::inert()` or `Signal::yields()` are
 //! JIT candidates. Polymorphic functions remain excluded.
 //!
 //! ## Architecture
@@ -53,9 +53,9 @@ use std::fmt;
 pub enum JitError {
     /// Instruction not supported by JIT
     UnsupportedInstruction(String),
-    /// Function has polymorphic effect
+    /// Function has polymorphic signal
     Polymorphic,
-    /// Function has yielding effect (rejected by batch compilation only)
+    /// Function has yielding signal (rejected by batch compilation only)
     Yielding,
     /// Cranelift compilation failed
     CompilationFailed(String),
@@ -69,7 +69,7 @@ impl fmt::Display for JitError {
             JitError::UnsupportedInstruction(name) => {
                 write!(f, "JIT: unsupported instruction: {}", name)
             }
-            JitError::Polymorphic => write!(f, "JIT: function has polymorphic effect"),
+            JitError::Polymorphic => write!(f, "JIT: function has polymorphic signal"),
             JitError::Yielding => write!(f, "JIT: yielding functions cannot be batch-compiled"),
             JitError::CompilationFailed(msg) => write!(f, "JIT compilation failed: {}", msg),
             JitError::InvalidLir(msg) => write!(f, "JIT: invalid LIR: {}", msg),

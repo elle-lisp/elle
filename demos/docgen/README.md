@@ -154,7 +154,7 @@ The stdlib reference is **auto-generated** from the Elle runtime. To update it:
 
 The generator calls:
 - `(vm/list-primitives)` — Get all primitive names
-- `(vm/primitive-meta name)` — Get metadata (arity, effect, docstring) for each primitive
+- `(vm/primitive-meta name)` — Get metadata (arity, signal, docstring) for each primitive
 
 ## Important Notes
 

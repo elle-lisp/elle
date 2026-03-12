@@ -179,7 +179,7 @@ mod tests {
         env: Vec<Value>,
         yield_points: Vec<YieldPointMeta>,
     ) -> (crate::vm::VM, Value) {
-        use crate::effects::Effect;
+        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
         use std::collections::HashMap;
@@ -196,7 +196,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants,
-            effect: Effect::yields(),
+            signal: Signal::yields(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),

@@ -12,7 +12,7 @@ Design documents, language references, and contributor guides for Elle.
 | `types.md` | Type system: mutable/immutable split, all types, predicates, display format, equality | Root AGENTS.md |
 | `semantics.md` | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring | Root AGENTS.md |
 | `macros.md` | Macro system: current state, architecture, hygiene, scope sets | Root AGENTS.md |
-| `except.md` | Exception handling: error structs, try/catch, error propagation | Root AGENTS.md |
+| `signals.md` | Signal system design: fiber signals, error signalling, user-defined signals, JIT integration | Root AGENTS.md |
 | `modules.md` | Module system: closure-as-module, parametric imports, qualified symbols, trade-offs | Root AGENTS.md |
 
 ### Contributor Guides
@@ -22,14 +22,14 @@ Design documents, language references, and contributor guides for Elle.
 | `cookbook.md` | Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros | Root AGENTS.md |
 | `testing.md` | Testing strategy: decision tree, test categories, property tests, CI structure, running tests | Root AGENTS.md |
 | `pipeline.md` | Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching | Root AGENTS.md |
-| `debugging.md` | Debugging toolkit: introspection primitives, time API, effect system, memory profiling | Root AGENTS.md |
+| `debugging.md` | Debugging toolkit: introspection primitives, time API, signal system, memory profiling | Root AGENTS.md |
 | `oddities.md` | Intentional design choices that look wrong: nil vs empty list, comment/splice syntax, mutation, collection literals | Root AGENTS.md |
 
 ### Design Documents
 
 | File | Description | Referenced from |
 |------|-------------|-----------------|
-| `effects.md` | Effect system design: motivation, signal protocol, effect inference, JIT integration | Root AGENTS.md |
+| `signals.md` | Signal system design: motivation, signal protocol, error signalling, signal inference, JIT integration | Root AGENTS.md |
 | `fibers.md` | Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains | Root AGENTS.md |
 | `ffi.md` | FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling | Root AGENTS.md |
 
@@ -72,7 +72,7 @@ These documents are authoritative and should be kept in sync with implementation
 - `language.md` — language reference
 - `types.md` — type system
 - `semantics.md` — semantic definitions
-- `effects.md` — effect system design
+- `signals.md` — signal system design
 - `fibers.md` — fiber architecture
 - `ffi.md` — FFI design
 - `pipeline.md` — compilation pipeline
@@ -90,11 +90,11 @@ Root AGENTS.md references these docs:
 - `pipeline.md` — compilation pipeline architecture
 - `language.md` — language reference
 - `types.md` — type system
-- `effects.md` — effect system
+- `signals.md` — signal system and signal inference
 - `fibers.md` — fiber concurrency
 - `macros.md` — macro system
 - `ffi.md` — foreign function interface
-- `except.md` — exception handling
+- `signals.md` — signal system and error signalling
 - `semantics.md` — semantic details
 - `testing.md` — testing strategy
 - `debugging.md` — debugging tools
@@ -105,7 +105,7 @@ Root AGENTS.md references these docs:
 `cookbook.md` references:
 - `language.md` — for syntax examples
 - `types.md` — for type system details
-- `effects.md` — for effect annotations
+- `signals.md` — for signal annotations
 - `testing.md` — for test organization
 
 ## Files
@@ -118,13 +118,12 @@ Root AGENTS.md references these docs:
 | `types.md` | 444 | Type system definition |
 | `semantics.md` | 154 | Authoritative semantics |
 | `macros.md` | 334 | Macro system design |
-| `except.md` | 196 | Exception handling |
+| `signals.md` | ~1200 | Signal system design and error signalling |
 | `cookbook.md` | 647 | Recipes for common changes |
 | `testing.md` | 472 | Testing strategy |
 | `pipeline.md` | 256 | Compilation pipeline |
 | `debugging.md` | 220 | Debugging toolkit |
 | `oddities.md` | 280 | Intentional design oddities |
-| `effects.md` | 761 | Effect system design |
 | `fibers.md` | 312 | Fiber architecture |
 | `ffi.md` | 455 | FFI design |
 | `modules.md` | ~240 | Module system design |

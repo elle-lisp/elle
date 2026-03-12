@@ -4,11 +4,11 @@
 //! IoRequest and return (SIG_YIELD | SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
 
-use crate::effects::Effect;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -195,7 +195,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/read-line",
         func: prim_stream_read_line,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Read one line from port. Returns string or nil (EOF).",
         params: &["port"],
@@ -206,7 +206,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/read",
         func: prim_stream_read,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
@@ -217,7 +217,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/read-all",
         func: prim_stream_read_all,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
@@ -228,7 +228,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/write",
         func: prim_stream_write,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Write data to port. Returns bytes written.",
         params: &["port", "data"],
@@ -239,7 +239,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "stream/flush",
         func: prim_stream_flush,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],

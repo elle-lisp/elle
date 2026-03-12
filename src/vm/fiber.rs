@@ -79,7 +79,7 @@ impl VM {
         //     (a) Parent already has shared_alloc → propagate down the chain.
         //     (b) Root fiber parent (saved_heap is null) → child creates its own.
         //     (c) Non-root parent, no existing shared_alloc → create on parent's heap.
-        if self.fiber.closure.effect().may_yield() || self.fiber.closure.effect().may_io() {
+        if self.fiber.closure.signal().may_yield() || self.fiber.closure.signal().may_io() {
             let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
                 // Case (a): parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()

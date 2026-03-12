@@ -1,13 +1,13 @@
 # hir/analyze
 
-Syntax to HIR analysis: binding resolution, capture computation, effect inference, and linting.
+Syntax to HIR analysis: binding resolution, capture computation, signal inference, and linting.
 
 ## Responsibility
 
 Transform expanded Syntax trees into HIR by:
 1. Resolving all variable references to `Binding` (NaN-boxed heap objects)
 2. Computing closure captures and lbox requirements
-3. Inferring effects (including interprocedural effect tracking)
+3. Inferring signals (including interprocedural signal tracking)
 4. Validating scope rules and control flow
 5. Extracting docstrings from function bodies
 
@@ -25,9 +25,9 @@ Does NOT:
 | `BindingScope` | `Parameter`, `Local`, or `Global` |
 | `CaptureInfo` | What a closure captures and how (`Local`, `Capture`, or `Global`) |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
-| `EffectSources` | Tracks Yields sources within a lambda body for polymorphic inference |
-| `current_param_bounds` | Maps `Binding` → `Effects` for parameters with declared bounds (during lambda analysis) |
-| `param_bounds_env` | Maps `Binding` → `Vec<(usize, Effects)>` for call-site checking of bounded parameters |
+| `SignalSources` | Tracks Yields sources within a lambda body for polymorphic inference |
+| `current_param_bounds` | Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis) |
+| `param_bounds_env` | Maps `Binding` → `Vec<(usize, Signal)>` for call-site checking of bounded parameters |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
 
@@ -41,7 +41,7 @@ Analyzer
     ├─► resolve variables → Binding (heap-allocated, shared by reference)
     ├─► track mutations → binding.mark_mutated()
     ├─► track captures → binding.mark_captured() + CaptureInfo
-    ├─► infer effects → Effect (Inert, Yields, Polymorphic)
+    ├─► infer signals → Signal (Inert, Yields, Polymorphic)
     ├─► validate scope rules (hygienic resolution)
     ├─► validate control flow (break targeting)
     └─► extract docstrings → Option<Value>
@@ -50,16 +50,16 @@ Analyzer
 HIR (bindings are inline — no separate HashMap)
 ```
 
-## Interprocedural effect tracking
+## Interprocedural signal tracking
 
-The analyzer tracks effects across function boundaries:
+The analyzer tracks signals across function boundaries:
 
-1. **Effect environment**: Maps `Binding` → `Effect` for locally-defined functions
-2. **Global effects**: Maps `SymbolId` → `Effect` for top-level defines (from previous forms)
-3. **Primitive effects**: Maps `SymbolId` → `Effect` for built-in functions
-4. **Call analysis**: When analyzing a call, looks up the callee's effect and propagates it
-5. **Polymorphic effects**: For higher-order functions like `map`, examines the argument's effect
-6. **Mutation invalidation**: `set!` clears the effect tracking for the mutated binding
+1. **Signal environment**: Maps `Binding` → `Signal` for locally-defined functions
+2. **Global signals**: Maps `SymbolId` → `Signal` for top-level defines (from previous forms)
+3. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions
+4. **Call analysis**: When analyzing a call, looks up the callee's signal and propagates it
+5. **Polymorphic signals**: For higher-order functions like `map`, examines the argument's signal
+6. **Mutation invalidation**: `set!` clears the signal tracking for the mutated binding
 
 ## Scope-aware binding resolution
 
@@ -82,9 +82,9 @@ This prevents accidental capture in macros while allowing intentional capture vi
 | `binding.rs` | ~530 | Binding forms: `let`, `letrec`, `def`/`var`, `set!` |
 | `fileletrec.rs` | ~360 | File-scope letrec compilation for top-level forms |
 | `destructure.rs` | ~415 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
-| `lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects, docstrings |
+| `lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals, docstrings |
 | `special.rs` | ~345 | Special forms: `match`, `yield`, pattern matching |
-| `call.rs` | ~200 | Call analysis and effect tracking |
+| `call.rs` | ~200 | Call analysis and signal tracking |
 
 ## Invariants
 
@@ -94,7 +94,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
 
-4. **Effects combine upward.** A `begin` has the combined effect of its children. A `fn` body's effect is stored but the fn itself is Inert.
+4. **Signals combine upward.** A `begin` has the combined signal of its children. A `fn` body's signal is stored but the fn itself is Inert.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its own `Vec<CaptureInfo>` listing what it captures and how.
 
@@ -114,11 +114,11 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block` has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`. The analyzer validates: break outside block → error, unknown block name → error, break across function boundary → error. The lowerer compiles break to `Move` + `Jump` — no new bytecode instructions needed. `while` wraps its `While` node in an implicit `Block` named `"while"`, so `(break :while val)` or unnamed `(break)` can exit a while loop.
 
-14. **`Eval` compiles and executes a datum at runtime.** `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the analyzer for `(eval expr)` or `(eval expr env)`. The effect is always `Yields` (conservative — eval'd code can do anything). Not in tail position. The VM handler accesses the symbol table via thread-local context and caches the Expander on the VM for reuse.
+14. **`Eval` compiles and executes a datum at runtime.** `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the     analyzer for `(eval expr)` or `(eval expr env)`. The signal is always `Yields` (conservative — eval'd code can do anything). Not in tail position. The VM handler accesses the symbol table via thread-local context and caches the Expander on the VM for reuse.
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
 
-16. **Effect bounds are parsed from `restrict` preambles.** After docstring extraction and before body analysis, the analyzer scans for `restrict` forms in the lambda body preamble. `(restrict)` declares the function is inert. `(restrict :kw ...)` declares the function may emit only these signals. `(restrict param)` declares the parameter must be inert. `(restrict param :kw ...)` declares the parameter may emit at most these signals. Multiple `restrict` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-restrict form ends the preamble.
+16. **Signal bounds are parsed from `silence` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` forms in the lambda body preamble. `(silence)` declares the function is inert. `(silence :kw ...)` declares the function may emit only these signals. `(silence param)` declares the parameter must be inert. `(silence param :kw ...)` declares the parameter may emit at most these signals. Multiple `silence` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-silence form ends the preamble.
 
 17. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
 
@@ -128,8 +128,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 - **Adding a new special form**: Add a case in `forms.rs::analyze_expr`, implement `analyze_your_form` method
 - **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
-- **Changing effect inference**: Update `call.rs` and `lambda.rs`
-- **Changing effect bounds**: Update `lambda.rs::parse_restrict_preamble()` and `call.rs` for call-site checking
+- **Changing signal inference**: Update `call.rs` and `lambda.rs`
+- **Changing signal bounds**: Update `lambda.rs::parse_silence_preamble()` and `call.rs` for call-site checking
 - **Changing pattern matching**: Update `special.rs` and `destructure.rs`
 - **Changing scope resolution**: Update `mod.rs::lookup()` and `bind()`
 
@@ -138,7 +138,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Forgetting to mark captures**: If a binding is referenced in a nested lambda, call `binding.mark_captured()` during analysis
 - **Forgetting to mark mutations**: If a binding is assigned via `set!`, call `binding.mark_mutated()`
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
-- **Not propagating effects**: When combining sub-expressions, use `effect.combine()` to merge effects upward
+- **Not propagating signals**: When combining sub-expressions, use `signal.combine()` to merge signals upward
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node
-- **Forgetting to include bounded parameter bits in inferred_effects**: When a parameter has a `restrict` bound, its bits must be included in the lambda's `inferred_effects`, not tracked as polymorphic
-- **Not checking effect bounds at call sites**: When a concrete function is passed to a parameter with a bound, the analyzer must check the argument's effect against the bound
+- **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `silence` bound, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic
+- **Not checking signal bounds at call sites**: When a concrete function is passed to a parameter with a bound, the analyzer must check the argument's signal against the bound

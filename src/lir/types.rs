@@ -1,6 +1,6 @@
 //! LIR type definitions
 
-use crate::effects::Effect;
+use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
 
@@ -52,8 +52,8 @@ pub struct LirFunction {
     /// Variables without the bit set are stored directly without cell wrapping,
     /// avoiding heap allocation on every function call.
     pub lbox_locals_mask: u64,
-    /// Effect of this function (Pure, Yields, or Polymorphic)
-    pub effect: Effect,
+    /// Signal of this function (Pure, Yields, or Polymorphic)
+    pub signal: Signal,
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
     /// Original lambda Syntax node for eval environment reconstruction
@@ -69,7 +69,7 @@ pub struct LirFunction {
     /// Empty for non-yielding functions.
     pub yield_points: Vec<YieldPointInfo>,
     /// Call site metadata, populated during bytecode emission.
-    /// Only populated for functions where `effect.may_suspend()`.
+    /// Only populated for functions where `signal.may_suspend()`.
     /// Indexed by call instruction order (0, 1, 2, ...).
     pub call_sites: Vec<CallSiteInfo>,
 }
@@ -98,7 +98,7 @@ pub struct YieldPointInfo {
 /// The JIT reads this to know the bytecode IP at each call instruction,
 /// which is needed to build SuspendedFrames for yield-through-call.
 ///
-/// Only populated for functions where `effect.may_suspend()`.
+/// Only populated for functions where `signal.may_suspend()`.
 #[derive(Debug, Clone)]
 pub struct CallSiteInfo {
     /// Bytecode IP after the Call instruction and its operands.
@@ -131,7 +131,7 @@ impl LirFunction {
             num_captures: 0,
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
-            effect: Effect::inert(),
+            signal: Signal::inert(),
             doc: None,
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
@@ -333,12 +333,12 @@ pub enum LirInstr {
     /// No registers produced or consumed.
     PopParamFrame,
 
-    // === Effect Checking ===
-    /// Check that a closure's effect satisfies a bound.
-    /// If the value in `src` is a closure whose `effect.bits & !allowed_bits != 0`,
+    // === Signal Checking ===
+    /// Check that a closure's signal satisfies a bound.
+    /// If the value in `src` is a closure whose `signal.bits & !allowed_bits != 0`,
     /// signal `:error`. If the value is not a closure, signal `:error`.
     /// If the check passes, execution continues.
-    CheckEffectBound { src: Reg, allowed_bits: u32 },
+    CheckSignalBound { src: Reg, allowed_bits: u32 },
 }
 
 /// Binary operations

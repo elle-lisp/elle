@@ -93,7 +93,7 @@ preserving the current expansion context (macro registry, scope state). Nested
 macro calls work because the same Expander is threaded through.
 
 **Primitive metadata divergence**: `compile`/`compile_file` call
-`register_primitives()` which returns effect and arity metadata as a side
+`register_primitives()` which returns signal and arity metadata as a side
 effect of registration. `eval`/`analyze` and friends call `build_primitive_meta()`
 instead, which builds the same metadata without registering anything (the
 caller's VM already has primitives registered). This is why `compile` can work
@@ -116,13 +116,13 @@ is intentional — Expanders are not cached or reused across top-level calls.
 ## The fixpoint loop
 
 Used by `compile_file`, `eval_all` (via `compile_file`), and `analyze_file` to
-correctly infer effects for mutually recursive top-level definitions.
+correctly infer signals for mutually recursive top-level definitions.
 
 ### Problem
 
 When compiling `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (f x)))`,
 the analyzer sees `f` before `g` exists. Without pre-scanning, `g` would be
-treated as an unknown global with `Polymorphic` effect, making `f` also
+treated as an unknown global with `Polymorphic` signal, making `f` also
 `Polymorphic` — even if both are actually `Inert`.
 
 ### Algorithm (in `src/pipeline/fixpoint.rs`)
@@ -135,8 +135,8 @@ count of 10 within phase 4):
    `run_fixpoint`.)
 
 2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
-   For each match, seed `global_effects` with `Effect::inert()` (optimistic —
-   assume inert) and extract syntactic arity into `global_arities`.
+    For each match, seed `global_signals` with `Signal::inert()` (optimistic —
+    assume inert) and extract syntactic arity into `global_arities`.
 
 3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
    `def` bindings as immutable globals for cross-form immutability checking.
@@ -144,14 +144,14 @@ count of 10 within phase 4):
 4. **Fixpoint iteration** (in `run_fixpoint()`, max 10 iterations):
    - Clear `analysis_results`
    - For each form, create a fresh `Analyzer` seeded with:
-     - `global_effects` from previous iteration (or pre-scan)
+     - `global_signals` from previous iteration (or pre-scan)
      - `global_arities` from pre-scan + previous forms
      - `immutable_globals` from pre-scan + previous forms
-   - Analyze the form, collect actual inferred effects via
-     `analyzer.take_defined_global_effects()`
-   - After all forms: compare `new_global_effects` with `global_effects`
+   - Analyze the form, collect actual inferred signals via
+     `analyzer.take_defined_global_signals()`
+   - After all forms: compare `new_global_signals` with `global_signals`
    - If equal → converged, break
-   - If different → update `global_effects`, re-analyze all forms
+   - If different → update `global_signals`, re-analyze all forms
 
 5. **Post-analysis callback** (parameterized by `post_analyze` closure):
    - `compile_file` passes `|a| mark_tail_calls(&mut a.hir)` to mark tail calls
@@ -161,9 +161,9 @@ count of 10 within phase 4):
 
 ### Convergence
 
-The algorithm converges because effects form a lattice: `Inert` < `Yields` <
-`Polymorphic`. Each iteration can only move effects upward (from the optimistic
-`Inert` seed toward the true effect). Once no effect changes, the fixpoint is
+The algorithm converges because signals form a lattice: `Inert` < `Yields` <
+`Polymorphic`. Each iteration can only move signals upward (from the optimistic
+`Inert` seed toward the true signal). Once no signal changes, the fixpoint is
 reached. The max of 10 iterations is a safety bound — in practice, convergence
 happens in 1–3 iterations.
 
@@ -182,12 +182,12 @@ duplicated logic and makes the algorithm easier to maintain.
 pub(super) fn prescan_forms(
     forms: &[Syntax],
     symbols: &mut SymbolTable,
-) -> (HashMap<SymbolId, Effect>, HashMap<SymbolId, Arity>, HashSet<SymbolId>)
+) -> (HashMap<SymbolId, Signal>, HashMap<SymbolId, Arity>, HashSet<SymbolId>)
 ```
 
 Unified pre-scan that processes all forms in a single pass, calling both
 `scan_define_lambda` and `scan_const_binding` for each form. Returns:
-- `global_effects`: `(def name (fn ...))` patterns seeded with `Effect::inert()`
+- `global_signals`: `(def name (fn ...))` patterns seeded with `Signal::inert()`
 - `global_arities`: syntactic arities from lambda parameter lists
 - `immutable_globals`: all `(def name ...)` patterns
 
@@ -203,7 +203,7 @@ pub(super) fn scan_define_lambda(
 Matches expanded syntax of the form `(var/def name (fn ...))`. Returns the
 interned `SymbolId` and the syntactic arity (number of parameters, if the
 parameter list is a simple list). Used to seed the fixpoint loop with
-optimistic `Effect::inert()` and known arities before analysis begins.
+optimistic `Signal::inert()` and known arities before analysis begins.
 
 This operates on **expanded** syntax — `defn` has already been desugared to
 `(def name (fn ...))` by the Expander.
@@ -227,7 +227,7 @@ Every compilation path follows the same five phases:
 
 1. **Read**: `read_syntax(source, source_name)` → `Syntax`
 2. **Expand**: `expander.expand(syntax, symbols, vm)` → expanded `Syntax`
-3. **Analyze**: `Analyzer::new_with_primitives(symbols, effects, arities)` →
+3. **Analyze**: `Analyzer::new_with_primitives(symbols, signals, arities)` →
    `analyzer.analyze(&expanded)` → `AnalysisResult { hir, .. }`
 4. **Tail call marking**: `mark_tail_calls(&mut analysis.hir)` (mutates HIR in place)
 5. **Lower + Emit**: `Lowerer::new().with_intrinsics(intrinsics).lower(&hir)` →
@@ -263,7 +263,7 @@ have their own VM.
 ## Known issues
 
 `CompileResult.warnings` is always empty (dead field). Single-form functions
-(`compile`, `eval`, `analyze`) don't benefit from cross-form effect inference —
+(`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
 a file compiled via `compile` instead of `compile_file` will treat all global
 calls as `Polymorphic`. The REPL uses `compile` (single-form), so REPL-defined
-functions don't get cross-form effect inference.
+functions don't get cross-form signal inference.

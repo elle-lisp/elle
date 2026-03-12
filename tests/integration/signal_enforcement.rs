@@ -1,23 +1,23 @@
-// Integration tests for interprocedural effect tracking and enforcement
+// Integration tests for interprocedural signal tracking and enforcement
 //
-// These tests verify that effects propagate correctly across function boundaries:
-// - Direct yield has Yields effect
-// - Calling a yielding function propagates Yields effect
-// - Polymorphic effects (like map) resolve based on argument effects
+// These tests verify that signals propagate correctly across function boundaries:
+// - Direct yield has Yields signal
+// - Calling a yielding function propagates Yields signal
+// - Polymorphic signals (like map) resolve based on argument signals
 // - Inert functions remain inert
-// - assign invalidates effect tracking
+// - assign invalidates signal tracking
 
-use elle::effects::Effect;
 use elle::hir::HirKind;
 use elle::pipeline::{analyze, analyze_file};
 use elle::primitives::register_primitives;
+use elle::signals::Signal;
 use elle::symbol::SymbolTable;
 use elle::vm::VM;
 
 fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     (symbols, vm)
 }
 
@@ -26,26 +26,26 @@ fn setup() -> (SymbolTable, VM) {
 // ============================================================================
 
 #[test]
-fn test_effect_direct_yield() {
-    // (fn () (yield 1)) should have Pure effect on the lambda creation
-    // but the body should have Yields effect
+fn test_signal_direct_yield() {
+    // (fn () (yield 1)) should have Pure signal on the lambda creation
+    // but the body should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn () (yield 1))", &mut symbols, &mut vm, "<test>").unwrap();
 
     // Lambda creation is pure
-    assert_eq!(result.hir.effect, Effect::inert());
+    assert_eq!(result.hir.signal, Signal::inert());
 
     // But the body should be Yields
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::yields());
+        assert_eq!(body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }
 }
 
 #[test]
-fn test_effect_yield_in_begin() {
-    // (begin (yield 1) (yield 2)) should have Yields effect
+fn test_signal_yield_in_begin() {
+    // (begin (yield 1) (yield 2)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (yield 1) (yield 2))",
@@ -54,15 +54,15 @@ fn test_effect_yield_in_begin() {
         "<test>",
     )
     .unwrap();
-    assert_eq!(result.hir.effect, Effect::yields());
+    assert_eq!(result.hir.signal, Signal::yields());
 }
 
 #[test]
-fn test_effect_yield_in_if() {
-    // (if true (yield 1) 2) should have Yields effect
+fn test_signal_yield_in_if() {
+    // (if true (yield 1) 2) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("(if true (yield 1) 2)", &mut symbols, &mut vm, "<test>").unwrap();
-    assert_eq!(result.hir.effect, Effect::yields());
+    assert_eq!(result.hir.signal, Signal::yields());
 }
 
 // ============================================================================
@@ -70,9 +70,9 @@ fn test_effect_yield_in_if() {
 // ============================================================================
 
 #[test]
-fn test_effect_call_propagation() {
+fn test_signal_call_propagation() {
     // (def gen (fn () (yield 1)))
-    // (gen) should have Yields effect
+    // (gen) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def gen (fn () (yield 1))) (gen))",
@@ -82,14 +82,14 @@ fn test_effect_call_propagation() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Calling a yielding function should propagate Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Calling a yielding function should propagate Yields signal"
     );
 }
 
 #[test]
-fn test_effect_nested_propagation() {
+fn test_signal_nested_propagation() {
     // (def gen (fn () (yield 1)))
     // (def wrapper (fn () (gen)))
     // (wrapper) should be Yields
@@ -102,14 +102,14 @@ fn test_effect_nested_propagation() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Nested call to yielding function should propagate Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Nested call to yielding function should propagate Yields signal"
     );
 }
 
 #[test]
-fn test_effect_pure_call() {
+fn test_signal_pure_call() {
     // (def f (fn (x) (+ x 1)))
     // (f 42) should be Pure
     let (mut symbols, mut vm) = setup();
@@ -121,15 +121,15 @@ fn test_effect_pure_call() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Calling a pure function should remain Pure"
     );
 }
 
 #[test]
-fn test_effect_let_bound_lambda() {
-    // (let ((gen (fn () (yield 1)))) (gen)) should have Yields effect
+fn test_signal_let_bound_lambda() {
+    // (let ((gen (fn () (yield 1)))) (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(let ((gen (fn () (yield 1)))) (gen))",
@@ -139,15 +139,15 @@ fn test_effect_let_bound_lambda() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Calling a let-bound yielding lambda should propagate Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Calling a let-bound yielding lambda should propagate Yields signal"
     );
 }
 
 #[test]
-fn test_effect_letrec_bound_lambda() {
-    // (letrec ((gen (fn () (yield 1)))) (gen)) should have Yields effect
+fn test_signal_letrec_bound_lambda() {
+    // (letrec ((gen (fn () (yield 1)))) (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(letrec ((gen (fn () (yield 1)))) (gen) 42)",
@@ -157,9 +157,9 @@ fn test_effect_letrec_bound_lambda() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Calling a letrec-bound yielding lambda should propagate Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Calling a letrec-bound yielding lambda should propagate Yields signal"
     );
 }
 
@@ -168,49 +168,49 @@ fn test_effect_letrec_bound_lambda() {
 // ============================================================================
 
 // Note: map, filter, fold are defined as Lisp functions in init_stdlib,
-// not as primitives. For polymorphic effect resolution to work with them,
+// not as primitives. For polymorphic signal resolution to work with them,
 // they would need to be defined in the same compilation unit or tracked
 // across compilation units. These tests verify the behavior with locally
 // defined higher-order functions.
 
 #[test]
-fn test_effect_polymorphic_local_higher_order() {
+fn test_signal_polymorphic_local_higher_order() {
     // Define a local higher-order function and verify polymorphic resolution
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def my-map (fn (f lst)                (if (empty? lst)                    ()                    (cons (f (first lst)) (my-map f (rest lst))))))            (def gen (fn (x) (yield x)))            (my-map gen (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // my-map calls gen which yields, so my-map's body has Yields effect
-    // When we call (my-map gen ...), we look up my-map's effect
-    // Since my-map is defined with a lambda, we track its body effect
+    // my-map calls gen which yields, so my-map's body has Yields signal
+    // When we call (my-map gen ...), we look up my-map's signal
+    // Since my-map is defined with a lambda, we track its body signal
     // The body calls f which is a parameter - we can't resolve that statically
     // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Local higher-order function with unknown parameter effect is conservatively Yields"
+        result.hir.signal,
+        Signal::yields(),
+        "Local higher-order function with unknown parameter signal is conservatively Yields"
     );
 }
 
 #[test]
-fn test_effect_polymorphic_direct_call() {
-    // Direct call with yielding lambda should propagate effect
+fn test_signal_polymorphic_direct_call() {
+    // Direct call with yielding lambda should propagate signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))            (apply-fn (fn (x) (yield x)) 42))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     // apply-fn's body calls f which is a parameter
-    // We can't statically resolve the parameter's effect
+    // We can't statically resolve the parameter's signal
     // So this is Yields (sound: unknown callee may yield)
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Higher-order function with parameter call is conservatively Yields"
     );
 }
 
 #[test]
-fn test_effect_polymorphic_with_pure_arg() {
+fn test_signal_polymorphic_with_pure_arg() {
     // Calling a global function (map) with pure lambda
-    // Since map isn't in primitive_effects (it's defined in stdlib),
+    // Since map isn't in primitive_signals (it's defined in stdlib),
     // the call is conservatively Yields (sound: unknown global may yield)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
@@ -221,15 +221,15 @@ fn test_effect_polymorphic_with_pure_arg() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Call to unknown global is Yields (sound default)"
     );
 }
 
 #[test]
-fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
-    // Calling a global function (map) that isn't in primitive_effects
+fn test_signal_polymorphic_with_yielding_arg_unknown_global() {
+    // Calling a global function (map) that isn't in primitive_signals
     // Unknown globals default to Yields for soundness
     let (mut symbols, mut vm) = setup();
     let result = analyze(
@@ -239,11 +239,11 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
         "<test>",
     )
     .unwrap();
-    // map is not in primitive_effects (it's defined in stdlib, not as a primitive)
+    // map is not in primitive_signals (it's defined in stdlib, not as a primitive)
     // Unknown globals are Yields for soundness
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Call to unknown global is Yields (sound default)"
     );
 }
@@ -253,10 +253,10 @@ fn test_effect_polymorphic_with_yielding_arg_unknown_global() {
 // ============================================================================
 
 #[test]
-fn test_effect_set_invalidation() {
+fn test_signal_set_invalidation() {
     // (var f (fn () 42))
     // (assign f (fn () (yield 1)))
-    // After assign, effect tracking for f is invalidated
+    // After assign, signal tracking for f is invalidated
     // Calling f should be Yields (sound: we can't prove it's pure)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
@@ -266,12 +266,12 @@ fn test_effect_set_invalidation() {
         "<test>",
     )
     .unwrap();
-    // After assign, we conservatively treat the effect as Yields
+    // After assign, we conservatively treat the signal as Yields
     // This is sound: we can't prove the new value is pure
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "After assign, effect should be Yields (sound default)"
+        result.hir.signal,
+        Signal::yields(),
+        "After assign, signal should be Yields (sound default)"
     );
 }
 
@@ -280,25 +280,25 @@ fn test_effect_set_invalidation() {
 // ============================================================================
 
 #[test]
-fn test_effect_direct_lambda_call_yields() {
-    // ((fn () (yield 1))) should have Yields effect
+fn test_signal_direct_lambda_call_yields() {
+    // ((fn () (yield 1))) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze("((fn () (yield 1)))", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Direct call to yielding lambda should have Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Direct call to yielding lambda should have Yields signal"
     );
 }
 
 #[test]
-fn test_effect_direct_lambda_call_pure() {
+fn test_signal_direct_lambda_call_pure() {
     // ((fn () 42)) should be Pure
     let (mut symbols, mut vm) = setup();
     let result = analyze("((fn () 42))", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Direct call to pure lambda should be Pure"
     );
 }
@@ -308,12 +308,12 @@ fn test_effect_direct_lambda_call_pure() {
 // ============================================================================
 
 #[test]
-fn test_effect_multiple_calls_mixed() {
+fn test_signal_multiple_calls_mixed() {
     // (begin (def pure-fn (fn () 42))
     //        (def yield-fn (fn () (yield 1)))
     //        (pure-fn)
     //        (yield-fn))
-    // Should have Yields effect because yield-fn is called
+    // Should have Yields signal because yield-fn is called
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (var f (fn () 42)) (assign f (fn () (yield 1))) (f))",
@@ -323,16 +323,16 @@ fn test_effect_multiple_calls_mixed() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Sequence with yielding call should have Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Sequence with yielding call should have Yields signal"
     );
 }
 
 #[test]
-fn test_effect_conditional_yield() {
+fn test_signal_conditional_yield() {
     // (def maybe-yield (fn (x) (if x (yield 1) 2)))
-    // (maybe-yield true) should have Yields effect
+    // (maybe-yield true) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def pure-fn (fn () 42)) (def yield-fn (fn () (yield 1))) (pure-fn) (yield-fn))",
@@ -342,18 +342,18 @@ fn test_effect_conditional_yield() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Call to function with conditional yield should have Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Call to function with conditional yield should have Yields signal"
     );
 }
 
 #[test]
-fn test_effect_closure_captures_yielding() {
+fn test_signal_closure_captures_yielding() {
     // (let ((gen (fn () (yield 1))))
     //   (let ((wrapper (fn () (gen))))
     //     (wrapper)))
-    // Should have Yields effect
+    // Should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(let ((gen (fn () (yield 1)))) (let ((wrapper (fn () (gen)))) (wrapper)))",
@@ -363,9 +363,9 @@ fn test_effect_closure_captures_yielding() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Nested closure calling yielding function should have Yields effect"
+        result.hir.signal,
+        Signal::yields(),
+        "Nested closure calling yielding function should have Yields signal"
     );
 }
 
@@ -374,8 +374,8 @@ fn test_effect_closure_captures_yielding() {
 // ============================================================================
 
 #[test]
-fn test_effect_pure_primitives() {
-    // Pure primitives should have Pure effect
+fn test_signal_pure_primitives() {
+    // Pure primitives should have Pure signal
     let (mut symbols, mut vm) = setup();
 
     let pure_calls = [
@@ -399,8 +399,8 @@ fn test_effect_pure_primitives() {
     for call in pure_calls {
         let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
         assert_eq!(
-            result.hir.effect,
-            Effect::inert(),
+            result.hir.signal,
+            Signal::inert(),
             "Primitive call '{}' should be Pure",
             call
         );
@@ -412,19 +412,19 @@ fn test_effect_pure_primitives() {
 // ============================================================================
 
 #[test]
-fn test_lambda_body_effect_yields() {
+fn test_lambda_body_signal_yields() {
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (x) (yield x))", &mut symbols, &mut vm, "<test>").unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::yields());
+        assert_eq!(body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }
 }
 
 #[test]
-fn test_lambda_body_effect_nested_yield() {
+fn test_lambda_body_signal_nested_yield() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(fn (x) (begin (+ x 1) (yield x) (+ x 2)))",
@@ -435,7 +435,7 @@ fn test_lambda_body_effect_nested_yield() {
     .unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.effect, Effect::yields());
+        assert_eq!(body.signal, Signal::yields());
     } else {
         panic!("Expected Lambda");
     }
@@ -446,9 +446,9 @@ fn test_lambda_body_effect_nested_yield() {
 // ============================================================================
 
 #[test]
-fn test_effect_unknown_global_is_yields() {
+fn test_signal_unknown_global_is_yields() {
     // Unknown global functions default to Yields (sound)
-    // This is the fix for effect soundness: if we can't prove a global is pure,
+    // This is the fix for signal soundness: if we can't prove a global is pure,
     // we must assume it may yield (since it could be redefined via assign)
     let (mut symbols, mut vm) = setup();
     let result = analyze(
@@ -459,8 +459,8 @@ fn test_effect_unknown_global_is_yields() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Unknown global should be Yields for soundness"
     );
 }
@@ -470,15 +470,15 @@ fn test_effect_unknown_global_is_yields() {
 // ============================================================================
 
 #[test]
-fn test_effect_parameter_call_is_yields() {
-    // Calling a function parameter should be Yields (we can't know its effect)
+fn test_signal_parameter_call_is_yields() {
+    // Calling a function parameter should be Yields (we can't know its signal)
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn (f) (f 42))", &mut symbols, &mut vm, "<test>").unwrap();
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
         assert_eq!(
-            body.effect,
-            Effect::yields(),
-            "Calling a function parameter should be Yields (unknown effect)"
+            body.signal,
+            Signal::yields(),
+            "Calling a function parameter should be Yields (unknown signal)"
         );
     } else {
         panic!("Expected Lambda");
@@ -486,7 +486,7 @@ fn test_effect_parameter_call_is_yields() {
 }
 
 #[test]
-fn test_effect_let_bound_non_lambda_call_is_yields() {
+fn test_signal_let_bound_non_lambda_call_is_yields() {
     // Calling a let-bound non-lambda should be Yields
     let (mut symbols, mut vm) = setup();
     let result = analyze(
@@ -496,11 +496,11 @@ fn test_effect_let_bound_non_lambda_call_is_yields() {
         "<test>",
     )
     .unwrap();
-    // f is not a lambda literal, effect unknown → Yields
+    // f is not a lambda literal, signal unknown → Yields
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
-        "Calling a let-bound non-lambda should be Yields (unknown effect)"
+        result.hir.signal,
+        Signal::yields(),
+        "Calling a let-bound non-lambda should be Yields (unknown signal)"
     );
 }
 
@@ -520,16 +520,16 @@ fn test_polymorphic_inference_single_param() {
     )
     .unwrap();
 
-    // Check the lambda's inferred effect
+    // Check the lambda's inferred signal
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effects, ..
+            inferred_signals, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effects,
-                Effect::polymorphic(0),
-                "apply-fn should have Polymorphic(0) effect"
+                *inferred_signals,
+                Signal::polymorphic(0),
+                "apply-fn should have Polymorphic(0) signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -551,8 +551,8 @@ fn test_polymorphic_inference_resolves_pure() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Calling polymorphic function with pure arg should be Pure"
     );
 }
@@ -569,8 +569,8 @@ fn test_polymorphic_inference_resolves_yields() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Calling polymorphic function with yielding arg should be Yields"
     );
 }
@@ -587,8 +587,8 @@ fn test_polymorphic_inference_my_map() {
     // The recursive call to my-map is seeded as Pure during analysis.
     // When called with +, which is Pure, the result is Pure.
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Recursive higher-order function with pure arg should be Pure"
     );
 }
@@ -601,8 +601,8 @@ fn test_polymorphic_inference_non_recursive_map() {
     .unwrap();
     // apply-to-list is Polymorphic(0), + is Pure, so the call is Pure
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Non-recursive higher-order function with pure arg should be Pure"
     );
 }
@@ -621,12 +621,12 @@ fn test_polymorphic_inference_direct_yield_prevents() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effects, ..
+            inferred_signals, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effects,
-                Effect::yields(),
+                *inferred_signals,
+                Signal::yields(),
                 "Function with direct yield should be Yields, not Polymorphic"
             );
         } else {
@@ -651,12 +651,12 @@ fn test_polymorphic_inference_two_params() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effects, ..
+            inferred_signals, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effects,
-                Effect {
+                *inferred_signals,
+                Signal {
                     bits: elle::value::SignalBits(0),
                     propagates: 0b11, // params 0 and 1
                 },
@@ -682,8 +682,8 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
     )
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Calling polymorphic function with pure arg should be Pure"
     );
 }
@@ -695,8 +695,8 @@ fn test_polymorphic_inference_two_params_resolves_yields() {
     let result = analyze(        r#"(begin            (def gen (fn () (yield 1)))           (def apply-both (fn (f g x) (begin (f x) (g x))))            (apply-both gen * 5))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     assert_eq!(
-        result.hir.effect,
-        Effect::yields(),
+        result.hir.signal,
+        Signal::yields(),
         "Calling Polymorphic({{0,1}}) with one yielding arg should be Yields"
     );
 }
@@ -715,13 +715,13 @@ fn test_polymorphic_inference_second_param() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effects, ..
+            inferred_signals, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effects,
-                Effect::polymorphic(1),
-                "apply-second should have Polymorphic(1) effect"
+                *inferred_signals,
+                Signal::polymorphic(1),
+                "apply-second should have Polymorphic(1) signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -738,11 +738,11 @@ fn test_polymorphic_inference_nested_call() {
     let result = analyze(        r#"(begin            (def apply-fn (fn (f x) (f x)))           (def wrapper (fn (g y) (apply-fn g y)))           (wrapper + 42))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
     // wrapper calls apply-fn with g, apply-fn is Polymorphic(0)
-    // So wrapper's body effect depends on g's effect
+    // So wrapper's body signal depends on g's signal
     // wrapper should be Polymorphic(0) and the final call with + should be Pure
     assert_eq!(
-        result.hir.effect,
-        Effect::inert(),
+        result.hir.signal,
+        Signal::inert(),
         "Nested polymorphic calls with pure arg should be Pure"
     );
 }
@@ -758,12 +758,12 @@ fn test_polymorphic_inference_with_known_yielding_call() {
     if let HirKind::Begin(exprs) = &result.hir.kind {
         if let HirKind::Define { value, .. } = &exprs[1].kind {
             if let HirKind::Lambda {
-                inferred_effects, ..
+                inferred_signals, ..
             } = &value.kind
             {
                 assert_eq!(
-                    *inferred_effects,
-                    Effect::yields(),
+                    *inferred_signals,
+                    Signal::yields(),
                     "Function calling known yielding function should be Yields"
                 );
             } else {
@@ -779,7 +779,7 @@ fn test_polymorphic_inference_with_known_yielding_call() {
 
 #[test]
 fn test_polymorphic_inference_pure_function() {
-    // A pure function should have Pure effect, not Polymorphic
+    // A pure function should have Pure signal, not Polymorphic
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def add1 (fn (x) (+ x 1)))",
@@ -791,13 +791,13 @@ fn test_polymorphic_inference_pure_function() {
 
     if let HirKind::Define { value, .. } = &result.hir.kind {
         if let HirKind::Lambda {
-            inferred_effects, ..
+            inferred_signals, ..
         } = &value.kind
         {
             assert_eq!(
-                *inferred_effects,
-                Effect::inert(),
-                "Pure function should have Pure effect"
+                *inferred_signals,
+                Signal::inert(),
+                "Pure function should have Pure signal"
             );
         } else {
             panic!("Expected Lambda");
@@ -807,73 +807,73 @@ fn test_polymorphic_inference_pure_function() {
     }
 }
 
-// Cross-form effect tracking is now handled natively by the letrec model.
+// Cross-form signal tracking is now handled natively by the letrec model.
 // The old fixpoint-based tests have been removed. Equivalent coverage is
-// provided by test_mutual_recursion_effects_are_pure in pipeline.rs and
-// the nqueens effect test.
+// provided by test_mutual_recursion_signals_are_pure in pipeline.rs and
+// the nqueens signal test.
 
 // ============================================================================
-// CHUNK 2: (effect :keyword) form tests
+// CHUNK 2: (signal :keyword) form tests
 // ============================================================================
 
-// test_effect_declaration_returns_keyword: migrated to tests/elle/effects.lisp
+// test_signal_declaration_returns_keyword: migrated to tests/elle/signals.lisp
 
-// test_effect_declaration_non_keyword_error: migrated to tests/elle/effects.lisp
+// test_signal_declaration_non_keyword_error: migrated to tests/elle/signals.lisp
 
-// test_effect_declaration_builtin_error: migrated to tests/elle/effects.lisp
+// test_signal_declaration_builtin_error: migrated to tests/elle/signals.lisp
 
-// test_effect_in_expression_position: migrated to tests/elle/effects.lisp
+// test_signal_in_expression_position: migrated to tests/elle/signals.lisp
 
-// test_effect_declaration_duplicate_error: migrated to tests/elle/effects.lisp
+// test_signal_declaration_duplicate_error: migrated to tests/elle/signals.lisp
 
 // ============================================================================
-// CHUNK 3: restrict form parsing tests
+// CHUNK 3: silence form parsing tests
 // ============================================================================
 
 #[test]
-fn test_restrict_parses_function_level_inert() {
+fn test_silence_parses_function_level_inert() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict) (+ x 1))",
+        "(fn (x) (silence) (+ x 1))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (restrict preamble parsing will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_restrict_parses_param_level_inert() {
+fn test_silence_parses_param_level_inert() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (f x) (restrict f) (f x))",
+        "(fn (f x) (silence f) (f x))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (param_bounds field will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_restrict_parses_param_level_with_keyword() {
+fn test_silence_parses_param_level_with_keyword() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(effect :restrict_c3a) (def _ (fn (f x) (restrict f :restrict_c3a) (f x)))",
+        "(signal :restrict_c3a) (def _ (fn (f x) (silence f :restrict_c3a) (f x)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (param_bounds field will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
 }
 
 #[test]
-fn test_restrict_unknown_keyword_error() {
+fn test_silence_unknown_keyword_error() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (f) (restrict f :nonexistent_c3b) (f))",
+        "(fn (f) (silence f :nonexistent_c3b) (f))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -884,31 +884,31 @@ fn test_restrict_unknown_keyword_error() {
 }
 
 #[test]
-fn test_restrict_unknown_param_error() {
+fn test_silence_unknown_param_error() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze("(fn (f) (restrict g) (f))", &mut symbols, &mut vm, "<test>");
+    let result = analyze("(fn (f) (silence g) (f))", &mut symbols, &mut vm, "<test>");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(err.contains("not a parameter") || err.contains("unknown parameter"));
 }
 
 #[test]
-fn test_restrict_duplicate_param_last_wins() {
+fn test_silence_duplicate_param_last_wins() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(effect :dup_p_c3c) (def _ (fn (f) (restrict f) (restrict f :dup_p_c3c) (f)))",
+        "(signal :dup_p_c3c) (def _ (fn (f) (silence f) (silence f :dup_p_c3c) (f)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (param_bounds field will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
 }
 
 #[test]
-fn test_restrict_outside_lambda_not_special() {
+fn test_silence_outside_lambda_not_special() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze("(restrict f)", &mut symbols, &mut vm, "<test>");
+    let result = analyze("(silence f)", &mut symbols, &mut vm, "<test>");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -919,10 +919,10 @@ fn test_restrict_outside_lambda_not_special() {
 }
 
 #[test]
-fn test_restrict_function_level_with_keywords() {
+fn test_silence_function_level_with_keywords() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict :error) (error \"boom\"))",
+        "(fn (x) (silence :error) (error \"boom\"))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -932,10 +932,10 @@ fn test_restrict_function_level_with_keywords() {
 }
 
 #[test]
-fn test_restrict_after_docstring() {
+fn test_silence_after_docstring() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (f x) \"Apply f.\" (restrict f) (f x))",
+        "(fn (f x) \"Apply f.\" (silence f) (f x))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -950,40 +950,40 @@ fn test_restrict_after_docstring() {
 }
 
 // ============================================================================
-// CHUNK 4: Effect inference with bounds tests
+// CHUNK 4: Signal inference with bounds tests
 // ============================================================================
 
 #[test]
-fn test_restrict_param_eliminates_polymorphism() {
+fn test_silence_param_eliminates_polymorphism() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(def apply-inert (fn (f x) (restrict f) (f x)))",
+        "(def apply-inert (fn (f x) (silence f) (f x)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (effect inference with bounds will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok());
 }
 
 #[test]
-fn test_restrict_param_contributes_bound_bits() {
+fn test_silence_param_contributes_bound_bits() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(effect :bound_c4a) (def apply-bounded (fn (f x) (restrict f :bound_c4a) (f x)))",
+        "(signal :bound_c4a) (def apply-bounded (fn (f x) (silence f :bound_c4a) (f x)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (effect inference with bounds will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
 }
 
 #[test]
-fn test_restrict_function_ceiling_passes() {
+fn test_silence_function_ceiling_passes() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict) (+ x 1))",
+        "(fn (x) (silence) (+ x 1))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -992,10 +992,10 @@ fn test_restrict_function_ceiling_passes() {
 }
 
 #[test]
-fn test_restrict_function_ceiling_fails() {
+fn test_silence_function_ceiling_fails() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict) (yield x))",
+        "(fn (x) (silence) (yield x))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1006,10 +1006,10 @@ fn test_restrict_function_ceiling_fails() {
 }
 
 #[test]
-fn test_restrict_function_ceiling_error_passes() {
+fn test_silence_function_ceiling_error_passes() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict :error) (error \"boom\"))",
+        "(fn (x) (silence :error) (error \"boom\"))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1018,10 +1018,10 @@ fn test_restrict_function_ceiling_error_passes() {
 }
 
 #[test]
-fn test_restrict_function_ceiling_error_fails_yield() {
+fn test_silence_function_ceiling_error_fails_yield() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(fn (x) (restrict :error) (yield x))",
+        "(fn (x) (silence :error) (yield x))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1030,36 +1030,36 @@ fn test_restrict_function_ceiling_error_fails_yield() {
 }
 
 #[test]
-fn test_restrict_callsite_concrete_fails() {
-    // Compile-time callsite checking is not yet implemented — restrict bounds
+fn test_silence_callsite_concrete_fails() {
+    // Compile-time callsite checking is not yet implemented — silence bounds
     // are enforced at runtime via CheckEffectBound. Use eval_source to verify
     // the runtime check catches the violation.
     let result = crate::common::eval_source(
-        "(begin (def apply-inert (fn (f x) (restrict f) (f x))) (apply-inert (fn (x) (yield x)) 42))",
+        "(begin (def apply-inert (fn (f x) (silence f) (f x))) (apply-inert (fn (x) (yield x)) 42))",
     );
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("effect-violation") || err.contains("restrict") || err.contains("bound"));
+    assert!(err.contains("signal-violation") || err.contains("silence") || err.contains("bound"));
 }
 
 #[test]
-fn test_restrict_param_with_user_effect() {
+fn test_silence_param_with_user_signal() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(effect :user_c4b) (def apply-user (fn (f) (restrict f :user_c4b) (f)))",
+        "(signal :user_c4b) (def apply-user (fn (f) (silence f :user_c4b) (f)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error (effect inference with bounds will be added in implementation)
+    // Should parse without error
     assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
 }
 
 #[test]
-fn test_restrict_ceiling_fails_bounded_param() {
+fn test_silence_ceiling_fails_bounded_param() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(effect :ceil_c4c) (def bad (fn (f x) (restrict f :ceil_c4c) (restrict) (f x)))",
+        "(signal :ceil_c4c) (def bad (fn (f x) (silence f :ceil_c4c) (silence) (f x)))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1070,35 +1070,35 @@ fn test_restrict_ceiling_fails_bounded_param() {
 }
 
 // ============================================================================
-// CHUNK 5: Runtime effect checking tests
+// CHUNK 5: Runtime signal checking tests
 // ============================================================================
 
-// test_restrict_runtime_check_passes: migrated to tests/elle/effects.lisp
+// test_silence_runtime_check_passes: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_check_fails: migrated to tests/elle/effects.lisp
+// test_silence_runtime_check_fails: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_non_closure_passes: migrated to tests/elle/effects.lisp
+// test_silence_runtime_non_closure_passes: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_bounded_keyword: migrated to tests/elle/effects.lisp
+// test_silence_runtime_bounded_keyword: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_bounded_keyword_fails: migrated to tests/elle/effects.lisp
+// test_silence_runtime_bounded_keyword_fails: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_dynamic_passes: migrated to tests/elle/effects.lisp
+// test_silence_runtime_dynamic_passes: migrated to tests/elle/signals.lisp
 
-// test_restrict_runtime_dynamic_fails: migrated to tests/elle/effects.lisp
+// test_silence_runtime_dynamic_fails: migrated to tests/elle/signals.lisp
 
 // ============================================================================
-// CHUNK 6: (effects) introspection primitive tests
+// CHUNK 6: (signals) introspection primitive tests
 // ============================================================================
 
-// test_effects_primitive_returns_struct: migrated to tests/elle/effects.lisp
-// test_effects_primitive_contains_builtins: migrated to tests/elle/effects.lisp
-// test_effects_primitive_contains_user_effects: migrated to tests/elle/effects.lisp
+// test_signals_primitive_returns_struct: migrated to tests/elle/signals.lisp
+// test_signals_primitive_contains_builtins: migrated to tests/elle/signals.lisp
+// test_signals_primitive_contains_user_signals: migrated to tests/elle/signals.lisp
 
 #[test]
-fn test_effects_primitive_is_inert() {
+fn test_signals_primitive_is_inert() {
     let (mut symbols, mut vm) = setup();
-    let result = analyze("(fn () (effects))", &mut symbols, &mut vm, "<test>");
-    // Should parse without error (effects primitive will be added in implementation)
+    let result = analyze("(fn () (signals))", &mut symbols, &mut vm, "<test>");
+    // Should parse without error
     assert!(result.is_ok());
 }

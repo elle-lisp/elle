@@ -1,5 +1,5 @@
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -139,7 +139,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/monotonic",
         func: prim_clock_monotonic,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return seconds elapsed since process start (monotonic clock)",
         params: &[],
@@ -150,7 +150,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/realtime",
         func: prim_clock_realtime,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return seconds since Unix epoch (wall clock)",
         params: &[],
@@ -161,7 +161,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/cpu",
         func: prim_clock_cpu,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return thread CPU time in seconds",
         params: &[],
@@ -172,7 +172,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "time/sleep",
         func: prim_sleep,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Sleep for the specified number of seconds",
         params: &["seconds"],

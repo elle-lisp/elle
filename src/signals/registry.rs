@@ -1,9 +1,9 @@
 use super::{SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_YIELD};
-/// Signal registry for mapping effect keywords to bit positions.
+/// Signal registry for mapping signal keywords to bit positions.
 ///
-/// The registry maintains a global mapping of effect keywords (`:error`, `:yield`, etc.)
-/// to their corresponding bit positions. Built-in effects occupy bits 0-15, while
-/// user-defined effects are allocated from bits 16-31.
+/// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
+/// to their corresponding bit positions. Built-in signals occupy bits 0-15, while
+/// user-defined signals are allocated from bits 16-31.
 use std::sync::{Mutex, OnceLock};
 
 /// An entry in the signal registry mapping a keyword name to its bit position.
@@ -13,14 +13,14 @@ pub struct SignalEntry {
     pub bit_position: u32,
 }
 
-/// Global registry mapping effect keywords to bit positions.
+/// Global registry mapping signal keywords to bit positions.
 ///
-/// Built-in effects (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) are
+/// Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) are
 /// pre-registered at bits 0, 1, 2, 4, 8, 9 respectively. Bits 3, 5, 6, 7 are
 /// reserved for VM-internal use and not registered.
 ///
-/// User-defined effects are allocated starting at bit 16 and proceeding upward.
-/// The registry can support up to 16 user-defined effects (bits 16-31).
+/// User-defined signals are allocated starting at bit 16 and proceeding upward.
+/// The registry can support up to 16 user-defined signals (bits 16-31).
 pub struct SignalRegistry {
     entries: Vec<SignalEntry>,
     next_user_bit: u32,
@@ -35,7 +35,7 @@ impl SignalRegistry {
         }
     }
 
-    /// Create a registry with built-in effects pre-registered.
+    /// Create a registry with built-in signals pre-registered.
     ///
     /// Pre-registers:
     /// - `:error` at bit 0
@@ -56,10 +56,10 @@ impl SignalRegistry {
         registry
     }
 
-    /// Register a built-in effect at a specific bit position.
+    /// Register a built-in signal at a specific bit position.
     fn register_builtin(&mut self, name: &str, bit_position: u32) -> Result<u32, String> {
         if self.entries.iter().any(|e| e.name == name) {
-            return Err(format!("Effect '{}' already registered", name));
+            return Err(format!("Signal '{}' already registered", name));
         }
         self.entries.push(SignalEntry {
             name: name.to_string(),
@@ -68,21 +68,21 @@ impl SignalRegistry {
         Ok(bit_position)
     }
 
-    /// Register a user-defined effect and allocate the next available bit.
+    /// Register a user-defined signal and allocate the next available bit.
     ///
-    /// Returns the bit position allocated to this effect, or an error if:
-    /// - The effect name is already registered (built-in or user-defined)
+    /// Returns the bit position allocated to this signal, or an error if:
+    /// - The signal name is already registered (built-in or user-defined)
     /// - All 16 user bits (16-31) are exhausted
     pub fn register(&mut self, name: &str) -> Result<u32, String> {
         // Check if already registered (built-in or user)
         if self.entries.iter().any(|e| e.name == name) {
-            return Err(format!("Effect '{}' already registered", name));
+            return Err(format!("Signal '{}' already registered", name));
         }
 
         // Check if we've exhausted user bits (16-31)
         if self.next_user_bit > 31 {
             return Err(format!(
-                "Cannot register effect '{}': all 16 user effect bits (16-31) are exhausted",
+                "Cannot register signal '{}': all 16 user signal bits (16-31) are exhausted",
                 name
             ));
         }
@@ -96,9 +96,9 @@ impl SignalRegistry {
         Ok(bit_position)
     }
 
-    /// Look up the bit position for an effect keyword.
+    /// Look up the bit position for an signal keyword.
     ///
-    /// Returns `Some(bit_position)` if the effect is registered, `None` otherwise.
+    /// Returns `Some(bit_position)` if the signal is registered, `None` otherwise.
     pub fn lookup(&self, name: &str) -> Option<u32> {
         self.entries
             .iter()
@@ -111,9 +111,9 @@ impl SignalRegistry {
         &self.entries
     }
 
-    /// Convert an effect keyword to its signal bits representation.
+    /// Convert an signal keyword to its signal bits representation.
     ///
-    /// Returns `Some(SignalBits)` if the effect is registered, `None` otherwise.
+    /// Returns `Some(SignalBits)` if the signal is registered, `None` otherwise.
     pub fn to_signal_bits(&self, name: &str) -> Option<crate::value::fiber::SignalBits> {
         self.lookup(name)
             .map(|bit_pos| crate::value::fiber::SignalBits(1 << bit_pos))
@@ -146,14 +146,14 @@ impl Default for SignalRegistry {
 
 /// Global signal registry singleton.
 ///
-/// Initialized on first access with built-in effects pre-registered.
+/// Initialized on first access with built-in signals pre-registered.
 /// Thread-safe via `Mutex`.
 static SIGNAL_REGISTRY: OnceLock<Mutex<SignalRegistry>> = OnceLock::new();
 
 /// Get the global signal registry.
 ///
 /// Returns a reference to the process-global `Mutex<SignalRegistry>`.
-/// The registry is initialized with built-in effects on first access.
+/// The registry is initialized with built-in signals on first access.
 pub fn global_registry() -> &'static Mutex<SignalRegistry> {
     SIGNAL_REGISTRY.get_or_init(|| Mutex::new(SignalRegistry::with_builtins()))
 }
@@ -184,8 +184,8 @@ mod tests {
     #[test]
     fn test_user_registration_sequential() {
         let mut registry = SignalRegistry::with_builtins();
-        let bit1 = registry.register("effect1").unwrap();
-        let bit2 = registry.register("effect2").unwrap();
+        let bit1 = registry.register("signal1").unwrap();
+        let bit2 = registry.register("signal2").unwrap();
         assert_eq!(bit1, 16);
         assert_eq!(bit2, 17);
     }
@@ -209,11 +209,11 @@ mod tests {
     #[test]
     fn test_overflow() {
         let mut registry = SignalRegistry::with_builtins();
-        // Register 16 user effects (bits 16-31)
+        // Register 16 user signals (bits 16-31)
         for i in 0..16 {
             let name = format!("user_{}", i);
             let result = registry.register(&name);
-            assert!(result.is_ok(), "Failed to register user effect {}", i);
+            assert!(result.is_ok(), "Failed to register user signal {}", i);
         }
         // 17th should fail
         let result = registry.register("user_16");

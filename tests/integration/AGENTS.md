@@ -8,7 +8,7 @@ Test end-to-end pipeline behavior by evaluating Elle source code through the ful
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
 - Concurrency (fibers, coroutines, thread transfer)
-- Effect enforcement (interprocedural effect tracking)
+- Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
 - Prelude macros (defn, let*, when, unless, etc.)
@@ -80,8 +80,8 @@ Tests are organized by feature area in separate files:
 | `pipeline_property.rs` | Property-based pipeline tests |
 | `pipeline_point.rs` | Specific pipeline points |
 | `thread_transfer.rs` | Thread-safe value transfer |
-| `effect_enforcement.rs` | Effect system enforcement |
-| `effect_unsoundness.rs` | Effect system edge cases |
+| `signal_enforcement.rs` | Signal system enforcement |
+| `signal_unsoundness.rs` | Signal system edge cases |
 | `jit.rs` | JIT compilation |
 | ~~`fibers.rs`~~ | Migrated to `tests/elle/fibers.lisp` |
 | `time_property.rs` | Time-based property tests |
@@ -134,7 +134,7 @@ let (mut symbols, mut vm) = setup();
 
 ## Naming conventions
 
-- Test files: lowercase, hyphenated concepts joined with underscores (e.g., `closures_and_lambdas.rs`, `effect_enforcement.rs`)
+- Test files: lowercase, hyphenated concepts joined with underscores (e.g., `closures_and_lambdas.rs`, `signal_enforcement.rs`)
 - Test functions: `test_` prefix for example-based, descriptive name for property tests (e.g., `fn test_basic_arithmetic()`, `fn int_roundtrip(...)`)
 - Property test names describe the invariant, not the implementation
 

@@ -327,9 +327,9 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<JitCode, JitError> {
-        // Only reject polymorphic effects (effect depends on arguments).
+        // Only reject polymorphic signals (signal depends on arguments).
         // Yielding functions are now supported via side-exit.
-        if lir.effect.propagates != 0 {
+        if lir.signal.propagates != 0 {
             return Err(JitError::Polymorphic);
         }
 
@@ -419,7 +419,7 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<Vec<String>, JitError> {
-        if lir.effect.propagates != 0 {
+        if lir.signal.propagates != 0 {
             return Err(JitError::Polymorphic);
         }
 
@@ -463,10 +463,10 @@ impl JitCompiler {
         // If a yielding function were batch-compiled, elle_jit_yield would
         // panic on index-out-of-bounds when looking up yield point metadata.
         for member in members {
-            if member.lir.effect.propagates != 0 {
+            if member.lir.signal.propagates != 0 {
                 return Err(JitError::Polymorphic);
             }
-            if member.lir.effect.may_suspend() {
+            if member.lir.signal.may_suspend() {
                 return Err(JitError::Yielding);
             }
             if matches!(member.lir.arity, Arity::AtLeast(_))
@@ -750,7 +750,7 @@ impl JitCompiler {
         }
 
         // Allocate shared spill slot for yield/call sites (if any)
-        if lir.effect.may_suspend() {
+        if lir.signal.may_suspend() {
             translator.allocate_shared_spill_slot(&mut builder);
         }
 
@@ -810,10 +810,10 @@ impl Default for JitCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::Effect;
     use crate::lir::{
         BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
+    use crate::signals::Signal;
     use crate::syntax::Span;
     use crate::value::Arity;
 
@@ -825,7 +825,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 1;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load argument 0 into register 0
@@ -850,7 +850,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(2));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load arguments into registers
@@ -920,7 +920,7 @@ mod tests {
     #[test]
     fn test_reject_polymorphic() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::polymorphic(0);
+        lir.signal = Signal::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir, None);
@@ -930,7 +930,7 @@ mod tests {
     #[test]
     fn test_accept_yielding() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::yields();
+        lir.signal = Signal::yields();
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         // Should compile (no Yield terminators in this simple LIR)
@@ -981,7 +981,7 @@ mod tests {
         f.name = Some("f".to_string());
         f.num_regs = 8;
         f.num_captures = 0;
-        f.effect = Effect::inert();
+        f.signal = Signal::inert();
 
         // Block 0 (entry): load arg, check condition
         let mut b0 = BasicBlock::new(Label(0));
@@ -1064,7 +1064,7 @@ mod tests {
         g.name = Some("g".to_string());
         g.num_regs = 4;
         g.num_captures = 0;
-        g.effect = Effect::inert();
+        g.signal = Signal::inert();
 
         let mut gb0 = BasicBlock::new(Label(0));
         gb0.instructions.push(SpannedInstr::new(
@@ -1116,7 +1116,7 @@ mod tests {
     #[test]
     fn test_compile_batch_rejects_polymorphic() {
         let mut lir = make_simple_lir();
-        lir.effect = Effect::polymorphic(0);
+        lir.signal = Signal::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let members = vec![BatchMember {
@@ -1134,7 +1134,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(0));
         func.num_regs = 2;
         func.num_captures = 0;
-        func.effect = Effect::yields();
+        func.signal = Signal::yields();
 
         let mut b0 = BasicBlock::new(Label(0));
         b0.instructions.push(SpannedInstr::new(

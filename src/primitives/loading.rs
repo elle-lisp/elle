@@ -1,8 +1,8 @@
 //! FFI library loading, symbol lookup, signature creation, and callback primitives
 
-use crate::effects::Effect;
 use crate::ffi::types::{CallingConvention, Signature};
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -347,7 +347,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/native",
         func: prim_ffi_native,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Load a shared library. Pass nil for the current process.",
         params: &["path"],
@@ -358,7 +358,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/lookup",
         func: prim_ffi_lookup,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Look up a symbol in a loaded library.",
         params: &["lib", "name"],
@@ -369,7 +369,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/signature",
         func: prim_ffi_signature,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Create a reified function signature. Optional third arg for variadic functions.",
         params: &["return-type", "arg-types", "fixed-args"],
@@ -380,7 +380,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/callback",
         func: prim_ffi_callback,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Create a C function pointer from an Elle closure. Returns a pointer.",
         params: &["sig", "closure"],
@@ -391,7 +391,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/callback-free",
         func: prim_ffi_callback_free,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Free a callback created by ffi/callback.",
         params: &["ptr"],

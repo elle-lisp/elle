@@ -2,7 +2,7 @@
 ##
 ## Migrated from tests/property/coroutines.rs (behavioral property tests).
 ## Tests sequential yields, resume values, conditionals, loops, state
-## transitions, interleaving, and effect threading.
+## transitions, interleaving, and signal threading.
 
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
@@ -176,25 +176,25 @@
   (assert-eq (coro/resume co6e) 110 "interleaved 3: co3 return"))
 
 # ============================================================================
-# Effect threading: yielding closure has correct effect
+# Signal threading: yielding closure has correct signal
 # ============================================================================
 
-# yielding_closure_has_correct_effect: yield marks closure as yielding
+# yielding_closure_has_correct_signal: yield marks closure as yielding
 (begin
   (def gen7 (fn [] (yield 42) 999))
   (var co7 (make-coroutine gen7))
   (assert-eq (coro/resume co7) 42
-    "effect threading: first resume yields value")
+    "signal threading: first resume yields value")
   (assert-eq (string (coro/status co7)) "paused"
-    "effect threading: status is paused after yield"))
+    "signal threading: status is paused after yield"))
 
 (begin
   (def gen7b (fn [] (yield -100) 0))
   (var co7b (make-coroutine gen7b))
   (assert-eq (coro/resume co7b) -100
-    "effect threading: negative yield value")
+    "signal threading: negative yield value")
   (assert-eq (string (coro/status co7b)) "paused"
-     "effect threading: paused after negative yield"))
+     "signal threading: paused after negative yield"))
 
 # ============================================================================
 # Basic yield/resume tests (from integration/coroutines.rs)
@@ -282,7 +282,7 @@
     (f)
     (yield 2)))
   (var co (make-coroutine g))
-  (assert-eq (coro/resume co) 1 "effect propagation: first yield"))
+  (assert-eq (coro/resume co) 1 "signal propagation: first yield"))
 
 # ============================================================================
 # Nested coroutines tests
@@ -637,7 +637,7 @@
   "resuming done coroutine fails")
 
 # ============================================================================
-# Runtime effect checks (Pure closure warnings)
+# Runtime signal checks (Pure closure warnings)
 # ============================================================================
 
 # test_make_coroutine_pure_closure_still_works

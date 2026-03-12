@@ -64,7 +64,7 @@ pub struct VM {
 /// execution context for top-level bytecode. This closure is never
 /// called; it exists only to satisfy Fiber's constructor.
 fn root_closure() -> Rc<Closure> {
-    use crate::effects::Effect;
+    use crate::signals::Signal;
     use crate::value::types::Arity;
     use crate::value::ClosureTemplate;
     Rc::new(Closure {
@@ -75,7 +75,7 @@ fn root_closure() -> Rc<Closure> {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::inert(),
+            signal: Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),

@@ -4,7 +4,7 @@ Elle is a Lisp. Source text becomes bytecode; bytecode runs on a register-based 
 
 This is not a toy. The implementation targets correctness, performance, and
 clarity — in that order. We compile through multiple IRs, we have proper
-lexical scoping with closure capture analysis, and we have an effect system.
+lexical scoping with closure capture analysis, and we have a signal system.
 
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
@@ -37,12 +37,12 @@ bytecode. Error messages include file:line:col information.
 |--------|----------------|
 | `reader` | Lexing and parsing to `Syntax` |
 | `syntax` | Syntax types, macro expansion |
-| `hir` | Binding resolution, capture analysis, effect inference, linting, symbol extraction, docstring extraction |
+| `hir` | Binding resolution, capture analysis, signal inference, linting, symbol extraction, docstring extraction |
 | `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) |
-| `effects` | Effect type (`Inert`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping |
+| `signals` | Signal type (`Inert`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping |
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
@@ -58,7 +58,7 @@ bytecode. Error messages include file:line:col information.
 ### The Value type
 
 `Value` is the runtime representation using NaN-boxing. Create values via methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
-- `Closure` — bytecode + captured environment + arity + effect + `location_map` + `doc` + `syntax`
+- `Closure` — bytecode + captured environment + arity + signal + `location_map` + `doc` + `syntax`
 - `LBox` / `LocalLBox` — mutable lboxes for captured variables
 - `Fiber` — independent execution context with stack, frames, signal mask
 - `Parameter` — dynamic binding with default value, looked up at runtime
@@ -114,7 +114,7 @@ These must remain true. Violating them breaks the system:
    use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
    which parameters need lbox wrapping.
 
-3. **Effects are inferred, not declared — except when `restrict` provides explicit bounds.** The `Effect` enum (`Inert`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. The `restrict` form constrains inference; it doesn't replace it. The inferred effect must be a subset of the declared bound. When a parameter has a `restrict` bound, it is no longer polymorphic — its effect is known to be at most the bound.
+3. **Signals are inferred, not declared — except when `silence` provides explicit bounds.** The `Signal` type (`Inert`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. The `silence` form constrains inference; it doesn't replace it. The inferred signal must be a subset of the declared bound. When a parameter has a `silence` bound, it is no longer polymorphic — its signal is known to be at most the bound.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the

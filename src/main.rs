@@ -373,7 +373,7 @@ fn main() {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
 
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
 
     set_symbol_table(&mut symbols as *mut SymbolTable);
     set_length_symbol_table(&mut symbols as *mut SymbolTable);

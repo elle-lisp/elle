@@ -27,7 +27,7 @@ pub fn eval_syntax(
 
     let meta = cached_primitive_meta(symbols);
     let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
@@ -66,7 +66,7 @@ pub fn eval(
     let expanded = expander.expand(syntax, symbols, vm)?;
 
     let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);

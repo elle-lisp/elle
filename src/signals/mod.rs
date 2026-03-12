@@ -1,8 +1,8 @@
-//! Effect system for tracking which signals a function may emit.
+//! Signal type for tracking which signals a function may emit.
 //!
-//! Effects are signal-bits-based: they track which signals a function
+//! Signals are signal-bits-based: they track which signals a function
 //! might emit (error, yield, debug, ffi, user-defined) and which
-//! parameter indices propagate their callee's effects (for higher-order
+//! parameter indices propagate their callee's signals (for higher-order
 //! functions like map/filter/fold).
 
 pub mod registry;
@@ -14,8 +14,8 @@ use std::fmt;
 // Signal constants — canonical definitions
 // ---------------------------------------------------------------------------
 //
-// These are the semantic signal definitions for the effect system. They live
-// here because the effect/signal registry is the semantic owner; fiber.rs
+// These are the semantic signal definitions for the signal system. They live
+// here because the signal registry is the semantic owner; fiber.rs
 // is a runtime data structure that consumes them.
 //
 // Signal bit partitioning:
@@ -45,35 +45,35 @@ pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termina
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
 pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
 
-/// Effect classification for expressions and functions.
+/// Signal classification for expressions and functions.
 ///
 /// Two fields:
 /// - `bits`: which signals this function itself might emit
-/// - `propagates`: bitmask of parameter indices whose effects this
-///   function propagates (bit i set = parameter i's effects flow through)
+/// - `propagates`: bitmask of parameter indices whose signals this
+///   function propagates (bit i set = parameter i's signals flow through)
 ///
 /// `Copy` and `const fn` constructors — no allocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Effect {
+pub struct Signal {
     /// Signal bits this function itself might emit.
     pub bits: SignalBits,
-    /// Bitmask of parameter indices whose effects this function propagates.
-    /// Bit i set means this function may exhibit parameter i's effects.
+    /// Bitmask of parameter indices whose signals this function propagates.
+    /// Bit i set means this function may exhibit parameter i's signals.
     pub propagates: u32,
 }
 
-impl Default for Effect {
+impl Default for Signal {
     fn default() -> Self {
-        Effect::inert()
+        Signal::inert()
     }
 }
 
 // ── Constructors ────────────────────────────────────────────────────
 
-impl Effect {
-    /// No effects: does not signal, does not propagate.
+impl Signal {
+    /// No signals: does not signal, does not propagate.
     pub const fn inert() -> Self {
-        Effect {
+        Signal {
             bits: SignalBits::new(0),
             propagates: 0,
         }
@@ -81,7 +81,7 @@ impl Effect {
 
     /// May error (most primitives: arity/type errors).
     pub const fn errors() -> Self {
-        Effect {
+        Signal {
             bits: SIG_ERROR,
             propagates: 0,
         }
@@ -89,7 +89,7 @@ impl Effect {
 
     /// May yield (cooperative suspension).
     pub const fn yields() -> Self {
-        Effect {
+        Signal {
             bits: SIG_YIELD,
             propagates: 0,
         }
@@ -97,7 +97,7 @@ impl Effect {
 
     /// May yield and may error.
     pub const fn yields_errors() -> Self {
-        Effect {
+        Signal {
             bits: SignalBits::new(SIG_YIELD.0 | SIG_ERROR.0),
             propagates: 0,
         }
@@ -105,7 +105,7 @@ impl Effect {
 
     /// May halt the VM (non-resumable termination with return value).
     pub const fn halts() -> Self {
-        Effect {
+        Signal {
             bits: SignalBits::new(SIG_HALT.0 | SIG_ERROR.0),
             propagates: 0,
         }
@@ -113,7 +113,7 @@ impl Effect {
 
     /// Calls foreign code via FFI.
     pub const fn ffi() -> Self {
-        Effect {
+        Signal {
             bits: SIG_FFI,
             propagates: 0,
         }
@@ -122,42 +122,42 @@ impl Effect {
     /// Calls foreign code and may error (SIG_FFI | SIG_ERROR).
     /// Used for FFI primitives that validate arguments before calling C.
     pub const fn ffi_errors() -> Self {
-        Effect {
+        Signal {
             bits: SignalBits::new(SIG_FFI.0 | SIG_ERROR.0),
             propagates: 0,
         }
     }
 
-    /// Polymorphic: effect depends on a single parameter (no error signal).
+    /// Polymorphic: signal depends on a single parameter (no error signal).
     pub const fn polymorphic(param: usize) -> Self {
-        Effect {
+        Signal {
             bits: SignalBits::new(0),
             propagates: 1 << param,
         }
     }
 
-    /// Polymorphic: effect depends on a single parameter (may error).
+    /// Polymorphic: signal depends on a single parameter (may error).
     pub const fn polymorphic_errors(param: usize) -> Self {
-        Effect {
+        Signal {
             bits: SIG_ERROR,
             propagates: 1 << param,
         }
     }
 
-    /// Combine two effects (used for sequencing).
+    /// Combine two signals (used for sequencing).
     /// Signal bits are ORed. Propagation masks are ORed.
-    pub const fn combine(self, other: Effect) -> Effect {
-        Effect {
+    pub const fn combine(self, other: Signal) -> Signal {
+        Signal {
             bits: SignalBits::new(self.bits.0 | other.bits.0),
             propagates: self.propagates | other.propagates,
         }
     }
 
-    /// Combine multiple effects.
-    pub fn combine_all(effects: impl IntoIterator<Item = Effect>) -> Effect {
-        effects
+    /// Combine multiple signals.
+    pub fn combine_all(signals: impl IntoIterator<Item = Signal>) -> Signal {
+        signals
             .into_iter()
-            .fold(Effect::inert(), |a, b| a.combine(b))
+            .fold(Signal::inert(), |a, b| a.combine(b))
     }
 }
 
@@ -165,10 +165,10 @@ impl Effect {
 //
 // Each predicate asks a specific question about capabilities.
 
-impl Effect {
+impl Signal {
     /// Can this function suspend execution?
-    /// Suspension signals: yield, debug. Polymorphic effects may also
-    /// suspend (depends on the argument's effect at the call site).
+    /// Suspension signals: yield, debug. Polymorphic signals may also
+    /// suspend (depends on the argument's signal at the call site).
     pub const fn may_suspend(&self) -> bool {
         const SUSPENSION_BITS: u32 = SIG_YIELD.0 | SIG_DEBUG.0;
         (self.bits.0 & SUSPENSION_BITS) != 0 || self.propagates != 0
@@ -199,12 +199,12 @@ impl Effect {
         self.bits.0 & SIG_IO.0 != 0
     }
 
-    /// Does this function's effect depend on its arguments?
+    /// Does this function's signal depend on its arguments?
     pub const fn is_polymorphic(&self) -> bool {
         self.propagates != 0
     }
 
-    /// Get the set of parameter indices this effect propagates.
+    /// Get the set of parameter indices this signal propagates.
     pub fn propagated_params(&self) -> impl Iterator<Item = usize> {
         let mask = self.propagates;
         (0..32).filter(move |i| mask & (1 << i) != 0)
@@ -213,12 +213,12 @@ impl Effect {
 
 // ── Constants ───────────────────────────────────────────────────────
 
-impl Effect {
-    pub const INERT: Effect = Effect::inert();
-    pub const YIELDS: Effect = Effect::yields();
+impl Signal {
+    pub const INERT: Signal = Signal::inert();
+    pub const YIELDS: Signal = Signal::yields();
 }
 
-impl fmt::Display for Effect {
+impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.propagates != 0 {
             let indices: Vec<_> = self.propagated_params().map(|i| i.to_string()).collect();
@@ -255,67 +255,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_effect_combine_inert() {
-        assert_eq!(Effect::inert().combine(Effect::inert()), Effect::inert());
+    fn test_signal_combine_inert() {
+        assert_eq!(Signal::inert().combine(Signal::inert()), Signal::inert());
     }
 
     #[test]
-    fn test_effect_combine_yields() {
-        assert_eq!(Effect::inert().combine(Effect::yields()), Effect::yields());
-        assert_eq!(Effect::yields().combine(Effect::inert()), Effect::yields());
-        assert_eq!(Effect::yields().combine(Effect::yields()), Effect::yields());
+    fn test_signal_combine_yields() {
+        assert_eq!(Signal::inert().combine(Signal::yields()), Signal::yields());
+        assert_eq!(Signal::yields().combine(Signal::inert()), Signal::yields());
+        assert_eq!(Signal::yields().combine(Signal::yields()), Signal::yields());
     }
 
     #[test]
-    fn test_effect_combine_polymorphic() {
+    fn test_signal_combine_polymorphic() {
         assert_eq!(
-            Effect::inert().combine(Effect::polymorphic(0)),
-            Effect::polymorphic(0)
+            Signal::inert().combine(Signal::polymorphic(0)),
+            Signal::polymorphic(0)
         );
         assert_eq!(
-            Effect::polymorphic(1).combine(Effect::inert()),
-            Effect::polymorphic(1)
+            Signal::polymorphic(1).combine(Signal::inert()),
+            Signal::polymorphic(1)
         );
         // Polymorphic + Yields = both
-        let combined = Effect::polymorphic(0).combine(Effect::yields());
+        let combined = Signal::polymorphic(0).combine(Signal::yields());
         assert!(combined.may_yield());
         assert!(combined.is_polymorphic());
     }
 
     #[test]
-    fn test_effect_combine_polymorphic_multiple() {
-        let combined = Effect::polymorphic(0).combine(Effect::polymorphic(1));
+    fn test_signal_combine_polymorphic_multiple() {
+        let combined = Signal::polymorphic(0).combine(Signal::polymorphic(1));
         assert_eq!(
             combined,
-            Effect {
+            Signal {
                 bits: SignalBits::new(0),
                 propagates: 0b11,
             }
         );
 
-        let combined2 = Effect::polymorphic(0).combine(Effect::polymorphic(0));
-        assert_eq!(combined2, Effect::polymorphic(0));
+        let combined2 = Signal::polymorphic(0).combine(Signal::polymorphic(0));
+        assert_eq!(combined2, Signal::polymorphic(0));
     }
 
     #[test]
-    fn test_effect_combine_all() {
+    fn test_signal_combine_all() {
         assert_eq!(
-            Effect::combine_all([Effect::inert(), Effect::inert(), Effect::inert()]),
-            Effect::inert()
+            Signal::combine_all([Signal::inert(), Signal::inert(), Signal::inert()]),
+            Signal::inert()
         );
         assert_eq!(
-            Effect::combine_all([Effect::inert(), Effect::yields(), Effect::inert()]),
-            Effect::yields()
+            Signal::combine_all([Signal::inert(), Signal::yields(), Signal::inert()]),
+            Signal::yields()
         );
     }
 
     #[test]
     fn test_may_suspend() {
-        assert!(!Effect::inert().may_suspend());
-        assert!(!Effect::errors().may_suspend());
-        assert!(Effect::yields().may_suspend());
-        assert!(Effect::polymorphic(0).may_suspend());
-        assert!(Effect {
+        assert!(!Signal::inert().may_suspend());
+        assert!(!Signal::errors().may_suspend());
+        assert!(Signal::yields().may_suspend());
+        assert!(Signal::polymorphic(0).may_suspend());
+        assert!(Signal {
             bits: SIG_DEBUG,
             propagates: 0,
         }
@@ -324,34 +324,34 @@ mod tests {
 
     #[test]
     fn test_may_yield() {
-        assert!(!Effect::inert().may_yield());
-        assert!(Effect::yields().may_yield());
-        assert!(!Effect::errors().may_yield());
+        assert!(!Signal::inert().may_yield());
+        assert!(Signal::yields().may_yield());
+        assert!(!Signal::errors().may_yield());
     }
 
     #[test]
     fn test_may_error() {
-        assert!(!Effect::inert().may_error());
-        assert!(Effect::errors().may_error());
-        assert!(!Effect::yields().may_error());
-        assert!(Effect::yields_errors().may_error());
+        assert!(!Signal::inert().may_error());
+        assert!(Signal::errors().may_error());
+        assert!(!Signal::yields().may_error());
+        assert!(Signal::yields_errors().may_error());
 
         // Combining errors
-        let combined = Effect::inert().combine(Effect::errors());
+        let combined = Signal::inert().combine(Signal::errors());
         assert!(combined.may_error());
         assert!(!combined.may_suspend());
     }
 
     #[test]
     fn test_may_ffi() {
-        assert!(!Effect::inert().may_ffi());
-        assert!(Effect::ffi().may_ffi());
-        assert!(Effect::ffi_errors().may_ffi());
+        assert!(!Signal::inert().may_ffi());
+        assert!(Signal::ffi().may_ffi());
+        assert!(Signal::ffi_errors().may_ffi());
     }
 
     #[test]
     fn test_ffi_errors() {
-        let e = Effect::ffi_errors();
+        let e = Signal::ffi_errors();
         assert!(e.may_ffi());
         assert!(e.may_error());
         assert!(!e.may_yield());
@@ -361,28 +361,28 @@ mod tests {
 
     #[test]
     fn test_is_polymorphic() {
-        assert!(!Effect::inert().is_polymorphic());
-        assert!(Effect::polymorphic(0).is_polymorphic());
+        assert!(!Signal::inert().is_polymorphic());
+        assert!(Signal::polymorphic(0).is_polymorphic());
     }
 
     #[test]
-    fn test_effect_display() {
-        assert_eq!(format!("{}", Effect::inert()), "inert");
-        assert_eq!(format!("{}", Effect::yields()), "yields");
-        assert_eq!(format!("{}", Effect::errors()), "inert+errors");
-        assert_eq!(format!("{}", Effect::yields_errors()), "yields+errors");
-        assert_eq!(format!("{}", Effect::polymorphic(0)), "polymorphic(0)");
+    fn test_signal_display() {
+        assert_eq!(format!("{}", Signal::inert()), "inert");
+        assert_eq!(format!("{}", Signal::yields()), "yields");
+        assert_eq!(format!("{}", Signal::errors()), "inert+errors");
+        assert_eq!(format!("{}", Signal::yields_errors()), "yields+errors");
+        assert_eq!(format!("{}", Signal::polymorphic(0)), "polymorphic(0)");
         assert_eq!(
-            format!("{}", Effect::polymorphic_errors(0)),
+            format!("{}", Signal::polymorphic_errors(0)),
             "polymorphic(0)+errors"
         );
-        assert_eq!(format!("{}", Effect::ffi()), "inert+ffi");
-        assert_eq!(format!("{}", Effect::ffi_errors()), "inert+errors+ffi");
+        assert_eq!(format!("{}", Signal::ffi()), "inert+ffi");
+        assert_eq!(format!("{}", Signal::ffi_errors()), "inert+errors+ffi");
     }
 
     #[test]
     fn test_propagated_params() {
-        let e = Effect {
+        let e = Signal {
             bits: SignalBits::new(0),
             propagates: 0b101, // params 0 and 2
         };
@@ -391,15 +391,15 @@ mod tests {
     }
 
     #[test]
-    fn test_effect_is_copy() {
-        let e = Effect::yields();
+    fn test_signal_is_copy() {
+        let e = Signal::yields();
         let e2 = e; // Copy
         assert_eq!(e, e2);
     }
 
     #[test]
     fn test_constants() {
-        assert_eq!(Effect::INERT, Effect::inert());
-        assert_eq!(Effect::YIELDS, Effect::yields());
+        assert_eq!(Signal::INERT, Signal::inert());
+        assert_eq!(Signal::YIELDS, Signal::yields());
     }
 }

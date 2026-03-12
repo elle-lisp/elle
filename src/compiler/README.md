@@ -38,15 +38,15 @@ vm.execute(&result.bytecode)?;
 This goes through `Syntax` → `HIR` → `LIR` → `Bytecode` with proper binding
 resolution, capture analysis, and source location tracking.
 
-## Effects
+## Signals (Static)
 
-The `Effect` type (in `src/effects/`) tracks computational effects:
+The `Signal` type (in `src/signals/`) tracks static signals:
 
-- `Inert` - no side effects, can be optimized
+- `Inert` - no signals emitted, can be optimized
 - `Yields` - may yield (for coroutines)
-- `Polymorphic` - effect depends on arguments
+- `Polymorphic` - signal depends on arguments
 
-Effects are inferred during HIR analysis and propagate upward. A function
+Signals are inferred during HIR analysis and propagate upward. A function
 calling a `Yields` function is itself `Yields`.
 
 ## See Also

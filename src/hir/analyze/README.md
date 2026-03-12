@@ -1,6 +1,6 @@
 # HIR Analysis
 
-The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving all variable references, computing closure captures, and inferring effects.
+The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving all variable references, computing closure captures, and inferring signals.
 
 ## What Analysis Does
 
@@ -10,7 +10,7 @@ The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving al
 
 3. **Mutation Tracking**: Variables modified with `set` are marked as mutated. Combined with capture information, this determines which variables need lbox boxing for correct semantics.
 
-4. **Effect Inference**: Each expression is tagged with its effect (`Inert`, `Yields`, or `Polymorphic`). Effects propagate upward through the tree.
+4. **Signal Inference**: Each expression is tagged with its signal (`Inert`, `Yields`, or `Polymorphic`). Signals propagate upward through the tree.
 
 ## Scope Rules
 
@@ -29,7 +29,7 @@ The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving al
 | [`destructure.rs`](destructure.rs) | Destructuring pattern analysis |
 | [`lambda.rs`](lambda.rs) | Lambda/fn analysis with captures |
 | [`special.rs`](special.rs) | Special forms: `match`, `yield` |
-| [`call.rs`](call.rs) | Call analysis and effect tracking |
+| [`call.rs`](call.rs) | Call analysis and signal tracking |
 
 ## See Also
 

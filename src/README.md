@@ -16,12 +16,12 @@ Source locations flow through the entire pipeline, enabling precise error messag
 |--------|---------|
 | `reader` | Lexing and parsing S-expressions to `Syntax` trees |
 | `syntax` | Syntax types, macro expansion, hygiene via scope sets |
-| `hir` | Binding resolution, capture analysis, effect inference |
+| `hir` | Binding resolution, capture analysis, signal inference |
 | `lir` | SSA form with virtual registers and basic blocks |
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution engine and builtin documentation |
 | `value` | Runtime value representation (NaN-boxed 8-byte values): LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
-| `effects` | Effect type system (`Inert`, `Yields`, `Polymorphic`) |
+| `signals` | Signal type system (`Signal` struct with `bits` and `propagates`) |
 | `lint` | Diagnostic types and static analysis rules |
 | `symbols` | Symbol table and IDE feature support |
 | `error` | Error types and source location mapping |
@@ -45,7 +45,7 @@ Source locations flow through the entire pipeline, enabling precise error messag
 
 1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed Value), not symbols.
 2. **Closures capture by value into their environment.** Mutable captures use `LocalLBox`.
-3. **Effects are inferred, not declared.** The `Effect` enum propagates from leaves to root during analysis.
+3. **Signals are inferred, not declared.** The `Signal` type propagates from leaves to root during analysis.
 4. **The VM is stack-based for operands, register-addressed for locals.** Instructions reference registers by index.
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is forbidden.
 

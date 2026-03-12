@@ -6,7 +6,7 @@ Core interpreter and compiler crate. Implements the full Elle pipeline from sour
 
 Provide the complete Elle implementation:
 - Parse S-expressions and expand macros
-- Analyze code for bindings, captures, and effects
+- Analyze code for bindings, captures, and signals
 - Lower to intermediate representations
 - Emit bytecode
 - Execute bytecode on a register-based VM
@@ -29,12 +29,12 @@ Provide the complete Elle implementation:
 |--------|---------|
 | `reader` | Lexing and parsing to `Syntax` |
 | `syntax` | Syntax types, macro expansion |
-| `hir` | Binding resolution, capture analysis, effect inference, linting |
+| `hir` | Binding resolution, capture analysis, signal inference, linting |
 | `lir` | SSA form with virtual registers, basic blocks, source tracking |
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed) with types: LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
-| `effects` | Effect type system (`Inert`, `Yields`, `Polymorphic`) |
+| `signals` | Signal type system (`Signal` struct with `bits` and `propagates`) |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
 | `error` | Error types and source location mapping |
@@ -69,7 +69,7 @@ Source locations flow through the entire pipeline: Syntax spans â†’ HIR spans â†
 
 1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed Value), not symbols.
 2. **Closures capture by value into their environment.** Mutable captures use `LocalLBox`.
-3. **Effects are inferred, not declared.** The `Effect` enum propagates from leaves to root during analysis.
+3. **Signals are inferred, not declared.** The `Signal` struct propagates from leaves to root during analysis.
 4. **The VM is stack-based for operands, register-addressed for locals.** Instructions reference registers by index.
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is forbidden.
 

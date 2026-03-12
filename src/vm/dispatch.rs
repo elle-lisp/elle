@@ -437,24 +437,24 @@ impl VM {
                 Instruction::IsSetMut => {
                     types::handle_is_set_mut(self);
                 }
-                Instruction::CheckEffectBound => {
+                Instruction::CheckSignalBound => {
                     // Read u32 as two u16s (low half first, then high half)
                     let lo = self.read_u16(bc, &mut ip) as u32;
                     let hi = self.read_u16(bc, &mut ip) as u32;
                     let allowed_bits = lo | (hi << 16);
                     let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
                     if let Some(closure) = val.as_closure() {
-                        let effect_bits = closure.effect().bits.0;
-                        let excess = effect_bits & !allowed_bits;
+                        let signal_bits = closure.signal().bits.0;
+                        let excess = signal_bits & !allowed_bits;
                         if excess != 0 {
                             let registry =
-                                crate::effects::registry::global_registry().lock().unwrap();
+                                crate::signals::registry::global_registry().lock().unwrap();
                             let excess_str = registry
                                 .format_signal_bits(crate::value::fiber::SignalBits(excess));
                             let allowed_str = registry
                                 .format_signal_bits(crate::value::fiber::SignalBits(allowed_bits));
                             let err = crate::value::error_val(
-                                "effect-violation",
+                                "signal-violation",
                                 format!(
                                     "restrict: closure may emit {} but parameter is restricted to {}",
                                     excess_str, allowed_str
@@ -464,7 +464,7 @@ impl VM {
                         }
                     } else {
                         // Non-closure values (primitives, etc.) are inert — they pass
-                        // any effect bound check. Only closures carry effect metadata.
+                        // any signal bound check. Only closures carry signal metadata.
                     }
                 }
             }

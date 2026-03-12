@@ -1,8 +1,8 @@
-//! Special forms: yield, match, restrict
+//! Special forms: yield, match, silence
 
 use super::*;
-use crate::effects::registry;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
+use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 
 /// Callback type for resolving variable patterns.
@@ -11,43 +11,43 @@ type ResolveVar<'a> =
     dyn Fn(&mut Analyzer<'_>, &str, &[ScopeId], &Span) -> Result<HirPattern, String> + 'a;
 
 impl<'a> Analyzer<'a> {
-    /// Analyze a `(restrict ...)` form.
+    /// Analyze a `(silence ...)` form.
     ///
-    /// restrict is a declaration, not an expression. It must appear inside
+    /// silence is a declaration, not an expression. It must appear inside
     /// a lambda body. It accumulates into `current_param_bounds` and
     /// `current_declared_ceiling`, which `analyze_lambda` reads after
     /// analyzing the body.
     ///
     /// Forms:
-    /// - `(restrict)` — function-level ceiling = inert
-    /// - `(restrict :kw ...)` — function-level ceiling with specific signals
-    /// - `(restrict param)` — parameter bound = inert
-    /// - `(restrict param :kw ...)` — parameter bound with specific signals
-    pub(crate) fn analyze_restrict(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+    /// - `(silence)` — function-level ceiling = inert
+    /// - `(silence :kw ...)` — function-level ceiling with specific signals
+    /// - `(silence param)` — parameter bound = inert
+    /// - `(silence param :kw ...)` — parameter bound with specific signals
+    pub(crate) fn analyze_silence(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
-                "{}: restrict must appear inside a function body",
+                "{}: silence must appear inside a function body",
                 span
             ));
         }
 
         let args = &items[1..];
         if args.is_empty() {
-            // (restrict) — function-level ceiling = inert
-            self.current_declared_ceiling = Some(Effect::inert());
+            // (silence) — function-level ceiling = inert
+            self.current_declared_ceiling = Some(Signal::inert());
             return Ok(Hir::inert(HirKind::Nil, span));
         }
 
         match &args[0].kind {
             SyntaxKind::Keyword(_) => {
-                // (restrict :kw1 :kw2 ...) — function-level ceiling
+                // (silence :kw1 :kw2 ...) — function-level ceiling
                 let mut bits = 0u32;
                 for arg in args {
                     let kw = match &arg.kind {
                         SyntaxKind::Keyword(k) => k,
                         _ => {
                             return Err(format!(
-                                "{}: restrict: expected keyword, got {}",
+                                "{}: silence: expected keyword, got {}",
                                 arg.span,
                                 arg.kind_label()
                             ));
@@ -56,25 +56,25 @@ impl<'a> Analyzer<'a> {
                     let reg = registry::global_registry().lock().unwrap();
                     let bit_pos = reg.lookup(kw).ok_or_else(|| {
                         format!(
-                            "{}: restrict: effect :{} not registered (unknown effect keyword)",
+                            "{}: silence: signal :{} not registered (unknown signal keyword)",
                             arg.span, kw
                         )
                     })?;
                     bits |= 1 << bit_pos;
                 }
-                self.current_declared_ceiling = Some(Effect {
+                self.current_declared_ceiling = Some(Signal {
                     bits: crate::value::fiber::SignalBits(bits),
                     propagates: 0,
                 });
             }
             SyntaxKind::Symbol(param_name) => {
-                // (restrict param :kw1 :kw2 ...) — parameter-level bound
+                // (silence param :kw1 :kw2 ...) — parameter-level bound
                 let binding = self.find_current_param_binding(param_name, &args[0].span)?;
 
                 let keywords = &args[1..];
                 let bound = if keywords.is_empty() {
-                    // (restrict param) — bound is inert
-                    Effect::inert()
+                    // (silence param) — bound is inert
+                    Signal::inert()
                 } else {
                     let mut bits = 0u32;
                     for kw_syntax in keywords {
@@ -82,7 +82,7 @@ impl<'a> Analyzer<'a> {
                             SyntaxKind::Keyword(k) => k,
                             _ => {
                                 return Err(format!(
-                                    "{}: restrict: expected keyword after parameter name, got {}",
+                                    "{}: silence: expected keyword after parameter name, got {}",
                                     kw_syntax.span,
                                     kw_syntax.kind_label()
                                 ));
@@ -91,13 +91,13 @@ impl<'a> Analyzer<'a> {
                         let reg = registry::global_registry().lock().unwrap();
                         let bit_pos = reg.lookup(kw).ok_or_else(|| {
                             format!(
-                                "{}: restrict: effect :{} not registered (unknown effect keyword)",
+                                "{}: silence: signal :{} not registered (unknown signal keyword)",
                                 kw_syntax.span, kw
                             )
                         })?;
                         bits |= 1 << bit_pos;
                     }
-                    Effect {
+                    Signal {
                         bits: crate::value::fiber::SignalBits(bits),
                         propagates: 0,
                     }
@@ -108,7 +108,7 @@ impl<'a> Analyzer<'a> {
             }
             _ => {
                 return Err(format!(
-                    "{}: restrict: expected keyword or parameter name, got {}",
+                    "{}: silence: expected keyword or parameter name, got {}",
                     args[0].span,
                     args[0].kind_label()
                 ));
@@ -126,7 +126,7 @@ impl<'a> Analyzer<'a> {
             }
         }
         Err(format!(
-            "{}: restrict: '{}' is not a parameter of this function",
+            "{}: silence: '{}' is not a parameter of this function",
             span, name
         ))
     }
@@ -139,12 +139,12 @@ impl<'a> Analyzer<'a> {
         let value = self.analyze_expr(&items[1])?;
 
         // Track that this lambda has a direct yield (not from calling a parameter)
-        self.current_effect_sources.has_direct_yield = true;
+        self.current_signal_sources.has_direct_yield = true;
 
         Ok(Hir::new(
             HirKind::Yield(Box::new(value)),
             span,
-            Effect::yields(), // Yield always has Yields effect
+            Signal::yields(), // Yield always has Yields signal
         ))
     }
 
@@ -157,7 +157,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let value = self.analyze_expr(&items[1])?;
-        let mut effect = value.effect;
+        let mut signal = value.signal;
         let mut arms = Vec::new();
 
         for arm in &items[2..] {
@@ -185,14 +185,14 @@ impl<'a> Analyzer<'a> {
             // Check for guard
             let (guard, body_idx) = if parts.len() >= 3 && parts[1].as_symbol() == Some("when") {
                 let guard_expr = self.analyze_expr(&parts[2])?;
-                effect = effect.combine(guard_expr.effect);
+                signal = signal.combine(guard_expr.signal);
                 (Some(guard_expr), 3)
             } else {
                 (None, 1)
             };
 
             let body = self.analyze_body(&parts[body_idx..], span.clone())?;
-            effect = effect.combine(body.effect);
+            signal = signal.combine(body.signal);
             self.pop_scope();
 
             arms.push((pattern, guard, body));
@@ -212,7 +212,7 @@ impl<'a> Analyzer<'a> {
                 arms,
             },
             span,
-            effect,
+            signal,
         ))
     }
 

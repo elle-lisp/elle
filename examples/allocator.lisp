@@ -126,7 +126,7 @@
 # 6. Scope allocation — compile-time analysis
 # ========================================
 #
-# Note: let bodies that call polymorphic-effect functions (map, filter, fold
+# Note: let bodies that call polymorphic-signal functions (map, filter, fold
 # with callbacks) or user-defined functions cannot scope-allocate — the
 # compiler cannot prove the result is immediate without interprocedural analysis.
 

@@ -41,7 +41,7 @@
 //! user-provided closures (`eval`, `arena/allocs`) do not handle yield —
 //! they propagate the signal upward, which will confuse the outer execution
 //! context. Closures passed to these primitives must be non-yielding (Pure
-//! effect). This is not currently enforced at the call site.
+//! signal). This is not currently enforced at the call site.
 //!
 //! ### Rules for new callers
 //!

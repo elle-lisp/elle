@@ -11,7 +11,7 @@ A comprehensive reference for Elle's core language features, data types, control
 5. [Scoping Rules](#scoping-rules)
 6. [Functions and Closures](#functions-and-closures)
 7. [Control Flow](#control-flow)
-8. [Exception Handling](#exception-handling)
+8. [Error Handling](#error-handling)
 9. [Collections](#collections)
 10. [Standard Library Overview](#standard-library-overview)
 11. [Advanced Topics](#advanced-topics)
@@ -26,7 +26,7 @@ Elle is a Lisp dialect implemented in Rust with a focus on performance and expre
 
 - **First-class functions** and closures with proper lexical scoping
 - **Rich data types** including lists, vectors, tables, and structs
-- **Modern exception handling** with try-catch-finally
+- **Signal-based error handling** with try-catch-finally built on fibers
 - **Comprehensive standard library** for strings, math, file I/O, and more
 - **Bytecode compilation** for efficient execution
 - **FFI (Foreign Function Interface)** for calling C libraries
@@ -628,44 +628,44 @@ Inner functions access outer scope:
 
 ---
 
-## Effects and Restrictions
+## Signals and Restrictions
 
-### `effect` — Register User-Defined Effects
+### `signal` — Register User-Defined Signals
 
-Registers a new user-defined effect keyword. See `docs/effects.md` for full details.
+Registers a new user-defined signal keyword. See `docs/signals.md` for full details.
 
 ```janet
-(effect :heartbeat)    # Register :heartbeat effect
-(effect :rate-limit)   # Register :rate-limit effect
+(signal :heartbeat)    # Register :heartbeat signal
+(signal :rate-limit)   # Register :rate-limit signal
 ```
 
-### `restrict` — Declare Effect Bounds
+### `silence` — Declare Signal Bounds
 
-Declares effect bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
+Declares signal bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
 
 ```janet
 # Function-level: this function is inert
 (fn (x y)
-  (restrict)
+  (silence)
   (+ x y))
 
 # Function-level: this function may only error
 (fn (x)
-  (restrict :error)
+  (silence :error)
   (if (< x 0) (error "negative") x))
 
 # Parameter-level: parameter f must be inert
 (fn (f x)
-  (restrict f)
+  (silence f)
   (f x))
 
 # Parameter-level: parameter f may only error
 (fn (f x)
-  (restrict f :error)
+  (silence f :error)
   (f x))
 ```
 
-See `docs/effects.md` for full semantics and examples.
+See `docs/signals.md` for full semantics and examples.
 
 ---
 
@@ -884,7 +884,7 @@ result  # ⟹ "early exit"
 
 ### forever - Infinite Loop
 
-`forever` creates an infinite loop that must be exited via `break` or exception:
+`forever` creates an infinite loop that must be exited via `break`:
 
 ```janet
 (forever body...)
@@ -936,21 +936,28 @@ Elle uses functional iteration rather than imperative loops. Use higher-order fu
 
 ---
 
-## Exception Handling
+## Error Handling
+
+Errors in Elle are signals — values emitted on the `:error` bit via fiber
+primitives. There is no `throw`, no `raise`, no exception hierarchy. The
+stdlib convention for error values is `{:error :keyword :message "..."}`,
+but any value can be signalled as an error. See `docs/signals.md` for the
+full signal system design.
 
 ### try-catch - Basic Error Handling
 
-`try` evaluates code and `catch` handles exceptions:
+`try` evaluates code and `catch` handles errors:
 
 ```janet
 (try
   (/ 10 0)
-  (catch (e)
+  (catch e
     (display "Error caught!")
     (newline)))
 ```
 
-The catch block receives the error value.
+The catch block receives the error value (by convention a struct like
+`{:error :division-by-zero :message "..."}`).
 
 ### finally - Cleanup Code
 
@@ -960,8 +967,8 @@ The catch block receives the error value.
 (try
   (display "Attempting operation")
   (newline)
-  (throw "Something went wrong")
-  (catch (e)
+  (error {:error :failed :message "Something went wrong"})
+  (catch e
     (display "Caught: ")
     (display e)
     (newline))
@@ -970,32 +977,49 @@ The catch block receives the error value.
     (newline)))
 ```
 
-Output:
-```
-Attempting operation
-Caught: Something went wrong
-Cleanup code runs here
-```
+### protect and defer
 
-### Creating and Throwing Exceptions
-
-Use `exception` to create exception values and `throw` to signal them:
+`protect` runs cleanup code regardless of outcome:
 
 ```janet
-(var my-error (exception "Invalid input" (@struct "code" 42)))
-(throw my-error)
-
-# Or throw directly:
-(throw (exception "Something failed" nil))
+(protect
+  (do-work)
+  (cleanup))  # always runs
 ```
 
-Get information from exceptions:
+`defer` registers cleanup to run when the current scope exits:
 
 ```janet
-(var e (exception "Test error" (@struct "context" "validation")))
-(exception-message e) ⟹ "Test error"
-(exception-data e)    ⟹ @{context validation}
+(let ((f (open-file "data.txt")))
+  (defer (close-file f))
+  (process f))  # close-file runs when scope exits, even on error
 ```
+
+### Signalling Errors
+
+Use `error` to signal an error value:
+
+```janet
+# Convention: struct with :error and :message keys
+(error {:error :bad-input :message "expected a number"})
+
+# Any value works — the signal system doesn't care about the shape
+(error "something went wrong")
+(error 42)
+```
+
+### Handling Errors Explicitly
+
+Use `protect` to inspect success vs. failure directly:
+
+```janet
+(let (([ok? val] (protect (/ 10 0))))
+  (if ok?
+    val
+    (begin (display "Error: ") (display val) (newline))))
+```
+
+`protect` returns `[true result]` on success and `[false error-value]` on error.
 
 ---
 
@@ -1320,9 +1344,9 @@ Use try-catch for expected error cases:
 ```janet
 (try
   (risky-operation)
-  (catch (e)
+  (catch e
     (display "Error: ")
-    (display (exception-message e))
+    (display (get e :message))
     (newline)))
 ```
 
@@ -1393,7 +1417,7 @@ Make it clear which outer variables a function uses:
 ## Further Reading
 
 - **types.md**: Complete type system reference
-- **effects.md**: Effect system and type inference
+- **signals.md**: Signal system and type inference
 - **macros.md**: Macro system and metaprogramming
 - **fibers.md**: Coroutines and fiber-based concurrency
 - **examples/**: Browse example programs for common patterns

@@ -250,7 +250,7 @@ fn test_vm_uses_location_map_for_stack_trace() {
 
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
 
     // Compile a simple expression
     let source = "(+ 1 2)";

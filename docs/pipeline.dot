@@ -26,7 +26,7 @@ digraph pipeline {
 
     expand  [label=<Expander<br/><font point-size="9" color="#666666">macro expansion, scope sets</font>>]
 
-    analyze [label=<Analyzer<br/><font point-size="9" color="#666666">bindings, effects, captures, mutations</font>>]
+    analyze [label=<Analyzer<br/><font point-size="9" color="#666666">bindings, signals, captures, mutations</font>>]
 
     lower   [label=<Lowerer<br/><font point-size="9" color="#666666">escape analysis, region instructions</font>>]
 
@@ -46,7 +46,7 @@ digraph pipeline {
 
     // ── Fixpoint loop ──────────────────────────────────────────────
 
-    analyze -> analyze [label=<fixpoint<br/><font point-size="8">(effects)</font>>
+    analyze -> analyze [label=<fixpoint<br/><font point-size="8">(signals)</font>>
                         style=dashed color="#cc6600"
                         fontcolor="#cc6600" constraint=false]
 

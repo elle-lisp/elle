@@ -53,7 +53,7 @@ For any test you need to write, answer these questions in order:
 
 **1. Does the test need access to Rust types, APIs, or compiler internals?**
 
-Examples: inspecting `HirKind` variants, checking `Effect` values, calling
+Examples: inspecting `HirKind` variants, checking `Signal` values, calling
 `analyze()` or `compile()` directly, testing `Value` constructors, examining
 `Lexer`/`Reader` output, verifying bytecode disassembly, testing JIT internals.
 
@@ -124,7 +124,7 @@ value. Otherwise, write Elle test scripts.
 |------|----------|------|
 | Access to private items (`pub(crate)` or less) | Inline `#[cfg(test)]` in the source file | Testing implementation details of a single module |
 | Access to public Rust APIs, no pipeline | `tests/unittests/` | Testing `Value`, `SymbolTable`, primitives via Rust calls |
-| Access to intermediate pipeline stages | `tests/integration/` | Testing `analyze()`, `compile()`, HIR/LIR structure, effects |
+| Access to intermediate pipeline stages | `tests/integration/` | Testing `analyze()`, `compile()`, HIR/LIR structure, signals |
 | Compile-time rejection | `tests/integration/` | Code that must not compile |
 | Runtime error message inspection | `tests/integration/` | Substring matching on error strings |
 | VM internals (scope stack, frames) | `tests/vm/` | Below integration, above unit |
@@ -251,7 +251,7 @@ case counts uniformly without modifying test files.
 
 | Cost per case | Default cases | Example |
 |---------------|---------------|---------|
-| Cheap (pure Rust, no eval) | 1000 | NaN-boxing roundtrips, effect combine |
+| Cheap (pure Rust, no eval) | 1000 | NaN-boxing roundtrips, signal combine |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals, fibers, coroutines) | 10–50 | Pipeline properties, fiber determinism |
 
@@ -312,7 +312,7 @@ These tests cannot be expressed in Elle and must remain in Rust:
 | Error message inspection | `error_reporting.rs` | Substring matching on error strings |
 | CLI subprocess tests | `dispatch.rs` (7) | Testing exit codes and subprocess behavior |
 | Float precision | `core.rs` | Testing exact float values (NaN, Inf, precision) |
-| Type introspection | `effect_enforcement.rs`, `hir_debug.rs`, `lir_debug.rs` | Inspecting HIR/LIR/Effect types |
+| Type introspection | `signal_enforcement.rs`, `hir_debug.rs`, `lir_debug.rs` | Inspecting HIR/LIR/Signal types |
 | Pipeline internals | `pipeline.rs`, `pipeline_property.rs`, `new_pipeline_property.rs` | Intermediate pipeline stages |
 | LSP protocol | `lsp.rs` | Language server protocol implementation |
 | JIT internals | `jit.rs` | JIT compilation pipeline |
@@ -444,7 +444,7 @@ This gives access to private items. No registration needed.
 ## Naming conventions
 
 - Test files: lowercase, hyphenated concepts joined with underscores
-  (e.g., `closures_and_lambdas.rs`, `effect_enforcement.rs`)
+  (e.g., `closures_and_lambdas.rs`, `signal_enforcement.rs`)
 - Test functions: `test_` prefix for example-based, descriptive name for
   property tests (e.g., `fn int_roundtrip(...)`, `fn add_commutative(...)`)
 - Property test names describe the invariant, not the implementation

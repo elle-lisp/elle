@@ -129,7 +129,7 @@
 # Values allocated in a child fiber survive across yield/resume cycles
 # because the FiberHeap persists on the Fiber struct.
 (let* ((f (fiber/new (fn ()
-             (fiber/signal 2 (cons 1 2))
+             (emit 2 (cons 1 2))
              (cons 3 4))
            2))
        (first-val (fiber/resume f))
@@ -160,7 +160,7 @@
 # test_yielding_child_yields_string
 # A yielding child allocates a string and yields it.
 # The parent should be able to read the string after resume.
-(let* ((f (fiber/new (fn () (fiber/signal 2 "hello")) 2))
+(let* ((f (fiber/new (fn () (emit 2 "hello")) 2))
        (result (fiber/resume f)))
   (assert-string-eq result "hello" "yielding child yields string"))
 
@@ -174,8 +174,8 @@
 # test_yield_resume_multiple_cycles
 # Fiber yields twice (two resume cycles). Both values readable.
 (let* ((f (fiber/new (fn ()
-             (fiber/signal 2 "first")
-             (fiber/signal 2 "second")
+             (emit 2 "first")
+             (emit 2 "second")
              "done")
            2))
        (v1 (fiber/resume f))
@@ -188,27 +188,27 @@
 # test_abc_chain_yield_through
 # A→B→C: C yields a string, B catches and re-yields to A.
 # Tests transitive shared_alloc propagation.
-(let* ((c (fiber/new (fn () (fiber/signal 2 "from-c")) 2))
+(let* ((c (fiber/new (fn () (emit 2 "from-c")) 2))
        (b (fiber/new (fn ()
              (let* ((val (fiber/resume c)))
-               (fiber/signal 2 val)))
+               (emit 2 val)))
            2))
        (a-result (fiber/resume b)))
   (assert-string-eq a-result "from-c" "abc chain yield through"))
 
 # test_root_child_yield
 # Root resumes a yielding child. Child yields a string.
-(let* ((f (fiber/new (fn () (fiber/signal 2 "from-child")) 2))
+(let* ((f (fiber/new (fn () (emit 2 "from-child")) 2))
        (result (fiber/resume f)))
   (assert-string-eq result "from-child" "root child yield"))
 
 # test_root_child_grandchild_yield
 # Root→child→grandchild. Grandchild yields string,
 # child yields it to root.
-(let* ((gc (fiber/new (fn () (fiber/signal 2 "from-gc")) 2))
+(let* ((gc (fiber/new (fn () (emit 2 "from-gc")) 2))
        (child (fiber/new (fn ()
                 (let* ((val (fiber/resume gc)))
-                  (fiber/signal 2 val)))
+                  (emit 2 val)))
               2)))
   (let ((result (fiber/resume child)))
     (assert-string-eq result "from-gc" "root child grandchild yield")))
@@ -218,7 +218,7 @@
 # The yielded string should survive child death because it's
 # in the shared allocator (owned by parent or child).
 (let* ((f (fiber/new (fn ()
-             (fiber/signal 2 "alive")
+             (emit 2 "alive")
              "done")
            2))
        (yielded (fiber/resume f))
@@ -228,9 +228,9 @@
 # test_multi_resume_yield_basic
 # Multiple yields without letrec — tests shared alloc across resumes.
 (let* ((f (fiber/new (fn ()
-              (fiber/signal 2 0)
-              (fiber/signal 2 1)
-              (fiber/signal 2 2))
+              (emit 2 0)
+              (emit 2 1)
+              (emit 2 2))
             2)))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
@@ -243,9 +243,9 @@
 # Yield heap-allocated values across multiple resumes.
 # Tests that shared alloc keeps values alive for the parent.
 (let* ((f (fiber/new (fn ()
-              (fiber/signal 2 "hello")
-              (fiber/signal 2 "world")
-              (fiber/signal 2 "done"))
+              (emit 2 "hello")
+              (emit 2 "world")
+              (emit 2 "done"))
             2)))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
@@ -257,9 +257,9 @@
 # test_multi_resume_yield_mixed_values
 # Yield a mix of immediate and heap values across resumes.
 (let* ((f (fiber/new (fn ()
-              (fiber/signal 2 42)
-              (fiber/signal 2 (list 1 2 3))
-              (fiber/signal 2 "end"))
+              (emit 2 42)
+              (emit 2 (list 1 2 3))
+              (emit 2 "end"))
             2)))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
@@ -272,8 +272,8 @@
 # Parent resumes two different yielding children.
 # Both yield strings. Both readable.
 # Tests owned_shared Vec growth doesn't invalidate earlier pointers.
-(let* ((f1 (fiber/new (fn () (fiber/signal 2 "from-f1")) 2))
-       (f2 (fiber/new (fn () (fiber/signal 2 "from-f2")) 2))
+(let* ((f1 (fiber/new (fn () (emit 2 "from-f1")) 2))
+       (f2 (fiber/new (fn () (emit 2 "from-f2")) 2))
        (v1 (fiber/resume f1))
        (v2 (fiber/resume f2)))
   (assert-string-eq v1 "from-f1" "multiple children: first")
@@ -284,14 +284,14 @@
 # test_yield_immediate_no_shared_alloc_needed
 # Yielding an immediate (int) requires no heap allocation.
 # The shared alloc infrastructure should not interfere.
-(let* ((f (fiber/new (fn () (fiber/signal 2 42)) 2))
+(let* ((f (fiber/new (fn () (emit 2 42)) 2))
        (result (fiber/resume f)))
   (assert-eq result 42 "yield immediate no shared alloc"))
 
 # test_yield_list_parent_traverses
 # Fiber yields a cons list. Parent traverses all elements.
 # The list cells are heap-allocated — they go to shared alloc.
-(let* ((f (fiber/new (fn () (fiber/signal 2 (list 10 20 30))) 2))
+(let* ((f (fiber/new (fn () (emit 2 (list 10 20 30))) 2))
        (lst (fiber/resume f)))
   (assert-eq (first lst) 10 "yield list: first")
   (assert-eq (first (rest lst)) 20 "yield list: second")
@@ -324,7 +324,7 @@
 # Parent cancels a suspended child that has a shared allocator.
 # Mask 3 catches both error (1) and yield (2) so cancel doesn't propagate.
 (let* ((f (fiber/new (fn ()
-              (fiber/signal 2 "yielded")
+              (emit 2 "yielded")
               "never-reached")
             3))
        (v1 (fiber/resume f)))      # child suspends

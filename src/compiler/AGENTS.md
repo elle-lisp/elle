@@ -26,7 +26,7 @@ Bytecode instruction definitions and debug formatting.
 1. **`Instruction` byte values are stable.** Changing them breaks existing
    bytecode. Add new instructions at the end.
 
-2. **Effect inference is conservative.** Unknown calls are `IO`. Only proven
+2. **Signal inference is conservative.** Unknown calls are `IO`. Only proven
    inert code is `Inert`.
 
 ## Key types

@@ -53,9 +53,9 @@
 <!-- analyze -->
 <g id="node4" class="node">
 <title>analyze</title>
-<path fill="#fef7e0" stroke="#333333" stroke-width="1.2" d="M235,-350C235,-350 93,-350 93,-350 87,-350 81,-344 81,-338 81,-338 81,-326 81,-326 81,-320 87,-314 93,-314 93,-314 235,-314 235,-314 241,-314 247,-320 247,-326 247,-326 247,-338 247,-338 247,-344 241,-350 235,-350"/>
+<path fill="#fef7e0" stroke="#333333" stroke-width="1.2" d="M236.5,-350C236.5,-350 91.5,-350 91.5,-350 85.5,-350 79.5,-344 79.5,-338 79.5,-338 79.5,-326 79.5,-326 79.5,-320 85.5,-314 91.5,-314 91.5,-314 236.5,-314 236.5,-314 242.5,-314 248.5,-320 248.5,-326 248.5,-326 248.5,-338 248.5,-338 248.5,-344 242.5,-350 236.5,-350"/>
 <text text-anchor="start" x="143" y="-332.55" font-family="Helvetica,sans-Serif" font-size="11.00">Analyzer</text>
-<text text-anchor="start" x="89" y="-323.45" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#666666">bindings, effects, captures, mutations</text>
+<text text-anchor="start" x="87.5" y="-323.45" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#666666">bindings, signals, captures, mutations</text>
 </g>
 <!-- expand&#45;&gt;analyze -->
 <g id="edge3" class="edge">
@@ -79,10 +79,10 @@
 <!-- analyze&#45;&gt;analyze -->
 <g id="edge7" class="edge">
 <title>analyze&#45;&gt;analyze</title>
-<path fill="none" stroke="#cc6600" stroke-dasharray="5,2" d="M247.32,-338.9C261.88,-337.98 272,-335.68 272,-332 272,-329.38 266.88,-327.47 258.69,-326.24"/>
-<polygon fill="#cc6600" stroke="#cc6600" points="259.13,-322.77 248.83,-325.25 258.43,-329.74 259.13,-322.77"/>
-<text text-anchor="start" x="272" y="-332.95" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#cc6600">fixpoint</text>
-<text text-anchor="start" x="272" y="-324.9" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#cc6600">(effects)</text>
+<path fill="none" stroke="#cc6600" stroke-dasharray="5,2" d="M248.94,-338.87C263.45,-337.93 273.5,-335.64 273.5,-332 273.5,-329.41 268.42,-327.51 260.27,-326.28"/>
+<polygon fill="#cc6600" stroke="#cc6600" points="260.75,-322.81 250.44,-325.28 260.04,-329.78 260.75,-322.81"/>
+<text text-anchor="start" x="273.88" y="-332.95" font-family="Helvetica,sans-Serif" font-size="9.00" fill="#cc6600">fixpoint</text>
+<text text-anchor="start" x="273.5" y="-324.9" font-family="Helvetica,sans-Serif" font-size="8.00" fill="#cc6600">(signals)</text>
 </g>
 <!-- lower -->
 <g id="node5" class="node">

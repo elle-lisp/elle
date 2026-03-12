@@ -20,8 +20,8 @@ locals, transitively through parent's captures, or from globals).
 via `binding.mark_mutated()`. Combined with capture information, this
 determines which variables need lbox boxing for correct semantics.
 
-**Effect Inference**: Each expression is tagged with its effect (`Inert`, `Yields`,
-or `Polymorphic`). Effects propagate upward through the tree.
+**Signal Inference**: Each expression is tagged with its signal (`Inert`, `Yields`,
+or `Polymorphic`). Signals propagate upward through the tree.
 
 ## Example
 

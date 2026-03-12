@@ -22,11 +22,11 @@ mod pipeline_property {
 mod thread_transfer {
     include!("thread_transfer.rs");
 }
-mod effect_enforcement {
-    include!("effect_enforcement.rs");
+mod signal_enforcement {
+    include!("signal_enforcement.rs");
 }
-mod effect_unsoundness {
-    include!("effect_unsoundness.rs");
+mod signal_unsoundness {
+    include!("signal_unsoundness.rs");
 }
 mod jit {
     include!("jit.rs");

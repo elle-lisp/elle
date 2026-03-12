@@ -287,10 +287,10 @@ infrastructure before the need exists would be premature.
 
 The analyzer processes one file at a time. When it encounters `(import ...)`,
 it sees a function call that returns an unknown value. It cannot infer the
-types, arities, or effects of the imported module's exports.
+types, arities, or signals of the imported module's exports.
 
 This means:
-- No cross-file effect tracking (the import call itself has effect `errors()`)
+- No cross-file signal tracking (the import call itself has signal `errors()`)
 - No cross-file arity checking
 - No completion or hover for imported symbols in the LSP (the LSP operates on
   a single document)
