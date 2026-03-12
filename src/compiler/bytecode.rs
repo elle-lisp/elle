@@ -227,12 +227,12 @@ pub enum Instruction {
     /// Type check: is value a mutable set?
     IsSetMut,
 
-    /// Check that a closure's effect satisfies a bound.
+    /// Check that a closure's signal satisfies a bound.
     /// Operand: u32 allowed_bits.
     /// Pops the value from the stack. If it's a closure whose
-    /// `effect.bits & !allowed_bits != 0`, signals `:error`.
+    /// `signal.bits & !allowed_bits != 0`, signals `:error`.
     /// If the value is not a closure, signals `:error`.
-    CheckEffectBound,
+    CheckSignalBound,
 }
 
 /// Compiled bytecode with constants

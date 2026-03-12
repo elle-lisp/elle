@@ -112,7 +112,7 @@ State machine:
 
 ## Primitives
 
-| Primitive | Effect | Purpose |
+| Primitive | Signal | Purpose |
 |-----------|--------|---------|
 | `io-request?` | inert | Check if value is an I/O request |
 | `io-backend?` | inert | Check if value is an I/O backend |

@@ -4,9 +4,9 @@ JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. Functions with `Effect::inert()`
-or `Effect::yields()` are JIT candidates. Polymorphic functions (where
-`effect.propagates != 0`) are rejected. Yielding functions use side-exit:
+Compile `LirFunction` to native x86_64 code. Functions with `Signal::inert()`
+or `Signal::yields()` are JIT candidates. Polymorphic functions (where
+`signal.propagates != 0`) are rejected. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
 `YIELD_SENTINEL` to the interpreter.
 
@@ -63,7 +63,7 @@ The JIT was built incrementally:
 |-------|-------|
 | Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
 | Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
-| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), globals (`LoadGlobal`, `StoreGlobal`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. |
+| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. (`LoadGlobal`/`StoreGlobal` were included at this phase but have since been removed — globals are now depth-0 upvalues.) |
 | Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
 
 ## Phase 4 Scope (Current)
@@ -75,7 +75,7 @@ Supported instructions:
 - **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
 - **LBoxes**: `MakeLBox`, `LoadLBox`, `StoreLBox`, `StoreCapture`
-- **Globals**: `LoadGlobal`, `StoreGlobal`
+- **Globals**: Accessed as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`; `LoadGlobal`/`StoreGlobal` are dead instructions (unreachable in VM dispatch)
 - **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`
 
@@ -208,17 +208,17 @@ go through `elle_jit_call` as before.
 
 ## Fiber Integration and Yield Side-Exit
 
-The effect system and JIT side-exit mechanism enable fibers and JIT to coexist:
+The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
-  `fiber/bits`, `fiber/mask` have `Effect::errors()` — `may_suspend()` is
+  `fiber/bits`, `fiber/mask` have `Signal::errors()` — `may_suspend()` is
   false, so closures calling them can be JIT-compiled. `fiber?` has
-  `Effect::inert()`. These all return `SIG_OK` or `SIG_ERROR`, which
+  `Signal::inert()`. These all return `SIG_OK` or `SIG_ERROR`, which
   `jit_handle_primitive_signal` handles.
 
-- **JIT-excluded fiber primitives**: `fiber/resume` and `fiber/signal` have
-  `Effect::yields_errors()` — `may_suspend()` is true. Any closure calling
-  them transitively inherits this effect, so the JIT gate rejects them.
+- **JIT-excluded fiber primitives**: `fiber/resume` and `emit` have
+  `Signal::yields_errors()` — `may_suspend()` is true. Any closure calling
+  them transitively inherits this signal, so the JIT gate rejects them.
 
 - **Yield side-exit**: When a JIT-compiled function reaches a `Yield` terminator,
   it calls `elle_jit_yield` (a runtime helper) which:
@@ -246,7 +246,7 @@ The effect system and JIT side-exit mechanism enable fibers and JIT to coexist:
 
 - **Catch-all panic**: `jit_handle_primitive_signal` panics on unexpected
   signal bits (not `SIG_OK`, `SIG_ERROR`, `SIG_HALT`, `SIG_YIELD`, or `SIG_QUERY`).
-  Reaching this means the effect system has a bug — a polymorphic primitive
+  Reaching this means the signal system has a bug — a polymorphic primitive
   was called from JIT code.
 
 ## JIT-to-JIT Calling
@@ -270,16 +270,16 @@ Key details:
 ## Error Handling in Dispatch
 
 All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`,
-`elle_jit_load_global`) set `vm.fiber.signal` to `(SIG_ERROR, condition)` on
-error and return `TAG_NIL`. The JIT checks for pending errors after each call
-via `elle_jit_has_exception` (which checks `fiber.signal` for `SIG_ERROR`).
+`elle_jit_load_global`) set `vm.fiber.signal` to `(SIG_ERROR, error_value)` on
+error and return `TAG_NIL`. The JIT checks for pending error signals after each
+call via `elle_jit_has_exception` (which checks `fiber.signal` for `SIG_ERROR`).
 No errors are silently swallowed.
 
 ## Invariants
 
 1. **Only non-polymorphic functions.** `JitCompiler::compile` returns
-   `JitError::Polymorphic` for functions where `effect.propagates != 0` (polymorphic).
-   Functions with `Effect::inert()` or `Effect::yields()` are accepted.
+   `JitError::Polymorphic` for functions where `signal.propagates != 0` (polymorphic).
+   Functions with `Signal::inert()` or `Signal::yields()` are accepted.
    Errors (SIG_ERROR) and FFI (SIG_FFI) are fine — they don't require frame
    snapshot/restore.
 
@@ -385,7 +385,7 @@ YieldPointMeta {
 ### Call Site Recording
 
 During bytecode emission, when a `LirInstr::Call` is encountered in a function
-where `effect.may_suspend()`:
+where `signal.may_suspend()`:
 1. The emitter records the bytecode position after the Call opcode as `resume_ip`
 2. The emitter captures the operand stack state (after popping func/args, before pushing result) as `stack_regs`
 3. A `CallSiteInfo` is pushed to `Emitter.call_sites`
@@ -398,5 +398,5 @@ resume IP and stack state.
 
 - Phase 5:
    - Inline type checks for arithmetic fast paths
-   - JIT-native exception handling (setjmp/longjmp or Cranelift exception tables)
+   - JIT-native signal handling (setjmp/longjmp or Cranelift exception tables)
    - Benchmarks and profiling

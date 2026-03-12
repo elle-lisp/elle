@@ -415,7 +415,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
         let syntax = Syntax::new(SyntaxKind::Int(42), span);
         let result = expander.expand(syntax.clone(), &mut symbols, &mut vm);
@@ -429,7 +429,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
             Syntax::new(SyntaxKind::Symbol("+".to_string()), span.clone()),
@@ -448,7 +448,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
             Syntax::new(SyntaxKind::Int(1), span.clone()),
@@ -466,7 +466,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 10, 1, 1);
         let items = vec![
             Syntax::new(SyntaxKind::Int(1), span.clone()),
@@ -484,7 +484,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
         let inner = Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone());
         let syntax = Syntax::new(SyntaxKind::Quote(Box::new(inner)), span);
@@ -499,7 +499,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
 
         // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
@@ -558,7 +558,7 @@ mod tests {
         let mut expander = Expander::new();
         let mut symbols = crate::symbol::SymbolTable::new();
         let mut vm = crate::vm::VM::new();
-        let _effects = crate::primitives::register_primitives(&mut vm, &mut symbols);
+        let _signals = crate::primitives::register_primitives(&mut vm, &mut symbols);
         let span = Span::new(0, 5, 1, 1);
 
         let template = Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone());

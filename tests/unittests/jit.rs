@@ -326,16 +326,16 @@ mod jit_tests {
     // =========================================================================
     // Fiber + JIT verification tests
     //
-    // The effect system prevents suspending closures from being JIT-compiled.
+    // The signal system prevents suspending closures from being JIT-compiled.
     // Non-suspending fiber primitives (fiber/new, fiber?, fiber/status, etc.)
     // return SIG_OK/SIG_ERROR which the JIT handles. Suspending primitives
-    // (fiber/resume, fiber/signal) propagate may_suspend through the effect
+    // (fiber/resume, fiber/signal) propagate may_suspend through the signal
     // system, so closures calling them are never JIT candidates.
     // =========================================================================
 
     #[test]
     fn test_jit_fiber_predicate_in_hot_loop() {
-        // fiber? has Effect::inert() — should be JIT-compilable.
+        // fiber? has Signal::inert() — should be JIT-compilable.
         // Call it in a hot loop to trigger JIT, verify correct results.
         let result = eval_source(
             r#"(begin
@@ -351,7 +351,7 @@ mod jit_tests {
 
     #[test]
     fn test_jit_fiber_new_in_hot_loop() {
-        // fiber/new has Effect::errors() — not suspending, JIT-safe.
+        // fiber/new has Signal::errors() — not suspending, JIT-safe.
         // Create fibers in a hot loop, verify they're created correctly.
         let result = eval_source(
             r#"(begin
@@ -368,7 +368,7 @@ mod jit_tests {
 
     #[test]
     fn test_jit_fiber_status_in_hot_loop() {
-        // fiber/status has Effect::errors() — JIT-safe.
+        // fiber/status has Signal::errors() — JIT-safe.
         // Check status of a fiber repeatedly in a hot loop.
         let result = eval_source(
             r#"(begin
@@ -389,7 +389,7 @@ mod jit_tests {
 
     #[test]
     fn test_jit_closure_calling_fiber_resume_not_jit_compiled() {
-        // fiber/resume has Effect::yields_errors() — may_suspend is true.
+        // fiber/resume has Signal::yields_errors() — may_suspend is true.
         // A closure calling fiber/resume should NOT be JIT-compiled, but
         // should still work correctly via the interpreter.
         let result = eval_source(

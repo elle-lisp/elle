@@ -7,7 +7,7 @@ Compilation entry points: source text → bytecode or HIR.
 Orchestrate the full compilation pipeline:
 - Reader: source text → Syntax
 - Expander: Syntax → expanded Syntax (macro expansion)
-- Analyzer: expanded Syntax → HIR (binding resolution, effect inference)
+- Analyzer: expanded Syntax → HIR (binding resolution, signal inference)
 - Lowerer: HIR → LIR (register allocation, basic blocks)
 - Emitter: LIR → Bytecode (instruction encoding)
 - VM: Bytecode → Value (execution)
@@ -125,7 +125,7 @@ Properties:
 5. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
     wraps the file's letrec in an outer scope containing all registered primitives.
     This enables compile-time checks (e.g., `(set + 42)` is an error) and
-    effect/arity tracking via `Binding` identity.
+    signal/arity tracking via `Binding` identity.
 
 6. **File return value is the last expression.** If the last form is a `def`/`var`,
     the file returns the binding's name. If the last form is a bare expression,

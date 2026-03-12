@@ -35,7 +35,7 @@ Runtime value representation using NaN-boxing.
 | Type | Location | Purpose |
 |------|----------|---------|
 | `Value` | `repr/mod.rs` | NaN-boxed 8-byte value (Copy) |
-| `Closure` | `closure.rs` | Bytecode + env + arity + effect + location_map + syntax |
+| `Closure` | `closure.rs` | Bytecode + env + arity + signal + location_map + syntax |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
@@ -102,7 +102,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
     `FiberHeap.shared_alloc` is a raw `*mut SharedAllocator` set during
     `with_child_fiber` and nulled on swap-back. Routing: when `shared_alloc`
     is non-null, `FiberHeap::alloc()` routes all allocations to the shared
-    allocator. Only yielding fibers (`Effect::Yields`) get shared allocators.
+    allocator.   Only yielding fibers (signal includes `SIG_YIELD`) get shared allocators.
 
 ## Value encoding
 

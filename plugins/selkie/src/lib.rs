@@ -1,8 +1,8 @@
 //! Elle selkie plugin — Mermaid diagram rendering via the `selkie-rs` crate.
 
-use elle::effects::Effect;
 use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
+use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::value::types::Arity;
 use elle::value::{error_val, TableKey, Value};
@@ -208,7 +208,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "selkie/render",
         func: prim_selkie_render,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Render a Mermaid diagram to SVG",
         params: &["diagram"],
@@ -219,7 +219,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "selkie/render-to-file",
         func: prim_selkie_render_to_file,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Render a Mermaid diagram to an SVG file",
         params: &["diagram", "path"],
@@ -230,7 +230,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "selkie/render-ascii",
         func: prim_selkie_render_ascii,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Render a Mermaid diagram to ASCII art",
         params: &["diagram"],

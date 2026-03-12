@@ -1,6 +1,6 @@
-use crate::effects::Effect;
 use crate::pipeline::compile_file;
 use crate::pipeline::update_cache_with_stdlib;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use crate::value::Value;
@@ -88,7 +88,7 @@ fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Ve
 fn extract_exports(
     exports_val: Value,
     symbols: &mut SymbolTable,
-) -> HashMap<SymbolId, (Value, Effect)> {
+) -> HashMap<SymbolId, (Value, Signal)> {
     let exports_struct = exports_val.as_struct().unwrap_or_else(|| {
         panic!(
             "stdlib export closure did not return a struct: {}",
@@ -100,9 +100,9 @@ fn extract_exports(
     for (key, value) in exports_struct.iter() {
         if let crate::value::types::TableKey::Keyword(name) = key {
             let sym_id = symbols.intern(name);
-            // Use errors() as a conservative effect — stdlib functions can error
-            // but we don't know their exact effects statically.
-            result.insert(sym_id, (*value, Effect::errors()));
+            // Use errors() as a conservative signal — stdlib functions can error
+            // but we don't know their exact signals statically.
+            result.insert(sym_id, (*value, Signal::errors()));
         }
     }
     result
@@ -112,11 +112,11 @@ fn extract_exports(
 ///
 /// In the letrec model there are no VM globals. Stdlib exports are
 /// made available to user code via `bind_primitives`, which reads
-/// from `PrimitiveMeta.functions` and `PrimitiveMeta.effects`.
+/// from `PrimitiveMeta.functions` and `PrimitiveMeta.signals`.
 fn register_stdlib_exports(
     _vm: &mut VM,
     symbols: &mut SymbolTable,
-    exports: &HashMap<SymbolId, (Value, Effect)>,
+    exports: &HashMap<SymbolId, (Value, Signal)>,
 ) {
     // Update the compilation cache so subsequent compile_file calls
     // see stdlib exports as primitives.

@@ -104,7 +104,7 @@ The standard prelude (`prelude.lisp`) defines:
 - `->>` — thread-last macro
 - `when` — conditional without else
 - `unless` — conditional with negated test
-- `try`/`catch` — exception handling
+- `try`/`catch` — error signal handling (sugar over fiber primitives)
 - `protect` — finally block
 - `defer` — cleanup on exit
 - `with` — resource management

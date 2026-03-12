@@ -1,7 +1,7 @@
 # Virtual Machine
 
 The VM executes bytecode produced by the compiler. It's a stack-based machine
-with register-addressed local variables.
+with register-addressed local variables and a fiber-based signal system.
 
 ## Architecture
 
@@ -12,8 +12,10 @@ two values, adds them, pushes the result.
 vector, accessed by index via `LoadUpvalue`/`StoreUpvalue`. At top level,
 locals use `LoadLocal`/`StoreLocal` which access the stack directly.
 
-**Globals**: Stored in a HashMap keyed by `SymbolId`. `LoadGlobal`/`StoreGlobal`
-read and write globals.
+**Globals**: Stored in a HashMap keyed by `SymbolId`. Primitives and top-level
+`def` bindings are globals. The lowerer emits upvalue loads for all variable
+references — there is no separate `LoadGlobal`/`StoreGlobal` instruction; global
+bindings are accessed as depth-0 upvalues in the outermost closure.
 
 ## Execution Loop
 
@@ -21,7 +23,7 @@ read and write globals.
 loop {
     let instr = bytecode[ip];
     ip += 1;
-    
+
     match instr {
         LoadConst => { /* push constant */ }
         Add => { /* pop two, push sum */ }
@@ -29,10 +31,10 @@ loop {
         Return => { return stack.pop(); }
         // ...
     }
-    
-    // Check for exceptions after each instruction
-    if exception && !handling {
-        jump_to_handler_or_propagate();
+
+    // Check for signals after each instruction
+    if let Some((bits, _)) = fiber.signal {
+        // propagate signal to parent
     }
 }
 ```
@@ -59,50 +61,28 @@ Tail calls (`TailCall` instruction) avoid stack growth:
 
 This enables unbounded recursion without stack overflow.
 
-## Exception Handling
+## Signal-Based Error Handling
 
-```lisp
-(handler-case
-  (risky-operation)
-  (error e (handle-error e)))
-```
+Errors are signals, not exceptions. When a runtime error occurs:
 
-Compiles to:
-- `PushHandler` with handler offset
-- Execute body
-- `PopHandler` on success, jump past handlers
-- Handler code: `MatchException`, conditionally execute handler
+1. The VM (or primitive) stores `(SIG_ERROR, error_value)` in `fiber.signal`
+2. The dispatch loop checks `fiber.signal` after each instruction
+3. The signal propagates up the fiber chain
+4. A parent fiber with the `:error` bit in its mask catches it
 
-Exceptions propagate by unwinding the stack to `handler.stack_depth` and
-jumping to `handler.handler_offset`.
+`try`/`catch` is a macro that creates a child fiber with mask=`SIG_ERROR`,
+resumes it, and checks the result. No special VM support beyond the fiber
+primitive.
 
-## Coroutines
+## Fibers
 
-Coroutines are suspendable computations:
-
-```lisp
-(var gen (coroutine (fn () (yield 1) (yield 2) 3)))
-(coro/resume gen)  ; → 1
-(coro/resume gen)  ; → 2
-(coro/resume gen)  ; → 3
-```
-
-On `yield`:
-1. Create a `ContinuationFrame` capturing IP, stack, env
-2. Build `ContinuationData` with the frame chain
-3. Mark coroutine as `Paused`
-4. Return `VmResult::Yielded { value, continuation }`
-
-On resume:
-1. Replay the continuation frame chain via `resume_continuation`
-2. Push resume value (becomes yield's return value)
-3. Continue execution
-
-The continuation captures the full call chain from yield point to coroutine
-boundary, enabling yield across nested function calls.
+Fibers are independent execution contexts (stack + frames + signal mask).
+See `AGENTS.md` and `docs/fibers.md` for the full fiber architecture.
 
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
 - `src/compiler/bytecode.rs` - instruction definitions
 - `src/lir/emit.rs` - bytecode emission
+- `docs/fibers.md` - fiber architecture
+- `docs/signals.md` - signal system design

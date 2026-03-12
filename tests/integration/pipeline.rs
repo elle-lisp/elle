@@ -6,7 +6,7 @@ use elle::{register_primitives, SymbolTable, Value, VM};
 fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     (symbols, vm)
 }
 
@@ -663,7 +663,7 @@ fn test_analyze_with_let() {
 }
 
 #[test]
-fn test_mutual_recursion_effect_inference() {
+fn test_mutual_recursion_signal_inference() {
     // Test that mutually recursive functions are inferred as Pure
     // when they only call each other and pure primitives
     let (mut symbols, _) = setup();
@@ -694,7 +694,7 @@ fn test_mutual_recursion_execution() {
 }
 
 #[test]
-fn test_mutual_recursion_effects_are_pure() {
+fn test_mutual_recursion_signals_are_pure() {
     // Test that mutually recursive functions are inferred as Pure
     let (mut symbols, _) = setup();
     let source = r#"
@@ -709,9 +709,9 @@ fn test_mutual_recursion_effects_are_pure() {
     for constant in &result.bytecode.constants {
         if let Some(closure) = constant.as_closure() {
             assert!(
-                !closure.effect().may_suspend(),
+                !closure.signal().may_suspend(),
                 "Closure should not suspend, got {:?}",
-                closure.effect()
+                closure.signal()
             );
         }
     }
@@ -762,9 +762,9 @@ fn test_nqueens_functions_are_pure() {
         if let Some(closure) = constant.as_closure() {
             found_closures += 1;
             assert!(
-                !closure.effect().may_suspend(),
+                !closure.signal().may_suspend(),
                 "Closure should not suspend, got {:?}",
-                closure.effect()
+                closure.signal()
             );
         }
     }
@@ -829,12 +829,12 @@ fn test_fiber_resume_dead_status() {
 }
 
 #[test]
-fn test_fiber_signal_and_resume() {
-    // A fiber that signals, then is resumed to completion
+fn test_fiber_emit_and_resume() {
+    // A fiber that emits, then is resumed to completion
     let (mut symbols, mut vm) = setup();
     // SIG_YIELD = 2, mask catches it
     let result = eval(
-        r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
+        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
              (fiber/resume f)
              (fiber/value f))"#,
         &mut symbols,
@@ -848,11 +848,11 @@ fn test_fiber_signal_and_resume() {
 }
 
 #[test]
-fn test_fiber_signal_resume_continues() {
-    // Resume after signal should continue execution and return final value
+fn test_fiber_emit_resume_continues() {
+    // Resume after emit should continue execution and return final value
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(let ((f (fiber/new (fn () (fiber/signal 2 99) 42) 2)))
+        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
              (fiber/resume f)
              (fiber/resume f))"#,
         &mut symbols,
@@ -891,13 +891,13 @@ fn test_fiber_not_fiber() {
 }
 
 #[test]
-fn test_fiber_signal_through_nested_call() {
-    // A fiber whose body calls a function that signals.
+fn test_fiber_emit_through_nested_call() {
+    // A fiber whose body calls a function that emits.
     // This tests yield propagation through nested calls.
     let (mut symbols, mut vm) = setup();
     let result = eval(
         r#"(begin
-             (defn inner () (fiber/signal 2 99))
+             (defn inner () (emit 2 99))
              (let ((f (fiber/new (fn () (inner) 42) 2)))
                (fiber/resume f)
                (fiber/value f)))"#,

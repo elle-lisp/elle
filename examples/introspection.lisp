@@ -5,7 +5,7 @@
 # Demonstrates:
 #   Clock primitives   — clock/monotonic, clock/realtime, clock/cpu
 #   Timing             — time/elapsed, time/stopwatch
-#   Closure inspection — closure?, pure?, arity, captures, bytecode-size
+#   Closure inspection — closure?, silent?, arity, captures, bytecode-size
 #   Disassembly        — disbit (bytecode), disjit (Cranelift IR)
 #   Debug utilities    — debug-print, trace
 #   Micro-benchmarking — timing loops with clock/monotonic
@@ -86,10 +86,10 @@
 (display "  closure?: add=") (display (closure? add))
 (display " +=") (print (closure? +))
 
-# pure? — true for closures with no side effects
-(assert-true (pure? add) "add is pure")
-(assert-true (pure? identity-fn) "identity-fn is pure")
-(display "  pure?: add=") (print (pure? add))
+# silent? — true for closures that do not suspend (no yield/debug/polymorphic)
+(assert-true (silent? add) "add is silent")
+(assert-true (silent? identity-fn) "identity-fn is silent")
+(display "  silent?: add=") (print (silent? add))
 
 # arity — number of parameters (nil for non-closures)
 (assert-eq (arity add) 2 "add has arity 2")

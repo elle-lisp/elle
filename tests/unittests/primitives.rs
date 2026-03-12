@@ -1139,7 +1139,7 @@ fn test_spawn_primitive() {
             num_captures: 0,
             num_params: 0,
             constants: std::rc::Rc::new(vec![]),
-            effect: elle::effects::Effect::inert(),
+            signal: elle::signals::Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
@@ -1667,7 +1667,7 @@ fn test_json_serialize_errors() {
             num_captures: 0,
             num_params: 0,
             constants: std::rc::Rc::new(vec![]),
-            effect: elle::effects::Effect::inert(),
+            signal: elle::signals::Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
@@ -1698,7 +1698,7 @@ fn test_disjit_returns_array_for_pure_closure() {
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
-    let _effects = register_primitives(&mut vm2, &mut symbols2);
+    let _signals = register_primitives(&mut vm2, &mut symbols2);
     let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
     let disasm = call_primitive(&disjit, &[result]).unwrap();
@@ -1735,7 +1735,7 @@ fn test_disbit_returns_array_for_pure_closure() {
 
     let mut vm2 = VM::new();
     let mut symbols2 = SymbolTable::new();
-    let _effects = register_primitives(&mut vm2, &mut symbols2);
+    let _signals = register_primitives(&mut vm2, &mut symbols2);
     let result = pipeline_eval("(fn (x) (+ x 1))", &mut symbols2, &mut vm2, "<test>").unwrap();
 
     let ir = call_primitive(&disbit, &[result]).unwrap();
@@ -1773,7 +1773,7 @@ fn test_disjit_arity_error() {
 fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     elle::context::set_symbol_table(&mut symbols as *mut SymbolTable);
     elle::primitives::init_stdlib(&mut vm, &mut symbols);
     pipeline_eval(input, &mut symbols, &mut vm, "<test>").map_err(elle::error::LError::from)
@@ -2014,7 +2014,7 @@ fn test_function_predicate() {
             num_captures: 0,
             num_params: 1,
             constants: std::rc::Rc::new(vec![]),
-            effect: elle::effects::Effect::inert(),
+            signal: elle::signals::Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
@@ -2061,7 +2061,7 @@ fn test_primitive_predicate() {
             num_captures: 0,
             num_params: 1,
             constants: std::rc::Rc::new(vec![]),
-            effect: elle::effects::Effect::inert(),
+            signal: elle::signals::Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),

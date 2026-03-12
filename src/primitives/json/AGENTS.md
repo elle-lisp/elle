@@ -30,7 +30,7 @@ JSON parsing and serialization primitives.
 
 ## Primitives
 
-| Name | Arity | Effect | Purpose |
+| Name | Arity | Signal | Purpose |
 |------|-------|--------|---------|
 | `json/parse` | 1 | Inert | Parse JSON string to Elle value |
 | `json/serialize` | 1 | Inert | Serialize Elle value to compact JSON |

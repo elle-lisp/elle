@@ -69,11 +69,11 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
 
     // Register collected primitives into the VM's docs.
     //
-    // Note: plugin effects and arities are NOT registered in PrimitiveMeta
+    // Note: plugin signals and arities are NOT registered in PrimitiveMeta
     // because plugins are loaded at runtime (via `import-file`), after the
     // static analyzer has already processed the calling code. The analyzer
     // will see plugin primitives as unknown locals, not as primitives with
-    // known effects or arities. This is the same limitation as any runtime
+    // known signals or arities. This is the same limitation as any runtime
     // import — a pre-existing constraint, not a plugin-specific gap.
     for def in &ctx.primitives {
         let _sym_id = symbols.intern(def.name);
@@ -83,7 +83,7 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
             doc: def.doc,
             params: def.params,
             arity: def.arity,
-            effect: def.effect,
+            signal: def.signal,
             category: def.category,
             example: def.example,
             aliases: def.aliases,

@@ -1,7 +1,7 @@
-use crate::effects::Effect;
 use crate::error::{LError, LResult};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::register_primitives;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -27,7 +27,7 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
         let mut symbols = SymbolTable::new();
         // Register primitives so docs are available in the spawned thread.
         // Primitives are in the bytecode constant pool — no globals remapping needed.
-        let _effects = register_primitives(&mut vm, &mut symbols);
+        let _signals = register_primitives(&mut vm, &mut symbols);
 
         // Reconstruct closure from bundle.
         let closure_val = bundle.into_value();
@@ -200,7 +200,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/spawn",
         func: prim_spawn,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Spawn a new thread that executes a closure with captured immutable values",
         params: &["closure"],
@@ -211,7 +211,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/join",
         func: prim_join,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Wait for a thread to complete and return its result",
         params: &["thread-handle"],
@@ -222,7 +222,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/thread-id",
         func: prim_current_thread_id,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
         params: &[],

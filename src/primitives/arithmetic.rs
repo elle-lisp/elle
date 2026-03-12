@@ -1,6 +1,6 @@
 use crate::arithmetic;
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -288,7 +288,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "+",
         func: prim_add,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Sum all arguments. Returns 0 for no arguments.",
         params: &["xs"],
@@ -299,7 +299,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "-",
         func: prim_sub,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(1),
         doc: "Subtract arguments left-to-right. Single arg negates.",
         params: &["x", "ys"],
@@ -310,7 +310,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "*",
         func: prim_mul,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Multiply all arguments. Returns 1 for no arguments.",
         params: &["xs"],
@@ -321,7 +321,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "/",
         func: prim_div_vm,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(1),
         doc: "Divide arguments left-to-right. Single arg takes reciprocal.",
         params: &["x", "ys"],
@@ -332,7 +332,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mod",
         func: prim_mod,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Euclidean modulo. Result has same sign as divisor.",
         params: &["a", "b"],
@@ -343,7 +343,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "%",
         func: prim_rem,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
@@ -354,7 +354,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "rem",
         func: prim_rem,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
@@ -365,7 +365,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "abs",
         func: prim_abs,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Absolute value.",
         params: &["x"],
@@ -376,7 +376,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "min",
         func: prim_min,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(1),
         doc: "Minimum of all arguments.",
         params: &["xs"],
@@ -387,7 +387,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "max",
         func: prim_max,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(1),
         doc: "Maximum of all arguments.",
         params: &["xs"],
@@ -398,7 +398,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "even?",
         func: prim_even,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Test if integer is even.",
         params: &["n"],
@@ -409,7 +409,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "odd?",
         func: prim_odd,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Test if integer is odd.",
         params: &["n"],

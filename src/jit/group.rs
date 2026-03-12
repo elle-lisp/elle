@@ -68,7 +68,7 @@ pub(crate) fn discover_compilation_group(
             None => continue,
         };
 
-        if lir.effect.may_suspend() {
+        if lir.signal.may_suspend() {
             continue;
         }
 
@@ -165,10 +165,10 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::Effect;
     use crate::lir::{
         BasicBlock, Label, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
+    use crate::signals::Signal;
     use crate::syntax::Span;
     use crate::value::Arity;
 
@@ -178,7 +178,7 @@ mod tests {
         func.name = Some(name.to_string());
         func.num_regs = 4;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -216,7 +216,7 @@ mod tests {
         func.name = Some("leaf".to_string());
         func.num_regs = 1;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -246,7 +246,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            effect: lir.effect,
+            signal: lir.signal,
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -311,7 +311,7 @@ mod tests {
         let caller = make_caller("f", sym_g);
 
         let mut callee = make_leaf();
-        callee.effect = Effect::yields();
+        callee.signal = Signal::yields();
 
         let mut globals = vec![Value::NIL; 10];
         globals[5] = make_closure_value(callee);
@@ -345,7 +345,7 @@ mod tests {
         callee.name = Some("callee_with_closure".to_string());
         callee.num_regs = 3;
         callee.num_captures = 0;
-        callee.effect = Effect::inert();
+        callee.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -450,7 +450,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            effect: Effect::inert(),
+            signal: Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -482,7 +482,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -582,7 +582,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.effect = Effect::inert();
+        func.signal = Signal::inert();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(

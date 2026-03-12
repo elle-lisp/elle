@@ -75,7 +75,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | `Value::@string(bytes)` | @string | Heap-allocated mutable @string |
 | `Value::bytes(bytes)` | bytes | Heap-allocated immutable byte sequence |
 | `Value::@bytes(bytes)` | @bytes | Heap-allocated mutable @bytes |
-| `Value::closure(c)` | Closure | Bytecode + env + arity + effect + location_map |
+| `Value::closure(c)` | Closure | Bytecode + env + arity + signal + location_map |
 | `Value::fiber(f)` | Fiber | Independent execution context |
 | `Value::lbox(v)` | LBox | Mutable lbox (user-created via `box`) |
 | `Value::binding(name, scope)` | Binding | Compile-time binding metadata (never at runtime) |

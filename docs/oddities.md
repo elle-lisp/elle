@@ -20,18 +20,18 @@ Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))` retur
 
 `assign` is the form for variable mutation: `(assign var value)`. This is distinct from the `set` constructor primitive for creating set values. Agents reflexively write `(set x val)` — this creates a set, not a mutation.
 
-### `restrict` is a preamble declaration, not an expression
+### `silence` is a preamble declaration, not an expression
 
-`restrict` only appears inside lambda bodies as a preamble declaration (after optional docstring, before first non-declaration expression). It is NOT a general expression form. Using `restrict` outside a lambda body is a call to the stdlib `restrict` function, which signals `:error` at runtime.
+`silence` only appears inside lambda bodies as a preamble declaration (after optional docstring, before first non-declaration expression). It is NOT a general expression form. Using `silence` outside a lambda body is a call to the stdlib `silence` function, which signals `:error` at runtime.
 
 ```janet
-# Correct: restrict in lambda body preamble
+# Correct: silence in lambda body preamble
 (fn (f x)
-  (restrict f)
+  (silence f)
   (f x))
 
-# Runtime error: restrict outside lambda body
-(restrict f)  # Error: signals :error at runtime
+# Runtime error: silence outside lambda body
+(silence f)  # Error: signals :error at runtime
 ```
 
 ### Collection literal mutable/immutable split

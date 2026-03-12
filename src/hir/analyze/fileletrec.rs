@@ -35,7 +35,7 @@ impl<'a> Analyzer<'a> {
     /// `Expr` (gensym-named dummy binding). Three-pass analysis:
     /// - Pass 1: pre-bind all names (enables mutual recursion)
     /// - Pass 2: analyze initializers sequentially
-    /// - Pass 3: fixpoint loop for effect propagation through mutual recursion
+    /// - Pass 3: fixpoint loop for signal propagation through mutual recursion
     ///
     /// Returns a single `HirKind::Letrec` node. The body is a reference
     /// to the last binding (the file's return value).
@@ -88,25 +88,25 @@ impl<'a> Analyzer<'a> {
                         ));
                     }
                 }
-                FileForm::Effect(keyword_syntax) => {
+                FileForm::Signal(keyword_syntax) => {
                     let keyword = match &keyword_syntax.kind {
                         crate::syntax::SyntaxKind::Keyword(k) => k.clone(),
                         _ => {
                             return Err(format!(
-                                "{}: effect requires a keyword argument, got {}",
+                                "{}: signal requires a keyword argument, got {}",
                                 keyword_syntax.span,
                                 keyword_syntax.kind_label()
                             ));
                         }
                     };
-                    crate::effects::registry::global_registry()
+                    crate::signals::registry::global_registry()
                         .lock()
                         .unwrap()
                         .register(&keyword)
                         .map_err(|e| format!("{}: {}", keyword_syntax.span, e))?;
-                    // Effect declarations produce the keyword value.
+                    // Signal declarations produce the keyword value.
                     // Create a gensym binding whose initializer is the keyword literal.
-                    let gensym_name = format!("__effect_{}", gensym_counter);
+                    let gensym_name = format!("__signal_{}", gensym_counter);
                     gensym_counter += 1;
                     let binding = self.bind(&gensym_name, &[], BindingScope::Local);
                     binding.mark_prebound();
@@ -132,9 +132,9 @@ impl<'a> Analyzer<'a> {
 
         // Pass 2: analyze all initializers sequentially.
         let mut bindings = Vec::new();
-        let mut effect = Effect::inert();
+        let mut signal = Signal::inert();
         let mut last_binding: Option<Binding> = None;
-        // Track lambda bindings for fixpoint effect propagation (Pass 3).
+        // Track lambda bindings for fixpoint signal propagation (Pass 3).
         // Each entry: (index in `bindings`, binding, reference to value syntax).
         let mut lambda_entries: Vec<(usize, Binding, &Syntax)> = Vec::new();
 
@@ -149,18 +149,18 @@ impl<'a> Analyzer<'a> {
                         self.register_binding(name, scopes, *binding);
                     }
                     let value = self.analyze_expr(value_syntax)?;
-                    effect = effect.combine(value.effect);
+                    signal = signal.combine(value.signal);
 
                     let bindings_idx = bindings.len();
                     if let HirKind::Lambda {
                         params: lambda_params,
                         num_required,
                         rest_param,
-                        inferred_effects,
+                        inferred_signals,
                         ..
                     } = &value.kind
                     {
-                        self.effect_env.insert(*binding, *inferred_effects);
+                        self.signal_env.insert(*binding, *inferred_signals);
                         let arity = Arity::for_lambda(
                             rest_param.is_some(),
                             *num_required,
@@ -184,7 +184,7 @@ impl<'a> Analyzer<'a> {
                         self.register_binding(name, scopes, *binding);
                     }
                     let value = self.analyze_expr(value_syntax)?;
-                    effect = effect.combine(value.effect);
+                    signal = signal.combine(value.signal);
 
                     self.pre_bindings.clone_from(leaf_bindings);
                     let pattern = self.analyze_destructure_pattern(
@@ -218,19 +218,19 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        // Pass 3: fixpoint loop for effect propagation through mutual recursion.
+        // Pass 3: fixpoint loop for signal propagation through mutual recursion.
         //
         // Pass 2 analyzes bindings sequentially, so a lambda analyzed early may
-        // see stale (optimistic) effects for lambdas analyzed later. For mutually
-        // recursive functions, this means effects don't propagate through cycles:
+        // see stale (optimistic) signals for lambdas analyzed later. For mutually
+        // recursive functions, this means signals don't propagate through cycles:
         //
         //   (def foo (fn [] (bar)))    # analyzed first, sees bar as Pure (stale)
         //   (def bar (fn [] (yield 1) (foo)))  # analyzed second, correctly Yields
         //
         // foo stays Pure even though it calls a Yields function. Fix: re-analyze
-        // lambda bindings until effect_env stabilizes.
+        // lambda bindings until signal_env stabilizes.
         //
-        // Re-analysis side effects are benign: the side effects of re-analyzing
+        // Re-analysis side signals are benign: the side signals of re-analyzing
         // a lambda (additional `mark_captured()`, `mark_mutated()` calls on
         // bindings) are monotonic — they only add flags, never remove them.
         // Re-analysis can only make the result more conservative, never incorrect.
@@ -239,18 +239,18 @@ impl<'a> Analyzer<'a> {
             for _ in 0..MAX_FIXPOINT_ITERS {
                 let mut changed = false;
                 for &(idx, binding, value_syntax) in &lambda_entries {
-                    let old_effect = self
-                        .effect_env
+                    let old_signal = self
+                        .signal_env
                         .get(&binding)
                         .copied()
-                        .unwrap_or_else(Effect::inert);
+                        .unwrap_or_else(Signal::inert);
                     let new_hir = self.analyze_expr(value_syntax)?;
                     if let HirKind::Lambda {
-                        inferred_effects, ..
+                        inferred_signals, ..
                     } = &new_hir.kind
                     {
-                        if *inferred_effects != old_effect {
-                            self.effect_env.insert(binding, *inferred_effects);
+                        if *inferred_signals != old_signal {
+                            self.signal_env.insert(binding, *inferred_signals);
                             changed = true;
                         }
                     }
@@ -276,13 +276,13 @@ impl<'a> Analyzer<'a> {
                 body: Box::new(body),
             },
             span,
-            effect,
+            signal,
         ))
     }
 
     /// Pass 1 helper: pre-bind a simple (non-destructuring) name for file-scope letrec.
     ///
-    /// Creates the binding and seeds effect/arity tracking for lambda forms.
+    /// Creates the binding and seeds signal/arity tracking for lambda forms.
     /// Duplicate names are deferred to Pass 2 for sequential shadowing.
     fn prebind_simple<'s>(
         &mut self,
@@ -309,10 +309,10 @@ impl<'a> Analyzer<'a> {
             binding.mark_immutable();
         }
 
-        // Seed effect_env and arity_env for lambda forms so self-recursive
+        // Seed signal_env and arity_env for lambda forms so self-recursive
         // calls don't default to Yields during analysis.
         if Self::is_lambda_syntax(value_syntax) {
-            self.effect_env.insert(binding, Effect::inert());
+            self.signal_env.insert(binding, Signal::inert());
             if let Some(list) = value_syntax.as_list() {
                 if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
                     self.arity_env

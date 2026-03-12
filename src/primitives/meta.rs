@@ -1,6 +1,6 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum)
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::syntax::Syntax;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
@@ -165,7 +165,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/gensym",
         func: prim_gensym,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(0, 1),
         doc: "Generate a unique symbol with optional prefix",
         params: &["prefix"],
@@ -176,7 +176,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/datum->syntax",
         func: prim_datum_to_syntax,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Create a syntax object with lexical context from another syntax object",
         params: &["context", "datum"],
@@ -187,7 +187,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/syntax->datum",
         func: prim_syntax_to_datum,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Strip scope information from a syntax object, returning the plain value",
         params: &["stx"],

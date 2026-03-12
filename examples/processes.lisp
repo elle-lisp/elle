@@ -311,7 +311,7 @@
               # worker-a spawns worker-b and links to it
               (let ([b (spawn-link (fn ()
                           # worker-b crashes
-                          (fiber/signal 1 {:error :boom :message "worker-b crashed"})))])
+                          (emit 1 {:error :boom :message "worker-b crashed"})))])
                 # worker-a waits for something (will be killed by link)
                 (recv))))])
 
@@ -334,7 +334,7 @@
     (trap-exit true)
     (let* ([me (self)]
            [child (spawn-link (fn ()
-                    (fiber/signal 1 {:error :intentional :message "test crash"})))])
+                    (emit 1 {:error :intentional :message "test crash"})))])
 
       (let ([msg (recv)])
         (display "  trapped exit: ") (print msg)
@@ -379,7 +379,7 @@
            [child (spawn-link (fn ()
                     # Wait for go signal, then crash
                     (recv)
-                    (fiber/signal 1 [:boom "crash"])))])
+                    (emit 1 [:boom "crash"])))])
 
       # Unlink before the child crashes
       (unlink child)

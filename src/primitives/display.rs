@@ -1,5 +1,5 @@
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -447,7 +447,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "display",
         func: prim_display,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Human-readable output without quotes on strings.",
         params: &["vals"],
@@ -458,7 +458,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "print",
         func: prim_print,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Human-readable output with trailing newline.",
         params: &["vals"],
@@ -469,7 +469,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "write",
         func: prim_write,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Write values in readable literal form. Strings are quoted.",
         params: &["vals"],
@@ -480,7 +480,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "newline",
         func: prim_newline,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Print a newline.",
         params: &[],
@@ -491,7 +491,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pp",
         func: prim_pp,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
@@ -502,7 +502,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "describe",
         func: prim_describe,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Return a string describing a value's type and content.",
         params: &["value"],

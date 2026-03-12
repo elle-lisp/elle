@@ -1,6 +1,6 @@
 //! String formatting primitive
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -704,7 +704,7 @@ pub(crate) fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "string/format",
     func: prim_string_format,
-    effect: Effect::inert(),
+    signal: Signal::inert(),
     arity: Arity::AtLeast(1),
     doc: "Format a template string with positional or named arguments.",
     params: &["template", "args"],

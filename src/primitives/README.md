@@ -57,7 +57,7 @@ VM's dispatch loop handles the actual execution.
 
 3. **Register it** in `registration.rs`:
    ```rust
-    register_fn(vm, symbols, &mut effects, "my-func", prim_my_func, Effect::errors());
+    register_fn(vm, symbols, &mut signals, "my-func", prim_my_func, Signal::errors());
    ```
 
 ## Error Handling

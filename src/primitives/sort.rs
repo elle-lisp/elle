@@ -1,6 +1,6 @@
 //! Sort and range primitives
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
@@ -260,7 +260,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sort",
         func: prim_sort,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists return new values.",
         params: &["coll"],
@@ -271,7 +271,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "range",
         func: prim_range,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(1, 3),
         doc: "Generate a range of numbers as an array. (range end), (range start end), (range start end step).",
         params: &["start-or-end", "end", "step"],

@@ -1,6 +1,6 @@
 //! Bitwise operation primitives
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -230,7 +230,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/and",
         func: prim_bit_and,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise AND of all arguments",
         params: &["xs"],
@@ -241,7 +241,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/or",
         func: prim_bit_or,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise OR of all arguments",
         params: &["xs"],
@@ -252,7 +252,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/xor",
         func: prim_bit_xor,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(2),
         doc: "Bitwise XOR of all arguments",
         params: &["xs"],
@@ -263,7 +263,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/not",
         func: prim_bit_not,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Bitwise NOT of argument",
         params: &["x"],
@@ -274,7 +274,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/shl",
         func: prim_bit_shift_left,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Left shift first argument by second argument (clamped to 0-63).",
         params: &["x", "n"],
@@ -285,7 +285,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bit/shr",
         func: prim_bit_shift_right,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Arithmetic right shift first argument by second argument (clamped to 0-63).",
         params: &["x", "n"],

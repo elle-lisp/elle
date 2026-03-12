@@ -96,7 +96,7 @@ fn test_yield_point_info_collected() {
     // fn() { yield 42; resume_value }
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 2;
-    func.effect = crate::effects::Effect::yields();
+    func.signal = crate::signals::Signal::yields();
 
     let mut b0 = BasicBlock::new(Label(0));
     b0.instructions.push(SpannedInstr::new(

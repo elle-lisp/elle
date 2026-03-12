@@ -223,8 +223,8 @@ impl Lowerer {
 
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
-        // Propagate effect from HIR to top-level LIR function
-        self.current_func.effect = hir.effect;
+        // Propagate signal from HIR to top-level LIR function
+        self.current_func.signal = hir.signal;
 
         Ok(std::mem::replace(
             &mut self.current_func,
@@ -349,7 +349,7 @@ impl Lowerer {
     ///
     /// Returns `true` when ALL six conditions hold:
     /// 1. No binding is captured by a nested lambda (captured values escape)
-    /// 2. Body cannot suspend (yield/debug/polymorphic effects prevent cleanup)
+    /// 2. Body cannot suspend (yield/debug/polymorphic signals prevent cleanup)
     /// 3. Body result is provably a NaN-boxed immediate (not heap-allocated)
     /// 4. Body contains no dangerous outward `set` (set to outer binding
     ///    with a value that could be heap-allocated inside the scope)
@@ -368,7 +368,7 @@ impl Lowerer {
         }
 
         // Condition 2: no suspension
-        if body.effect.may_suspend() {
+        if body.signal.may_suspend() {
             self.scope_stats.rejected_suspends += 1;
             return false;
         }
@@ -431,7 +431,7 @@ impl Lowerer {
     fn can_scope_allocate_block(&mut self, block_id: &BlockId, body: &[Hir]) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no suspension
-        if body.iter().any(|e| e.effect.may_suspend()) {
+        if body.iter().any(|e| e.signal.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
             return false;
         }

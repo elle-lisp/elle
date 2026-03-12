@@ -11,9 +11,9 @@
 
 use super::heap::{alloc, deref, Cons, HeapObject};
 use super::repr::Value;
-use crate::effects::Effect;
 use crate::error::LocationMap;
 use crate::hir::VarargKind;
+use crate::signals::Signal;
 use crate::value::types::Arity;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -37,7 +37,7 @@ pub struct SendableClosure {
     pub num_captures: usize,
     pub num_params: usize,
     pub constants: Vec<SendValue>,
-    pub effect: Effect,
+    pub signal: Signal,
     pub lbox_params_mask: u64,
     pub lbox_locals_mask: u64,
     pub symbol_names: HashMap<u32, String>,
@@ -249,7 +249,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 num_captures: 0,
                 num_params: 0,
                 constants: Vec::new(),
-                effect: closure_rc.template.effect,
+                signal: closure_rc.template.signal,
                 lbox_params_mask: 0,
                 lbox_locals_mask: 0,
                 symbol_names: HashMap::new(),
@@ -292,7 +292,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 num_captures: closure_rc.template.num_captures,
                 num_params: closure_rc.template.num_params,
                 constants,
-                effect: closure_rc.template.effect,
+                signal: closure_rc.template.signal,
                 lbox_params_mask: closure_rc.template.lbox_params_mask,
                 lbox_locals_mask: closure_rc.template.lbox_locals_mask,
                 symbol_names: (*closure_rc.template.symbol_names).clone(),
@@ -592,7 +592,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 num_captures: sc.num_captures,
                 num_params: sc.num_params,
                 constants: Rc::new(constants),
-                effect: sc.effect,
+                signal: sc.signal,
                 lbox_params_mask: sc.lbox_params_mask,
                 lbox_locals_mask: sc.lbox_locals_mask,
                 symbol_names: Rc::new(sc.symbol_names),

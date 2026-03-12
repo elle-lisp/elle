@@ -252,7 +252,7 @@ mod tests {
     fn setup() -> (SymbolTable, VM) {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        let _effects = register_primitives(&mut vm, &mut symbols);
+        let _signals = register_primitives(&mut vm, &mut symbols);
         (symbols, vm)
     }
 

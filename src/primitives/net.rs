@@ -6,11 +6,11 @@
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
 //! for scheduler dispatch.
 
-use crate::effects::Effect;
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -472,7 +472,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "tcp/listen",
         func: prim_tcp_listen,
         arity: Arity::Exact(2),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Bind and listen on a TCP address. Returns a listener port.",
         params: &["addr", "port"],
         category: "tcp",
@@ -483,7 +483,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "tcp/accept",
         func: prim_tcp_accept,
         arity: Arity::AtLeast(1),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
         params: &["listener"],
         category: "tcp",
@@ -494,7 +494,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "tcp/connect",
         func: prim_tcp_connect,
         arity: Arity::AtLeast(2),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Connect to a TCP address. Returns a stream port.",
         params: &["addr", "port"],
         category: "tcp",
@@ -505,7 +505,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "tcp/shutdown",
         func: prim_tcp_shutdown,
         arity: Arity::Exact(2),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "tcp",
@@ -517,7 +517,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "udp/bind",
         func: prim_udp_bind,
         arity: Arity::Exact(2),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Bind a UDP socket. Returns a UDP port.",
         params: &["addr", "port"],
         category: "udp",
@@ -528,7 +528,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "udp/send-to",
         func: prim_udp_send_to,
         arity: Arity::AtLeast(4),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
         params: &["socket", "data", "addr", "port"],
         category: "udp",
@@ -539,7 +539,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "udp/recv-from",
         func: prim_udp_recv_from,
         arity: Arity::AtLeast(2),
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
         params: &["socket", "count"],
         category: "udp",

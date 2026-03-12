@@ -89,7 +89,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "fiber?",
     "closure?",
     "jit?",
-    "pure?",
+    "silent?",
     "coro?",
     "box?",
     // Collection predicates → bool

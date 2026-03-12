@@ -1,6 +1,6 @@
 //! File I/O primitives
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -534,7 +534,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/read",
         func: prim_slurp,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read entire file as a string",
         params: &["path"],
@@ -545,7 +545,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/write",
         func: prim_spit,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Write string content to a file (overwrites if exists)",
         params: &["path", "content"],
@@ -556,7 +556,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/append",
         func: prim_append_file,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Append string content to a file",
         params: &["path", "content"],
@@ -567,7 +567,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/delete",
         func: prim_delete_file,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Delete a file",
         params: &["path"],
@@ -578,7 +578,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/delete-dir",
         func: prim_delete_directory,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Delete a directory (must be empty)",
         params: &["path"],
@@ -589,7 +589,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/mkdir",
         func: prim_create_directory,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory",
         params: &["path"],
@@ -600,7 +600,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/mkdir-all",
         func: prim_create_directory_all,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a directory and all parent directories",
         params: &["path"],
@@ -611,7 +611,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/rename",
         func: prim_rename_file,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Rename a file",
         params: &["old-path", "new-path"],
@@ -622,7 +622,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/copy",
         func: prim_copy_file,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Copy a file",
         params: &["src", "dst"],
@@ -633,7 +633,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/size",
         func: prim_file_size,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get file size in bytes",
         params: &["path"],
@@ -644,7 +644,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/ls",
         func: prim_list_directory,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "List directory contents",
         params: &["path"],
@@ -655,7 +655,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "file/lines",
         func: prim_read_lines,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Read lines from a file and return as a list of strings",
         params: &["path"],

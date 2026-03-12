@@ -113,7 +113,7 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
     // Analyze
     let meta = cached_primitive_meta(symbols);
     let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
     let mut analysis = analyzer
         .analyze(&expanded)

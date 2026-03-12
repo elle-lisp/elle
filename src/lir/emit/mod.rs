@@ -89,7 +89,7 @@ impl Emitter {
         self.yield_stack_state.clear();
         self.yield_points.clear();
         self.call_sites.clear();
-        self.current_func_may_suspend = func.effect.may_suspend();
+        self.current_func_may_suspend = func.signal.may_suspend();
         self.current_func_num_locals = func.num_locals;
 
         // First pass: record label offsets (simplified - emit all blocks in order)
@@ -307,7 +307,7 @@ impl Emitter {
                     num_captures: captures.len(),
                     num_params: func.num_params,
                     constants: Rc::new(nested_bytecode.constants),
-                    effect: func.effect,
+                    signal: func.signal,
                     lbox_params_mask: func.lbox_params_mask,
                     lbox_locals_mask: func.lbox_locals_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
@@ -744,9 +744,9 @@ impl Emitter {
                 // No stack effect
             }
 
-            LirInstr::CheckEffectBound { src, allowed_bits } => {
+            LirInstr::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CheckEffectBound);
+                self.bytecode.emit(Instruction::CheckSignalBound);
                 // Emit u32 as two u16s (low half first, then high half)
                 self.bytecode.emit_u16(*allowed_bits as u16);
                 self.bytecode.emit_u16((*allowed_bits >> 16) as u16);

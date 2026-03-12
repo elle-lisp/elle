@@ -1,30 +1,30 @@
 #!/usr/bin/env elle
 
-# Effects — user-defined signals and effect restrictions
+# Signals — user-defined signals and signal restrictions
 #
 # Demonstrates:
-#   effect              — declaring user-defined signal keywords
-#   restrict            — bounding which signals a function may emit
-#   restrict (param)    — bounding which signals a callback may emit
+#   signal              — declaring user-defined signal keywords
+#   silence             — bounding which signals a function may emit
+#   silence (param)     — bounding which signals a callback may emit
 #   Early termination   — :abort stops a search the moment a match is found
 #   Progress reporting  — :progress lets callers observe long-running work
 #   Logging             — :log entries the caller can collect or ignore
-#   Plugin sandboxing   — restrict limits what signals a plugin may emit
+#   Plugin sandboxing   — silence limits what signals a plugin may emit
 #
-# Effects are flow-control signals. They interrupt execution and let the
+# Signals are flow-control interrupts. They suspend execution and let the
 # caller decide how to respond. Restricting signals has nothing to do with
 # side-effects — a function can mutate state and still be inert.
 
 # ========================================
-# 1. Declaring user-defined effects
+# 1. Declaring user-defined signals
 # ========================================
 
 # Declare four user-defined signal keywords.
 # Each becomes a named flow-control interrupt the caller can intercept.
-(effect :abort)    # signals early termination — caller catches and uses the value
-(effect :progress) # signals a progress update — caller can display or collect
-(effect :log)      # signals a log entry — caller decides whether to record it
-(effect :audit)    # signals an audit event — caller can log for compliance
+(signal :abort)    # signals early termination — caller catches and uses the value
+(signal :progress) # signals a progress update — caller can display or collect
+(signal :log)      # signals a log entry — caller decides whether to record it
+(signal :audit)    # signals an audit event — caller can log for compliance
 
 # ========================================
 # 2. Early termination with :abort
@@ -37,7 +37,7 @@
   (each x xs              # visit each element in order
     (when (pred x)        # stop as soon as pred is true
       # signal :abort with the found value — interrupts the fiber
-      (fiber/signal :abort x))))
+      (emit :abort x))))
 
 # drive-search runs find-first in a fiber that catches :abort signals
 (defn drive-search []
@@ -47,7 +47,7 @@
 # create a fiber whose mask allows :abort to surface
 (def search-fiber (fiber/new drive-search |:abort|))
 
-# resume once — the fiber runs until it hits fiber/signal :abort
+# resume once — the fiber runs until it hits emit :abort
 (fiber/resume search-fiber)
 
 # if the fiber paused, it caught an :abort signal; fiber/value holds the payload
@@ -66,7 +66,7 @@
   "Square item and signal :progress with the result."
   (def result (* item item))  # compute the square
   # signal :progress — suspends until the caller resumes
-  (fiber/signal :progress {:item item :result result})
+  (emit :progress {:item item :result result})
   result)                     # return the square as the map result
 
 (defn process-items [items]
@@ -85,7 +85,7 @@
 
 # drive the fiber until it finishes, collecting each :progress signal
 (forever
-  # resume the fiber — runs until next fiber/signal or completion
+  # resume the fiber — runs until next emit or completion
   (fiber/resume pf)
   (if (= (fiber/status pf) :paused)
     # fiber paused on a :progress signal — collect the payload
@@ -109,13 +109,13 @@
 (defn compute-with-log [x]
   "Double x, add 10, signaling :log at each step. Returns the result."
   # signal the start — caller may record this
-  (fiber/signal :log {:level :info :msg "starting"})
+  (emit :log {:level :info :msg "starting"})
   (def step1 (* x 2))   # double the input
   # signal the intermediate value
-  (fiber/signal :log {:level :debug :msg (-> "doubled to " (append (string step1)))})
+  (emit :log {:level :debug :msg (-> "doubled to " (append (string step1)))})
   (def step2 (+ step1 10))  # add ten
   # signal completion
-  (fiber/signal :log {:level :info :msg "done"})
+  (emit :log {:level :info :msg "done"})
   step2)                # return the final result
 
 # run-logged is the fiber entry point for the collecting caller
@@ -130,7 +130,7 @@
 
 # drive the fiber, collecting each :log signal
 (forever
-  # resume — runs until next fiber/signal :log or completion
+  # resume — runs until next emit :log or completion
   (fiber/resume lf)
   (match (fiber/status lf)
          # fiber paused on :log — record the entry
@@ -161,16 +161,16 @@
 (print direct-result)                        # print the result
 
 # ========================================
-# 5. restrict — protecting iteration from signaling callbacks
+# 5. silence — protecting iteration from signaling callbacks
 # ========================================
 
 # safe-map requires its callback to be inert.
 # If f could signal mid-iteration, the partially-built result list
-# would be abandoned — restrict makes that a runtime error instead.
+# would be abandoned — silence makes that a runtime error instead.
 (defn safe-map [f xs]
   "Map f over xs. f must be inert — signals mid-iteration corrupt the result."
-  # restrict f to emit no signals — enforced at call time
-  (restrict f)
+  # silence f to emit no signals — enforced at call time
+  (silence f)
   (map f xs))  # map f over xs normally
 
 # square is an inert callback — no signals, just arithmetic
@@ -183,35 +183,35 @@
 (display "  squares: ") # display prompt
 (print squares)         # print the squares
 
-# noisy-double signals :log mid-iteration — violates the restrict bound
+# noisy-double signals :log mid-iteration — violates the silence bound
 (defn noisy-double [x]
   "Double x, but also signal :log — not inert."
-  # this signal will be caught by restrict and turned into :effect-violation
-  (fiber/signal :log {:msg "doubling"})
+  # this signal will be caught by silence and turned into :signal-violation
+  (emit :log {:msg "doubling"})
   (* x 2))  # the multiplication never completes
 
-# protect catches the :effect-violation error as data
+# protect catches the :signal-violation error as data
 (def [ok? err] (protect (safe-map noisy-double [1 2 3])))
-(display "  effect violation: ") # display prompt
+(display "  signal violation: ") # display prompt
 (print err)                       # print the error
-# err is {:error :effect-violation :message "..."} — inspect with ->
+# err is {:error :signal-violation :message "..."} — inspect with ->
 (assert (not ok?) "safe-map: signaling callback rejected")
-(assert (= (-> err (get :error)) :effect-violation) "safe-map: effect-violation error")
+(assert (= (-> err (get :error)) :signal-violation) "safe-map: signal-violation error")
 
 # match on the error kind to handle different violations distinctly
 (match err:error  # syntax-sugar for (get err :error)
-  (:effect-violation (display "  safe-map: callback tried to signal mid-iteration\n"))
+  (:signal-violation (display "  safe-map: callback tried to signal mid-iteration\n"))
   (_ (error err)))
 
 # ========================================
-# 6. restrict — ensuring callbacks are inert
+# 6. silence — ensuring callbacks are inert
 # ========================================
 
 # run-pure requires its plugin to be inert — no signals at all.
 # This is the strongest guarantee: the plugin cannot interrupt execution.
 (defn run-pure [plugin data]
   "Run plugin on data. plugin must be inert — no signals allowed."
-  (restrict plugin)
+  (silence plugin)
   (plugin data))
 
 # good-plugin is inert — just arithmetic, no signals
@@ -230,15 +230,15 @@
   (yield :escape-attempt)
   data)  # never reached
 
-# protect catches the :effect-violation error as data
+# protect catches the :signal-violation error as data
 (def [ok? err] (protect (run-pure bad-plugin 21)))
 (display "  sandbox violation: ") # display prompt
 (print err)                        # print the error
 (assert (not ok?) "plugin: yielding plugin caught")
-(assert (= (-> err (get :error)) :effect-violation) "plugin: effect-violation error")
+(assert (= (-> err (get :error)) :signal-violation) "plugin: signal-violation error")
 
 (match err:error
-  (:effect-violation (display "  plugin: callback tried to yield — rejected by restrict\n"))
+  (:signal-violation (display "  plugin: callback tried to yield — rejected by silence\n"))
   (_ (error err)))
 
 # ========================================
@@ -250,7 +250,7 @@
 (defn sensitive-op [data]
   "Perform a sensitive operation, signaling both :log and :audit."
   # emit both bits simultaneously — one signal, two meanings
-  (fiber/signal |:log :audit| {:op :write :data data :user "alice"})
+  (emit |:log :audit| {:op :write :data data :user "alice"})
   (string "processed: " data))  # return a string describing the result
 
 # run-sensitive is the entry point for the sensitive operation fiber
@@ -305,4 +305,4 @@
 (assert (= (-> audit-sig-val (get :user)) "alice") "audit: user field present")
 
 (print "")                                    # blank line
-(print "all effects tests passed.")           # final message
+(print "all signals tests passed.")           # final message

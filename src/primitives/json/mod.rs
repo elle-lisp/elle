@@ -9,8 +9,8 @@ mod serializer;
 pub use parser::JsonParser;
 pub use serializer::{escape_json_string, serialize_value, serialize_value_pretty};
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -86,7 +86,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/parse",
         func: prim_json_parse,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Parse a JSON string into Elle values",
         params: &["json-string"],
@@ -97,7 +97,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/serialize",
         func: prim_json_serialize,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
         params: &["value"],
@@ -108,7 +108,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/pretty",
         func: prim_json_serialize_pretty,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
         params: &["value"],
@@ -403,7 +403,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            effect: crate::effects::Effect::inert(),
+            signal: crate::signals::Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),

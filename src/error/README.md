@@ -70,4 +70,4 @@ at the point of failure.
 ## See Also
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
-- `docs/except.md` - Elle-level error handling (user-facing error structs)
+- `docs/signals.md` - Elle-level error handling (error signalling, conventions)

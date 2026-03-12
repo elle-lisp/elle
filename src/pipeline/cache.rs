@@ -94,12 +94,12 @@ pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
 /// Add stdlib exports to the cached PrimitiveMeta.
 ///
 /// Called by `init_stdlib` after compiling and executing stdlib.lisp.
-/// Each export is added to `meta.effects` and `meta.functions` so that
+/// Each export is added to `meta.signals` and `meta.functions` so that
 /// `bind_primitives` will pre-bind them for all subsequent compilations.
 pub fn update_cache_with_stdlib(
     exports: std::collections::HashMap<
         crate::value::SymbolId,
-        (crate::value::Value, crate::effects::Effect),
+        (crate::value::Value, crate::signals::Signal),
     >,
 ) {
     COMPILATION_CACHE.with(|cache| {
@@ -114,8 +114,8 @@ pub fn update_cache_with_stdlib(
                 .expect("prelude loading must succeed");
             CompilationCache { vm, expander, meta }
         });
-        for (sym_id, (value, effect)) in &exports {
-            c.meta.effects.insert(*sym_id, *effect);
+        for (sym_id, (value, signal)) in &exports {
+            c.meta.signals.insert(*sym_id, *signal);
             c.meta.functions.insert(*sym_id, *value);
         }
     });

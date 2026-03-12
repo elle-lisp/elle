@@ -2,8 +2,8 @@
 //!
 //! Thin wrappers around `crate::path`. No camino imports here.
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -245,7 +245,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/join",
         func: prim_path_join,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(1),
         doc: "Join path components",
         params: &["components"],
@@ -256,7 +256,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/parent",
         func: prim_path_parent,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get parent directory (nil if none)",
         params: &["path"],
@@ -267,7 +267,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/filename",
         func: prim_path_filename,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get file name (last component, nil if none)",
         params: &["path"],
@@ -278,7 +278,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/stem",
         func: prim_path_stem,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get file stem (filename without extension, nil if none)",
         params: &["path"],
@@ -289,7 +289,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/extension",
         func: prim_path_extension,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get file extension without dot (nil if none)",
         params: &["path"],
@@ -300,7 +300,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/with-extension",
         func: prim_path_with_extension,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Replace file extension (empty string removes it)",
         params: &["path", "ext"],
@@ -311,7 +311,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/normalize",
         func: prim_path_normalize,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Lexical path normalization (resolve . and ..)",
         params: &["path"],
@@ -322,7 +322,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/absolute",
         func: prim_path_absolute,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Compute absolute path (does not require path to exist)",
         params: &["path"],
@@ -333,7 +333,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/canonicalize",
         func: prim_path_canonicalize,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Resolve path through filesystem (symlinks resolved, must exist)",
         params: &["path"],
@@ -344,7 +344,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/relative",
         func: prim_path_relative,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "Compute relative path from base to target (nil if impossible)",
         params: &["target", "base"],
@@ -355,7 +355,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/components",
         func: prim_path_components,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Split path into list of components",
         params: &["path"],
@@ -366,7 +366,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/absolute?",
         func: prim_path_is_absolute,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "True if path is absolute",
         params: &["path"],
@@ -377,7 +377,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/relative?",
         func: prim_path_is_relative,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "True if path is relative",
         params: &["path"],
@@ -388,7 +388,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/cwd",
         func: prim_path_cwd,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(0),
         doc: "Get current working directory",
         params: &[],
@@ -399,7 +399,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/exists?",
         func: prim_path_exists,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Check if path exists",
         params: &["path"],
@@ -410,7 +410,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/file?",
         func: prim_path_is_file,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Check if path is a regular file",
         params: &["path"],
@@ -421,7 +421,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "path/dir?",
         func: prim_path_is_dir,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Check if path is a directory",
         params: &["path"],

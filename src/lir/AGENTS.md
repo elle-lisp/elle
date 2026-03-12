@@ -190,7 +190,7 @@ The JIT uses this to spill live registers to a stack slot and call the yield run
 
 ### CallSiteInfo
 
-Recorded when a `LirInstr::Call` is emitted in a function where `effect.may_suspend()`:
+Recorded when a `LirInstr::Call` is emitted in a function where `signal.may_suspend()`:
 - `resume_ip: usize` — Bytecode offset after the Call instruction (where the interpreter resumes if the callee yields)
 - `stack_regs: Vec<Reg>` — Virtual registers on the operand stack after popping func/args but before pushing the result
 

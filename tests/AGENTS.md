@@ -16,7 +16,7 @@ tests/
 ├── property/           # Property-based tests (proptest)
 │   ├── mod.rs          # Module declarations
 │   ├── strategies.rs   # Shared proptest strategies for generating Values and types
-│   └── *.rs            # One file per domain (arithmetic, nanboxing, effects, etc.)
+│   └── *.rs            # One file per domain (arithmetic, nanboxing, signals, etc.)
 ├── integration/        # Full-pipeline integration tests
 │   ├── mod.rs          # Module declarations
 │   └── *.rs            # One file per feature area
@@ -29,7 +29,7 @@ In addition to the `tests/` directory:
 
 - **`src/` inline tests**: 58 modules in `src/` contain `#[cfg(test)]` modules
   with unit tests colocated next to the code they test. These cover reader,
-  syntax, HIR, LIR, emitter, VM, value representation, effects, FFI, LSP,
+  syntax, HIR, LIR, emitter, VM, value representation, signals, FFI, LSP,
   lint, JIT, formatter, pipeline, and more.
 
 - **`examples/`**: Every `.lisp` file in `examples/` is an executable test.
@@ -82,7 +82,7 @@ VM) and check the result. They cover:
 - Core language features (arithmetic, conditionals, lists, functions)
 - Advanced features (closures, recursion, higher-order functions, match)
 - Concurrency (fibers, coroutines, thread transfer)
-- Effect enforcement (interprocedural effect tracking)
+- Signal enforcement (interprocedural signal tracking)
 - Error reporting (error messages include correct source locations)
 - Destructuring, blocks, splice, booleans, dispatch
 - Prelude macros (defn, let*, when, unless, etc.)
@@ -102,7 +102,7 @@ APIs directly without going through the full compilation pipeline:
   list/array/cons operations, arity matching
 - `symbol.rs` — Symbol interning, lookup, persistence, ordering
 - `primitives.rs` — Primitive functions called directly via `call_primitive()`
-- `closures_and_lambdas.rs` — Closure construction, capture, arity, effects
+- `closures_and_lambdas.rs` — Closure construction, capture, arity, signals
 - `bytecode_debug.rs` — Bytecode compilation and debug output
 - `hir_debug.rs` — HIR structure after analysis
 - `lir_debug.rs` — LIR structure after lowering
@@ -116,7 +116,7 @@ Use for **tests tightly coupled to implementation details**. These live next to
 the code they test and have access to private items. 58 modules have inline
 tests covering: lexer, parser, syntax conversion, expander, analyzer, lowerer,
 emitter, VM core, VM arithmetic, value representation,
-closures, fibers, effects, FFI (marshal, callback, loader, types, call),
+closures, fibers, signals, FFI (marshal, callback, loader, types, call),
 primitives (fibers, coroutines, FFI, process, JSON), JIT (compiler, dispatch,
 group, runtime), LSP (completion, definition, hover, references, rename,
 formatting, state), lint (rules, diagnostics, CLI), formatter, pipeline,
@@ -263,7 +263,7 @@ This gives access to private items. No registration needed.
 ### Naming conventions
 
 - Test files: lowercase, hyphenated concepts joined with underscores
-  (e.g., `closures_and_lambdas.rs`, `effect_enforcement.rs`)
+  (e.g., `closures_and_lambdas.rs`, `signal_enforcement.rs`)
 - Test functions: `test_` prefix for example-based, descriptive name for
   property tests (e.g., `fn int_roundtrip(...)`, `fn add_commutative(...)`)
 - Property test names describe the invariant, not the implementation
@@ -293,7 +293,7 @@ Choose case counts based on the cost of each test case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
-| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, effect combine laws |
+| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, signal combine laws |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals or recursion) | 10-50 | Bug regression, determinism, complex programs |
 
@@ -325,7 +325,7 @@ cargo test                     # use per-test defaults (CI thorough)
 Property test files follow a consistent structure:
 
 1. Module-level comment explaining what invariants are tested
-2. Any local helper functions (e.g., `infer_effect()` in `effects.rs`,
+2. Any local helper functions (e.g., `infer_signal()` in `signals.rs`,
    `syntax_eq()` in `reader.rs`)
 3. `proptest!` blocks grouped by invariant category, separated by section
    headers (`// =========================================================================`)

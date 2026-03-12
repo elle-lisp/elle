@@ -24,7 +24,7 @@ pub fn analyze(
 
     let expanded = expander.expand(syntax, symbols, vm)?;
     let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
     Ok(AnalyzeResult { hir: analysis.hir })
@@ -67,7 +67,7 @@ pub fn analyze_file(
 
     // Analyze
     let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.effects.clone(), meta.arities.clone());
+        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
     let hir = analyzer.analyze_file_letrec(forms, span)?;
 
