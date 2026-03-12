@@ -429,8 +429,8 @@ mod tests {
     /// This closure has empty bytecode — it won't execute correctly,
     /// but it's enough to test callback creation/destruction.
     fn test_closure(arity: usize) -> Rc<Closure> {
-        use crate::signals::Signal;
         use crate::error::LocationMap;
+        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
         let template = Rc::new(ClosureTemplate {
@@ -529,8 +529,8 @@ mod tests {
 
     #[test]
     fn test_build_callback_env_with_captures() {
-        use crate::signals::Signal;
         use crate::error::LocationMap;
+        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
 

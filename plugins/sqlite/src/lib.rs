@@ -1,8 +1,8 @@
 //! Elle SQLite plugin — database access via the `rusqlite` crate.
 
-use elle::effects::Effect;
 use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
+use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::value::types::Arity;
 use elle::value::{error_val, TableKey, Value};
@@ -267,7 +267,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/open",
         func: prim_sqlite_open,
-        effect: Effect::errors(),
+        effect: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Open a SQLite database. Use \":memory:\" for in-memory.",
         params: &["path"],
@@ -278,7 +278,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/close",
         func: prim_sqlite_close,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Close a SQLite database (no-op; connection closes on GC).",
         params: &["db"],
@@ -289,7 +289,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/execute",
         func: prim_sqlite_execute,
-        effect: Effect::errors(),
+        effect: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Execute SQL that doesn't return rows. Returns rows affected.",
         params: &["db", "sql", "params?"],
@@ -300,7 +300,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sqlite/query",
         func: prim_sqlite_query,
-        effect: Effect::errors(),
+        effect: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Execute a query and return results as a list of structs.",
         params: &["db", "sql", "params?"],

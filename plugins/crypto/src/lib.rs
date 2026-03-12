@@ -4,9 +4,9 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha224, Sha256, Sha384, Sha512, Sha512_224, Sha512_256};
 use std::collections::BTreeMap;
 
-use elle::effects::Effect;
 use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
+use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::value::types::Arity;
 use elle::value::{error_val, TableKey, Value};
@@ -141,7 +141,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha224",
         func: prim_sha224,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-224 hash. Accepts string, bytes, or blob. Returns 28 bytes.",
         params: &["data"],
@@ -152,7 +152,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha256",
         func: prim_sha256,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-256 hash. Accepts string, bytes, or blob. Returns 32 bytes.",
         params: &["data"],
@@ -163,7 +163,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha384",
         func: prim_sha384,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-384 hash. Accepts string, bytes, or blob. Returns 48 bytes.",
         params: &["data"],
@@ -174,7 +174,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha512",
         func: prim_sha512,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-512 hash. Accepts string, bytes, or blob. Returns 64 bytes.",
         params: &["data"],
@@ -185,7 +185,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha512-224",
         func: prim_sha512_224,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-512/224 hash (SHA-512 truncated to 224 bits). Accepts string, bytes, or blob. Returns 28 bytes.",
         params: &["data"],
@@ -196,7 +196,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/sha512-256",
         func: prim_sha512_256,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "SHA-512/256 hash (SHA-512 truncated to 256 bits). Accepts string, bytes, or blob. Returns 32 bytes.",
         params: &["data"],
@@ -208,7 +208,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha224",
         func: prim_hmac_sha224,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA224. Takes (key, message). Returns 28 bytes.",
         params: &["key", "message"],
@@ -219,7 +219,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha256",
         func: prim_hmac_sha256,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA256. Takes (key, message). Returns 32 bytes.",
         params: &["key", "message"],
@@ -230,7 +230,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha384",
         func: prim_hmac_sha384,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA384. Takes (key, message). Returns 48 bytes.",
         params: &["key", "message"],
@@ -241,7 +241,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha512",
         func: prim_hmac_sha512,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA512. Takes (key, message). Returns 64 bytes.",
         params: &["key", "message"],
@@ -252,7 +252,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha512-224",
         func: prim_hmac_sha512_224,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA512/224. Takes (key, message). Returns 28 bytes.",
         params: &["key", "message"],
@@ -263,7 +263,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "crypto/hmac-sha512-256",
         func: prim_hmac_sha512_256,
-        effect: Effect::inert(),
+        effect: Signal::inert(),
         arity: Arity::Exact(2),
         doc: "HMAC-SHA512/256. Takes (key, message). Returns 32 bytes.",
         params: &["key", "message"],

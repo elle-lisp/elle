@@ -1,7 +1,7 @@
-use crate::signals::Signal;
 use crate::error::{LError, LResult};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::register_primitives;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;

@@ -165,10 +165,10 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signals::Signal;
     use crate::lir::{
         BasicBlock, Label, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
+    use crate::signals::Signal;
     use crate::syntax::Span;
     use crate::value::Arity;
 

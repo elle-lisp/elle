@@ -810,10 +810,10 @@ impl Default for JitCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signals::Signal;
     use crate::lir::{
         BasicBlock, BinOp, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
+    use crate::signals::Signal;
     use crate::syntax::Span;
     use crate::value::Arity;
 

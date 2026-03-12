@@ -1,6 +1,6 @@
-use crate::signals::Signal;
 use crate::pipeline::compile_file;
 use crate::pipeline::update_cache_with_stdlib;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use crate::value::Value;

@@ -18,8 +18,8 @@
 
 use std::rc::Rc;
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::allocator::AllocatorBox;
 use crate::value::fiber::SignalBits;
 use crate::value::fiber::{SIG_ERROR, SIG_OK};

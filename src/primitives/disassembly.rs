@@ -1,8 +1,8 @@
 //! Bytecode and JIT disassembly primitives
 
-use crate::signals::Signal;
 use crate::lir::{terminator_kind, Terminator};
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;

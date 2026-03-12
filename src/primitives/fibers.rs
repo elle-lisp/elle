@@ -4,8 +4,8 @@
 //! value extraction. Introspection and management primitives (bits, mask,
 //! parent, child, propagate, cancel, fiber?) are in `fiber_introspect.rs`.
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -417,8 +417,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signals::Signal;
     use crate::error::LocationMap;
+    use crate::signals::Signal;
     use crate::value::fiber::{SIG_ERROR as FIBER_SIG_ERROR, SIG_YIELD};
     use crate::value::{Arity, Closure};
     use std::collections::HashMap;

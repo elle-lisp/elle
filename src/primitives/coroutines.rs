@@ -13,8 +13,8 @@
 //! - coro/>iterator: Identity (fibers are iterable)
 //! - yield*: Prelude macro for sub-coroutine delegation
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{
     Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
 };

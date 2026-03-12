@@ -376,8 +376,8 @@ impl std::fmt::Debug for Fiber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::signals::Signal;
     use crate::error::LocationMap;
+    use crate::signals::Signal;
     use crate::value::types::Arity;
     use std::collections::HashMap;
 

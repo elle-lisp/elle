@@ -9,8 +9,8 @@
 //! - fiber/cancel: Inject error into suspended fiber
 //! - fiber?: Type predicate
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{FiberStatus, SignalBits, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

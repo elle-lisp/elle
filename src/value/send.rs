@@ -11,9 +11,9 @@
 
 use super::heap::{alloc, deref, Cons, HeapObject};
 use super::repr::Value;
-use crate::signals::Signal;
 use crate::error::LocationMap;
 use crate::hir::VarargKind;
+use crate::signals::Signal;
 use crate::value::types::Arity;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

@@ -1,8 +1,8 @@
 //! Set primitives for immutable and mutable sets
 use std::collections::BTreeSet;
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

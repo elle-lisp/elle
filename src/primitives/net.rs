@@ -6,11 +6,11 @@
 //! complete immediately. Accept/connect/send/recv/shutdown yield SIG_IO
 //! for scheduler dispatch.
 
-use crate::signals::Signal;
 use crate::io::request::{ConnectAddr, IoOp, IoRequest};
 use crate::port::{Port, PortKind};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

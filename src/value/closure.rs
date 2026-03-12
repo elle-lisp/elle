@@ -4,8 +4,8 @@
 //! `ClosureTemplate` holds per-definition data (shared across all instances
 //! of the same lambda). `Closure` pairs a template with a captured environment.
 
-use crate::signals::Signal;
 use crate::error::LocationMap;
+use crate::signals::Signal;
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::collections::HashMap;

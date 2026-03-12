@@ -1,8 +1,8 @@
 //! List manipulation primitives
 mod advanced;
 
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};

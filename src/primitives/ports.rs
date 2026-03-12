@@ -1,8 +1,8 @@
 //! Port primitives — lifecycle management for file descriptors.
 
-use crate::signals::Signal;
 use crate::port::{Direction, Encoding, Port};
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

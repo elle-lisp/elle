@@ -1,6 +1,6 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum)
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::syntax::Syntax;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;

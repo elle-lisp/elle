@@ -4,11 +4,11 @@
 //! IoRequest and return (SIG_YIELD | SIG_IO, request), which suspends
 //! the fiber. The scheduler catches SIG_IO and dispatches to a backend.
 
-use crate::signals::Signal;
 use crate::io::request::{IoOp, IoRequest};
 use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

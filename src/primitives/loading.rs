@@ -1,8 +1,8 @@
 //! FFI library loading, symbol lookup, signature creation, and callback primitives
 
-use crate::signals::Signal;
 use crate::ffi::types::{CallingConvention, Signature};
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};

@@ -1,6 +1,6 @@
 //! Process-related primitives
-use crate::signals::Signal;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
