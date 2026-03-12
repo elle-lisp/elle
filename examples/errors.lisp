@@ -21,7 +21,7 @@
 
 # Errors in Elle are values signaled via fibers. By convention, a struct
 # {:error :keyword :message "message"} is used, but any value works.
-# (error val) is a prelude macro that expands to (fiber/signal 1 val).
+# (error val) is a prelude macro that expands to (emit 1 val).
 
 # try/catch runs the body; if an error occurs, the catch handler runs
 # with the error bound to the catch variable.

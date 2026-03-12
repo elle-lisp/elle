@@ -429,8 +429,8 @@ mod tests {
     /// This closure has empty bytecode — it won't execute correctly,
     /// but it's enough to test callback creation/destruction.
     fn test_closure(arity: usize) -> Rc<Closure> {
-        use crate::effects::Effect;
         use crate::error::LocationMap;
+        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
         let template = Rc::new(ClosureTemplate {
@@ -440,7 +440,7 @@ mod tests {
             num_captures: 0,
             num_params: arity,
             constants: Rc::new(vec![]),
-            effect: Effect::inert(),
+            signal: Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -529,8 +529,8 @@ mod tests {
 
     #[test]
     fn test_build_callback_env_with_captures() {
-        use crate::effects::Effect;
         use crate::error::LocationMap;
+        use crate::signals::Signal;
         use crate::value::types::Arity;
         use crate::value::ClosureTemplate;
 
@@ -541,7 +541,7 @@ mod tests {
             num_captures: 1,
             num_params: 1,
             constants: Rc::new(vec![]),
-            effect: Effect::inert(),
+            signal: Signal::inert(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),

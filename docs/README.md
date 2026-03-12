@@ -10,7 +10,6 @@ This directory contains design documents, language references, and contributor g
 | [types.md](types.md) | Type system: mutable/immutable split, all types, predicates, display format, equality |
 | [semantics.md](semantics.md) | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring |
 | [macros.md](macros.md) | Macro system: current state, architecture, hygiene, scope sets |
-| [except.md](except.md) | Exception handling: error structs, try/catch, error propagation |
 | [modules.md](modules.md) | Module system: closure-as-module, parametric imports, qualified symbols, trade-offs |
 
 ## Contributor Guides
@@ -20,13 +19,13 @@ This directory contains design documents, language references, and contributor g
 | [cookbook.md](cookbook.md) | Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros |
 | [testing.md](testing.md) | Testing strategy: decision tree, test categories, property tests, CI structure, running tests |
 | [pipeline.md](pipeline.md) | Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching |
-| [debugging.md](debugging.md) | Debugging toolkit: introspection primitives, time API, effect system, memory profiling |
+| [debugging.md](debugging.md) | Debugging toolkit: introspection primitives, time API, signal system, memory profiling |
 
 ## Design Documents
 
 | File | Description |
 |------|-------------|
-| [effects.md](effects.md) | Effect system design: motivation, signal protocol, effect inference, JIT integration |
+| [signals.md](signals.md) | Signal system design: motivation, signal protocol, signal inference, JIT integration |
 | [fibers.md](fibers.md) | Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains |
 | [ffi.md](ffi.md) | FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling |
 
@@ -43,7 +42,7 @@ This directory contains design documents, language references, and contributor g
 - **Starting out?** Read [language.md](language.md) first, then [pipeline.md](pipeline.md)
 - **Working with modules?** Read [modules.md](modules.md)
 - **Adding a feature?** Check [cookbook.md](cookbook.md) for the recipe
-- **Understanding effects?** Read [effects.md](effects.md)
+- **Understanding signals?** Read [signals.md](signals.md)
 - **Working with concurrency?** Read [fibers.md](fibers.md)
 - **Implementing FFI?** Read [ffi.md](ffi.md)
 - **Writing tests?** Read [testing.md](testing.md)

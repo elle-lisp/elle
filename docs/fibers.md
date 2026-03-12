@@ -16,7 +16,7 @@ non-local control flow — errors, yields, coroutines, cancellation — is
 - [Coroutines](#coroutines)
 - [Error Handling](#error-handling)
 - [Terminal vs. Resumable Signals](#terminal-vs-resumable-signals)
-- [Effect System Integration](#effect-system-integration)
+- [Signal System Integration](#signal-system-integration)
 - [What's Not Implemented Yet](#whats-not-implemented-yet)
 implemented as signals propagating through a fiber chain.
 
@@ -93,7 +93,7 @@ user-defined signal types.
 
 ### Signal emission
 
-When code emits a signal (`fiber/signal`):
+When code emits a signal (`emit`):
 
 1. Signal value stored in `fiber.signal`
 2. Fiber status → `Suspended`
@@ -141,7 +141,7 @@ copying on suspension.
 
 ### Two suspension modes
 
-**Signal suspension** (`fiber/signal`): single `SuspendedFrame` with empty
+**Signal suspension** (`emit`): single `SuspendedFrame` with empty
 stack. The fiber's own operand stack is preserved in place.
 
 **Yield suspension** (`yield` instruction): chain of `SuspendedFrame`s from
@@ -244,7 +244,7 @@ Walk `fiber/child` to find the originating fiber. The originator's
 |-----------|-----------|---------|
 | `fiber/new` | `(fn mask) → fiber` | Create fiber from closure with signal mask |
 | `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value# returns signal value |
-| `fiber/signal` | `(bits value) → (suspends)` | Emit signal from current fiber |
+| `emit` | `(bits value) → (suspends)` | Emit signal from current fiber |
 | `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:suspended`, `:dead`, `:error` |
 | `fiber/value` | `(fiber) → value` | Signal payload or return value |
 | `fiber/bits` | `(fiber) → int` | Signal bits from last signal |
@@ -308,13 +308,13 @@ handler either:
 An uncaught `SIG_ERROR` at the root fiber is terminal by convention.
 
 
-## Effect System Integration
+## Signal System Integration
 
-Closures carry an `Effect` with signal bits describing what they might emit.
-The fiber's mask determines which signals are caught. The effect system is
-compile-time# signals are runtime. Same bitfield, different timing.
+Closures carry a `Signal` with signal bits describing what they might emit.
+The fiber's mask determines which signals are caught. The signal system is
+compile-time; runtime signals are runtime events. Same bitfield, different timing.
 
-See `docs/effects.md` for the effect system design.
+See `docs/signals.md` for the signal system design.
 
 
 ## What's Not Implemented Yet

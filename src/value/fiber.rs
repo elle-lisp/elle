@@ -221,10 +221,10 @@ impl From<SignalBits> for u32 {
     }
 }
 
-// Signal constants are canonically defined in `crate::effects` (the semantic
+// Signal constants are canonically defined in `crate::signals` (the semantic
 // owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
 // imports continue to work.
-pub use crate::effects::{
+pub use crate::signals::{
     SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
     SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
 };
@@ -376,8 +376,8 @@ impl std::fmt::Debug for Fiber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::Effect;
     use crate::error::LocationMap;
+    use crate::signals::Signal;
     use crate::value::types::Arity;
     use std::collections::HashMap;
 
@@ -391,7 +391,7 @@ mod tests {
                 num_captures: 0,
                 num_params: 0,
                 constants: Rc::new(vec![]),
-                effect: Effect::inert(),
+                signal: Signal::inert(),
                 lbox_params_mask: 0,
                 lbox_locals_mask: 0,
                 symbol_names: Rc::new(HashMap::new()),

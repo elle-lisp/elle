@@ -1,7 +1,7 @@
 //! High-level Intermediate Representation (HIR)
 //!
 //! HIR is the fully-analyzed form produced from expanded Syntax. All bindings
-//! are resolved, effects are inferred, and captures are computed. This is the
+//! are resolved, signals are inferred, and captures are computed. This is the
 //! input to the lowering phase that produces LIR.
 //!
 //! Pipeline:

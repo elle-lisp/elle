@@ -1,5 +1,5 @@
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -160,7 +160,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "import",
     func: prim_import_file,
-    effect: Effect::errors(),
+    signal: Signal::errors(),
     arity: Arity::Exact(1),
     doc: "Import a module file and execute it in the current context",
     params: &["path"],

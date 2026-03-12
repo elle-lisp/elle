@@ -39,7 +39,7 @@ Return values:
 All SIG_RESUME primitives (including coroutine wrappers) return
 `(SIG_RESUME, fiber_value)`. Fiber primitives (`fiber/resume`) return SIG_RESUME with the fiber value.
 The VM swaps the child fiber into `vm.fiber`, executes it, then swaps back.
-`fiber/signal` returns the signal bits directly — the VM's catch-all handler
+`emit` returns the signal bits directly — the VM's catch-all handler
 stores them in `fiber.signal` and suspends the fiber.
 
 ## Adding a primitive
@@ -109,13 +109,13 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `concurrency.rs` | `spawn`, `join`, `current-thread-id` |
 | `chan.rs` | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
 | `coroutines.rs` | `coro/new`, `coro/resume`, `coro/done?`, `coro/status`, `coro/value`, `coro/>iterator` |
-| `fibers.rs` | `fiber/new`, `fiber/resume`, `fiber/signal`, `fiber/status`, `fiber/value` |
+| `fibers.rs` | `fiber/new`, `fiber/resume`, `emit`, `fiber/status`, `fiber/value` |
 | `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
-| `introspection.rs` | `closure?`, `jit?`, `inert?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `keyword` (alias: `string->keyword`) |
+| `introspection.rs` | `closure?`, `jit?`, `silent?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
 | `arena.rs` | `arena/count`, `arena/stats`, `arena/scope-stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `arena/fiber-stats`, `environment` |
 | `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |

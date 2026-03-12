@@ -12,7 +12,7 @@ fn eval_scheduled(input: &str) -> Result<Value, String> {
 fn setup_scheduled() -> (VM, SymbolTable) {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);

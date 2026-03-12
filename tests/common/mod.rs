@@ -17,7 +17,7 @@ use elle::{eval_all, init_stdlib, register_primitives, SymbolTable, Value, VM};
 pub fn eval_source_bare(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     set_vm_context(&mut vm as *mut VM);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     // No init_stdlib — tests using this must not depend on stdlib functions
@@ -36,7 +36,7 @@ pub fn eval_source_bare(input: &str) -> Result<Value, String> {
 pub fn eval_source(input: &str) -> Result<Value, String> {
     let mut vm = VM::new();
     let mut symbols = SymbolTable::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     // Set symbol table context before stdlib init so that macros using
     // gensym (each, ffi/defbind) work during init_stdlib's eval() calls.
     set_vm_context(&mut vm as *mut VM);
@@ -55,7 +55,7 @@ pub fn eval_source(input: &str) -> Result<Value, String> {
 pub fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
     let mut vm = VM::new();
-    let _effects = register_primitives(&mut vm, &mut symbols);
+    let _signals = register_primitives(&mut vm, &mut symbols);
     set_symbol_table(&mut symbols as *mut SymbolTable);
     init_stdlib(&mut vm, &mut symbols);
     (symbols, vm)
@@ -126,7 +126,7 @@ fn eval_with_cache(
         let c = borrow.get_or_insert_with(|| {
             let mut vm = VM::new();
             let mut symbols = SymbolTable::new();
-            let _effects = register_primitives(&mut vm, &mut symbols);
+            let _signals = register_primitives(&mut vm, &mut symbols);
             // Context pointers needed during init (stdlib loading uses gensym).
             set_vm_context(&mut vm as *mut VM);
             set_symbol_table(&mut symbols as *mut SymbolTable);

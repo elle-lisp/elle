@@ -1,8 +1,8 @@
 //! FFI memory management, typed access, and type construction primitives
 
-use crate::effects::Effect;
 use crate::ffi::types::TypeDesc;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -586,7 +586,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/size",
         func: prim_ffi_size,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the size of a C type in bytes.",
         params: &["type"],
@@ -597,7 +597,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/align",
         func: prim_ffi_align,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the alignment of a C type in bytes.",
         params: &["type"],
@@ -608,7 +608,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/malloc",
         func: prim_ffi_malloc,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Allocate C memory.",
         params: &["size"],
@@ -619,7 +619,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/free",
         func: prim_ffi_free,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(1),
         doc: "Free C memory.",
         params: &["ptr"],
@@ -630,7 +630,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/read",
         func: prim_ffi_read,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(2),
         doc: "Read a typed value from C memory.",
         params: &["ptr", "type"],
@@ -641,7 +641,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/write",
         func: prim_ffi_write,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Exact(3),
         doc: "Write a typed value to C memory.",
         params: &["ptr", "type", "value"],
@@ -652,7 +652,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/string",
         func: prim_ffi_string,
-        effect: Effect::ffi_errors(),
+        signal: Signal::ffi_errors(),
         arity: Arity::Range(1, 2),
         doc: "Read a null-terminated C string from a pointer.",
         params: &["ptr", "max-len"],
@@ -663,7 +663,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/struct",
         func: prim_ffi_struct,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a struct type descriptor from field types.",
         params: &["fields"],
@@ -674,7 +674,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/array",
         func: prim_ffi_array,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create an array type descriptor from element type and count.",
         params: &["elem-type", "count"],

@@ -28,7 +28,7 @@ Elle is designed with **Janet ergonomics in mind**, not as a direct port of any 
 - **Immutable by default**: Collections are immutable unless prefixed with `@`
 - **Keyword arguments**: Functions use keywords for named parameters
 - **Fibers**: Lightweight concurrency via fibers, not threads
-- **Effects system**: Explicit effect tracking for optimization
+- **Signal system**: Explicit signal tracking for optimization
 - **Scope allocation**: Region-based memory management for scopes
 
 ## See Also

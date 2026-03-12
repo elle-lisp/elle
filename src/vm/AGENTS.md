@@ -195,7 +195,7 @@ same fiber (same heap, globals, parameter frames).
 If the inner closure yields (`SIG_YIELD`), the saved outer stack is restored but
 the fiber is suspended mid-inner-execution. Callers that invoke user-provided
 closures (`eval`, `arena/allocs`) do not handle yield — they propagate the signal
-upward. Closures passed to these must be non-yielding (Pure effect). This is not
+upward. Closures passed to these must be non-yielding (inert signal). This is not
 currently enforced at the call site.
 
 See `execute.rs` module doc for the full rules on what is preserved, what is
@@ -203,14 +203,14 @@ overwritten, and how to add new callers.
 
 ## Suspension mechanism
 
-When a fiber suspends (via yield instruction or `fiber/signal`):
+When a fiber suspends (via yield instruction or `emit`):
 
 1. **Yield instruction** (`handle_yield`): captures innermost frame as a
    `SuspendedFrame` with bytecode (Rc clone), constants (Rc clone), env
    (Rc clone), IP (after yield), and operand stack. Stored in `fiber.suspended`.
 2. **Call handler** (if yield propagates through a call): appends caller's
    frame to `fiber.suspended` vec.
-3. **Signal suspension** (`fiber/signal`): single `SuspendedFrame` with empty
+3. **Signal suspension** (`emit`): single `SuspendedFrame` with empty
    stack, stored in `fiber.suspended` by the resume handler.
 4. **Frame ordering**: innermost (yielder/signaler) at index 0, outermost
    (caller) at last index.
@@ -226,7 +226,7 @@ Key methods:
   installs the child fiber's `FiberHeap`, executes, then restores the saved
   pointer on swap-back. Root fibers have no heap installed (allocate to the
   global `HEAP_ARENA`); only child fibers get per-fiber heap routing.
-  For yielding fibers (`Effect::Yields`), also provisions a shared allocator
+  For yielding fibers (signal includes `SIG_YIELD`), also provisions a shared allocator
   via a three-way branch (step 3b): (a) parent has shared_alloc → propagate
   down, (b) root parent → child creates its own, (c) non-root parent →
   create on parent's heap. Cleared on swap-back (step 7a).
@@ -301,7 +301,7 @@ execution route to this shared allocator instead of the child's private bump.
 3. **Non-root parent, no shared_alloc** (case c): Create a new shared allocator
    on the parent's FiberHeap's `owned_shared`.
 
-**Effect gate (M1)**: Fibers whose closure has `Effect::Yields` or `Effect::io()`
+**Signal gate (M1)**: Fibers whose closure has signal bits `SIG_YIELD` or `SIG_IO`
 (checked via `may_yield() || may_io()`) get shared allocators. I/O fibers yield
 `SIG_IO` requests that the parent (scheduler) must read, requiring a shared
 allocator for value exchange. Non-yielding, non-I/O fibers skip step 3b entirely.
@@ -344,7 +344,7 @@ to see parent-established parameter bindings.
 | `execute.rs` | ~250 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack`, re-entrancy documentation |
 | `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |
 | `stack.rs` | ~100 | Stack operations: LoadConst, Pop, Dup |
-| `variables.rs` | ~150 | LoadGlobal, StoreGlobal, LoadUpvalue, etc. |
+| `variables.rs` | ~150 | LoadUpvalue, StoreUpvalue, LoadLocal, StoreLocal, LoadCapture, etc. (`LoadGlobal`/`StoreGlobal` are dead instructions — unreachable in dispatch) |
 | `parameters.rs` | ~50 | Parameter resolution: `resolve_parameter` helper |
 | `control.rs` | ~100 | Jump, JumpIfFalse, Return |
 | `closure.rs` | ~100 | MakeClosure |

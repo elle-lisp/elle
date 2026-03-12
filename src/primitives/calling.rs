@@ -1,7 +1,7 @@
 //! FFI function call primitives
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -87,7 +87,7 @@ pub(crate) fn prim_ffi_call(args: &[Value]) -> (SignalBits, Value) {
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "ffi/call",
     func: prim_ffi_call,
-    effect: Effect::ffi_errors(),
+    signal: Signal::ffi_errors(),
     arity: Arity::AtLeast(2),
     doc: "Call a C function through libffi.",
     params: &["fn-ptr", "sig"],

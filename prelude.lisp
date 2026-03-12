@@ -52,12 +52,12 @@
   `(if ,test nil (begin ,;body)))
 
 ## error - signal a fiber error
-## (error) => (fiber/signal 1 nil)
-## (error value) => (fiber/signal 1 value)
+## (error) => (emit 1 nil)
+## (error value) => (emit 1 value)
 (defmacro error (& args)
   (if (> (length args) 1)
-    (fiber/signal 1 {:error :arity-error :message "error: expected 0 or 1 arguments"})
-    `(fiber/signal 1 ,(if (empty? args) nil (first args)))))
+    (emit 1 {:error :arity-error :message "error: expected 0 or 1 arguments"})
+    `(emit 1 ,(if (empty? args) nil (first args)))))
 
 ## try/catch - error handling via fibers
 ## Usage: (try body... (catch e handler...))

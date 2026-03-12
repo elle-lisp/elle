@@ -16,8 +16,8 @@ impl Lowerer {
         captures: &[CaptureInfo],
         body: &Hir,
         num_locals: u16,
-        inferred_effect: &crate::effects::Effect,
-        param_bounds: &[(Binding, crate::effects::Effect)],
+        inferred_signal: &crate::signals::Signal,
+        param_bounds: &[(Binding, crate::signals::Signal)],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<Reg, String> {
@@ -99,7 +99,7 @@ impl Lowerer {
             captures,
             body,
             num_locals,
-            *inferred_effect,
+            *inferred_signal,
             param_bounds,
             doc,
             syntax,
@@ -126,8 +126,8 @@ impl Lowerer {
         captures: &[CaptureInfo],
         body: &Hir,
         _num_locals: u16,
-        inferred_effect: crate::effects::Effect,
-        param_bounds: &[(Binding, crate::effects::Effect)],
+        inferred_signal: crate::signals::Signal,
+        param_bounds: &[(Binding, crate::signals::Signal)],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<LirFunction, String> {
@@ -192,8 +192,8 @@ impl Lowerer {
         }
         self.current_func.lbox_params_mask = lbox_params_mask;
 
-        // Emit CheckEffectBound for each bounded parameter
-        for (bound_binding, bound_effect) in param_bounds {
+        // Emit CheckSignalBound for each bounded parameter
+        for (bound_binding, bound_signal) in param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(bound_binding) {
                 let src = self.fresh_reg();
                 // All params are upvalues in lambda body — use LoadCapture.
@@ -203,9 +203,9 @@ impl Lowerer {
                     dst: src,
                     index: slot,
                 });
-                self.emit(LirInstr::CheckEffectBound {
+                self.emit(LirInstr::CheckSignalBound {
                     src,
-                    allowed_bits: bound_effect.bits.0,
+                    allowed_bits: bound_signal.bits.0,
                 });
             }
         }
@@ -217,8 +217,8 @@ impl Lowerer {
 
         self.current_func.entry = Label(0);
         self.current_func.num_regs = self.next_reg;
-        // Propagate inferred effect to LIR function
-        self.current_func.effect = inferred_effect;
+        // Propagate inferred signal to LIR function
+        self.current_func.signal = inferred_signal;
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 

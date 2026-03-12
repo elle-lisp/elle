@@ -1,6 +1,6 @@
 //! Bytes and @bytes primitives (binary data)
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -332,7 +332,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes",
         func: prim_bytes,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create immutable bytes. Accepts integers (0-255), or a single string/keyword.",
         params: &[],
@@ -343,7 +343,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@bytes",
         func: prim_blob,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create mutable bytes. Accepts integers (0-255), or a single string/keyword.",
         params: &[],
@@ -354,7 +354,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes->hex",
         func: prim_bytes_to_hex,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Convert bytes or @bytes to a lowercase hex string.",
         params: &["b"],
@@ -365,7 +365,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "slice",
         func: prim_slice,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(3),
         doc: "Slice a sequence from start to end index. Works on bytes, @bytes, array, @array, list, string, and @string. Returns same type as input.",
         params: &["coll", "start", "end"],

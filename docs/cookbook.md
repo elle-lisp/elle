@@ -58,7 +58,7 @@ at the bottom of the file):
 
 ```rust
 use crate::primitives::def::PrimitiveDef;
-use crate::effects::Effect;
+use crate::signals::Signal;
 use crate::value::types::Arity;
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -66,7 +66,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "my-func",
         func: prim_my_func,
-        effect: Effect::inert(),       // or Effect::yields() if it signals
+        signal: Signal::inert(),       // or Signal::yields() if it signals
         arity: Arity::Exact(1),
         doc: "One-line description.",
         params: &["x"],
@@ -100,10 +100,10 @@ pub mod my_module;
 each `PrimitiveDef`, it:
 - Interns the name via `symbols.intern(def.name)` → `SymbolId`
 - Stores `Value::native_fn(def.func)` in `vm.globals[sym_id]`
-- Records effect and arity in `PrimitiveMeta`
+- Records signal and arity in `PrimitiveMeta`
 - Registers aliases identically
 
-At runtime, `LoadGlobal` fetches the `NativeFn` value, and `Call`
+At runtime, the VM fetches the `NativeFn` value from globals and `Call`
 dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 
 ### Key types
@@ -112,9 +112,9 @@ dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 |------|----------|---------|
 | `NativeFn` | `src/value/types.rs` | `fn(&[Value]) -> (SignalBits, Value)` |
 | `PrimitiveDef` | `src/primitives/def.rs` | Declarative metadata struct |
-| `PrimitiveMeta` | `src/primitives/def.rs` | Collected effects/arities maps |
+| `PrimitiveMeta` | `src/primitives/def.rs` | Collected signals/arities maps |
 | `Arity` | `src/value/types.rs` | `Exact(n)`, `AtLeast(n)`, `Range(min, max)` |
-| `Effect` | `src/effects/` | `Effect::inert()`, `Effect::yields()` |
+| `Signal` | `src/signals/` | `Signal::inert()`, `Signal::yields()` |
 
 ### Conventions
 
@@ -430,14 +430,14 @@ pub(crate) fn analyze_my_form(
     }
     let arg = self.analyze_expr(&items[1])?;
     let body = self.analyze_expr(&items[2])?;
-    let effect = arg.effect.combine(body.effect);
+    let signal = arg.signal.combine(body.signal);
     Ok(Hir::new(
         HirKind::MyForm {
             arg: Box::new(arg),
             body: Box::new(body),
         },
         span,
-        effect,
+        signal,
     ))
 }
 ```

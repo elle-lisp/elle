@@ -1,7 +1,7 @@
 //! Parameter primitives (Racket-style dynamic parameters)
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -40,7 +40,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "parameter",
         func: prim_make_parameter,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Create a new dynamic parameter with a default value.",
         params: &["default"],
@@ -51,7 +51,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "parameter?",
         func: prim_is_parameter,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Check if value is a dynamic parameter.",
         params: &["value"],

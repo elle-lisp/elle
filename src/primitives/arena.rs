@@ -1,7 +1,7 @@
 //! Heap arena and memory management primitives
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -438,7 +438,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/stats",
         func: prim_arena_stats,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return heap arena statistics as a struct with :count and :capacity.",
         params: &[],
@@ -449,7 +449,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/count",
         func: prim_arena_count,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(0, 1),
         doc: "Return current heap object count. :fiber (default) = bumpalo count for child fibers (0 for root), :global = HEAP_ARENA count.",
         params: &["scope?"],
@@ -460,7 +460,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/scope-stats",
         func: prim_scope_stats,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return scope allocation runtime stats as {:enters N :dtors-run N}. Only non-zero inside child fibers.",
         params: &[],
@@ -471,7 +471,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/set-object-limit",
         func: prim_arena_set_object_limit,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(1, 2),
         doc: "Set max heap object count. Pass nil to remove limit. Returns previous limit or nil.",
         params: &["n", "scope?"],
@@ -482,7 +482,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/object-limit",
         func: prim_arena_object_limit,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(0, 1),
         doc: "Get current object limit. Returns int or nil (unlimited).",
         params: &["scope?"],
@@ -493,7 +493,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
      PrimitiveDef {
          name: "arena/bytes",
          func: prim_arena_bytes,
-         effect: Effect::inert(),
+         signal: Signal::inert(),
          arity: Arity::Range(0, 1),
          doc: "Return bytes consumed. :fiber (default) = bumpalo bytes, :global = estimated from object count × 128.",
          params: &["scope?"],
@@ -504,7 +504,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/checkpoint",
         func: prim_arena_checkpoint,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return an opaque mark for the current root-fiber arena position. Pass to arena/reset to reclaim all objects allocated after this point. Dangerous: invalidates all Values allocated after the mark.",
         params: &[],
@@ -515,7 +515,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/reset",
         func: prim_arena_reset,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Reclaim all root-fiber arena objects allocated after mark (from arena/checkpoint). Runs Drop for freed objects. Dangerous: any Value pointing into the freed region is now invalid.",
         params: &["mark"],
@@ -526,7 +526,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/allocs",
         func: prim_arena_allocs,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Run thunk, return (result . net-allocs) where net-allocs is the net heap objects allocated.",
         params: &["thunk"],
@@ -537,7 +537,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/peak",
         func: prim_arena_peak,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(0, 1),
         doc: "Return peak object count (high-water mark). Optional :global scope.",
         params: &["scope?"],
@@ -548,7 +548,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/reset-peak",
         func: prim_arena_reset_peak,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Range(0, 1),
         doc: "Reset peak to current count. Returns previous peak. Optional :global scope.",
         params: &["scope?"],
@@ -559,7 +559,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/fiber-stats",
         func: prim_arena_fiber_stats,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Return heap stats for a suspended or dead fiber as a struct with :count, :bytes, :peak, :object-limit, :scope-enters, :dtors-run.",
         params: &["fiber"],

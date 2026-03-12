@@ -90,10 +90,10 @@ For `block`: conditions 1-4 plus all break values targeting this block are safe 
 
 **Known limitations and why they exist:**
 
-- **`suspends` (condition 2)**: Any let body that calls a `Polymorphic`-effect
+- **`suspends` (condition 2)**: Any let body that calls a `Polymorphic`-signal
   function (e.g., `map`, `filter`, `fold` with a callback) fails this condition.
-  Fixing this requires knowing the concrete effect of the callback at the call
-  site — i.e., monomorphization or effect polymorphism tracking. Not feasible
+  Fixing this requires knowing the concrete signal of the callback at the call
+  site — i.e., monomorphization or signal polymorphism tracking. Not feasible
   without interprocedural analysis.
 
 - **`unsafe-result` (condition 3)**: Calls to user-defined functions fail

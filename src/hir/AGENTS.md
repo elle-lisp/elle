@@ -1,14 +1,14 @@
 # hir
 
 High-level Intermediate Representation. Fully-analyzed form with resolved
-bindings, inferred effects, and computed captures.
+bindings, inferred signals, and computed captures.
 
 ## Responsibility
 
 Transform expanded Syntax into a representation suitable for lowering.
 - Resolve all variable references to `Binding` (NaN-boxed heap objects)
 - Compute closure captures
-- Infer effects
+- Infer signals
 - Validate scope rules
 
 Does NOT:
@@ -20,7 +20,7 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Hir` | Expression node with kind, span, effect |
+| `Hir` | Expression node with kind, span, signal |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
 | `Binding` | NaN-boxed Value wrapping `HeapObject::Binding(RefCell<BindingInner>)` — Copy, identity by bit-pattern |
 | `BindingScope` | `Parameter`, `Local`, or `Global` (in `value::heap`) |
@@ -50,7 +50,7 @@ Analyzer
     ├─► resolve variables → Binding (heap-allocated, shared by reference)
     ├─► track mutations → binding.mark_mutated()
     ├─► track captures → binding.mark_captured() + CaptureInfo
-    └─► infer effects → Effect
+    └─► infer signals → Signal
     │
     ▼
 HIR (bindings are inline — no separate HashMap)
@@ -76,8 +76,8 @@ HIR (bindings are inline — no separate HashMap)
    captured AND mutable. A parameter needs an lbox if mutated. Globals never need
    lboxes. Immutable captured locals are captured by value directly.
 
-4. **Effects combine upward.** A `begin` has the combined effect of its
-   children. A `fn` body's effect is stored but the fn itself is Inert.
+4. **Signals combine upward.** A `begin` has the combined signal of its
+   children. A `fn` body's signal is stored but the fn itself is Inert.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
@@ -130,7 +130,7 @@ HIR (bindings are inline — no separate HashMap)
 
 14. **`Eval` compiles and executes a datum at runtime.**
     `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the
-    analyzer for `(eval expr)` or `(eval expr env)`. The effect is always
+    analyzer for `(eval expr)` or `(eval expr env)`. The signal is always
     `Yields` (conservative — eval'd code can do anything). Not in tail
     position. The VM handler accesses the symbol table via thread-local
     context and caches the Expander on the VM for reuse.
@@ -141,12 +141,12 @@ HIR (bindings are inline — no separate HashMap)
        in `doc`. This field is threaded through LIR into `Closure.doc` and
        used by the `(doc name)` primitive and LSP hover.
 
-16. **Effect bounds are declared via `restrict` preambles.**
-        `HirKind::Lambda` has effect-related fields:
-        - `inferred_effects: Effects` (always present) — the minimum guaranteed set of effects the lambda may produce
-        - `param_bounds: Vec<(Binding, Effects)>` (from `(restrict param :kw ...)`) — bounds on parameters
-        The programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)` is a separate concept — the `restrict` form provides a bound that the compiler checks `inferred_effects` against.
-        When a parameter has a bound, it is no longer polymorphic — its effect contribution is the bound's bits.
+16. **Signal bounds are declared via `silence` preambles.**
+        `HirKind::Lambda` has signal-related fields:
+        - `inferred_signals: Signal` (always present) — the minimum guaranteed set of signals the lambda may produce
+        - `param_bounds: Vec<(Binding, Signal)>` (from `(silence param :kw ...)`) — bounds on parameters
+        The programmer-supplied ceiling constraint from `(silence)` or `(silence :kw ...)` is a separate concept — the `silence` form provides a bound that the compiler checks `inferred_signals` against.
+        When a parameter has a bound, it is no longer polymorphic — its signal contribution is the bound's bits.
 
 17. **Set literals are desugared to constructor calls.**
       `SyntaxKind::Set` (immutable set `|1 2 3|`) desugars to `(set ;elems)`.
@@ -192,7 +192,7 @@ HIR (bindings are inline — no separate HashMap)
      wraps the file's letrec in an outer scope containing all registered
      primitives. Primitives are `BindingScope::Global` with `mark_immutable()`
      set. File-level `def` bindings shadow primitives. The lowerer emits
-     `LoadGlobal` for both, but compile-time checks (e.g., `(set + 42)` is
+     upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
      an error) use the `Binding` identity.
 
 ## Files
@@ -204,9 +204,9 @@ HIR (bindings are inline — no separate HashMap)
 | `analyze/forms.rs` | ~355 | Core form analysis: `analyze_expr`, control flow |
 | `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
-| `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, effects |
+| `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals |
 | `analyze/special.rs` | ~210 | Special forms: `match`, `yield` |
-| `analyze/call.rs` | ~200 | Call analysis and effect tracking |
+| `analyze/call.rs` | ~200 | Call analysis and signal tracking |
 | `expr.rs` | ~180 | `Hir`, `HirKind` |
 | `binding.rs` | ~110 | `Binding(Value)` newtype, `CaptureInfo`, `CaptureKind` |
 | `pattern.rs` | ~100 | Pattern matching types |

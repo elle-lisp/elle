@@ -64,7 +64,7 @@ Tests are organized by feature area:
 | `tables.lisp` | Table operations |
 | `fibers.lisp` | Fiber operations |
 | `coroutines.lisp` | Coroutine behavior |
-| `effects.lisp` | Effect system |
+| `signals.lisp` | Signal system |
 | `closures.lisp` | Closure behavior |
 | `recursion.lisp` | Recursive functions |
 | `higher-order.lisp` | Higher-order functions |

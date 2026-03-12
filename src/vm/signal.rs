@@ -341,8 +341,8 @@ impl VM {
                         Value::string(format!("{}", doc.arity)),
                     );
                     fields.insert(
-                        TableKey::Keyword("effect".to_string()),
-                        Value::string(format!("{}", doc.effect)),
+                        TableKey::Keyword("signal".to_string()),
+                        Value::string(format!("{}", doc.signal)),
                     );
                     // aliases as a list of strings
                     let aliases: Vec<Value> = doc
@@ -482,7 +482,7 @@ impl VM {
     /// Uses `execute_bytecode_saving_stack` (re-entrant VM call). The thunk
     /// runs on the current fiber — same heap, same globals, same parameter
     /// frames. Yield from the thunk is propagated upward (not handled here);
-    /// callers should only pass non-yielding (Pure effect) closures.
+    /// callers should only pass non-yielding (inert signal) closures.
     ///
     /// The before/after count snapshots bracket the thunk's execution to
     /// measure net allocations.

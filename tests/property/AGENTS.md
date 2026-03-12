@@ -9,7 +9,7 @@ Test invariants that must hold for *all* valid inputs using proptest. Cover:
 - Mathematical laws (commutativity, associativity, identity, inverse)
 - Type discrimination (exactly one type predicate is true for any Value)
 - Determinism (same source always produces same result)
-- Effect inference soundness (pure expressions never inferred as yielding)
+- Signal inference soundness (pure expressions never inferred as yielding)
 - Bug regression across input ranges (not just the single case that triggered it)
 
 Does NOT:
@@ -78,7 +78,7 @@ Choose case counts based on the cost of each test case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
-| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, effect combine laws |
+| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, signal combine laws |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals or recursion) | 10-50 | Bug regression, determinism, complex programs |
 
@@ -126,7 +126,7 @@ Tests are organized by domain in separate files:
 | `fibers.rs` | Fiber operations and properties |
 | `nanboxing.rs` | NaN-boxing roundtrips and encoding |
 | `reader.rs` | Reader parse/display roundtrips |
-| `effects.rs` | Effect inference soundness |
+| `signals.rs` | Signal inference soundness |
 | `strings.rs` | String operations and properties |
 | `ffi.rs` | FFI type marshalling |
 | `path.rs` | Path operations |
@@ -136,7 +136,7 @@ Tests are organized by domain in separate files:
 Property test files follow a consistent structure:
 
 1. Module-level comment explaining what invariants are tested
-2. Any local helper functions (e.g., `infer_effect()` in `effects.rs`, `syntax_eq()` in `reader.rs`)
+2. Any local helper functions (e.g., `infer_signal()` in `signals.rs`, `syntax_eq()` in `reader.rs`)
 3. `proptest!` blocks grouped by invariant category, separated by section headers (`// =========================================================================`)
 4. Non-property `#[test]` functions at the bottom for constant/edge cases that don't need generation
 
@@ -149,7 +149,7 @@ Property test files follow a consistent structure:
 | `fibers.rs` | ~100-200 | Fiber property tests |
 | `nanboxing.rs` | ~100-200 | NaN-boxing property tests |
 | `reader.rs` | ~100-200 | Reader property tests |
-| `effects.rs` | ~100-200 | Effect inference property tests |
+| `signals.rs` | ~100-200 | Signal inference property tests |
 | `strings.rs` | ~100-200 | String property tests |
 | `ffi.rs` | ~100-200 | FFI property tests |
 | `path.rs` | ~100-200 | Path property tests |

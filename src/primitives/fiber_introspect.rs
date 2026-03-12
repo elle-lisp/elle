@@ -9,8 +9,8 @@
 //! - fiber/cancel: Inject error into suspended fiber
 //! - fiber?: Type predicate
 
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{FiberStatus, SignalBits, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -279,7 +279,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/bits",
         func: prim_fiber_bits,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get the signal bits from the fiber's last signal",
         params: &["fiber"],
@@ -290,7 +290,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/mask",
         func: prim_fiber_mask,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's signal mask",
         params: &["fiber"],
@@ -301,7 +301,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber?",
         func: prim_is_fiber,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Check if a value is a fiber",
         params: &["value"],
@@ -312,7 +312,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/parent",
         func: prim_fiber_parent,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if none",
         params: &["fiber"],
@@ -323,7 +323,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/child",
         func: prim_fiber_child,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Get the most recently resumed child fiber, or nil if none",
         params: &["fiber"],
@@ -334,7 +334,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/propagate",
         func: prim_fiber_propagate,
-        effect: Effect::yields_errors(),
+        signal: Signal::yields_errors(),
         arity: Arity::Exact(1),
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
@@ -345,7 +345,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/cancel",
         func: prim_fiber_cancel,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Inject an error into a suspended fiber. Error value defaults to nil.",
         params: &["fiber", "error?"],

@@ -46,7 +46,7 @@ impl Linter {
     pub fn lint_str(&mut self, code: &str, filename: &str) -> Result<(), String> {
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
-        let _effects = register_primitives(&mut vm, &mut symbols);
+        let _signals = register_primitives(&mut vm, &mut symbols);
         set_symbol_table(&mut symbols as *mut SymbolTable);
         init_stdlib(&mut vm, &mut symbols);
 

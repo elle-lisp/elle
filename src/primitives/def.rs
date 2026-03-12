@@ -4,7 +4,7 @@
 //! table. `register_primitives` iterates all tables to register
 //! primitives with the VM and build the metadata maps.
 
-use crate::effects::Effect;
+use crate::signals::Signal;
 use crate::value::types::{Arity, NativeFn};
 use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
@@ -20,8 +20,8 @@ pub struct PrimitiveDef {
     pub name: &'static str,
     /// The Rust implementation.
     pub func: NativeFn,
-    /// Signal effects (errors, yields, etc.).
-    pub effect: Effect,
+    /// Signal (errors, yields, etc.).
+    pub signal: Signal,
     /// Argument count constraint.
     pub arity: Arity,
     /// One-line description for help/hover/docs.
@@ -46,7 +46,7 @@ impl PrimitiveDef {
     pub const DEFAULT: PrimitiveDef = PrimitiveDef {
         name: "",
         func: _default_prim,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "",
         params: &[],
@@ -71,7 +71,7 @@ pub struct Doc {
     pub doc: &'static str,
     pub params: &'static [&'static str],
     pub arity: Arity,
-    pub effect: Effect,
+    pub signal: Signal,
     pub category: &'static str,
     pub example: &'static str,
     pub aliases: &'static [&'static str],
@@ -126,7 +126,7 @@ impl Doc {
 /// primitive metadata.
 #[derive(Clone)]
 pub struct PrimitiveMeta {
-    pub effects: HashMap<SymbolId, Effect>,
+    pub signals: HashMap<SymbolId, Signal>,
     pub arities: HashMap<SymbolId, Arity>,
     pub docs: HashMap<SymbolId, Doc>,
     /// NativeFn values for each primitive, keyed by SymbolId.
@@ -139,7 +139,7 @@ pub struct PrimitiveMeta {
 impl PrimitiveMeta {
     pub fn new() -> Self {
         PrimitiveMeta {
-            effects: HashMap::new(),
+            signals: HashMap::new(),
             arities: HashMap::new(),
             docs: HashMap::new(),
             functions: HashMap::new(),

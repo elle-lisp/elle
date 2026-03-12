@@ -1,6 +1,6 @@
 //! Process-related primitives
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -85,7 +85,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/exit",
         func: prim_exit,
-        effect: Effect::errors(),
+        signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Exit the process with an optional exit code (0-255)",
         params: &["code"],
@@ -96,7 +96,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/halt",
         func: prim_halt,
-        effect: Effect::halts(),
+        signal: Signal::halts(),
         arity: Arity::Range(0, 1),
         doc: "Halt the VM gracefully, returning a value to the host",
         params: &["value"],
@@ -107,7 +107,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/args",
         func: prim_sys_args,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(0),
         doc: "Return command-line arguments as an array (excluding interpreter and script path)",
         params: &[],

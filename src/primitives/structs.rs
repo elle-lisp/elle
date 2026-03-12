@@ -1,6 +1,6 @@
 //! Struct operations primitives (immutable hash maps)
-use crate::effects::Effect;
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, TableKey, Value};
@@ -11,7 +11,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "struct",
         func: prim_struct,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::AtLeast(0),
         doc: "Create an immutable struct from key-value pairs",
         params: &[],
@@ -22,7 +22,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "freeze",
         func: prim_freeze,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Convert a mutable collection to its immutable equivalent. Handles @array, @struct, @set, @string (requires valid UTF-8), @bytes. Returns immutable values as-is.",
         params: &["collection"],
@@ -33,7 +33,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "thaw",
         func: prim_thaw,
-        effect: Effect::inert(),
+        signal: Signal::inert(),
         arity: Arity::Exact(1),
         doc: "Convert an immutable collection to its mutable equivalent. Handles array, struct, set, string, bytes. Returns mutable values as-is.",
         params: &["collection"],

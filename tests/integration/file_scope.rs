@@ -482,11 +482,11 @@ fn test_file_destructure_eval_with_macro() {
 }
 
 // ============================================================================
-// Fixpoint effect propagation for mutually recursive file-scope lambdas
+// Fixpoint signal propagation for mutually recursive file-scope lambdas
 // ============================================================================
 
 #[test]
-fn test_mutual_recursion_effect_propagation() {
+fn test_mutual_recursion_signal_propagation() {
     // foo calls bar; bar yields; foo must also be inferred as Yields.
     // Without the fixpoint loop, foo is analyzed first and sees bar's
     // stale seed (Pure), so foo is incorrectly inferred as Pure.
@@ -494,30 +494,30 @@ fn test_mutual_recursion_effect_propagation() {
         r#"
         (def foo (fn [] (bar)))
         (def bar (fn [] (yield 1) (foo)))
-        (pure? foo)
+        (silent? foo)
         "#,
     );
-    // foo should NOT be pure — it calls a yielding function
+    // foo is NOT silent — it calls a yielding function
     assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
-fn test_mutual_recursion_effect_propagation_reverse_order() {
+fn test_mutual_recursion_signal_propagation_reverse_order() {
     // Same as above but bar is defined first — bar directly yields,
-    // so foo should see bar's Yields effect even in a single pass.
+    // so foo should see bar's Yields signal even in a single pass.
     // This test ensures the fixpoint doesn't break the already-correct case.
     let result = eval_file_source(
         r#"
         (def bar (fn [] (yield 1) (foo)))
         (def foo (fn [] (bar)))
-        (pure? foo)
+        (silent? foo)
         "#,
     );
     assert_eq!(result.unwrap(), Value::bool(false));
 }
 
 #[test]
-fn test_mutual_recursion_three_way_effect_propagation() {
+fn test_mutual_recursion_three_way_signal_propagation() {
     // Three-way mutual recursion: a -> b -> c -> yield.
     // All three should be inferred as Yields.
     let result = eval_file_source(
@@ -525,34 +525,34 @@ fn test_mutual_recursion_three_way_effect_propagation() {
         (def a (fn [] (b)))
         (def b (fn [] (c)))
         (def c (fn [] (yield 1) (a)))
-        (list (pure? a) (pure? b) (pure? c))
+        (list (silent? a) (silent? b) (silent? c))
         "#,
     );
     let val = result.unwrap();
-    // All three should be non-pure
+    // All three are NOT silent — they transitively call a yielding function
     let items = val.list_to_vec().expect("expected list");
     assert_eq!(items.len(), 3);
-    assert_eq!(items[0], Value::bool(false), "a should not be pure");
-    assert_eq!(items[1], Value::bool(false), "b should not be pure");
-    assert_eq!(items[2], Value::bool(false), "c should not be pure");
+    assert_eq!(items[0], Value::bool(false), "a should not be silent");
+    assert_eq!(items[1], Value::bool(false), "b should not be silent");
+    assert_eq!(items[2], Value::bool(false), "c should not be silent");
 }
 
 #[test]
-fn test_mutual_recursion_pure_stays_pure() {
-    // Mutually recursive functions that are genuinely pure should stay pure.
-    // The fixpoint must not incorrectly promote Pure to Yields.
+fn test_mutual_recursion_inert_stays_inert() {
+    // Mutually recursive functions that are genuinely inert should stay inert.
+    // The fixpoint must not incorrectly promote inert to Yields.
     let result = eval_file_source(
         r#"
         (def even? (fn [n] (if (= n 0) true (odd? (- n 1)))))
         (def odd? (fn [n] (if (= n 0) false (even? (- n 1)))))
-        (list (pure? even?) (pure? odd?))
+        (list (silent? even?) (silent? odd?))
         "#,
     );
     let val = result.unwrap();
     let items = val.list_to_vec().expect("expected list");
     assert_eq!(items.len(), 2);
-    assert_eq!(items[0], Value::bool(true), "even? should be pure");
-    assert_eq!(items[1], Value::bool(true), "odd? should be pure");
+    assert_eq!(items[0], Value::bool(true), "even? should be silent");
+    assert_eq!(items[1], Value::bool(true), "odd? should be silent");
 }
 
 // ============================================================================

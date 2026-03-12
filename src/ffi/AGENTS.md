@@ -207,4 +207,4 @@ Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
   `HeapObject::LibHandle`
 - `prelude.lisp` — `ffi/defbind` macro generates calls to `ffi/lookup`,
   `ffi/signature`, `ffi/call`
-- `effects/mod.rs` — `Effect::ffi()`, `Effect::ffi_errors()` use `SIG_FFI`
+- `signals/mod.rs` — `Signal::ffi()`, `Signal::ffi_errors()` use `SIG_FFI`

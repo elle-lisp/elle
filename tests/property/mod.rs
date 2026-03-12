@@ -6,8 +6,8 @@ mod nanboxing {
 mod reader {
     include!("reader.rs");
 }
-mod effects {
-    include!("effects.rs");
+mod signals {
+    include!("signals.rs");
 }
 mod ffi {
     include!("ffi.rs");

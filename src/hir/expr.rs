@@ -2,31 +2,31 @@
 
 use super::binding::{Binding, CaptureInfo};
 use super::pattern::HirPattern;
-use crate::effects::Effect;
+use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::Value;
 use std::rc::Rc;
 
-/// HIR expression with source location and effect
+/// HIR expression with source location and signal
 #[derive(Debug, Clone)]
 pub struct Hir {
     pub kind: HirKind,
     pub span: Span,
-    pub effect: Effect,
+    pub signal: Signal,
 }
 
 impl Hir {
     /// Create a new HIR node
-    pub fn new(kind: HirKind, span: Span, effect: Effect) -> Self {
-        Hir { kind, span, effect }
+    pub fn new(kind: HirKind, span: Span, signal: Signal) -> Self {
+        Hir { kind, span, signal }
     }
 
-    /// Create an inert HIR node (no effects)
+    /// Create an inert HIR node (no signals)
     pub fn inert(kind: HirKind, span: Span) -> Self {
         Hir {
             kind,
             span,
-            effect: Effect::inert(),
+            signal: Signal::inert(),
         }
     }
 }
@@ -102,19 +102,19 @@ pub enum HirKind {
         body: Box<Hir>,
         /// Number of local slots needed (params + locals)
         num_locals: u16,
-        /// The inferred effect of CALLING this lambda.
-        /// This may differ from body.effect for higher-order functions:
-        /// - body.effect is the raw effect of the body expression
-        /// - inferred_effects may be Polymorphic(i) if the Yields comes solely
+        /// The inferred signal of CALLING this lambda.
+        /// This may differ from body.signal for higher-order functions:
+        /// - body.signal is the raw signal of the body expression
+        /// - inferred_signals may be Polymorphic(i) if the Yields comes solely
         ///   from calling parameter i
-        /// - When `restrict` bounds are present, bounded parameter calls contribute
+        /// - When `silence` bounds are present, bounded parameter calls contribute
         ///   their bound's bits directly (not polymorphic).
-        inferred_effects: Effect,
-        /// Declared effect bounds for parameters (from `(restrict param :kw ...)`).
+        inferred_signals: Signal,
+        /// Declared signal bounds for parameters (from `(silence param :kw ...)`).
         /// Only parameters with explicit bounds appear here. These bounds feed
-        /// into inferred_effects computation (bounded param's bits are included)
-        /// and into runtime checking (CheckEffectBound instruction).
-        param_bounds: Vec<(Binding, Effect)>,
+        /// into inferred_signals computation (bounded param's bits are included)
+        /// and into runtime checking (CheckSignalBound instruction).
+        param_bounds: Vec<(Binding, Signal)>,
         /// Optional docstring extracted from the lambda body
         doc: Option<Value>,
         /// Original lambda Syntax node for eval environment reconstruction

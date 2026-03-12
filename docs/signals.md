@@ -1,6 +1,6 @@
-# Effects and Signals: Design Document
+# Signals: Design Document
 
-This document captures the design of Elle's unified effect and signal system.
+This document captures the design of Elle's unified signal system.
 It records not just decisions but the reasoning, alternatives, and open
 questions that led to them. Future readers should be able to understand the
 
@@ -12,11 +12,12 @@ questions that led to them. Future readers should be able to understand the
 - [The Core Insight](#the-core-insight)
 - [Capabilities Down, Signals Up](#capabilities-down-signals-up)
 - [The Signal Protocol](#the-signal-protocol)
-- [The Effect System](#the-effect-system)
+- [The Signal System](#the-signal-system)
 - [JIT Integration](#jit-integration)
 - [Surface Syntax](#surface-syntax)
 - [Migration Status](#migration-status)
 - [Non-Unwinding Recovery](#non-unwinding-recovery)
+- [Error Signalling](#error-signalling)
 - [Open Questions](#open-questions)
 - [Resolved Questions](#resolved-questions)
 trade-offs and pick up where we left off.
@@ -26,11 +27,11 @@ trade-offs and pick up where we left off.
 
 Elle previously had separate mechanisms for coroutines (continuation
 capture/replay), exception handling (handler stack with unwind semantics),
-and effect inference (boolean fields for yields and errors). The JIT could
+and signal inference (boolean fields for yields and errors). The JIT could
 only compile inert functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
-Coroutines are fibers that yield. Errors are signals. The effect system
+Coroutines are fibers that yield. Errors are signals. The signal system
 tracks signal bits. See `docs/fibers.md` for the implementation reference.
 
 
@@ -65,7 +66,7 @@ Key insights from Janet:
    `propagate`. One runtime primitive# the language provides sugar.
 
 Janet's limitation: signals are a single integer (one thing happened), and
-there's no static tracking of effects. You can't look at a function and know
+there's no static tracking of signals. You can't look at a function and know
 what signals it might emit. Optimization opportunities that depend on static
 knowledge are unavailable.
 
@@ -104,7 +105,7 @@ copy." But it's a hint, not a guarantee. The compiler may or may not be able
 to exploit it depending on downstream usage. Code changes can silently add
 copies. The programmer gets a hopeful suggestion, not a contract.
 
-**Lesson**: Effect declarations should be contracts. If you say "this callback
+**Lesson**: Signal declarations should be contracts. If you say "this callback
 must not yield," the system guarantees it — by static proof or runtime check.
 The programmer gets a real promise.
 
@@ -146,10 +147,10 @@ and green threads are *ways to use it*.
 parent's mask determines catch-or-propagate. Signals are the runtime
 communication mechanism between fibers.
 
-**Effect**: The static description of what signals a function might emit over
-its lifetime. A set of signal types, represented as a bitfield. Effects exist
-at compile time for analysis and optimization. Every signal corresponds to an
-effect bit, but effects describe *possibility* while signals describe *events*.
+**Signal (static)**: The static description of what signals a function might emit over
+its lifetime. A set of signal types, represented as a bitfield. Signals exist
+at compile time for analysis and optimization. Every runtime signal corresponds to a
+static signal bit, but static signals describe *possibility* while runtime signals describe *events*.
 
 **Handler**: Code that catches a specific signal type and provides a response.
 In Elle, a handler is a fiber with the appropriate mask bit set. Catching is
@@ -172,12 +173,12 @@ fibers.
 
 ## The Core Insight
 
-**There is no distinction between effects and signals except timing.** An
-effect is a signal that hasn't been emitted yet. A signal is an effect that
-just happened. The bitfield is the same for both.
+**There is no distinction between static signals and runtime signals except timing.** A
+static signal is a runtime signal that hasn't been emitted yet. A runtime signal is a static
+signal that just happened. The bitfield is the same for both.
 
-Whether a particular effect requires the caller's attention is determined by
-the fiber's mask, not by the effect itself. If the mask says "catch IO," then
+Whether a particular signal requires the caller's attention is determined by
+the fiber's mask, not by the signal itself. If the mask says "catch IO," then
 IO is a signal — the function suspends and the handler runs. If the mask
 doesn't mention IO, the function just does the IO and continues.
 
@@ -189,7 +190,7 @@ This means:
 - The programmer decides, at fiber creation time, what to intercept
 
 This is algebraic effects without the type-theoretic baggage. The mechanism
-is Janet's signals# the static analysis is Koka's effect tracking# the
+is Janet's signals# the static analysis is Koka's signal tracking# the
 programmer interface is "create a fiber with a mask."
 
 
@@ -221,7 +222,7 @@ This is capability-based security applied to control flow:
   something it wasn't granted. The handler decides what happens next.
 
 **Note on implementation phases**: Phases 1–5 of the migration (below) implement
-signal routing and effect tracking. Capability enforcement — checking what a
+signal routing and signal tracking. Capability enforcement — checking what a
 fiber is allowed to do and signaling when it exceeds its grant — is future work
 requiring a different mechanism (likely a capability field on fibers and checks
 at signal emission points). The vision is complete, but the early phases focus
@@ -257,13 +258,13 @@ This means the root fiber — the top-level program — has all capabilities.
 Each fiber boundary is an opportunity to restrict. Sandboxing is just
 "create a fiber with a narrow capability set."
 
-### Relationship to Effects
+### Relationship to Signals
 
-A function's **effect bits** describe what capabilities it *might need*. The
+A function's **signal bits** describe what capabilities it *might need*. The
 caller's **capability bits** describe what it *grants*. A signal occurs when
 `needed & ~granted != 0` — the function needs something it wasn't given.
 
-At compile time, the compiler can check: does the callee's effect set fit
+At compile time, the compiler can check: does the callee's signal set fit
 within the caller's capability grant? If yes, no signals are possible from
 this call (for capability reasons). If no, signals are possible and the
 caller must be prepared to handle them.
@@ -363,8 +364,8 @@ semantics of combinations.
 **Fiber masks work the same way.** A fiber mask like `|:yield :io|` catches
 fibers that have either bit set. The mask is a bitmask, not an enum.
 
-**User-defined effects (bits 16–31) compose freely** with built-in bits. A
-user-defined effect can be combined with `:yield`, `:error`, `:io`, or any
+**User-defined signals (bits 16–31) compose freely** with built-in bits. A
+user-defined signal can be combined with `:yield`, `:error`, `:io`, or any
 other bit.
 
 ### Terminal vs Resumable Signals
@@ -414,100 +415,100 @@ Fiber {
 }
 ```
 
-The closure carries its effect bits. The fiber's mask determines which
-signals it catches from children. There is no `effects` field on the Fiber
-— effects are a compile-time property of the closure, not the fiber.
+The closure carries its signal bits. The fiber's mask determines which
+signals it catches from children. There is no `signals` field on the Fiber
+— signals are a compile-time property of the closure, not the fiber.
 
 See `docs/fibers.md` for the full Fiber, SuspendedFrame, and FiberHandle
 documentation.
 
 
-## The Effect System
+## The Signal System
 
-### Effect Bits
+### Signal Bits (Static)
 
-An effect is a set of signal types that a function might emit. Represented
+A signal (static) is a set of signal types that a function might emit. Represented
 as a bitfield (same type as signal bits).
 
 ```
-type EffectBits = SignalBits  -- same bitfield type, same bit positions
+type SignalBits = SignalBits  -- same bitfield type, same bit positions
 ```
 
 Operations:
 
-- **Combine**: `a | b` (union — a block's effect is the union of its parts)
-- **Check**: `actual & ~permitted == 0` (subset — are all actual effects permitted?)
-- **Inert**: `bits == 0` (no effects)
+- **Combine**: `a | b` (union — a block's signal is the union of its parts)
+- **Check**: `actual & ~permitted == 0` (subset — are all actual signals permitted?)
+- **Inert**: `bits == 0` (no signals)
 - **Has**: `bits & YIELD != 0` (membership test)
 
 ### Compile-Time Inference
 
-The compiler walks the AST and infers effects:
+The compiler walks the AST and infers signals:
 
 - A literal is inert (no bits)
-- A primitive has known effect bits (declared at registration)
-- A call's effect is the callee's effect combined with the call overhead
-- A `begin` block's effect is the union of its children
-- A lambda's body effect is stored on the lambda but the lambda itself is inert
+- A primitive has known signal bits (declared at registration)
+- A call's signal is the callee's signal combined with the call overhead
+- A `begin` block's signal is the union of its children
+- A lambda's body signal is stored on the lambda but the lambda itself is inert
 - A handler that catches signal X removes bit X from the enclosed expression's
-  effect
+  signal
 
 ### Parametric Polymorphism
 
-Higher-order functions propagate their arguments' effects. `map`'s effect is
-"whatever `f` does, plus my own base effects." The compile-time
+Higher-order functions propagate their arguments' signals. `map`'s signal is
+"whatever `f` does, plus my own base signals." The compile-time
 representation:
 
 ```
-Effect {
+Signal {
     bits: SignalBits,           -- from own body
     propagates: u32,            -- bitmask of parameter indices
 }
 ```
 
-Resolved effect at a call site:
+Resolved signal at a call site:
 
 ```
-call_effect = f.bits | union(effect(arg[i]) for i in 0..param_count if (propagates & (1 << i)) != 0)
+call_signal = f.bits | union(signal(arg[i]) for i in 0..param_count if (propagates & (1 << i)) != 0)
 ```
 
 If the compiler can see the concrete argument (e.g., it's the `+` primitive),
 it can resolve the polymorphism statically and potentially prove the call site
-has fewer effects than the general case.
+has fewer signals than the general case.
 
-**Note**: Effect bounds on parameters (constraining what effects callbacks may
+**Note**: Signal bounds on parameters (constraining what signals callbacks may
 have) are deferred to a future phase. When needed, they'll be tracked in the
-analysis environment, not on the Effect struct itself — keeping Effect as a
+analysis environment, not on the Signal struct itself — keeping Signal as a
 simple Copy pair.
 
-### Effect Restrictions
+### Signal Restrictions
 
-The programmer can restrict effects on functions using the `restrict` form:
+The programmer can restrict signals on functions using the `silence` form:
 
 ```janet
 (defn query (db sql)
-  (restrict :io :error)
+  (silence :io :error)
   ...)
 ```
 
-And effect bounds on parameters:
+And signal bounds on parameters:
 
 ```janet
 (defn fast-map (f xs)
-  (restrict f)
+  (silence f)
   (map f xs))
 ```
 
 These are contracts. The system enforces them — statically when possible,
 dynamically when not.
 
-### Runtime Effect Checking
+### Runtime Signal Checking
 
-Closures carry their effect bits. When a closure is passed to a function
-with an effect bound, the runtime checks:
+Closures carry their signal bits. When a closure is passed to a function
+with a signal bound, the runtime checks:
 
 ```
-closure.effects & ~bound == 0
+closure.signals & ~bound == 0
 ```
 
 This is one AND and one comparison. If it fails, it's a signal (an error
@@ -541,11 +542,11 @@ overhead for non-inert functions is one branch per call (checking the signal).
 For inert functions (where the compiler can prove no signals), the branch can
 be elided entirely.
 
-### Effect-Guided Optimization
+### Signal-Guided Optimization
 
-The compiler's effect information guides JIT decisions:
+The compiler's signal information guides JIT decisions:
 
-- **No effects**: inline aggressively, no signal checks needed
+- **No signals**: inline aggressively, no signal checks needed
 - **Errors only**: signal checks needed, but no yield/continuation overhead
 - **Yields**: full signal protocol, but the JIT still compiles the function —
   it just includes the propagation path
@@ -554,26 +555,26 @@ The compiler's effect information guides JIT decisions:
    signal checks
 
 
-## I/O Effects
+## I/O Signals
 
 ### SIG_IO and the Scheduler
 
-I/O effects use the `:io` signal bit (bit 9). A fiber performing I/O signals
+I/O signals use the `:io` signal bit (bit 9). A fiber performing I/O signals
 `|:yield :io|` because it wants to both suspend AND request I/O handling.
 This is a convention, not a language rule — the bits compose freely.
 
 **Signal bit**: Bit 9 (`SIG_IO = 1 << 9`)
 
-**Effect constructors**:
-- `Effect::io()` — function may perform I/O
-- `Effect::io_errors()` — function may perform I/O and may error
+**Signal constructors**:
+- `Signal::io()` — function may perform I/O
+- `Signal::io_errors()` — function may perform I/O and may error
 
-**Predicate**: `may_io()` — check if effect includes I/O
+**Predicate**: `may_io()` — check if signal includes I/O
 
 ### Stream Primitives and I/O Requests
 
 Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
-`stream/write`, `stream/flush`) have effect `io_errors()`. They do not
+`stream/write`, `stream/flush`) have signal `io_errors()`. They do not
 perform I/O themselves. Instead, they:
 
 1. Build an `IoRequest` (typed descriptor of the I/O operation)
@@ -603,13 +604,13 @@ the scheduler, not by the language.
 
 ## Signal Registry
 
-The signal registry maps effect keywords to bit positions. Built-in effects occupy bits 0–15; user-defined effects use bits 16–31.
+The signal registry maps signal keywords to bit positions. Built-in signals occupy bits 0–15; user-defined signals use bits 16–31.
 
-### Built-in Effects
+### Built-in Signals
 
 | Keyword | Bit | Meaning |
 |---------|-----|---------|
-| `:error` | 0 | Error/exception |
+| `:error` | 0 | Error signal |
 | `:yield` | 1 | Cooperative suspension |
 | `:debug` | 2 | Breakpoint/trace |
 | `:ffi` | 4 | Calls foreign code |
@@ -618,30 +619,30 @@ The signal registry maps effect keywords to bit positions. Built-in effects occu
 
 Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use and are not user-visible.
 
-### User-Defined Effects
+### User-Defined Signals
 
-User-defined effects are registered via the `(effect :keyword)` form and allocated bits 16–31. Up to 16 user effects are supported per compilation unit.
+User-defined signals are registered via the `(signal :keyword)` form and allocated bits 16–31. Up to 16 user signals are supported per compilation unit.
 
 ```janet
-# Register a user-defined effect
-(effect :heartbeat)
-(effect :rate-limit)
+# Register a user-defined signal
+(signal :heartbeat)
+(signal :rate-limit)
 
-# Effects are registered in order of appearance
+# Signals are registered in order of appearance
 # :heartbeat gets bit 16, :rate-limit gets bit 17
 ```
 
-Duplicate registration is a compile-time error. Typos in effect keywords used in `restrict` that don't match any registered effect are also compile-time errors.
+Duplicate registration is a compile-time error. Typos in signal keywords used in `silence` that don't match any registered signal are also compile-time errors.
 
-## Declaring User Effects
+## Declaring User Signals
 
-### `(effect :keyword)` Form
+### `(signal :keyword)` Form
 
-Registers a new user-defined effect keyword and returns the keyword value.
+Registers a new user-defined signal keyword and returns the keyword value.
 
 **Syntax:**
 ```janet
-(effect :keyword)
+(signal :keyword)
 ```
 
 **Semantics:**
@@ -649,113 +650,113 @@ Registers a new user-defined effect keyword and returns the keyword value.
 - Returns the keyword value
 - Valid in any position (file scope or expression position)
 - Duplicate registration is a compile-time error
-- Built-in effects (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) cannot be re-registered
+- Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) cannot be re-registered
 
 **Examples:**
 ```janet
 # File scope
-(effect :heartbeat)
-(effect :rate-limit)
+(signal :heartbeat)
+(signal :rate-limit)
 
 # Expression position
-(def my-effect (effect :custom))
-my-effect  # ⟹ :custom
+(def my-signal (signal :custom))
+my-signal  # ⟹ :custom
 ```
 
-## Effect Restrictions
+## Signal Restrictions
 
-### `(restrict ...)` Form
+### `(silence ...)` Form
 
-Declares effect bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
+Declares signal bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
 
 **Syntax:**
 ```janet
 # Function-level restriction (no signals)
-(restrict)
+(silence)
 
 # Function-level restriction (specific signals allowed)
-(restrict :kw1 :kw2)
+(silence :kw1 :kw2)
 
 # Parameter-level restriction (parameter must be inert)
-(restrict param)
+(silence param)
 
 # Parameter-level restriction (parameter may emit specific signals)
-(restrict param :kw1 :kw2)
+(silence param :kw1 :kw2)
 ```
 
 **Semantics:**
 
-- `(restrict)` — This function emits no signals (inert)
-- `(restrict :kw1 :kw2)` — This function may emit only these signals
-- `(restrict param)` — Parameter `param` must be inert (no signals)
-- `(restrict param :kw1 :kw2)` — Parameter `param` may emit at most these signals
-- Multiple `restrict` forms allowed in one lambda (one per parameter + one function-level)
-- Keywords must be registered (via `effect` or built-in)
+- `(silence)` — This function emits no signals (inert)
+- `(silence :kw1 :kw2)` — This function may emit only these signals
+- `(silence param)` — Parameter `param` must be inert (no signals)
+- `(silence param :kw1 :kw2)` — Parameter `param` may emit at most these signals
+- Multiple `silence` forms allowed in one lambda (one per parameter + one function-level)
+- Keywords must be registered (via `signal` or built-in)
 - Parameter names must match declared parameters
 - Duplicate restrictions for the same parameter: the last one wins
 
-**Outside lambda bodies**, `restrict` is a call to the stdlib `restrict` function, which signals `:error` at runtime. `restrict` is implemented as:
+**Outside lambda bodies**, `silence` is a call to the stdlib `silence` function, which signals `:error` at runtime. `silence` is implemented as:
 ```
-(defn restrict [& _]
-  (error {:error :invalid-restrict
-          :message "restrict must appear in a function body preamble"}))
+(defn silence [& _]
+  (error {:error :invalid-silence
+          :message "silence must appear in a function body preamble"}))
 ```
 
 **Examples:**
 ```janet
 # Inert function
 (defn add (x y)
-  (restrict)
+  (silence)
   (+ x y))
 
 # Function that may error
 (defn validate (x)
-  (restrict :error)
+  (silence :error)
   (if (< x 0) (error "negative") x))
 
 # Higher-order function with inert callback
 (defn apply-inert (f x)
   "Apply f to x, requiring f to be inert."
-  (restrict f)
+  (silence f)
   (f x))
 
 # Higher-order function with bounded callback
 (defn apply-safe (f x)
   "Apply f to x, allowing only errors."
-  (restrict f :error)
+  (silence f :error)
   (f x))
 
 # Multiple restrictions
 (defn map-safe (f xs)
   "Map f over xs, f may only error."
-  (restrict f :error)
-  (restrict :error)
+  (silence f :error)
+  (silence :error)
   (map f xs))
 ```
 
 ## Compile-Time Verification
 
-### Effect Inference with Bounds
+### Signal Inference with Bounds
 
-Every lambda has an `inferred_effects` — the minimum guaranteed set of effects the lambda may produce. It is always present (never Optional) and is accumulated from:
+Every lambda has `inferred_signals` — the minimum guaranteed set of signals the lambda may produce. It is always present (never Optional) and is accumulated from:
 
 1. **Direct signal emissions** in the body (e.g., `(yield x)`, `(error "msg")`)
-2. **Effects of internal calls** to statically-known functions — their `inferred_effects` bits propagate upward
-3. **Effects contributed by parameter calls:**
-   - If a parameter has a `restrict` bound, its bound's bits are included in `inferred_effects`
+2. **Signals of internal calls** to statically-known functions — their `inferred_signals` bits propagate upward
+3. **Signals contributed by parameter calls:**
+   - If a parameter has a `silence` bound, its bound's bits are included in `inferred_signals`
    - If a parameter has NO bound, it contributes conservatively (Yields)
 
-The `inferred_effects: Effects` field is always present and contains the minimum guaranteed set of effects the lambda may produce. The programmer-supplied ceiling constraint from `(restrict)` or `(restrict :kw ...)` is a separate concept — the `restrict` form provides a bound that the compiler checks `inferred_effects` against. When a `restrict` bound is present, the compiler checks that `inferred_effects.bits ⊆ bound.bits`. If the check passes, the lambda's final effect is the declared bound (tighter). If it fails, compile-time error.
+The `inferred_signals: Signal` field is always present and contains the minimum guaranteed set of signals the lambda may produce. The programmer-supplied ceiling constraint from `(silence)` or `(silence :kw ...)` is a separate concept — the `silence` form provides a bound that the compiler checks `inferred_signals` against. When a `silence` bound is present, the compiler checks that `inferred_signals.bits ⊆ bound.bits`. If the check passes, the lambda's final signal is the declared bound (tighter). If it fails, compile-time error.
 
 **Example:**
 ```janet
 # Function with parameter bound
 (defn apply-inert (f x)
-  (restrict f)  # f must be inert
+  (silence f)  # f must be inert
   (f x))
 
-# Inferred effect: inert (because f is bounded to inert)
-# No polymorphism — f's effect is known to be zero bits
+# Inferred signal: inert (because f is bounded to inert)
+# No polymorphism — f's signal is known to be zero bits
 
 # This works: + is inert
 (apply-inert + 42)
@@ -766,30 +767,30 @@ The `inferred_effects: Effects` field is always present and contains the minimum
 
 ### Parameter Bounds Eliminate Polymorphism
 
-A function with `(restrict f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be inert, so the function's effect is determined by its own body only, not by what `f` might do.
+A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be inert, so the function's signal is determined by its own body only, not by what `f` might do.
 
 **Example:**
 ```janet
 # Without bound: polymorphic
 (defn map-any (f xs)
   (map f xs))
-# Effect: Polymorphic(0) — depends on f's effect
+# Signal: Polymorphic(0) — depends on f's signal
 
 # With bound: not polymorphic
 (defn map-inert (f xs)
-  (restrict f)
+  (silence f)
   (map f xs))
-# Effect: inert — f is guaranteed inert, so map is inert
+# Signal: inert — f is guaranteed inert, so map is inert
 ```
 
 ### Call-Site Checking
 
-When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's effect against the bound at compile time.
+When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's signal against the bound at compile time.
 
 **Example:**
 ```janet
 (defn apply-inert (f x)
-  (restrict f)
+  (silence f)
   (f x))
 
 # Compile-time check passes: + is inert
@@ -797,37 +798,37 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 
 # Compile-time check fails: yielding function violates bound
 (apply-inert (fn () (yield 1)) 42)
-# Error: argument violates effect bound
+# Error: argument violates signal bound
 ```
 
 ## Runtime Verification
 
-When a closure is passed to a function with an effect bound, the runtime checks that the closure's effect satisfies the bound. This is necessary for dynamic arguments where the effect cannot be determined at compile time.
+When a closure is passed to a function with a signal bound, the runtime checks that the closure's signal satisfies the bound. This is necessary for dynamic arguments where the signal cannot be determined at compile time.
 
 **Mechanism:**
-- The lowerer emits a `CheckEffectBound` instruction at function entry for each bounded parameter
-- The VM checks: `closure.effect.bits & ~allowed != 0`
+- The lowerer emits a `CheckSignalBound` instruction at function entry for each bounded parameter
+- The VM checks: `closure.signal.bits & ~allowed != 0`
 - If the check fails, the VM signals `:error` with a descriptive message
 
 **Example:**
 ```janet
 (defn apply-inert (f x)
-  (restrict f)
+  (silence f)
   (f x))
 
-# At runtime, if f's effect violates the bound, error is signaled
+# At runtime, if f's signal violates the bound, error is signaled
 (var f (eval '(fn () (yield 1))))
 (apply-inert f 42)
-# Runtime error: argument violates effect bound
+# Runtime error: argument violates signal bound
 ```
 
 ## JIT Integration
 
-Effect bounds enable JIT optimizations:
+Signal bounds enable JIT optimizations:
 
 1. **Loop specialization**: When a higher-order function is called with a provably-inert callback, the JIT can specialize the inner loop to skip signal checks
 2. **Inlining**: Inert callbacks can be inlined more aggressively
-3. **Elimination of polymorphism**: Bounded parameters eliminate the need to track polymorphic effects, simplifying JIT compilation
+3. **Elimination of polymorphism**: Bounded parameters eliminate the need to track polymorphic signals, simplifying JIT compilation
 
 **Example:**
 ```janet
@@ -837,30 +838,30 @@ Effect bounds enable JIT optimizations:
 
 # With bounds: JIT can specialize for inert f
 (defn map-inert (f xs)
-  (restrict f)
+  (silence f)
   (map f xs))
 ```
 
-## `(effects)` Introspection Primitive
+## `(signals)` Introspection Primitive
 
-Returns the full signal registry as a struct with effect keywords as keys and bit positions as values.
+Returns the full signal registry as a struct with signal keywords as keys and bit positions as values.
 
 **Syntax:**
 ```janet
-(effects)
+(signals)
 ```
 
 **Returns:**
-A struct mapping effect keywords to bit positions. Includes both built-in and user-defined effects.
+A struct mapping signal keywords to bit positions. Includes both built-in and user-defined signals.
 
 **Example:**
 ```janet
-(effects)
+(signals)
 # ⟹ {:error 0 :yield 1 :debug 2 :ffi 4 :halt 8 :io 9 :heartbeat 16 :rate-limit 17}
 
-# After registering user effects
-(effect :custom)
-(effects)
+# After registering user signals
+(signal :custom)
+(signals)
 # ⟹ {:error 0 :yield 1 :debug 2 :ffi 4 :halt 8 :io 9 :heartbeat 16 :rate-limit 17 :custom 18}
 ```
 
@@ -878,7 +879,7 @@ A struct mapping effect keywords to bit positions. Includes both built-in and us
 (fiber/resume fiber value) → signal-bits
 
 ;# Emit a signal from the current fiber (suspends it)
-(fiber/signal bits value) → (suspends)
+(emit bits value) → (suspends)
 
 ;# === Introspection ===
 
@@ -923,10 +924,10 @@ A struct mapping effect keywords to bit positions. Includes both built-in and us
   (finally cleanup))
 
 ;# yield
-(yield value) → (fiber/signal :yield value)
+(yield value) → (emit :yield value)
 
-;# throw
-(throw value) → (fiber/signal :error value)
+;# error (signal an error)
+(error value) → (emit 1 value)
 
 ;# Thin aliases
 (coro/new fn) → (fiber/new fn :yield)
@@ -934,19 +935,19 @@ A struct mapping effect keywords to bit positions. Includes both built-in and us
 (coro/status co) → (fiber/status co)
 ```
 
-### Effect Restrictions
+### Signal Restrictions
 
 ```janet
 (defn inert-add (x y)
-  (restrict)           ;# no effects — inert
+  (silence)           ;# no signals — inert
   (+ x y))
 
 (defn may-fail (x)
-  (restrict :error)   ;# may error, nothing else
+  (silence :error)   ;# may error, nothing else
   (/ 1 x))
 
 (defn callback-must-be-inert (f xs)
-  (restrict f) ;# f must have no effects
+  (silence f) ;# f must have no signals
   (map f xs))
 ```
 
@@ -962,7 +963,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
 2. ✅ **Unified signals.** Error and yield are signal types. `Condition`
    type removed. Errors are `[:keyword "message"]` tuples.
 
-3. ✅ **Signal-bits-based Effect type.** `Effect { bits: SignalBits,
+3. ✅ **Signal-bits-based Signal type.** `Signal { bits: SignalBits,
    propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
     and `may_error` fields replaced.
 
@@ -972,7 +973,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
 5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no
    allocation API.
 
-6. ✅ **Effect restrictions.** `restrict` forms for effect contracts implemented.
+6. ✅ **Signal restrictions.** `silence` forms for signal contracts implemented.
 
 7. ❌ **Erlang-style processes.** Fibers on an event loop with a scheduler.
 
@@ -1029,7 +1030,7 @@ don't resume. No special syntax or VM support is needed.
 ;# The callee: signals with available recovery options
 (def (safe-divide a b)
    (if (= b 0)
-     (fiber/signal :error
+     (emit :error
        (@struct :error :division-by-zero
                 :options [:use-value :return-zero]))
      (/ a b)))
@@ -1045,6 +1046,111 @@ don't resume. No special syntax or VM support is needed.
 ```
 
 
+## Error Signalling
+
+Errors in Elle are signals — values emitted on the `:error` bit (bit 0,
+`SIG_ERROR`). There is no exception hierarchy, no `Condition` type, no
+`handler-case`. Error handling is fiber signal handling.
+
+### Error Representation
+
+The stdlib convention is a struct: `{:error :keyword :message "message"}`.
+
+```janet
+# Stdlib primitive errors look like:
+{:error :type-error :message "car: expected pair, got integer"}
+{:error :division-by-zero :message "cannot divide by zero"}
+{:error :arity-mismatch :message "expected 2 arguments, got 3"}
+```
+
+The `:error` keyword classifies the error. The `:message` string describes it.
+Both are ordinary Elle values — no special types.
+
+**This is a convention, not a hard rule.** Users can define their own error
+value shapes. The signal system doesn't care what the payload is; it's just
+a Value. Pattern matching on the payload is how handlers distinguish error
+kinds. A user might prefer `[:boom "message"]`, or a plain string, or an
+integer error code — whatever suits their domain.
+
+### Two Failure Modes
+
+**VM bugs** (stack underflow, bad bytecode, corrupted state): the compiler
+emitted bad code or the VM has a defect. These panic immediately. Elle code
+cannot catch them.
+
+**Runtime errors** (type mismatch, arity error, division by zero, undefined
+variable): program behavior on bad data. These are signalled via `SIG_ERROR`
+and can be caught by a parent fiber with the appropriate mask.
+
+### How Errors Flow
+
+**From primitives**: All primitives are `NativeFn: fn(&[Value]) -> (SignalBits, Value)`.
+Success returns `(SIG_OK, value)`. Error returns `(SIG_ERROR, error_struct)`.
+The VM's dispatch checks signal bits after each primitive call.
+
+**From instruction handlers**: Instructions like `Add`, `Car`, `Cdr` set
+`fiber.signal` directly when they detect a type mismatch or other error.
+
+**From Elle code**: Use `error` (a prelude macro) or `emit` directly:
+
+```janet
+# Prelude macro — signals {:error :the-kw :message "..."} on SIG_ERROR
+(error {:error :bad-input :message "expected a number"})
+
+# Or emit directly — any value works
+(emit 1 {:error :custom :message "something failed"})
+
+# User-defined error shape — completely valid
+(emit 1 [:my-error "the details"])
+```
+
+### Catching Errors
+
+Errors are caught by fibers whose mask includes the `:error` bit:
+
+```janet
+# try/catch is sugar for fiber signal handling
+(try
+  (risky-operation)
+  (catch e
+    (handle-error e)))
+
+;# Expands to approximately:
+(let ((f (fiber/new (fn () (risky-operation)) 1)))  # mask = SIG_ERROR
+  (fiber/resume f nil)
+  (match (fiber/status f)
+    (:error (handle-error (fiber/value f)))
+    (_ (fiber/value f))))
+```
+
+The `try`/`catch`, `protect`, `defer`, and `with` macros are all built on
+fiber primitives. No special VM support.
+
+### Error Propagation
+
+Errors propagate up the fiber chain until caught:
+
+1. Child signals `SIG_ERROR`
+2. Parent checks: `child.mask & SIG_ERROR != 0`?
+   - **Yes**: parent catches, child stays suspended (or becomes `error` state)
+   - **No**: parent also suspends, signal propagates to grandparent
+3. At the root fiber: uncaught error becomes `Err(String)` via the public API boundary
+
+`fiber/propagate` re-signals a caught signal, preserving the child chain for
+stack traces. `fiber/cancel` injects an error into a suspended fiber.
+
+### The Public API Boundary
+
+`execute_bytecode` is the translation boundary between the signal-based
+internal VM and the `Result<Value, String>` external API:
+
+- `SIG_OK` → `Ok(value)`
+- `SIG_ERROR` → `Err(format_error(signal_value))`
+
+External callers (REPL, file execution, tests) see `Result`. Internal code
+sees `SignalBits`.
+
+
 ## Open Questions
 
 ### Compound signals
@@ -1058,19 +1164,19 @@ it. Revisit if we find a use case.
 32 bits: 7 used (0–6) + 9 reserved (7–15) + 16 user-defined (16–31). If
 users need more than 16 signal types, bump SignalBits to u64.
 
-### Dynamic effect checking overhead
+### Dynamic signal checking overhead
 
-Checking `closure.effects & ~bound == 0` at every call boundary with an
-effect bound — is this too expensive? It's one AND + one branch. Probably
+Checking `closure.signals & ~bound == 0` at every call boundary with a
+signal bound — is this too expensive? It's one AND + one branch. Probably
 fine, but worth measuring.
 
 ### Interaction with the type system
 
-Elle doesn't have a static type system (yet). Effects are the closest thing
+Elle doesn't have a static type system (yet). Signals are the closest thing
 to static types. Should they evolve toward a type system, or remain a
 separate concern?
 
-### Effect subtyping
+### Signal subtyping
 
 Should there be a hierarchy of signal types, or is the flat bitfield
 sufficient? Janet uses a flat space. Koka uses a hierarchy. Flat is simpler
@@ -1081,14 +1187,15 @@ and faster. Current implementation: flat.
 - **Signal resumption**: Yes. Resume value is pushed onto the child's operand
   stack. See `docs/fibers.md`.
 
-- **Error representation**: Errors are `[:keyword "message"]` tuples. No
-  `Condition` type, no exception hierarchy. Pattern matching on the payload
-  replaces hierarchy checks.
+- **Error representation**: Errors are values — by convention a struct
+  `{:error :keyword :message "..."}`, but any value works. No `Condition`
+  type, no signal hierarchy. Pattern matching on the payload replaces hierarchy
+  checks. See the "Error Signalling" section below.
 
 - **Coroutine aliases**: `yield` works as a special form (emits
   `SIG_YIELD`). `make-coroutine` / `coro/resume` are thin wrappers
   around `fiber/new` / `fiber/resume`. `try`/`catch` macro is blocked on
   macro system work.
 
-- **Effect erasure**: Effect bits are stored on the `Closure` struct (one
-  `Effect` value = 8 bytes). Acceptable cost.
+- **Signal erasure**: Signal bits are stored on the `Closure` struct (one
+  `Signal` value = 8 bytes). Acceptable cost.

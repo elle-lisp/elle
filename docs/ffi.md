@@ -17,7 +17,7 @@ explicit marshalling. The backend uses the `libffi` crate (middle-level API)
 - [Value::pointer()](#valuepointer)
 - [CIF Caching](#cif-caching)
 - [Error Handling](#error-handling)
-- [Effect System](#effect-system)
+- [Signal System](#signal-system)
 - [Struct Marshalling](#struct-marshalling)
 - [Invariants](#invariants)
 for calling convention correctness across platforms.
@@ -404,18 +404,18 @@ Integer arguments are range-checked: passing 256 as `:i8` signals an
 `ffi-type-error` from the marshalling layer.
 
 
-## Effect System
+## Signal System
 
-FFI primitives carry the `Effect::ffi_errors()` effect, which is
+FFI primitives carry the `Signal::ffi_errors()` signal, which is
 `SIG_FFI | SIG_ERROR`. This means:
 
-- The effect system knows these functions call foreign code (`SIG_FFI`)
+- The signal system knows these functions call foreign code (`SIG_FFI`)
 - They may also error (`SIG_ERROR`)
 - Pure primitives like `ffi/signature`, `ffi/struct`, `ffi/array`,
-  `ffi/size`, `ffi/align` carry `Effect::errors()` (just `SIG_ERROR`)
+  `ffi/size`, `ffi/align` carry `Signal::errors()` (just `SIG_ERROR`)
 
 `SIG_FFI` is bit 4 (value 16) in the signal bitmask. It is used by the
-effect system for compile-time tracking but is not a runtime signal — FFI
+signal system for compile-time tracking but is not a runtime signal — FFI
 calls don't emit `SIG_FFI` at runtime.
 
 
