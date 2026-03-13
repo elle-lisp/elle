@@ -18,6 +18,7 @@ use crate::value::{error_val, Value};
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::os::unix::io::RawFd;
 use std::time::Duration;
 
 /// Completion from an async I/O operation.
@@ -61,6 +62,9 @@ pub(crate) struct PendingOp {
     /// Per-operation timeout from IoRequest.
     #[allow(dead_code)]
     pub(crate) timeout: Option<Duration>,
+    /// For io_uring Connect: the socket fd created before submitting.
+    /// On CQE success (result_code == 0), this becomes the connected fd.
+    pub(crate) connect_fd: Option<RawFd>,
 }
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -268,6 +272,7 @@ impl AsyncBackend {
                         listener_kind,
                         connect_addr: None,
                         timeout: request.timeout,
+                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -321,6 +326,7 @@ impl AsyncBackend {
                         listener_kind: None,
                         connect_addr: None,
                         timeout: request.timeout,
+                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -362,6 +368,7 @@ impl AsyncBackend {
                         listener_kind: None,
                         connect_addr: None,
                         timeout: request.timeout,
+                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -403,6 +410,7 @@ impl AsyncBackend {
                         listener_kind: None,
                         connect_addr: None,
                         timeout: request.timeout,
+                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -469,6 +477,7 @@ impl AsyncBackend {
                         listener_kind: None,
                         connect_addr: None,
                         timeout: request.timeout,
+                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -499,16 +508,19 @@ impl AsyncBackend {
             ..
         } = *inner;
 
-        match platform {
+        let uring_fd = match platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ring) => {
-                crate::io::uring::submit_uring_connect(ring, id, addr, timeout, buffer_pool)?;
+                let fd =
+                    crate::io::uring::submit_uring_connect(ring, id, addr, timeout, buffer_pool)?;
+                Some(fd)
             }
             PlatformBackend::ThreadPool(_) => {
                 let _ = buffer_pool;
                 network_pool.submit(id, -1, op_kind, data, 0)?;
+                None
             }
-        }
+        };
 
         pending.insert(
             id,
@@ -534,6 +546,7 @@ impl AsyncBackend {
                     ConnectAddr::Unix { path } => ConnectAddr::Unix { path: path.clone() },
                 }),
                 timeout,
+                connect_fd: uring_fd,
             },
         );
         Ok(id)
@@ -574,6 +587,7 @@ impl AsyncBackend {
                 listener_kind: None,
                 connect_addr: None,
                 timeout: None,
+                connect_fd: None,
             },
         );
         Ok(id)
@@ -836,7 +850,12 @@ impl AsyncBackendInner {
     fn drain_network_completions(&mut self) {
         let raw = self.network_pool.poll();
         for (id, result_code, data) in raw {
-            if let Some(pending) = self.pending.remove(&id) {
+            if let Some(mut pending) = self.pending.remove(&id) {
+                // Thread pool Connect: result_code is the new fd.
+                // Stash it in connect_fd so the completion handler finds it there.
+                if matches!(pending.op, IoOp::Connect { .. }) && result_code > 0 {
+                    pending.connect_fd = Some(result_code);
+                }
                 let c = completion::process_raw_completion(
                     id,
                     result_code,
@@ -885,6 +904,7 @@ impl AsyncBackendInner {
                 listener_kind: None,
                 connect_addr: None,
                 timeout: None,
+                connect_fd: None,
             },
         );
         Ok(id)

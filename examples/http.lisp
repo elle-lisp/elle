@@ -1,47 +1,127 @@
 #!/usr/bin/env elle
 
-## HTTP module example
-##
-## Demonstrates:
-##   parse-url    — URL parsing
-##   http:respond — build response structs
-##   http:get     — make a GET request
-##   http:post    — make a POST request with a body
-##   Integration  — live server+client round-trip using ev/run
-
-(def http ((import "./lib/http.lisp")))
-
-# ── URL parsing ──────────────────────────────────────────────────────────────
-
-(let* [[u (http:parse-url "http://example.com:8080/api?q=test")]]
-  (assert (= u:host  "example.com") "host")
-  (assert (= u:port  8080)          "port")
-  (assert (= u:path  "/api")        "path")
-  (assert (= u:query "q=test")      "query"))
-
-# ── http:respond ─────────────────────────────────────────────────────────────
-
-(let* [[r (http:respond 200 "Hello, World!")]]
-  (assert (= r:status 200)             "status 200")
-  (assert (= r:body   "Hello, World!") "body"))
-
-# ── http:serve demonstration ────────────────────────────────────────────────
+# HTTP — server and client in a single event loop
 #
-# http:serve(port handler) starts an HTTP server that runs forever.
-# The handler receives a request struct and returns a response struct.
-# Request: {:method :path :version :headers :body}
-# Response: {:status :headers :body}
+# Demonstrates:
+#   http:serve                        — accept loop with fiber-per-connection
+#   http:connect/send/close           — keep-alive client session
+#   http:get                          — one-shot client request
+#   http:respond                      — response construction
+#   http:parse-url                    — URL parsing
+#   ev/run + ev/spawn                 — single async event loop
 #
-# Example handler (not executed here, as http:serve blocks):
-#
-#   (defn my-handler [request]
-#     (match request:method
-#       ("GET" (http:respond 200 (string/format "GET {}" request:path)))
-#       ("POST" (http:respond 201 (string/format "Posted: {}" request:body)))
-#       (_ (http:respond 405 "Method Not Allowed"))))
-#
-#   (http:serve 8080 my-handler)  ; runs forever
-#
-# To stop the server, use (cancel server-fiber) from outside the handler.
+# The server accepts connections and routes requests.  The client exercises
+# keep-alive (two requests on one TCP connection) then one-shot mode.
 
-(print "all http examples passed.")
+(def http ((import-file "./lib/http.lisp")))
+
+
+# ── URL parsing (pure, no I/O) ──────────────────────────────────────────────
+
+(let [[u (http:parse-url "http://example.com:8080/api?q=test")]]
+  (assert (= u:host "example.com") "parse-url: host")
+  (assert (= u:port 8080)          "parse-url: port")
+  (assert (= u:path "/api")        "parse-url: path")
+  (assert (= u:query "q=test")     "parse-url: query"))
+
+(let [[u (http:parse-url "http://localhost/")]]
+  (assert (= u:port 80)  "parse-url: default port")
+  (assert (= u:path "/") "parse-url: root path"))
+
+
+# ── Response construction (pure, no I/O) ────────────────────────────────────
+
+(let [[r (http:respond 200 "hello")]]
+  (assert (= r:status 200)                              "respond: status")
+  (assert (= r:body "hello")                            "respond: body")
+  (assert (= (get r:headers :content-length) "5")       "respond: content-length")
+  (assert (= (get r:headers :content-type) "text/plain") "respond: content-type"))
+
+
+# ── Server + client integration ─────────────────────────────────────────────
+#
+# Architecture:
+#   1. Bind a TCP listener on port 0 (OS-assigned)
+#   2. ev/run launches two fibers:
+#      - Server: http:serve handles accept loop + connection handling
+#      - Client: exercises keep-alive then one-shot modes
+#   3. Client closes the listener when done, causing http:serve to exit.
+
+(var request-count 0)
+
+(defn handler [request]
+  "Route requests and count them."
+  (assign request-count (+ request-count 1))
+  (cond
+    ((= request:path "/hello")
+     (http:respond 200 "Hello, World!"))
+
+    ((= request:path "/echo")
+     (http:respond 201 request:body
+       :headers {:content-type "application/octet-stream"}))
+
+    ((= request:path "/count")
+     (http:respond 200 (string request-count)))
+
+    (true
+     (http:respond 404 "not found"))))
+
+(let [[listener (tcp/listen "127.0.0.1" 0)]]
+  (let* [[addr (port/path listener)]
+         [port-num (integer (get (string/split addr ":") 1))]]
+    (display "  server listening on port ") (print port-num)
+    (let [[results @[]]]
+      (ev/run
+        # Server fiber
+        (fn [] (http:serve listener handler))
+
+        # Client fiber
+        (fn []
+          (defer (port/close listener)
+
+            # ── Keep-alive: two requests on one TCP connection ──
+
+            (let [[session (http:connect
+                             (string/format "http://127.0.0.1:{}/" port-num))]]
+              (let [[r1 (http:send session "GET" "/hello")]]
+                (display "  keep-alive GET /hello: ") (print r1:status)
+                (push results r1))
+
+              (let [[r2 (http:send session "POST" "/echo"
+                          :body "ping" :headers {:content-type "text/plain"})]]
+                (display "  keep-alive POST /echo: ") (print r2:status)
+                (push results r2))
+
+              (http:close session))
+
+            # ── One-shot: new TCP connection, connection: close ──
+
+            (let [[r3 (http:get
+                         (string/format "http://127.0.0.1:{}/count" port-num))]]
+              (display "  one-shot GET /count: ") (print r3:body)
+              (push results r3)))))
+
+      # ── Assertions ──────────────────────────────────────────────
+
+      (let [[r1 (get results 0)]
+            [r2 (get results 1)]
+            [r3 (get results 2)]]
+
+        # Keep-alive GET
+        (assert (= r1:status 200)            "keep-alive GET: status 200")
+        (assert (= r1:body "Hello, World!")  "keep-alive GET: body")
+
+        # Keep-alive POST
+        (assert (= r2:status 201)            "keep-alive POST: status 201")
+        (assert (= r2:body "ping")           "keep-alive POST: echoed body")
+        (assert (= (get r2:headers :content-type) "application/octet-stream")
+          "keep-alive POST: custom content-type")
+
+        # One-shot GET (connection: close)
+        (assert (= r3:status 200)            "one-shot GET: status 200")
+        (assert (= r3:body "3")              "one-shot GET: 3 requests served"))
+
+      (assert (= request-count 3) "server handled exactly 3 requests"))))
+
+(print "")
+(print "all http passed.")

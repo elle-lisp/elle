@@ -239,29 +239,6 @@ fn prim_is_port_open(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(!port.is_closed()))
 }
 
-/// (port/path port) → string or nil
-///
-/// Returns the port's path/address string, or nil for stdio ports.
-fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("port/path: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    let port = match extract_port(&args[0], "port/path") {
-        Ok(p) => p,
-        Err(e) => return e,
-    };
-    match port.path() {
-        Some(p) => (SIG_OK, Value::string(p)),
-        None => (SIG_OK, Value::NIL),
-    }
-}
-
 /// (port/set-options port :timeout ms) → nil
 ///
 /// Set port options. Currently only :timeout is recognized.
@@ -468,17 +445,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["port"],
         category: "port",
         example: "(port/open? (port/stdout)) #=> true",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "port/path",
-        func: prim_port_path,
-        signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Return port's path or address string, nil for stdio.",
-        params: &["port"],
-        category: "port",
-        example: "(port/path (port/open \"data.txt\" :read))",
         aliases: &[],
     },
     PrimitiveDef {

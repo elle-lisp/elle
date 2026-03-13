@@ -90,34 +90,11 @@ pub(super) fn process_raw_completion(
             IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
             IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
             IoOp::Accept => {
-                // Accept: result_code is new fd, data is encoded address
-                // Data format: addr_len (4 bytes LE) + sockaddr_storage
-                if data.len() < 4 {
-                    return Completion {
-                        id,
-                        result: Err(error_val("io-error", "invalid accept data")),
-                    };
-                }
-                let addr_len =
-                    u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
-                if data.len() < 4 + std::mem::size_of::<libc::sockaddr_storage>() {
-                    return Completion {
-                        id,
-                        result: Err(error_val("io-error", "invalid accept data")),
-                    };
-                }
-                let addr_bytes = &data[4..4 + std::mem::size_of::<libc::sockaddr_storage>()];
-                let addr_storage = unsafe {
-                    let mut storage: libc::sockaddr_storage = std::mem::zeroed();
-                    std::ptr::copy_nonoverlapping(
-                        addr_bytes.as_ptr(),
-                        &mut storage as *mut _ as *mut u8,
-                        std::mem::size_of::<libc::sockaddr_storage>(),
-                    );
-                    storage
-                };
-                let peer_addr = format_sockaddr(&addr_storage, addr_len);
-                let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
+                // Accept: result_code is the new fd (from both io_uring and thread pool).
+                // Peer address is obtained via getpeername() — works uniformly.
+                let fd = result_code;
+                let peer_addr = peer_address(fd);
+                let fd = unsafe { OwnedFd::from_raw_fd(fd) };
                 let new_port = match pending.listener_kind {
                     Some(PortKind::TcpListener) => Port::new_tcp_stream(fd, peer_addr),
                     Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
@@ -131,12 +108,20 @@ pub(super) fn process_raw_completion(
                 Value::external("port", new_port)
             }
             IoOp::Connect { addr } => {
-                // Connect: result_code is new fd, data is peer address string
-                let peer_addr = String::from_utf8_lossy(&data).to_string();
-                let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
+                // Connect: fd and address come from PendingOp (set at submission time).
+                // io_uring: connect_fd = pre-created socket, result_code = 0.
+                // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
+                let fd = pending
+                    .connect_fd
+                    .expect("Connect completion without connect_fd");
+                let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+                let peer_addr = match addr {
+                    ConnectAddr::Tcp { addr: host, port } => format!("{}:{}", host, port),
+                    ConnectAddr::Unix { path } => path.clone(),
+                };
                 let new_port = match addr {
                     ConnectAddr::Tcp { .. } => Port::new_tcp_stream(fd, peer_addr),
-                    ConnectAddr::Unix { path } => Port::new_unix_stream(fd, path.clone()),
+                    ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
                 };
                 Value::external("port", new_port)
             }
@@ -182,6 +167,19 @@ pub(super) fn process_raw_completion(
         Completion {
             id,
             result: Ok(value),
+        }
+    }
+}
+
+/// Get peer address string from a connected socket fd via getpeername().
+fn peer_address(fd: i32) -> String {
+    unsafe {
+        let mut storage: libc::sockaddr_storage = std::mem::zeroed();
+        let mut len = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+        if libc::getpeername(fd, &mut storage as *mut _ as *mut libc::sockaddr, &mut len) == 0 {
+            format_sockaddr(&storage, len)
+        } else {
+            "unknown".to_string()
         }
     }
 }

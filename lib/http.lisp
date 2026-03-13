@@ -59,7 +59,7 @@
   (def headers @{})
   (forever
     (let [[line (stream/read-line port)]]
-      (when (empty? line)
+      (when (or (nil? line) (empty? line))
         (break (freeze headers)))
       (let [[colon-pos (string/find line ":")]]
         (when (nil? colon-pos)
@@ -81,18 +81,19 @@
 
 (defn read-request-line [port]
   "Read and parse HTTP request line: 'GET /path HTTP/1.1'.
-   Returns {:method :path :version} (all strings).
-   Signals :http-error on malformed input."
-  (let* [[line (stream/read-line port)]
-         [parts (string/split line " ")]]
-    (when (< (length parts) 3)
-      (error {:error :http-error :message "malformed request line"
-              :line line}))
-    (let [[[method path version] parts]]
-      (unless (string/starts-with? version "HTTP/")
-        (error {:error :http-error :message "invalid HTTP version"
-                :version version}))
-      {:method method :path path :version version})))
+   Returns {:method :path :version} or nil on EOF."
+  (let [[line (stream/read-line port)]]
+    (if (nil? line)
+      nil
+      (let [[parts (string/split line " ")]]
+        (when (< (length parts) 3)
+          (error {:error :http-error :message "malformed request line"
+                  :line line}))
+        (let [[[method path version] parts]]
+          (unless (string/starts-with? version "HTTP/")
+            (error {:error :http-error :message "invalid HTTP version"
+                    :version version}))
+          {:method method :path path :version version})))))
 
 (defn write-request-line [port method path]
   "Write HTTP request line: 'METHOD path HTTP/1.1\\r\\n'."
@@ -123,7 +124,7 @@
     (and cl (stream/read port (integer cl)))))
 
 # ============================================================================
-# Client API
+# Reason phrases
 # ============================================================================
 
 (def reason-phrases
@@ -138,40 +139,69 @@
    403 "Forbidden"
    404 "Not Found"
    405 "Method Not Allowed"
+   413 "Payload Too Large"
    409 "Conflict"
    500 "Internal Server Error"
    502 "Bad Gateway"
    503 "Service Unavailable"})
 
-(defn build-request-headers [host extra-headers body]
-  "Build request headers with host, connection, and optional Content-Length."
-  (let [[headers (merge {:host host :connection "close"} (or extra-headers {}))]]
+# ============================================================================
+# Response construction
+# ============================================================================
+
+(defn http-respond [status body &keys {:headers extra-headers}]
+  "Build a response struct with Content-Type and Content-Length set.
+   Caller can override headers via :headers."
+  (let* [[base-headers {:content-type "text/plain"
+                        :content-length (string (string/size-of body))}]
+         [merged (if (nil? extra-headers)
+                   base-headers
+                   (merge base-headers extra-headers))]]
+    {:status status :headers merged :body body}))
+
+# ============================================================================
+# Client API
+# ============================================================================
+
+(defn wants-close? [headers]
+  "True if headers indicate the connection should close."
+  (let [[conn (get headers :connection)]]
+    (and conn (= (string/lowercase conn) "close"))))
+
+(defn build-request-headers [host extra-headers body keep-alive]
+  "Build request headers. Sets connection: keep-alive or close."
+  (let [[headers (merge {:host host
+                         :connection (if keep-alive "keep-alive" "close")}
+                        (or extra-headers {}))]]
     (if (nil? body)
         headers
         (merge headers {:content-length (string (string/size-of body))}))))
 
+(defn send-request [conn method path host extra-headers body keep-alive]
+  "Send an HTTP request on an open connection. Returns response struct.
+   Does NOT close the connection."
+  (write-request-line conn method path)
+  (let [[headers (build-request-headers host extra-headers body keep-alive)]]
+    (write-headers conn headers)
+    (stream/write conn "\r\n")
+    (unless (nil? body) (stream/write conn body))
+    (stream/flush conn)
+    (let* [[status-line (read-status-line conn)]
+           [resp-headers (read-headers conn)]
+           [resp-body (read-body conn resp-headers)]]
+      {:status status-line:status :headers resp-headers :body resp-body})))
+
 (defn http-request [method url &keys {:body body :headers extra-headers}]
-  "Make an HTTP/1.1 request. Returns {:status :headers :body}.
-   method: string (\"GET\", \"POST\", etc.)
-   url: string
-   :body optional string body
-   :headers optional struct of extra headers to send"
+  "Make an HTTP/1.1 request. Opens a new connection, sends request, closes.
+   Returns {:status :headers :body}."
   (let* [[url-parsed (parse-url url)]
          [request-path (if (nil? url-parsed:query)
                            url-parsed:path
                            (string/format "{}?{}" url-parsed:path url-parsed:query))]
          [conn (tcp/connect url-parsed:host url-parsed:port)]]
     (defer (port/close conn)
-      (write-request-line conn method request-path)
-      (let [[headers (build-request-headers url-parsed:host extra-headers body)]]
-        (write-headers conn headers)
-        (stream/write conn "\r\n")
-        (unless (nil? body) (stream/write conn body))
-        (stream/flush conn)
-        (let* [[status-line (read-status-line conn)]
-               [resp-headers (read-headers conn)]
-               [resp-body (read-body conn resp-headers)]]
-          {:status status-line:status :headers resp-headers :body resp-body})))))
+      (send-request conn method request-path
+                    url-parsed:host extra-headers body false))))
 
 (defn http-get [url &keys {:headers headers}]
   "Make a GET request. Returns {:status :headers :body}."
@@ -181,21 +211,41 @@
   "Make a POST request with body. Returns {:status :headers :body}."
   (http-request "POST" url :body body :headers headers))
 
+(defn http-connect [url]
+  "Open a keep-alive connection to a URL's host:port.
+   Returns {:conn :host :path-prefix} for use with http:send."
+  (let* [[url-parsed (parse-url url)]
+         [conn (tcp/connect url-parsed:host url-parsed:port)]]
+    {:conn conn :host url-parsed:host}))
+
+(defn http-send [session method path &keys {:body body :headers extra-headers}]
+  "Send a request on an existing keep-alive connection.
+   session: struct from http:connect. Returns {:status :headers :body}.
+   Connection remains open unless server sends connection: close."
+  (send-request session:conn method path
+                session:host extra-headers body true))
+
+(defn http-close [session]
+  "Close a keep-alive session."
+  (port/close session:conn))
+
 # ============================================================================
 # Server API
 # ============================================================================
 
 (defn read-request [conn]
   "Read a complete HTTP request from a connection port.
-   Returns {:method :path :version :headers :body}."
-  (let* [[req-line (read-request-line conn)]
-         [headers (read-headers conn)]
-         [body (read-body conn headers)]]
-    {:method req-line:method
-     :path req-line:path
-     :version req-line:version
-     :headers headers
-     :body body}))
+   Returns {:method :path :version :headers :body}, or nil on EOF."
+  (let [[req-line (read-request-line conn)]]
+    (if (nil? req-line)
+      nil
+      (let* [[headers (read-headers conn)]
+             [body (read-body conn headers)]]
+        {:method req-line:method
+         :path req-line:path
+         :version req-line:version
+         :headers headers
+         :body body}))))
 
 (defn write-response [conn response]
   "Write a complete HTTP response to a connection port and flush.
@@ -208,51 +258,68 @@
     (stream/write conn response:body))
   (stream/flush conn))
 
-(defn http-respond [status body &keys {:headers extra-headers}]
-  "Build a response struct with Content-Type and Content-Length set.
-   Caller can override headers via :headers."
-  (let* [[base-headers {:content-type "text/plain"
-                        :content-length (string (string/size-of body))}]
-         [merged (if (nil? extra-headers)
-                   base-headers
-                   (merge base-headers extra-headers))]]
-    {:status status :headers merged :body body}))
-
-(defn handle-connection [conn handler]
-  "Handle a single HTTP connection: read request, call handler, write response.
-   Errors in handler return a 500 response. Connection is closed on exit."
+(defn connection-loop [conn handler on-error]
+  "Handle HTTP requests on a connection until it closes or either side
+   sends connection: close. Each request is read, passed to handler,
+   and the response is written. Errors in handler produce a 500 response.
+   on-error is called with (request error) when the handler fails."
   (defer (port/close conn)
-    (let* [[request (read-request conn)]
-           [[ok? val] (protect (handler request))]
-           [response (if ok?
-                       val
-                       (http-respond 500 "Internal Server Error"))]]
-      (write-response conn response))))
+    (forever
+      (let [[request (protect (read-request conn))]]
+        # Read failure or EOF — connection done
+        (unless (get request 0) (break nil))
+        (let [[req (get request 1)]]
+          (when (nil? req) (break nil))
+          (let* [[[ok? val] (protect (handler req))]
+                 [response (if ok?
+                             val
+                             (begin
+                               (when on-error (on-error req val))
+                               (http-respond 500 "Internal Server Error")))]]
+            (write-response conn response)
+            # Close if client or our response says so
+            (when (or (wants-close? req:headers)
+                      (wants-close? response:headers))
+              (break nil))))))))
 
-(defn accept-loop [listener handler]
-  "Accept connections and spawn fibers to handle them."
-  (forever
-    (let [[conn (tcp/accept listener)]]
-      (ev/spawn (fn [] (handle-connection conn handler))))))
+(defn default-on-error [request err]
+  "Default error handler: print to stderr."
+  (stream/write (port/stderr)
+    (string/format "http: handler error on {} {}: {}\n"
+                   request:method request:path err)))
 
-(defn http-serve [port-num handler]
-  "Start an HTTP server on port-num. Calls handler for each request.
+(defn http-serve [listener handler &keys {:on-error on-error}]
+  "Accept connections on listener and handle them with keep-alive.
+   Each connection runs in its own fiber via ev/spawn.
+   Must be called inside an ev/run or equivalent scheduler context.
+   Exits cleanly when the listener is closed.
    handler: (fn [request]) -> response
-   Runs until killed. Each connection runs in its own fiber.
-   Errors in handler return a 500 response."
-  (let [[listener (tcp/listen "0.0.0.0" port-num)]]
-    (ev/run (fn [] (accept-loop listener handler)))))
+   :on-error: (fn [request error]) -> nil (default: print to stderr)"
+  (let [[err-fn (or on-error default-on-error)]]
+    (forever
+      (let [[[ok? conn] (protect (tcp/accept listener))]]
+        (unless ok? (break nil))
+        (ev/spawn (fn [] (connection-loop conn handler err-fn)))))))
 
 # ============================================================================
 # Exports
 # ============================================================================
 
 (fn []
-  {:parse-url        parse-url
-   :header->keyword  header->kw
-   :keyword->header  kw->header
-   :request          http-request
-   :get              http-get
-   :post             http-post
-   :respond          http-respond
-   :serve            http-serve})
+  {:parse-url  parse-url
+
+   # Response construction
+   :respond    http-respond
+
+   # Client — one-shot
+   :get        http-get
+   :post       http-post
+   :request    http-request
+
+   # Client — keep-alive
+   :connect    http-connect
+   :send       http-send
+   :close      http-close
+
+   # Server
+   :serve      http-serve})

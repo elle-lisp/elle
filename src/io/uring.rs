@@ -3,7 +3,7 @@
 use crate::io::aio::{Completion, PendingOp, TIMEOUT_USER_DATA_TAG};
 use crate::io::completion::process_raw_completion;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::ConnectAddr;
+use crate::io::request::{ConnectAddr, IoOp};
 use crate::io::types::{FdState, PortKey};
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
@@ -102,18 +102,174 @@ pub(super) fn submit_uring_accept(
     Ok(())
 }
 
+/// Submit a Connect SQE via io_uring.
+///
+/// Creates a non-blocking socket, builds the sockaddr, and submits
+/// `opcode::Connect`. The socket fd is returned so the caller can stash it
+/// in `PendingOp.connect_fd`. On CQE success (result_code == 0), that fd
+/// is the connected socket.
 pub(super) fn submit_uring_connect(
     ring: &mut io_uring::IoUring,
     id: u64,
     addr: &ConnectAddr,
     timeout: Option<Duration>,
-    _buffer_pool: &mut BufferPool,
-) -> Result<(), String> {
-    // For io_uring connect, we need to resolve the address and create a socket
-    // This is complex, so we'll keep the thread-pool fallback for now
-    // and just return an error to fall back to thread pool
-    let _ = (ring, id, addr, timeout);
-    Err("io_uring connect not yet implemented; using thread pool".to_string())
+    buffer_pool: &mut BufferPool,
+) -> Result<RawFd, String> {
+    use io_uring::opcode;
+    use io_uring::types::Fd;
+
+    let (sock_fd, sockaddr_buf, sockaddr_len) = match addr {
+        ConnectAddr::Tcp {
+            addr: host,
+            port: port_num,
+        } => {
+            let resolved = format!("{}:{}", host, port_num)
+                .parse::<std::net::SocketAddr>()
+                .map_err(|e| format!("connect: invalid address: {}", e))?;
+
+            let (domain, sa_bytes, sa_len) = match resolved {
+                std::net::SocketAddr::V4(v4) => {
+                    let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+                    sin.sin_family = libc::AF_INET as libc::sa_family_t;
+                    sin.sin_port = v4.port().to_be();
+                    sin.sin_addr.s_addr = u32::from(*v4.ip()).to_be();
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(
+                            &sin as *const _ as *const u8,
+                            std::mem::size_of::<libc::sockaddr_in>(),
+                        )
+                        .to_vec()
+                    };
+                    (
+                        libc::AF_INET,
+                        bytes,
+                        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+                    )
+                }
+                std::net::SocketAddr::V6(v6) => {
+                    let mut sin6: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
+                    sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+                    sin6.sin6_port = v6.port().to_be();
+                    sin6.sin6_addr.s6_addr = v6.ip().octets();
+                    let bytes = unsafe {
+                        std::slice::from_raw_parts(
+                            &sin6 as *const _ as *const u8,
+                            std::mem::size_of::<libc::sockaddr_in6>(),
+                        )
+                        .to_vec()
+                    };
+                    (
+                        libc::AF_INET6,
+                        bytes,
+                        std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
+                    )
+                }
+            };
+
+            let fd = unsafe { libc::socket(domain, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0) };
+            if fd < 0 {
+                return Err(format!(
+                    "connect: socket() failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            (fd, sa_bytes, sa_len)
+        }
+        ConnectAddr::Unix { path } => {
+            let fd =
+                unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0) };
+            if fd < 0 {
+                return Err(format!(
+                    "connect: socket() failed: {}",
+                    std::io::Error::last_os_error()
+                ));
+            }
+            let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+            sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
+            let (addr_len, ok) = if let Some(name) = path.strip_prefix('@') {
+                let max = sun.sun_path.len() - 1;
+                if name.len() > max {
+                    unsafe { libc::close(fd) };
+                    return Err("connect: abstract socket name too long".into());
+                }
+                sun.sun_path[0] = 0;
+                for (i, b) in name.bytes().enumerate() {
+                    sun.sun_path[i + 1] = b as libc::c_char;
+                }
+                let len = std::mem::size_of::<libc::sa_family_t>() + 1 + name.len();
+                (len as libc::socklen_t, true)
+            } else {
+                let max = sun.sun_path.len() - 1;
+                if path.len() > max {
+                    unsafe { libc::close(fd) };
+                    return Err("connect: unix path too long".into());
+                }
+                for (i, b) in path.bytes().enumerate() {
+                    sun.sun_path[i] = b as libc::c_char;
+                }
+                (
+                    std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+                    true,
+                )
+            };
+            if !ok {
+                unsafe { libc::close(fd) };
+                return Err("connect: invalid unix path".into());
+            }
+            let bytes = unsafe {
+                std::slice::from_raw_parts(
+                    &sun as *const _ as *const u8,
+                    std::mem::size_of::<libc::sockaddr_un>(),
+                )
+                .to_vec()
+            };
+            (fd, bytes, addr_len)
+        }
+    };
+
+    // Stash the sockaddr in a buffer so it lives until the CQE completes.
+    let buf_handle = buffer_pool.alloc(sockaddr_buf.len());
+    let buf = buffer_pool.get_mut(buf_handle);
+    buf.extend_from_slice(&sockaddr_buf);
+
+    let connect_sqe = opcode::Connect::new(
+        Fd(sock_fd),
+        buf.as_ptr() as *const libc::sockaddr,
+        sockaddr_len,
+    )
+    .build()
+    .user_data(id);
+
+    let connect_sqe = if timeout.is_some() {
+        connect_sqe.flags(io_uring::squeue::Flags::IO_LINK)
+    } else {
+        connect_sqe
+    };
+
+    unsafe {
+        ring.submission().push(&connect_sqe).map_err(|e| {
+            libc::close(sock_fd);
+            format!("io/submit: io_uring submission queue full: {}", e)
+        })?;
+    }
+
+    if let Some(dur) = timeout {
+        let ts = io_uring::types::Timespec::new()
+            .sec(dur.as_secs())
+            .nsec(dur.subsec_nanos());
+        let timeout_sqe = opcode::LinkTimeout::new(&ts)
+            .build()
+            .user_data(id | TIMEOUT_USER_DATA_TAG);
+        unsafe {
+            ring.submission()
+                .push(&timeout_sqe)
+                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+        }
+    }
+
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
+    Ok(sock_fd)
 }
 
 pub(super) fn submit_uring_sendto(
@@ -362,12 +518,29 @@ pub(super) fn wait_uring(
         }
 
         let id = user_data;
-        if let Some(pending_op) = pending.remove(&id) {
-            let data = if result_code > 0 {
-                let buf = buffer_pool.get_mut(pending_op.buffer_handle);
-                buf[..result_code as usize].to_vec()
-            } else {
-                Vec::new()
+        if let Some(mut pending_op) = pending.remove(&id) {
+            // io_uring Connect: CQE result is 0 on success, negative errno on failure.
+            // On failure, close the pre-created socket. connect_fd stays set so the
+            // error path in process_raw_completion won't try to use it.
+            if let Some(fd) = pending_op.connect_fd {
+                if result_code < 0 {
+                    unsafe { libc::close(fd) };
+                    pending_op.connect_fd = None;
+                }
+                // On success, connect_fd is already correct — the completion handler
+                // reads it directly.
+            }
+
+            // Only read CQE data from the buffer for stream I/O ops where
+            // result_code is a byte count. For Accept (result_code = new fd),
+            // Connect (result_code = 0), Sleep, Shutdown, Flush — no buffer data.
+            let data = match &pending_op.op {
+                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll if result_code > 0 => {
+                    let buf = buffer_pool.get_mut(pending_op.buffer_handle);
+                    buf[..result_code as usize].to_vec()
+                }
+                IoOp::Write { .. } | IoOp::SendTo { .. } => Vec::new(),
+                _ => Vec::new(),
             };
             let completion = process_raw_completion(
                 id,
