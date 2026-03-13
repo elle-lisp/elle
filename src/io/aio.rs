@@ -11,7 +11,7 @@ use crate::io::threadpool::{
     TP_OP_CONNECT_UNIX, TP_OP_FLUSH, TP_OP_READ, TP_OP_RECV_FROM, TP_OP_SEND_TO, TP_OP_SHUTDOWN,
     TP_OP_WRITE,
 };
-use crate::io::types::{FdState, FdStatus, PortKey};
+use crate::io::types::{FdState, PortKey};
 use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
 use crate::value::{error_val, Value};

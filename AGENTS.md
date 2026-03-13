@@ -46,7 +46,7 @@ bytecode. Error messages include file:line:col information.
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions |
+| `primitives` | Built-in functions; includes `port/path` and `string/size-of` |
 | `stdlib` | Standard library functions (loaded at startup) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift |
@@ -73,6 +73,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 |---------|------|---------|
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
+| lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
 
 ## Directories
 
@@ -81,6 +82,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
+| `lib/` | Reusable Elle modules (HTTP, etc.) |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |

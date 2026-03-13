@@ -26,11 +26,11 @@ http-serve port handler → tcp/listen → ev/run → forever:
 
 | Function | Signature | Effect | Returns |
 |----------|-----------|--------|---------|
-| `get` | `(fn [url &keys {:headers}])` | Yields | response struct |
-| `post` | `(fn [url body &keys {:headers}])` | Yields | response struct |
-| `request` | `(fn [method url &keys {:body :headers}])` | Yields | response struct |
-| `serve` | `(fn [port-num handler])` | Yields | nil (runs forever) |
-| `respond` | `(fn [status body &keys {:headers}])` | Inert | response struct |
+| `http-get` | `(fn [url &keys {:headers}])` | Yields | response struct |
+| `http-post` | `(fn [url body &keys {:headers}])` | Yields | response struct |
+| `http-request` | `(fn [method url &keys {:body :headers}])` | Yields | response struct |
+| `http-serve` | `(fn [port-num handler])` | Yields | nil (runs forever) |
+| `http-respond` | `(fn [status body &keys {:headers}])` | Inert | response struct |
 | `parse-url` | `(fn [url])` | Errors | url struct |
 
 ## Struct shapes
