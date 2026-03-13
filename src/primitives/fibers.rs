@@ -377,7 +377,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["fiber", "value"],
         category: "fiber",
         example: "(fiber/resume f)",
-        aliases: &[],
+        aliases: &["resume"],
     },
     PrimitiveDef {
         name: "fiber/emit",
