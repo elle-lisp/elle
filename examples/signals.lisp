@@ -13,7 +13,7 @@
 #
 # Signals are flow-control interrupts. They suspend execution and let the
 # caller decide how to respond. Restricting signals has nothing to do with
-# side-effects — a function can mutate state and still be inert.
+# side-effects — a function can mutate state and still be silent.
 
 # ========================================
 # 1. Declaring user-defined signals
@@ -164,28 +164,28 @@
 # 5. silence — protecting iteration from signaling callbacks
 # ========================================
 
-# safe-map requires its callback to be inert.
+# safe-map requires its callback to be silent.
 # If f could signal mid-iteration, the partially-built result list
 # would be abandoned — silence makes that a runtime error instead.
 (defn safe-map [f xs]
-  "Map f over xs. f must be inert — signals mid-iteration corrupt the result."
+  "Map f over xs. f must be silent — signals mid-iteration corrupt the result."
   # silence f to emit no signals — enforced at call time
   (silence f)
   (map f xs))  # map f over xs normally
 
-# square is an inert callback — no signals, just arithmetic
+# square is an silent callback — no signals, just arithmetic
 (defn square [x]
   "Return x squared."
   (* x x))  # pure arithmetic, no signals
 
 (def squares (safe-map square [1 2 3 4 5]))  # works fine
-(assert (= squares (list 1 4 9 16 25)) "safe-map: inert callback works")
+(assert (= squares (list 1 4 9 16 25)) "safe-map: silent callback works")
 (display "  squares: ") # display prompt
 (print squares)         # print the squares
 
 # noisy-double signals :log mid-iteration — violates the silence bound
 (defn noisy-double [x]
-  "Double x, but also signal :log — not inert."
+  "Double x, but also signal :log — not silent."
   # this signal will be caught by silence and turned into :signal-violation
   (emit :log {:msg "doubling"})
   (* x 2))  # the multiplication never completes
@@ -204,29 +204,29 @@
   (_ (error err)))
 
 # ========================================
-# 6. silence — ensuring callbacks are inert
+# 6. silence — ensuring callbacks are silent
 # ========================================
 
-# run-pure requires its plugin to be inert — no signals at all.
+# run-pure requires its plugin to be silent — no signals at all.
 # This is the strongest guarantee: the plugin cannot interrupt execution.
 (defn run-pure [plugin data]
-  "Run plugin on data. plugin must be inert — no signals allowed."
+  "Run plugin on data. plugin must be silent — no signals allowed."
   (silence plugin)
   (plugin data))
 
-# good-plugin is inert — just arithmetic, no signals
+# good-plugin is silent — just arithmetic, no signals
 (defn good-plugin [data]
   "A well-behaved plugin: pure computation, returns a result."
   (* data 2))
 
 (def plugin-result (run-pure good-plugin 21))
-(assert (= plugin-result 42) "plugin: inert plugin works")
+(assert (= plugin-result 42) "plugin: silent plugin works")
 (display "  good plugin result: ") # display prompt
 (print plugin-result)              # print the result
 
-# bad-plugin yields — violates the inert restriction
+# bad-plugin yields — violates the silent restriction
 (defn bad-plugin [data]
-  "A misbehaving plugin: attempts to yield, violating the inert bound."
+  "A misbehaving plugin: attempts to yield, violating the silent bound."
   (yield :escape-attempt)
   data)  # never reached
 
