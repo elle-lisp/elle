@@ -294,7 +294,12 @@
                 (defer (port/close conn)
                   (let ((req (read-request conn)))
                     (put result 0 req)
-                    (write-response conn (handler req))))))
+                    (let ((response
+                            (let (([ok? val] (protect (handler req))))
+                              (if ok?
+                                  val
+                                  (http-respond 500 "Internal Server Error")))))
+                      (write-response conn response))))))
             (fn ()  # client fiber
               (put result 1 (request-fn port-num))))
           (port/close listener)
