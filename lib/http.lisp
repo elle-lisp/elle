@@ -4,49 +4,47 @@
 ## Usage:      (http:get "http://example.com/")
 
 # ============================================================================
-# Chunk 1: URL parsing
+# URL parsing
 # ============================================================================
 
 (defn parse-url [url]
   "Parse an HTTP URL string into {:scheme :host :port :path :query}.
    Only 'http' scheme is supported. Default port is 80. Default path is '/'.
    Query is nil if absent, otherwise the string after '?' without the '?'."
-  (when (not (string-starts-with? url "http://"))
+  (unless (string-starts-with? url "http://")
     (error {:error :http-error :message "unsupported scheme" :url url}))
-  (let* [[rest (slice url 7 (length url))]
-         [slash-pos (string/find rest "/")]
-         [authority (if (nil? slash-pos) rest (slice rest 0 slash-pos))]
-         [path-and-query (if (nil? slash-pos) "/" (slice rest slash-pos (length rest)))]
-         [colon-pos (string/find authority ":")]
-         [host (if (nil? colon-pos) authority (slice authority 0 colon-pos))]
-         [port (if (nil? colon-pos) 80 (integer (slice authority (+ colon-pos 1) (length authority))))]]
-    (when (= (length rest) 0)
-      (error {:error :http-error :message "missing host"}))
-    (when (= (length host) 0)
-      (error {:error :http-error :message "empty host"}))
-    (let* [[q-pos (string/find path-and-query "?")]
-           [path (if (nil? q-pos) path-and-query (slice path-and-query 0 q-pos))]
-           [query (if (nil? q-pos) nil (slice path-and-query (+ q-pos 1) (length path-and-query)))]]
+  (let* [[tail (slice url (length "http://"))]
+         [slash (string/find tail "/")]
+         [auth (if (nil? slash) tail (slice tail 0 slash))]
+         [path+query (if (nil? slash) "/" (slice tail slash))]
+         [colon (string/find auth ":")]
+         [host (if (nil? colon) auth (slice auth 0 colon))]
+         [port (if (nil? colon) 80 (integer (slice auth (inc colon))))]]
+    (when (empty? tail)
+      (error {:error :http-error :message "missing host" :url url}))
+    (when (empty? host)
+      (error {:error :http-error :message "empty host" :url url}))
+    (let* [[q-pos (string/find path+query "?")]
+           [path (if (nil? q-pos) path+query (slice path+query 0 q-pos))]
+           [query (if (nil? q-pos) nil (slice path+query (inc q-pos)))]]
       {:scheme "http" :host host :port port :path path :query query})))
 
 # ============================================================================
-# Chunk 2: Header parsing and serialization
+# Header parsing and serialization
 # ============================================================================
 
-(defn header-name->keyword [name]
+(defn header->kw [name]
   "Convert HTTP header name string to lowercase keyword.
    'Content-Type' -> :content-type"
-  (keyword (string/downcase name)))
+  (keyword (string/lowercase name)))
 
 (defn capitalize-segment [part]
   "Capitalize first letter of a string segment."
-  (if (= (length part) 0)
+  (if (empty? part)
       part
-      (string/format "{}{}"
-        (string/upcase (slice part 0 1))
-        (slice part 1 (length part)))))
+      (concat (string/uppercase (first part)) (rest part))))
 
-(defn keyword->header-name [kw]
+(defn kw->header [kw]
   "Convert keyword to HTTP header name with capitalized segments.
    :content-type -> 'Content-Type'"
   (let* [[parts (string/split (string kw) "-")]
@@ -58,25 +56,27 @@
    Header keys are lowercase keywords (:content-type, :host, etc.).
    Stops when it reads an empty line (CRLF-only or LF-only).
    Signals :http-error on malformed header lines."
-  (let [[headers (@struct)]]
-    (forever
-      (let [[line (stream/read-line port)]]
-        (when (= (length line) 0) (break (freeze headers)))
-        (let [[colon-pos (string/find line ":")]]
-          (when (nil? colon-pos)
-            (error {:error :http-error :message "malformed header"}))
-          (let* [[name (slice line 0 colon-pos)]
-                 [value (string/trim (slice line (+ colon-pos 1) (length line)))]]
-            (put headers (header-name->keyword name) value)))))))
+  (def headers @{})
+  (forever
+    (let [[line (stream/read-line port)]]
+      (when (empty? line)
+        (break (freeze headers)))
+      (let [[colon-pos (string/find line ":")]]
+        (when (nil? colon-pos)
+          (error {:error :http-error :message "malformed header"
+                  :line line}))
+        (let* [[name (slice line 0 colon-pos)]
+               [value (string/trim (slice line (inc colon-pos)))]]
+          (put headers (header->kw name) value))))))
 
 (defn write-headers [port headers]
   "Write HTTP headers struct to port. Each header is written as 'Name: value\\r\\n'.
    Keys are keywords converted back to HTTP header name casing."
-  (each k in (keys headers)
-    (stream/write port (string/format "{}: {}\r\n" (keyword->header-name k) (get headers k)))))
+  (each [key value] in (pairs headers)
+    (stream/write port (string/format "{}: {}\r\n" (kw->header key) value))))
 
 # ============================================================================
-# Chunk 3: Request and response wire format
+# Request and response wire format
 # ============================================================================
 
 (defn read-request-line [port]
@@ -86,8 +86,13 @@
   (let* [[line (stream/read-line port)]
          [parts (string/split line " ")]]
     (when (< (length parts) 3)
-      (error {:error :http-error :message "malformed request line"}))
-    {:method (get parts 0) :path (get parts 1) :version (get parts 2)}))
+      (error {:error :http-error :message "malformed request line"
+              :line line}))
+    (let [[method path version] parts]
+      (unless (string/starts-with? version "HTTP/")
+        (error {:error :http-error :message "invalid HTTP version"
+                :version version}))
+      {:method method :path path :version version})))
 
 (defn write-request-line [port method path]
   "Write HTTP request line: 'METHOD path HTTP/1.1\\r\\n'."
@@ -100,7 +105,8 @@
   (let* [[line (stream/read-line port)]
          [parts (string/split line " ")]]
     (when (< (length parts) 2)
-      (error {:error :http-error :message "malformed status line"}))
+      (error {:error :http-error :message "malformed status line"
+              :line line}))
     (let* [[[version status-str & reason-parts] parts]
            [status (integer status-str)]
            [reason (if (empty? reason-parts) "" (string/join reason-parts " "))]]
@@ -114,10 +120,10 @@
   "Read request/response body based on Content-Length header.
    Returns body string, or nil if Content-Length is absent."
   (let [[cl (get headers :content-length)]]
-    (if (nil? cl) nil (stream/read port (integer cl)))))
+    (and cl (stream/read port (integer cl)))))
 
 # ============================================================================
-# Chunk 4: Client API
+# Client API
 # ============================================================================
 
 (def reason-phrases
@@ -160,7 +166,7 @@
       (let [[headers (build-request-headers url-parsed:host extra-headers body)]]
         (write-headers conn headers)
         (stream/write conn "\r\n")
-        (when (not (nil? body)) (stream/write conn body))
+        (unless (nil? body) (stream/write conn body))
         (stream/flush conn)
         (let* [[status-line (read-status-line conn)]
                [resp-headers (read-headers conn)]
@@ -176,7 +182,7 @@
   (http-request "POST" url :body body :headers headers))
 
 # ============================================================================
-# Chunk 5: Server API
+# Server API
 # ============================================================================
 
 (defn read-request [conn]
@@ -185,16 +191,21 @@
   (let* [[req-line (read-request-line conn)]
          [headers (read-headers conn)]
          [body (read-body conn headers)]]
-    {:method req-line:method :path req-line:path :version req-line:version
-     :headers headers :body body}))
+    {:method req-line:method
+     :path req-line:path
+     :version req-line:version
+     :headers headers
+     :body body}))
 
 (defn write-response [conn response]
   "Write a complete HTTP response to a connection port and flush.
    response is {:status :headers :body}."
-  (write-status-line conn response:status (or (get reason-phrases response:status) "Unknown"))
+  (write-status-line conn response:status
+                     (or (get reason-phrases response:status) "Unknown"))
   (write-headers conn response:headers)
   (stream/write conn "\r\n")
-  (when (not (nil? response:body)) (stream/write conn response:body))
+  (unless (nil? response:body)
+    (stream/write conn response:body))
   (stream/flush conn))
 
 (defn http-respond [status body &keys {:headers extra-headers}]
@@ -202,7 +213,9 @@
    Caller can override headers via :headers."
   (let* [[base-headers {:content-type "text/plain"
                         :content-length (string (string/size-of body))}]
-         [merged (if (nil? extra-headers) base-headers (merge base-headers extra-headers))]]
+         [merged (if (nil? extra-headers)
+                   base-headers
+                   (merge base-headers extra-headers))]]
     {:status status :headers merged :body body}))
 
 (defn handle-connection [conn handler]
@@ -211,7 +224,9 @@
   (defer (port/close conn)
     (let* [[request (read-request conn)]
            [[ok? val] (protect (handler request))]
-           [response (if ok? val (http-respond 500 "Internal Server Error"))]]
+           [response (if ok?
+                       val
+                       (http-respond 500 "Internal Server Error"))]]
       (write-response conn response))))
 
 (defn accept-loop [listener handler]
@@ -229,17 +244,15 @@
     (ev/run (fn [] (accept-loop listener handler)))))
 
 # ============================================================================
-# Module export closure
+# Exports
 # ============================================================================
 
 (fn []
-  {:parse-url            parse-url
-   :header-name->keyword header-name->keyword
-   :keyword->header-name keyword->header-name
-   :http-request         http-request
-   :http-get             http-get
-   :http-post            http-post
-   :http-respond         http-respond
-   :http-serve           http-serve
-   :read-request         read-request
-   :write-response       write-response})
+  {:parse-url        parse-url
+   :header->keyword  header->kw
+   :keyword->header  kw->header
+   :request          http-request
+   :get              http-get
+   :post             http-post
+   :respond          http-respond
+   :serve            http-serve})
