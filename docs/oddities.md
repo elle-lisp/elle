@@ -62,7 +62,7 @@ The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data. `Value:
 
 ### Signal bits partitioning
 
-Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug), Bits 3-8 are VM-internal (resume, FFI, propagate, cancel, query, halt), Bit 9 is SIG_IO (I/O request to scheduler), Bits 10-15 are reserved, and Bits 16-31 are for user-defined signal types. See `src/value/fiber.rs` lines 138-165 for the constants and partitioning comment.
+Signal bits are partitioned: Bits 0-2 are user-facing (error, yield, debug), Bits 3-10 are VM-internal (resume, FFI, propagate, abort, query, halt, IO, terminal), Bits 11-15 are reserved, and Bits 16-31 are for user-defined signal types. Bit 6 (`SIG_ABORT`) is a composite (`SIG_ERROR | SIG_TERMINAL`), not a standalone bit at position 6. Bit 10 (`SIG_TERMINAL`) marks signals as uncatchable — they pass through mask checks regardless. See `src/value/fiber.rs` for the constants and `src/signals/mod.rs` for the partitioning comment.
 
 ### Destructuring silent nil semantics
 

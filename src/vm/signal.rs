@@ -58,7 +58,7 @@ impl VM {
             return self.handle_fiber_propagate_signal(value);
         }
 
-        if bits == SIG_ABORT {
+        if bits == SIG_ABORT && value.as_fiber().is_some() {
             return self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip);
         }
 
@@ -149,7 +149,7 @@ impl VM {
             return self.handle_fiber_propagate_signal_tail(value);
         }
 
-        if bits == SIG_ABORT {
+        if bits == SIG_ABORT && value.as_fiber().is_some() {
             return self.handle_fiber_abort_signal_tail(value);
         }
 

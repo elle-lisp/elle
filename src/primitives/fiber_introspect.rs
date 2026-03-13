@@ -246,13 +246,22 @@ pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let error_value = args.get(1).copied().unwrap_or(Value::NIL);
-    let status = handle.with(|fiber| fiber.status);
+
+    // try_with returns None when fiber is taken (currently executing on VM).
+    // That means it's the currently running fiber — self-cancel.
+    let status = match handle.try_with(|fiber| fiber.status) {
+        Some(s) => s,
+        None => {
+            // Self-cancel: fiber is alive (taken by VM). Return terminal error
+            // to kill the dispatch loop without unwinding.
+            return (SIG_ERROR | SIG_TERMINAL, error_value);
+        }
+    };
 
     match status {
         FiberStatus::Alive => {
-            // Self-cancel: return terminal error to kill the dispatch loop
-            // without unwinding. The caller (with_child_fiber or root) will
-            // see the terminal signal and set the fiber to :error.
+            // Fiber exists in handle but status is Alive — shouldn't happen
+            // in normal operation, but handle it as self-cancel.
             (SIG_ERROR | SIG_TERMINAL, error_value)
         }
         FiberStatus::New | FiberStatus::Paused => {

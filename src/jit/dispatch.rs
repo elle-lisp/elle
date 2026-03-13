@@ -75,8 +75,8 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // fiber/propagate: propagate the child fiber's signal.
             vm.handle_fiber_propagate_signal_jit(value)
         }
-        SIG_ABORT => {
-            // fiber/cancel: inject error into suspended fiber (abort).
+        SIG_ABORT if value.as_fiber().is_some() => {
+            // fiber/abort: inject error into suspended fiber (abort).
             vm.handle_fiber_abort_signal_jit(value)
         }
         _ => {
