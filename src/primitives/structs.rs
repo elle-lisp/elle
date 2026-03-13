@@ -41,6 +41,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(thaw {:a 1 :b 2})",
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "pairs",
+        func: prim_pairs,
+        signal: Signal::inert(),
+        arity: Arity::Exact(1),
+        doc: "Iterate over struct key-value pairs as [key value] arrays.",
+        params: &["struct"],
+        category: "struct",
+        example: "(pairs {:a 1 :b 2})",
+        aliases: &[],
+    },
 ];
 
 /// Create an immutable struct from key-value pairs
@@ -201,6 +212,50 @@ pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
                 "thaw: expected collection (array, struct, set, string, bytes), got {}",
                 args[0].type_name()
             ),
+        ),
+    )
+}
+
+/// Convert a struct to a list of [key value] pairs
+/// (pairs {:a 1 :b 2}) -> ((:a 1) (:b 2))
+pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("pairs: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    if let Some(map) = args[0].as_struct() {
+        let mut result = Value::EMPTY_LIST;
+        // Build list in reverse, then we'll reverse the final result
+        for (key, value) in map.iter().rev() {
+            let key_val = match key {
+                TableKey::Nil => Value::NIL,
+                TableKey::Bool(b) => Value::bool(*b),
+                TableKey::Int(i) => Value::int(*i),
+                TableKey::Symbol(sym) => Value::symbol(sym.0),
+                TableKey::String(s) => Value::string(s.as_str()),
+                TableKey::Keyword(kw) => Value::keyword(kw.as_str()),
+                TableKey::Identity(_) => {
+                    // Identity keys are opaque; skip them
+                    continue;
+                }
+            };
+            let pair = Value::array(vec![key_val, *value]);
+            result = Value::cons(pair, result);
+        }
+        return (SIG_OK, result);
+    }
+
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("pairs: expected struct, got {}", args[0].type_name()),
         ),
     )
 }

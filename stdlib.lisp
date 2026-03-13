@@ -821,6 +821,14 @@
         (ev/spawn t))
       (pump-fn))))
 
+(defn inc [x]
+  "Return x + 1."
+  (+ x 1))
+
+(defn dec [x]
+  "Return x - 1."
+  (- x 1))
+
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.
@@ -842,6 +850,6 @@
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
    :sync-scheduler sync-scheduler :*scheduler* *scheduler*
-   :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
-   :ev/run ev/run
-   :merge merge})
+    :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
+    :ev/run ev/run
+    :merge merge :inc inc :dec dec})

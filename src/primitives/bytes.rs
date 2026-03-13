@@ -151,12 +151,12 @@ pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
 /// Supports: bytes, @bytes, array, @array, list, string, @string.
 /// Indices are 0-based, clamped to length. start >= end returns empty.
 pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 3 {
+    if args.len() < 2 || args.len() > 3 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("slice: expected 3 arguments, got {}", args.len()),
+                format!("slice: expected 2-3 arguments, got {}", args.len()),
             ),
         );
     }
@@ -181,25 +181,31 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    let end = match args[2].as_int() {
-        Some(i) if i >= 0 => i as usize,
-        Some(i) => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "error",
-                    format!("slice: end must be non-negative, got {}", i),
-                ),
-            )
-        }
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("slice: end must be integer, got {}", args[2].type_name()),
-                ),
-            )
+
+    // If no end provided, use length of sequence (will be clamped below)
+    let end = if args.len() == 2 {
+        usize::MAX
+    } else {
+        match args[2].as_int() {
+            Some(i) if i >= 0 => i as usize,
+            Some(i) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("slice: end must be non-negative, got {}", i),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("slice: end must be integer, got {}", args[2].type_name()),
+                    ),
+                )
+            }
         }
     };
 
@@ -366,11 +372,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "slice",
         func: prim_slice,
         signal: Signal::inert(),
-        arity: Arity::Exact(3),
-        doc: "Slice a sequence from start to end index. Works on bytes, @bytes, array, @array, list, string, and @string. Returns same type as input.",
-        params: &["coll", "start", "end"],
+        arity: Arity::Range(2, 3),
+        doc: "Slice a sequence from start to end index. If end is omitted, slice to end of sequence. Returns same type as input.",
+        params: &["coll", "start", "end?"],
         category: "bytes",
-        example: "(slice [1 2 3 4 5] 1 3)",
+        example: "(slice [1 2 3 4 5] 1 3)\n(slice \"hello\" 1)",
         aliases: &[],
     },
 
