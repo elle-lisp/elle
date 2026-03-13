@@ -240,4 +240,6 @@
    :http-get             http-get
    :http-post            http-post
    :http-respond         http-respond
-   :http-serve           http-serve})
+   :http-serve           http-serve
+   :read-request         read-request
+   :write-response       write-response})

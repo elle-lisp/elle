@@ -336,6 +336,7 @@ fn prim_port_set_options(args: &[Value]) -> (SignalBits, Value) {
 /// - TCP listener: the bound address string (e.g. "127.0.0.1:8080")
 /// - TCP stream: the peer address string (e.g. "127.0.0.1:54321")
 /// - Stdio ports (stdin/stdout/stderr): nil
+///
 /// Signals :type-error if argument is not a port.
 fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
