@@ -2,7 +2,7 @@
 
 use super::dispatch::YIELD_SENTINEL;
 use crate::value::fiber::{SIG_ERROR, SIG_HALT, SIG_YIELD};
-use crate::value::{SuspendedFrame, Value};
+use crate::value::{BytecodeFrame, SuspendedFrame, Value};
 
 // =============================================================================
 // Yield Side-Exit Helpers
@@ -54,7 +54,7 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { Value::from_bits(bits) });
     }
 
-    let frame = SuspendedFrame {
+    let frame = SuspendedFrame::Bytecode(BytecodeFrame {
         bytecode: closure.template.bytecode.clone(),
         constants: closure.template.constants.clone(),
         env: closure.env.clone(),
@@ -62,7 +62,7 @@ pub extern "C" fn elle_jit_yield(
         stack,
         active_allocator: crate::value::fiber_heap::save_active_allocator(),
         location_map: closure.template.location_map.clone(),
-    };
+    });
 
     vm.fiber.signal = Some((SIG_YIELD, yielded));
     vm.fiber.suspended = Some(vec![frame]);
@@ -115,7 +115,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         stack.push(unsafe { Value::from_bits(bits) });
     }
 
-    let caller_frame = SuspendedFrame {
+    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
         bytecode: closure.template.bytecode.clone(),
         constants: closure.template.constants.clone(),
         env: closure.env.clone(),
@@ -123,7 +123,7 @@ pub extern "C" fn elle_jit_yield_through_call(
         stack,
         active_allocator: crate::value::fiber_heap::save_active_allocator(),
         location_map: closure.template.location_map.clone(),
-    };
+    });
 
     // Append caller frame to the existing suspended chain.
     // The callee MUST have set fiber.suspended — if not, it's a VM bug.

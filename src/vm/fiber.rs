@@ -17,7 +17,9 @@
 
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
-use crate::value::{FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
+use crate::value::{
+    BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK,
+};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -141,10 +143,11 @@ impl VM {
     pub(super) fn handle_fiber_resume_signal(
         &mut self,
         fiber_value: Value,
-        _bytecode: &Rc<Vec<u8>>,
-        _constants: &Rc<Vec<Value>>,
-        _closure_env: &Rc<Vec<Value>>,
-        _ip: &mut usize,
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
     ) -> Option<SignalBits> {
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
@@ -202,6 +205,32 @@ impl VM {
                     self.fiber.stack.push(Value::NIL);
                     None // dispatch loop will see the error signal
                 } else {
+                    // Non-error suspending signal (e.g., SIG_IO from sub-fiber).
+                    // Build a suspension chain so the outer fiber's locals are
+                    // preserved and the sub-fiber is correctly resumed via the
+                    // fiber-swap machinery.
+                    //
+                    // Chain: [FiberResume(f), outer_caller_frame]
+                    // - FiberResume(f): on the next resume, deliver io_result to f
+                    //   via do_fiber_resume (which uses the proper fiber-swap path),
+                    //   then pass f's return value forward.
+                    // - outer_caller_frame: continues the defer/protect expansion
+                    //   with f's return value as the result of (fiber/resume f nil).
+                    let fiber_resume_frame = SuspendedFrame::FiberResume {
+                        handle: handle.clone(),
+                        fiber_value,
+                    };
+                    let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
+                        bytecode: bytecode.clone(),
+                        constants: constants.clone(),
+                        env: closure_env.clone(),
+                        ip: *ip,
+                        stack: caller_stack,
+                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
+                        location_map: location_map.clone(),
+                    });
+                    self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
                     Some(result_bits)
                 }
             }
@@ -250,13 +279,30 @@ impl VM {
                 SIG_ERROR
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
+                if !result_bits.contains(SIG_ERROR) && !result_bits.contains(SIG_HALT) {
+                    // Non-error suspending signal in TailCall position.
+                    // Insert a FiberResume frame so that call_inner's
+                    // caller-frame building code chains it as:
+                    //   [FiberResume(f), ..., outer_caller_frame]
+                    // This ensures the I/O result is routed to the sub-fiber
+                    // via the proper fiber-swap path before the outer caller
+                    // continues with f's return value.
+                    let fiber_resume_frame = SuspendedFrame::FiberResume {
+                        handle: handle.clone(),
+                        fiber_value,
+                    };
+                    let mut existing = self.fiber.suspended.take().unwrap_or_default();
+                    let mut all = vec![fiber_resume_frame];
+                    all.append(&mut existing);
+                    self.fiber.suspended = Some(all);
+                }
                 result_bits
             }
         }
     }
 
     /// Execute a fiber resume: swap fibers, run, swap back.
-    fn do_fiber_resume(
+    pub(super) fn do_fiber_resume(
         &mut self,
         child_handle: &FiberHandle,
         child_value: Value,
@@ -345,7 +391,7 @@ impl VM {
         // different function's bytecode before the signal occurred.
         if !result.bits.is_ok() && !result.bits.contains(SIG_HALT) && self.fiber.suspended.is_none()
         {
-            self.fiber.suspended = Some(vec![SuspendedFrame {
+            self.fiber.suspended = Some(vec![SuspendedFrame::Bytecode(BytecodeFrame {
                 bytecode: result.bytecode,
                 constants: result.constants,
                 env: result.env,
@@ -353,7 +399,7 @@ impl VM {
                 stack: vec![],
                 active_allocator: crate::value::fiber_heap::save_active_allocator(),
                 location_map: result.location_map,
-            }]);
+            })]);
         }
 
         result.bits

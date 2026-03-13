@@ -4,7 +4,8 @@ use crate::primitives::def::Doc;
 use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK,
+    BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
+    SIG_HALT, SIG_OK,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -368,6 +369,13 @@ impl VM {
     /// For multi-frame suspension (yield-through-calls), this replays the
     /// full call chain.
     ///
+    /// Handles two frame types:
+    /// - `Bytecode`: restores the saved operand stack and continues bytecode
+    ///   execution from the saved instruction pointer.
+    /// - `FiberResume`: resumes a suspended sub-fiber (from `defer`/`protect`)
+    ///   with the current value via `do_fiber_resume`, using the proper
+    ///   fiber-swap machinery so heap context and parent/child chain are correct.
+    ///
     /// Returns SignalBits. The result value is stored in `self.fiber.signal`.
     pub fn resume_suspended(
         &mut self,
@@ -387,59 +395,123 @@ impl VM {
         for i in 0..frames.len() {
             let frame = &frames[i];
 
-            // Restore this frame's stack (empty for signal suspension)
-            self.fiber.stack.clear();
-            self.fiber.stack.extend(frame.stack.iter().copied());
+            match frame {
+                SuspendedFrame::FiberResume {
+                    handle,
+                    fiber_value,
+                } => {
+                    // Deliver `current_value` to the suspended sub-fiber.
+                    // Inject it as the sub-fiber's signal value so that
+                    // `do_fiber_resume` picks it up as the resume_value for
+                    // `do_fiber_subsequent_resume`, which pushes it onto the
+                    // I/O frame's stack (the return value of the I/O call).
+                    handle.with_mut(|f| {
+                        f.signal = Some((SIG_OK, current_value));
+                    });
 
-            // Push the value from the inner frame (or resume value for innermost)
-            self.fiber.stack.push(current_value);
+                    let handle = handle.clone();
+                    let fiber_value = *fiber_value;
+                    let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
+                    let mask = handle.with(|f| f.mask);
 
-            let exec = self.execute_bytecode_from_ip(
-                &frame.bytecode,
-                &frame.constants,
-                &frame.env,
-                frame.ip,
-                &frame.location_map,
-            );
-
-            if exec.bits.is_ok() {
-                let (_, v) = self.fiber.signal.take().unwrap();
-                current_value = v;
-            } else {
-                // Non-OK signal (yield, error, user-defined).
-                // Save context for potential future resume if not already
-                // set (yield instruction sets it; fiber/signal does not).
-                // SIG_HALT is non-resumable — no suspended frame needed.
-                //
-                // Use the active bytecode/constants/env from ExecResult,
-                // not the original frame — a tail call may have switched
-                // to a different function's bytecode before the signal.
-                if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
-                    self.fiber.suspended = Some(vec![SuspendedFrame {
-                        bytecode: exec.bytecode,
-                        constants: exec.constants,
-                        env: exec.env,
-                        ip: exec.ip,
-                        stack: vec![],
-                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
-                        location_map: exec.location_map,
-                    }]);
-                }
-
-                // For suspending signals (any bits except error/halt), merge remaining outer frames
-                if !exec.bits.contains(SIG_ERROR)
-                    && !exec.bits.contains(SIG_HALT)
-                    && i + 1 < frames.len()
-                {
-                    if let Some(ref mut new_frames) = self.fiber.suspended {
-                        for f in frames[i + 1..].iter() {
-                            new_frames.push(f.clone());
+                    if result_bits.is_ok() || mask.contains(result_bits) {
+                        // Sub-fiber completed or its signal was caught by mask.
+                        // Clear child chain; result flows to next frame.
+                        self.fiber.child = None;
+                        self.fiber.child_value = None;
+                        current_value = result_value;
+                    } else {
+                        // Sub-fiber suspended again (e.g. another I/O yield).
+                        // Propagate: save the sub-fiber as a FiberResume frame
+                        // again, then append remaining outer frames.
+                        use crate::value::fiber::FiberStatus;
+                        if result_bits.contains(crate::value::SIG_HALT) {
+                            handle.with_mut(|f| f.status = FiberStatus::Dead);
                         }
+                        if result_bits.contains(crate::value::SIG_ERROR) {
+                            handle.with_mut(|f| f.status = FiberStatus::Error);
+                        }
+                        self.fiber.signal = Some((result_bits, result_value));
+
+                        // Re-save the FiberResume frame for the next resume.
+                        // The sub-fiber's suspension context is stored in f.suspended.
+                        if !result_bits.contains(SIG_HALT) {
+                            let resume_frame = SuspendedFrame::FiberResume {
+                                handle: handle.clone(),
+                                fiber_value,
+                            };
+                            let mut new_frames = vec![resume_frame];
+                            // Append remaining outer frames after this one
+                            for f in frames[i + 1..].iter() {
+                                new_frames.push(f.clone());
+                            }
+                            self.fiber.suspended = Some(new_frames);
+                        }
+
+                        self.fiber.stack = saved_stack;
+                        return result_bits;
                     }
                 }
 
-                self.fiber.stack = saved_stack;
-                return exec.bits;
+                SuspendedFrame::Bytecode(frame) => {
+                    // Restore this frame's stack (empty for signal suspension)
+                    self.fiber.stack.clear();
+                    self.fiber.stack.extend(frame.stack.iter().copied());
+
+                    // Push the value from the inner frame (or resume value for innermost)
+                    self.fiber.stack.push(current_value);
+
+                    let exec = self.execute_bytecode_from_ip(
+                        &frame.bytecode,
+                        &frame.constants,
+                        &frame.env,
+                        frame.ip,
+                        &frame.location_map,
+                    );
+
+                    if exec.bits.is_ok() {
+                        let (_, v) = self.fiber.signal.take().unwrap();
+                        current_value = v;
+                    } else {
+                        // Non-OK signal (yield, error, user-defined).
+                        // Save context for potential future resume if not already
+                        // set (yield instruction sets it; fiber/signal does not).
+                        // SIG_HALT is non-resumable — no suspended frame needed.
+                        //
+                        // Use the active bytecode/constants/env from ExecResult,
+                        // not the original frame — a tail call may have switched
+                        // to a different function's bytecode before the signal.
+                        if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
+                            self.fiber.suspended =
+                                Some(vec![SuspendedFrame::Bytecode(BytecodeFrame {
+                                    bytecode: exec.bytecode,
+                                    constants: exec.constants,
+                                    env: exec.env,
+                                    ip: exec.ip,
+                                    stack: vec![],
+                                    active_allocator:
+                                        crate::value::fiber_heap::save_active_allocator(),
+                                    location_map: exec.location_map,
+                                })]);
+                        }
+
+                        // For suspending signals (any bits except error/halt),
+                        // merge remaining outer frames
+                        if !exec.bits.contains(SIG_ERROR)
+                            && !exec.bits.contains(SIG_HALT)
+                            && i + 1 < frames.len()
+                        {
+                            if let Some(ref mut new_frames) = self.fiber.suspended {
+                                for f in frames[i + 1..].iter() {
+                                    new_frames.push(f.clone());
+                                }
+                            }
+                        }
+
+                        self.fiber.stack = saved_stack;
+                        return exec.bits;
+                    }
+                }
             }
         }
 

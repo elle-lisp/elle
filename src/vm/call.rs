@@ -10,7 +10,7 @@
 use crate::error::LocationMap;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
+use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -219,7 +219,7 @@ impl VM {
                             {
                                 let (_, value) = self.fiber.signal.take().unwrap();
                                 let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                                let caller_frame = SuspendedFrame {
+                                let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
                                     bytecode: bytecode.clone(),
                                     constants: constants.clone(),
                                     env: closure_env.clone(),
@@ -228,7 +228,7 @@ impl VM {
                                     active_allocator:
                                         crate::value::fiber_heap::save_active_allocator(),
                                     location_map: location_map.clone(),
-                                };
+                                });
                                 let mut frames = self.fiber.suspended.take().unwrap_or_default();
                                 frames.push(caller_frame);
                                 self.fiber.signal = Some((sig, value));
@@ -280,7 +280,7 @@ impl VM {
                     let (_, value) = self.fiber.signal.take().unwrap();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    let caller_frame = SuspendedFrame {
+                    let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
                         bytecode: bytecode.clone(),
                         constants: constants.clone(),
                         env: closure_env.clone(),
@@ -288,7 +288,7 @@ impl VM {
                         stack: caller_stack,
                         active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         location_map: location_map.clone(),
-                    };
+                    });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
                     frames.push(caller_frame);
