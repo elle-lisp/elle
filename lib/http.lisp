@@ -162,6 +162,79 @@
         (stream/read port (integer cl)))))
 
 # ============================================================================
+# Chunk 4: Client API
+# ============================================================================
+
+(def reason-phrases
+  {200 "OK"
+   201 "Created"
+   204 "No Content"
+   301 "Moved Permanently"
+   302 "Found"
+   304 "Not Modified"
+   400 "Bad Request"
+   401 "Unauthorized"
+   403 "Forbidden"
+   404 "Not Found"
+   405 "Method Not Allowed"
+   409 "Conflict"
+   500 "Internal Server Error"
+   502 "Bad Gateway"
+   503 "Service Unavailable"})
+
+(defn http-request [method url &keys {:body body :headers extra-headers}]
+  "Make an HTTP/1.1 request. Returns {:status :headers :body}.
+   method: string (\"GET\", \"POST\", etc.)
+   url: string parsed by parse-url
+   :body optional string body
+   :headers optional struct of extra headers to send
+   # NOTE: Content-Length computed via (length body) — correct for ASCII,
+   # wrong for non-ASCII. v1 limitation."
+  (let ((parsed (parse-url url)))
+    (let ((host (get parsed :host))
+          (port-num (get parsed :port))
+          (path (get parsed :path))
+          (query (get parsed :query)))
+      (let ((request-path (if (nil? query) path
+                             (string/format "{}?{}" path query))))
+        (let ((conn (tcp/connect host port-num)))
+          (defer (port/close conn)
+            # Write request line
+            (write-request-line conn method request-path)
+            # Write headers
+            (let ((base-headers {:host host
+                                  :connection "close"}))
+              (let ((all-headers (if (nil? extra-headers)
+                                     base-headers
+                                     (merge-structs base-headers extra-headers))))
+                # Add Content-Length if body present
+                (let ((send-headers (if (nil? body)
+                                        all-headers
+                                        (merge-structs all-headers
+                                          {:content-length (string (length body))}))))
+                  (write-headers conn send-headers)
+                  (stream/write conn "\r\n")
+                  # Write body if present
+                  (when (not (nil? body))
+                    (stream/write conn body))
+                  (stream/flush conn)
+                  # Read response
+                  (let ((status-line (read-status-line conn)))
+                    (let ((resp-headers (read-headers conn)))
+                      (let ((resp-body (read-body conn resp-headers)))
+                        {:status  (get status-line :status)
+                         :headers resp-headers
+                         :body    resp-body}))))))))))))
+
+(defn http-get [url &keys {:headers headers}]
+  "Make a GET request. Returns {:status :headers :body}."
+  (http-request "GET" url :headers headers))
+
+(defn http-post [url body &keys {:headers headers}]
+  "Make a POST request with body. Returns {:status :headers :body}."
+  (http-request "POST" url :body body :headers headers))
+
+# ============================================================================
 # Module export closure
 # ============================================================================
 
@@ -175,4 +248,8 @@
    :write-request-line   write-request-line
    :read-status-line     read-status-line
    :write-status-line    write-status-line
-   :read-body            read-body})
+   :read-body            read-body
+   :reason-phrases       reason-phrases
+   :http-request         http-request
+   :http-get             http-get
+   :http-post            http-post})

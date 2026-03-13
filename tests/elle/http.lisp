@@ -253,3 +253,16 @@
   (assert-eq (get out 1) "/submit"   "full req: path")
   (assert-eq (get out 2) "localhost" "full req: host header")
   (assert-eq (get out 3) "data"      "full req: body"))
+
+# ============================================================================
+# Chunk 4: Client API — error paths
+# ============================================================================
+
+(def http-request (get http :http-request))
+(def http-get     (get http :http-get))
+(def http-post    (get http :http-post))
+
+# Connection refused (nothing listening on port 1)
+(assert-err
+  (fn () (ev/spawn (fn () (http-get "http://127.0.0.1:1/"))))
+  "http-get: connection refused signals error")
