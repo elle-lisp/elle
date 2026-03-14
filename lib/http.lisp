@@ -120,7 +120,7 @@
 (defn read-body [port headers]
   "Read request/response body based on Content-Length header.
    Returns body string, or nil if Content-Length is absent."
-  (let [[cl (get headers :content-length)]]
+  (let [[cl headers:content-length]]
     (and cl (stream/read port (integer cl)))))
 
 # ============================================================================
@@ -165,7 +165,7 @@
 
 (defn wants-close? [headers]
   "True if headers indicate the connection should close."
-  (let [[conn (get headers :connection)]]
+  (let [[conn headers:connection]]
     (and conn (= (string/lowercase conn) "close"))))
 
 (defn build-request-headers [host extra-headers body keep-alive]
@@ -334,16 +334,16 @@
   (let [[p (port/open "/tmp/elle-http-test-headers" :read)]]
     (let [[h (ev/spawn (fn [] (read-headers p)))]]
       (port/close p)
-      (assert (= (get h :content-type)   "text/plain")  "read-headers content-type")
-      (assert (= (get h :host)           "example.com") "read-headers host")
-      (assert (= (get h :content-length) "42")           "read-headers content-length")))
+      (assert (= h:content-type   "text/plain")  "read-headers content-type")
+      (assert (= h:host           "example.com") "read-headers host")
+      (assert (= h:content-length "42")           "read-headers content-length")))
 
   # read-headers trims whitespace
   (spit "/tmp/elle-http-test-headers-ws" "X-Foo:   bar baz   \r\n\r\n")
   (let [[p (port/open "/tmp/elle-http-test-headers-ws" :read)]]
     (let [[h (ev/spawn (fn [] (read-headers p)))]]
       (port/close p)
-      (assert (= (get h :x-foo) "bar baz") "read-headers trims whitespace")))
+      (assert (= h:x-foo "bar baz") "read-headers trims whitespace")))
 
   # read-headers malformed
   (spit "/tmp/elle-http-test-headers-bad" "no-colon-here\r\n\r\n")
@@ -407,7 +407,7 @@
           (put out 0 rl:method)
           (put out 1 rl:path)
           (let [[h (read-headers p)]]
-            (put out 2 (get h :host))
+            (put out 2 h:host)
             (let [[body (read-body p h)]]
               (put out 3 body))))))
       (port/close p))

@@ -64,9 +64,11 @@ impl Lowerer {
 
             HirKind::Assign { target, value } => self.lower_assign(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),
-            HirKind::Destructure { pattern, value } => {
-                self.lower_destructure_expr(pattern, value, &hir.span)
-            }
+            HirKind::Destructure {
+                pattern,
+                value,
+                strict,
+            } => self.lower_destructure_expr(pattern, value, *strict, &hir.span),
 
             HirKind::While { cond, body } => self.lower_while(cond, body),
 

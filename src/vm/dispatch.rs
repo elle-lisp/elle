@@ -185,7 +185,27 @@ impl VM {
                     data::handle_array_set(self);
                 }
 
-                // Destructuring (silent nil on type mismatch)
+                // Destructuring
+                Instruction::CarDestructure => {
+                    data::handle_car_destructure(self);
+                }
+                Instruction::CdrDestructure => {
+                    data::handle_cdr_destructure(self);
+                }
+                Instruction::ArrayMutRefDestructure => {
+                    data::handle_array_ref_destructure(self, bc, &mut ip);
+                }
+                Instruction::ArrayMutSliceFrom => {
+                    data::handle_array_slice_from(self, bc, &mut ip);
+                }
+                Instruction::TableGetOrNil => {
+                    data::handle_table_get_or_nil(self, bc, &mut ip, constants);
+                }
+                Instruction::TableGetDestructure => {
+                    data::handle_table_get_destructure(self, bc, &mut ip, constants);
+                }
+
+                // Silent destructuring (parameter context: absent optional params → nil)
                 Instruction::CarOrNil => {
                     data::handle_car_or_nil(self);
                 }
@@ -194,12 +214,6 @@ impl VM {
                 }
                 Instruction::ArrayMutRefOrNil => {
                     data::handle_array_ref_or_nil(self, bc, &mut ip);
-                }
-                Instruction::ArrayMutSliceFrom => {
-                    data::handle_array_slice_from(self, bc, &mut ip);
-                }
-                Instruction::TableGetOrNil => {
-                    data::handle_table_get_or_nil(self, bc, &mut ip, constants);
                 }
 
                 // Arithmetic (integer)

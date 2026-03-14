@@ -52,7 +52,10 @@ impl<'a> Analyzer<'a> {
 
         // Bind required parameters
         let mut params = Vec::new();
-        let mut param_destructures = Vec::new();
+        // Each entry: (pattern, binding, strict)
+        // strict=true: missing/wrong-type values signal error (required and &keys patterns)
+        // strict=false: missing/wrong-type values produce nil (&opt patterns, &named)
+        let mut param_destructures: Vec<(_, _, bool)> = Vec::new();
         for param in parsed.required.iter() {
             if let Some(name) = param.as_symbol() {
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
@@ -62,7 +65,8 @@ impl<'a> Analyzer<'a> {
                 params.push(tmp);
                 let pattern =
                     self.analyze_destructure_pattern(param, BindingScope::Local, false, &span)?;
-                param_destructures.push((pattern, tmp));
+                // Required params: strict — wrong type should error
+                param_destructures.push((pattern, tmp, true));
             } else {
                 return Err(format!(
                     "{}: lambda parameter must be a symbol, list, or array",
@@ -72,7 +76,7 @@ impl<'a> Analyzer<'a> {
         }
         let num_required = params.len();
 
-        // Bind optional parameters (same as required — they're all param slots)
+        // Bind optional parameters: strict=false because absent opt params receive nil
         for param in parsed.optional.iter() {
             if let Some(name) = param.as_symbol() {
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
@@ -82,7 +86,8 @@ impl<'a> Analyzer<'a> {
                 params.push(tmp);
                 let pattern =
                     self.analyze_destructure_pattern(param, BindingScope::Local, false, &span)?;
-                param_destructures.push((pattern, tmp));
+                // Optional params: strict=false — absent (nil) produces nil, not error
+                param_destructures.push((pattern, tmp, false));
             } else {
                 return Err(format!(
                     "{}: lambda parameter must be a symbol, list, or array",
@@ -121,7 +126,9 @@ impl<'a> Analyzer<'a> {
                         false,
                         &span,
                     )?;
-                    param_destructures.push((pattern, tmp));
+                    // &keys opts struct is always present; missing keys produce nil
+                    // (same as &named — keyword arg patterns are optional by convention)
+                    param_destructures.push((pattern, tmp, false));
                     (Some(tmp), VarargKind::Struct)
                 } else {
                     return Err(format!(
@@ -151,9 +158,11 @@ impl<'a> Analyzer<'a> {
                     ));
                 }
 
-                // Build struct destructure pattern: {:name1 name1 :name2 name2 ...}
-                let pattern = HirPattern::Struct { entries };
-                param_destructures.push((pattern, tmp));
+                // Build named-param destructure pattern: {:name1 name1 :name2 name2 ...}
+                // Uses NamedStruct (not Struct) so missing keys produce nil, not errors.
+                let pattern = HirPattern::NamedStruct { entries };
+                // NamedStruct always uses TableGetOrNil; strict=false is consistent but unused.
+                param_destructures.push((pattern, tmp, false));
 
                 (Some(tmp), VarargKind::StrictStruct(valid_keys))
             }
@@ -187,10 +196,11 @@ impl<'a> Analyzer<'a> {
             let body_signal = body.signal;
             let mut exprs: Vec<Hir> = param_destructures
                 .into_iter()
-                .map(|(pattern, tmp)| {
+                .map(|(pattern, tmp, strict)| {
                     Hir::inert(
                         HirKind::Destructure {
                             pattern,
+                            strict,
                             value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
                         },
                         span.clone(),

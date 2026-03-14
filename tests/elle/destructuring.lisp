@@ -6,11 +6,12 @@
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # Helper: assert that (thunk) signals an error
+# Uses protect (not try/catch) to correctly capture VM-level signals
+# from destructuring instructions.
 (defn assert-err [thunk msg]
   "Assert that (thunk) signals an error"
-  (let ([result (try (begin (thunk) :no-error)
-                  (catch (e) :got-error))])
-    (assert-eq result :got-error msg)))
+  (let (([ok? _] (protect (thunk))))
+    (assert (not ok?) msg)))
 
 # ============================================================
 # def: list destructuring
@@ -23,18 +24,16 @@
   (assert-eq b 2 "def list basic: b")
   (assert-eq c 3 "def list basic: c"))
 
-# test_def_list_short_source — missing elements become nil
+# test_def_list_short_source — missing elements signal error
 (begin
-  (def (a b c) (list 1))
-  (assert-eq a 1 "def list short: a")
-  (assert-eq b nil "def list short: b is nil")
-  (assert-eq c nil "def list short: c is nil"))
+  (def (a-ok) (list 1))
+  (assert-eq a-ok 1 "def list short: present element ok"))
+(assert-err (fn () (def (a b c) (list 1)))
+  "def list short: error on missing element")
 
-# test_def_list_empty_source
-(begin
-  (def (a b) (list))
-  (assert-eq a nil "def list empty: a is nil")
-  (assert-eq b nil "def list empty: b is nil"))
+# test_def_list_empty_source — empty source signals error
+(assert-err (fn () (def (a b) (list)))
+  "def list empty: error on empty list")
 
 # test_def_list_extra_elements_ignored
 (begin
@@ -42,11 +41,9 @@
   (assert-eq a 1 "def list extra: a")
   (assert-eq b 2 "def list extra: b"))
 
-# test_def_list_wrong_type_gives_nil
-(begin
-  (def (a b) 42)
-  (assert-eq a nil "def list wrong type: a is nil")
-  (assert-eq b nil "def list wrong type: b is nil"))
+# test_def_list_wrong_type — wrong type signals error
+(assert-err (fn () (def (a b) 42))
+  "def list wrong type: error")
 
 # ============================================================
 # def: @array/array destructuring
@@ -58,17 +55,16 @@
   (assert-eq x 10 "def array basic: x")
   (assert-eq y 20 "def array basic: y"))
 
-# test_def_array_short_source
+# test_def_array_short_source — missing elements signal error
 (begin
-  (def [x y z] [10])
-  (assert-eq x 10 "def array short: x")
-  (assert-eq y nil "def array short: y is nil")
-  (assert-eq z nil "def array short: z is nil"))
+  (def [x-ok] [10])
+  (assert-eq x-ok 10 "def array short: present element ok"))
+(assert-err (fn () (def [x y z] [10]))
+  "def array short: error on missing element")
 
-# test_def_array_wrong_type_gives_nil
-(begin
-  (def [a b] 42)
-  (assert-eq a nil "def array wrong type: a is nil"))
+# test_def_array_wrong_type — wrong type signals error
+(assert-err (fn () (def [a b] 42))
+  "def array wrong type: error")
 
 # ============================================================
 # def: nested destructuring
@@ -437,25 +433,21 @@
   (assert-string-eq n "Alice" "def struct basic: name")
   (assert-eq a 30 "def struct basic: age"))
 
-# test_def_struct_missing_key
-(begin
-  (def {:missing m} {:other 42})
-  (assert-eq m nil "def struct missing key"))
+# test_def_struct_missing_key — missing key signals error
+(assert-err (fn () (def {:missing m} {:other 42}))
+  "def struct missing key: error")
 
-# test_def_struct_wrong_type
-(begin
-  (def {:x x} 42)
-  (assert-eq x nil "def struct wrong type"))
+# test_def_struct_wrong_type — wrong type signals error
+(assert-err (fn () (def {:x x} 42))
+  "def struct wrong type: error")
 
-# test_struct_missing_key_is_nil (duplicate coverage, kept for completeness)
-(begin
-  (def {:missing m2} {:other 42})
-  (assert-eq m2 nil "struct missing key is nil"))
+# test_struct_missing_key_errors (was: test_struct_missing_key_is_nil)
+(assert-err (fn () (def {:missing m2} {:other 42}))
+  "struct missing key errors")
 
-# test_struct_wrong_type_is_nil
-(begin
-  (def {:x x2} 42)
-  (assert-eq x2 nil "struct wrong type is nil"))
+# test_struct_wrong_type_errors (was: test_struct_wrong_type_is_nil)
+(assert-err (fn () (def {:x x2} 42))
+  "struct wrong type errors")
 
 # test_struct_empty_pattern
 (begin
@@ -582,9 +574,11 @@
 (var match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
 (assert-eq match-tbl-str :no-match "match @struct pattern does not match struct")
 
-# test_destructure_non_sequential_gives_nil
-(assert-eq (let (([a b] 42)) a) nil "destructure non-sequential int gives nil")
-(assert-eq (let (([a b] "hello")) a) nil "destructure non-sequential string gives nil")
+# test_destructure_non_sequential_errors (was: test_destructure_non_sequential_gives_nil)
+(assert-err (fn () (let (([a b] 42)) a))
+  "destructure non-sequential int: error")
+(assert-err (fn () (let (([a b] "hello")) a))
+  "destructure non-sequential string: error")
 
 # test_def_array_basic
 (begin
@@ -670,7 +664,7 @@
 (assert-eq ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30
   "keys destructure")
 
-# test_keys_missing_key_destructure
+# test_keys_missing_key_destructure — missing key produces nil (keyword args are optional)
 (assert-eq ((fn (a &keys {:x x :y y}) y) 1 :x 10) nil
   "keys missing key destructure")
 
@@ -805,10 +799,9 @@
   (assert-eq kv 1 "mixed keys: keyword")
   (assert-eq sv 2 "mixed keys: symbol"))
 
-# test_symbol_key_missing_returns_nil
-(begin
-  (def {'missing m} (struct 'other 1))
-  (assert-eq m nil "symbol key missing returns nil"))
+# test_symbol_key_missing_errors (was: test_symbol_key_missing_returns_nil)
+(assert-err (fn () (def {'missing m} (struct 'other 1)))
+  "symbol key missing: error")
 
 # test_match_struct_symbol_key
 (var match-sym
@@ -909,15 +902,13 @@
   (def {:x x :y y :z z} {:x 1 :y 2 :z 3})
   (assert-eq (+ x (+ y z)) 6 "struct destructure multi-key"))
 
-# def_struct_missing_key_is_nil
-(begin
-  (def {:missing m} {:other 42})
-  (assert-true (nil? m) "struct missing key is nil (property)"))
+# def_struct_missing_key_errors (was: def_struct_missing_key_is_nil)
+(assert-err (fn () (def {:missing m} {:other 42}))
+  "struct missing key errors (property)")
 
-# def_struct_non_struct_is_nil
-(begin
-  (def {:a a} 42)
-  (assert-true (nil? a) "struct non-struct gives nil (property)"))
+# def_struct_non_struct_errors (was: def_struct_non_struct_is_nil)
+(assert-err (fn () (def {:a a} 42))
+  "struct non-struct errors (property)")
 
 # fn_param_struct_equiv_get
 (begin
@@ -944,10 +935,9 @@
   (def {:p {:x px :y py}} {:p {:x 3 :y 4}})
   (assert-eq (+ px py) 7 "nested struct destructure (property)"))
 
-# nested_struct_missing_inner
-(begin
-  (def {:p {:missing m}} {:p {:x 42}})
-  (assert-true (nil? m) "nested struct missing inner (property)"))
+# nested_struct_missing_inner_errors (was: nested_struct_missing_inner)
+(assert-err (fn () (def {:p {:missing m}} {:p {:x 42}}))
+  "nested struct missing inner errors (property)")
 
 # match_struct_extracts
 (var mt-extract (match {:val 42} ({:val v} v) (_ :fail)))

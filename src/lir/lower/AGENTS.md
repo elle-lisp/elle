@@ -157,13 +157,14 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 | `LoadResumeValue` | → value | First instruction in yield resume block |
-| `CarOrNil` | value → car | Car of cons, or nil if not a cons |
-| `CdrOrNil` | value → cdr | Cdr of cons, or EMPTY_LIST if not a cons |
-| `ArrayRefOrNil` | array → elem | Array element by immediate u16 index, or nil if out of bounds |
+| `CarDestructure` | value → car | Car of cons, signals error if not a cons |
+| `CdrDestructure` | value → cdr | Cdr of cons, signals error if not a cons |
+| `ArrayMutRefDestructure` | array → elem | Array element by immediate u16 index, signals error if wrong type or out of bounds |
 | `IsArray` | value → bool | Type check: is value an array? (for pattern matching) |
 | `IsStruct` | value → bool | Type check: is value a struct or @struct? (for pattern matching) |
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
-| `TableGetOrNil` | @struct → value | Get key from @struct/struct, or nil if missing/wrong type (u16 const_idx operand) |
+| `TableGetOrNil` | struct → value | Get key from struct/@struct, nil if missing/wrong type — used by match (u16 const_idx operand) |
+| `TableGetDestructure` | struct → value | Get key from struct/@struct, signals error if missing/wrong type — used by binding forms (u16 const_idx operand) |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |

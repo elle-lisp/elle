@@ -42,13 +42,21 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a struct {...} by keyword or symbol keys (emits IsStruct guard)
+    /// Match a struct {...} by keyword or symbol keys (emits IsStruct guard).
+    /// Used by binding forms (def, var, let, fn params): missing keys signal an error.
     Struct {
         entries: Vec<(PatternKey, HirPattern)>,
     },
 
-    /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsTable guard)
+    /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsTable guard).
+    /// Used by binding forms: missing keys signal an error.
     Table {
+        entries: Vec<(PatternKey, HirPattern)>,
+    },
+
+    /// Match a &named parameter struct: keyword or symbol keys with silent nil on missing.
+    /// Used only by &named parameter destructuring, where absent keys are valid (nil).
+    NamedStruct {
         entries: Vec<(PatternKey, HirPattern)>,
     },
 
@@ -127,7 +135,9 @@ impl HirPattern {
                     r.collect_bindings(out);
                 }
             }
-            HirPattern::Struct { entries } | HirPattern::Table { entries } => {
+            HirPattern::Struct { entries }
+            | HirPattern::Table { entries }
+            | HirPattern::NamedStruct { entries } => {
                 for (_, pattern) in entries {
                     pattern.collect_bindings(out);
                 }
@@ -171,7 +181,9 @@ impl HirPattern {
                     r.collect_binding_names(out);
                 }
             }
-            HirPattern::Struct { entries } | HirPattern::Table { entries } => {
+            HirPattern::Struct { entries }
+            | HirPattern::Table { entries }
+            | HirPattern::NamedStruct { entries } => {
                 for (_, pattern) in entries {
                     pattern.collect_binding_names(out);
                 }

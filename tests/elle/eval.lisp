@@ -4,20 +4,17 @@
 
 (def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
-# Helper: assert that an expression errors (wraps in try/catch)
+# Helper: assert that an expression errors (uses protect to capture VM-level signals)
 (defn assert-err [thunk msg]
   "Assert that (thunk) signals an error"
-  (let ([result (try (begin (thunk) :no-error)
-                  (catch (e) :got-error))])
-    (assert-eq result :got-error msg)))
+  (let (([ok? _] (protect (thunk))))
+    (assert (not ok?) msg)))
 
 # Helper: assert that an expression errors and the message contains a substring
 (defn assert-err-contains [thunk substring msg]
   "Assert that (thunk) signals an error containing substring"
-  (let ([result (try (begin (thunk) nil)
-                  (catch (e) e))])
-    (assert-true (string? (string result))
-                 (append msg " — expected error"))
+  (let (([ok? result] (protect (thunk))))
+    (assert (not ok?) (append msg " — expected error"))
     (assert-true (string/contains? (string result) substring)
                  (-> msg (append " — expected '") (append substring) (append "' in error")))))
 
@@ -226,7 +223,7 @@
 # ============================================================
 
 # test_eval_with_try_catch
-(assert-eq (eval '(try (/ 1 0) (catch (e) 42))) 42
+(assert-eq (eval '(try (/ 1 0) (catch e 42))) 42
            "eval with try/catch")
 
 # ============================================================

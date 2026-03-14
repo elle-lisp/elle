@@ -17,30 +17,32 @@
 
 
 # ========================================
-# 1. Silent nil semantics
+# 1. Strict destructuring semantics
 # ========================================
 
-# Destructuring never errors on shape mismatch. Missing → nil.
+# Destructuring errors on shape mismatch. Missing elements or keys → error.
+# Extra elements are silently ignored.
 
-# Fewer values than bindings: extras get nil
-(def (sn-a sn-b sn-c) (list 10))
-(assert-eq sn-a 10 "silent nil: present element")
-(assert-eq sn-b nil "silent nil: missing => nil")
+# Fewer values than bindings: error (use match for optional elements)
+(assert-err (fn () (def (sn-a sn-b sn-c) (list 10)))
+  "strict: missing elements => error")
+(def (sn-a) (list 10))
+(assert-eq sn-a 10 "strict: present element ok")
 
-# More values than bindings: extras silently ignored
+# More values than bindings: extras silently ignored (this is still fine)
 (def (sn-p sn-q) (list 1 2 3 4 5))
-(assert-eq sn-q 2 "silent nil: extra elements ignored")
+(assert-eq sn-q 2 "strict: extra elements ignored")
 
-# Wrong type entirely: non-list gives nil for all bindings
-(def (sn-x sn-y) 42)
-(assert-eq sn-x nil "silent nil: non-list => nil")
+# Wrong type entirely: non-list signals error
+(assert-err (fn () (def (sn-x sn-y) 42))
+  "strict: non-list => error")
 
-# Same for array patterns on a non-indexed value
-(def [sn-i sn-j] "hello")
-(assert-eq sn-i nil "silent nil: string in array pattern => nil")
+# Array pattern on non-indexed value: error
+(assert-err (fn () (def [sn-i sn-j] "hello"))
+  "strict: string in array pattern => error")
 
-(display "  fewer vals:  (def (a b c) (list 10)) → b=") (print sn-b)
-(display "  wrong type:  (def (x y) 42)          → x=") (print sn-x)
+(display "  strict:  (def (a b c) (list 10)) errors on missing element") (print "")
+(display "  strict:  (def (x y) 42) errors on wrong type") (print "")
 
 
 # ========================================
@@ -205,13 +207,13 @@
 (def {:name sk-name :age sk-age} {:name "Bob" :age 25})
 (assert-eq sk-name "Bob" "struct key: name")
 
-# Missing key gives nil
-(def {:missing sk-missing} {:other 42})
-(assert-eq sk-missing nil "struct key: missing => nil")
+# Missing key signals error
+(assert-err (fn () (def {:missing sk-missing} {:other 42}))
+  "struct key: missing => error")
 
-# Non-struct gives nil for all bindings
-(def {:x sk-from-int} 42)
-(assert-eq sk-from-int nil "struct key: non-struct => nil")
+# Non-struct signals error
+(assert-err (fn () (def {:x sk-from-int} 42))
+  "struct key: non-struct => error")
 
 # Mutable @struct works with the same pattern
 (def {:a sk-from-tbl} @{:a 99 :b 100})
@@ -234,7 +236,7 @@
 
 (display "  {:name n :age a} → ") (display sk-name) (display ", ") (print sk-age)
 (display "  nested 3-level struct → host=") (print sk-host)
-(display "  missing key → ") (print sk-missing)
+(display "  missing key → error (strict semantics)") (print "")
 
 
 # ========================================

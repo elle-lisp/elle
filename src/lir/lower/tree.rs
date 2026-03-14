@@ -235,7 +235,7 @@ impl Lowerer {
             AccessPath::Index(inner, idx) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutRefOrNil {
+                self.emit(LirInstr::ArrayMutRefDestructure {
                     dst,
                     src: parent,
                     index: *idx as u16,

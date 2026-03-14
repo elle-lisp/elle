@@ -198,11 +198,13 @@ pub enum HirKind {
 
     // === Destructuring ===
     /// Unconditional destructuring: extract values from a compound and bind them.
-    /// Missing values → nil, no type checks, no branching on failure.
     /// Used by def/var/let/let*/fn when the binding position is a list or array.
+    /// `strict`: if true (binding forms: def/var/let/fn body), missing values signal error.
+    /// `strict`: if false (parameter context: &opt, &keys patterns), missing values → nil.
     Destructure {
         pattern: HirPattern,
         value: Box<Hir>,
+        strict: bool,
     },
 
     /// Runtime eval: compile and execute a datum.

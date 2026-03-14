@@ -579,15 +579,19 @@ impl<'a> FunctionTranslator<'a> {
                 let nil = builder.ins().iconst(I64, TAG_NIL as i64);
                 builder.def_var(var(dst.0), nil);
             }
-            LirInstr::CarOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
-            }
-            LirInstr::CdrOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction("CdrOrNil".to_string()));
-            }
-            LirInstr::ArrayMutRefOrNil { .. } => {
+            LirInstr::CarDestructure { .. } => {
                 return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutRefOrNil".to_string(),
+                    "CarDestructure".to_string(),
+                ));
+            }
+            LirInstr::CdrDestructure { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "CdrDestructure".to_string(),
+                ));
+            }
+            LirInstr::ArrayMutRefDestructure { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "ArrayMutRefDestructure".to_string(),
                 ));
             }
             LirInstr::ArrayMutSliceFrom { .. } => {
@@ -613,6 +617,22 @@ impl<'a> FunctionTranslator<'a> {
             LirInstr::TableGetOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction(
                     "TableGetOrNil".to_string(),
+                ));
+            }
+            LirInstr::TableGetDestructure { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "TableGetDestructure".to_string(),
+                ));
+            }
+            LirInstr::CarOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
+            }
+            LirInstr::CdrOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction("CdrOrNil".to_string()));
+            }
+            LirInstr::ArrayMutRefOrNil { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "ArrayMutRefOrNil".to_string(),
                 ));
             }
             LirInstr::Eval { .. } => {
