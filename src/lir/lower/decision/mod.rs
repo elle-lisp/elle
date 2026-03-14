@@ -594,11 +594,33 @@ fn specialize(
             let mut new_patterns = row.patterns[..col].to_vec();
             new_patterns.extend(sub_patterns);
             new_patterns.extend_from_slice(&row.patterns[col + 1..]);
+            // Accumulate the rest binding (if any) for Struct/Table patterns.
+            // The rest sub-pattern is NOT added to sub_patterns (no decision tree
+            // constructor for it), so we accumulate it directly into bindings now.
+            let mut new_bindings = row.bindings.clone();
+            match pat {
+                HirPattern::Struct {
+                    entries,
+                    rest: Some(rest_pat),
+                }
+                | HirPattern::Table {
+                    entries,
+                    rest: Some(rest_pat),
+                } => {
+                    let exclude: Vec<PatternKey> = entries.iter().map(|(k, _)| k.clone()).collect();
+                    collect_pattern_bindings(
+                        rest_pat,
+                        &AccessPath::StructRest(Box::new(col_access.clone()), exclude),
+                        &mut new_bindings,
+                    );
+                }
+                _ => {}
+            }
             rows.push(PatternRow {
                 patterns: new_patterns,
                 guard: row.guard.clone(),
                 arm_index: row.arm_index,
-                bindings: row.bindings.clone(),
+                bindings: new_bindings,
             });
         }
         // else: different constructor → row is dropped
