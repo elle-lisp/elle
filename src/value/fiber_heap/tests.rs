@@ -470,6 +470,39 @@ fn test_clear_clears_scope_bumps() {
     assert_eq!(heap.allocated_bytes(), 0);
 }
 
+// ── ROOT_HEAP tests (Chunk 1) ─────────────────────────────────────
+
+#[test]
+fn test_ensure_root_heap_idempotent() {
+    // ensure_root_heap() must return the same pointer on every call.
+    let p1 = ensure_root_heap();
+    let p2 = ensure_root_heap();
+    let p3 = ensure_root_heap();
+    assert!(!p1.is_null());
+    assert_eq!(p1, p2);
+    assert_eq!(p2, p3);
+}
+
+#[test]
+fn test_root_heap_active_allocator_initialized() {
+    // After ensure_root_heap(), active_allocator must be non-null.
+    let ptr = ensure_root_heap();
+    let heap = unsafe { &*ptr };
+    assert!(!heap.active_allocator().is_null());
+}
+
+#[test]
+fn test_vm_new_installs_root_heap() {
+    use crate::vm::core::VM;
+    let _vm = VM::new();
+    // After VM::new(), the current heap pointer must be non-null.
+    assert!(is_fiber_heap_installed());
+    // Clean up: uninstall so we don't interfere with subsequent tests.
+    // (ROOT_HEAP thread-local persists, but CURRENT_FIBER_HEAP can be
+    //  uninstalled for test isolation.)
+    uninstall_fiber_heap();
+}
+
 // ── Shared allocator ownership tests ──────────────────────────────
 
 #[test]

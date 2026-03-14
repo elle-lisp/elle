@@ -329,6 +329,11 @@ pub struct Fiber {
     /// Per-fiber heap for arena-style allocation. Boxed for pointer stability:
     /// the thread-local stores `*mut FiberHeap`, which must survive moves of
     /// the Fiber struct (e.g., during `std::mem::swap` in fiber transitions).
+    ///
+    /// **Root fiber**: this field exists for structural uniformity but is
+    /// unused for allocations. The root fiber allocates through the
+    /// `ROOT_HEAP` thread-local (see `src/value/fiber_heap/routing.rs`).
+    /// Child fibers use this field normally.
     pub heap: Box<crate::value::fiber_heap::FiberHeap>,
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.

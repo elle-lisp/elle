@@ -8,6 +8,72 @@ thread_local! {
         const { Cell::new(std::ptr::null_mut()) };
 }
 
+// Thread-local storage for the root fiber's persistent FiberHeap.
+//
+// Created once per thread on first access via `ensure_root_heap()`.
+// Never freed (leaked via `Box::leak`) — semantically equivalent to
+// HEAP_ARENA, which also lived for the thread's lifetime.
+//
+// Stores a raw pointer to the leaked `FiberHeap`. Null until first
+// `ensure_root_heap()` call.
+thread_local! {
+    static ROOT_HEAP: std::cell::Cell<*mut FiberHeap> =
+        const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+/// Ensure the thread-local root heap exists and return a pointer to it.
+///
+/// Creates the heap on first call (leaking it via `Box::leak`),
+/// initializes `active_allocator`, and stores the pointer. Subsequent
+/// calls return the same pointer.
+///
+/// The returned pointer is valid for the thread's lifetime.
+pub fn ensure_root_heap() -> *mut FiberHeap {
+    ROOT_HEAP.with(|cell| {
+        let ptr = cell.get();
+        if !ptr.is_null() {
+            return ptr;
+        }
+        // Box::leak gives us a &'static mut FiberHeap. Cast to *mut for
+        // storage in Cell<*mut>. The address is stable because Box heap-
+        // allocates the value (and we never free it).
+        let heap: &'static mut FiberHeap = Box::leak(Box::new(FiberHeap::new()));
+        heap.init_active_allocator();
+        let ptr = heap as *mut FiberHeap;
+        cell.set(ptr);
+        ptr
+    })
+}
+
+/// Install the root heap as the active fiber heap, replacing whatever
+/// was active (typically null at VM startup, or a child heap if re-called).
+///
+/// Called by `VM::new()` to ensure the root fiber's FiberHeap is active
+/// before any bytecode executes.
+///
+/// # Safety
+/// The root heap pointer from `ensure_root_heap()` is valid for the
+/// thread's lifetime.
+pub fn install_root_heap() {
+    let ptr = ensure_root_heap();
+    // SAFETY: ptr is valid for thread lifetime (leaked Box).
+    unsafe { install_fiber_heap(ptr) };
+}
+
+/// Ensure the root heap exists and is installed as the current heap.
+///
+/// Used by `alloc()` as a lazy fallback when called from test code
+/// that runs without a `VM`. Returns the now-installed heap pointer.
+///
+/// In normal VM execution this is never called — the heap is installed
+/// by `VM::new()` and remains installed for the VM's lifetime.
+pub fn ensure_and_install_root_heap() -> *mut FiberHeap {
+    let ptr = ensure_root_heap();
+    // SAFETY: ptr is valid for thread lifetime (leaked Box).
+    unsafe { install_fiber_heap(ptr) };
+    ptr
+}
+
 /// Install a fiber heap as the current thread's active heap.
 ///
 /// # Safety
