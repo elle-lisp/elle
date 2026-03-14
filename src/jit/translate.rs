@@ -624,6 +624,9 @@ impl<'a> FunctionTranslator<'a> {
                     "TableGetDestructure".to_string(),
                 ));
             }
+            LirInstr::StructRest { .. } => {
+                return Err(JitError::UnsupportedInstruction("StructRest".to_string()));
+            }
             LirInstr::CarOrNil { .. } => {
                 return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
             }

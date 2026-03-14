@@ -44,14 +44,18 @@ pub enum HirPattern {
 
     /// Match a struct {...} by keyword or symbol keys (emits IsStruct guard).
     /// Used by binding forms (def, var, let, fn params): missing keys signal an error.
+    /// When `rest` is Some, collects all keys NOT explicitly named into a new immutable struct.
     Struct {
         entries: Vec<(PatternKey, HirPattern)>,
+        rest: Option<Box<HirPattern>>,
     },
 
     /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsTable guard).
     /// Used by binding forms: missing keys signal an error.
+    /// When `rest` is Some, collects all keys NOT explicitly named into a new immutable struct.
     Table {
         entries: Vec<(PatternKey, HirPattern)>,
+        rest: Option<Box<HirPattern>>,
     },
 
     /// Match a &named parameter struct: keyword or symbol keys with silent nil on missing.
@@ -135,9 +139,15 @@ impl HirPattern {
                     r.collect_bindings(out);
                 }
             }
-            HirPattern::Struct { entries }
-            | HirPattern::Table { entries }
-            | HirPattern::NamedStruct { entries } => {
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                for (_, pattern) in entries {
+                    pattern.collect_bindings(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_bindings(out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
                 for (_, pattern) in entries {
                     pattern.collect_bindings(out);
                 }
@@ -181,9 +191,15 @@ impl HirPattern {
                     r.collect_binding_names(out);
                 }
             }
-            HirPattern::Struct { entries }
-            | HirPattern::Table { entries }
-            | HirPattern::NamedStruct { entries } => {
+            HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+                for (_, pattern) in entries {
+                    pattern.collect_binding_names(out);
+                }
+                if let Some(r) = rest {
+                    r.collect_binding_names(out);
+                }
+            }
+            HirPattern::NamedStruct { entries } => {
                 for (_, pattern) in entries {
                     pattern.collect_binding_names(out);
                 }

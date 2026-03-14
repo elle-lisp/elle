@@ -524,6 +524,27 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
+            LirInstr::StructRest {
+                dst,
+                src,
+                exclude_keys,
+            } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::StructRest);
+                self.bytecode.emit_u16(exclude_keys.len() as u16);
+                for key in exclude_keys {
+                    let key_value = match key {
+                        LirConst::Keyword(name) => Value::keyword(name),
+                        LirConst::Symbol(sid) => Value::symbol(sid.0),
+                        _ => panic!("StructRest: unsupported key type {:?}", key),
+                    };
+                    let const_idx = self.bytecode.add_constant(key_value);
+                    self.bytecode.emit_u16(const_idx);
+                }
+                self.pop();
+                self.push_reg(*dst);
+            }
+
             // Silent destructuring (parameter context: absent optional params → nil)
             LirInstr::CarOrNil { dst, src } => {
                 self.ensure_on_top(*src);

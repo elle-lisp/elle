@@ -351,7 +351,7 @@ to see parent-established parameter bindings.
 | `arithmetic.rs` | ~150 | Add, Sub, Mul, Div |
 | `comparison.rs` | ~100 | Eq, Lt, Gt, Le, Ge |
 | `types.rs` | ~50 | IsNil, IsEmptyList, IsPair, Not |
-| `data.rs` | ~100 | Cons, Car, Cdr, MakeVector |
+| `data.rs` | ~100 | Cons, Car, Cdr, MakeVector, `handle_struct_rest` |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
 | `cell.rs` | ~70 | LBox operations: MakeLBox, UnlBox, UpdateLBox |

@@ -247,6 +247,11 @@ pub enum Instruction {
     /// `signal.bits & !allowed_bits != 0`, signals `:error`.
     /// If the value is not a closure, signals `:error`.
     CheckSignalBound,
+
+    /// Struct rest for destructuring: collect all keys from src NOT in excluded keys.
+    /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
+    /// Source struct is popped from the stack; result pushed.
+    StructRest,
 }
 
 /// Compiled bytecode with constants
@@ -452,6 +457,22 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (const_idx={})", idx));
                     i += 2;
+                }
+            }
+            Instruction::StructRest => {
+                if i + 1 < instructions.len() {
+                    let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                    i += 2;
+                    let mut keys = Vec::new();
+                    for _ in 0..count {
+                        if i + 1 < instructions.len() {
+                            let idx =
+                                ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                            i += 2;
+                            keys.push(format!("const[{}]", idx));
+                        }
+                    }
+                    line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
                 }
             }
             Instruction::Eval => {

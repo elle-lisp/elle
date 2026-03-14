@@ -339,6 +339,7 @@ fn test_struct_pattern() {
                         (PatternKey::Keyword("x".to_string()), HirPattern::Wildcard),
                         (PatternKey::Keyword("y".to_string()), HirPattern::Wildcard),
                     ],
+                    rest: None,
                 }],
                 None,
                 0,

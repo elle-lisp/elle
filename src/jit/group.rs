@@ -155,6 +155,7 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
                 | LirInstr::ArrayMutLen { .. }
                 | LirInstr::TableGetOrNil { .. }
                 | LirInstr::TableGetDestructure { .. }
+                | LirInstr::StructRest { .. }
                 | LirInstr::CarOrNil { .. }
                 | LirInstr::CdrOrNil { .. }
                 | LirInstr::ArrayMutRefOrNil { .. }

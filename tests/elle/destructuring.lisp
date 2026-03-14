@@ -664,9 +664,13 @@
 (assert-eq ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30
   "keys destructure")
 
-# test_keys_missing_key_destructure — missing key produces nil (keyword args are optional)
-(assert-eq ((fn (a &keys {:x x :y y}) y) 1 :x 10) nil
-  "keys missing key destructure")
+# test_keys_missing_key_destructure — missing key now signals an error
+(assert-err (fn () ((fn (a &keys {:x x :y y}) y) 1 :x 10))
+  "keys missing key destructure signals error")
+
+# test_keys_all_present — all keys provided, still works
+(assert-eq ((fn (a &keys {:x x :y y}) (+ x y)) 1 :x 10 :y 20) 30
+  "keys destructure all present")
 
 # test_keys_with_opt
 (assert-list-eq ((fn (a &opt b &keys opts) (list a b opts)) 1)
@@ -980,3 +984,79 @@
 # keys_duplicate_keys
 (assert-err (fn () ((fn (a &keys opts) (get opts :x)) 1 :x 10 :x 20))
   "duplicate keyword keys error")
+
+# ============================================================================
+# Struct rest-destructuring {& more}
+# ============================================================================
+
+# test_struct_rest_basic
+(assert-eq
+  (let [({:a a & rest} {:a 1 :b 2 :c 3})]
+    rest)
+  {:b 2 :c 3}
+  "struct rest basic: captures remaining keys")
+
+# test_struct_rest_empty_remainder
+(assert-eq
+  (let [({:a a :b b & rest} {:a 1 :b 2})]
+    rest)
+  {}
+  "struct rest empty: no extra keys → empty struct")
+
+# test_struct_rest_all_explicit
+(assert-eq
+  (let [({:a a & rest} {:a 10})]
+    [a rest])
+  [10 {}]
+  "struct rest: all keys explicit → rest is empty struct")
+
+# test_struct_rest_in_fn
+(assert-eq
+  ((fn ({:x x & rest}) rest) {:x 1 :y 2 :z 3})
+  {:y 2 :z 3}
+  "struct rest in fn param")
+
+# test_struct_rest_result_is_immutable
+(assert-eq
+  (type-of (let [({:a a & rest} {:a 1 :b 2})] rest))
+  :struct
+  "struct rest result is always immutable struct")
+
+# test_struct_rest_from_mutable
+(assert-eq
+  (let [({:a a & rest} @{:a 1 :b 2 :c 3})]
+    rest)
+  {:b 2 :c 3}
+  "struct rest from @struct input yields immutable rest")
+
+# test_struct_rest_in_match
+(assert-eq
+  (match {:x 1 :y 2 :z 3}
+    ({:x x & rest} rest)
+    (_ nil))
+  {:y 2 :z 3}
+  "struct rest in match pattern")
+
+# test_struct_rest_table_in_match
+(assert-eq
+  (match @{:x 1 :y 2 :z 3}
+    (@{:x x & rest} rest)
+    (_ nil))
+  {:y 2 :z 3}
+  "struct rest on @struct in match pattern")
+
+# test_keys_destructure_with_rest — combined &keys + struct rest
+(assert-eq
+  ((fn (a &keys {:x x & rest}) rest) 1 :x 10 :y 20 :z 30)
+  {:y 20 :z 30}
+  "keys destructure with rest: captures extra kwargs")
+
+# test_keys_destructure_with_rest_no_extra
+(assert-eq
+  ((fn (a &keys {:x x & rest}) rest) 1 :x 10)
+  {}
+  "keys destructure with rest, no extra keys")
+
+# test_keys_destructure_missing_required_with_rest
+(assert-err (fn () ((fn (a &keys {:x x & rest}) rest) 1 :y 20))
+  "keys destructure missing required key signals error even with rest")
