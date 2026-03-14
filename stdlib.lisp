@@ -11,6 +11,7 @@
 ## - Search: find, find-index, index-of, last-index-of
 ## - Transformation: flatten, group-by, partition, take-while, drop-while
 ## - Struct operations: merge
+## - Stream sinks: stream/for-each, stream/fold, stream/collect, stream/into-array
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
@@ -719,6 +720,57 @@
       (each k in (keys b) (put result k (get b k)))
       (if (mutable? a) result (freeze result))))))
 
+## ── Stream combinators ─────────────────────────────────────────────
+##
+## Streams are coroutines. A read stream yields values when resumed.
+## Sink combinators consume a stream to completion and return a result.
+## Transform combinators return a new coroutine wrapping a source.
+## Port-to-stream converters return coroutines backed by an open port.
+##
+## All port-backed streams must be consumed inside a scheduler context
+## (ev/spawn or ev/run) because port I/O emits SIG_IO.
+
+(defn stream/for-each [f source]
+  "Apply f to each value yielded by source. Returns nil.
+   Signal is polymorphic in f: if f yields, stream/for-each yields."
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (f (coro/value source))
+    (coro/resume source))
+  nil)
+
+(defn stream/fold [f init source]
+  "Reduce values from source with f, starting from init.
+   Returns the final accumulator value.
+   Signal is polymorphic in f: if f yields, stream/fold yields."
+  (var acc init)
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (assign acc (f acc (coro/value source)))
+    (coro/resume source))
+  acc)
+
+(defn stream/collect [source]
+  "Collect all values yielded by source into a list.
+   Builds in reverse using cons then reverses — O(n).
+   Signal: errors only (no user callback)."
+  (var acc ())
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (assign acc (cons (coro/value source) acc))
+    (coro/resume source))
+  (reverse acc))
+
+(defn stream/into-array [source]
+  "Collect all values yielded by source into a mutable array.
+   Signal: errors only (no user callback)."
+  (let [[result @[]]]
+    (coro/resume source)
+    (while (not (coro/done? source))
+      (push result (coro/value source))
+      (coro/resume source))
+    result))
+
 ## ── Standard port parameters ────────────────────────────────────────
 
 (def *stdin*  (parameter (port/stdin)))
@@ -906,4 +958,6 @@
     :sync-scheduler sync-scheduler :*scheduler* *scheduler*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/shutdown ev/shutdown :*shutdown* *shutdown*
-     :merge merge :inc inc :dec dec})
+     :merge merge :inc inc :dec dec
+     :stream/for-each stream/for-each :stream/fold stream/fold
+     :stream/collect stream/collect :stream/into-array stream/into-array})
