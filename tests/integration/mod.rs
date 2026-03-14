@@ -83,6 +83,9 @@ mod net {
 mod file_scope {
     include!("file_scope.rs");
 }
+mod traits {
+    include!("traits.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
