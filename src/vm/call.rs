@@ -658,7 +658,7 @@ impl VM {
                 .fiber
                 .signal
                 .take()
-                .unwrap_or_else(|| (crate::value::SIG_ERROR, Value::NIL));
+                .unwrap_or((crate::value::SIG_ERROR, Value::NIL));
             Err(self.format_error_with_location(err))
         } else {
             // Unexpected suspending signal (yield from macro body — not supported).

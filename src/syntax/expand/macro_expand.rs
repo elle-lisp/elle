@@ -119,7 +119,7 @@ impl Expander {
         // stored in the cache. The closure compilation cost (one-time per pipeline
         // call) is left in the arena; subsequent calls skip this phase entirely.
         let transformer: Value = {
-            let cached = macro_def.cached_transformer.borrow().clone();
+            let cached = *macro_def.cached_transformer.borrow();
             if let Some(v) = cached {
                 v
             } else {
