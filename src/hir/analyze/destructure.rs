@@ -78,9 +78,20 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
                 // Struct/@struct patterns are alternating keyword/pattern pairs;
-                // only extract names from the value patterns (odd indices)
-                for item in items.iter().skip(1).step_by(2) {
+                // split at & first to avoid treating the rest binding as a value slot
+                let amp_pos = items
+                    .iter()
+                    .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+                let pairs_end = amp_pos.unwrap_or(items.len());
+                // Extract names from value slots (odd indices within the pairs section)
+                for item in items[..pairs_end].iter().skip(1).step_by(2) {
                     Self::extract_pattern_names(item, out);
+                }
+                // Extract name from rest pattern if present
+                if let Some(pos) = amp_pos {
+                    if let Some(rest) = items.get(pos + 1) {
+                        Self::extract_pattern_names(rest, out);
+                    }
                 }
             }
             _ => {} // Ignore non-symbol, non-compound elements (including keywords)
@@ -376,14 +387,9 @@ impl<'a> Analyzer<'a> {
             SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
                 // Both {...} and @{...} destructure the same way in binding forms
                 // (no type guard — TableGetOrNil handles both)
-                if items.len() % 2 != 0 {
-                    return Err(format!(
-                        "{}: struct destructuring requires keyword-pattern pairs",
-                        span
-                    ));
-                }
+                let (key_val_items, rest_syntax) = Self::split_struct_rest(items, span)?;
                 let mut entries = Vec::new();
-                for pair in items.chunks(2) {
+                for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
                         SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
@@ -408,7 +414,13 @@ impl<'a> Analyzer<'a> {
                         self.analyze_destructure_pattern(&pair[1], scope, immutable, span)?;
                     entries.push((key, pattern));
                 }
-                Ok(HirPattern::Struct { entries })
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(
+                        self.analyze_destructure_pattern(r, scope, immutable, span)?,
+                    )),
+                    None => None,
+                };
+                Ok(HirPattern::Struct { entries, rest })
             }
             SyntaxKind::Set(_) | SyntaxKind::SetMut(_) => Err(format!(
                 "{}: sets cannot be destructured (unordered collection)",
@@ -418,6 +430,46 @@ impl<'a> Analyzer<'a> {
                 "{}: destructuring pattern element must be a symbol, list, tuple, array, struct, or table",
                 span
             )),
+        }
+    }
+
+    /// Split struct pattern items at `&` into (key-value pairs, optional rest).
+    /// Items before `&` must have even count (complete keyword-pattern pairs).
+    /// Returns an error if items before `&` have odd count, multiple `&` appear,
+    /// or `&` is not followed by exactly one element.
+    pub(super) fn split_struct_rest<'s>(
+        items: &'s [Syntax],
+        span: &Span,
+    ) -> Result<(&'s [Syntax], Option<&'s Syntax>), String> {
+        let amp_pos = items
+            .iter()
+            .position(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+        match amp_pos {
+            None => Ok((items, None)),
+            Some(pos) => {
+                // Validate: no second &
+                let has_second = items[pos + 1..]
+                    .iter()
+                    .any(|s| matches!(&s.kind, SyntaxKind::Symbol(n) if n == "&"));
+                if has_second {
+                    return Err(format!("{}: multiple & in struct pattern", span));
+                }
+                // Items before & must be even-count pairs
+                if pos % 2 != 0 {
+                    return Err(format!(
+                        "{}: struct pattern: & must appear after complete keyword-pattern pairs",
+                        span
+                    ));
+                }
+                let after_amp = &items[pos + 1..];
+                if after_amp.len() != 1 {
+                    return Err(format!(
+                        "{}: & in struct pattern must be followed by exactly one binding",
+                        span
+                    ));
+                }
+                Ok((&items[..pos], Some(&after_amp[0])))
+            }
         }
     }
 }

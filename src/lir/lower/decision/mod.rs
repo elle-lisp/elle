@@ -36,6 +36,9 @@ pub(crate) enum AccessPath {
     Slice(Box<AccessPath>, usize),
     /// Value at keyword key in a struct at the given path.
     Key(Box<AccessPath>, PatternKey),
+    /// All keys NOT in the given set, collected from a struct at the given path.
+    /// Used for `& rest` patterns in struct destructuring.
+    StructRest(Box<AccessPath>, Vec<PatternKey>),
 }
 
 /// A constructor represents the "shape" that a pattern tests for.
@@ -215,10 +218,10 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
                 Some(Constructor::ArrayMut(elements.len()))
             }
         }
-        HirPattern::Struct { entries } => Some(Constructor::Struct(
+        HirPattern::Struct { entries, rest: _ } => Some(Constructor::Struct(
             entries.iter().map(|(k, _)| k.clone()).collect(),
         )),
-        HirPattern::Table { entries } => Some(Constructor::Table(
+        HirPattern::Table { entries, rest: _ } => Some(Constructor::Table(
             entries.iter().map(|(k, _)| k.clone()).collect(),
         )),
         HirPattern::Set { .. } => Some(Constructor::Set),
@@ -279,11 +282,19 @@ fn collect_pattern_bindings(
                 );
             }
         }
-        HirPattern::Struct { entries } | HirPattern::Table { entries } => {
+        HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
             for (key, sub_pat) in entries {
                 collect_pattern_bindings(
                     sub_pat,
                     &AccessPath::Key(Box::new(access.clone()), key.clone()),
+                    out,
+                );
+            }
+            if let Some(rest_pat) = rest {
+                let exclude: Vec<PatternKey> = entries.iter().map(|(k, _)| k.clone()).collect();
+                collect_pattern_bindings(
+                    rest_pat,
+                    &AccessPath::StructRest(Box::new(access.clone()), exclude),
                     out,
                 );
             }
@@ -471,7 +482,7 @@ fn extract_sub_patterns(pat: &HirPattern, ctor: &Constructor) -> Vec<HirPattern>
             }
             sub
         }
-        HirPattern::Struct { entries } | HirPattern::Table { entries } => {
+        HirPattern::Struct { entries, rest: _ } | HirPattern::Table { entries, rest: _ } => {
             // The constructor carries the merged key set (union of all
             // struct patterns in the column). Produce a sub-pattern
             // for each key in the merged set: the pattern's sub-pattern

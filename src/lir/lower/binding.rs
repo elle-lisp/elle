@@ -514,7 +514,7 @@ impl Lowerer {
                 }
                 Ok(())
             }
-            HirPattern::Struct { entries } => {
+            HirPattern::Struct { entries, rest: _ } => {
                 // Structs are immutable key-value maps
                 let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
@@ -551,7 +551,7 @@ impl Lowerer {
                 }
                 Ok(())
             }
-            HirPattern::Table { entries } => {
+            HirPattern::Table { entries, rest: _ } => {
                 let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
                 self.emit(LirInstr::StoreLocal {

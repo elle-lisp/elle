@@ -268,6 +268,10 @@ impl Lowerer {
                 });
                 Ok(dst)
             }
+            AccessPath::StructRest(_, _) => {
+                // Wired in Chunk 4 after StructRest LIR instruction is defined.
+                Err("StructRest access path not yet wired".to_string())
+            }
         }
     }
 
@@ -1105,7 +1109,7 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Struct { entries } => {
+            HirPattern::Struct { entries, rest: _ } => {
                 // Struct {...} pattern matching for `match`.
                 // Check if value is a struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
@@ -1173,7 +1177,7 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Table { entries } => {
+            HirPattern::Table { entries, rest: _ } => {
                 // @struct @{...} pattern matching for `match`.
                 // Check if value is a @struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {

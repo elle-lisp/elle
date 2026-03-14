@@ -352,14 +352,9 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxKind::Struct(items) => {
                 // Struct pattern {...} - matches structs (immutable)
-                if items.len() % 2 != 0 {
-                    return Err(format!(
-                        "{}: struct pattern requires keyword-pattern pairs",
-                        syntax.span
-                    ));
-                }
+                let (key_val_items, rest_syntax) = Self::split_struct_rest(items, &syntax.span)?;
                 let mut entries = Vec::new();
-                for pair in items.chunks(2) {
+                for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
                         SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
@@ -383,18 +378,17 @@ impl<'a> Analyzer<'a> {
                     let pattern = self.analyze_pattern_inner(&pair[1], resolve_var)?;
                     entries.push((key, pattern));
                 }
-                Ok(HirPattern::Struct { entries })
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
+                    None => None,
+                };
+                Ok(HirPattern::Struct { entries, rest })
             }
             SyntaxKind::StructMut(items) => {
                 // StructMut pattern @{...} - matches @structs (mutable)
-                if items.len() % 2 != 0 {
-                    return Err(format!(
-                        "{}: struct pattern requires keyword-pattern pairs",
-                        syntax.span
-                    ));
-                }
+                let (key_val_items, rest_syntax) = Self::split_struct_rest(items, &syntax.span)?;
                 let mut entries = Vec::new();
-                for pair in items.chunks(2) {
+                for pair in key_val_items.chunks(2) {
                     let key = match &pair[0].kind {
                         SyntaxKind::Keyword(k) => PatternKey::Keyword(k.clone()),
                         SyntaxKind::Quote(inner) => match &inner.kind {
@@ -418,7 +412,11 @@ impl<'a> Analyzer<'a> {
                     let pattern = self.analyze_pattern_inner(&pair[1], resolve_var)?;
                     entries.push((key, pattern));
                 }
-                Ok(HirPattern::Table { entries })
+                let rest = match rest_syntax {
+                    Some(r) => Some(Box::new(self.analyze_pattern_inner(r, resolve_var)?)),
+                    None => None,
+                };
+                Ok(HirPattern::Table { entries, rest })
             }
             SyntaxKind::Set(items) => {
                 // Set pattern |x| - matches sets (immutable)
