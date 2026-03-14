@@ -93,7 +93,7 @@ impl Value {
         if self.is_keyword() {
             let ptr = (self.0 & PTRVAL_PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
             match unsafe { &*ptr } {
-                crate::value::heap::HeapObject::LString(s) => Some(s),
+                crate::value::heap::HeapObject::LString { s, .. } => Some(s),
                 _ => None,
             }
         } else {
@@ -258,7 +258,7 @@ impl Value {
                 return None;
             }
             match unsafe { deref(*self) } {
-                HeapObject::LString(s) => Some(f(s)),
+                HeapObject::LString { s, .. } => Some(f(s)),
                 _ => None,
             }
         }
@@ -303,7 +303,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LArrayMut(v) => Some(v),
+            HeapObject::LArrayMut { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -319,7 +319,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LStructMut(t) => Some(t),
+            HeapObject::LStructMut { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -334,7 +334,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LStruct(s) => Some(s),
+            HeapObject::LStruct { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -347,7 +347,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Closure(c) => Some(c),
+            HeapObject::Closure { closure, .. } => Some(closure),
             _ => None,
         }
     }
@@ -360,7 +360,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LBox(c, _) => Some(c),
+            HeapObject::LBox { cell, .. } => Some(cell),
             _ => None,
         }
     }
@@ -372,7 +372,7 @@ impl Value {
         if !self.is_heap() {
             return false;
         }
-        unsafe { matches!(deref(*self), HeapObject::LBox(_, true)) }
+        unsafe { matches!(deref(*self), HeapObject::LBox { is_local: true, .. }) }
     }
 
     /// Extract as native function if this is a native function.
@@ -396,7 +396,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LArray(elems) => Some(elems),
+            HeapObject::LArray { elements, .. } => Some(elements),
             _ => None,
         }
     }
@@ -415,7 +415,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LSet(s) => Some(s),
+            HeapObject::LSet { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -435,7 +435,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LSetMut(s) => Some(s),
+            HeapObject::LSetMut { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -455,7 +455,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LStringMut(b) => Some(b),
+            HeapObject::LStringMut { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -468,7 +468,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LBytes(b) => Some(b),
+            HeapObject::LBytes { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -481,7 +481,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LBytesMut(b) => Some(b),
+            HeapObject::LBytesMut { data, .. } => Some(data),
             _ => None,
         }
     }
@@ -494,7 +494,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::ThreadHandle(h) => Some(h),
+            HeapObject::ThreadHandle { handle, .. } => Some(handle),
             _ => None,
         }
     }
@@ -507,7 +507,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Fiber(handle) => Some(handle),
+            HeapObject::Fiber { handle, .. } => Some(handle),
             _ => None,
         }
     }
@@ -520,7 +520,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Syntax(s) => Some(s),
+            HeapObject::Syntax { syntax, .. } => Some(syntax),
             _ => None,
         }
     }
@@ -580,7 +580,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::Parameter { id, default } => Some((*id, *default)),
+            HeapObject::Parameter { id, default, .. } => Some((*id, *default)),
             _ => None,
         }
     }
@@ -666,7 +666,7 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::ManagedPointer(cell) => Some(cell),
+            HeapObject::ManagedPointer { addr, .. } => Some(addr),
             _ => None,
         }
     }
@@ -679,7 +679,7 @@ impl Value {
         }
         unsafe {
             match deref(*self) {
-                HeapObject::External(ext) => ext.data.downcast_ref::<T>(),
+                HeapObject::External { obj, .. } => obj.data.downcast_ref::<T>(),
                 _ => None,
             }
         }
@@ -693,7 +693,7 @@ impl Value {
         }
         unsafe {
             match deref(*self) {
-                HeapObject::External(ext) => Some(ext.type_name),
+                HeapObject::External { obj, .. } => Some(obj.type_name),
                 _ => None,
             }
         }

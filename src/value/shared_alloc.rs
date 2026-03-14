@@ -100,13 +100,16 @@ mod tests {
     #[test]
     fn test_shared_alloc_basic() {
         let mut sa = SharedAllocator::new();
-        let v = sa.alloc(HeapObject::LString("hello".into()));
+        let v = sa.alloc(HeapObject::LString {
+            s: "hello".into(),
+            traits: Value::NIL,
+        });
         assert_eq!(sa.len(), 1);
         assert!(v.is_heap());
         unsafe {
             let obj = crate::value::heap::deref(v);
             match obj {
-                HeapObject::LString(s) => assert_eq!(&**s, "hello"),
+                HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
                 _ => panic!("Expected String"),
             }
         }
@@ -123,7 +126,10 @@ mod tests {
     #[test]
     fn test_shared_alloc_drop_types_tracked() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::LString("tracked".into()));
+        sa.alloc(HeapObject::LString {
+            s: "tracked".into(),
+            traits: Value::NIL,
+        });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
         assert_eq!(sa.dtors.len(), 1); // only String
@@ -132,8 +138,14 @@ mod tests {
     #[test]
     fn test_shared_alloc_teardown_runs_dtors() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::LString("a".into()));
-        sa.alloc(HeapObject::LString("b".into()));
+        sa.alloc(HeapObject::LString {
+            s: "a".into(),
+            traits: Value::NIL,
+        });
+        sa.alloc(HeapObject::LString {
+            s: "b".into(),
+            traits: Value::NIL,
+        });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 3);
         assert_eq!(sa.dtors.len(), 2);
@@ -147,16 +159,22 @@ mod tests {
     #[test]
     fn test_shared_alloc_teardown_resets_bump() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::LString("first".into()));
+        sa.alloc(HeapObject::LString {
+            s: "first".into(),
+            traits: Value::NIL,
+        });
         sa.teardown();
 
         // Allocate again after teardown — should work fine
-        let v = sa.alloc(HeapObject::LString("second".into()));
+        let v = sa.alloc(HeapObject::LString {
+            s: "second".into(),
+            traits: Value::NIL,
+        });
         assert_eq!(sa.len(), 1);
         unsafe {
             let obj = crate::value::heap::deref(v);
             match obj {
-                HeapObject::LString(s) => assert_eq!(&**s, "second"),
+                HeapObject::LString { s, .. } => assert_eq!(&**s, "second"),
                 _ => panic!("Expected String"),
             }
         }
@@ -172,7 +190,10 @@ mod tests {
         assert_eq!(sa.len(), 1);
         assert!(!sa.is_empty());
 
-        sa.alloc(HeapObject::LString("x".into()));
+        sa.alloc(HeapObject::LString {
+            s: "x".into(),
+            traits: Value::NIL,
+        });
         assert_eq!(sa.len(), 2);
 
         sa.alloc(HeapObject::Float(42.5));

@@ -76,7 +76,10 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
     let thread_handle_data = ThreadHandle {
         result: result_holder,
     };
-    Ok(alloc(HeapObject::ThreadHandle(thread_handle_data)))
+    Ok(alloc(HeapObject::ThreadHandle {
+        handle: thread_handle_data,
+        traits: Value::NIL,
+    }))
 }
 
 /// Spawns a new thread that executes a closure with captured immutable values

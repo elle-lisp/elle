@@ -8,6 +8,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::value::Value;
+
 use crate::value::heap::HeapObject;
 
 thread_local! {
@@ -34,7 +36,10 @@ impl StringInterner {
         }
 
         // Allocate new HeapObject::LString
-        let rc = Rc::new(HeapObject::LString(s.into()));
+        let rc = Rc::new(HeapObject::LString {
+            s: s.into(),
+            traits: Value::NIL,
+        });
         let ptr = Rc::as_ptr(&rc);
 
         // Store in table
@@ -257,7 +262,7 @@ mod tests {
         let ptr = intern_string("verification test");
         let heap_obj = unsafe { &*ptr };
         match heap_obj {
-            HeapObject::LString(s) => assert_eq!(&**s, "verification test"),
+            HeapObject::LString { s, .. } => assert_eq!(&**s, "verification test"),
             _ => panic!("Expected HeapObject::LString"),
         }
     }
@@ -275,7 +280,7 @@ mod tests {
         // Verify content is still accessible
         let heap_obj = unsafe { &*ptr1 };
         match heap_obj {
-            HeapObject::LString(s) => assert_eq!(&**s, "scoped string"),
+            HeapObject::LString { s, .. } => assert_eq!(&**s, "scoped string"),
             _ => panic!("Expected HeapObject::LString"),
         }
     }
@@ -313,7 +318,7 @@ mod tests {
         // Verify content
         let heap_obj = unsafe { &*ptr1 };
         match heap_obj {
-            HeapObject::LString(s) => assert_eq!(s.len(), 10000),
+            HeapObject::LString { s, .. } => assert_eq!(s.len(), 10000),
             _ => panic!("Expected HeapObject::LString"),
         }
     }

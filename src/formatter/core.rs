@@ -95,7 +95,7 @@ fn format_value(
     if let Some(_ptr) = value.as_heap_ptr() {
         let obj = unsafe { deref(*value) };
         match obj {
-            HeapObject::LArrayMut(v) => {
+            HeapObject::LArrayMut { data: v, .. } => {
                 if let Ok(elements) = v.try_borrow() {
                     if elements.is_empty() {
                         return "[]".to_string();
@@ -112,52 +112,54 @@ fn format_value(
             HeapObject::Cons(cons) => {
                 return format_cons(&cons.first, &cons.rest, indent, config, symbol_table);
             }
-            HeapObject::LStructMut(_) => {
+            HeapObject::LStructMut { .. } => {
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
-            HeapObject::LStruct(_) => {
+            HeapObject::LStruct { .. } => {
                 // For Phase 1, just return a placeholder
                 return "{{...}}".to_string();
             }
-            HeapObject::Closure(_) => return "#<closure>".to_string(),
+            HeapObject::Closure { .. } => return "#<closure>".to_string(),
             HeapObject::NativeFn(_) => return "#<native-fn>".to_string(),
             HeapObject::LibHandle(_) => return "#<lib-handle>".to_string(),
-            HeapObject::LArray(elems) => {
+            HeapObject::LArray {
+                elements: elems, ..
+            } => {
                 let items: Vec<String> = elems
                     .iter()
                     .map(|e| format_value(e, indent, config, symbol_table))
                     .collect();
                 return format!("[{}]", items.join(" "));
             }
-            HeapObject::ThreadHandle(_) => return "#<thread-handle>".to_string(),
-            HeapObject::LBox(_, _) => return "#<box>".to_string(),
+            HeapObject::ThreadHandle { .. } => return "#<thread-handle>".to_string(),
+            HeapObject::LBox { .. } => return "#<box>".to_string(),
             HeapObject::Float(_) => return "#<float>".to_string(),
-            HeapObject::Fiber(_) => return "#<fiber>".to_string(),
-            HeapObject::Syntax(s) => return format!("#<syntax:{}>", s),
+            HeapObject::Fiber { .. } => return "#<fiber>".to_string(),
+            HeapObject::Syntax { syntax: s, .. } => return format!("#<syntax:{}>", s),
             HeapObject::Binding(_) => return "#<binding>".to_string(),
             HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
-            HeapObject::LStringMut(_) => return "@\"...\"".to_string(),
-            HeapObject::LBytes(_) => return "#bytes[...]".to_string(),
-            HeapObject::LBytesMut(_) => return "#@bytes[...]".to_string(),
-            HeapObject::ManagedPointer(cell) => {
+            HeapObject::LStringMut { .. } => return "@\"...\"".to_string(),
+            HeapObject::LBytes { .. } => return "#bytes[...]".to_string(),
+            HeapObject::LBytesMut { .. } => return "#@bytes[...]".to_string(),
+            HeapObject::ManagedPointer { addr: cell, .. } => {
                 return match cell.get() {
                     Some(addr) => format!("<pointer 0x{:x}>", addr),
                     None => "<freed-pointer>".to_string(),
                 }
             }
-            HeapObject::External(ext) => return format!("#<{}>", ext.type_name),
+            HeapObject::External { obj: ext, .. } => return format!("#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
-            HeapObject::LString(s) => return format!("\"{}\"", s.escape_default()),
-            HeapObject::LSet(s) => {
+            HeapObject::LString { s, .. } => return format!("\"{}\"", s.escape_default()),
+            HeapObject::LSet { data: s, .. } => {
                 let items: Vec<String> = s
                     .iter()
                     .map(|e| format_value(e, indent, config, symbol_table))
                     .collect();
                 return format!("|{}|", items.join(" "));
             }
-            HeapObject::LSetMut(s_ref) => {
+            HeapObject::LSetMut { data: s_ref, .. } => {
                 if let Ok(s) = s_ref.try_borrow() {
                     let items: Vec<String> = s
                         .iter()
