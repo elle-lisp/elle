@@ -314,3 +314,71 @@
           (port/lines (port/open "/tmp/elle-test-streams-compose-478" :read)))))))
   (list 11 12 13)
   "composition: port/lines -> map -> take -> collect")
+
+# === Integration tests ===
+
+# Full pipeline: file -> lines -> drop header -> map parse -> filter -> take -> collect
+(spit "/tmp/elle-test-streams-pipeline-478"
+  "id,value\n1,100\n2,200\n3,300\n4,400\n5,500")
+(assert-eq
+  (ev/spawn (fn []
+    (stream/collect
+      (stream/take 3
+        (stream/filter (fn [row] (> (get row :value) 150))
+          (stream/map
+            (fn [line]
+              (let [[parts (string/split line ",")]]
+                {:id    (integer (get parts 0))
+                 :value (integer (get parts 1))}))
+            (stream/drop 1
+              (port/lines (port/open "/tmp/elle-test-streams-pipeline-478" :read)))))))))
+  (list {:id 2 :value 200} {:id 3 :value 300} {:id 4 :value 400})
+  "integration: CSV pipeline drop-header map-parse filter take collect")
+
+# Nested streams: stream/concat of stream/map-ped sources
+(assert-eq
+  (stream/collect
+    (stream/concat
+      (stream/map (fn [x] (* x 10)) (make-from-list (list 1 2)))
+      (stream/map (fn [x] (* x 100)) (make-from-list (list 3 4)))))
+  (list 10 20 300 400)
+  "nested streams: concat of mapped sources")
+
+# === Error propagation ===
+
+# stream/for-each with a callback that errors — error propagates to caller
+(assert-err
+  (fn []
+    (stream/for-each
+      (fn [v] (when (= v 2) (error {:error :test-error :message "stop at 2"})))
+      (make-range 5)))
+  "stream/for-each: callback error propagates")
+
+# stream/fold with a callback that errors — error propagates
+(assert-err
+  (fn []
+    (stream/fold
+      (fn [acc v] (when (= v 3) (error {:error :test-error :message "stop at 3"})) (+ acc v))
+      0
+      (make-range 5)))
+  "stream/fold: callback error propagates")
+
+# stream/map with a transform that errors — error propagates through collect
+(assert-err
+  (fn []
+    (stream/collect
+      (stream/map
+        (fn [v] (when (= v 1) (error {:error :test-error :message "stop at 1"})) v)
+        (make-range 3))))
+  "stream/map: transform error propagates through collect")
+
+# Error propagation: stream from closed port errors through combinator chain
+(spit "/tmp/elle-test-streams-closederror-478" "some data")
+(assert-err
+  (fn []
+    (ev/spawn (fn []
+      (let [[p (port/open "/tmp/elle-test-streams-closederror-478" :read)]]
+        (port/close p)
+        # Attempt to read from a closed port — should error through the chain
+        (stream/collect (port/lines p))))))
+  "error propagation: closed port errors through port/lines and collect")
