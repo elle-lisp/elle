@@ -482,7 +482,7 @@ impl VM {
                             self.fiber.signal = Some((SIG_ERROR, err));
                         }
                     } else {
-                        // Non-closure values (primitives, etc.) are inert — they pass
+                        // Non-closure values (primitives, etc.) are silent — they pass
                         // any signal bound check. Only closures carry signal metadata.
                     }
                 }

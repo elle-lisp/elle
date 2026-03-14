@@ -620,7 +620,7 @@ impl VM {
     /// arity mismatch, error signal, or halt.
     ///
     /// Callers must not pass closures that may yield (signal includes
-    /// `SIG_YIELD`). Macro transformer closures are always inert.
+    /// `SIG_YIELD`). Macro transformer closures are always silent.
     pub fn call_closure(
         &mut self,
         closure: &crate::value::Closure,

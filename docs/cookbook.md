@@ -66,7 +66,7 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "my-func",
         func: prim_my_func,
-        signal: Signal::inert(),       // or Signal::yields() if it signals
+        signal: Signal::silent(),       // or Signal::yields() if it signals
         arity: Arity::Exact(1),
         doc: "One-line description.",
         params: &["x"],
@@ -114,7 +114,7 @@ dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 | `PrimitiveDef` | `src/primitives/def.rs` | Declarative metadata struct |
 | `PrimitiveMeta` | `src/primitives/def.rs` | Collected signals/arities maps |
 | `Arity` | `src/value/types.rs` | `Exact(n)`, `AtLeast(n)`, `Range(min, max)` |
-| `Signal` | `src/signals/` | `Signal::inert()`, `Signal::yields()` |
+| `Signal` | `src/signals/` | `Signal::silent()`, `Signal::yields()` |
 
 ### Conventions
 

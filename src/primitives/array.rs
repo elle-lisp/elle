@@ -475,7 +475,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "array",
         func: prim_tuple,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Create an immutable array from arguments.",
         params: &[],
@@ -486,7 +486,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@array",
         func: prim_array,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable array from arguments.",
         params: &[],

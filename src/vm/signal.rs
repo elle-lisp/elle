@@ -489,7 +489,7 @@ impl VM {
     /// Uses `execute_bytecode_saving_stack` (re-entrant VM call). The thunk
     /// runs on the current fiber — same heap, same globals, same parameter
     /// frames. Yield from the thunk is propagated upward (not handled here);
-    /// callers should only pass non-yielding (inert signal) closures.
+    /// callers should only pass non-yielding (silent signal) closures.
     ///
     /// The before/after count snapshots bracket the thunk's execution to
     /// measure net allocations.

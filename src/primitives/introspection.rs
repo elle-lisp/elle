@@ -302,7 +302,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "coroutine?",
         func: crate::primitives::coroutines::prim_is_coroutine,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Returns true if value is a coroutine (fiber-based)",
         params: &["value"],

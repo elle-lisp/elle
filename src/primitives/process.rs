@@ -107,7 +107,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/args",
         func: prim_sys_args,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return command-line arguments as an array (excluding interpreter and script path)",
         params: &[],

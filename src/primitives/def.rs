@@ -46,7 +46,7 @@ impl PrimitiveDef {
     pub const DEFAULT: PrimitiveDef = PrimitiveDef {
         name: "",
         func: _default_prim,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "",
         params: &[],

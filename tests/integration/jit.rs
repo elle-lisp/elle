@@ -58,7 +58,7 @@ fn test_jit_identity() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -76,7 +76,7 @@ fn test_jit_constant() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -100,7 +100,7 @@ fn test_jit_nil() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -124,7 +124,7 @@ fn test_jit_bool_true() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -148,7 +148,7 @@ fn test_jit_bool_false() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -172,7 +172,7 @@ fn test_jit_empty_list() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -200,7 +200,7 @@ fn test_jit_add() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -229,7 +229,7 @@ fn test_jit_sub() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -258,7 +258,7 @@ fn test_jit_mul() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -287,7 +287,7 @@ fn test_jit_div() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -316,7 +316,7 @@ fn test_jit_rem() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -345,7 +345,7 @@ fn test_jit_neg() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -375,7 +375,7 @@ fn test_jit_lt_true() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -403,7 +403,7 @@ fn test_jit_lt_false() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -431,7 +431,7 @@ fn test_jit_eq() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -468,7 +468,7 @@ fn test_jit_branch_true() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     // Entry block: load arg, branch on x
     let mut entry = BasicBlock::new(Label(0));
@@ -520,7 +520,7 @@ fn test_jit_branch_false() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -569,7 +569,7 @@ fn test_jit_branch_nil() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -617,7 +617,7 @@ fn test_jit_branch_integer_truthy() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -697,7 +697,7 @@ fn test_jit_call_compiles() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -725,7 +725,7 @@ fn test_jit_rejects_make_closure() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let inner_func = Box::new(LirFunction::new(Arity::Exact(0)));
     let mut entry = BasicBlock::new(Label(0));
@@ -756,7 +756,7 @@ fn test_jit_conditional_arithmetic() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 4;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     // Entry: load arg, compare x == 0
     let mut entry = BasicBlock::new(Label(0));
@@ -837,7 +837,7 @@ fn test_jit_chained_arithmetic() {
     let mut func = LirFunction::new(Arity::Exact(3));
     func.num_regs = 5;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -887,7 +887,7 @@ fn test_jit_bit_and() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -916,7 +916,7 @@ fn test_jit_bit_or() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -945,7 +945,7 @@ fn test_jit_shl() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -978,7 +978,7 @@ fn test_jit_not_true() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1003,7 +1003,7 @@ fn test_jit_not_false() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1028,7 +1028,7 @@ fn test_jit_not_nil() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1057,7 +1057,7 @@ fn test_jit_float_constant() {
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
@@ -1080,7 +1080,7 @@ fn test_jit_float_add() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1116,7 +1116,7 @@ fn test_jit_cons() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1148,7 +1148,7 @@ fn test_jit_car_cdr() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 4;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1191,7 +1191,7 @@ fn test_jit_is_pair() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1222,7 +1222,7 @@ fn test_jit_make_array() {
     let mut func = LirFunction::new(Arity::Exact(3));
     func.num_regs = 4;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1267,7 +1267,7 @@ fn test_jit_make_lbox() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1294,7 +1294,7 @@ fn test_jit_load_lbox() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1320,7 +1320,7 @@ fn test_jit_store_lbox() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0)); // cell
@@ -1359,7 +1359,7 @@ fn test_jit_tail_call_compiles() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1504,7 +1504,7 @@ fn test_jit_int_add_wrapping() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1543,7 +1543,7 @@ fn test_jit_int_sub_wrapping() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1579,7 +1579,7 @@ fn test_jit_div_by_zero_integer() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1610,7 +1610,7 @@ fn test_jit_mixed_int_float_add() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1643,7 +1643,7 @@ fn test_jit_int_lt_negative() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1679,7 +1679,7 @@ fn test_jit_int_eq_negative() {
     let mut func = LirFunction::new(Arity::Exact(2));
     func.num_regs = 3;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1718,7 +1718,7 @@ fn test_jit_neg_negative() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1744,7 +1744,7 @@ fn test_jit_bit_not_zero() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1770,7 +1770,7 @@ fn test_jit_not_integer_zero() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
@@ -1796,7 +1796,7 @@ fn test_jit_not_empty_list() {
     let mut func = LirFunction::new(Arity::Exact(1));
     func.num_regs = 2;
     func.num_captures = 0;
-    func.signal = Signal::inert();
+    func.signal = Signal::silent();
 
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));

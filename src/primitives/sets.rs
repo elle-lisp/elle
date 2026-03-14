@@ -456,7 +456,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "set",
         func: prim_set,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Create an immutable set from elements (deduplicates, freezes mutable values)",
         params: &[],
@@ -467,7 +467,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@set",
         func: prim_at_set,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable set from elements (deduplicates, freezes mutable values)",
         params: &[],

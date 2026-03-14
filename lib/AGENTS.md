@@ -31,7 +31,7 @@ http-serve port handler → tcp/listen → ev/run → forever:
 | `http-request` | `(fn [method url &named body headers])` | Yields | response struct |
 | `http-serve` | `(fn [listener handler &named on-error])` | Yields | nil (runs forever) |
 | `http-send` | `(fn [session method path &named body headers])` | Yields | response struct |
-| `http-respond` | `(fn [status body &named headers])` | Inert | response struct |
+| `http-respond` | `(fn [status body &named headers])` | Silent | response struct |
 | `parse-url` | `(fn [url])` | Errors | url struct |
 
 ## Struct shapes

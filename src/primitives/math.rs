@@ -418,7 +418,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/pi",
         func: prim_pi,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "The mathematical constant pi (π).",
         params: &[],
@@ -429,7 +429,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/e",
         func: prim_e,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "The mathematical constant e (Euler's number).",
         params: &[],

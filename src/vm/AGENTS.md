@@ -195,7 +195,7 @@ same fiber (same heap, globals, parameter frames).
 If the inner closure yields (`SIG_YIELD`), the saved outer stack is restored but
 the fiber is suspended mid-inner-execution. Callers that invoke user-provided
 closures (`eval`, `arena/allocs`) do not handle yield — they propagate the signal
-upward. Closures passed to these must be non-yielding (inert signal). This is not
+upward. Closures passed to these must be non-yielding (silent signal). This is not
 currently enforced at the call site.
 
 See `execute.rs` module doc for the full rules on what is preserved, what is

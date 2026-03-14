@@ -131,7 +131,7 @@ impl LirFunction {
             num_captures: 0,
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             doc: None,
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
@@ -312,7 +312,7 @@ pub enum LirInstr {
     /// Used for &opt/(required) parameter destructuring.
     CdrOrNil { dst: Reg, src: Reg },
     /// Array ref with silent nil: returns nil if out of bounds or not an array.
-    /// Used for &opt/[required] parameter destructuring.
+    /// Used for &opt/\[required\] parameter destructuring.
     ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
 
     // === Coroutines ===

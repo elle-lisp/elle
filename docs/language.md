@@ -644,7 +644,7 @@ Registers a new user-defined signal keyword. See `docs/signals.md` for full deta
 Declares signal bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
 
 ```janet
-# Function-level: this function is inert
+# Function-level: this function is silent
 (fn (x y)
   (silence)
   (+ x y))
@@ -654,7 +654,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
   (silence :error)
   (if (< x 0) (error "negative") x))
 
-# Parameter-level: parameter f must be inert
+# Parameter-level: parameter f must be silent
 (fn (f x)
   (silence f)
   (f x))

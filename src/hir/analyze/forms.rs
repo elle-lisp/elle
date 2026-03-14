@@ -23,12 +23,12 @@ impl<'a> Analyzer<'a> {
 
         match &syntax.kind {
             // Literals
-            SyntaxKind::Nil => Ok(Hir::inert(HirKind::Nil, span)),
-            SyntaxKind::Bool(b) => Ok(Hir::inert(HirKind::Bool(*b), span)),
-            SyntaxKind::Int(n) => Ok(Hir::inert(HirKind::Int(*n), span)),
-            SyntaxKind::Float(f) => Ok(Hir::inert(HirKind::Float(*f), span)),
-            SyntaxKind::String(s) => Ok(Hir::inert(HirKind::String(s.clone()), span)),
-            SyntaxKind::Keyword(k) => Ok(Hir::inert(HirKind::Keyword(k.clone()), span)),
+            SyntaxKind::Nil => Ok(Hir::silent(HirKind::Nil, span)),
+            SyntaxKind::Bool(b) => Ok(Hir::silent(HirKind::Bool(*b), span)),
+            SyntaxKind::Int(n) => Ok(Hir::silent(HirKind::Int(*n), span)),
+            SyntaxKind::Float(f) => Ok(Hir::silent(HirKind::Float(*f), span)),
+            SyntaxKind::String(s) => Ok(Hir::silent(HirKind::String(s.clone()), span)),
+            SyntaxKind::Keyword(k) => Ok(Hir::silent(HirKind::Keyword(k.clone()), span)),
 
             // Variable reference
             SyntaxKind::Symbol(name) => {
@@ -39,16 +39,16 @@ impl<'a> Analyzer<'a> {
                 }
 
                 match self.lookup(name, syntax.scopes.as_slice()) {
-                    Some(binding) => Ok(Hir::inert(HirKind::Var(binding), span)),
+                    Some(binding) => Ok(Hir::silent(HirKind::Var(binding), span)),
                     None => {
                         // Try with empty scopes — catches primitives with
                         // empty scope sets when the reference has
                         // macro-introduced scopes
                         match self.lookup(name, &[]) {
-                            Some(binding) => Ok(Hir::inert(HirKind::Var(binding), span)),
+                            Some(binding) => Ok(Hir::silent(HirKind::Var(binding), span)),
                             None => {
                                 let binding = self.resolve_primitive(name);
-                                Ok(Hir::inert(HirKind::Var(binding), span))
+                                Ok(Hir::silent(HirKind::Var(binding), span))
                             }
                         }
                     }
@@ -58,7 +58,7 @@ impl<'a> Analyzer<'a> {
             // Immutable array literal [...] - call array primitive
             SyntaxKind::Array(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     let (inner, spliced) = Self::unwrap_splice(item);
                     let hir = self.analyze_expr(inner)?;
@@ -66,7 +66,7 @@ impl<'a> Analyzer<'a> {
                     args.push(CallArg { expr: hir, spliced });
                 }
                 let binding = self.resolve_primitive("array");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -81,7 +81,7 @@ impl<'a> Analyzer<'a> {
             // Mutable array literal @[...] - call @array primitive
             SyntaxKind::ArrayMut(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     let (inner, spliced) = Self::unwrap_splice(item);
                     let hir = self.analyze_expr(inner)?;
@@ -89,7 +89,7 @@ impl<'a> Analyzer<'a> {
                     args.push(CallArg { expr: hir, spliced });
                 }
                 let binding = self.resolve_primitive("@array");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -104,7 +104,7 @@ impl<'a> Analyzer<'a> {
             // Struct literal {...} - call struct primitive
             SyntaxKind::Struct(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -122,7 +122,7 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 let binding = self.resolve_primitive("struct");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -137,7 +137,7 @@ impl<'a> Analyzer<'a> {
             // Mutable struct literal @{...} - call @struct primitive
             SyntaxKind::StructMut(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -155,7 +155,7 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 let binding = self.resolve_primitive("@struct");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -170,11 +170,11 @@ impl<'a> Analyzer<'a> {
             // Quote - convert to Value at analysis time
             SyntaxKind::Quote(inner) => {
                 let value = (**inner).to_value(self.symbols);
-                Ok(Hir::inert(HirKind::Quote(value), span))
+                Ok(Hir::silent(HirKind::Quote(value), span))
             }
 
             // Syntax literal — pre-computed Value from macro argument passing
-            SyntaxKind::SyntaxLiteral(value) => Ok(Hir::inert(HirKind::Quote(*value), span)),
+            SyntaxKind::SyntaxLiteral(value) => Ok(Hir::silent(HirKind::Quote(*value), span)),
 
             // Quasiquote, Unquote, UnquoteSplicing should have been expanded
             SyntaxKind::Quasiquote(_) | SyntaxKind::Unquote(_) | SyntaxKind::UnquoteSplicing(_) => {
@@ -193,7 +193,7 @@ impl<'a> Analyzer<'a> {
             // Set literal |...| - call set constructor primitive
             SyntaxKind::Set(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -211,7 +211,7 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 let binding = self.resolve_primitive("set");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -226,7 +226,7 @@ impl<'a> Analyzer<'a> {
             // Mutable set literal @|...| - call mutable-set constructor primitive
             SyntaxKind::SetMut(items) => {
                 let mut args = Vec::new();
-                let mut signal = Signal::inert();
+                let mut signal = Signal::silent();
                 for item in items {
                     if matches!(&item.kind, SyntaxKind::Splice(_))
                         || (matches!(&item.kind, SyntaxKind::List(elems) if elems.first().is_some_and(|e| e.as_symbol() == Some("splice"))))
@@ -244,7 +244,7 @@ impl<'a> Analyzer<'a> {
                     });
                 }
                 let binding = self.resolve_primitive("@set");
-                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::inert());
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
                 Ok(Hir::new(
                     HirKind::Call {
                         func: Box::new(func),
@@ -259,7 +259,7 @@ impl<'a> Analyzer<'a> {
             // List - could be special form or function call
             SyntaxKind::List(items) => {
                 if items.is_empty() {
-                    return Ok(Hir::inert(HirKind::EmptyList, span));
+                    return Ok(Hir::silent(HirKind::EmptyList, span));
                 }
 
                 // Check for special forms
@@ -284,7 +284,7 @@ impl<'a> Analyzer<'a> {
                                 return Err(format!("{}: quote requires 1 argument", span));
                             }
                             let value = items[1].to_value(self.symbols);
-                            return Ok(Hir::inert(HirKind::Quote(value), span));
+                            return Ok(Hir::silent(HirKind::Quote(value), span));
                         }
                         "yield" => return self.analyze_yield(items, span),
                         "match" => return self.analyze_match(items, span),
@@ -316,7 +316,7 @@ impl<'a> Analyzer<'a> {
                                 .unwrap()
                                 .register(&keyword)
                                 .map_err(|e| format!("{}: {}", items[1].span, e))?;
-                            return Ok(Hir::inert(HirKind::Keyword(keyword.to_string()), span));
+                            return Ok(Hir::silent(HirKind::Keyword(keyword.to_string()), span));
                         }
 
                         // (doc <symbol>) — if the symbol resolves to a
@@ -369,7 +369,7 @@ impl<'a> Analyzer<'a> {
         let else_branch = if items.len() == 4 {
             self.analyze_expr(&items[3])?
         } else {
-            Hir::inert(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span.clone())
         };
 
         let signal = cond
@@ -390,7 +390,7 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_begin(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::inert(HirKind::Nil, span));
+            return Ok(Hir::silent(HirKind::Nil, span));
         }
 
         // Check if we're inside a function scope
@@ -411,7 +411,7 @@ impl<'a> Analyzer<'a> {
 
             // Pass 2: Analyze all expressions (all bindings now visible)
             let mut exprs = Vec::new();
-            let mut signal = Signal::inert();
+            let mut signal = Signal::silent();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -423,7 +423,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // At top level, sequential semantics are fine
             let mut exprs = Vec::new();
-            let mut signal = Signal::inert();
+            let mut signal = Signal::silent();
 
             for item in items {
                 let hir = self.analyze_expr(item)?;
@@ -531,7 +531,7 @@ impl<'a> Analyzer<'a> {
         let value = if let Some(val_syn) = value_syntax {
             self.analyze_expr(val_syn)?
         } else {
-            Hir::inert(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span.clone())
         };
 
         let signal = value.signal;
@@ -574,7 +574,7 @@ impl<'a> Analyzer<'a> {
         } else {
             // Multiple body forms: wrap in implicit begin
             let mut exprs = Vec::new();
-            let mut signal = Signal::inert();
+            let mut signal = Signal::silent();
             for item in &items[2..] {
                 let hir = self.analyze_expr(item)?;
                 signal = signal.combine(hir.signal);
@@ -609,11 +609,11 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_and(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::inert(HirKind::Bool(true), span));
+            return Ok(Hir::silent(HirKind::Bool(true), span));
         }
 
         let mut exprs = Vec::new();
-        let mut signal = Signal::inert();
+        let mut signal = Signal::silent();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -626,11 +626,11 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_or(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.is_empty() {
-            return Ok(Hir::inert(HirKind::Bool(false), span));
+            return Ok(Hir::silent(HirKind::Bool(false), span));
         }
 
         let mut exprs = Vec::new();
-        let mut signal = Signal::inert();
+        let mut signal = Signal::silent();
 
         for item in items {
             let hir = self.analyze_expr(item)?;
@@ -654,7 +654,7 @@ impl<'a> Analyzer<'a> {
         let env = if items.len() == 3 {
             self.analyze_expr(&items[2])?
         } else {
-            Hir::inert(HirKind::Nil, span.clone())
+            Hir::silent(HirKind::Nil, span.clone())
         };
         let signal = Signal::yields().combine(expr.signal).combine(env.signal);
         Ok(Hir::new(
@@ -693,7 +693,7 @@ impl<'a> Analyzer<'a> {
         }
 
         let mut bindings = Vec::new();
-        let mut signal = Signal::inert();
+        let mut signal = Signal::silent();
 
         for pair_syntax in bindings_syntax {
             let pair = pair_syntax.as_list_or_tuple().ok_or_else(|| {
@@ -731,12 +731,12 @@ impl<'a> Analyzer<'a> {
 
     pub(crate) fn analyze_cond(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if items.len() < 2 {
-            return Ok(Hir::inert(HirKind::Nil, span));
+            return Ok(Hir::silent(HirKind::Nil, span));
         }
 
         let mut clauses = Vec::new();
         let mut else_branch = None;
-        let mut signal = Signal::inert();
+        let mut signal = Signal::silent();
 
         for clause in &items[1..] {
             let parts = clause.as_list_or_tuple().ok_or_else(|| {
@@ -803,10 +803,10 @@ impl<'a> Analyzer<'a> {
         // First segment: resolve as variable
         let first = segments[0];
         let mut result = match self.lookup(first, scopes) {
-            Some(binding) => Hir::inert(HirKind::Var(binding), span.clone()),
+            Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
             None => {
                 let binding = self.resolve_primitive(first);
-                Hir::inert(HirKind::Var(binding), span.clone())
+                Hir::silent(HirKind::Var(binding), span.clone())
             }
         };
 
@@ -815,8 +815,8 @@ impl<'a> Analyzer<'a> {
         // get is a pure primitive with known arity Range(2,3).
         let get_binding = self.resolve_primitive("get");
         for segment in &segments[1..] {
-            let get_func = Hir::inert(HirKind::Var(get_binding), span.clone());
-            let key = Hir::inert(HirKind::Keyword(segment.to_string()), span.clone());
+            let get_func = Hir::silent(HirKind::Var(get_binding), span.clone());
+            let key = Hir::silent(HirKind::Keyword(segment.to_string()), span.clone());
             let call_signal = result.signal;
             result = Hir::new(
                 HirKind::Call {

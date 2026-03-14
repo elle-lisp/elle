@@ -414,7 +414,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/parent",
         func: prim_fiber_parent,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Get the parent fiber, or nil if this is a top-level fiber",
         params: &["fiber"],

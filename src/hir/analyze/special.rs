@@ -19,9 +19,9 @@ impl<'a> Analyzer<'a> {
     /// analyzing the body.
     ///
     /// Forms:
-    /// - `(silence)` — function-level ceiling = inert
+    /// - `(silence)` — function-level ceiling = silent
     /// - `(silence :kw ...)` — function-level ceiling with specific signals
-    /// - `(silence param)` — parameter bound = inert
+    /// - `(silence param)` — parameter bound = silent
     /// - `(silence param :kw ...)` — parameter bound with specific signals
     pub(crate) fn analyze_silence(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
@@ -33,9 +33,9 @@ impl<'a> Analyzer<'a> {
 
         let args = &items[1..];
         if args.is_empty() {
-            // (silence) — function-level ceiling = inert
-            self.current_declared_ceiling = Some(Signal::inert());
-            return Ok(Hir::inert(HirKind::Nil, span));
+            // (silence) — function-level ceiling = silent
+            self.current_declared_ceiling = Some(Signal::silent());
+            return Ok(Hir::silent(HirKind::Nil, span));
         }
 
         match &args[0].kind {
@@ -73,8 +73,8 @@ impl<'a> Analyzer<'a> {
 
                 let keywords = &args[1..];
                 let bound = if keywords.is_empty() {
-                    // (silence param) — bound is inert
-                    Signal::inert()
+                    // (silence param) — bound is silent
+                    Signal::silent()
                 } else {
                     let mut bits = 0u32;
                     for kw_syntax in keywords {
@@ -115,7 +115,7 @@ impl<'a> Analyzer<'a> {
             }
         }
 
-        Ok(Hir::inert(HirKind::Nil, span))
+        Ok(Hir::silent(HirKind::Nil, span))
     }
 
     /// Find a parameter binding by name in the current lambda's params.

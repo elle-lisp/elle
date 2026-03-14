@@ -111,7 +111,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -131,7 +131,7 @@ mod tests {
             template: make_template(),
             env: Rc::new(vec![]),
         };
-        assert_eq!(closure.signal(), Signal::inert());
+        assert_eq!(closure.signal(), Signal::silent());
     }
 
     #[test]
@@ -143,7 +143,7 @@ mod tests {
             num_captures: 2,
             num_params: 3,
             constants: Rc::new(vec![]),
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -168,7 +168,7 @@ mod tests {
             num_captures: 1,
             num_params: 3,
             constants: Rc::new(vec![]),
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -193,7 +193,7 @@ mod tests {
             num_captures: 0,
             num_params: 3,
             constants: Rc::new(vec![]),
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),

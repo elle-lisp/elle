@@ -39,7 +39,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   When a fiber finishes, its entire heap is freed in O(1) — no GC pause, no reference counting.
 
-- **Signals are typed, cooperative flow-control interrupts.** A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up. The compiler infers which functions can emit signals and enforces that inert contexts don't call yielding ones.
+- **Signals are typed, cooperative flow-control interrupts.** A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up. The compiler infers which functions can emit signals and enforces that silent contexts don't call yielding ones.
 
   **Error handling** — a fiber signals an error; the parent catches it:
 
@@ -97,10 +97,10 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Static analysis is a first-class feature.** The compiler performs full binding resolution, capture analysis, signal inference, and lint passes before any code runs. This is not optional tooling bolted on — it is the compilation pipeline. Most Lisps are dynamic; Elle knows at compile time what every binding refers to, what every closure captures, and what signals every function can emit.
 
-- **A sound signal system, inferred not declared.** Every function is automatically classified as `Inert`, `Yields`, or `Polymorphic`. The compiler enforces this: an inert context cannot call a yielding function. No annotations required.
+- **A sound signal system, inferred not declared.** Every function is automatically classified as `Silent`, `Yields`, or `Polymorphic`. The compiler enforces this: an silent context cannot call a yielding function. No annotations required.
 
   ```janet
-  # Inert — inferred automatically
+  # Silent — inferred automatically
   (defn add (a b) (+ a b))
 
   # Yields — inferred from emit call

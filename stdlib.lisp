@@ -11,6 +11,9 @@
 ## - Search: find, find-index, index-of, last-index-of
 ## - Transformation: flatten, group-by, partition, take-while, drop-while
 ## - Struct operations: merge
+## - Stream sinks: stream/for-each, stream/fold, stream/collect, stream/into-array
+## - Stream transforms: stream/map, stream/filter, stream/take, stream/drop, stream/concat, stream/zip, stream/pipe
+## - Stream ports: port/lines, port/chunks, port/writer
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
@@ -719,6 +722,172 @@
       (each k in (keys b) (put result k (get b k)))
       (if (mutable? a) result (freeze result))))))
 
+## ── Stream combinators ─────────────────────────────────────────────
+##
+## Streams are coroutines. A read stream yields values when resumed.
+## Sink combinators consume a stream to completion and return a result.
+## Transform combinators return a new coroutine wrapping a source.
+## Port-to-stream converters return coroutines backed by an open port.
+##
+## All port-backed streams must be consumed inside a scheduler context
+## (ev/spawn or ev/run) because port I/O emits SIG_IO.
+
+(defn stream/for-each [f source]
+  "Apply f to each value yielded by source. Returns nil.
+   Signal is polymorphic in f: if f yields, stream/for-each yields."
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (f (coro/value source))
+    (coro/resume source))
+  nil)
+
+(defn stream/fold [f init source]
+  "Reduce values from source with f, starting from init.
+   Returns the final accumulator value.
+   Signal is polymorphic in f: if f yields, stream/fold yields."
+  (var acc init)
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (assign acc (f acc (coro/value source)))
+    (coro/resume source))
+  acc)
+
+(defn stream/collect [source]
+  "Collect all values yielded by source into a list.
+   Builds in reverse using cons then reverses — O(n).
+   Signal: errors only (no user callback)."
+  (var acc ())
+  (coro/resume source)
+  (while (not (coro/done? source))
+    (assign acc (cons (coro/value source) acc))
+    (coro/resume source))
+  (reverse acc))
+
+(defn stream/into-array [source]
+  "Collect all values yielded by source into a mutable array.
+   Signal: errors only (no user callback)."
+  (let [[result @[]]]
+    (coro/resume source)
+    (while (not (coro/done? source))
+      (push result (coro/value source))
+      (coro/resume source))
+    result))
+
+(defn stream/map [f source]
+  "Return a coroutine that yields (f value) for each value from source.
+   Signal: Silent (may error). f is not called at construction time."
+  (coro/new (fn []
+    (forever
+      (coro/resume source)
+      (if (coro/done? source)
+        (break)
+        (yield (f (coro/value source))))))))
+
+(defn stream/filter [pred source]
+  "Return a coroutine that yields values from source where (pred value) is truthy.
+   Signal: Silent (may error). pred is not called at construction time."
+  (coro/new (fn []
+    (forever
+      (coro/resume source)
+      (when (coro/done? source) (break))
+      (when (pred (coro/value source))
+        (yield (coro/value source)))))))
+
+(defn stream/take [n source]
+  "Return a coroutine that yields at most n values from source.
+   Signal: Silent (may error)."
+  (coro/new (fn []
+    (var remaining n)
+    (forever
+      (when (<= remaining 0) (break))
+      (coro/resume source)
+      (when (coro/done? source) (break))
+      (yield (coro/value source))
+      (assign remaining (- remaining 1))))))
+
+(defn stream/drop [n source]
+  "Return a coroutine that skips n values from source, then yields the rest.
+   Signal: Silent (may error)."
+  (coro/new (fn []
+    (var skipped 0)
+    # Skip n values
+    (while (< skipped n)
+      (coro/resume source)
+      (when (coro/done? source) (break))
+      (assign skipped (+ skipped 1)))
+    # Yield the rest
+    (when (not (coro/done? source))
+      (forever
+        (coro/resume source)
+        (when (coro/done? source) (break))
+        (yield (coro/value source)))))))
+
+(defn stream/concat [& sources]
+  "Return a coroutine that yields all values from each source in order.
+   Dead (pre-exhausted) sources are skipped gracefully.
+   Signal: Silent (may error)."
+  (coro/new (fn []
+    (each src in sources
+      # Guard against resuming an already-dead coroutine — coro/resume
+      # on a dead coroutine is an error, not a no-op.
+      (when (not (coro/done? src))
+        (coro/resume src)
+        (while (not (coro/done? src))
+          (yield (coro/value src))
+          (coro/resume src)))))))
+
+(defn stream/zip [& sources]
+  "Return a coroutine that yields immutable arrays of values, one from each source.
+   Stops when any source is exhausted (shortest-wins semantics).
+   Signal: Silent (may error)."
+  (coro/new (fn []
+    (forever
+      (var done false)
+      (let [[vals (map (fn [s]
+                        (coro/resume s)
+                        (when (coro/done? s) (assign done true))
+                        (coro/value s))
+                      sources)]]
+        (when done (break))
+        (yield (apply array vals)))))))
+
+(defn stream/pipe [source & transforms]
+  "Thread source through each transform function in order.
+   Each transform is (fn [stream] -> stream).
+   Example: (stream/pipe src (partial stream/map f) (partial stream/take 10))
+   Signal: polymorphic in transforms."
+  (fold (fn [s t] (t s)) source transforms))
+
+(defn port/lines [port]
+  "Yields lines from port one at a time. Closes port on exhaustion.
+   Must be called inside a scheduler context (ev/spawn or sync-scheduler)."
+  (coro/new (fn []
+    (forever
+      (let [[line (stream/read-line port)]]
+        (if (nil? line)
+          (begin (port/close port) (break))
+          (yield line)))))))
+
+(defn port/chunks [port size]
+  "Yields byte chunks of `size` from port. Final chunk may be smaller.
+   Must be called inside a scheduler context."
+  (coro/new (fn []
+    (forever
+      (let [[chunk (stream/read port size)]]
+        (if (nil? chunk)
+          (begin (port/close port) (break))
+          (yield chunk)))))))
+
+(defn port/writer [port]
+  "Returns a write-stream coroutine. Resume with a string to write it.
+   Resume with nil to close the port. Must be called inside a scheduler context."
+  (coro/new (fn []
+    (forever
+      (let [[val (yield nil)]]
+        (if (nil? val)
+          (begin (port/close port) (break))
+          (stream/write port val)))))))
+
 ## ── Standard port parameters ────────────────────────────────────────
 
 (def *stdin*  (parameter (port/stdin)))
@@ -906,4 +1075,11 @@
     :sync-scheduler sync-scheduler :*scheduler* *scheduler*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/shutdown ev/shutdown :*shutdown* *shutdown*
-     :merge merge :inc inc :dec dec})
+     :merge merge :inc inc :dec dec
+     :stream/for-each stream/for-each :stream/fold stream/fold
+     :stream/collect stream/collect :stream/into-array stream/into-array
+     :stream/map stream/map :stream/filter stream/filter
+     :stream/take stream/take :stream/drop stream/drop
+     :stream/concat stream/concat :stream/zip stream/zip
+     :stream/pipe stream/pipe
+     :port/lines port/lines :port/chunks port/chunks :port/writer port/writer})

@@ -222,7 +222,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sys/thread-id",
         func: prim_current_thread_id,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return the ID of the current thread",
         params: &[],

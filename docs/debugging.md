@@ -73,9 +73,9 @@ Two namespaces separate concerns: `clock/` for point-in-time readings,
 
 | Primitive | Signature | Returns | Signal | Backing |
 |-----------|-----------|---------|--------|---------|
-| `clock/monotonic` | `(clock/monotonic)` | float | `Signal::inert()` | `std::time::Instant` relative to a process-global epoch |
-| `clock/realtime` | `(clock/realtime)` | float | `Signal::inert()` | `std::time::SystemTime::UNIX_EPOCH` |
-| `clock/cpu` | `(clock/cpu)` | float | `Signal::inert()` | `libc::clock_gettime(CLOCK_THREAD_CPUTIME_ID)` |
+| `clock/monotonic` | `(clock/monotonic)` | float | `Signal::silent()` | `std::time::Instant` relative to a process-global epoch |
+| `clock/realtime` | `(clock/realtime)` | float | `Signal::silent()` | `std::time::SystemTime::UNIX_EPOCH` |
+| `clock/cpu` | `(clock/cpu)` | float | `Signal::silent()` | `libc::clock_gettime(CLOCK_THREAD_CPUTIME_ID)` |
 
 `clock/monotonic` uses a `OnceLock<Instant>` initialized on first call.
 All readings are relative to this epoch, keeping values small and maximizing
@@ -161,7 +161,7 @@ pub struct Signal {
 }
 ```
 
-Constructors: `Signal::inert()`, `Signal::errors()`, `Signal::yields()`,
+Constructors: `Signal::silent()`, `Signal::errors()`, `Signal::yields()`,
 `Signal::yields_errors()`, `Signal::ffi()`, `Signal::polymorphic(n)`,
 `Signal::polymorphic_errors(n)`.
 

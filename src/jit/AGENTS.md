@@ -4,7 +4,7 @@ JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. Functions with `Signal::inert()`
+Compile `LirFunction` to native x86_64 code. Functions with `Signal::silent()`
 or `Signal::yields()` are JIT candidates. Polymorphic functions (where
 `signal.propagates != 0`) are rejected. Yielding functions use side-exit:
 JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
@@ -213,7 +213,7 @@ The signal system and JIT side-exit mechanism enable fibers and JIT to coexist:
 - **JIT-safe fiber primitives**: `fiber/new`, `fiber/status`, `fiber/value`,
   `fiber/bits`, `fiber/mask` have `Signal::errors()` — `may_suspend()` is
   false, so closures calling them can be JIT-compiled. `fiber?` has
-  `Signal::inert()`. These all return `SIG_OK` or `SIG_ERROR`, which
+  `Signal::silent()`. These all return `SIG_OK` or `SIG_ERROR`, which
   `jit_handle_primitive_signal` handles.
 
 - **JIT-excluded fiber primitives**: `fiber/resume` and `emit` have
@@ -279,7 +279,7 @@ No errors are silently swallowed.
 
 1. **Only non-polymorphic functions.** `JitCompiler::compile` returns
    `JitError::Polymorphic` for functions where `signal.propagates != 0` (polymorphic).
-   Functions with `Signal::inert()` or `Signal::yields()` are accepted.
+   Functions with `Signal::silent()` or `Signal::yields()` are accepted.
    Errors (SIG_ERROR) and FFI (SIG_FFI) are fine — they don't require frame
    snapshot/restore.
 

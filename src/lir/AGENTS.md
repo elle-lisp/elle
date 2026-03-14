@@ -136,7 +136,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 10. **Call site metadata is only populated for may_suspend functions.**
      `Emitter.current_func_may_suspend` gates call site recording. For
      non-suspending functions, `call_sites` is empty. This avoids overhead
-     for inert functions that can never yield.
+     for silent functions that can never yield.
 
 9. **Yield point metadata is collected during emission.** `Emitter::emit()`
     returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
@@ -147,7 +147,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 10. **Call site metadata is only populated for may_suspend functions.**
      `Emitter.current_func_may_suspend` gates call site recording. For
      non-suspending functions, `call_sites` is empty. This avoids overhead
-     for inert functions that can never yield.
+     for silent functions that can never yield.
 
 ## Key instructions
 
