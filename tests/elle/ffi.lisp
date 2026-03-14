@@ -348,3 +348,20 @@
 (ffi/defbind getpid libc "getpid" :int @[])
 (def pid (getpid))
 (assert-true (> pid 0) "ffi/defbind zero args")
+
+## ── ffi/signature and ffi/defbind with immutable array arg-types ─
+
+# Regression test for issue #560: ffi/signature must accept immutable arrays.
+
+(def libc (ffi/native nil))
+(ffi/defbind abs libc "abs" :int [:int])
+(assert-eq (abs -42) 42 "ffi/defbind immutable array arg-types")
+
+(def libc (ffi/native nil))
+(def ptr (ffi/lookup libc "abs"))
+(def sig (ffi/signature :int [:int]))
+(assert-eq (ffi/call ptr sig -7) 7 "ffi/signature with immutable array")
+
+(def libc (ffi/native nil))
+(ffi/defbind getpid libc "getpid" :int [])
+(assert-true (> (getpid) 0) "ffi/defbind empty immutable array")

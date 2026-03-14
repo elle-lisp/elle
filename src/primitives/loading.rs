@@ -140,6 +140,8 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
     // Parse argument types from array or list
     let arg_vals = if let Some(arr) = args[1].as_array_mut() {
         arr.borrow().clone()
+    } else if let Some(arr) = args[1].as_array() {
+        arr.to_vec()
     } else {
         match args[1].list_to_vec() {
             Ok(v) => v,
