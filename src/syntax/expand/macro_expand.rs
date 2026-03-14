@@ -1,13 +1,27 @@
 //! Macro call expansion via VM evaluation
 //!
-//! The macro body is compiled and executed in the real VM. Arguments are
-//! wrapped as `Value::syntax(arg)` via `SyntaxLiteral` and bound via `let`.
-//! The result Value is converted back to Syntax via `from_value()`.
+//! Macro call expansion via VM evaluation
 //!
-//! Scope preservation: arguments are wrapped as syntax objects so their
-//! scope sets survive the Value round-trip. `from_value()` unwraps syntax
-//! objects back to Syntax, preserving scopes. `add_scope_recursive` then
-//! stamps the intro scope on the result, including unwrapped argument nodes.
+//! On first invocation, the macro body `(fn (params...) template)` is compiled
+//! and stored in `MacroDef.cached_transformer`. Subsequent invocations skip the
+//! full analyze/lower/emit pipeline and call the cached closure directly via
+//! `VM::call_closure`, passing arguments as `Value`s.
+//!
+//! Scope preservation: atom arguments (nil, bool, int, float, string, keyword)
+//! are passed as their direct `Value` equivalents — they don't participate in
+//! binding resolution and wrapping them as syntax objects would change their
+//! runtime semantics (e.g., `false` wrapped in a syntax object becomes truthy).
+//! Symbols and compound forms are wrapped as `Value::syntax(arg)` to preserve
+//! scope sets through the closure call. `from_value()` unwraps syntax objects
+//! back to `Syntax`, preserving scopes. `add_scope_recursive` then stamps the
+//! intro scope on the result.
+//!
+//! Arena management: two phases with distinct guard scopes. Phase 1 (closure
+//! compilation) has no guard — closures are allocated on HEAP_ARENA via `alloc()`
+//! and a guard would free them. The one-time compilation cost stays in the arena.
+//! Phase 2 (closure call + result conversion) has its own guard that frees the
+//! transient result values after converting to owned Syntax. This keeps the
+//! per-invocation arena cost constant after the first call.
 //!
 //! Known limitations:
 //! - Macros cannot return improper lists (e.g. `(cons 1 2)`). The
@@ -15,27 +29,32 @@
 
 use super::{Expander, MacroDef, SyntaxKind, MAX_MACRO_EXPANSION_DEPTH};
 use crate::symbol::SymbolTable;
-use crate::syntax::{Span, Syntax};
+use crate::syntax::Syntax;
 use crate::value::Value;
 use crate::vm::VM;
 
-/// Wrap a macro argument for binding in the let-expression.
-/// Atoms are quoted to preserve semantics. Symbols and compounds
-/// are wrapped as syntax objects to preserve scope sets.
-fn wrap_macro_arg(arg: &Syntax, span: &Span) -> Syntax {
+/// Convert a macro argument Syntax node directly to a Value for passing
+/// to a cached closure call. Mirrors `wrap_macro_arg` but produces a
+/// `Value` instead of a `Syntax` node.
+///
+/// Atoms become their direct Value equivalents. Symbols and compounds
+/// become `Value::syntax(arg)` to preserve scope sets through the
+/// closure call.
+fn wrap_macro_arg_value(arg: &Syntax) -> Value {
     match &arg.kind {
-        SyntaxKind::Nil
-        | SyntaxKind::Bool(_)
-        | SyntaxKind::Int(_)
-        | SyntaxKind::Float(_)
-        | SyntaxKind::String(_)
-        | SyntaxKind::Keyword(_) => {
-            Syntax::new(SyntaxKind::Quote(Box::new(arg.clone())), span.clone())
+        SyntaxKind::Nil => Value::NIL,
+        SyntaxKind::Bool(b) => {
+            if *b {
+                Value::TRUE
+            } else {
+                Value::FALSE
+            }
         }
-        _ => Syntax::new(
-            SyntaxKind::SyntaxLiteral(Value::syntax(arg.clone())),
-            span.clone(),
-        ),
+        SyntaxKind::Int(n) => Value::int(*n),
+        SyntaxKind::Float(f) => Value::float(*f),
+        SyntaxKind::String(s) => Value::string(s.clone()),
+        SyntaxKind::Keyword(k) => Value::keyword(k),
+        _ => Value::syntax(arg.clone()),
     }
 }
 
@@ -92,80 +111,109 @@ impl Expander {
     ) -> Result<Syntax, String> {
         let span = call_site.span.clone();
 
-        // Mark the heap arena — all allocations until release are temporary.
-        // After from_value() converts the result to owned Syntax, all heap
-        // Values from let_expr construction and eval_syntax are dead.
-        let _arena_guard = crate::value::heap::ArenaGuard::new();
+        // --- Phase 1: Get or compile the transformer closure (no arena guard) ---
+        //
+        // Cache miss: compile `(fn (p1 p2 & rest) template)` via eval_syntax.
+        // Cache hit: clone the cached Value (cheap — Value is Copy, Rc inside).
+        //
+        // No ArenaGuard here: closures are allocated on HEAP_ARENA via `alloc()`.
+        // A guard around `eval_syntax` would release the closure before it can be
+        // stored in the cache. The closure compilation cost (one-time per pipeline
+        // call) is left in the arena; subsequent calls skip this phase entirely.
+        let transformer: Value = {
+            let cached = macro_def.cached_transformer.borrow().clone();
+            if let Some(v) = cached {
+                v
+            } else {
+                // Build the fn parameter list, including rest param if present.
+                let mut param_items: Vec<Syntax> = macro_def
+                    .params
+                    .iter()
+                    .map(|p| Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()))
+                    .collect();
+                if let Some(ref rest_name) = macro_def.rest_param {
+                    param_items.push(Syntax::new(
+                        SyntaxKind::Symbol("&".to_string()),
+                        span.clone(),
+                    ));
+                    param_items.push(Syntax::new(
+                        SyntaxKind::Symbol(rest_name.clone()),
+                        span.clone(),
+                    ));
+                }
+                let params_list = Syntax::new(SyntaxKind::List(param_items), span.clone());
 
-        // Build let-expression: (let ((p1 arg1) (p2 arg2)) body)
-        // Symbols and compound forms are wrapped as Value::syntax(arg) via
-        // SyntaxLiteral to preserve scope sets through the Value round-trip.
-        // Atoms (nil, bool, int, float, string, keyword) are quoted normally —
-        // they don't participate in binding resolution and wrapping them as
-        // syntax objects would change their runtime semantics (e.g., false wrapped
-        // in a syntax object becomes truthy).
-        // Bind fixed params
-        let mut bindings: Vec<Syntax> = macro_def
-            .params
-            .iter()
-            .zip(&args[..macro_def.params.len()])
-            .map(|(param, arg)| {
-                let arg_expr = wrap_macro_arg(arg, &span);
-                Syntax::new(
+                // Build `(fn (params...) template)`.
+                let fn_expr = Syntax::new(
                     SyntaxKind::List(vec![
-                        Syntax::new(SyntaxKind::Symbol(param.clone()), span.clone()),
-                        arg_expr,
+                        Syntax::new(SyntaxKind::Symbol("fn".to_string()), span.clone()),
+                        params_list,
+                        macro_def.template.clone(),
                     ]),
                     span.clone(),
-                )
-            })
-            .collect();
+                );
 
-        // Bind rest param if present
-        if let Some(ref rest_name) = macro_def.rest_param {
-            let rest_args = &args[macro_def.params.len()..];
-            // Build (list arg1 arg2 ...) expression
-            let mut list_elems = vec![Syntax::new(
-                SyntaxKind::Symbol("list".to_string()),
-                span.clone(),
-            )];
-            for arg in rest_args {
-                list_elems.push(wrap_macro_arg(arg, &span));
+                // Compile and execute to obtain the closure Value.
+                let closure_val = crate::pipeline::eval_syntax(fn_expr, self, symbols, vm)?;
+
+                // Store in this MacroDef instance's cache.
+                *macro_def.cached_transformer.borrow_mut() = Some(closure_val);
+
+                // Write back to the original entry in the macro map so that
+                // subsequent expansions within this pipeline call also benefit.
+                // (The CompilationCache's Expander won't see this update, which
+                // is acceptable — the cache warms per pipeline call.)
+                if let Some(original) = self.macros.get_mut(&macro_def.name) {
+                    *original.cached_transformer.borrow_mut() = Some(closure_val);
+                }
+
+                closure_val
             }
-            let list_expr = Syntax::new(SyntaxKind::List(list_elems), span.clone());
-            bindings.push(Syntax::new(
-                SyntaxKind::List(vec![
-                    Syntax::new(SyntaxKind::Symbol(rest_name.clone()), span.clone()),
-                    list_expr,
-                ]),
-                span.clone(),
-            ));
-        }
+        };
 
-        let let_expr = Syntax::new(
-            SyntaxKind::List(vec![
-                Syntax::new(SyntaxKind::Symbol("let".to_string()), span.clone()),
-                Syntax::new(SyntaxKind::List(bindings), span.clone()),
-                macro_def.template.clone(),
-            ]),
-            span.clone(),
-        );
+        // --- Phase 2: Call the closure and convert result (with arena guard) ---
+        //
+        // The arena guard here covers only the transient allocations from calling
+        // the closure and converting the Value result to Syntax. The closure itself
+        // (`transformer`) was allocated in Phase 1 outside this guard's scope, so
+        // it survives the release. This keeps per-invocation arena cost constant.
+        let result_syntax = {
+            let _arena_guard = crate::value::heap::ArenaGuard::new();
 
-        // Compile and execute in the VM
-        let result_value = crate::pipeline::eval_syntax(let_expr, self, symbols, vm)?;
+            // --- Wrap arguments as Values ---
+            let closure = transformer.as_closure().ok_or_else(|| {
+                format!("Macro '{}': transformer is not a closure", macro_def.name)
+            })?;
 
-        // Convert result back to Syntax
-        let result_syntax = Syntax::from_value(&result_value, symbols, span)?;
+            // Collect fixed param arg values.
+            let mut arg_values: Vec<Value> = args[..macro_def.params.len()]
+                .iter()
+                .map(wrap_macro_arg_value)
+                .collect();
 
-        // Release arena — all temp heap objects from this expansion are freed.
-        // Must happen BEFORE expand() recurse, which may trigger more expansions.
-        drop(_arena_guard);
+            // Collect rest args — the closure's arity is AtLeast(n) with a rest param,
+            // and VM's populate_env with VarargKind::List collects remaining args into
+            // an Elle list automatically. Pass them as individual Values.
+            if macro_def.rest_param.is_some() {
+                for arg in &args[macro_def.params.len()..] {
+                    arg_values.push(wrap_macro_arg_value(arg));
+                }
+            }
 
-        // Add intro scope for hygiene
+            // --- Call the cached closure ---
+            let result_value = vm.call_closure(closure, &arg_values)?;
+
+            // --- Convert result back to Syntax ---
+            // Must happen before _arena_guard drops and frees result_value.
+            Syntax::from_value(&result_value, symbols, span.clone())?
+            // _arena_guard drops here, releasing transient allocations.
+        };
+
+        // Add intro scope for hygiene.
         let intro_scope = self.fresh_scope();
         let hygienized = self.add_scope_recursive(result_syntax, intro_scope);
 
-        // Continue expanding the result
+        // Continue expanding the result.
         self.expand(hygienized, symbols, vm)
     }
 }
