@@ -43,18 +43,41 @@ impl Completion {
 }
 
 /// Pending async I/O operation.
-pub(crate) struct PendingOp {
-    pub(crate) op: IoOp,
-    pub(crate) port_key: PortKey,
-    pub(crate) port: Value,
-    pub(crate) buffer_handle: BufferHandle,
-    /// For Accept: which kind of listener (TcpListener or UnixListener).
-    /// Used on completion to create the right stream port type.
-    pub(crate) listener_kind: Option<PortKind>,
-    /// For io_uring Connect: the socket fd created before submitting.
-    /// On CQE success (result_code == 0), this becomes the connected fd.
-    /// For thread pool Connect: set on completion to the fd from TcpStream::connect.
-    pub(crate) connect_fd: Option<RawFd>,
+///
+/// Three variants matching the three port lifecycles:
+/// - `Port`: operates on an existing port (stream I/O, accept, datagram, shutdown)
+/// - `Connect`: creates a new port on completion (no existing port)
+/// - `Sleep`: portless timer
+pub(crate) enum PendingOp {
+    /// Operation on an existing port.
+    Port {
+        op: IoOp,
+        port_key: PortKey,
+        port: Value,
+        buffer_handle: BufferHandle,
+        /// For Accept: which kind of listener (TcpListener or UnixListener).
+        listener_kind: Option<PortKind>,
+    },
+    /// Connect to a remote address. Creates a new port on completion.
+    Connect {
+        addr: ConnectAddr,
+        buffer_handle: BufferHandle,
+        /// io_uring: pre-created socket fd. Thread pool: set to result fd
+        /// on completion. Cleared on connect failure (fd closed).
+        connect_fd: Option<RawFd>,
+    },
+    /// Async timer. No port.
+    Sleep { buffer_handle: BufferHandle },
+}
+
+impl PendingOp {
+    pub(crate) fn buffer_handle(&self) -> BufferHandle {
+        match self {
+            PendingOp::Port { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
+        }
+    }
 }
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -253,13 +276,12 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp {
+                    PendingOp::Port {
                         op: IoOp::Accept,
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind,
-                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -310,7 +332,7 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp {
+                    PendingOp::Port {
                         op: IoOp::SendTo {
                             addr: addr.clone(),
                             port_num: *port_num,
@@ -320,8 +342,6 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
-
-                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -355,14 +375,12 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp {
+                    PendingOp::Port {
                         op: IoOp::RecvFrom { count: *count },
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
-
-                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -396,14 +414,12 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp {
+                    PendingOp::Port {
                         op: IoOp::Shutdown { how: *how },
                         port_key,
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
-
-                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -420,29 +436,12 @@ impl AsyncBackend {
                 match platform {
                     #[cfg(target_os = "linux")]
                     PlatformBackend::Uring(ring) => {
-                        let (op_kind, write_data) = match &request.op {
-                            IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll => (0u8, Vec::new()),
-                            IoOp::Write { data } => {
-                                let bytes = Self::extract_write_bytes(data);
-                                (1u8, bytes)
-                            }
-                            IoOp::Flush => (2u8, Vec::new()),
-                            _ => unreachable!(),
-                        };
-
-                        let read_size = match &request.op {
-                            IoOp::Read { count } => *count,
-                            IoOp::ReadLine | IoOp::ReadAll => 4096,
-                            _ => 0,
-                        };
-
-                        crate::io::uring::submit_uring(
+                        crate::io::uring::submit_uring_stream(
                             ring,
                             id,
                             fd,
-                            op_kind,
-                            &write_data,
-                            read_size,
+                            &request.op,
+                            request.timeout,
                             buffer_pool,
                             buf_handle,
                         )?;
@@ -471,7 +470,7 @@ impl AsyncBackend {
 
                 pending.insert(
                     id,
-                    PendingOp {
+                    PendingOp::Port {
                         op: match &request.op {
                             IoOp::ReadLine => IoOp::ReadLine,
                             IoOp::Read { count } => IoOp::Read { count: *count },
@@ -484,8 +483,6 @@ impl AsyncBackend {
                         port: request.port,
                         buffer_handle: buf_handle,
                         listener_kind: None,
-
-                        connect_fd: None,
                     },
                 );
                 Ok(id)
@@ -537,20 +534,15 @@ impl AsyncBackend {
 
         pending.insert(
             id,
-            PendingOp {
-                op: IoOp::Connect {
-                    addr: match addr {
-                        ConnectAddr::Tcp { addr: host, port } => ConnectAddr::Tcp {
-                            addr: host.clone(),
-                            port: *port,
-                        },
-                        ConnectAddr::Unix { path } => ConnectAddr::Unix { path: path.clone() },
+            PendingOp::Connect {
+                addr: match addr {
+                    ConnectAddr::Tcp { addr: host, port } => ConnectAddr::Tcp {
+                        addr: host.clone(),
+                        port: *port,
                     },
+                    ConnectAddr::Unix { path } => ConnectAddr::Unix { path: path.clone() },
                 },
-                port_key: PortKey::Fd(-1),
-                port: Value::NIL,
                 buffer_handle: buf_handle,
-                listener_kind: None,
                 connect_fd: uring_fd,
             },
         );
@@ -584,14 +576,8 @@ impl AsyncBackend {
 
         pending.insert(
             id,
-            PendingOp {
-                op: IoOp::Sleep { duration },
-                port_key: PortKey::Fd(-1),
-                port: Value::NIL,
+            PendingOp::Sleep {
                 buffer_handle: buf_handle,
-                listener_kind: None,
-
-                connect_fd: None,
             },
         );
         Ok(id)
@@ -726,6 +712,7 @@ impl AsyncBackend {
                     } in raw_completions
                     {
                         if let Some(pending_op) = pending.remove(&id) {
+                            let buf_handle = pending_op.buffer_handle();
                             let c = completion::process_raw_completion(
                                 id,
                                 result_code,
@@ -733,7 +720,7 @@ impl AsyncBackend {
                                 &pending_op,
                                 fd_states,
                                 buffer_pool,
-                                pending_op.buffer_handle,
+                                buf_handle,
                             );
                             completions.push_back(c);
                         }
@@ -748,7 +735,7 @@ impl AsyncBackend {
         Ok(inner.completions.drain(..).collect())
     }
 
-    fn extract_write_bytes(data: &Value) -> Vec<u8> {
+    pub(crate) fn extract_write_bytes(data: &Value) -> Vec<u8> {
         if let Some(s) = data.with_string(|s| s.as_bytes().to_vec()) {
             s
         } else if let Some(b) = data.as_bytes() {
@@ -794,6 +781,7 @@ impl AsyncBackendInner {
                 } in raw
                 {
                     if let Some(pending) = self.pending.remove(&id) {
+                        let buf_handle = pending.buffer_handle();
                         let c = completion::process_raw_completion(
                             id,
                             result_code,
@@ -801,7 +789,7 @@ impl AsyncBackendInner {
                             &pending,
                             &mut self.fd_states,
                             &mut self.buffer_pool,
-                            pending.buffer_handle,
+                            buf_handle,
                         );
                         self.completions.push_back(c);
                     }
@@ -825,9 +813,15 @@ impl AsyncBackendInner {
             if let Some(mut pending) = self.pending.remove(&id) {
                 // Thread pool Connect: result_code is the new fd.
                 // Stash it in connect_fd so the completion handler finds it there.
-                if matches!(pending.op, IoOp::Connect { .. }) && result_code > 0 {
-                    pending.connect_fd = Some(result_code);
+                if let PendingOp::Connect {
+                    ref mut connect_fd, ..
+                } = pending
+                {
+                    if result_code > 0 {
+                        *connect_fd = Some(result_code);
+                    }
                 }
+                let buf_handle = pending.buffer_handle();
                 let c = completion::process_raw_completion(
                     id,
                     result_code,
@@ -835,7 +829,7 @@ impl AsyncBackendInner {
                     &pending,
                     &mut self.fd_states,
                     &mut self.buffer_pool,
-                    pending.buffer_handle,
+                    buf_handle,
                 );
                 self.completions.push_back(c);
             }
@@ -863,7 +857,7 @@ impl AsyncBackendInner {
         let buf_handle = self.buffer_pool.alloc(0);
         self.pending.insert(
             id,
-            PendingOp {
+            PendingOp::Port {
                 op: match op {
                     IoOp::ReadLine => IoOp::ReadLine,
                     IoOp::Read { count } => IoOp::Read { count: *count },
@@ -874,8 +868,6 @@ impl AsyncBackendInner {
                 port: Value::NIL, // stdin has no port Value
                 buffer_handle: buf_handle,
                 listener_kind: None,
-
-                connect_fd: None,
             },
         );
         Ok(id)
@@ -890,7 +882,7 @@ impl AsyncBackendInner {
                 .into_iter()
                 .filter_map(|sc| {
                     if let Some(pending) = self.pending.remove(&sc.id) {
-                        self.buffer_pool.release(pending.buffer_handle);
+                        self.buffer_pool.release(pending.buffer_handle());
                         let c = match sc.result {
                             Ok(data) if data.is_empty() => Completion {
                                 id: sc.id,

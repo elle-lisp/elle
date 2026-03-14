@@ -9,43 +9,51 @@ use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn submit_uring(
+/// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
+pub(super) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: u64,
     fd: RawFd,
-    op_kind: u8,
-    write_data: &[u8],
-    read_size: usize,
+    op: &IoOp,
+    timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
     buf_handle: BufferHandle,
 ) -> Result<(), String> {
     use io_uring::opcode;
     use io_uring::types::Fd;
 
-    let entry = match op_kind {
-        0 => {
-            // Read
+    let entry = match op {
+        IoOp::ReadLine | IoOp::ReadAll => {
             let buf = buffer_pool.get_mut(buf_handle);
-            buf.resize(read_size, 0);
+            buf.resize(4096, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
                 .build()
                 .user_data(id)
         }
-        1 => {
-            // Write — copy data into pool buffer
+        IoOp::Read { count } => {
+            let buf = buffer_pool.get_mut(buf_handle);
+            buf.resize(*count, 0);
+            opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+                .build()
+                .user_data(id)
+        }
+        IoOp::Write { data } => {
+            let bytes = crate::io::aio::AsyncBackend::extract_write_bytes(data);
             let buf = buffer_pool.get_mut(buf_handle);
             buf.clear();
-            buf.extend_from_slice(write_data);
+            buf.extend_from_slice(&bytes);
             opcode::Write::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
                 .build()
                 .user_data(id)
         }
-        2 => {
-            // Fsync
-            opcode::Fsync::new(Fd(fd)).build().user_data(id)
-        }
-        _ => return Err("io/submit: unknown operation kind".into()),
+        IoOp::Flush => opcode::Fsync::new(Fd(fd)).build().user_data(id),
+        _ => return Err(format!("io/submit: unexpected stream op {:?}", op)),
+    };
+
+    let entry = if timeout.is_some() {
+        entry.flags(io_uring::squeue::Flags::IO_LINK)
+    } else {
+        entry
     };
 
     unsafe {
@@ -53,6 +61,21 @@ pub(super) fn submit_uring(
             .push(&entry)
             .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
     }
+
+    if let Some(dur) = timeout {
+        let ts = io_uring::types::Timespec::new()
+            .sec(dur.as_secs())
+            .nsec(dur.subsec_nanos());
+        let timeout_sqe = opcode::LinkTimeout::new(&ts)
+            .build()
+            .user_data(id | TIMEOUT_USER_DATA_TAG);
+        unsafe {
+            ring.submission()
+                .push(&timeout_sqe)
+                .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+        }
+    }
+
     ring.submit()
         .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
     Ok(())
@@ -491,10 +514,15 @@ pub(super) fn drain_cqes(
         let id = user_data;
         if let Some(mut pending_op) = pending.remove(&id) {
             // Connect: on failure, close the pre-created socket.
-            if let Some(fd) = pending_op.connect_fd {
-                if result_code < 0 {
-                    unsafe { libc::close(fd) };
-                    pending_op.connect_fd = None;
+            if let PendingOp::Connect {
+                ref mut connect_fd, ..
+            } = pending_op
+            {
+                if let Some(fd) = *connect_fd {
+                    if result_code < 0 {
+                        unsafe { libc::close(fd) };
+                        *connect_fd = None;
+                    }
                 }
             }
 
@@ -507,38 +535,42 @@ pub(super) fn drain_cqes(
             // Extract the sockaddr and payload, encode as:
             //   addr_len(4 LE) + sockaddr_storage + payload
             // to match the thread pool format expected by completion.rs.
-            let data = match &pending_op.op {
-                IoOp::RecvFrom { .. } if result_code > 0 => {
-                    let msghdr_size = std::mem::size_of::<libc::msghdr>();
-                    let iovec_size = std::mem::size_of::<libc::iovec>();
-                    let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
-                    let buf = buffer_pool.get_mut(pending_op.buffer_handle);
+            let buf_handle = pending_op.buffer_handle();
+            let data = match &pending_op {
+                PendingOp::Port { op, .. } => match op {
+                    IoOp::RecvFrom { .. } if result_code > 0 => {
+                        let msghdr_size = std::mem::size_of::<libc::msghdr>();
+                        let iovec_size = std::mem::size_of::<libc::iovec>();
+                        let sockaddr_size = std::mem::size_of::<libc::sockaddr_storage>();
+                        let buf = buffer_pool.get_mut(buf_handle);
 
-                    // Read actual address length from msghdr (kernel updates msg_namelen)
-                    let addr_len = unsafe {
-                        let msg_ptr = buf.as_ptr() as *const libc::msghdr;
-                        (*msg_ptr).msg_namelen
-                    };
+                        // Read actual address length from msghdr (kernel updates msg_namelen)
+                        let addr_len = unsafe {
+                            let msg_ptr = buf.as_ptr() as *const libc::msghdr;
+                            (*msg_ptr).msg_namelen
+                        };
 
-                    // Extract sockaddr_storage bytes
-                    let sa_start = msghdr_size + iovec_size;
-                    let sa_bytes = buf[sa_start..sa_start + sockaddr_size].to_vec();
+                        // Extract sockaddr_storage bytes
+                        let sa_start = msghdr_size + iovec_size;
+                        let sa_bytes = buf[sa_start..sa_start + sockaddr_size].to_vec();
 
-                    // Extract payload bytes (result_code = bytes received)
-                    let data_start = msghdr_size + iovec_size + sockaddr_size;
-                    let payload = buf[data_start..data_start + result_code as usize].to_vec();
+                        // Extract payload bytes (result_code = bytes received)
+                        let data_start = msghdr_size + iovec_size + sockaddr_size;
+                        let payload = buf[data_start..data_start + result_code as usize].to_vec();
 
-                    // Encode in thread pool format: addr_len(4 LE) + sockaddr_storage + payload
-                    let mut encoded = Vec::with_capacity(4 + sockaddr_size + payload.len());
-                    encoded.extend_from_slice(&addr_len.to_le_bytes());
-                    encoded.extend_from_slice(&sa_bytes);
-                    encoded.extend_from_slice(&payload);
-                    encoded
-                }
-                IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll if result_code > 0 => {
-                    let buf = buffer_pool.get_mut(pending_op.buffer_handle);
-                    buf[..result_code as usize].to_vec()
-                }
+                        // Encode in thread pool format: addr_len(4 LE) + sockaddr_storage + payload
+                        let mut encoded = Vec::with_capacity(4 + sockaddr_size + payload.len());
+                        encoded.extend_from_slice(&addr_len.to_le_bytes());
+                        encoded.extend_from_slice(&sa_bytes);
+                        encoded.extend_from_slice(&payload);
+                        encoded
+                    }
+                    IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll if result_code > 0 => {
+                        let buf = buffer_pool.get_mut(buf_handle);
+                        buf[..result_code as usize].to_vec()
+                    }
+                    _ => Vec::new(),
+                },
                 _ => Vec::new(),
             };
             let completion = process_raw_completion(
@@ -548,7 +580,7 @@ pub(super) fn drain_cqes(
                 &pending_op,
                 fd_states,
                 buffer_pool,
-                pending_op.buffer_handle,
+                buf_handle,
             );
             completions.push_back(completion);
         }

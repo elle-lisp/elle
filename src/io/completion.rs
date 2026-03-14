@@ -22,166 +22,193 @@ pub(super) fn process_raw_completion(
     // Release the buffer back to the pool
     buffer_pool.release(buf_handle);
 
-    // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
-    // Both are success for a timer.
-    if matches!(pending.op, IoOp::Sleep { .. }) {
-        return Completion {
-            id,
-            result: Ok(Value::NIL),
-        };
-    }
-
-    if result_code < 0 {
-        // Error
-        let errno = -result_code;
-        // Check for timeout (ECANCELED = 125 on Linux)
-        let is_timeout = errno == 125; // ECANCELED
-        let msg = if is_timeout {
-            "I/O operation timed out".to_string()
-        } else {
-            format!("I/O error: errno {}", errno)
-        };
-        let error_type = if is_timeout { "timeout" } else { "io-error" };
-        let state = fd_states
-            .entry(pending.port_key.clone())
-            .or_insert_with(FdState::new);
-        state.status = FdStatus::Error(msg.clone());
-        Completion {
-            id,
-            result: Err(error_val(error_type, msg)),
+    match pending {
+        PendingOp::Sleep { .. } => {
+            // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
+            // Both are success for a timer.
+            Completion {
+                id,
+                result: Ok(Value::NIL),
+            }
         }
-    } else if result_code == 0
-        && matches!(
-            pending.op,
-            IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll
-        )
-    {
-        // EOF for read operations
-        let state = fd_states
-            .entry(pending.port_key.clone())
-            .or_insert_with(FdState::new);
-        state.status = FdStatus::Eof;
-        Completion {
-            id,
-            result: Ok(Value::NIL),
+        PendingOp::Connect {
+            addr, connect_fd, ..
+        } => {
+            if result_code < 0 {
+                let errno = -result_code;
+                let is_timeout = errno == 125;
+                let msg = if is_timeout {
+                    "I/O operation timed out".to_string()
+                } else {
+                    format!("I/O error: errno {}", errno)
+                };
+                let error_type = if is_timeout { "timeout" } else { "io-error" };
+                return Completion {
+                    id,
+                    result: Err(error_val(error_type, msg)),
+                };
+            }
+            // Connect: fd and address come from PendingOp (set at submission time).
+            // io_uring: connect_fd = pre-created socket, result_code = 0.
+            // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
+            let fd = connect_fd.expect("Connect completion without connect_fd");
+            let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+            let peer_addr = match addr {
+                ConnectAddr::Tcp { addr: host, port } => format!("{}:{}", host, port),
+                ConnectAddr::Unix { path } => path.clone(),
+            };
+            let new_port = match addr {
+                ConnectAddr::Tcp { .. } => Port::new_tcp_stream(fd, peer_addr),
+                ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
+            };
+            Completion {
+                id,
+                result: Ok(Value::external("port", new_port)),
+            }
         }
-    } else {
-        // Success
-        let value = match &pending.op {
-            IoOp::ReadLine => {
-                // Per-fd buffering: append raw data, extract one line.
+        PendingOp::Port {
+            op,
+            port_key,
+            port,
+            listener_kind,
+            ..
+        } => {
+            if result_code < 0 {
+                // Error
+                let errno = -result_code;
+                let is_timeout = errno == 125; // ECANCELED
+                let msg = if is_timeout {
+                    "I/O operation timed out".to_string()
+                } else {
+                    format!("I/O error: errno {}", errno)
+                };
+                let error_type = if is_timeout { "timeout" } else { "io-error" };
                 let state = fd_states
-                    .entry(pending.port_key.clone())
+                    .entry(port_key.clone())
                     .or_insert_with(FdState::new);
-                state.buffer.extend_from_slice(&data);
+                state.status = FdStatus::Error(msg.clone());
+                return Completion {
+                    id,
+                    result: Err(error_val(error_type, msg)),
+                };
+            }
 
-                if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
-                    let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
-                    let s = String::from_utf8_lossy(&line_bytes);
-                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                    Value::string(trimmed)
-                } else {
-                    // No newline — partial line at EOF. Drain everything.
-                    let all: Vec<u8> = state.buffer.drain(..).collect();
-                    let s = String::from_utf8_lossy(&all);
-                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                    Value::string(trimmed)
-                }
+            if result_code == 0 && matches!(op, IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll)
+            {
+                // EOF for read operations
+                let state = fd_states
+                    .entry(port_key.clone())
+                    .or_insert_with(FdState::new);
+                state.status = FdStatus::Eof;
+                return Completion {
+                    id,
+                    result: Ok(Value::NIL),
+                };
             }
-            IoOp::Read { .. } | IoOp::ReadAll => {
-                // Check port encoding
-                if let Some(port) = pending.port.as_external::<Port>() {
-                    match port.encoding() {
-                        Encoding::Text => {
-                            let s = String::from_utf8_lossy(&data);
-                            Value::string(s.as_ref())
-                        }
-                        Encoding::Binary => Value::bytes(data),
+
+            // Success
+            let value = match op {
+                IoOp::ReadLine => {
+                    // Per-fd buffering: append raw data, extract one line.
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    state.buffer.extend_from_slice(&data);
+
+                    if let Some(pos) = state.buffer.iter().position(|&b| b == b'\n') {
+                        let line_bytes: Vec<u8> = state.buffer.drain(..=pos).collect();
+                        let s = String::from_utf8_lossy(&line_bytes);
+                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
+                        Value::string(trimmed)
+                    } else {
+                        // No newline — partial line at EOF. Drain everything.
+                        let all: Vec<u8> = state.buffer.drain(..).collect();
+                        let s = String::from_utf8_lossy(&all);
+                        let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
+                        Value::string(trimmed)
                     }
-                } else {
-                    Value::string(String::from_utf8_lossy(&data).as_ref())
                 }
-            }
-            IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
-            IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
-            IoOp::Accept => {
-                // Accept: result_code is the new fd (from both io_uring and thread pool).
-                // Peer address is obtained via getpeername() — works uniformly.
-                let fd = result_code;
-                let peer_addr = crate::io::sockaddr::peer_address(fd);
-                let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-                let new_port = match pending.listener_kind {
-                    Some(PortKind::TcpListener) => Port::new_tcp_stream(fd, peer_addr),
-                    Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
-                    _ => {
+                IoOp::Read { .. } | IoOp::ReadAll => {
+                    // Check port encoding
+                    if let Some(p) = port.as_external::<Port>() {
+                        match p.encoding() {
+                            Encoding::Text => {
+                                let s = String::from_utf8_lossy(&data);
+                                Value::string(s.as_ref())
+                            }
+                            Encoding::Binary => Value::bytes(data),
+                        }
+                    } else {
+                        Value::string(String::from_utf8_lossy(&data).as_ref())
+                    }
+                }
+                IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
+                IoOp::Flush | IoOp::Shutdown { .. } | IoOp::Sleep { .. } => Value::NIL,
+                IoOp::Accept => {
+                    // Accept: result_code is the new fd (from both io_uring and thread pool).
+                    // Peer address is obtained via getpeername() — works uniformly.
+                    let fd = result_code;
+                    let peer_addr = crate::io::sockaddr::peer_address(fd);
+                    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+                    let new_port = match listener_kind {
+                        Some(PortKind::TcpListener) => Port::new_tcp_stream(fd, peer_addr),
+                        Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
+                        _ => {
+                            return Completion {
+                                id,
+                                result: Err(error_val("io-error", "invalid listener kind")),
+                            };
+                        }
+                    };
+                    Value::external("port", new_port)
+                }
+                IoOp::Connect { .. } => {
+                    // Connect ops use PendingOp::Connect, not PendingOp::Port
+                    unreachable!("Connect should use PendingOp::Connect variant")
+                }
+                IoOp::RecvFrom { .. } => {
+                    // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
+                    if data.len() < 4 {
                         return Completion {
                             id,
-                            result: Err(error_val("io-error", "invalid listener kind")),
+                            result: Err(error_val("io-error", "invalid recvfrom data")),
                         };
                     }
-                };
-                Value::external("port", new_port)
-            }
-            IoOp::Connect { addr } => {
-                // Connect: fd and address come from PendingOp (set at submission time).
-                // io_uring: connect_fd = pre-created socket, result_code = 0.
-                // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
-                let fd = pending
-                    .connect_fd
-                    .expect("Connect completion without connect_fd");
-                let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-                let peer_addr = match addr {
-                    ConnectAddr::Tcp { addr: host, port } => format!("{}:{}", host, port),
-                    ConnectAddr::Unix { path } => path.clone(),
-                };
-                let new_port = match addr {
-                    ConnectAddr::Tcp { .. } => Port::new_tcp_stream(fd, peer_addr),
-                    ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
-                };
-                Value::external("port", new_port)
-            }
-            IoOp::RecvFrom { .. } => {
-                // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
-                if data.len() < 4 {
-                    return Completion {
-                        id,
-                        result: Err(error_val("io-error", "invalid recvfrom data")),
+                    let addr_len =
+                        u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
+                    let addr_offset = 4 + std::mem::size_of::<libc::sockaddr_storage>();
+                    if data.len() < addr_offset {
+                        return Completion {
+                            id,
+                            result: Err(error_val("io-error", "invalid recvfrom data")),
+                        };
+                    }
+                    let addr_bytes = &data[4..4 + std::mem::size_of::<libc::sockaddr_storage>()];
+                    let addr_storage = unsafe {
+                        let mut storage: libc::sockaddr_storage = std::mem::zeroed();
+                        std::ptr::copy_nonoverlapping(
+                            addr_bytes.as_ptr(),
+                            &mut storage as *mut _ as *mut u8,
+                            std::mem::size_of::<libc::sockaddr_storage>(),
+                        );
+                        storage
                     };
-                }
-                let addr_len =
-                    u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
-                let addr_offset = 4 + std::mem::size_of::<libc::sockaddr_storage>();
-                if data.len() < addr_offset {
-                    return Completion {
-                        id,
-                        result: Err(error_val("io-error", "invalid recvfrom data")),
-                    };
-                }
-                let addr_bytes = &data[4..4 + std::mem::size_of::<libc::sockaddr_storage>()];
-                let addr_storage = unsafe {
-                    let mut storage: libc::sockaddr_storage = std::mem::zeroed();
-                    std::ptr::copy_nonoverlapping(
-                        addr_bytes.as_ptr(),
-                        &mut storage as *mut _ as *mut u8,
-                        std::mem::size_of::<libc::sockaddr_storage>(),
+                    let (addr_str, port_num) = crate::io::sockaddr::parse(&addr_storage, addr_len);
+                    let payload = data[addr_offset..].to_vec();
+                    let mut fields = std::collections::BTreeMap::new();
+                    fields.insert(TableKey::Keyword("data".into()), Value::bytes(payload));
+                    fields.insert(TableKey::Keyword("addr".into()), Value::string(addr_str));
+                    fields.insert(
+                        TableKey::Keyword("port".into()),
+                        Value::int(port_num as i64),
                     );
-                    storage
-                };
-                let (addr_str, port_num) = crate::io::sockaddr::parse(&addr_storage, addr_len);
-                let payload = data[addr_offset..].to_vec();
-                let mut fields = std::collections::BTreeMap::new();
-                fields.insert(TableKey::Keyword("data".into()), Value::bytes(payload));
-                fields.insert(TableKey::Keyword("addr".into()), Value::string(addr_str));
-                fields.insert(
-                    TableKey::Keyword("port".into()),
-                    Value::int(port_num as i64),
-                );
-                Value::struct_from(fields)
+                    Value::struct_from(fields)
+                }
+            };
+            Completion {
+                id,
+                result: Ok(value),
             }
-        };
-        Completion {
-            id,
-            result: Ok(value),
         }
     }
 }
