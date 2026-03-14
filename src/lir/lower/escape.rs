@@ -36,7 +36,7 @@
 use std::collections::HashSet;
 
 use super::Lowerer;
-use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind};
+use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
 use crate::lir::intrinsics::IntrinsicOp;
 use crate::lir::types::BinOp;
 
@@ -88,10 +88,31 @@ impl Lowerer {
 
             HirKind::Begin(exprs) => {
                 // Empty begin produces nil (an immediate)
-                match exprs.last() {
-                    Some(last) => self.result_is_safe(last, scope_bindings),
-                    None => true,
+                let Some(last) = exprs.last() else {
+                    return true;
+                };
+                // Destructure nodes that precede the last expression bind
+                // variables to values produced by StructRest and similar
+                // operations — all of which are heap-allocated inside the
+                // current scope. Track these bindings so that a Var
+                // referencing one is not mistaken for an outer (pre-scope)
+                // binding.
+                //
+                // We use a sentinel Hir (a string literal) whose
+                // result_is_safe is false, representing "heap-allocated
+                // inside the scope". The String variant is chosen purely
+                // because result_is_safe already returns false for it.
+                let sentinel = Hir::silent(
+                    HirKind::String(String::new()),
+                    crate::syntax::Span::synthetic(),
+                );
+                let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
+                for expr in &exprs[..exprs.len() - 1] {
+                    if let HirKind::Destructure { pattern, .. } = &expr.kind {
+                        collect_destructure_bindings(pattern, &sentinel, &mut extended);
+                    }
                 }
+                self.result_is_safe(last, &extended)
             }
 
             HirKind::Cond {
@@ -770,5 +791,59 @@ impl Lowerer {
         let mut inner_blocks = HashSet::new();
         body.iter()
             .any(|e| Self::walk_for_escaping_break(e, &mut inner_blocks))
+    }
+}
+
+/// Collect all `Var` bindings introduced by a `Destructure` pattern into
+/// `out`, each paired with `sentinel` as its "init" expression.
+///
+/// Used by `result_is_safe` to track pattern-bound variables produced by
+/// `Destructure` nodes within a `Begin` body. These bindings receive heap-
+/// allocated values (e.g. from `StructRest`) inside the current scope, so
+/// they are not safe to return from a scope-allocated `let`.
+fn collect_destructure_bindings<'a>(
+    pattern: &HirPattern,
+    sentinel: &'a Hir,
+    out: &mut Vec<(Binding, &'a Hir)>,
+) {
+    match pattern {
+        HirPattern::Var(b) => out.push((*b, sentinel)),
+        HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
+        HirPattern::Cons { head, tail } => {
+            collect_destructure_bindings(head, sentinel, out);
+            collect_destructure_bindings(tail, sentinel, out);
+        }
+        HirPattern::List { elements, rest }
+        | HirPattern::Tuple { elements, rest }
+        | HirPattern::Array { elements, rest } => {
+            for p in elements {
+                collect_destructure_bindings(p, sentinel, out);
+            }
+            if let Some(r) = rest {
+                collect_destructure_bindings(r, sentinel, out);
+            }
+        }
+        HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
+            for (_, p) in entries {
+                collect_destructure_bindings(p, sentinel, out);
+            }
+            if let Some(r) = rest {
+                collect_destructure_bindings(r, sentinel, out);
+            }
+        }
+        HirPattern::NamedStruct { entries } => {
+            for (_, p) in entries {
+                collect_destructure_bindings(p, sentinel, out);
+            }
+        }
+        HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
+            collect_destructure_bindings(binding, sentinel, out);
+        }
+        HirPattern::Or(alternatives) => {
+            // All alternatives bind the same variables; collect from the first
+            if let Some(first) = alternatives.first() {
+                collect_destructure_bindings(first, sentinel, out);
+            }
+        }
     }
 }
