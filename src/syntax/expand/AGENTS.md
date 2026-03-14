@@ -23,7 +23,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Expander` | Main struct that expands macros |
-| `MacroDef` | Macro definition (name, params, rest_param, template, definition_scope) |
+| `MacroDef` | Macro definition (name, params, rest_param, template, definition_scope, cached_transformer) |
 
 ## Data flow
 
@@ -156,9 +156,16 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 
 6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed to the macro body, which is compiled and executed in the real VM via `pipeline::eval_syntax()`. The result Value is converted back to Syntax via `from_value()`. Macros must use quasiquote to return code templates.
 
-7. **Qualified symbols pass through expansion unchanged.** `module:name` is recognized by the lexer as a single token. The Expander does not transform it. The Analyzer desugars it to nested `get` calls.
+7. **Cached transformer is populated on first use, per pipeline call.**
+   `MacroDef.cached_transformer` holds the compiled `(fn (params...) template)`
+   closure after first expansion. Cloning `MacroDef` copies the `Value` (cheap;
+   it's `Copy` and the closure's heap data is `Rc`). The original in the
+   `CompilationCache` does NOT see the update (different `RefCell`) — the
+   cache warms per pipeline call, not globally. This is by design.
 
-8. **Expansion depth is bounded.** Max 200 levels to prevent infinite expansion. If exceeded, compilation fails with "macro expansion depth exceeded" error.
+8. **Qualified symbols pass through expansion unchanged.** `module:name` is recognized by the lexer as a single token. The Expander does not transform it. The Analyzer desugars it to nested `get` calls.
+
+9. **Expansion depth is bounded.** Max 200 levels to prevent infinite expansion. If exceeded, compilation fails with "macro expansion depth exceeded" error.
 
 ## When to modify
 

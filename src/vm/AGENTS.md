@@ -337,7 +337,7 @@ to see parent-established parameter bindings.
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
 | `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
-| `call.rs` | ~683 | Call, TailCall, environment building |
+| `call.rs` | ~683 | Call, TailCall, environment building, `call_closure` macro helper |
 | `jit_entry.rs` | ~282 | JIT compilation profiling, dispatch, batch compilation |
 | `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/scope-stats, arena/fiber-stats, arena/allocs), re-entrant thunk execution |
 | `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |

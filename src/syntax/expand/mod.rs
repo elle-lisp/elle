@@ -9,6 +9,7 @@ mod tests;
 use super::{ScopeId, Span, Syntax, SyntaxKind};
 use crate::symbol::SymbolTable;
 use crate::vm::VM;
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 /// Maximum macro expansion depth before erroring (prevents infinite expansion)
@@ -23,6 +24,12 @@ pub struct MacroDef {
     pub template: Syntax,
     #[allow(dead_code)] // set during construction; read access planned for hygiene
     pub(crate) definition_scope: ScopeId,
+    /// Cached compiled transformer closure. Populated on first expansion.
+    /// The Value is a closure compiled from `(fn (params...) template)`.
+    /// `RefCell` enables interior mutation while `MacroDef` is held as `&`.
+    /// Cloning copies the inner `Value` (cheap — `Value` is `Copy`, closure
+    /// heap data is `Rc`). Clones get a fresh `RefCell` with the same closure.
+    pub(crate) cached_transformer: RefCell<Option<crate::value::Value>>,
 }
 
 /// Hygienic macro expander
@@ -228,6 +235,7 @@ impl Expander {
             rest_param,
             template,
             definition_scope: ScopeId(0), // Top-level scope
+            cached_transformer: RefCell::new(None),
         };
 
         self.define_macro(macro_def);
