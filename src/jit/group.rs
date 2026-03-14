@@ -146,14 +146,18 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
         for spanned in &bb.instructions {
             match &spanned.instr {
                 LirInstr::MakeClosure { .. }
-                | LirInstr::CarOrNil { .. }
-                | LirInstr::CdrOrNil { .. }
-                | LirInstr::ArrayMutRefOrNil { .. }
+                | LirInstr::CarDestructure { .. }
+                | LirInstr::CdrDestructure { .. }
+                | LirInstr::ArrayMutRefDestructure { .. }
                 | LirInstr::ArrayMutSliceFrom { .. }
                 | LirInstr::IsArrayMut { .. }
                 | LirInstr::IsTable { .. }
                 | LirInstr::ArrayMutLen { .. }
                 | LirInstr::TableGetOrNil { .. }
+                | LirInstr::TableGetDestructure { .. }
+                | LirInstr::CarOrNil { .. }
+                | LirInstr::CdrOrNil { .. }
+                | LirInstr::ArrayMutRefOrNil { .. }
                 | LirInstr::Eval { .. } => return true,
                 _ => {}
             }

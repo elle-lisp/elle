@@ -165,17 +165,27 @@ impl fmt::Display for LirInstr {
             LirInstr::LoadLBox { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
             LirInstr::StoreLBox { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
-            // === Destructuring (silent nil) ===
-            LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
-            LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
-                write!(f, "{} ← {}[{}]?", dst, src, index)
+            // === Destructuring ===
+            LirInstr::CarDestructure { dst, src } => write!(f, "{} ← car!({})", dst, src),
+            LirInstr::CdrDestructure { dst, src } => write!(f, "{} ← cdr!({})", dst, src),
+            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+                write!(f, "{} ← {}[{}]!", dst, src, index)
             }
             LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 write!(f, "{} ← {}[{}..]", dst, src, index)
             }
             LirInstr::TableGetOrNil { dst, src, key } => {
                 write!(f, "{} ← {}.{}?", dst, src, key)
+            }
+            LirInstr::TableGetDestructure { dst, src, key } => {
+                write!(f, "{} ← {}.{}!", dst, src, key)
+            }
+
+            // === Silent destructuring (parameter context) ===
+            LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
+            LirInstr::CdrOrNil { dst, src } => write!(f, "{} ← cdr?({})", dst, src),
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+                write!(f, "{} ← {}[{}]?", dst, src, index)
             }
 
             // === Coroutines ===
@@ -370,13 +380,13 @@ mod tests {
         assert_eq!(
             format!(
                 "{}",
-                LirInstr::ArrayMutRefOrNil {
+                LirInstr::ArrayMutRefDestructure {
                     dst: Reg(2),
                     src: Reg(0),
                     index: 1
                 }
             ),
-            "r2 ← r0[1]?"
+            "r2 ← r0[1]!"
         );
         assert_eq!(
             format!(
@@ -388,6 +398,17 @@ mod tests {
                 }
             ),
             "r3 ← r0.:name?"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                LirInstr::TableGetDestructure {
+                    dst: Reg(3),
+                    src: Reg(0),
+                    key: LirConst::Keyword("name".into())
+                }
+            ),
+            "r3 ← r0.:name!"
         );
     }
 

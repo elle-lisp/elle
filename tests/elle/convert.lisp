@@ -3,9 +3,8 @@
 # Helper for asserting errors
 (defn assert-err [thunk msg]
   "Assert that (thunk) signals an error"
-  (let ([result (try (begin (thunk) :no-error)
-                  (catch (e) :got-error))])
-    (assert-eq result :got-error msg)))
+  (let (([ok? _] (protect (thunk))))
+    (assert (not ok?) msg)))
 
 # ============================================================================
 # Conversion primitive tests

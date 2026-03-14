@@ -214,58 +214,113 @@ pub(crate) fn handle_array_set(vm: &mut VM) {
     vm.fiber.stack.push(val);
 }
 
-/// Car with silent nil: returns nil if not a cons cell.
-/// Used by destructuring — missing values become nil, no errors.
-pub(crate) fn handle_car_or_nil(vm: &mut VM) {
+/// Car for destructuring: signals error if not a cons cell.
+pub(crate) fn handle_car_destructure(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CarOrNil");
+        .expect("VM bug: Stack underflow on CarDestructure");
     match val.as_cons() {
         Some(cons) => vm.fiber.stack.push(cons.first),
-        None => vm.fiber.stack.push(Value::NIL),
+        None => {
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("destructuring: expected list, got {}", val.type_name()),
+                ),
+            ));
+            vm.fiber.stack.push(Value::NIL);
+        }
     }
 }
 
-/// Cdr with silent empty-list: returns EMPTY_LIST if not a cons cell.
-/// Used by destructuring — rest of an exhausted list is empty list, not nil.
-pub(crate) fn handle_cdr_or_nil(vm: &mut VM) {
+/// Cdr for destructuring: signals error if not a cons cell.
+pub(crate) fn handle_cdr_destructure(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on CdrOrNil");
+        .expect("VM bug: Stack underflow on CdrDestructure");
     match val.as_cons() {
         Some(cons) => vm.fiber.stack.push(cons.rest),
-        None => vm.fiber.stack.push(Value::EMPTY_LIST),
+        None => {
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("destructuring: expected list, got {}", val.type_name()),
+                ),
+            ));
+            vm.fiber.stack.push(Value::EMPTY_LIST);
+        }
     }
 }
 
-/// Indexed ref with silent nil: returns nil if out of bounds or not an array.
+/// Array ref for destructuring: signals error if not an array or out of bounds.
 /// Operand: u16 index (immediate, read from bytecode).
-/// Used by destructuring — missing values become nil, no errors.
-pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+pub(crate) fn handle_array_ref_destructure(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
-    let result = if let Some(vec_ref) = val.as_array_mut() {
-        vec_ref.borrow().get(index).copied()
+        .expect("VM bug: Stack underflow on ArrayMutRefDestructure");
+    if let Some(vec_ref) = val.as_array_mut() {
+        let borrowed = vec_ref.borrow();
+        match borrowed.get(index).copied() {
+            Some(v) => vm.fiber.stack.push(v),
+            None => {
+                vm.fiber.signal = Some((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "destructuring: array index {} out of bounds (length {})",
+                            index,
+                            borrowed.len()
+                        ),
+                    ),
+                ));
+                vm.fiber.stack.push(Value::NIL);
+            }
+        }
     } else if let Some(elems) = val.as_array() {
-        elems.get(index).copied()
+        match elems.get(index).copied() {
+            Some(v) => vm.fiber.stack.push(v),
+            None => {
+                vm.fiber.signal = Some((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "destructuring: array index {} out of bounds (length {})",
+                            index,
+                            elems.len()
+                        ),
+                    ),
+                ));
+                vm.fiber.stack.push(Value::NIL);
+            }
+        }
     } else {
-        None
-    };
-    vm.fiber.stack.push(result.unwrap_or(Value::NIL));
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+    }
 }
 
-/// Slice from index with silent nil: returns sub-array from index to end.
+/// Array slice from index for destructuring: returns sub-array from index to end.
 /// Works on both arrays and @arrays; result type matches input type.
+/// Empty slice (index >= length) is valid. Signals error on wrong type.
 /// Operand: u16 index (immediate, read from bytecode).
-/// Used by & rest destructuring — collects remaining elements.
+/// Used by & rest destructuring.
 pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
     let index = vm.read_u16(bytecode, ip) as usize;
     let val = vm
@@ -287,14 +342,22 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
             Value::array(vec![])
         }
     } else {
-        Value::array_mut(vec![])
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+        return;
     };
     vm.fiber.stack.push(result);
 }
 
 /// Table/struct get with silent nil: returns nil if key missing or wrong type.
+/// Used by pattern matching (match) — absent keys are valid there.
 /// Operand: u16 constant pool index (keyword key).
-/// Used by destructuring — missing keys become nil, no errors.
 pub(crate) fn handle_table_get_or_nil(
     vm: &mut VM,
     bytecode: &[u8],
@@ -334,6 +397,132 @@ pub(crate) fn handle_table_get_or_nil(
     }
     // Not found or wrong type → nil
     vm.fiber.stack.push(Value::NIL);
+}
+
+/// Table/struct get for destructuring: signals error if key missing or wrong type.
+/// Operand: u16 constant pool index (keyword key).
+pub(crate) fn handle_table_get_destructure(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
+    let const_idx = vm.read_u16(bytecode, ip) as usize;
+    let key_value = constants[const_idx];
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on TableGetDestructure");
+
+    let key = match TableKey::from_value(&key_value) {
+        Some(k) => k,
+        None => {
+            vm.fiber.signal = Some((
+                SIG_ERROR,
+                error_val("type-error", "destructuring: invalid key type"),
+            ));
+            vm.fiber.stack.push(Value::NIL);
+            return;
+        }
+    };
+
+    // Try immutable struct
+    if let Some(struct_map) = val.as_struct() {
+        match struct_map.get(&key) {
+            Some(value) => {
+                vm.fiber.stack.push(*value);
+                return;
+            }
+            None => {
+                vm.fiber.signal = Some((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("destructuring: key {} not found", key_value),
+                    ),
+                ));
+                vm.fiber.stack.push(Value::NIL);
+                return;
+            }
+        }
+    }
+    // Try mutable @struct
+    if let Some(table_ref) = val.as_struct_mut() {
+        match table_ref.borrow().get(&key) {
+            Some(value) => {
+                vm.fiber.stack.push(*value);
+                return;
+            }
+            None => {
+                vm.fiber.signal = Some((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("destructuring: key {} not found", key_value),
+                    ),
+                ));
+                vm.fiber.stack.push(Value::NIL);
+                return;
+            }
+        }
+    }
+    // Not a struct at all
+    vm.fiber.signal = Some((
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("destructuring: expected struct, got {}", val.type_name()),
+        ),
+    ));
+    vm.fiber.stack.push(Value::NIL);
+}
+
+/// Car with silent nil (parameter destructuring): returns nil if not a cons cell.
+/// Used for &opt/(required) parameter destructuring where absent values produce nil.
+pub(crate) fn handle_car_or_nil(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on CarOrNil");
+    match val.as_cons() {
+        Some(cons) => vm.fiber.stack.push(cons.first),
+        None => vm.fiber.stack.push(Value::NIL),
+    }
+}
+
+/// Cdr with silent empty-list (parameter destructuring): returns EMPTY_LIST if not a cons cell.
+/// Used for &opt/(required) parameter destructuring.
+pub(crate) fn handle_cdr_or_nil(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on CdrOrNil");
+    match val.as_cons() {
+        Some(cons) => vm.fiber.stack.push(cons.rest),
+        None => vm.fiber.stack.push(Value::EMPTY_LIST),
+    }
+}
+
+/// Array ref with silent nil (parameter destructuring): returns nil if out of bounds or not array.
+/// Operand: u16 index (immediate, read from bytecode).
+pub(crate) fn handle_array_ref_or_nil(vm: &mut VM, bytecode: &[u8], ip: &mut usize) {
+    let index = vm.read_u16(bytecode, ip) as usize;
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on ArrayMutRefOrNil");
+    let result = if let Some(vec_ref) = val.as_array_mut() {
+        vec_ref.borrow().get(index).copied()
+    } else if let Some(elems) = val.as_array() {
+        elems.get(index).copied()
+    } else {
+        None
+    };
+    vm.fiber.stack.push(result.unwrap_or(Value::NIL));
 }
 
 /// Extend an @array with all elements from an indexed source (array or @array).

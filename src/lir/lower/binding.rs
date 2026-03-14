@@ -279,20 +279,29 @@ impl Lowerer {
 
     /// Lower a Destructure node: evaluate the value, then destructure into bindings.
     /// Returns a nil register (destructuring is a statement, not an expression).
+    /// `strict`: if true, missing/wrong-type values signal error; if false, produce nil.
     pub(super) fn lower_destructure_expr(
         &mut self,
         pattern: &HirPattern,
         value: &Hir,
+        strict: bool,
         _span: &Span,
     ) -> Result<Reg, String> {
         let value_reg = self.lower_expr(value)?;
-        self.lower_destructure(pattern, value_reg)?;
+        self.lower_destructure(pattern, value_reg, strict)?;
         // Destructure produces nil as its expression value
         self.emit_const(LirConst::Nil)
     }
 
     /// Recursively destructure a value into pattern bindings.
-    fn lower_destructure(&mut self, pattern: &HirPattern, value_reg: Reg) -> Result<(), String> {
+    /// `strict`: if true, use strict (error-signaling) instructions;
+    ///           if false, use silent-nil instructions for missing/wrong-type values.
+    fn lower_destructure(
+        &mut self,
+        pattern: &HirPattern,
+        value_reg: Reg,
+        strict: bool,
+    ) -> Result<(), String> {
         match pattern {
             HirPattern::Wildcard => {
                 // Discard the value — don't bind it
@@ -315,11 +324,18 @@ impl Lowerer {
                     if is_last {
                         // Last fixed element, no rest: just take car
                         let car = self.fresh_reg();
-                        self.emit(LirInstr::CarOrNil {
-                            dst: car,
-                            src: current,
-                        });
-                        self.lower_destructure(element, car)?;
+                        if strict {
+                            self.emit(LirInstr::CarDestructure {
+                                dst: car,
+                                src: current,
+                            });
+                        } else {
+                            self.emit(LirInstr::CarOrNil {
+                                dst: car,
+                                src: current,
+                            });
+                        }
+                        self.lower_destructure(element, car, strict)?;
                     } else {
                         // Store current to temp slot, reload for each extraction
                         self.emit(LirInstr::StoreLocal {
@@ -333,10 +349,17 @@ impl Lowerer {
                             slot: temp_slot,
                         });
                         let cdr = self.fresh_reg();
-                        self.emit(LirInstr::CdrOrNil {
-                            dst: cdr,
-                            src: load_for_cdr,
-                        });
+                        if strict {
+                            self.emit(LirInstr::CdrDestructure {
+                                dst: cdr,
+                                src: load_for_cdr,
+                            });
+                        } else {
+                            self.emit(LirInstr::CdrOrNil {
+                                dst: cdr,
+                                src: load_for_cdr,
+                            });
+                        }
 
                         let load_for_car = self.fresh_reg();
                         self.emit(LirInstr::LoadLocal {
@@ -344,18 +367,25 @@ impl Lowerer {
                             slot: temp_slot,
                         });
                         let car = self.fresh_reg();
-                        self.emit(LirInstr::CarOrNil {
-                            dst: car,
-                            src: load_for_car,
-                        });
+                        if strict {
+                            self.emit(LirInstr::CarDestructure {
+                                dst: car,
+                                src: load_for_car,
+                            });
+                        } else {
+                            self.emit(LirInstr::CarOrNil {
+                                dst: car,
+                                src: load_for_car,
+                            });
+                        }
 
-                        self.lower_destructure(element, car)?;
+                        self.lower_destructure(element, car, strict)?;
                         current = cdr;
                     }
                 }
                 // Bind the remaining tail to the rest pattern
                 if let Some(rest_pat) = rest {
-                    self.lower_destructure(rest_pat, current)?;
+                    self.lower_destructure(rest_pat, current, strict)?;
                 }
                 Ok(())
             }
@@ -376,16 +406,21 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefOrNil {
-                        dst: elem,
-                        src: reloaded,
-                        index: i as u16,
-                    });
-                    self.lower_destructure(element, elem)?;
+                    if strict {
+                        self.emit(LirInstr::ArrayMutRefDestructure {
+                            dst: elem,
+                            src: reloaded,
+                            index: i as u16,
+                        });
+                    } else {
+                        self.emit(LirInstr::ArrayMutRefOrNil {
+                            dst: elem,
+                            src: reloaded,
+                            index: i as u16,
+                        });
+                    }
+                    self.lower_destructure(element, elem, strict)?;
                 }
-                // Bind the remaining array slice to the rest pattern.
-                // For arrays, we need a slice-from-index operation.
-                // Use ArrayMutSliceFrom instruction (to be added).
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
@@ -398,7 +433,7 @@ impl Lowerer {
                         src: reloaded,
                         index: elements.len() as u16,
                     });
-                    self.lower_destructure(rest_pat, slice)?;
+                    self.lower_destructure(rest_pat, slice, strict)?;
                 }
                 Ok(())
             }
@@ -418,12 +453,20 @@ impl Lowerer {
                         slot: temp_slot,
                     });
                     let elem = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefOrNil {
-                        dst: elem,
-                        src: reloaded,
-                        index: i as u16,
-                    });
-                    self.lower_destructure(element, elem)?;
+                    if strict {
+                        self.emit(LirInstr::ArrayMutRefDestructure {
+                            dst: elem,
+                            src: reloaded,
+                            index: i as u16,
+                        });
+                    } else {
+                        self.emit(LirInstr::ArrayMutRefOrNil {
+                            dst: elem,
+                            src: reloaded,
+                            index: i as u16,
+                        });
+                    }
+                    self.lower_destructure(element, elem, strict)?;
                 }
                 // Bind the remaining array slice to the rest pattern.
                 if let Some(rest_pat) = rest {
@@ -438,7 +481,36 @@ impl Lowerer {
                         src: reloaded,
                         index: elements.len() as u16,
                     });
-                    self.lower_destructure(rest_pat, slice)?;
+                    self.lower_destructure(rest_pat, slice, strict)?;
+                }
+                Ok(())
+            }
+            HirPattern::NamedStruct { entries } => {
+                // &named parameter destructuring: missing keys always produce nil (not errors).
+                let temp_slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
+
+                for (key, sub_pattern) in entries {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
+                    let elem = self.fresh_reg();
+                    let lir_key = match key {
+                        PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                    };
+                    self.emit(LirInstr::TableGetOrNil {
+                        dst: elem,
+                        src: reloaded,
+                        key: lir_key,
+                    });
+                    self.lower_destructure(sub_pattern, elem, false)?;
                 }
                 Ok(())
             }
@@ -462,12 +534,20 @@ impl Lowerer {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
-                    self.emit(LirInstr::TableGetOrNil {
-                        dst: elem,
-                        src: reloaded,
-                        key: lir_key,
-                    });
-                    self.lower_destructure(sub_pattern, elem)?;
+                    if strict {
+                        self.emit(LirInstr::TableGetDestructure {
+                            dst: elem,
+                            src: reloaded,
+                            key: lir_key,
+                        });
+                    } else {
+                        self.emit(LirInstr::TableGetOrNil {
+                            dst: elem,
+                            src: reloaded,
+                            key: lir_key,
+                        });
+                    }
+                    self.lower_destructure(sub_pattern, elem, strict)?;
                 }
                 Ok(())
             }
@@ -490,12 +570,20 @@ impl Lowerer {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
-                    self.emit(LirInstr::TableGetOrNil {
-                        dst: elem,
-                        src: reloaded,
-                        key: lir_key,
-                    });
-                    self.lower_destructure(sub_pattern, elem)?;
+                    if strict {
+                        self.emit(LirInstr::TableGetDestructure {
+                            dst: elem,
+                            src: reloaded,
+                            key: lir_key,
+                        });
+                    } else {
+                        self.emit(LirInstr::TableGetOrNil {
+                            dst: elem,
+                            src: reloaded,
+                            key: lir_key,
+                        });
+                    }
+                    self.lower_destructure(sub_pattern, elem, strict)?;
                 }
                 Ok(())
             }

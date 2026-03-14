@@ -237,7 +237,7 @@ impl Lowerer {
             AccessPath::Index(inner, idx) => {
                 let parent = self.load_access_path(inner, scrutinee_slot)?;
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::ArrayMutRefOrNil {
+                self.emit(LirInstr::ArrayMutRefDestructure {
                     dst,
                     src: parent,
                     index: *idx as u16,
@@ -821,7 +821,7 @@ impl Lowerer {
             }
             HirPattern::Tuple { elements, rest } => {
                 // Array [...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefOrNil for each element.
+                // Check if value is an array, then use ArrayMutRefDestructure for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -908,7 +908,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(len_ok_label);
 
-                // Step 4: Match each element using ArrayMutRefOrNil
+                // Step 4: Match each element using ArrayMutRefDestructure
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
@@ -925,7 +925,7 @@ impl Lowerer {
                     }
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefDestructure {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -964,7 +964,7 @@ impl Lowerer {
             }
             HirPattern::Array { elements, rest } => {
                 // Array @[...] pattern matching for `match`.
-                // Check if value is an array, then use ArrayMutRefOrNil for each element.
+                // Check if value is an array, then use ArrayMutRefDestructure for each element.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -1068,7 +1068,7 @@ impl Lowerer {
                     }
 
                     let elem_reg = self.fresh_reg();
-                    self.emit(LirInstr::ArrayMutRefOrNil {
+                    self.emit(LirInstr::ArrayMutRefDestructure {
                         dst: elem_reg,
                         src: reloaded,
                         index: i as u16,
@@ -1341,6 +1341,10 @@ impl Lowerer {
                 // Recursively match the binding (if any)
                 self.lower_pattern_match(binding, value_reg, fail_label)?;
                 Ok(())
+            }
+            HirPattern::NamedStruct { .. } => {
+                // NamedStruct only appears in &named parameter destructuring, never in match.
+                unreachable!("NamedStruct in lower_pattern_match")
             }
         }
     }

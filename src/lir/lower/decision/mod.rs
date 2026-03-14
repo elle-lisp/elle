@@ -227,6 +227,10 @@ fn pattern_constructor(pat: &HirPattern) -> Option<Constructor> {
             // Or-patterns should have been expanded before reaching here.
             None
         }
+        HirPattern::NamedStruct { .. } => {
+            // NamedStruct only appears in &named parameter destructuring, never in match.
+            unreachable!("NamedStruct in pattern_constructor")
+        }
     }
 }
 
@@ -283,6 +287,10 @@ fn collect_pattern_bindings(
                     out,
                 );
             }
+        }
+        HirPattern::NamedStruct { .. } => {
+            // NamedStruct only appears in &named parameter destructuring, never in match.
+            unreachable!("NamedStruct in collect_pattern_bindings")
         }
         HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
             // Set patterns bind the whole value — the binding sub-pattern

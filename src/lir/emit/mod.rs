@@ -458,23 +458,23 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::CarOrNil { dst, src } => {
+            LirInstr::CarDestructure { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CarOrNil);
+                self.bytecode.emit(Instruction::CarDestructure);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::CdrOrNil { dst, src } => {
+            LirInstr::CdrDestructure { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CdrOrNil);
+                self.bytecode.emit(Instruction::CdrDestructure);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
+                self.bytecode.emit(Instruction::ArrayMutRefDestructure);
                 self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
@@ -502,6 +502,47 @@ impl Emitter {
                 let const_idx = self.bytecode.add_constant(key_value);
                 self.bytecode.emit(Instruction::TableGetOrNil);
                 self.bytecode.emit_u16(const_idx);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::TableGetDestructure { dst, src, key } => {
+                self.ensure_on_top(*src);
+                let key_value = match key {
+                    LirConst::Keyword(name) => Value::keyword(name),
+                    LirConst::String(s) => Value::string(s.clone()),
+                    LirConst::Int(n) => Value::int(*n),
+                    LirConst::Symbol(sym) => Value::symbol(sym.0),
+                    LirConst::Bool(b) => Value::bool(*b),
+                    LirConst::Nil => Value::NIL,
+                    _ => panic!("TableGetDestructure: unsupported key type"),
+                };
+                let const_idx = self.bytecode.add_constant(key_value);
+                self.bytecode.emit(Instruction::TableGetDestructure);
+                self.bytecode.emit_u16(const_idx);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            // Silent destructuring (parameter context: absent optional params → nil)
+            LirInstr::CarOrNil { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::CarOrNil);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::CdrOrNil { dst, src } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::CdrOrNil);
+                self.pop();
+                self.push_reg(*dst);
+            }
+
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+                self.ensure_on_top(*src);
+                self.bytecode.emit(Instruction::ArrayMutRefOrNil);
+                self.bytecode.emit_u16(*index);
                 self.pop();
                 self.push_reg(*dst);
             }

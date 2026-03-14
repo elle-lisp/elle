@@ -159,15 +159,15 @@ pub enum Instruction {
     /// Empty list constant
     EmptyList,
 
-    /// Car with silent nil (for destructuring): returns nil if not a cons
-    CarOrNil,
+    /// Car for destructuring: signals error if not a cons cell.
+    CarDestructure,
 
-    /// Cdr with silent nil (for destructuring): returns nil if not a cons
-    CdrOrNil,
+    /// Cdr for destructuring: signals error if not a cons cell.
+    CdrDestructure,
 
-    /// Array ref with silent nil (for destructuring): returns nil if out of bounds
+    /// Array ref for destructuring: signals error if not an array or out of bounds.
     /// Operand: u16 index (immediate)
-    ArrayMutRefOrNil,
+    ArrayMutRefDestructure,
     /// Array slice from index (for & rest destructuring): returns sub-array from index to end
     /// Operand: u16 index (immediate)
     ArrayMutSliceFrom,
@@ -185,6 +185,20 @@ pub enum Instruction {
     /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
     /// Operand: u16 constant pool index (keyword key)
     TableGetOrNil,
+
+    /// Table/struct get for destructuring: signals error if key missing or wrong type.
+    /// Operand: u16 constant pool index (keyword key)
+    TableGetDestructure,
+
+    /// Car with silent nil (for parameter destructuring): returns nil if not a cons cell.
+    /// Used by &opt/(required) parameter destructuring where absent values → nil.
+    CarOrNil,
+    /// Cdr with silent empty-list (for parameter destructuring): returns EMPTY_LIST if not a cons.
+    /// Used by &opt/(required) parameter destructuring.
+    CdrOrNil,
+    /// Array ref with silent nil (for parameter destructuring): returns nil if out of bounds.
+    /// Operand: u16 index (immediate)
+    ArrayMutRefOrNil,
 
     /// Runtime eval: pop expr and env from stack, compile+execute, push result.
     Eval,
@@ -424,14 +438,16 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     i += 3;
                 }
             }
-            Instruction::ArrayMutRefOrNil | Instruction::ArrayMutSliceFrom => {
+            Instruction::ArrayMutRefDestructure
+            | Instruction::ArrayMutSliceFrom
+            | Instruction::ArrayMutRefOrNil => {
                 if i + 1 < instructions.len() {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (index={})", idx));
                     i += 2;
                 }
             }
-            Instruction::TableGetOrNil => {
+            Instruction::TableGetOrNil | Instruction::TableGetDestructure => {
                 if i + 1 < instructions.len() {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (const_idx={})", idx));
@@ -552,6 +568,26 @@ mod tests {
             let decoded: Instruction = unsafe { std::mem::transmute(bc.instructions[0]) };
             assert_eq!(decoded, instr, "Instruction {:?} did not roundtrip", instr);
         }
+    }
+
+    #[test]
+    fn test_bytecode_renamed_instructions_round_trip() {
+        // Verify that repr(u8) values of renamed destructuring instructions
+        // have not shifted. Rearranging the enum breaks bytecode on disk/wire.
+        //
+        // Counting from 0: LoadConst=0 ... EmptyList=60,
+        // CarDestructure=61, CdrDestructure=62, ArrayMutRefDestructure=63,
+        // ArrayMutSliceFrom=64, IsArray=65, ..., TableGetOrNil=70,
+        // TableGetDestructure=71.
+        assert_eq!(Instruction::CarDestructure as u8, 61);
+        assert_eq!(Instruction::CdrDestructure as u8, 62);
+        assert_eq!(Instruction::ArrayMutRefDestructure as u8, 63);
+        // TableGetDestructure is new — it must differ from TableGetOrNil
+        assert_ne!(
+            Instruction::TableGetDestructure as u8,
+            Instruction::TableGetOrNil as u8,
+            "TableGetDestructure must have a distinct byte value from TableGetOrNil"
+        );
     }
 
     #[test]

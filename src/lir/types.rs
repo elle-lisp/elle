@@ -279,18 +279,32 @@ pub enum LirInstr {
     /// Store value into cell
     StoreLBox { cell: Reg, value: Reg },
 
-    // === Destructuring (silent nil) ===
-    /// Car with silent nil: returns nil if not a cons cell
-    CarOrNil { dst: Reg, src: Reg },
-    /// Cdr with silent nil: returns nil if not a cons cell
-    CdrOrNil { dst: Reg, src: Reg },
-    /// Array ref with silent nil: returns nil if out of bounds or not an array
-    ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
+    // === Destructuring ===
+    /// Car for destructuring: signals error if not a cons cell
+    CarDestructure { dst: Reg, src: Reg },
+    /// Cdr for destructuring: signals error if not a cons cell
+    CdrDestructure { dst: Reg, src: Reg },
+    /// Array ref for destructuring: signals error if out of bounds or not an array
+    ArrayMutRefDestructure { dst: Reg, src: Reg, index: u16 },
     /// Array slice from index: returns a new array from index to end, or empty array
     ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
-    /// Table/struct get with silent nil: returns nil if key not found or wrong type.
+    /// Table/struct get with silent nil: nil if key missing/wrong type. Used by match.
     /// `key` is a constant pool index holding a keyword Value.
     TableGetOrNil { dst: Reg, src: Reg, key: LirConst },
+    /// Table/struct get for destructuring: signals error if key missing or wrong type.
+    /// `key` is a constant pool index holding a keyword Value.
+    TableGetDestructure { dst: Reg, src: Reg, key: LirConst },
+
+    // === Silent destructuring (parameter context: absent optional params → nil) ===
+    /// Car with silent nil: returns nil if not a cons cell.
+    /// Used for &opt/(required) parameter destructuring where absent values produce nil.
+    CarOrNil { dst: Reg, src: Reg },
+    /// Cdr with silent empty-list: returns EMPTY_LIST if not a cons cell.
+    /// Used for &opt/(required) parameter destructuring.
+    CdrOrNil { dst: Reg, src: Reg },
+    /// Array ref with silent nil: returns nil if out of bounds or not an array.
+    /// Used for &opt/[required] parameter destructuring.
+    ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
 
     // === Coroutines ===
     /// Load the resume value after a yield.

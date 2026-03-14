@@ -122,6 +122,7 @@ impl<'a> Analyzer<'a> {
                         HirKind::Destructure {
                             pattern,
                             value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
+                            strict: true,
                         },
                         span.clone(),
                     )
@@ -304,6 +305,7 @@ impl<'a> Analyzer<'a> {
                         HirKind::Destructure {
                             pattern,
                             value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
+                            strict: true,
                         },
                         span.clone(),
                     )
@@ -354,6 +356,7 @@ impl<'a> Analyzer<'a> {
                 HirKind::Destructure {
                     pattern,
                     value: Box::new(value),
+                    strict: true,
                 },
                 span,
                 signal,
