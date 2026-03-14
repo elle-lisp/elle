@@ -564,7 +564,10 @@ fn test_alloc_without_installed_heap_lazy_inits() {
     // alloc() with no heap installed triggers lazy root heap installation.
     uninstall_fiber_heap();
     // alloc() should not panic even with no heap installed.
-    let v = crate::value::arena::alloc(HeapObject::LString("lazy-test".into()));
+    let v = crate::value::arena::alloc(HeapObject::LString {
+        s: "lazy-test".into(),
+        traits: Value::NIL,
+    });
     assert!(v.is_heap());
     // Root heap is now installed.
     assert!(is_fiber_heap_installed());
