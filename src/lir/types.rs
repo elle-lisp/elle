@@ -295,6 +295,15 @@ pub enum LirInstr {
     /// `key` is a constant pool index holding a keyword Value.
     TableGetDestructure { dst: Reg, src: Reg, key: LirConst },
 
+    /// Struct rest for destructuring: collect all keys from src NOT in exclude_keys
+    /// into a new immutable struct. Used by `{:a a & rest}` patterns.
+    /// `exclude_keys` are constant pool entries (keywords or symbols).
+    StructRest {
+        dst: Reg,
+        src: Reg,
+        exclude_keys: Vec<LirConst>,
+    },
+
     // === Silent destructuring (parameter context: absent optional params → nil) ===
     /// Car with silent nil: returns nil if not a cons cell.
     /// Used for &opt/(required) parameter destructuring where absent values produce nil.

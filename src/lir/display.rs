@@ -180,6 +180,14 @@ impl fmt::Display for LirInstr {
             LirInstr::TableGetDestructure { dst, src, key } => {
                 write!(f, "{} ← {}.{}!", dst, src, key)
             }
+            LirInstr::StructRest {
+                dst,
+                src,
+                exclude_keys,
+            } => {
+                let keys: Vec<String> = exclude_keys.iter().map(|k| format!("{}", k)).collect();
+                write!(f, "{} ← rest({}, excl=[{}])", dst, src, keys.join(", "))
+            }
 
             // === Silent destructuring (parameter context) ===
             LirInstr::CarOrNil { dst, src } => write!(f, "{} ← car?({})", dst, src),
