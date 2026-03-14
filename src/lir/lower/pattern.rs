@@ -268,6 +268,23 @@ impl Lowerer {
                 });
                 Ok(dst)
             }
+            AccessPath::StructRest(inner, exclude_keys) => {
+                let src_reg = self.load_access_path(inner, scrutinee_slot)?;
+                let rest_reg = self.fresh_reg();
+                let lir_exclude: Vec<LirConst> = exclude_keys
+                    .iter()
+                    .map(|k| match k {
+                        PatternKey::Keyword(s) => LirConst::Keyword(s.clone()),
+                        PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                    })
+                    .collect();
+                self.emit(LirInstr::StructRest {
+                    dst: rest_reg,
+                    src: src_reg,
+                    exclude_keys: lir_exclude,
+                });
+                Ok(rest_reg)
+            }
         }
     }
 
@@ -1105,7 +1122,7 @@ impl Lowerer {
 
                 Ok(())
             }
-            HirPattern::Struct { entries } => {
+            HirPattern::Struct { entries, rest } => {
                 // Struct {...} pattern matching for `match`.
                 // Check if value is a struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
@@ -1143,7 +1160,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(continue_label);
 
-                for (key, sub_pattern) in entries {
+                for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
                     if self.in_lambda {
                         self.emit(LirInstr::LoadCapture {
@@ -1171,9 +1188,38 @@ impl Lowerer {
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
                 }
 
+                if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded,
+                            slot: temp_slot,
+                        });
+                    }
+                    let rest_reg = self.fresh_reg();
+                    let exclude: Vec<LirConst> = entries
+                        .iter()
+                        .map(|(key, _)| match key {
+                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                        })
+                        .collect();
+                    self.emit(LirInstr::StructRest {
+                        dst: rest_reg,
+                        src: reloaded,
+                        exclude_keys: exclude,
+                    });
+                    self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
+                }
+
                 Ok(())
             }
-            HirPattern::Table { entries } => {
+            HirPattern::Table { entries, rest } => {
                 // @struct @{...} pattern matching for `match`.
                 // Check if value is a @struct, then use TableGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
@@ -1211,7 +1257,7 @@ impl Lowerer {
                 self.finish_block();
                 self.current_block = BasicBlock::new(continue_label);
 
-                for (key, sub_pattern) in entries {
+                for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
                     if self.in_lambda {
                         self.emit(LirInstr::LoadCapture {
@@ -1237,6 +1283,35 @@ impl Lowerer {
                     });
 
                     self.lower_pattern_match(sub_pattern, elem_reg, fail_label)?;
+                }
+
+                if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    if self.in_lambda {
+                        self.emit(LirInstr::LoadCapture {
+                            dst: reloaded,
+                            index: temp_slot,
+                        });
+                    } else {
+                        self.emit(LirInstr::LoadLocal {
+                            dst: reloaded,
+                            slot: temp_slot,
+                        });
+                    }
+                    let rest_reg = self.fresh_reg();
+                    let exclude: Vec<LirConst> = entries
+                        .iter()
+                        .map(|(key, _)| match key {
+                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                        })
+                        .collect();
+                    self.emit(LirInstr::StructRest {
+                        dst: rest_reg,
+                        src: reloaded,
+                        exclude_keys: exclude,
+                    });
+                    self.lower_pattern_match(rest_pat, rest_reg, fail_label)?;
                 }
 
                 Ok(())

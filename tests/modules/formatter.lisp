@@ -2,7 +2,7 @@
 # Accepts :prefix, :suffix, :separator keyword configuration
 # Returns a struct of exported functions that close over the config
 
-(fn (&keys {:prefix prefix :suffix suffix :separator separator})
+(fn (&named prefix suffix separator)
   "Parametric formatter module. Accepts :prefix, :suffix, :separator."
   (let* ([prefix (if (nil? prefix) "" prefix)]
          [suffix (if (nil? suffix) "" suffix)]

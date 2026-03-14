@@ -112,13 +112,16 @@ HIR (bindings are inline — no separate HashMap)
      elements produce `nil`, not errors. Wrong-type values produce `nil`
      for all bindings. No runtime type checks.
 
-12. **`HirPattern::Table` supports @struct/struct destructuring.**
-     `HirPattern::Table { entries: Vec<(PatternKey, HirPattern)> }` maps
-     keyword or symbol keys to sub-patterns. `PatternKey::Keyword(String)`
-     for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys.
-     In binding forms (`def`, `var`, `let`, `fn` params),
-     uses `TableGetOrNil` with silent nil. In `match` patterns, emits an
-     `IsStructMut` type guard first so non-@struct values fall through to the next arm.
+12. **`HirPattern::Table` and `HirPattern::Struct` support struct destructuring with optional rest.**
+     Both `Struct { entries: Vec<(PatternKey, HirPattern)>, rest: Option<Box<HirPattern>> }`
+     and `Table { entries, rest }` map keyword or symbol keys to sub-patterns.
+     `PatternKey::Keyword(String)` for `:foo` keys, `PatternKey::Symbol(SymbolId)` for `'foo` keys.
+     When `rest` is `Some(pat)`, the rest pattern binds a new immutable struct of all keys
+     NOT explicitly named. Rest is `None` at all construction sites by default.
+     In binding forms (`def`, `var`, `let`, `fn` params), uses `TableGetDestructure`
+     (strict: error on missing key) for entries, `StructRest` for the rest.
+     In `match` patterns, emits an `IsStruct`/`IsTable` type guard first so wrong-type
+     values fall through to the next arm.
 
 13. **`Block` and `Break` are compile-time control flow.** `HirKind::Block`
     has a `BlockId` and optional name. `HirKind::Break` targets a `BlockId`.

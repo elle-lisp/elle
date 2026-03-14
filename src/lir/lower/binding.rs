@@ -514,7 +514,7 @@ impl Lowerer {
                 }
                 Ok(())
             }
-            HirPattern::Struct { entries } => {
+            HirPattern::Struct { entries, rest } => {
                 // Structs are immutable key-value maps
                 let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
@@ -523,7 +523,7 @@ impl Lowerer {
                     src: value_reg,
                 });
 
-                for (key, sub_pattern) in entries {
+                for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,
@@ -549,9 +549,32 @@ impl Lowerer {
                     }
                     self.lower_destructure(sub_pattern, elem, strict)?;
                 }
+
+                if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
+                    let rest_reg = self.fresh_reg();
+                    let exclude: Vec<LirConst> = entries
+                        .iter()
+                        .map(|(key, _)| match key {
+                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                        })
+                        .collect();
+                    self.emit(LirInstr::StructRest {
+                        dst: rest_reg,
+                        src: reloaded,
+                        exclude_keys: exclude,
+                    });
+                    self.lower_destructure(rest_pat, rest_reg, strict)?;
+                }
+
                 Ok(())
             }
-            HirPattern::Table { entries } => {
+            HirPattern::Table { entries, rest } => {
                 let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
                 self.emit(LirInstr::StoreLocal {
@@ -559,7 +582,7 @@ impl Lowerer {
                     src: value_reg,
                 });
 
-                for (key, sub_pattern) in entries {
+                for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
                     self.emit(LirInstr::LoadLocal {
                         dst: reloaded,
@@ -585,6 +608,29 @@ impl Lowerer {
                     }
                     self.lower_destructure(sub_pattern, elem, strict)?;
                 }
+
+                if let Some(rest_pat) = rest {
+                    let reloaded = self.fresh_reg();
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
+                    let rest_reg = self.fresh_reg();
+                    let exclude: Vec<LirConst> = entries
+                        .iter()
+                        .map(|(key, _)| match key {
+                            PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
+                            PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
+                        })
+                        .collect();
+                    self.emit(LirInstr::StructRest {
+                        dst: rest_reg,
+                        src: reloaded,
+                        exclude_keys: exclude,
+                    });
+                    self.lower_destructure(rest_pat, rest_reg, strict)?;
+                }
+
                 Ok(())
             }
             _ => Err(format!("unsupported destructuring pattern: {:?}", pattern)),

@@ -149,14 +149,14 @@
 # Response construction
 # ============================================================================
 
-(defn http-respond [status body &keys {:headers extra-headers}]
+(defn http-respond [status body &named headers]
   "Build a response struct with Content-Type and Content-Length set.
    Caller can override headers via :headers."
   (let* [[base-headers {:content-type "text/plain"
                         :content-length (string (string/size-of body))}]
-         [merged (if (nil? extra-headers)
+         [merged (if (nil? headers)
                    base-headers
-                   (merge base-headers extra-headers))]]
+                   (merge base-headers headers))]]
     {:status status :headers merged :body body}))
 
 # ============================================================================
@@ -191,7 +191,7 @@
            [resp-body (read-body conn resp-headers)]]
       {:status status-line:status :headers resp-headers :body resp-body})))
 
-(defn http-request [method url &keys {:body body :headers extra-headers}]
+(defn http-request [method url &named body headers]
   "Make an HTTP/1.1 request. Opens a new connection, sends request, closes.
    Returns {:status :headers :body}."
   (let* [[url-parsed (parse-url url)]
@@ -201,13 +201,13 @@
          [conn (tcp/connect url-parsed:host url-parsed:port)]]
     (defer (port/close conn)
       (send-request conn method request-path
-                    url-parsed:host extra-headers body false))))
+                    url-parsed:host headers body false))))
 
-(defn http-get [url &keys {:headers headers}]
+(defn http-get [url &named headers]
   "Make a GET request. Returns {:status :headers :body}."
   (http-request "GET" url :headers headers))
 
-(defn http-post [url body &keys {:headers headers}]
+(defn http-post [url body &named headers]
   "Make a POST request with body. Returns {:status :headers :body}."
   (http-request "POST" url :body body :headers headers))
 
@@ -218,12 +218,12 @@
          [conn (tcp/connect url-parsed:host url-parsed:port)]]
     {:conn conn :host url-parsed:host}))
 
-(defn http-send [session method path &keys {:body body :headers extra-headers}]
+(defn http-send [session method path &named body headers]
   "Send a request on an existing keep-alive connection.
    session: struct from http:connect. Returns {:status :headers :body}.
    Connection remains open unless server sends connection: close."
   (send-request session:conn method path
-                session:host extra-headers body true))
+                session:host headers body true))
 
 (defn http-close [session]
   "Close a keep-alive session."
@@ -288,7 +288,7 @@
     (string/format "http: handler error on {} {}: {}\n"
                    request:method request:path err)))
 
-(defn http-serve [listener handler &keys {:on-error on-error}]
+(defn http-serve [listener handler &named on-error]
   "Accept connections on listener and handle them with keep-alive.
    Each connection runs in its own fiber via ev/spawn.
    Must be called inside an ev/run or equivalent scheduler context.

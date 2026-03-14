@@ -478,6 +478,52 @@ pub(crate) fn handle_table_get_destructure(
     vm.fiber.stack.push(Value::NIL);
 }
 
+/// Struct rest for destructuring: collect all keys NOT in exclude_keys into a new immutable struct.
+/// Operands: u16 count, then count x u16 const_idx.
+/// Pops source value from stack, pushes result struct.
+pub(crate) fn handle_struct_rest(
+    vm: &mut VM,
+    bytecode: &[u8],
+    ip: &mut usize,
+    constants: &[Value],
+) {
+    let count = vm.read_u16(bytecode, ip) as usize;
+    let mut exclude: std::collections::BTreeSet<TableKey> = std::collections::BTreeSet::new();
+    for _ in 0..count {
+        let const_idx = vm.read_u16(bytecode, ip) as usize;
+        let key_value = constants[const_idx];
+        if let Some(k) = TableKey::from_value(&key_value) {
+            exclude.insert(k);
+        }
+    }
+
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on StructRest");
+
+    // Collect all keys not in exclude set from struct or @struct
+    let mut result: std::collections::BTreeMap<TableKey, Value> = std::collections::BTreeMap::new();
+
+    if let Some(struct_map) = val.as_struct() {
+        for (k, v) in struct_map.iter() {
+            if !exclude.contains(k) {
+                result.insert(k.clone(), *v);
+            }
+        }
+    } else if let Some(table_ref) = val.as_struct_mut() {
+        for (k, v) in table_ref.borrow().iter() {
+            if !exclude.contains(k) {
+                result.insert(k.clone(), *v);
+            }
+        }
+    }
+    // Non-struct input → empty struct rest (consistent with TableGetOrNil nil behavior)
+
+    vm.fiber.stack.push(Value::struct_from(result));
+}
+
 /// Car with silent nil (parameter destructuring): returns nil if not a cons cell.
 /// Used for &opt/(required) parameter destructuring where absent values produce nil.
 pub(crate) fn handle_car_or_nil(vm: &mut VM) {
