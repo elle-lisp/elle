@@ -375,10 +375,11 @@ fn test_signal_closure_captures_yielding() {
 
 #[test]
 fn test_signal_pure_primitives() {
-    // Pure primitives should have Pure signal
+    // Most primitives now have errors signal (can raise type/arity errors).
+    // `list` is genuinely inert (variadic, no type checks).
     let (mut symbols, mut vm) = setup();
 
-    let pure_calls = [
+    let errors_calls = [
         "(+ 1 2)",
         "(- 5 3)",
         "(* 2 3)",
@@ -387,7 +388,6 @@ fn test_signal_pure_primitives() {
         "(> 2 1)",
         "(= 1 1)",
         "(cons 1 2)",
-        "(list 1 2 3)",
         "(first (list 1 2))",
         "(rest (list 1 2))",
         "(length (list 1 2 3))",
@@ -396,12 +396,24 @@ fn test_signal_pure_primitives() {
         "(string? \"hello\")",
     ];
 
-    for call in pure_calls {
+    for call in errors_calls {
+        let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
+        assert_eq!(
+            result.hir.signal,
+            Signal::errors(),
+            "Primitive call '{}' should have errors signal (type/arity checks)",
+            call
+        );
+    }
+
+    // list is inert — variadic constructor with no type checks
+    let inert_calls = ["(list 1 2 3)"];
+    for call in inert_calls {
         let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
         assert_eq!(
             result.hir.signal,
             Signal::inert(),
-            "Primitive call '{}' should be Pure",
+            "Primitive call '{}' should be inert",
             call
         );
     }
@@ -435,7 +447,7 @@ fn test_lambda_body_signal_nested_yield() {
     .unwrap();
 
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
-        assert_eq!(body.signal, Signal::yields());
+        assert_eq!(body.signal, Signal::yields_errors());
     } else {
         panic!("Expected Lambda");
     }
@@ -496,11 +508,11 @@ fn test_signal_let_bound_non_lambda_call_is_yields() {
         "<test>",
     )
     .unwrap();
-    // f is not a lambda literal, signal unknown → Yields
+    // f is not a lambda literal, signal unknown → Yields+Errors
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Calling a let-bound non-lambda should be Yields (unknown signal)"
+        Signal::yields_errors(),
+        "Calling a let-bound non-lambda should be Yields+Errors (unknown signal)"
     );
 }
 
@@ -552,8 +564,8 @@ fn test_polymorphic_inference_resolves_pure() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
-        "Calling polymorphic function with pure arg should be Pure"
+        Signal::errors(),
+        "Calling polymorphic function with errors arg should have errors signal"
     );
 }
 
@@ -585,11 +597,11 @@ fn test_polymorphic_inference_my_map() {
     .unwrap();
     // my-map is Polymorphic(0) because the only Yields source is calling f.
     // The recursive call to my-map is seeded as Pure during analysis.
-    // When called with +, which is Pure, the result is Pure.
+    // When called with +, which now has errors signal, the result has errors.
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
-        "Recursive higher-order function with pure arg should be Pure"
+        Signal::errors(),
+        "Recursive higher-order function with errors arg should have errors signal"
     );
 }
 
@@ -599,11 +611,11 @@ fn test_polymorphic_inference_non_recursive_map() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(        r#"(begin            (def apply-to-list (fn (f xs)              (if (empty? xs) (list)                  (cons (f (first xs)) (list)))))           (apply-to-list + (list 1 2 3)))"#,        &mut symbols, &mut vm, "<test>")
     .unwrap();
-    // apply-to-list is Polymorphic(0), + is Pure, so the call is Pure
+    // apply-to-list is Polymorphic(0), + now has errors signal, so the call has errors
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
-        "Non-recursive higher-order function with pure arg should be Pure"
+        Signal::errors(),
+        "Non-recursive higher-order function with errors arg should have errors signal"
     );
 }
 
@@ -683,8 +695,8 @@ fn test_polymorphic_inference_two_params_resolves_pure() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
-        "Calling polymorphic function with pure arg should be Pure"
+        Signal::errors(),
+        "Calling polymorphic function with errors args should have errors signal"
     );
 }
 
@@ -696,8 +708,8 @@ fn test_polymorphic_inference_two_params_resolves_yields() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::yields(),
-        "Calling Polymorphic({{0,1}}) with one yielding arg should be Yields"
+        Signal::yields_errors(),
+        "Calling Polymorphic({{0,1}}) with one yielding arg should be Yields+Errors"
     );
 }
 
@@ -739,11 +751,11 @@ fn test_polymorphic_inference_nested_call() {
     .unwrap();
     // wrapper calls apply-fn with g, apply-fn is Polymorphic(0)
     // So wrapper's body signal depends on g's signal
-    // wrapper should be Polymorphic(0) and the final call with + should be Pure
+    // wrapper should be Polymorphic(0) and the final call with + (which has errors) propagates errors
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
-        "Nested polymorphic calls with pure arg should be Pure"
+        Signal::errors(),
+        "Nested polymorphic calls with errors arg should have errors signal"
     );
 }
 
@@ -1032,7 +1044,7 @@ fn test_silence_function_ceiling_error_fails_yield() {
 #[test]
 fn test_silence_callsite_concrete_fails() {
     // Compile-time callsite checking is not yet implemented — silence bounds
-    // are enforced at runtime via CheckEffectBound. Use eval_source to verify
+    // are enforced at runtime via CheckSignalBound. Use eval_source to verify
     // the runtime check catches the violation.
     let result = crate::common::eval_source(
         "(begin (def apply-inert (fn (f x) (silence f) (f x))) (apply-inert (fn (x) (yield x)) 42))",

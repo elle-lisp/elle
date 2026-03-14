@@ -17,7 +17,7 @@ impl Lowerer {
             HirKind::String(s) => self.emit_const(LirConst::String(s.clone())),
             HirKind::Keyword(name) => self.emit_const(LirConst::Keyword(name.clone())),
 
-            HirKind::Var(binding) => self.lower_var(binding),
+            HirKind::Var(binding) => self.lower_var(binding, &hir.span),
             HirKind::Let { bindings, body } => self.lower_let(bindings, body),
             HirKind::Letrec { bindings, body } => self.lower_letrec(bindings, body),
             HirKind::Lambda {
@@ -86,7 +86,7 @@ impl Lowerer {
         }
     }
 
-    fn lower_var(&mut self, binding: &Binding) -> Result<Reg, String> {
+    fn lower_var(&mut self, binding: &Binding, span: &Span) -> Result<Reg, String> {
         // Check immutable_values first — primitive bindings and immutable
         // globals with literal values are compiled to LoadConst without
         // needing a slot allocation.
@@ -135,7 +135,7 @@ impl Lowerer {
                 .get(&sym_id.0)
                 .cloned()
                 .unwrap_or_else(|| format!("symbol #{}", sym_id.0));
-            Err(format!("undefined variable: {}", name))
+            Err(format!("{}: undefined variable: {}", span, name))
         }
     }
 

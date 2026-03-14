@@ -255,10 +255,10 @@
   (assert-eq (coro/value co) 42 "value after yield"))
 
 # ============================================================================
-# Effect inference tests
+# Signal inference tests
 # ============================================================================
 
-# test_pure_function_no_cps
+# test_silent_function_no_cps
 (begin
   (def sum (fn (n)
     (if (<= n 0)
@@ -640,21 +640,21 @@
 # Runtime signal checks (Pure closure warnings)
 # ============================================================================
 
-# test_make_coroutine_pure_closure_still_works
+# test_make_coroutine_silent_closure_still_works
 (begin
   (let ((co (make-coroutine (fn [] 42))))
-    (assert-eq (coro/resume co) 42 "pure closure in coroutine")))
+    (assert-eq (coro/resume co) 42 "silent closure in coroutine")))
 
 # test_make_coroutine_yielding_closure_works
 (begin
   (let ((co (make-coroutine (fn [] (yield 42)))))
     (assert-eq (coro/resume co) 42 "yielding closure in coroutine")))
 
-# test_coroutine_resume_pure_closure_completes_immediately
+# test_coroutine_resume_silent_closure_completes_immediately
 (begin
   (var co (make-coroutine (fn [] (+ 1 2 3))))
-  (assert-eq (coro/resume co) 6 "pure closure completes: value")
-  (assert-eq (string (coro/status co)) "dead" "pure closure completes: status"))
+  (assert-eq (coro/resume co) 6 "silent closure completes: value")
+  (assert-eq (string (coro/status co)) "dead" "silent closure completes: status"))
 
 # ============================================================================
 # Deep cross-call yield tests

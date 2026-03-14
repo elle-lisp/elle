@@ -143,7 +143,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "=",
         func: prim_eq,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test equality of values. Numeric-aware: (= 1 1.0) is true. Chained: (= a b c) means all are equal.",
         params: &["a", "b"],
@@ -154,7 +154,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "identical?",
         func: prim_identical,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Test strict identity. No numeric coercion: (identical? 1 1.0) is false.",
         params: &["a", "b"],
@@ -165,7 +165,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "<",
         func: prim_lt,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test strictly ascending order. Chained: (< a b c) means a < b and b < c. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
@@ -176,7 +176,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: ">",
         func: prim_gt,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test strictly descending order. Chained: (> c b a) means c > b and b > a. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
@@ -187,7 +187,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "<=",
         func: prim_le,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test non-descending order. Chained: (<= a b c) means a <= b and b <= c. Works on numbers, strings, and keywords.",
         params: &["a", "b"],
@@ -198,7 +198,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: ">=",
         func: prim_ge,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(2),
         doc: "Test non-ascending order. Chained: (>= c b a) means c >= b and b >= a. Works on numbers, strings, and keywords.",
         params: &["a", "b"],

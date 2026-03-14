@@ -288,7 +288,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "+",
         func: prim_add,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Sum all arguments. Returns 0 for no arguments.",
         params: &["xs"],
@@ -299,7 +299,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "-",
         func: prim_sub,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Subtract arguments left-to-right. Single arg negates.",
         params: &["x", "ys"],
@@ -310,7 +310,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "*",
         func: prim_mul,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Multiply all arguments. Returns 1 for no arguments.",
         params: &["xs"],
@@ -321,7 +321,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "/",
         func: prim_div_vm,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Divide arguments left-to-right. Single arg takes reciprocal.",
         params: &["x", "ys"],
@@ -332,7 +332,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mod",
         func: prim_mod,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Euclidean modulo. Result has same sign as divisor.",
         params: &["a", "b"],
@@ -343,7 +343,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "%",
         func: prim_rem,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
@@ -354,7 +354,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "rem",
         func: prim_rem,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Truncated remainder. Result has same sign as dividend.",
         params: &["a", "b"],
@@ -365,7 +365,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "abs",
         func: prim_abs,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Absolute value.",
         params: &["x"],
@@ -376,7 +376,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "min",
         func: prim_min,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Minimum of all arguments.",
         params: &["xs"],
@@ -387,7 +387,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "max",
         func: prim_max,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(1),
         doc: "Maximum of all arguments.",
         params: &["xs"],
@@ -398,7 +398,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "even?",
         func: prim_even,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Test if integer is even.",
         params: &["n"],
@@ -409,7 +409,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "odd?",
         func: prim_odd,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Test if integer is odd.",
         params: &["n"],

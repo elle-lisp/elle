@@ -580,12 +580,38 @@ pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::string_mut(bytes))
 }
 
+/// Return the UTF-8 byte length of a string (not grapheme count).
+pub(crate) fn prim_string_size_of(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("string/size-of: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(byte_len) = args[0].with_string(|s| s.len()) {
+        return (SIG_OK, Value::int(byte_len as i64));
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "string/size-of: expected string, got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
+}
+
 /// Declarative primitive definitions for string module.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@string",
         func: prim_buffer,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable string from byte arguments.",
         params: &[],
@@ -594,31 +620,31 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "string/upcase",
+        name: "string/uppercase",
         func: prim_string_upcase,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert string to uppercase.",
         params: &["s"],
         category: "string",
-        example: "(string/upcase \"hello\") #=> \"HELLO\"",
-        aliases: &["string-upcase"],
+        example: "(string/uppercase \"hello\") #=> \"HELLO\"",
+        aliases: &["string/upcase", "string-upcase"],
     },
     PrimitiveDef {
-        name: "string/downcase",
+        name: "string/lowercase",
         func: prim_string_downcase,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert string to lowercase.",
         params: &["s"],
         category: "string",
-        example: "(string/downcase \"HELLO\") #=> \"hello\"",
-        aliases: &["string-downcase"],
+        example: "(string/lowercase \"HELLO\") #=> \"hello\"",
+        aliases: &["string/downcase", "string-downcase"],
     },
     PrimitiveDef {
         name: "string/find",
         func: prim_string_find,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Find the grapheme index of a substring, with optional start offset.",
         params: &["haystack", "needle", "offset"],
@@ -629,7 +655,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/split",
         func: prim_string_split,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Split string by delimiter, returning an array of substrings.",
         params: &["s", "delim"],
@@ -640,7 +666,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/replace",
         func: prim_string_replace,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Replace all occurrences of old substring with new.",
         params: &["s", "old", "new"],
@@ -651,7 +677,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/trim",
         func: prim_string_trim,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Remove leading and trailing whitespace.",
         params: &["s"],
@@ -662,7 +688,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/contains?",
         func: prim_string_contains,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string contains substring.",
         params: &["s", "substr"],
@@ -673,7 +699,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/starts-with?",
         func: prim_string_starts_with,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string starts with prefix.",
         params: &["s", "prefix"],
@@ -684,7 +710,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/ends-with?",
         func: prim_string_ends_with,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if string ends with suffix.",
         params: &["s", "suffix"],
@@ -695,7 +721,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/join",
         func: prim_string_join,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Join list of strings with separator.",
         params: &["lst", "sep"],
@@ -706,7 +732,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "uri-encode",
         func: prim_uri_encode,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Percent-encode a string per RFC 3986.",
         params: &["str"],
@@ -714,4 +740,56 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(uri-encode \"hello world\") ;=> \"hello%20world\"",
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "string/size-of",
+        func: prim_string_size_of,
+        signal: Signal::inert(),
+        arity: Arity::Exact(1),
+        doc: "Return the UTF-8 byte length of a string.",
+        params: &["s"],
+        category: "string",
+        example: "(string/size-of \"café\") #=> 5",
+        aliases: &[],
+    },
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_of_ascii() {
+        let (sig, val) = prim_string_size_of(&[Value::string("hello")]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val.as_int(), Some(5));
+    }
+
+    #[test]
+    fn size_of_multibyte_utf8() {
+        // "café" — 'é' is 2 bytes, so total is 5 bytes
+        let (sig, val) = prim_string_size_of(&[Value::string("café")]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val.as_int(), Some(5));
+    }
+
+    #[test]
+    fn size_of_emoji() {
+        // "🎉" is 4 bytes in UTF-8
+        let (sig, val) = prim_string_size_of(&[Value::string("🎉")]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val.as_int(), Some(4));
+    }
+
+    #[test]
+    fn size_of_empty() {
+        let (sig, val) = prim_string_size_of(&[Value::string("")]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val.as_int(), Some(0));
+    }
+
+    #[test]
+    fn size_of_type_error() {
+        let (sig, _val) = prim_string_size_of(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+}

@@ -57,6 +57,23 @@ fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
     error.to_string()
 }
 
+/// Parse a compilation error string and format with location on separate line.
+/// Format: "file:line:col: message" -> "  at file:line:col\n✗ Compilation error: message"
+fn format_compilation_error(error: &str) -> String {
+    // Try to extract location and message
+    // Pattern: "file:line:col: message"
+    if let Some(colon_idx) = error.find(": ") {
+        let location_part = &error[..colon_idx];
+        // Check if this looks like a location (contains at least one colon for line:col)
+        if location_part.contains(':') {
+            let message = &error[colon_idx + 2..];
+            return format!("  at {}\n✗ Compilation error: {}", location_part, message);
+        }
+    }
+    // Fallback: just show error as-is
+    format!("✗ Compilation error: {}", error)
+}
+
 fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
     let mut contents = String::new();
     io::stdin()
@@ -90,7 +107,7 @@ fn run_source(
     let result = match compile_file(contents, symbols, source_name) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("✗ Compilation error: {}", e);
+            eprintln!("{}", format_compilation_error(&e));
             return Err(e);
         }
     };
@@ -189,7 +206,7 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                         } else {
                             // Real parse error - extract line and column from error message
                             let err_msg = e.to_string();
-                            eprintln!("✗ Compilation error: {}", err_msg);
+                            eprintln!("{}", format_compilation_error(&err_msg));
 
                             // Try to extract line and column from format like "<input>:1:3: message"
                             let (line, col) = if let Some(colon_pos) = err_msg.find(':') {
@@ -308,7 +325,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                 } else {
                     // Real parse error - extract line and column from error message
                     let err_msg = e.to_string();
-                    eprintln!("✗ Compilation error: {}", err_msg);
+                    eprintln!("{}", format_compilation_error(&err_msg));
 
                     // Try to extract line and column from format like "<input>:1:3: message"
                     let (line, col) = if let Some(colon_pos) = err_msg.find(':') {

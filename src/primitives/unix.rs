@@ -41,39 +41,20 @@ pub(crate) fn prim_unix_listen(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-    sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
-
-    let addr_len = if let Some(name) = path.strip_prefix('@') {
-        // Abstract socket
-        let max = sun.sun_path.len() - 1;
-        if name.len() > max {
-            unsafe { libc::close(fd) };
-            return (
-                SIG_ERROR,
-                error_val("io-error", "unix/listen: path too long"),
-            );
-        }
-        sun.sun_path[0] = 0;
-        for (i, b) in name.bytes().enumerate() {
-            sun.sun_path[i + 1] = b as libc::c_char;
-        }
-        (std::mem::size_of::<libc::sa_family_t>() + 1 + name.len()) as libc::socklen_t
-    } else {
-        // Filesystem socket — unlink first to avoid EADDRINUSE
+    // Filesystem socket — unlink first to avoid EADDRINUSE
+    if !path.starts_with('@') {
         let _ = std::fs::remove_file(&path);
-        let max = sun.sun_path.len() - 1;
-        if path.len() > max {
+    }
+
+    let (sun, addr_len) = match crate::io::sockaddr::build_unix(&path) {
+        Ok(result) => result,
+        Err(msg) => {
             unsafe { libc::close(fd) };
             return (
                 SIG_ERROR,
-                error_val("io-error", "unix/listen: path too long"),
+                error_val("io-error", format!("unix/listen: {}", msg)),
             );
         }
-        for (i, b) in path.bytes().enumerate() {
-            sun.sun_path[i] = b as libc::c_char;
-        }
-        (std::mem::size_of::<libc::sa_family_t>() + path.len() + 1) as libc::socklen_t
     };
 
     let ret = unsafe {
@@ -182,7 +163,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "unix/accept",
         func: prim_unix_accept,
         arity: Arity::AtLeast(1),
-        signal: Signal::errors(),
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
         params: &["listener"],
         category: "unix",
@@ -193,7 +177,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "unix/connect",
         func: prim_unix_connect,
         arity: Arity::AtLeast(1),
-        signal: Signal::errors(),
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
         doc: "Connect to a Unix domain socket. Returns a stream port.",
         params: &["path"],
         category: "unix",
@@ -204,7 +191,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "unix/shutdown",
         func: prim_unix_shutdown,
         arity: Arity::Exact(2),
-        signal: Signal::errors(),
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",
         params: &["port", "how"],
         category: "unix",

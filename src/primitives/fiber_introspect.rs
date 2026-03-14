@@ -6,12 +6,15 @@
 //! - fiber/parent: Get parent fiber or nil
 //! - fiber/child: Get most recently resumed child fiber or nil
 //! - fiber/propagate: Propagate caught signal preserving child chain
-//! - fiber/cancel: Inject error into suspended fiber
+//! - fiber/cancel (cancel): Hard-kill a fiber without unwinding
+//! - fiber/abort (abort): Inject error and resume for graceful unwinding
 //! - fiber?: Type predicate
 
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{FiberStatus, SignalBits, SIG_CANCEL, SIG_ERROR, SIG_OK, SIG_PROPAGATE};
+use crate::value::fiber::{
+    FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_TERMINAL,
+};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -213,10 +216,11 @@ pub(crate) fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
 
 /// (fiber/cancel fiber \[value\]) → value
 ///
-/// Inject an error into a suspended fiber. The error is injected directly
-/// into the target fiber (does not walk the child chain).
-///
-/// Returns SIG_CANCEL — the VM handles the cancellation.
+/// Hard-kill a fiber. Sets the fiber to :error status immediately without
+/// resuming it. No defer blocks run, no protect handlers execute.
+/// The fiber is dead. For self-cancel (cancelling the currently running
+/// fiber), returns SIG_ERROR | SIG_TERMINAL which terminates the dispatch
+/// loop without unwinding.
 pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
@@ -241,37 +245,110 @@ pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    // Validate: fiber must be in a cancellable state
-    let status = handle.with(|fiber| fiber.status);
+    let error_value = args.get(1).copied().unwrap_or(Value::NIL);
+
+    // try_with returns None when fiber is taken (currently executing on VM).
+    // That means it's the currently running fiber — self-cancel.
+    let status = match handle.try_with(|fiber| fiber.status) {
+        Some(s) => s,
+        None => {
+            // Self-cancel: fiber is alive (taken by VM). Return terminal error
+            // to kill the dispatch loop without unwinding.
+            return (SIG_ERROR | SIG_TERMINAL, error_value);
+        }
+    };
+
     match status {
-        FiberStatus::New | FiberStatus::Paused => {
-            // Valid for cancel — store the error value on the fiber
-            handle.with_mut(|fiber| {
-                fiber.signal = Some((SIG_ERROR, args.get(1).copied().unwrap_or(Value::NIL)));
-            });
-        }
         FiberStatus::Alive => {
-            return (
-                SIG_ERROR,
-                error_val("error", "fiber/cancel: cannot cancel a running fiber"),
-            );
+            // Fiber exists in handle but status is Alive — shouldn't happen
+            // in normal operation, but handle it as self-cancel.
+            (SIG_ERROR | SIG_TERMINAL, error_value)
         }
-        FiberStatus::Dead => {
-            return (
-                SIG_ERROR,
-                error_val("error", "fiber/cancel: cannot cancel a completed fiber"),
-            );
+        FiberStatus::New | FiberStatus::Paused => {
+            // Cancel another fiber: set status, store error, drop frames
+            handle.with_mut(|fiber| {
+                fiber.status = FiberStatus::Error;
+                fiber.signal = Some((SIG_ERROR, error_value));
+                fiber.suspended = None;
+            });
+            (SIG_OK, error_value)
         }
-        FiberStatus::Error => {
-            return (
-                SIG_ERROR,
-                error_val("error", "fiber/cancel: fiber already errored"),
-            );
-        }
+        FiberStatus::Dead => (
+            SIG_ERROR,
+            error_val("error", "fiber/cancel: cannot cancel a completed fiber"),
+        ),
+        FiberStatus::Error => (
+            SIG_ERROR,
+            error_val("error", "fiber/cancel: fiber already errored"),
+        ),
+    }
+}
+
+/// (fiber/abort fiber \[value\]) → value
+///
+/// Gracefully terminate a fiber by injecting an error and resuming it.
+/// The fiber's error handlers (protect) and cleanup blocks (defer) will
+/// execute. The fiber's final state depends on what its code does with
+/// the injected error — it may die, recover, or yield.
+///
+/// Only works on :paused fibers (must have something to unwind).
+/// Returns SIG_ABORT — the VM handles the fiber swap and execution.
+pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fiber/abort: expected 1-2 arguments, got {}", args.len()),
+            ),
+        );
     }
 
-    // Return SIG_CANCEL — VM will handle execution
-    (SIG_CANCEL, args[0])
+    let handle = match args[0].as_fiber() {
+        Some(h) => h,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("fiber/abort: expected fiber, got {}", args[0].type_name()),
+                ),
+            );
+        }
+    };
+
+    let error_value = args.get(1).copied().unwrap_or(Value::NIL);
+    let status = handle.with(|fiber| fiber.status);
+
+    match status {
+        FiberStatus::Paused => {
+            // Store the error value on the fiber for do_fiber_abort to pick up
+            handle.with_mut(|fiber| {
+                fiber.signal = Some((SIG_ERROR, error_value));
+            });
+            // Return SIG_ABORT — VM will inject error, resume, let it unwind
+            (SIG_ABORT, args[0])
+        }
+        FiberStatus::New => (
+            SIG_ERROR,
+            error_val(
+                "error",
+                "fiber/abort: cannot abort a fiber that was never started",
+            ),
+        ),
+        FiberStatus::Alive => (
+            SIG_ERROR,
+            error_val("error", "fiber/abort: cannot abort a running fiber"),
+        ),
+        FiberStatus::Dead => (
+            SIG_ERROR,
+            error_val("error", "fiber/abort: cannot abort a completed fiber"),
+        ),
+        FiberStatus::Error => (
+            SIG_ERROR,
+            error_val("error", "fiber/abort: fiber already errored"),
+        ),
+    }
 }
 
 /// Declarative primitive definitions for fiber introspection and management
@@ -279,7 +356,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/bits",
         func: prim_fiber_bits,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the signal bits from the fiber's last signal",
         params: &["fiber"],
@@ -290,7 +367,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber/mask",
         func: prim_fiber_mask,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the fiber's signal mask",
         params: &["fiber"],
@@ -301,7 +378,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fiber?",
         func: prim_is_fiber,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if a value is a fiber",
         params: &["value"],
@@ -310,20 +387,23 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "fiber/parent",
-        func: prim_fiber_parent,
-        signal: Signal::inert(),
-        arity: Arity::Exact(1),
-        doc: "Get the parent fiber, or nil if none",
-        params: &["fiber"],
+        name: "fiber/cancel",
+        func: prim_fiber_cancel,
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0),
+            propagates: 0,
+        },
+        arity: Arity::Range(1, 2),
+        doc: "Hard-kill a fiber. Sets it to :error without unwinding. No defer/protect runs. Supports self-cancel.",
+        params: &["fiber", "error?"],
         category: "fiber",
-        example: "(fiber/parent f)",
-        aliases: &[],
+        example: "(fiber/cancel f)\n(fiber/cancel f :reason)",
+        aliases: &["cancel"],
     },
     PrimitiveDef {
         name: "fiber/child",
         func: prim_fiber_child,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the most recently resumed child fiber, or nil if none",
         params: &["fiber"],
@@ -332,9 +412,23 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
+        name: "fiber/parent",
+        func: prim_fiber_parent,
+        signal: Signal::inert(),
+        arity: Arity::Exact(1),
+        doc: "Get the parent fiber, or nil if this is a top-level fiber",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/parent f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "fiber/propagate",
         func: prim_fiber_propagate,
-        signal: Signal::yields_errors(),
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_PROPAGATE.0),
+            propagates: 0,
+        },
         arity: Arity::Exact(1),
         doc: "Propagate a caught signal from a child fiber, preserving the child chain",
         params: &["fiber"],
@@ -343,14 +437,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "fiber/cancel",
-        func: prim_fiber_cancel,
-        signal: Signal::errors(),
+        name: "fiber/abort",
+        func: prim_fiber_abort,
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_ABORT.0),
+            propagates: 0,
+        },
         arity: Arity::Range(1, 2),
-        doc: "Inject an error into a suspended fiber. Error value defaults to nil.",
+        doc: "Gracefully terminate a fiber by injecting an error and resuming it. Defer/protect blocks run.",
         params: &["fiber", "error?"],
         category: "fiber",
-        example: "(fiber/cancel f)\n(fiber/cancel f :reason)",
-        aliases: &["cancel"],
+        example: "(fiber/abort f)\n(fiber/abort f :reason)",
+        aliases: &["abort"],
     },
 ];

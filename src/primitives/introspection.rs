@@ -269,7 +269,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "closure?",
         func: prim_is_closure,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if value is a bytecode closure",
         params: &["value"],
@@ -280,7 +280,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "jit?",
         func: prim_is_jit,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],
@@ -291,7 +291,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "silent?",
         func: prim_is_silent,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure is silent (does not suspend: no yield, debug, or polymorphic signal). False for non-closures.",
         params: &["value"],
@@ -313,7 +313,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/mutates-params?",
         func: prim_mutates_params,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure mutates any parameters",
         params: &["value"],
@@ -324,7 +324,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/errors?",
         func: prim_errors,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns true if closure may error",
         params: &["value"],
@@ -335,7 +335,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/arity",
         func: prim_arity,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns closure arity as int, pair, or nil",
         params: &["value"],
@@ -346,7 +346,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/captures",
         func: prim_captures,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns number of captured variables, or nil",
         params: &["value"],
@@ -357,7 +357,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/bytecode-size",
         func: prim_bytecode_size,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns size of bytecode in bytes, or nil",
         params: &["value"],
@@ -368,7 +368,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "doc",
         func: prim_doc,
-        signal: Signal::inert(),
+        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Look up documentation for a closure (by value) or a builtin (by name string).",
         params: &["target"],
@@ -379,7 +379,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/query",
         func: prim_vm_query,
-        signal: Signal::inert(),
+        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
@@ -390,7 +390,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "signals",
         func: prim_signals,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(0),
         doc: "Return the signal registry as a struct mapping keywords to bit positions.",
         params: &[],
@@ -401,7 +401,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keyword",
         func: prim_keyword,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a string to a keyword.",
         params: &["str"],

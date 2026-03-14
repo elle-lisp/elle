@@ -399,7 +399,7 @@ impl SyntaxReader {
                 Ok(Syntax::new(SyntaxKind::List(vec![sym, str_lit]), span))
             }
             _ => Err(format!(
-                "{}: @ must be followed by [...], {{...}}, or \"...\"",
+                "{}: @ must be followed by [...], {{...}}, |...|, or \"...\"",
                 start_loc.position()
             )),
         }

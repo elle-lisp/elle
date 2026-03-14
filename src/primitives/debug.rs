@@ -188,7 +188,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/print",
         func: prim_debug_print,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Prints a value with debug information to stderr",
         params: &["value"],
@@ -199,7 +199,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/trace",
         func: prim_trace,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Traces execution with a label, prints to stderr, returns value",
         params: &["label", "value"],

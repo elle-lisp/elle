@@ -1,3 +1,5 @@
+#!/usr/bin/env elle
+
 ## Async I/O example: concurrent file reads
 ##
 ## Demonstrates ev/run with multiple concurrent I/O thunks.

@@ -81,6 +81,6 @@
   (let (([ok? err] (protect (f))))
     (if ok?
       (error {:error :failed-assertion :message (-> "Expected error, got success\n" (append msg))})
-      (assert-eq (get err 0) expected-kind msg)))))
+      (assert-eq (get err :error) expected-kind msg)))))
 
 (fn [] {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind})

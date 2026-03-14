@@ -308,7 +308,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sqrt",
         func: prim_sqrt,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the square root of a number.",
         params: &["x"],
@@ -319,7 +319,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sin",
         func: prim_sin,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the sine of a number (in radians).",
         params: &["x"],
@@ -330,7 +330,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/cos",
         func: prim_cos,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the cosine of a number (in radians).",
         params: &["x"],
@@ -341,7 +341,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/tan",
         func: prim_tan,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the tangent of a number (in radians).",
         params: &["x"],
@@ -352,7 +352,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/log",
         func: prim_log,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Returns the natural logarithm of x, or logarithm with specified base.",
         params: &["x", "base"],
@@ -363,7 +363,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/exp",
         func: prim_exp,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns e raised to the power of x.",
         params: &["x"],
@@ -374,7 +374,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/pow",
         func: prim_pow,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Returns x raised to the power of y.",
         params: &["x", "y"],
@@ -385,7 +385,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/floor",
         func: prim_floor,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the largest integer less than or equal to x.",
         params: &["x"],
@@ -396,7 +396,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/ceil",
         func: prim_ceil,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the smallest integer greater than or equal to x.",
         params: &["x"],
@@ -407,7 +407,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/round",
         func: prim_round,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Returns the nearest integer to x.",
         params: &["x"],

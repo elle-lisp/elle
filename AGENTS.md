@@ -46,7 +46,8 @@ bytecode. Error messages include file:line:col information.
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions |
+| `primitives` | Built-in functions; includes `port/path` and `string/size-of` |
+| `stdlib` | Standard library functions (loaded at startup) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift |
 | `formatter` | Code formatting for Elle source |
@@ -72,6 +73,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 |---------|------|---------|
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
+| lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
 
 ## Directories
 
@@ -80,6 +82,7 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
+| `lib/` | Reusable Elle modules (HTTP, etc.) |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |
@@ -127,6 +130,10 @@ These must remain true. Violating them breaks the system:
 ## Intentional oddities
 
 Things that look wrong but aren't. The 4 most critical (agents get these wrong):
+
+- **Elle has no `-e` flag.** To run one-liners, use `echo '(expr)' | elle`.
+
+- **Elle has no `-` flags at all.** See `elle --help`.
 
 - **`nil` vs `()` are distinct.** `nil` is falsy (absence). `()` is truthy (empty list).
   Lists terminate with `EMPTY_LIST`. Use `empty?` (not `nil?`) for end-of-list.
@@ -184,3 +191,50 @@ When in doubt, run the tests.
 
 5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for common cross-cutting changes.
 6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how to add new tests.
+
+## Standard Library Functions
+
+### merge
+
+**Location:** `stdlib.lisp`
+
+**Signature:** `(merge a b)`
+
+**Purpose:** Merges struct `b` into struct `a`, returning the same type as `a`. Keys in `b` override keys in `a`.
+
+**Behavior:**
+- If `a` is an immutable struct `{...}`, returns an immutable struct
+- If `a` is a mutable struct `@{...}`, returns a mutable struct
+- All keys from `a` are preserved
+- All keys from `b` are added or override existing keys in `a`
+- The type of the result matches the type of `a`
+
+**Examples:**
+```lisp
+(merge {:x 1 :y 2} {:y 3 :z 4})
+#=> {:x 1 :y 3 :z 4}
+
+(merge @{:x 1 :y 2} {:y 3 :z 4})
+#=> @{:x 1 :y 3 :z 4}
+
+(merge {:a 1} {})
+#=> {:a 1}
+
+(merge {} {:b 2})
+#=> {:b 2}
+```
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| `a` is not a struct | `type-error` | `"merge: first argument must be struct, got {type}"` |
+| `b` is not a struct | `type-error` | `"merge: second argument must be struct, got {type}"` |
+| Wrong arity | `arity-error` | `"merge: expected 2 arguments, got N"` |
+
+**Invariants:**
+
+1. **Type preservation.** The result type matches the type of the first argument.
+2. **Non-destructive.** Neither `a` nor `b` is modified; a new struct is returned.
+3. **Override semantics.** Keys in `b` take precedence over keys in `a`.
+4. **Immutability respected.** If `a` is immutable, the result is immutable. If `a` is mutable, the result is mutable.

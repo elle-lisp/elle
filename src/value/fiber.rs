@@ -111,7 +111,7 @@ impl std::fmt::Debug for WeakFiberHandle {
     }
 }
 
-/// A suspended execution point.
+/// A suspended bytecode execution point.
 ///
 /// Captures everything needed to resume bytecode execution: the bytecode,
 /// constants pool, closure environment, instruction pointer, and operand
@@ -122,7 +122,7 @@ impl std::fmt::Debug for WeakFiberHandle {
 /// preserved). For yield suspension, `stack` captures the operand stack
 /// at the point of yield.
 #[derive(Debug, Clone)]
-pub struct SuspendedFrame {
+pub struct BytecodeFrame {
     /// Bytecode to resume executing
     pub bytecode: Rc<Vec<u8>>,
     /// Constants pool for this frame
@@ -139,6 +139,33 @@ pub struct SuspendedFrame {
     pub active_allocator: *const bumpalo::Bump,
     /// Location map for mapping bytecode offsets to source locations
     pub location_map: Rc<LocationMap>,
+}
+
+/// A suspended execution step — either a bytecode frame or a sub-fiber resume.
+///
+/// The `suspended` Vec on a `Fiber` contains a chain of these, replayed
+/// innermost-first by `resume_suspended`.
+///
+/// - `Bytecode`: resume bytecode execution at a saved instruction pointer.
+/// - `FiberResume`: resume a suspended sub-fiber (e.g. a `defer`/`protect`
+///   body fiber) with the value flowing through the chain.  This is used when
+///   a sub-fiber's I/O signal propagates through its parent: the parent saves
+///   a `FiberResume` frame so that on re-entry the I/O result is delivered to
+///   the sub-fiber first, and the sub-fiber's final return value then flows
+///   into the next frame in the chain (typically the outer `BytecodeFrame`
+///   that continues the `defer`/`protect` expansion after `fiber/resume`).
+#[derive(Debug, Clone)]
+pub enum SuspendedFrame {
+    /// Resume bytecode execution from a saved point.
+    Bytecode(BytecodeFrame),
+    /// Resume a suspended sub-fiber with the incoming value, then continue
+    /// to the next frame in the chain with the sub-fiber's return value.
+    FiberResume {
+        /// Handle to the suspended sub-fiber.
+        handle: FiberHandle,
+        /// The NaN-boxed `Value` wrapping `handle` (for child-chain wiring).
+        fiber_value: Value,
+    },
 }
 
 /// Signal type bits. The first 16 are compiler-reserved.
@@ -225,7 +252,7 @@ impl From<SignalBits> for u32 {
 // owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
 // imports continue to work.
 pub use crate::signals::{
-    SIG_CANCEL, SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
+    SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
     SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
 };
 

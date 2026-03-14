@@ -124,6 +124,7 @@ impl JitCode {
 impl JitCode {
     /// Create a JitCode with yield points but no real compiled code.
     /// For testing `elle_jit_yield` without Cranelift compilation.
+    #[allow(dead_code)]
     pub(crate) fn test_with_yield_points(
         yield_points: Vec<super::dispatch::YieldPointMeta>,
     ) -> Self {

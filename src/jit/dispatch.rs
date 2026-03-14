@@ -7,7 +7,7 @@
 //! Re-exported here so `compiler.rs` can reference them as `dispatch::*`.
 
 use crate::value::fiber::{
-    SignalBits, SIG_CANCEL, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
+    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
     SIG_YIELD,
 };
 use crate::value::repr::TAG_NIL;
@@ -25,7 +25,7 @@ pub use super::suspend::*;
 ///
 /// With the relaxed JIT gate, SIG_YIELD can now appear here from primitives
 /// like `fiber/resume`. VM-internal signals (SIG_RESUME, SIG_PROPAGATE,
-/// SIG_CANCEL) are dispatched to the VM's fiber handlers, which run the
+/// SIG_ABORT) are dispatched to the VM's fiber handlers, which run the
 /// child fiber synchronously and return a result.
 /// SIG_ERROR sets the exception on the fiber for the JIT caller to check.
 /// SIG_QUERY is dispatched to the VM's query handler (for primitives like
@@ -75,9 +75,9 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
             // fiber/propagate: propagate the child fiber's signal.
             vm.handle_fiber_propagate_signal_jit(value)
         }
-        SIG_CANCEL => {
-            // fiber/cancel: inject error into suspended fiber.
-            vm.handle_fiber_cancel_signal_jit(value)
+        SIG_ABORT if value.as_fiber().is_some() => {
+            // fiber/abort: inject error into suspended fiber (abort).
+            vm.handle_fiber_abort_signal_jit(value)
         }
         _ => {
             panic!(

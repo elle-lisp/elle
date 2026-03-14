@@ -115,15 +115,18 @@ When analyzing a call:
 
 ## I/O Signals
 
-I/O is no longer tracked in the signal system. Stream primitives use
-`Signal::errors()` (they may error on invalid ports, EOF, etc.). The I/O
-mechanism (SIG_IO, IoRequest) still exists at the runtime/scheduler level
-but is not reflected in static signal annotations.
+Stream primitives and network primitives include `SIG_IO` in their signal
+annotations. This is critical for escape analysis: `may_suspend()` checks
+`SIG_YIELD | SIG_DEBUG` bits and `propagates != 0`, but the scheduler also
+needs to know that a function may yield an I/O request. Primitives that
+return `(SIG_YIELD | SIG_IO, IoRequest)` must declare both bits.
 
 Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
-`stream/write`, `stream/flush`) have signal `errors()`. They return
-`(SIG_IO, IoRequest)` to suspend the fiber and let the scheduler dispatch
-to a backend.
+`stream/write`, `stream/flush`) have signal `SIG_ERROR | SIG_YIELD | SIG_IO`.
+Network primitives (`tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/send-to`,
+`udp/recv-from`, `unix/accept`, `unix/connect`, `unix/shutdown`) also include
+`SIG_YIELD | SIG_IO`. The async sleep primitive `ev/sleep` has signal
+`SIG_ERROR | SIG_YIELD | SIG_IO`.
 
 ## Dependents
 
@@ -136,7 +139,7 @@ Used across the pipeline and the runtime:
 - `jit/compiler.rs` — JIT gate checks `!signal.may_suspend()`
 - `vm/call.rs` — call dispatch checks `!signal.may_suspend()`
 - `primitives/coroutines.rs` — coroutine warnings check `!signal.may_yield()`
-- `primitives/stream.rs` — stream primitives use `Signal::errors()`
+- `primitives/stream.rs` — stream primitives use `SIG_ERROR | SIG_YIELD | SIG_IO`
 - `io/backend.rs` — backend execution returns `(SIG_OK, result)` or `(SIG_ERROR, error)`
 
 ## Files

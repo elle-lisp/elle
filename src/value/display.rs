@@ -402,6 +402,33 @@ impl fmt::Debug for Value {
             }
             return write!(f, "|");
         }
+        // Struct (immutable) — use Debug for keys and values
+        if let Some(struct_map) = self.as_struct() {
+            write!(f, "{{")?;
+            let mut first = true;
+            for (k, v) in struct_map.iter() {
+                if !first {
+                    write!(f, " ")?;
+                }
+                first = false;
+                write!(f, "{:?} {:?}", k, v)?;
+            }
+            return write!(f, "}}");
+        }
+        // Struct (mutable) — use Debug for keys and values
+        if let Some(table_ref) = self.as_struct_mut() {
+            let table = table_ref.borrow();
+            write!(f, "@{{")?;
+            let mut first = true;
+            for (k, v) in table.iter() {
+                if !first {
+                    write!(f, " ")?;
+                }
+                first = false;
+                write!(f, "{:?} {:?}", k, v)?;
+            }
+            return write!(f, "}}");
+        }
         // Everything else — delegate to Display
         write!(f, "{}", self)
     }
