@@ -24,7 +24,7 @@ use std::fmt;
 //   Bit  3:     Resume - run a suspended fiber (VM-internal)
 //   Bit  4:     FFI — calls foreign code
 //   Bit  5:     Propagate — propagate caught signal (VM-internal)
-//   Bit  6:     Cancel — inject error into fiber (VM-internal)
+//   Bit  6:     Abort — graceful fiber termination with error injection (VM-internal)
 //   Bit  7:     Query — read VM state without fiber swap (VM-internal)
 //   Bit  8:     Halt — graceful VM termination with return value
 //   Bit  9:     IO — I/O request to scheduler
@@ -39,7 +39,7 @@ pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
 pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
 pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
 pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
-pub const SIG_CANCEL: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // inject error into fiber (VM-internal)
+pub const SIG_ABORT: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // graceful fiber termination with error injection (VM-internal)
 pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
 pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler

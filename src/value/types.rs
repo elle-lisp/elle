@@ -87,7 +87,7 @@ impl fmt::Display for Arity {
 }
 
 /// Wrapper for table/struct keys - allows specific Value types to be keys
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum TableKey {
     Nil,
     Bool(bool),
@@ -241,6 +241,31 @@ impl fmt::Display for TableKey {
             TableKey::String(s) => write!(f, "\"{}\"", s),
             TableKey::Keyword(s) => write!(f, ":{}", s),
             TableKey::Identity(v) => write!(f, "{}", v),
+        }
+    }
+}
+
+impl fmt::Debug for TableKey {
+    /// Machine-readable representation of table keys.
+    /// Symbols: 'name (with opening quote only)
+    /// Strings: "value" (with quotes)
+    /// Keywords: :name
+    /// Others: same as Display
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TableKey::Nil => write!(f, "nil"),
+            TableKey::Bool(b) => write!(f, "{}", if *b { "true" } else { "false" }),
+            TableKey::Int(i) => write!(f, "{}", i),
+            TableKey::Symbol(id) => {
+                if let Some(name) = crate::context::resolve_symbol_name(id.0) {
+                    write!(f, "'{}", name)
+                } else {
+                    write!(f, "'#<sym:{}>", id.0)
+                }
+            }
+            TableKey::String(s) => write!(f, "\"{}\"", s),
+            TableKey::Keyword(s) => write!(f, ":{}", s),
+            TableKey::Identity(v) => write!(f, "{:?}", v),
         }
     }
 }

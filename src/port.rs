@@ -209,7 +209,6 @@ impl Port {
     }
 
     /// The original file path, if this is a file port.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
     }

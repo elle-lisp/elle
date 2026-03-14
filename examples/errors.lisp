@@ -9,7 +9,7 @@
 #   defer            — guaranteed cleanup after body
 #   with             — resource management (acquire / use / release)
 #   Error propagation — errors bubble through call stacks
-#   Fiber error handling — mask, terminal vs resumable, fiber/cancel
+#   Fiber error handling — mask, terminal vs resumable, cancel vs abort
 #   Practical patterns — safe wrappers, validation, error inspection
 
 (def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
@@ -269,27 +269,73 @@
 
 
 # ========================================
-# 8. fiber/cancel — injecting errors
+# 8. fiber/cancel vs fiber/abort
 # ========================================
 
-# fiber/cancel injects an error into a suspended fiber, making it
-# terminal (:error) regardless of its mask.
+# fiber/cancel — hard kill, no cleanup
+#
+# cancel sets the fiber to :error immediately. No defer blocks run,
+# no protect handlers execute. The fiber is dead.
 
-(def f2 (fiber/new (fn [] (yield :waiting) :done) 3))
-(fiber/resume f2 nil)
-(assert-eq (fiber/status f2) :paused "cancel target: starts paused")
-(assert-eq (fiber/value f2) :waiting "cancel target: yielded value")
+(def log1 @[])
+(def f-cancel (fiber/new (fn []
+  (defer (push log1 :cleanup)
+    (yield :waiting)
+    (push log1 :body-done)
+    :done)) 3))
+(fiber/resume f-cancel nil)
+(assert-eq (fiber/status f-cancel) :paused "cancel: starts paused")
 
-(fiber/cancel f2 {:error :cancelled :message "externally cancelled"})
-(def status2 (fiber/status f2))
-(display "  cancelled fiber status: ") (print status2)
-(assert-eq status2 :error "cancel: fiber is :error")
+(fiber/cancel f-cancel {:error :cancelled})
+(display "  cancel status: ") (print (fiber/status f-cancel))
+(display "  cancel log: ") (print log1)
+(assert-eq (fiber/status f-cancel) :error "cancel: fiber is :error")
+(assert-eq (length log1) 0 "cancel: no defer ran")
 
-# Resuming a cancelled fiber fails the same way as any errored fiber.
-(def [ok3? err3] (protect (fiber/resume f2)))
-(display "  resume cancelled fiber: ") (print err3)
-(assert-false ok3? "resume cancelled: signals an error")
-(assert-eq (get err3 :error) :error "resume cancelled: error kind is :error")
+# Resuming a cancelled fiber fails.
+(def [ok-c? err-c] (protect (fiber/resume f-cancel)))
+(display "  resume cancelled: ") (print err-c)
+(assert-false ok-c? "resume cancelled: signals error")
+
+# fiber/abort — inject error and resume
+#
+# abort injects an error into a paused fiber and resumes it.
+# Unlike cancel, the fiber's error handling machinery (mask, protect)
+# participates. With mask=1 (catches errors), the fiber suspends
+# with the injected error as a caught signal.
+
+(def f-abort (fiber/new (fn []
+  (yield :waiting)
+  :done) 3))  # mask=3 catches errors+yields
+(fiber/resume f-abort nil)
+(assert-eq (fiber/status f-abort) :paused "abort: starts paused")
+(assert-eq (fiber/value f-abort) :waiting "abort: yielded :waiting")
+
+(fiber/abort f-abort {:error :aborted})
+(display "  abort status: ") (print (fiber/status f-abort))
+(display "  abort value: ") (print (fiber/value f-abort))
+# With mask=3, the injected error is caught — fiber is :paused with the error
+(assert-eq (fiber/status f-abort) :paused "abort: error caught by mask")
+(assert-eq (get (fiber/value f-abort) :error) :aborted "abort: error value preserved")
+
+# Contrast with cancel: cancel kills immediately, abort goes through mask.
+# cancel with mask=3: fiber is dead regardless of mask.
+(def log-cmp @[])
+(def f-cmp (fiber/new (fn []
+  (yield :waiting)
+  (push log-cmp :after-yield)
+  :done) 3))  # mask=3 — would catch errors, but cancel bypasses mask
+(fiber/resume f-cmp nil)
+(fiber/cancel f-cmp {:error :killed})
+(display "  cancel vs abort - cancel: ") (print (fiber/status f-cmp))
+(assert-eq (fiber/status f-cmp) :error "cancel ignores mask")
+
+# fiber/cancel self — a fiber can cancel itself
+#
+# Self-cancel sends SIG_TERMINAL which is uncatchable — it propagates
+# through all mask checks (including protect/defer). This is intentional:
+# self-cancel is a hard kill that cannot be intercepted.
+# (fiber/cancel (fiber/self) :reason) — terminates the entire fiber chain.
 
 
 # ========================================

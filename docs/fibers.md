@@ -2,7 +2,7 @@
 
 Fibers are Elle's unified control-flow mechanism. A fiber is an independent
 execution context with its own stack, call frames, and signal state. All
-non-local control flow — errors, yields, coroutines, cancellation — is
+non-local control flow — errors, yields, coroutines, cancellation, abort — is
 
 ## Contents
 
@@ -84,12 +84,20 @@ Signal types are bit positions in a `u32` bitmask:
 | 3 | `SIG_RESUME` | 8 | VM-internal: fiber resume request |
 | 4 | `SIG_FFI` | 16 | Calls foreign code |
 | 5 | `SIG_PROPAGATE` | 32 | VM-internal: propagate caught signal |
-| 6 | `SIG_CANCEL` | 64 | VM-internal: inject error into fiber |
-| 7–15 | — | — | Reserved |
+| 6 | `SIG_ABORT` | `SIG_ERROR \| SIG_TERMINAL` | VM-internal: graceful fiber termination with error injection |
+| 7 | `SIG_QUERY` | 128 | VM-internal: read VM state |
+| 8 | `SIG_HALT` | 256 | Graceful VM termination |
+| 9 | `SIG_IO` | 512 | I/O request to scheduler |
+| 10 | `SIG_TERMINAL` | 1024 | Uncatchable — passes through mask checks |
+| 11–15 | — | — | Reserved |
 | 16–31 | — | — | User-defined signal types |
 
-Bits 0–2 are user-facing. Bits 3–6 are VM-internal. Bits 16–31 are for
+Bits 0–2 are user-facing. Bits 3–10 are VM-internal. Bits 16–31 are for
 user-defined signal types.
+
+`SIG_TERMINAL` (bit 10) marks a signal as **uncatchable**. It passes through
+all mask checks regardless of the fiber's mask. `SIG_ABORT` is
+`SIG_ERROR | SIG_TERMINAL` — a composite, not a standalone bit.
 
 ### Signal emission
 
@@ -252,7 +260,8 @@ Walk `fiber/child` to find the originating fiber. The originator's
 | `fiber/parent` | `(fiber) → fiber\|nil` | Parent fiber |
 | `fiber/child` | `(fiber) → fiber\|nil` | Most recently resumed child |
 | `fiber/propagate` | `(fiber) → (propagates)` | Propagate caught signal, preserve chain |
-| `fiber/cancel` | `(fiber value) → value` | Inject error into suspended fiber |
+| `fiber/cancel` | `(fiber value?) → value` | Hard-kill: set to :error, no unwinding |
+| `fiber/abort` | `(fiber value?) → value` | Graceful: inject error, resume for unwinding |
 | `fiber?` | `(value) → bool` | Type predicate |
 
 All fiber primitives are `NativeFn: fn(&[Value]) -> (SignalBits, Value)`.
@@ -306,6 +315,56 @@ handler either:
 - **Doesn't resume** (lets it be GC'd) → terminal
 
 An uncaught `SIG_ERROR` at the root fiber is terminal by convention.
+
+**Exception:** `SIG_TERMINAL` signals are uncatchable. They pass through
+mask checks regardless of the fiber's mask. This is how `fiber/cancel`
+self-cancel works — the terminal signal cannot be caught by `protect` or
+`defer`, ensuring the fiber dies immediately.
+
+
+## Cancel vs. Abort
+
+Two distinct operations for ending a fiber's execution:
+
+### fiber/cancel — hard kill
+
+Sets the fiber to `:error` status immediately. No VM dispatch, no
+frame execution, no defer/protect unwinding. The fiber is dead.
+
+- Accepts `:new` or `:paused` fibers (other-cancel)
+- Accepts `:alive` fibers (self-cancel only — the currently running fiber)
+- Self-cancel returns `SIG_ERROR | SIG_TERMINAL`, which terminates the
+  dispatch loop without unwinding. The terminal signal is uncatchable —
+  it propagates through all masks including `protect` and `defer`
+- Other-cancel returns `SIG_OK` with the error value
+
+```elle
+(def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) 3))
+(fiber/resume f)          # f is now :paused
+(fiber/cancel f :reason)  # f is now :error, :cleanup never printed
+```
+
+### fiber/abort — graceful termination
+
+Injects an error into a `:paused` fiber and resumes it. The fiber's
+error handlers (`protect`) and cleanup blocks (`defer`) execute during
+unwinding. The result is handled identically to `fiber/resume` — the
+child's actual outcome determines what the parent sees.
+
+- Only accepts `:paused` fibers
+- Returns `SIG_ABORT` — the VM handles the fiber swap
+- No post-hoc status stomp: if the fiber's protect catches and recovers,
+  the fiber may end up `:dead` instead of `:error`
+
+```elle
+(def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) 3))
+(fiber/resume f)          # f is now :paused
+(fiber/abort f :reason)   # :cleanup printed, f is now :error
+```
+
+### Aliases
+
+`cancel` is an alias for `fiber/cancel`. `abort` is an alias for `fiber/abort`.
 
 
 ## Signal System Integration

@@ -61,9 +61,13 @@ impl SyncBackend {
     /// Execute an I/O request synchronously.
     /// Returns `(SIG_OK, result)` on success, `(SIG_ERROR, error)` on failure.
     pub fn execute(&self, request: &IoRequest) -> (SignalBits, Value) {
-        // Connect creates a new port — no existing port required.
+        // Portless operations — no existing port required.
         if let IoOp::Connect { ref addr } = request.op {
             return self.execute_connect(addr);
+        }
+        if let IoOp::Sleep { duration } = request.op {
+            std::thread::sleep(duration);
+            return (SIG_OK, Value::NIL);
         }
 
         // All remaining ops require a valid port.
@@ -123,7 +127,7 @@ impl SyncBackend {
                     SIG_ERROR,
                     error_val("io-error", "accept: port is not a listener"),
                 ),
-                IoOp::Connect { .. } => unreachable!(), // handled above
+                IoOp::Connect { .. } | IoOp::Sleep { .. } => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
@@ -433,8 +437,12 @@ impl SyncBackend {
             PortKind::Stdout => io::stdout().lock().flush(),
             PortKind::Stderr => io::stderr().lock().flush(),
             PortKind::Stdin => Ok(()), // no-op
-            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
-                port.with_fd(|fd| {
+            // Sockets: fsync(2) returns EINVAL on socket fds. TCP and Unix
+            // stream sockets have kernel-managed buffers; flush is a no-op.
+            PortKind::TcpStream | PortKind::UnixStream => Ok(()),
+            PortKind::UdpSocket => Ok(()), // no meaningful flush for UDP
+            PortKind::File => port
+                .with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe { libc::fsync(raw) };
                     if ret < 0 {
@@ -448,8 +456,7 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                })
-            }
+                }),
             PortKind::TcpListener | PortKind::UnixListener => Ok(()), // no-op for listeners
         }
     }

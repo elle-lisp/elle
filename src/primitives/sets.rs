@@ -478,7 +478,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "set?",
         func: prim_is_set,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a set (immutable or mutable). Use (type-of x) to distinguish.",
         params: &["value"],
@@ -489,7 +489,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "contains?",
         func: prim_contains,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Check if a value is a member of a set",
         params: &["set", "value"],
@@ -500,7 +500,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "add",
         func: prim_add,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Add an element to a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
         params: &["set", "value"],
@@ -511,7 +511,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "del",
         func: prim_del,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Remove an element from a set. For immutable sets, returns a new set. For mutable sets, modifies in place.",
         params: &["set", "value"],
@@ -522,7 +522,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "union",
         func: prim_union,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the union of two sets (both must be the same type)",
         params: &["set1", "set2"],
@@ -533,7 +533,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "intersection",
         func: prim_intersection,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the intersection of two sets (both must be the same type)",
         params: &["set1", "set2"],
@@ -544,7 +544,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "difference",
         func: prim_difference,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Compute the difference of two sets (both must be the same type)",
         params: &["set1", "set2"],
@@ -555,7 +555,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "set->array",
         func: prim_set_to_array,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert a set to an array/tuple. Immutable set → tuple, mutable set → array.",
         params: &["set"],
@@ -566,7 +566,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "seq->set",
         func: prim_seq_to_set,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Convert any sequence to a set. Immutable inputs (list, tuple, string, bytes, set) → immutable set. Mutable inputs (array, buffer, blob, @set) → mutable set. Freezes mutable values on insertion.",
         params: &["seq"],

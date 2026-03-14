@@ -168,7 +168,7 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn track_signal_source_with_args(
         &mut self,
         func: &Hir,
-        raw_effect: &Signal,
+        raw_signal: &Signal,
         args: &[&Hir],
     ) {
         // Case 1: Direct call to a parameter
@@ -182,9 +182,9 @@ impl<'a> Analyzer<'a> {
         }
 
         // Case 2: Call to a polymorphic function with parameters as the polymorphic arguments
-        if raw_effect.is_polymorphic() {
+        if raw_signal.is_polymorphic() {
             let mut found_param = false;
-            for param_idx in raw_effect.propagated_params() {
+            for param_idx in raw_signal.propagated_params() {
                 if param_idx < args.len() {
                     if let HirKind::Var(arg_binding) = &args[param_idx].kind {
                         if matches!(arg_binding.scope(), BindingScope::Parameter)
@@ -204,8 +204,8 @@ impl<'a> Analyzer<'a> {
 
         // Case 3: Suspension from a non-parameter source
         // Only mark as non-param yield if the resolved signal may suspend
-        let resolved_effect = self.resolve_polymorphic_signal(raw_effect, args);
-        if resolved_effect.may_suspend() {
+        let resolved_signal = self.resolve_polymorphic_signal(raw_signal, args);
+        if resolved_signal.may_suspend() {
             self.current_signal_sources.has_non_param_yield = true;
         }
     }

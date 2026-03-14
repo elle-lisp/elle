@@ -300,8 +300,12 @@ compiler-reserved:
 | 3 | resume | 8 | VM-internal: fiber resume request |
 | 4 | ffi | 16 | Calls foreign code |
 | 5 | propagate | 32 | VM-internal: propagate caught signal |
-| 6 | cancel | 64 | VM-internal: inject error into fiber |
-| 7–15 | reserved | — | Future compiler-known signals |
+| 6 | abort | SIG_ERROR\|SIG_TERMINAL | VM-internal: graceful fiber termination |
+| 7 | query | 128 | VM-internal: read VM state |
+| 8 | halt | 256 | Graceful VM termination |
+| 9 | io | 512 | I/O request to scheduler |
+| 10 | terminal | 1024 | Uncatchable — passes through mask checks |
+| 11–15 | reserved | — | Future compiler-known signals |
 | 16+ | user | — | User-defined signal types |
 
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
@@ -1137,7 +1141,9 @@ Errors propagate up the fiber chain until caught:
 3. At the root fiber: uncaught error becomes `Err(String)` via the public API boundary
 
 `fiber/propagate` re-signals a caught signal, preserving the child chain for
-stack traces. `fiber/cancel` injects an error into a suspended fiber.
+stack traces. `fiber/cancel` hard-kills a fiber (no unwinding).
+`fiber/abort` injects an error and resumes a suspended fiber for graceful
+unwinding (defer/protect blocks run).
 
 ### The Public API Boundary
 

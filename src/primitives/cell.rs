@@ -108,7 +108,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box",
         func: prim_box,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Create a mutable box containing a value.",
         params: &["value"],
@@ -119,7 +119,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "unbox",
         func: prim_unbox,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Extract the value from a box.",
         params: &["box"],
@@ -130,7 +130,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "rebox",
         func: prim_rebox,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Modify the value in a box and return the new value.",
         params: &["box", "value"],
@@ -141,7 +141,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "box?",
         func: prim_box_p,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if a value is a box.",
         params: &["value"],

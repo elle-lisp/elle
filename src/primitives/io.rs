@@ -2,7 +2,9 @@
 
 use crate::io::aio::AsyncBackend;
 use crate::io::backend::SyncBackend;
+use crate::io::mock::MockBackend;
 use crate::io::request::IoRequest;
+use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -60,15 +62,22 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
             (SIG_OK, Value::external("io-backend", backend))
         }
         Some("async") => match AsyncBackend::new() {
-            Ok(backend) => (SIG_OK, Value::external("io-backend", backend)),
+            Ok(backend) => {
+                let any = AnyBackend(Box::new(backend));
+                (SIG_OK, Value::external("io-backend", any))
+            }
             Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
         },
+        Some("mock") => {
+            let any = AnyBackend(Box::new(MockBackend::new()));
+            (SIG_OK, Value::external("io-backend", any))
+        }
         Some(other) => (
             SIG_ERROR,
             error_val(
                 "value-error",
                 format!(
-                    "io/backend: unknown kind :{}, expected :sync or :async",
+                    "io/backend: unknown kind :{}, expected :sync, :async, or :mock",
                     other
                 ),
             ),
@@ -138,14 +147,14 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let backend = match args[0].as_external::<AsyncBackend>() {
+    let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    "io/submit: expected async io-backend (created with :async)",
+                    "io/submit: expected async io-backend (created with :async or :mock)",
                 ),
             )
         }
@@ -165,7 +174,7 @@ fn prim_io_submit(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match backend.submit(request) {
+    match backend.0.submit(request) {
         Ok(id) => (SIG_OK, Value::int(id as i64)),
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
     }
@@ -182,19 +191,19 @@ fn prim_io_reap(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let backend = match args[0].as_external::<AsyncBackend>() {
+    let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    "io/reap: expected async io-backend (created with :async)",
+                    "io/reap: expected async io-backend (created with :async or :mock)",
                 ),
             )
         }
     };
-    let completions = backend.poll();
+    let completions = backend.0.poll();
     let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
     (SIG_OK, Value::array(values))
 }
@@ -210,14 +219,14 @@ fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let backend = match args[0].as_external::<AsyncBackend>() {
+    let backend = match args[0].as_external::<AnyBackend>() {
         Some(b) => b,
         None => {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    "io/wait: expected async io-backend (created with :async)",
+                    "io/wait: expected async io-backend (created with :async or :mock)",
                 ),
             )
         }
@@ -237,11 +246,55 @@ fn prim_io_wait(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match backend.wait(timeout_ms) {
+    match backend.0.wait(timeout_ms) {
         Ok(completions) => {
             let values: Vec<Value> = completions.iter().map(|c| c.to_value()).collect();
             (SIG_OK, Value::array(values))
         }
+        Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
+    }
+}
+
+/// (io/cancel backend submission-id) → nil
+fn prim_io_cancel(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("io/cancel: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let backend = match args[0].as_external::<AnyBackend>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "io/cancel: expected async io-backend (created with :async or :mock)",
+                ),
+            )
+        }
+    };
+    let id = match args[1].as_int() {
+        Some(n) if n >= 0 => n as u64,
+        _ => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "io/cancel: expected non-negative integer submission ID, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    match backend.0.cancel(id) {
+        Ok(()) => (SIG_OK, Value::NIL),
         Err(msg) => (SIG_ERROR, error_val("io-error", msg)),
     }
 }
@@ -322,6 +375,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["backend", "timeout-ms"],
         category: "io",
         example: "(io/wait backend 1000)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "io/cancel",
+        func: prim_io_cancel,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Cancel a pending async I/O operation by submission ID. Returns nil.",
+        params: &["backend", "id"],
+        category: "io",
+        example: "(io/cancel backend id)",
         aliases: &[],
     },
 ];

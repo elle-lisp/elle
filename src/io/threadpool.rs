@@ -2,25 +2,62 @@
 
 use std::os::unix::io::{IntoRawFd, RawFd};
 
+/// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
+pub(super) enum PoolOp {
+    Read {
+        fd: RawFd,
+        size: usize,
+    },
+    Write {
+        fd: RawFd,
+        data: Vec<u8>,
+    },
+    Flush {
+        fd: RawFd,
+    },
+    Accept {
+        fd: RawFd,
+    },
+    ConnectTcp {
+        addr: String,
+    },
+    ConnectUnix {
+        path: String,
+    },
+    SendTo {
+        fd: RawFd,
+        addr: String,
+        port: u16,
+        data: Vec<u8>,
+    },
+    RecvFrom {
+        fd: RawFd,
+        size: usize,
+    },
+    Shutdown {
+        fd: RawFd,
+        how: i32,
+    },
+    Sleep {
+        nanos: u64,
+    },
+}
+
+/// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
+pub(super) struct PoolCompletion {
+    pub(super) id: u64,
+    pub(super) result_code: i32,
+    pub(super) data: Vec<u8>,
+}
+
 pub(crate) struct ThreadPoolBackend {
-    sender: crossbeam_channel::Sender<(u64, i32, Vec<u8>)>,
-    receiver: crossbeam_channel::Receiver<(u64, i32, Vec<u8>)>,
+    sender: crossbeam_channel::Sender<PoolCompletion>,
+    receiver: crossbeam_channel::Receiver<PoolCompletion>,
     in_flight: usize,
 }
 
 /// Maximum concurrent thread-pool operations.
 pub(super) const MAX_THREAD_POOL_OPS: usize = 64;
-
-// Thread-pool op_kind values.
-pub(super) const TP_OP_READ: u8 = 0;
-pub(super) const TP_OP_WRITE: u8 = 1;
-pub(super) const TP_OP_FLUSH: u8 = 2;
-pub(super) const TP_OP_ACCEPT: u8 = 3;
-pub(super) const TP_OP_CONNECT_TCP: u8 = 4;
-pub(super) const TP_OP_CONNECT_UNIX: u8 = 5;
-pub(super) const TP_OP_SEND_TO: u8 = 6;
-pub(super) const TP_OP_RECV_FROM: u8 = 7;
-pub(super) const TP_OP_SHUTDOWN: u8 = 8;
 
 impl ThreadPoolBackend {
     pub(super) fn new() -> Self {
@@ -33,26 +70,15 @@ impl ThreadPoolBackend {
     }
 
     /// Submit a blocking I/O operation on a background thread.
-    ///
-    /// `fd` is the raw fd. `op_kind` is 0 for read, 1 for write.
-    /// `data` is the write payload (empty for reads). `size` is the read buffer size.
-    pub(super) fn submit(
-        &mut self,
-        id: u64,
-        fd: RawFd,
-        op_kind: u8,
-        data: Vec<u8>,
-        size: usize,
-    ) -> Result<(), String> {
+    pub(super) fn submit(&mut self, id: u64, op: PoolOp) -> Result<(), String> {
         if self.in_flight >= MAX_THREAD_POOL_OPS {
             return Err("async I/O: too many concurrent operations (max 64)".into());
         }
         let sender = self.sender.clone();
         self.in_flight += 1;
         std::thread::spawn(move || {
-            let (result_code, result_data) = match op_kind {
-                TP_OP_READ => {
-                    // Read
+            let (result_code, data) = match op {
+                PoolOp::Read { fd, size } => {
                     let mut buf = vec![0u8; size];
                     let ret =
                         unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
@@ -66,8 +92,7 @@ impl ThreadPoolBackend {
                         (ret as i32, buf)
                     }
                 }
-                TP_OP_WRITE => {
-                    // Write
+                PoolOp::Write { fd, data } => {
                     let ret = unsafe {
                         libc::write(fd, data.as_ptr() as *const libc::c_void, data.len())
                     };
@@ -80,8 +105,7 @@ impl ThreadPoolBackend {
                         (ret as i32, Vec::new())
                     }
                 }
-                TP_OP_FLUSH => {
-                    // Flush (fsync)
+                PoolOp::Flush { fd } => {
                     let ret = unsafe { libc::fsync(fd) };
                     if ret < 0 {
                         (
@@ -92,8 +116,7 @@ impl ThreadPoolBackend {
                         (0, Vec::new())
                     }
                 }
-                TP_OP_ACCEPT => {
-                    // Accept: fd is listener fd
+                PoolOp::Accept { fd } => {
                     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
                     let mut addr_len: libc::socklen_t =
                         std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
@@ -126,27 +149,18 @@ impl ThreadPoolBackend {
                         (new_fd, result_data)
                     }
                 }
-                TP_OP_CONNECT_TCP => {
-                    // Connect TCP: data = "addr:port" as UTF-8
-                    let addr_str = String::from_utf8_lossy(&data).to_string();
-                    match std::net::TcpStream::connect(&addr_str) {
-                        Ok(stream) => {
-                            let peer = stream
-                                .peer_addr()
-                                .map(|a| a.to_string())
-                                .unwrap_or_else(|_| addr_str);
-                            let new_fd = stream.into_raw_fd();
-                            (new_fd, peer.into_bytes())
-                        }
-                        Err(e) => (
-                            -(e.raw_os_error().unwrap_or(1)),
-                            format!("{}", e).into_bytes(),
-                        ),
+                PoolOp::ConnectTcp { addr } => match std::net::TcpStream::connect(&addr) {
+                    Ok(stream) => {
+                        let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or(addr);
+                        let new_fd = stream.into_raw_fd();
+                        (new_fd, peer.into_bytes())
                     }
-                }
-                TP_OP_CONNECT_UNIX => {
-                    // Connect Unix: data = path as UTF-8
-                    let path = String::from_utf8_lossy(&data).to_string();
+                    Err(e) => (
+                        -(e.raw_os_error().unwrap_or(1)),
+                        format!("{}", e).into_bytes(),
+                    ),
+                },
+                PoolOp::ConnectUnix { path } => {
                     let sock_fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
                     if sock_fd < 0 {
                         (
@@ -154,107 +168,56 @@ impl ThreadPoolBackend {
                             Vec::new(),
                         )
                     } else {
-                        let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-                        sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
-                        let (addr_len, ok) = if let Some(name) = path.strip_prefix('@') {
-                            let max = sun.sun_path.len() - 1;
-                            if name.len() > max {
-                                (0 as libc::socklen_t, false)
-                            } else {
-                                sun.sun_path[0] = 0;
-                                for (i, b) in name.bytes().enumerate() {
-                                    sun.sun_path[i + 1] = b as libc::c_char;
-                                }
-                                let len = std::mem::size_of::<libc::sa_family_t>() + 1 + name.len();
-                                (len as libc::socklen_t, true)
+                        match crate::io::sockaddr::build_unix(&path) {
+                            Err(msg) => {
+                                unsafe { libc::close(sock_fd) };
+                                (-1, msg.into_bytes())
                             }
-                        } else {
-                            let max = sun.sun_path.len() - 1;
-                            if path.len() > max {
-                                (0 as libc::socklen_t, false)
-                            } else {
-                                for (i, b) in path.bytes().enumerate() {
-                                    sun.sun_path[i] = b as libc::c_char;
+                            Ok((sun, addr_len)) => {
+                                let ret = unsafe {
+                                    libc::connect(
+                                        sock_fd,
+                                        &sun as *const _ as *const libc::sockaddr,
+                                        addr_len,
+                                    )
+                                };
+                                if ret < 0 {
+                                    let err = std::io::Error::last_os_error();
+                                    unsafe {
+                                        libc::close(sock_fd);
+                                    }
+                                    (
+                                        -(err.raw_os_error().unwrap_or(1)),
+                                        format!("{}", err).into_bytes(),
+                                    )
+                                } else {
+                                    unsafe {
+                                        libc::fcntl(sock_fd, libc::F_SETFD, libc::FD_CLOEXEC);
+                                    }
+                                    (sock_fd, path.into_bytes())
                                 }
-                                let len = std::mem::size_of::<libc::sa_family_t>() + path.len() + 1;
-                                (len as libc::socklen_t, true)
-                            }
-                        };
-                        if !ok {
-                            unsafe {
-                                libc::close(sock_fd);
-                            }
-                            (-1, b"path too long".to_vec())
-                        } else {
-                            let ret = unsafe {
-                                libc::connect(
-                                    sock_fd,
-                                    &sun as *const _ as *const libc::sockaddr,
-                                    addr_len,
-                                )
-                            };
-                            if ret < 0 {
-                                let err = std::io::Error::last_os_error();
-                                unsafe {
-                                    libc::close(sock_fd);
-                                }
-                                (
-                                    -(err.raw_os_error().unwrap_or(1)),
-                                    format!("{}", err).into_bytes(),
-                                )
-                            } else {
-                                unsafe {
-                                    libc::fcntl(sock_fd, libc::F_SETFD, libc::FD_CLOEXEC);
-                                }
-                                (sock_fd, path.into_bytes())
                             }
                         }
                     }
                 }
-                TP_OP_SEND_TO => {
-                    // SendTo: data = "addr:port\0payload"
-                    let nul_pos = data.iter().position(|&b| b == 0).unwrap_or(data.len());
-                    let addr_str = String::from_utf8_lossy(&data[..nul_pos]).to_string();
-                    let payload = if nul_pos < data.len() {
-                        &data[nul_pos + 1..]
-                    } else {
-                        &[]
-                    };
+                PoolOp::SendTo {
+                    fd,
+                    addr,
+                    port,
+                    data,
+                } => {
+                    let addr_str = format!("{}:{}", addr, port);
                     match addr_str.parse::<std::net::SocketAddr>() {
                         Ok(dest) => {
-                            let (sockaddr, sockaddr_len) = match dest {
-                                std::net::SocketAddr::V4(v4) => {
-                                    let mut sin: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-                                    sin.sin_family = libc::AF_INET as libc::sa_family_t;
-                                    sin.sin_port = v4.port().to_be();
-                                    sin.sin_addr.s_addr = u32::from(*v4.ip()).to_be();
-                                    let ptr =
-                                        &sin as *const libc::sockaddr_in as *const libc::sockaddr;
-                                    let len =
-                                        std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-                                    (ptr, len)
-                                }
-                                std::net::SocketAddr::V6(v6) => {
-                                    let mut sin6: libc::sockaddr_in6 =
-                                        unsafe { std::mem::zeroed() };
-                                    sin6.sin6_family = libc::AF_INET6 as libc::sa_family_t;
-                                    sin6.sin6_port = v6.port().to_be();
-                                    sin6.sin6_addr.s6_addr = v6.ip().octets();
-                                    let ptr =
-                                        &sin6 as *const libc::sockaddr_in6 as *const libc::sockaddr;
-                                    let len = std::mem::size_of::<libc::sockaddr_in6>()
-                                        as libc::socklen_t;
-                                    (ptr, len)
-                                }
-                            };
+                            let (sa_bytes, sa_len) = crate::io::sockaddr::build_inet(&dest);
                             let ret = unsafe {
                                 libc::sendto(
                                     fd,
-                                    payload.as_ptr() as *const libc::c_void,
-                                    payload.len(),
+                                    data.as_ptr() as *const libc::c_void,
+                                    data.len(),
                                     0,
-                                    sockaddr,
-                                    sockaddr_len,
+                                    sa_bytes.as_ptr() as *const libc::sockaddr,
+                                    sa_len,
                                 )
                             };
                             if ret < 0 {
@@ -269,8 +232,7 @@ impl ThreadPoolBackend {
                         Err(e) => (-1, format!("bad address: {}", e).into_bytes()),
                     }
                 }
-                TP_OP_RECV_FROM => {
-                    // RecvFrom: fd is socket fd, size is buffer size
+                PoolOp::RecvFrom { fd, size } => {
                     let mut buf = vec![0u8; size];
                     let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
                     let mut addr_len: libc::socklen_t =
@@ -306,9 +268,7 @@ impl ThreadPoolBackend {
                         (ret as i32, result_data)
                     }
                 }
-                TP_OP_SHUTDOWN => {
-                    // Shutdown: data[0] is `how` value
-                    let how = if data.is_empty() { 0 } else { data[0] as i32 };
+                PoolOp::Shutdown { fd, how } => {
                     let ret = unsafe { libc::shutdown(fd, how) };
                     if ret < 0 {
                         (
@@ -319,15 +279,22 @@ impl ThreadPoolBackend {
                         (0, Vec::new())
                     }
                 }
-                _ => (-1, Vec::new()),
+                PoolOp::Sleep { nanos } => {
+                    std::thread::sleep(std::time::Duration::from_nanos(nanos));
+                    (0, Vec::new())
+                }
             };
-            let _ = sender.send((id, result_code, result_data));
+            let _ = sender.send(PoolCompletion {
+                id,
+                result_code,
+                data,
+            });
         });
         Ok(())
     }
 
-    /// Non-blocking poll for completions. Returns (id, result_code, data) tuples.
-    pub(super) fn poll(&mut self) -> Vec<(u64, i32, Vec<u8>)> {
+    /// Non-blocking poll for completions.
+    pub(super) fn poll(&mut self) -> Vec<PoolCompletion> {
         let mut results = Vec::new();
         while let Ok(item) = self.receiver.try_recv() {
             self.in_flight -= 1;
@@ -336,12 +303,26 @@ impl ThreadPoolBackend {
         results
     }
 
+    /// Returns true if this pool has any in-flight operations.
+    pub(super) fn has_in_flight(&self) -> bool {
+        self.in_flight > 0
+    }
+
+    /// Expose the receiver for cross-pool select in async wait.
+    pub(super) fn receiver(&self) -> &crossbeam_channel::Receiver<PoolCompletion> {
+        &self.receiver
+    }
+
+    /// Record one completion received externally (via select).
+    pub(super) fn record_completion(&mut self) {
+        if self.in_flight > 0 {
+            self.in_flight -= 1;
+        }
+    }
+
     /// Blocking wait for at least one completion.
     /// `timeout_ms`: None = wait forever, Some(0) = poll, Some(n) = wait up to n ms.
-    pub(super) fn wait(
-        &mut self,
-        timeout_ms: Option<u64>,
-    ) -> Result<Vec<(u64, i32, Vec<u8>)>, String> {
+    pub(super) fn wait(&mut self, timeout_ms: Option<u64>) -> Result<Vec<PoolCompletion>, String> {
         let mut results = Vec::new();
 
         // First drain any already-available completions

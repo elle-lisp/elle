@@ -48,7 +48,7 @@ impl SyncBackend {
         }
 
         let owned_fd = unsafe { OwnedFd::from_raw_fd(new_fd) };
-        let peer_addr = format_sockaddr(&addr_storage, addr_len);
+        let peer_addr = crate::io::sockaddr::format(&addr_storage, addr_len);
 
         let new_port = match port.kind() {
             PortKind::TcpListener => Port::new_tcp_stream(owned_fd, peer_addr),
@@ -94,41 +94,16 @@ impl SyncBackend {
                     );
                 }
 
-                let mut sun: libc::sockaddr_un = unsafe { std::mem::zeroed() };
-                sun.sun_family = libc::AF_UNIX as libc::sa_family_t;
-
-                let (path_bytes, addr_len) = if let Some(name) = path.strip_prefix('@') {
-                    // Abstract socket: sun_path[0] = 0, then rest of name
-                    let max = sun.sun_path.len() - 1;
-                    if name.len() > max {
+                let (sun, addr_len) = match crate::io::sockaddr::build_unix(path) {
+                    Ok(result) => result,
+                    Err(msg) => {
                         unsafe { libc::close(fd) };
                         return (
                             SIG_ERROR,
-                            error_val("io-error", "unix/connect: path too long"),
+                            error_val("io-error", format!("unix/connect: {}", msg)),
                         );
                     }
-                    sun.sun_path[0] = 0;
-                    for (i, b) in name.bytes().enumerate() {
-                        sun.sun_path[i + 1] = b as libc::c_char;
-                    }
-                    let len = std::mem::size_of::<libc::sa_family_t>() + 1 + name.len();
-                    (name.len() + 1, len as libc::socklen_t)
-                } else {
-                    let max = sun.sun_path.len() - 1;
-                    if path.len() > max {
-                        unsafe { libc::close(fd) };
-                        return (
-                            SIG_ERROR,
-                            error_val("io-error", "unix/connect: path too long"),
-                        );
-                    }
-                    for (i, b) in path.bytes().enumerate() {
-                        sun.sun_path[i] = b as libc::c_char;
-                    }
-                    let len = std::mem::size_of::<libc::sa_family_t>() + path.len() + 1;
-                    (path.len(), len as libc::socklen_t)
                 };
-                let _ = path_bytes; // used only for length calculation
 
                 let ret = unsafe {
                     libc::connect(
@@ -215,60 +190,17 @@ impl SyncBackend {
             }
         };
 
-        let (sa_ptr, sa_len) = match dest {
-            std::net::SocketAddr::V4(ref v4) => {
-                let sin = libc::sockaddr_in {
-                    sin_family: libc::AF_INET as libc::sa_family_t,
-                    sin_port: v4.port().to_be(),
-                    sin_addr: libc::in_addr {
-                        s_addr: u32::from_ne_bytes(v4.ip().octets()),
-                    },
-                    sin_zero: [0; 8],
-                };
-                // SAFETY: sin is stack-local and lives through the sendto call
-                let boxed = Box::new(sin);
-                (
-                    Box::into_raw(boxed) as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-                )
-            }
-            std::net::SocketAddr::V6(ref v6) => {
-                let sin6 = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as libc::sa_family_t,
-                    sin6_port: v6.port().to_be(),
-                    sin6_flowinfo: v6.flowinfo(),
-                    sin6_addr: libc::in6_addr {
-                        s6_addr: v6.ip().octets(),
-                    },
-                    sin6_scope_id: v6.scope_id(),
-                };
-                let boxed = Box::new(sin6);
-                (
-                    Box::into_raw(boxed) as *const libc::sockaddr,
-                    std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t,
-                )
-            }
-        };
+        let (sa_bytes, sa_len) = crate::io::sockaddr::build_inet(&dest);
 
         let ret = unsafe {
-            let r = libc::sendto(
+            libc::sendto(
                 raw_fd,
                 bytes.as_ptr() as *const libc::c_void,
                 bytes.len(),
                 0,
-                sa_ptr,
+                sa_bytes.as_ptr() as *const libc::sockaddr,
                 sa_len,
-            );
-            // Reclaim the box to avoid leak
-            match dest {
-                std::net::SocketAddr::V4(_) => {
-                    drop(Box::from_raw(sa_ptr as *mut libc::sockaddr_in));
-                }
-                std::net::SocketAddr::V6(_) => {
-                    drop(Box::from_raw(sa_ptr as *mut libc::sockaddr_in6));
-                }
-            }
-            r
+            )
         };
 
         if ret < 0 {
@@ -322,7 +254,7 @@ impl SyncBackend {
         }
 
         buf.truncate(ret as usize);
-        let (src_addr, src_port) = parse_sockaddr_ip(&addr_storage, addr_len);
+        let (src_addr, src_port) = crate::io::sockaddr::parse(&addr_storage, addr_len);
 
         // Build struct: {:data bytes :addr string :port int}
         use crate::value::heap::TableKey;
@@ -361,72 +293,5 @@ impl SyncBackend {
         } else {
             (SIG_OK, Value::NIL)
         }
-    }
-}
-
-/// Format a sockaddr_storage as a human-readable string.
-pub(super) fn format_sockaddr(addr: &libc::sockaddr_storage, len: libc::socklen_t) -> String {
-    match addr.ss_family as libc::c_int {
-        libc::AF_INET => {
-            let sin =
-                unsafe { &*(addr as *const libc::sockaddr_storage as *const libc::sockaddr_in) };
-            let ip = std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
-            let port = u16::from_be(sin.sin_port);
-            format!("{}:{}", ip, port)
-        }
-        libc::AF_INET6 => {
-            let sin6 =
-                unsafe { &*(addr as *const libc::sockaddr_storage as *const libc::sockaddr_in6) };
-            let ip = std::net::Ipv6Addr::from(sin6.sin6_addr.s6_addr);
-            let port = u16::from_be(sin6.sin6_port);
-            format!("[{}]:{}", ip, port)
-        }
-        libc::AF_UNIX => {
-            let sun =
-                unsafe { &*(addr as *const libc::sockaddr_storage as *const libc::sockaddr_un) };
-            let path_offset = std::mem::size_of::<libc::sa_family_t>();
-            let path_len = (len as usize).saturating_sub(path_offset);
-            if path_len == 0 {
-                return "unix:unnamed".to_string();
-            }
-            if sun.sun_path[0] == 0 {
-                // Abstract socket
-                let name_bytes: Vec<u8> =
-                    sun.sun_path[1..path_len].iter().map(|&c| c as u8).collect();
-                format!("@{}", String::from_utf8_lossy(&name_bytes))
-            } else {
-                let name_bytes: Vec<u8> = sun.sun_path[..path_len]
-                    .iter()
-                    .take_while(|&&c| c != 0)
-                    .map(|&c| c as u8)
-                    .collect();
-                String::from_utf8_lossy(&name_bytes).to_string()
-            }
-        }
-        _ => "unknown".to_string(),
-    }
-}
-
-/// Parse an IP sockaddr into (addr_string, port_number).
-pub(super) fn parse_sockaddr_ip(
-    addr: &libc::sockaddr_storage,
-    _len: libc::socklen_t,
-) -> (String, u16) {
-    match addr.ss_family as libc::c_int {
-        libc::AF_INET => {
-            let sin =
-                unsafe { &*(addr as *const libc::sockaddr_storage as *const libc::sockaddr_in) };
-            let ip = std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
-            let port = u16::from_be(sin.sin_port);
-            (ip.to_string(), port)
-        }
-        libc::AF_INET6 => {
-            let sin6 =
-                unsafe { &*(addr as *const libc::sockaddr_storage as *const libc::sockaddr_in6) };
-            let ip = std::net::Ipv6Addr::from(sin6.sin6_addr.s6_addr);
-            let port = u16::from_be(sin6.sin6_port);
-            (format!("[{}]", ip), port)
-        }
-        _ => ("unknown".to_string(), 0),
     }
 }

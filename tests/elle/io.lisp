@@ -231,6 +231,91 @@
 (assert-eq (slurp "/tmp/elle-test-ev-write-lisp") "async write test" "ev/run write thunk")
 
 # ============================================================================
+# ev/sleep tests
+# ============================================================================
+
+# === ev/sleep basic — returns nil ===
+
+(let ((result @[]))
+  (ev/run (fn []
+    (push result (ev/sleep 0))
+    (push result :done)))
+  (assert-eq (get result 0) nil "ev/sleep returns nil")
+  (assert-eq (get result 1) :done "code after ev/sleep runs"))
+
+# === ev/sleep with nonzero duration ===
+
+(let ((result @[]))
+  (ev/run (fn []
+    (ev/sleep 0.05)
+    (push result :woke)))
+  (assert-eq (get result 0) :woke "ev/sleep 50ms completes"))
+
+# === concurrent sleeps run in parallel ===
+
+(let ((t0 (clock/monotonic)))
+  (ev/run
+    (fn [] (ev/sleep 0.1))
+    (fn [] (ev/sleep 0.1))
+    (fn [] (ev/sleep 0.1)))
+  (let ((elapsed (- (clock/monotonic) t0)))
+    (assert-true (< elapsed 0.5)
+      "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
+
+# === ev/sleep interleaved with I/O ===
+
+(spit "/tmp/elle-test-sleep-io-lisp" "sleep-and-io")
+(let ((result @[]))
+  (ev/run
+    (fn []
+      (ev/sleep 0.01)
+      (push result :slept))
+    (fn []
+      (push result (stream/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read)))))
+  (assert-eq (length result) 2 "ev/sleep + I/O: both fibers complete")
+  (assert-true (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
+  (assert-true (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
+
+# === ev/sleep ordering — shorter sleep finishes first ===
+
+(let ((result @[]))
+  (ev/run
+    (fn []
+      (ev/sleep 0.1)
+      (push result :slow))
+    (fn []
+      (ev/sleep 0.01)
+      (push result :fast)))
+  (assert-eq (get result 0) :fast "shorter sleep finishes first")
+  (assert-eq (get result 1) :slow "longer sleep finishes second"))
+
+# === ev/sleep error: negative duration ===
+
+(assert-err
+  (fn () (ev/run (fn [] (ev/sleep -1))))
+  "ev/sleep rejects negative int")
+
+(assert-err
+  (fn () (ev/run (fn [] (ev/sleep -0.5))))
+  "ev/sleep rejects negative float")
+
+# === ev/sleep error: non-numeric ===
+
+(assert-err
+  (fn () (ev/run (fn [] (ev/sleep "hello"))))
+  "ev/sleep rejects non-numeric")
+
+# === ev/sleep error: wrong arity ===
+
+(assert-err
+  (fn () (eval '(ev/sleep)))
+  "ev/sleep rejects zero args")
+
+(assert-err
+  (fn () (eval '(ev/sleep 1 2)))
+  "ev/sleep rejects two args")
+
+# ============================================================================
 # Error tests (from integration/io.rs)
 # ============================================================================
 

@@ -704,7 +704,7 @@ pub(crate) fn prim_string_format(args: &[Value]) -> (SignalBits, Value) {
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     name: "string/format",
     func: prim_string_format,
-    signal: Signal::inert(),
+    signal: Signal::errors(),
     arity: Arity::AtLeast(1),
     doc: "Format a template string with positional or named arguments.",
     params: &["template", "args"],

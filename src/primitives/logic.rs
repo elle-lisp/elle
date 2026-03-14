@@ -110,7 +110,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "not",
         func: prim_not,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Logical NOT operation",
         params: &["x"],

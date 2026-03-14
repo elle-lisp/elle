@@ -260,7 +260,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "sort",
         func: prim_sort,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists return new values.",
         params: &["coll"],
@@ -271,7 +271,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "range",
         func: prim_range,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Range(1, 3),
         doc: "Generate a range of numbers as an array. (range end), (range start end), (range start end step).",
         params: &["start-or-end", "end", "step"],

@@ -1,6 +1,6 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::sync::OnceLock;
@@ -134,12 +134,61 @@ pub(crate) fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// Async sleep — yields to the scheduler with a timer IoRequest.
+/// (ev/sleep seconds)
+pub(crate) fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
+    use crate::io::request::{IoOp, IoRequest};
+    use crate::value::fiber::{SIG_IO, SIG_YIELD};
+    use std::time::Duration;
+
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ev/sleep: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let duration = if let Some(n) = args[0].as_int() {
+        if n < 0 {
+            return (
+                SIG_ERROR,
+                error_val("error", "ev/sleep: duration must be non-negative"),
+            );
+        }
+        Duration::from_secs(n as u64)
+    } else if let Some(f) = args[0].as_float() {
+        if f < 0.0 || !f.is_finite() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    "ev/sleep: duration must be a finite non-negative number",
+                ),
+            );
+        }
+        Duration::from_secs_f64(f)
+    } else {
+        return (
+            SIG_ERROR,
+            error_val("type-error", "ev/sleep: argument must be a number"),
+        );
+    };
+
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::portless(IoOp::Sleep { duration }),
+    )
+}
+
 /// Declarative primitive definitions for time operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/monotonic",
         func: prim_clock_monotonic,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(0),
         doc: "Return seconds elapsed since process start (monotonic clock)",
         params: &[],
@@ -150,7 +199,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/realtime",
         func: prim_clock_realtime,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(0),
         doc: "Return seconds since Unix epoch (wall clock)",
         params: &[],
@@ -161,7 +210,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "clock/cpu",
         func: prim_clock_cpu,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(0),
         doc: "Return thread CPU time in seconds",
         params: &[],
@@ -174,10 +223,24 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sleep,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Sleep for the specified number of seconds",
+        doc: "Sleep for the specified number of seconds (blocks the thread)",
         params: &["seconds"],
         category: "time",
         example: "(time/sleep 1.5)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ev/sleep",
+        func: prim_ev_sleep,
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::Exact(1),
+        doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
+        params: &["seconds"],
+        category: "scheduler",
+        example: "(ev/sleep 0.5)",
         aliases: &[],
     },
 ];

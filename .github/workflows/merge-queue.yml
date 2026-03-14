@@ -22,71 +22,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel
+        run: sudo apt-get install -y parallel
       - name: Build release binary
         run: cargo build --release
-      - name: Test all Lisp examples with release build
-        run: |
-          ELLE_BIN="./target/release/elle"
-          # Try TMPDIR, then TMP, then fallback to /tmp
-          TEMP_DIR="${TMPDIR:-${TMP:-/tmp}}/elle-examples-$$"
-          mkdir -p "$TEMP_DIR"
-
-          echo "Testing all Lisp examples with release build:"
-          echo "=============================================="
-
-          TOTAL=0
-          PASSED=0
-          FAILED=0
-
-          for example in examples/*.lisp; do
-            if [ ! -f "$example" ]; then
-              continue
-            fi
-
-            TOTAL=$((TOTAL + 1))
-            EXAMPLE_NAME=$(basename "$example")
-
-            echo ""
-            echo "Running: $EXAMPLE_NAME"
-            echo "---"
-
-            OUTPUT_FILE="$TEMP_DIR/output_$EXAMPLE_NAME.txt"
-            if timeout 10s "$ELLE_BIN" "$example" > "$OUTPUT_FILE" 2>&1; then
-              PASSED=$((PASSED + 1))
-              echo "✓ $EXAMPLE_NAME PASSED"
-              # Show first few lines of output
-              head -5 "$OUTPUT_FILE" | sed 's/^/  /'
-            else
-              FAILED=$((FAILED + 1))
-              echo "✗ $EXAMPLE_NAME FAILED"
-              # Show error details
-              head -10 "$OUTPUT_FILE" | sed 's/^/  /'
-              # Don't exit on failure - continue testing all examples
-            fi
-          done
-
-          # Cleanup
-          rm -rf "$TEMP_DIR"
-
-          echo ""
-          echo "=============================================="
-          echo "Results: $PASSED/$TOTAL passed, $FAILED failed"
-
-          if [ $FAILED -gt 0 ]; then
-            echo "✗ Some examples failed"
-            exit 1
-          else
-            echo "✓ All examples passed"
-          fi
-      - name: Run Elle script tests
-        run: |
-          echo "Running Elle script tests:"
-          echo "=========================="
-          for f in tests/elle/*.lisp; do
-            echo "  $f"
-            ./target/release/elle "$f" || exit 1
-          done
-          echo "✓ All Elle script tests passed"
+      - name: Run examples and Elle script tests
+        run: make smoke
 
   all-checks:
     name: All Checks Passed

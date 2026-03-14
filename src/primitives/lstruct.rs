@@ -15,7 +15,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "@struct",
         func: prim_table,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::AtLeast(0),
         doc: "Create a mutable struct from key-value pairs",
         params: &[],
@@ -26,7 +26,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "get",
         func: prim_get,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Range(2, 3),
         doc: "Get a value from a collection (tuple, array, string, struct) by index or key, with optional default",
         params: &["collection", "key", "default"],
@@ -37,7 +37,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "put",
         func: prim_put,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(3),
         doc: "Put a key-value pair into a struct",
         params: &["collection", "key", "value"],
@@ -48,7 +48,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "del",
         func: prim_del,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Delete a key from a struct",
         params: &["collection", "key"],
@@ -59,7 +59,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keys",
         func: prim_keys,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get all keys from a struct as a list",
         params: &["collection"],
@@ -70,7 +70,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "values",
         func: prim_values,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get all values from a struct as a list",
         params: &["collection"],
@@ -81,7 +81,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
      PrimitiveDef {
          name: "has?",
          func: prim_has_key,
-         signal: Signal::inert(),
+         signal: Signal::errors(),
          arity: Arity::Exact(2),
          doc: "Check if a collection has a key or element",
          params: &["collection", "key"],

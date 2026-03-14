@@ -2,13 +2,13 @@
 //!
 //! Routes signal bits returned by NativeFn primitives to the appropriate
 //! handler: stack push for SIG_OK, error storage for SIG_ERROR, fiber
-//! execution for SIG_RESUME/SIG_PROPAGATE/SIG_CANCEL, VM state reads
+//! execution for SIG_RESUME/SIG_PROPAGATE/SIG_ABORT, VM state reads
 //! for SIG_QUERY.
 
 use crate::value::error_val;
 use crate::value::{
-    SignalBits, SuspendedFrame, Value, SIG_CANCEL, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE,
-    SIG_QUERY, SIG_RESUME,
+    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK,
+    SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
 };
 use std::rc::Rc;
 
@@ -44,15 +44,22 @@ impl VM {
         // --- VM-internal signals (exact match — never composed) ---
 
         if bits == SIG_RESUME {
-            return self.handle_fiber_resume_signal(value, bytecode, constants, closure_env, ip);
+            return self.handle_fiber_resume_signal(
+                value,
+                bytecode,
+                constants,
+                closure_env,
+                ip,
+                location_map,
+            );
         }
 
         if bits == SIG_PROPAGATE {
             return self.handle_fiber_propagate_signal(value);
         }
 
-        if bits == SIG_CANCEL {
-            return self.handle_fiber_cancel_signal(value, bytecode, constants, closure_env, ip);
+        if bits == SIG_ABORT && value.as_fiber().is_some() {
+            return self.handle_fiber_abort_signal(value, bytecode, constants, closure_env, ip);
         }
 
         if bits == SIG_QUERY {
@@ -100,7 +107,7 @@ impl VM {
         // are suspension signals — save the stack into a SuspendedFrame so
         // call.rs can build the caller frame chain on resume.
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-        let frame = SuspendedFrame {
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
             bytecode: bytecode.clone(),
             constants: constants.clone(),
             env: closure_env.clone(),
@@ -108,7 +115,7 @@ impl VM {
             stack: saved_stack,
             active_allocator: crate::value::fiber_heap::save_active_allocator(),
             location_map: location_map.clone(),
-        };
+        });
         self.fiber.signal = Some((bits, value));
         self.fiber.suspended = Some(vec![frame]);
         Some(bits)
@@ -142,8 +149,8 @@ impl VM {
             return self.handle_fiber_propagate_signal_tail(value);
         }
 
-        if bits == SIG_CANCEL {
-            return self.handle_fiber_cancel_signal_tail(value);
+        if bits == SIG_ABORT && value.as_fiber().is_some() {
+            return self.handle_fiber_abort_signal_tail(value);
         }
 
         if bits == SIG_QUERY {
