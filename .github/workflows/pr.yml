@@ -97,52 +97,9 @@ jobs:
       - name: Run property tests
         run: "cargo test --test lib property::"
 
-  benchmarks:
-    name: Benchmarks
-    needs: changes
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    if: false
-    concurrency:
-      group: benchmarks-${{ github.ref }}
-      cancel-in-progress: false
-    permissions:
-      pull-requests: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install gnuplot
-        run: sudo apt-get install -y gnuplot
-      - name: Run Criterion benchmarks
-        run: |
-          cargo bench --bench benchmarks -- \
-            --sample-size 10 --warm-up-time 1 --measurement-time 2 \
-            --nresamples 100 --noplot --output-format bencher \
-            'parsing|symbol_interning|compilation|vm_execution|conditionals|end_to_end' \
-            | tee output.txt
-        env:
-          RAYON_NUM_THREADS: 1
-      - name: Post benchmark comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          {
-            echo '## Benchmark Results'
-            echo ''
-            echo '```'
-            cat output.txt
-            echo '```'
-            echo ''
-            echo "_Commit: ${{ github.event.pull_request.head.sha }}_"
-          } > comment.md
-          gh pr comment ${{ github.event.pull_request.number }} --body-file comment.md
-
-
   all-checks:
     name: All Checks Passed
-    needs: [changes, fmt, clippy, elle-tests, tests-combined, benchmarks]
+    needs: [changes, fmt, clippy, elle-tests, tests-combined]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -157,9 +114,6 @@ jobs:
         run: exit 1
       - name: Check combined tests
         if: needs.tests-combined.result == 'failure'
-        run: exit 1
-      - name: Check benchmarks
-        if: needs.benchmarks.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'
