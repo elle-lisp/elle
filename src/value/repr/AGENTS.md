@@ -118,17 +118,22 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 
 1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
 
-2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
+2. **Trait tables are invisible to equality and ordering.** The `traits` field
+   on heap variants is **not compared** by `PartialEq`, not hashed by `Hash`,
+   and not compared by `Ord`. Trait identity is a separate concern checked via
+   `identical?`.
 
-3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
+3. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-4. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
+4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
 
-5. **NaN-boxing is transparent.** Callers use constructors and accessors; they don't manipulate bits directly.
+5. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
 
-6. **Floats are bit-exact.** `Value::float(f).as_float()` returns the exact same bits (including NaN, Infinity, -0.0).
+6. **NaN-boxing is transparent.** Callers use constructors and accessors; they don't manipulate bits directly.
 
-7. **Integers are sign-extended.** 48-bit signed integers are stored with sign extension in the lower 48 bits.
+7. **Floats are bit-exact.** `Value::float(f).as_float()` returns the exact same bits (including NaN, Infinity, -0.0).
+
+8. **Integers are sign-extended.** 48-bit signed integers are stored with sign extension in the lower 48 bits.
 
 ## When to modify
 

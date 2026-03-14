@@ -70,39 +70,46 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 ## Invariants
 
 1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
+   The `traits: Value` field on heap variants is also `Copy`.
 
-2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
-    is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
+2. **`traits` field is always NIL or an immutable struct.** The `with-traits`
+   primitive validates that trait tables are immutable `LStruct` values. `NIL`
+   means "no traits attached". No other type is valid.
 
-3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref)
-      and `LocalLBox` (compiler-created for mutable captures and mutated parameters,
-      auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
-      Immutable captured locals do not need lboxes — they are captured by value.
+3. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST`
+     is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-4. **`Closure` has `location_map`, `doc`, and `syntax`.** The `location_map: Rc<LocationMap>`
-    field maps bytecode offsets to source locations for error reporting. The
-    `doc: Option<Value>` field carries the docstring extracted from the function
-    body, threaded from HIR through LIR. The `syntax: Option<Rc<Syntax>>` field
-    stores the original lambda `Syntax` node, used by `eval` to reconstruct
-    closures in the environment. Most construction sites set this to `None`;
-    it is populated by the emitter for user-defined lambdas.
+4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref)
+       and `LocalLBox` (compiler-created for mutable captures and mutated parameters,
+       auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
+       Immutable captured locals do not need lboxes — they are captured by value.
 
-5. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
-    transfer between threads, cloning `Rc` contents as needed.
+5. **`Closure` has `location_map`, `doc`, and `syntax`.** The `location_map: Rc<LocationMap>`
+     field maps bytecode offsets to source locations for error reporting. The
+     `doc: Option<Value>` field carries the docstring extracted from the function
+     body, threaded from HIR through LIR. The `syntax: Option<Rc<Syntax>>` field
+     stores the original lambda `Syntax` node, used by `eval` to reconstruct
+     closures in the environment. Most construction sites set this to `None`;
+     it is populated by the emitter for user-defined lambdas.
 
-6. **`SuspendedFrame` replaces both `SavedContext` and `ContinuationFrame`.**
-    A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
-    constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
-    Signal suspension has an empty stack; yield suspension captures the stack.
+6. **Thread transfer uses `SendValue`.** `SendValue` wraps values for safe
+     transfer between threads, cloning `Rc` contents as needed. Trait tables
+     are serialized as part of the value — they are NOT stripped on cross-thread
+     transfer.
 
-7. **Shared allocators enable zero-copy fiber exchange.** When a yielding child
-    fiber allocates heap objects, those allocations route to a `SharedAllocator`
-    owned by the parent's `FiberHeap` (or the child's own `FiberHeap` for
-    root→child chains). The parent reads yielded values directly — no deep copy.
-    `FiberHeap.shared_alloc` is a raw `*mut SharedAllocator` set during
-    `with_child_fiber` and nulled on swap-back. Routing: when `shared_alloc`
-    is non-null, `FiberHeap::alloc()` routes all allocations to the shared
-    allocator.   Only yielding fibers (signal includes `SIG_YIELD`) get shared allocators.
+7. **`SuspendedFrame` replaces both `SavedContext` and `ContinuationFrame`.**
+     A single type captures everything needed to resume: bytecode (`Rc<Vec<u8>>`),
+     constants (`Rc<Vec<Value>>`), env (`Rc<Vec<Value>>`), IP, and operand stack.
+     Signal suspension has an empty stack; yield suspension captures the stack.
+
+8. **Shared allocators enable zero-copy fiber exchange.** When a yielding child
+     fiber allocates heap objects, those allocations route to a `SharedAllocator`
+     owned by the parent's `FiberHeap` (or the child's own `FiberHeap` for
+     root→child chains). The parent reads yielded values directly — no deep copy.
+     `FiberHeap.shared_alloc` is a raw `*mut SharedAllocator` set during
+     `with_child_fiber` and nulled on swap-back. Routing: when `shared_alloc`
+     is non-null, `FiberHeap::alloc()` routes all allocations to the shared
+     allocator.   Only yielding fibers (signal includes `SIG_YIELD`) get shared allocators.
 
 ## Value encoding
 
@@ -155,6 +162,57 @@ Predicates: `is_set()` and `is_set_mut()` for type checking.
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 `Value::closure(c)`, `Value::binding(name, scope)`, `Value::set(btree_set)`,
 `Value::set_mut(btree_set)`. Don't construct enum variants directly.
+
+## Trait table field
+
+Every user-facing heap variant carries a `traits: Value` field (8 bytes).
+Initialized to `Value::NIL` (meaning "no traits"). Only an immutable `LStruct`
+may be stored here; the `with-traits` primitive validates this at call time.
+
+The field is **invisible to structural equality, ordering, and hashing**:
+`PartialEq`, `Ord`, and `Hash` on `Value` ignore the `traits` field.
+
+### Variants that carry `traits` (19 types)
+
+| Variant | Note |
+|---------|------|
+| `LArray` | immutable array |
+| `LArrayMut` | mutable @array — RefCell data shared on `with-traits` |
+| `LStruct` | immutable struct |
+| `LStructMut` | mutable @struct — RefCell data shared on `with-traits` |
+| `LString` | immutable string |
+| `LStringMut` | mutable @string — RefCell data shared on `with-traits` |
+| `LBytes` | immutable bytes |
+| `LBytesMut` | mutable @bytes — RefCell data shared on `with-traits` |
+| `LSet` | immutable set |
+| `LSetMut` | mutable @set — RefCell data shared on `with-traits` |
+| `Cons` | cons cell |
+| `Closure` | closure |
+| `LBox` | mutable box — RefCell data shared on `with-traits` |
+| `Fiber` | fiber — FiberHandle (Rc) cloned on `with-traits` |
+| `Syntax` | syntax object — Rc<Syntax> cloned on `with-traits` |
+| `ManagedPointer` | managed FFI pointer — Cell<Option<usize>> cloned on `with-traits` |
+| `External` | opaque plugin object — Rc<dyn Any> cloned on `with-traits` |
+| `Parameter` | dynamic parameter |
+| `ThreadHandle` | thread handle — Arc<Mutex<...>> cloned on `with-traits` |
+
+### Variants that do NOT carry `traits` (6 infrastructure types)
+
+`Float`, `NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`.
+
+`with-traits` on these returns a `:type-error`.
+
+### SendValue behavior
+
+Trait tables are **serialized** on `SendBundle::from_value` via a recursive
+`from_value_inner` call, the same as any other `Value` field. Trait tables
+are immutable structs whose values may be closures; closures survive
+cross-thread transfer intact via the intern table in `SendBundle`. The
+receiving thread reconstructs the trait table in `into_value_inner` and
+stores the result in the new `traits` field of the heap object.
+
+Each `SendValue` variant for the 19 traitable types carries a
+`traits: Box<SendValue>` field (or `traits: SendValue` if not recursive).
 
 ## Files
 

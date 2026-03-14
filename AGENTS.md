@@ -41,12 +41,12 @@ bytecode. Error messages include file:line:col information.
 | `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
-| `value` | Runtime value representation (NaN-boxed) |
+| `value` | Runtime value representation (NaN-boxed); trait table field on 19 user-facing heap variants |
 | `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping |
 | `io` | I/O request types, backends, timeout handling |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions; includes `port/path` and `string/size-of` |
+| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, and `traits` |
 | `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift |
@@ -59,13 +59,19 @@ bytecode. Error messages include file:line:col information.
 ### The Value type
 
 `Value` is the runtime representation using NaN-boxing. Create values via methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
-- `Closure` — bytecode + captured environment + arity + signal + `location_map` + `doc` + `syntax`
+- `Closure` — bytecode + captured environment + arity + signal + `location_map` + `doc` + `syntax` + `traits`
 - `LBox` / `LocalLBox` — mutable lboxes for captured variables
 - `Fiber` — independent execution context with stack, frames, signal mask
 - `Parameter` — dynamic binding with default value, looked up at runtime
 - `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`.
+
+**Trait table field:** Every user-facing heap variant carries a `traits: Value` field (8 bytes). Initialized to `Value::NIL` (meaning "no traits"). Only an immutable `LStruct` may be stored here; the `with-traits` primitive validates this at call time. The field is invisible to structural equality, ordering, and hashing.
+
+**Variants that carry `traits` (19 types):** `LArray`, `LArrayMut`, `LStruct`, `LStructMut`, `LString`, `LStringMut`, `LBytes`, `LBytesMut`, `LSet`, `LSetMut`, `Cons`, `Closure`, `LBox`, `Fiber`, `Syntax`, `ManagedPointer`, `External`, `Parameter`, `ThreadHandle`.
+
+**Variants that do NOT carry `traits` (6 infrastructure types):** `Float`, `NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`. `with-traits` on these returns a `:type-error`.
 
 ## Products
 
