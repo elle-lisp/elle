@@ -272,8 +272,12 @@
 # 9. Macro expansion: ArenaGuard works
 # ========================================
 
-# Per-iteration cost must be constant regardless of N.
-# If ArenaGuard is working, macro temps are freed each expansion.
+# Per-iteration cost must be constant regardless of N for warm (cached) calls.
+# Phase 2 of macro expansion uses an ArenaGuard to free transient allocations.
+# The first expansion per macro compiles the transformer closure (no guard —
+# the closure must survive to be cached). Subsequent expansions use the cached
+# closure and are cheaper. We pre-warm the cache before measuring so both
+# measurements reflect only the constant warm-path cost.
 (defn measure-per-iter (n expr)
   (let* ((before (arena/count)))
     (letrec ((loop (fn (i)
@@ -284,18 +288,20 @@
     (/ (- (arena/count) before) n)))
 
 (let* ((e '(let ((a 0)) (each x (list 1 2 3) (assign a (+ a x))) a))
+       (_ (eval e))  # warm-up: compile transformer closure, amortized outside measurement
        (p5 (measure-per-iter 5 e))
        (p20 (measure-per-iter 20 e)))
   (display "  each via eval: ") (display p5) (display "/") (display p20)
   (display " per-iter (5x/20x)\n")
-  (assert-eq p5 p20 "macro expansion cost is constant"))
+  (assert-eq p5 p20 "macro expansion cost is constant after cache warm-up"))
 
 (let* ((e '(defn temp (x) (let* ((a (+ x 1)) (b (+ a 2))) (-> b (* 2)))))
+       (_ (eval e))  # warm-up: compile transformer closures for defn, let*, ->
        (p5 (measure-per-iter 5 e))
        (p20 (measure-per-iter 20 e)))
   (display "  defn+let*+->: ") (display p5) (display "/") (display p20)
   (display " per-iter (5x/20x)\n")
-  (assert-eq p5 p20 "complex macro cost is constant"))
+  (assert-eq p5 p20 "complex macro cost is constant after cache warm-up"))
 
 
 # ========================================

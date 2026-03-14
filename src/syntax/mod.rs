@@ -533,6 +533,7 @@ mod tests {
             rest_param: None,
             template,
             definition_scope: ScopeId(0),
+            cached_transformer: std::cell::RefCell::new(None),
         };
 
         expander.define_macro(macro_def);
@@ -568,6 +569,7 @@ mod tests {
             rest_param: None,
             template,
             definition_scope: ScopeId(0),
+            cached_transformer: std::cell::RefCell::new(None),
         };
 
         expander.define_macro(macro_def);

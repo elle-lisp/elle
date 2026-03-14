@@ -45,6 +45,7 @@ expander.define_macro(MacroDef {
     rest_param: None,
     template: /* `(if ,cond ,body nil) */,
     definition_scope: ScopeId(0),
+    cached_transformer: RefCell::new(None),
 });
 
 // Expand code

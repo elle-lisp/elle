@@ -140,8 +140,12 @@
 # ── Leak detection: constant per-iter cost ──────────────────────────
 
 # test_arena_eval_cost_is_constant
-# Macro expansion cost per iteration must be stable across different N.
-# If ArenaGuard is broken, per-iter cost would grow.
+# Macro expansion cost per iteration must be stable across different N
+# after the transformer cache is warm.
+# The first expansion per macro compiles the transformer closure (no arena
+# guard — the closure must survive to be cached). Subsequent expansions use
+# the cached closure and are cheaper. We pre-warm the cache before measuring
+# so both measurements reflect only the constant warm-path cost.
 (let* ((measure (fn (n)
            (let* ((before (arena/count)))
              (letrec ((loop (fn (i)
@@ -150,10 +154,11 @@
                                 (loop (+ i 1))))))
                (loop 0))
              (/ (- (arena/count) before) n))))
+       (_ (eval '(defn temp (x) (+ x 1))))  # warm-up: compile transformer closures
        (p10 (measure 10))
        (p50 (measure 50)))
   (assert-eq (= p10 p50) true
-    "per-iter allocation cost is constant"))
+    "per-iter allocation cost is constant after cache warm-up"))
 
 # ── Shared allocator / zero-copy fiber exchange ─────────────────────
 

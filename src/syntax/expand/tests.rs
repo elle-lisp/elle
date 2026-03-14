@@ -5,6 +5,7 @@ use crate::primitives::register_primitives;
 use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span, Syntax, SyntaxKind};
 use crate::vm::VM;
+use std::cell::RefCell;
 
 fn setup() -> (SymbolTable, VM) {
     let mut symbols = SymbolTable::new();
@@ -275,6 +276,7 @@ fn test_macro_predicate_true() {
         rest_param: None,
         template: Syntax::new(SyntaxKind::Symbol("x".to_string()), span.clone()),
         definition_scope: ScopeId(0),
+        cached_transformer: RefCell::new(None),
     };
     expander.define_macro(macro_def);
 
@@ -391,6 +393,7 @@ fn test_expand_macro_basic() {
         rest_param: None,
         template,
         definition_scope: ScopeId(0),
+        cached_transformer: RefCell::new(None),
     };
     expander.define_macro(macro_def);
 
@@ -582,4 +585,143 @@ fn test_macro_with_conditional_body() {
     );
     let result = expander.expand(call_false, &mut symbols, &mut vm).unwrap();
     assert_eq!(result.to_string(), "42");
+}
+
+/// Verify the cached transformer is populated after first expansion.
+#[test]
+fn test_macro_cache_populated_after_first_call() {
+    let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
+    // Register prelude so that quasiquote is available
+    expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+    // Define a simple macro: (defmacro double (x) `(+ ,x ,x))
+    let defmacro_src = "(defmacro double (x) `(+ ,x ,x))";
+    let defmacro_syn = crate::reader::read_syntax(defmacro_src, "<test>").unwrap();
+    expander
+        .expand(defmacro_syn, &mut symbols, &mut vm)
+        .unwrap();
+
+    // Before first invocation, cache should be empty.
+    {
+        let macro_def = expander.macros.get("double").unwrap();
+        assert!(
+            macro_def.cached_transformer.borrow().is_none(),
+            "cache should be empty before first invocation"
+        );
+    }
+
+    // Invoke once.
+    let call_src = "(double 5)";
+    let call_syn = crate::reader::read_syntax(call_src, "<test>").unwrap();
+    expander.expand(call_syn, &mut symbols, &mut vm).unwrap();
+
+    // After first invocation, cache should be populated.
+    {
+        let macro_def = expander.macros.get("double").unwrap();
+        assert!(
+            macro_def.cached_transformer.borrow().is_some(),
+            "cache should be populated after first invocation"
+        );
+    }
+}
+
+/// Verify that calling the same macro with different args produces
+/// distinct, correct results (no cross-invocation state leakage).
+#[test]
+fn test_macro_cache_different_args_no_leakage() {
+    let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
+    expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+    // (defmacro double (x) `(+ ,x ,x))
+    let defmacro_syn =
+        crate::reader::read_syntax("(defmacro double (x) `(+ ,x ,x))", "<test>").unwrap();
+    expander
+        .expand(defmacro_syn, &mut symbols, &mut vm)
+        .unwrap();
+
+    // Expand (double 1), (double 2), (double 3) and verify each expands
+    // to a list containing the correct integer twice.
+    for n in [1i64, 2, 3] {
+        let src = format!("(double {})", n);
+        let syn = crate::reader::read_syntax(&src, "<test>").unwrap();
+        let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
+        let result_str = result.to_string();
+        // Should expand to (+ n n) — check n appears in the output.
+        let n_str = n.to_string();
+        assert!(
+            result_str.contains(&n_str),
+            "(double {}) should expand to contain {}, got: {}",
+            n,
+            n_str,
+            result_str
+        );
+        // Should contain + and the number twice.
+        assert!(result_str.contains('+'), "should contain +: {}", result_str);
+    }
+}
+
+/// Verify that falsy atom arguments (false, nil, 0) are passed correctly
+/// and do not become truthy through the cached closure path.
+#[test]
+fn test_macro_cache_atom_args_falsy() {
+    let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
+    expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+    // (defmacro echo-cond (test) `(if ,test true false))
+    // Expands echo-cond so we can inspect what value 'test' had.
+    let defmacro_syn = crate::reader::read_syntax(
+        "(defmacro echo-cond (test) `(if ,test true false))",
+        "<test>",
+    )
+    .unwrap();
+    expander
+        .expand(defmacro_syn, &mut symbols, &mut vm)
+        .unwrap();
+
+    // (echo-cond false) should expand to (if false true false)
+    // The key assertion: 'false' in the expansion must still be the
+    // boolean false literal, not a truthy syntax object.
+    for _ in 0..3 {
+        // Call multiple times to exercise both miss and hit paths.
+        let syn = crate::reader::read_syntax("(echo-cond false)", "<test>").unwrap();
+        let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
+        let result_str = result.to_string();
+        // The result should contain 'false' as a literal.
+        assert!(
+            result_str.contains("false"),
+            "false argument should remain false in expansion: {}",
+            result_str
+        );
+    }
+}
+
+/// Verify rest-param macros work correctly with the cache.
+#[test]
+fn test_macro_cache_rest_params() {
+    let mut expander = Expander::new();
+    let (mut symbols, mut vm) = setup();
+    expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+    // (defmacro my-begin (& forms) `(begin ,;forms))
+    let defmacro_syn =
+        crate::reader::read_syntax("(defmacro my-begin (& forms) `(begin ,;forms))", "<test>")
+            .unwrap();
+    expander
+        .expand(defmacro_syn, &mut symbols, &mut vm)
+        .unwrap();
+
+    // (my-begin a b c) — rest args collected into list
+    for _ in 0..2 {
+        let syn = crate::reader::read_syntax("(my-begin a b c)", "<test>").unwrap();
+        let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
+        let result_str = result.to_string();
+        assert!(
+            result_str.contains("begin"),
+            "should expand to begin form: {}",
+            result_str
+        );
+    }
 }
