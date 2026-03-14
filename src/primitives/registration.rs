@@ -8,7 +8,7 @@ use super::{
     concurrency, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers,
     fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
     modules, net, package, parameters, path, ports, process, read, sets, sort, stream, string,
-    structs, time, types, unix,
+    structs, time, traits, types, unix,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -59,6 +59,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     structs::PRIMITIVES,
     lstruct::PRIMITIVES,
     time::PRIMITIVES,
+    traits::PRIMITIVES,
     types::PRIMITIVES,
 ];
 

@@ -49,6 +49,7 @@ pub mod stream;
 pub mod string;
 pub mod structs;
 pub mod time;
+pub mod traits;
 pub mod types;
 pub mod unix;
 pub use def::{PrimitiveDef, PrimitiveMeta};

@@ -112,6 +112,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `fibers.rs` | `fiber/new`, `fiber/resume`, `emit`, `fiber/status`, `fiber/value` |
 | `fiber_introspect.rs` | `fiber/bits`, `fiber/mask`, `fiber/parent`, `fiber/child`, `fiber/propagate`, `fiber/cancel`, `fiber?` |
 | `parameters.rs` | `make-parameter`, `parameter?` |
+| `traits.rs` | `with-traits`, `traits` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |

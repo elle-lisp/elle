@@ -19,22 +19,52 @@ pub use crate::value::closure::Closure;
 pub use crate::value::types::{Arity, NativeFn, TableKey};
 
 /// Cons cell for list construction using NaN-boxed values.
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cons {
     pub first: Value,
     pub rest: Value,
+    pub traits: Value,
 }
 
 impl Cons {
     pub fn new(first: Value, rest: Value) -> Self {
-        Cons { first, rest }
+        Cons {
+            first,
+            rest,
+            traits: Value::NIL,
+        }
     }
 }
+
+impl std::fmt::Debug for Cons {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({:?} . {:?})", self.first, self.rest)
+    }
+}
+
+impl Clone for Cons {
+    fn clone(&self) -> Self {
+        Cons {
+            first: self.first,
+            rest: self.rest,
+            traits: self.traits,
+        }
+    }
+}
+
+impl PartialEq for Cons {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.rest == other.rest
+        // traits intentionally excluded
+    }
+}
+
+impl Eq for Cons {}
 
 impl std::hash::Hash for Cons {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.first.hash(state);
         self.rest.hash(state);
+        // traits intentionally excluded
     }
 }
 
@@ -49,6 +79,7 @@ impl Ord for Cons {
         self.first
             .cmp(&other.first)
             .then_with(|| self.rest.cmp(&other.rest))
+        // traits intentionally excluded
     }
 }
 
@@ -89,41 +120,64 @@ pub enum HeapTag {
 /// Each variant corresponds to a type that cannot be represented inline
 /// in the NaN-boxed Value. Objects are allocated on the heap and accessed
 /// via pointer.
+///
+/// 19 user-facing variants carry a `traits: Value` field (initialized to
+/// `Value::NIL`). The 6 infrastructure variants (Float, NativeFn, LibHandle,
+/// Binding, FFISignature, FFIType) do not carry traits.
 pub enum HeapObject {
     /// Immutable string
-    LString(Box<str>),
+    LString { s: Box<str>, traits: Value },
 
     /// Cons cell (list pair)
     Cons(Cons),
 
     /// Mutable array
-    LArrayMut(RefCell<Vec<Value>>),
+    LArrayMut {
+        data: RefCell<Vec<Value>>,
+        traits: Value,
+    },
 
     /// Mutable struct (hash map)
-    LStructMut(RefCell<BTreeMap<TableKey, Value>>),
+    LStructMut {
+        data: RefCell<BTreeMap<TableKey, Value>>,
+        traits: Value,
+    },
 
     /// Immutable struct
-    LStruct(BTreeMap<TableKey, Value>),
+    LStruct {
+        data: BTreeMap<TableKey, Value>,
+        traits: Value,
+    },
 
     /// Function closure (interpreted)
-    Closure(Rc<Closure>),
+    Closure { closure: Rc<Closure>, traits: Value },
 
     /// Immutable array (fixed-length sequence)
-    LArray(Vec<Value>),
+    LArray { elements: Vec<Value>, traits: Value },
 
     /// Mutable @string (byte sequence)
-    LStringMut(RefCell<Vec<u8>>),
+    LStringMut {
+        data: RefCell<Vec<u8>>,
+        traits: Value,
+    },
 
     /// Immutable byte sequence (binary data)
-    LBytes(Vec<u8>),
+    LBytes { data: Vec<u8>, traits: Value },
 
     /// Mutable byte sequence (binary data workspace)
-    LBytesMut(RefCell<Vec<u8>>),
+    LBytesMut {
+        data: RefCell<Vec<u8>>,
+        traits: Value,
+    },
 
     /// Mutable box for captured variables.
     /// The boolean distinguishes compiler-created boxes (true, auto-unwrapped
     /// by LoadUpvalue) from user-created boxes via `box` (false, not auto-unwrapped).
-    LBox(RefCell<Value>, bool),
+    LBox {
+        cell: RefCell<Value>,
+        is_local: bool,
+        traits: Value,
+    },
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
@@ -135,16 +189,19 @@ pub enum HeapObject {
     LibHandle(u32),
 
     /// Thread handle for concurrent execution
-    ThreadHandle(ThreadHandle),
+    ThreadHandle {
+        handle: crate::value::heap::ThreadHandle,
+        traits: Value,
+    },
 
     /// Fiber: independent execution context with its own stack and frames
-    Fiber(FiberHandle),
+    Fiber { handle: FiberHandle, traits: Value },
 
     /// Syntax object: preserves scope sets through the Value round-trip
     /// during macro expansion. This is the only HeapObject variant that
     /// references compile-time types — an intentional coupling required
     /// for first-class syntax objects in hygienic macros.
-    Syntax(Rc<Syntax>),
+    Syntax { syntax: Rc<Syntax>, traits: Value },
 
     /// Compile-time binding metadata. Mutable during analysis (the analyzer
     /// discovers captures and mutations after creating the binding), read-only
@@ -163,22 +220,35 @@ pub enum HeapObject {
 
     /// Managed FFI pointer with lifecycle tracking.
     /// `Some(addr)` = live, `None` = freed. Only for ffi/malloc'd memory.
-    ManagedPointer(std::cell::Cell<Option<usize>>),
+    ManagedPointer {
+        addr: std::cell::Cell<Option<usize>>,
+        traits: Value,
+    },
 
     /// Opaque external object from a plugin.
     /// Holds an arbitrary Rust value with a type name for Elle-side identity.
-    External(ExternalObject),
+    External { obj: ExternalObject, traits: Value },
 
     /// Dynamic parameter (Racket-style). Each parameter has a unique id
     /// (for lookup in the fiber's param_frames stack) and a default value
     /// (returned when no parameterize binding is active).
-    Parameter { id: u32, default: Value },
+    Parameter {
+        id: u32,
+        default: Value,
+        traits: Value,
+    },
 
     /// Immutable set (BTreeSet, no RefCell)
-    LSet(BTreeSet<Value>),
+    LSet {
+        data: BTreeSet<Value>,
+        traits: Value,
+    },
 
     /// Mutable set (BTreeSet wrapped in RefCell)
-    LSetMut(RefCell<BTreeSet<Value>>),
+    LSetMut {
+        data: RefCell<BTreeSet<Value>>,
+        traits: Value,
+    },
 }
 
 /// Internal binding metadata, heap-allocated behind the Value pointer.
@@ -254,67 +324,76 @@ pub struct ExternalObject {
     pub data: Rc<dyn Any>,
 }
 
+impl Clone for ExternalObject {
+    fn clone(&self) -> Self {
+        ExternalObject {
+            type_name: self.type_name,
+            data: self.data.clone(),
+        }
+    }
+}
+
 impl HeapObject {
     /// Get the type tag for this heap object.
     #[inline]
     pub fn tag(&self) -> HeapTag {
         match self {
-            HeapObject::LString(_) => HeapTag::LString,
+            HeapObject::LString { .. } => HeapTag::LString,
             HeapObject::Cons(_) => HeapTag::Cons,
-            HeapObject::LArrayMut(_) => HeapTag::LArrayMut,
-            HeapObject::LStructMut(_) => HeapTag::LStructMut,
-            HeapObject::LStruct(_) => HeapTag::LStruct,
-            HeapObject::Closure(_) => HeapTag::Closure,
-            HeapObject::LArray(_) => HeapTag::LArray,
-            HeapObject::LStringMut(_) => HeapTag::LStringMut,
-            HeapObject::LBytes(_) => HeapTag::LBytes,
-            HeapObject::LBytesMut(_) => HeapTag::LBytesMut,
-            HeapObject::LBox(_, _) => HeapTag::LBox,
+            HeapObject::LArrayMut { .. } => HeapTag::LArrayMut,
+            HeapObject::LStructMut { .. } => HeapTag::LStructMut,
+            HeapObject::LStruct { .. } => HeapTag::LStruct,
+            HeapObject::Closure { .. } => HeapTag::Closure,
+            HeapObject::LArray { .. } => HeapTag::LArray,
+            HeapObject::LStringMut { .. } => HeapTag::LStringMut,
+            HeapObject::LBytes { .. } => HeapTag::LBytes,
+            HeapObject::LBytesMut { .. } => HeapTag::LBytesMut,
+            HeapObject::LBox { .. } => HeapTag::LBox,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
-            HeapObject::ThreadHandle(_) => HeapTag::ThreadHandle,
-            HeapObject::Fiber(_) => HeapTag::Fiber,
-            HeapObject::Syntax(_) => HeapTag::Syntax,
+            HeapObject::ThreadHandle { .. } => HeapTag::ThreadHandle,
+            HeapObject::Fiber { .. } => HeapTag::Fiber,
+            HeapObject::Syntax { .. } => HeapTag::Syntax,
             HeapObject::Binding(_) => HeapTag::Binding,
             HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
             HeapObject::FFIType(_) => HeapTag::FFIType,
-            HeapObject::ManagedPointer(_) => HeapTag::ManagedPointer,
-            HeapObject::External(_) => HeapTag::External,
+            HeapObject::ManagedPointer { .. } => HeapTag::ManagedPointer,
+            HeapObject::External { .. } => HeapTag::External,
             HeapObject::Parameter { .. } => HeapTag::Parameter,
-            HeapObject::LSet(_) => HeapTag::LSet,
-            HeapObject::LSetMut(_) => HeapTag::LSetMut,
+            HeapObject::LSet { .. } => HeapTag::LSet,
+            HeapObject::LSetMut { .. } => HeapTag::LSetMut,
         }
     }
 
     /// Get a human-readable type name.
     pub fn type_name(&self) -> &'static str {
         match self {
-            HeapObject::LString(_) => "string",
+            HeapObject::LString { .. } => "string",
             HeapObject::Cons(_) => "list",
-            HeapObject::LArrayMut(_) => "@array",
-            HeapObject::LStructMut(_) => "@struct",
-            HeapObject::LStruct(_) => "struct",
-            HeapObject::Closure(_) => "closure",
-            HeapObject::LArray(_) => "array",
-            HeapObject::LStringMut(_) => "@string",
-            HeapObject::LBytes(_) => "bytes",
-            HeapObject::LBytesMut(_) => "@bytes",
-            HeapObject::LBox(_, _) => "box",
+            HeapObject::LArrayMut { .. } => "@array",
+            HeapObject::LStructMut { .. } => "@struct",
+            HeapObject::LStruct { .. } => "struct",
+            HeapObject::Closure { .. } => "closure",
+            HeapObject::LArray { .. } => "array",
+            HeapObject::LStringMut { .. } => "@string",
+            HeapObject::LBytes { .. } => "bytes",
+            HeapObject::LBytesMut { .. } => "@bytes",
+            HeapObject::LBox { .. } => "box",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-function",
             HeapObject::LibHandle(_) => "library-handle",
-            HeapObject::ThreadHandle(_) => "thread-handle",
-            HeapObject::Fiber(_) => "fiber",
-            HeapObject::Syntax(_) => "syntax",
+            HeapObject::ThreadHandle { .. } => "thread-handle",
+            HeapObject::Fiber { .. } => "fiber",
+            HeapObject::Syntax { .. } => "syntax",
             HeapObject::Binding(_) => "binding",
             HeapObject::FFISignature(_, _) => "ffi-signature",
             HeapObject::FFIType(_) => "ffi-type",
-            HeapObject::ManagedPointer(_) => "pointer",
-            HeapObject::External(ext) => ext.type_name,
+            HeapObject::ManagedPointer { .. } => "pointer",
+            HeapObject::External { obj, .. } => obj.type_name,
             HeapObject::Parameter { .. } => "parameter",
-            HeapObject::LSet(_) => "set",
-            HeapObject::LSetMut(_) => "@set",
+            HeapObject::LSet { .. } => "set",
+            HeapObject::LSetMut { .. } => "@set",
         }
     }
 }
@@ -322,21 +401,21 @@ impl HeapObject {
 impl std::fmt::Debug for HeapObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HeapObject::LString(s) => write!(f, "\"{}\"", s),
+            HeapObject::LString { s, .. } => write!(f, "\"{}\"", s),
             HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
-            HeapObject::LArrayMut(v) => {
-                if let Ok(borrowed) = v.try_borrow() {
+            HeapObject::LArrayMut { data, .. } => {
+                if let Ok(borrowed) = data.try_borrow() {
                     write!(f, "{:?}", &*borrowed)
                 } else {
                     write!(f, "[<borrowed>]")
                 }
             }
-            HeapObject::LStructMut(_) => write!(f, "<@struct>"),
-            HeapObject::LStruct(_) => write!(f, "<struct>"),
-            HeapObject::Closure(_) => write!(f, "<closure>"),
-            HeapObject::LArray(elems) => {
+            HeapObject::LStructMut { .. } => write!(f, "<@struct>"),
+            HeapObject::LStruct { .. } => write!(f, "<struct>"),
+            HeapObject::Closure { .. } => write!(f, "<closure>"),
+            HeapObject::LArray { elements, .. } => {
                 write!(f, "[")?;
-                for (i, v) in elems.iter().enumerate() {
+                for (i, v) in elements.iter().enumerate() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
@@ -344,16 +423,16 @@ impl std::fmt::Debug for HeapObject {
                 }
                 write!(f, "]")
             }
-            HeapObject::LStringMut(v) => {
-                if let Ok(borrowed) = v.try_borrow() {
+            HeapObject::LStringMut { data, .. } => {
+                if let Ok(borrowed) = data.try_borrow() {
                     write!(f, "@\"{}\"", String::from_utf8_lossy(&borrowed))
                 } else {
                     write!(f, "@\"<borrowed>\"")
                 }
             }
-            HeapObject::LBytes(b) => {
+            HeapObject::LBytes { data, .. } => {
                 write!(f, "#bytes[")?;
-                for (i, byte) in b.iter().enumerate() {
+                for (i, byte) in data.iter().enumerate() {
                     if i > 0 {
                         write!(f, " ")?;
                     }
@@ -361,8 +440,8 @@ impl std::fmt::Debug for HeapObject {
                 }
                 write!(f, "]")
             }
-            HeapObject::LBytesMut(b) => {
-                if let Ok(borrowed) = b.try_borrow() {
+            HeapObject::LBytesMut { data, .. } => {
+                if let Ok(borrowed) = data.try_borrow() {
                     write!(f, "#@bytes[")?;
                     for (i, byte) in borrowed.iter().enumerate() {
                         if i > 0 {
@@ -375,27 +454,27 @@ impl std::fmt::Debug for HeapObject {
                     write!(f, "#@bytes[<borrowed>]")
                 }
             }
-            HeapObject::LBox(_, _) => write!(f, "<box>"),
+            HeapObject::LBox { .. } => write!(f, "<box>"),
             HeapObject::Float(n) => write!(f, "{}", n),
             HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),
-            HeapObject::ThreadHandle(_) => write!(f, "<thread-handle>"),
-            HeapObject::Fiber(handle) => match handle.try_with(|fib| fib.status.as_str()) {
+            HeapObject::ThreadHandle { .. } => write!(f, "<thread-handle>"),
+            HeapObject::Fiber { handle, .. } => match handle.try_with(|fib| fib.status.as_str()) {
                 Some(status) => write!(f, "<fiber:{}>", status),
                 None => write!(f, "<fiber:taken>"),
             },
-            HeapObject::Syntax(s) => write!(f, "#<syntax:{}>", s),
+            HeapObject::Syntax { syntax, .. } => write!(f, "#<syntax:{}>", syntax),
             HeapObject::Binding(_) => write!(f, "#<binding>"),
             HeapObject::FFISignature(_, _) => write!(f, "<ffi-signature>"),
             HeapObject::FFIType(desc) => write!(f, "<ffi-type:{:?}>", desc),
-            HeapObject::ManagedPointer(cell) => match cell.get() {
-                Some(addr) => write!(f, "<managed-pointer 0x{:x}>", addr),
+            HeapObject::ManagedPointer { addr, .. } => match addr.get() {
+                Some(a) => write!(f, "<managed-pointer 0x{:x}>", a),
                 None => write!(f, "<freed-pointer>"),
             },
-            HeapObject::External(ext) => write!(f, "#<{}>", ext.type_name),
+            HeapObject::External { obj, .. } => write!(f, "#<{}>", obj.type_name),
             HeapObject::Parameter { id, .. } => write!(f, "<parameter:{}>", id),
-            HeapObject::LSet(s) => write!(f, "LSet({:?})", s),
-            HeapObject::LSetMut(s) => write!(f, "LSetMut({:?})", s.borrow()),
+            HeapObject::LSet { data, .. } => write!(f, "LSet({:?})", data),
+            HeapObject::LSetMut { data, .. } => write!(f, "LSetMut({:?})", data.borrow()),
         }
     }
 }
@@ -415,12 +494,15 @@ mod tests {
 
     #[test]
     fn test_alloc_string() {
-        let v = alloc(HeapObject::LString("hello".into()));
+        let v = alloc(HeapObject::LString {
+            s: "hello".into(),
+            traits: Value::NIL,
+        });
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::LString(s) => assert_eq!(&**s, "hello"),
+                HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
                 _ => panic!("Expected LString"),
             }
         }
@@ -428,12 +510,15 @@ mod tests {
 
     #[test]
     fn test_alloc_permanent_string() {
-        let v = alloc_permanent(HeapObject::LString("permanent".into()));
+        let v = alloc_permanent(HeapObject::LString {
+            s: "permanent".into(),
+            traits: Value::NIL,
+        });
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::LString(s) => assert_eq!(&**s, "permanent"),
+                HeapObject::LString { s, .. } => assert_eq!(&**s, "permanent"),
                 _ => panic!("Expected LString"),
             }
             drop_heap(v);
@@ -443,12 +528,15 @@ mod tests {
     #[test]
     fn test_arena_mark_release() {
         let mark = heap_arena_mark();
-        let v = alloc(HeapObject::LString("temporary".into()));
+        let v = alloc(HeapObject::LString {
+            s: "temporary".into(),
+            traits: Value::NIL,
+        });
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::LString(s) => assert_eq!(&**s, "temporary"),
+                HeapObject::LString { s, .. } => assert_eq!(&**s, "temporary"),
                 _ => panic!("Expected LString"),
             }
         }
@@ -460,7 +548,10 @@ mod tests {
         let before = heap_arena_len();
         {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::LString("guarded".into()));
+            alloc(HeapObject::LString {
+                s: "guarded".into(),
+                traits: Value::NIL,
+            });
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             let during = heap_arena_len();
             assert_eq!(during, before + 2);
@@ -474,10 +565,16 @@ mod tests {
         let before = heap_arena_len();
         {
             let _outer = ArenaGuard::new();
-            alloc(HeapObject::LString("outer alloc".into()));
+            alloc(HeapObject::LString {
+                s: "outer alloc".into(),
+                traits: Value::NIL,
+            });
             {
                 let _inner = ArenaGuard::new();
-                alloc(HeapObject::LString("inner alloc".into()));
+                alloc(HeapObject::LString {
+                    s: "inner alloc".into(),
+                    traits: Value::NIL,
+                });
                 let during_inner = heap_arena_len();
                 assert_eq!(during_inner, before + 2);
             }
@@ -493,7 +590,10 @@ mod tests {
         let before = heap_arena_len();
         let result: Result<(), String> = {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::LString("will be freed".into()));
+            alloc(HeapObject::LString {
+                s: "will be freed".into(),
+                traits: Value::NIL,
+            });
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             Err("simulated error".to_string())
         };
@@ -504,7 +604,10 @@ mod tests {
 
     #[test]
     fn test_heap_tag() {
-        let s = HeapObject::LString("test".into());
+        let s = HeapObject::LString {
+            s: "test".into(),
+            traits: Value::NIL,
+        };
         assert_eq!(s.tag(), HeapTag::LString);
         assert_eq!(s.type_name(), "string");
     }
