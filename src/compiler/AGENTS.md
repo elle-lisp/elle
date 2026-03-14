@@ -81,6 +81,14 @@ get region instructions.
 `break` emits compensating `RegionExit` instructions for each region entered
 between the break site and the target block (`region_depth` tracking).
 
+## Struct rest instruction
+
+`StructRest` collects all keys from a struct NOT in an excluded set into a new
+immutable struct. Operands: `u16 count` followed by `count` x `u16 const_idx`
+(each a keyword or symbol key value in the constant pool). Source struct is
+popped from the stack; result struct is pushed. Used by `{:a a & rest}`
+destructuring patterns. The JIT side-exits on this instruction.
+
 ## Anti-patterns
 
 - Modifying `Instruction` byte values (breaks compatibility)

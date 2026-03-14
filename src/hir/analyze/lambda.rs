@@ -123,12 +123,12 @@ impl<'a> Analyzer<'a> {
                     let pattern = self.analyze_destructure_pattern(
                         keys_syn,
                         BindingScope::Local,
-                        false,
+                        true,
                         &span,
                     )?;
-                    // &keys opts struct is always present; missing keys produce nil
-                    // (same as &named — keyword arg patterns are optional by convention)
-                    param_destructures.push((pattern, tmp, false));
+                    // &keys {:k v} destructures strictly: missing keys signal an error.
+                    // Use &named or &keys opts (simple symbol) for optional kwargs.
+                    param_destructures.push((pattern, tmp, true));
                     (Some(tmp), VarargKind::Struct)
                 } else {
                     return Err(format!(

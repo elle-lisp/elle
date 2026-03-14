@@ -204,6 +204,9 @@ impl VM {
                 Instruction::TableGetDestructure => {
                     data::handle_table_get_destructure(self, bc, &mut ip, constants);
                 }
+                Instruction::StructRest => {
+                    data::handle_struct_rest(self, bc, &mut ip, constants);
+                }
 
                 // Silent destructuring (parameter context: absent optional params → nil)
                 Instruction::CarOrNil => {

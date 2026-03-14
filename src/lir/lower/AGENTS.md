@@ -165,6 +165,7 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `ArrayLen` | array → int | Get array length (for pattern matching) |
 | `TableGetOrNil` | struct → value | Get key from struct/@struct, nil if missing/wrong type — used by match (u16 const_idx operand) |
 | `TableGetDestructure` | struct → value | Get key from struct/@struct, signals error if missing/wrong type — used by binding forms (u16 const_idx operand) |
+| `StructRest` | struct → struct | Collect all keys not in exclude set into a new immutable struct; variable-length operands: u16 count + count x u16 const_idx |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
