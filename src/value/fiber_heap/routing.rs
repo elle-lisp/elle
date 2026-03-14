@@ -147,7 +147,6 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
 }
 
 /// Push a scope mark on the current FiberHeap (called by VM `RegionEnter`).
-/// No-op if no FiberHeap is installed (root fiber).
 pub fn region_enter() {
     let ptr = current_heap_ptr();
     if !ptr.is_null() {
@@ -157,7 +156,6 @@ pub fn region_enter() {
 
 /// Pop a scope mark and release scoped objects on the current FiberHeap
 /// (called by VM `RegionExit`).
-/// No-op if no FiberHeap is installed (root fiber).
 pub fn region_exit() {
     let ptr = current_heap_ptr();
     if !ptr.is_null() {

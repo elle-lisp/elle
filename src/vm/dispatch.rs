@@ -394,7 +394,7 @@ impl VM {
                 }
 
                 // Allocation region markers: push/pop scope marks on FiberHeap.
-                // No-op for root fiber (no FiberHeap installed).
+                // Effective for both root and child fibers.
                 Instruction::RegionEnter => {
                     crate::value::fiber_heap::region_enter();
                 }

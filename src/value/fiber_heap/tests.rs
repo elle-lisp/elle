@@ -557,6 +557,21 @@ fn test_alloc_error_cleared_by_clear() {
     assert!(heap.take_alloc_error().is_none());
 }
 
+// ── Chunk 3: lazy root heap init via alloc() ──────────────────────
+
+#[test]
+fn test_alloc_without_installed_heap_lazy_inits() {
+    // alloc() with no heap installed triggers lazy root heap installation.
+    uninstall_fiber_heap();
+    // alloc() should not panic even with no heap installed.
+    let v = crate::value::arena::alloc(HeapObject::LString("lazy-test".into()));
+    assert!(v.is_heap());
+    // Root heap is now installed.
+    assert!(is_fiber_heap_installed());
+    // Clean up
+    uninstall_fiber_heap();
+}
+
 // ── Shared allocator ownership tests ──────────────────────────────
 
 #[test]

@@ -114,10 +114,11 @@ impl Expander {
         // Cache miss: compile `(fn (p1 p2 & rest) template)` via eval_syntax.
         // Cache hit: clone the cached Value (cheap — Value is Copy, Rc inside).
         //
-        // No ArenaGuard here: closures are allocated on HEAP_ARENA via `alloc()`.
-        // A guard around `eval_syntax` would release the closure before it can be
-        // stored in the cache. The closure compilation cost (one-time per pipeline
-        // call) is left in the arena; subsequent calls skip this phase entirely.
+        // No ArenaGuard here: the closure is allocated into the root FiberHeap
+        // and must persist until stored in the transformer cache. A guard would
+        // release it before caching.
+        // The closure compilation cost (one-time per pipeline call) is left in
+        // the arena; subsequent calls skip this phase entirely.
         let transformer: Value = {
             let cached = *macro_def.cached_transformer.borrow();
             if let Some(v) = cached {

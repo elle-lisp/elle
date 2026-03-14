@@ -355,3 +355,18 @@
 (assert-eq (length results) 50 "long lived coroutine: 50 yields")
 (assert-eq (first (get results 0)) 0 "long lived coroutine: first yield")
 (assert-eq (first (get results 49)) 49 "long lived coroutine: last yield")
+
+# ── Root fiber scope management (new in issue-525) ──────────────────
+
+# test_root_fiber_scope_stats_nonnegative
+# After issue-525, RegionEnter/RegionExit are effective on the root fiber.
+# scope-stats :enters should be >= 0 (may be > 0 due to stdlib scopes).
+(let* ((stats (arena/scope-stats))
+       (enters (get stats :enters))
+       (dtors (get stats :dtors-run)))
+  (assert-true (>= enters 0) "root fiber scope-stats :enters is non-negative")
+  (assert-true (>= dtors 0) "root fiber scope-stats :dtors-run is non-negative"))
+
+# test_root_fiber_count_nonzero
+# After a full VM startup (stdlib loaded), arena/count on root must be > 0.
+(assert-true (> (arena/count) 0) "root fiber arena/count is positive after stdlib load")

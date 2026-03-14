@@ -1,60 +1,23 @@
-//! Heap arena for temporary value allocation with mark/release semantics.
+//! Arena allocation layer.
+//!
+//! All allocations go through the current `FiberHeap` (root or child), reached
+//! via the `CURRENT_FIBER_HEAP` thread-local in `fiber_heap/routing.rs`.
+//!
+//! - `alloc()` — allocate a heap object; lazily installs root heap if needed
+//! - `alloc_permanent()` — Rc-backed allocation for objects that must outlive all scopes
+//! - `deref()` — get a reference to a heap object from a Value
+//! - `ArenaMark` — opaque position type for mark/release scope management
+//! - `ArenaGuard` — RAII guard that releases the arena to a saved mark on drop
+//! - `heap_arena_mark()` / `heap_arena_release()` — save/restore position on current FiberHeap
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::heap::HeapObject;
 use super::Value;
 
-// =============================================================================
-// Heap Arena
-//
-// STOPGAP: This is a tactical fix for unbounded memory growth during macro
-// expansion (see docs/heap-arena-plan.md). It is NOT a proper GC or lifetime
-// system. Known unsoundnesses:
-//
-// 1. `deref()` returns `&'static HeapObject`. For arena-allocated objects,
-//    this lifetime is a lie — the reference becomes dangling after release.
-//    Safe only because no code path retains a `&HeapObject` across a release.
-//
-// 2. There is no type-level distinction between arena-allocated and
-//    permanently-allocated Values. `clone_heap`/`drop_heap` assume Rc-backed
-//    pointers; calling them on arena-allocated Values is undefined behavior.
-//
-// 3. `HeapObject::Drop` during `truncate` must not allocate Values (would
-//    re-borrow the arena RefCell and panic). This constrains ExternalObject
-//    Drop impls.
-//
-// When we move to a real memory management solution, delete this entire
-// section and the `alloc_permanent` function.
-// =============================================================================
-
-struct HeapArena {
-    /// Box provides pointer stability: HeapObject addresses survive Vec reallocation.
-    #[allow(clippy::vec_box)]
-    objects: Vec<Box<HeapObject>>,
-    object_limit: Option<usize>,
-    peak_object_count: usize,
-}
-
-impl HeapArena {
-    fn new() -> Self {
-        HeapArena {
-            objects: Vec::new(),
-            object_limit: None,
-            peak_object_count: 0,
-        }
-    }
-}
-
-thread_local! {
-    static HEAP_ARENA: RefCell<HeapArena> = RefCell::new(HeapArena::new());
-}
-
 /// Opaque mark for arena scope management.
 ///
-/// Stores the HEAP_ARENA Vec position (for the root fiber) and the
-/// FiberHeap destructor list length (for child fibers with bumpalo).
+/// Stores the FiberHeap alloc position and destructor list length at mark time.
 pub struct ArenaMark {
     position: usize,
     dtor_len: usize,
@@ -132,135 +95,85 @@ impl Drop for ArenaGuard {
     }
 }
 
-/// Save the current arena position.
+/// Save the current arena position on the current FiberHeap.
 pub fn heap_arena_mark() -> ArenaMark {
-    if let Some(mark) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.mark()) {
-        return mark;
-    }
-    HEAP_ARENA.with(|arena| ArenaMark {
-        position: arena.borrow().objects.len(),
-        dtor_len: 0,
-        custom_ptrs_len: 0,
-        bump_depth: 0,
+    crate::value::fiber_heap::with_current_heap_mut(|heap| heap.mark()).unwrap_or_else(|| {
+        // Lazy init: no heap installed (test context). Install root heap.
+        let ptr = crate::value::fiber_heap::ensure_and_install_root_heap();
+        unsafe { (*ptr).mark() }
     })
 }
 
-/// Release all arena allocations back to the mark, dropping freed objects.
-///
-/// SAFETY CONSTRAINT: `HeapObject` variants dropped during truncate must not
-/// allocate Values in their Drop impls. Doing so would re-borrow the arena
-/// RefCell (already held by this truncate) and panic. This constrains
-/// `ExternalObject` — plugin Drop impls must not call `Value::cons()` etc.
+/// Release all arena allocations back to the mark, running destructors.
 pub fn heap_arena_release(mark: ArenaMark) {
     let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-    if !heap_ptr.is_null() {
-        unsafe { (*heap_ptr).release(mark) };
-        return;
-    }
-    HEAP_ARENA.with(|arena| arena.borrow_mut().objects.truncate(mark.position()))
+    let heap_ptr = if !heap_ptr.is_null() {
+        heap_ptr
+    } else {
+        crate::value::fiber_heap::ensure_and_install_root_heap()
+    };
+    unsafe { (*heap_ptr).release(mark) };
 }
 
-/// Return the current root-fiber arena position as an opaque checkpoint.
+/// Return the current arena position as an opaque checkpoint.
 ///
-/// Pass to [`heap_arena_reset`] to reclaim all objects allocated after
-/// this point. Only meaningful for the global HEAP_ARENA (root fiber).
+/// Retained for backward compatibility. In chunk 4, primitives
+/// switch to using ArenaMark directly.
 pub fn heap_arena_checkpoint() -> usize {
-    HEAP_ARENA.with(|arena| arena.borrow().objects.len())
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.len()).unwrap_or(0)
 }
 
-/// Truncate the root-fiber HEAP_ARENA back to `mark`, running Drop for
-/// all objects allocated after that position.
-///
-/// # Safety contract (caller's responsibility)
-///
-/// Any `Value` pointing into the freed region is now dangling. The caller
-/// must ensure those Values are unreachable before calling this.
-///
-/// # Panics
-///
-/// Does not panic if `mark > len` — silently no-ops (validated by caller).
-pub fn heap_arena_reset(mark: usize) {
-    HEAP_ARENA.with(|arena| {
-        let mut a = arena.borrow_mut();
-        if mark <= a.objects.len() {
-            a.objects.truncate(mark);
-        }
-    })
+/// No-op stub — replaced by FiberHeap::release in chunk 4.
+pub fn heap_arena_reset(_mark: usize) {
+    // Intentional no-op: bumpalo does not support position-based
+    // deallocation. This stub exists to keep compilation passing
+    // until chunk 4 rewrites arena/checkpoint and arena/reset.
 }
 
-/// Current number of live objects in the thread-local heap arena.
+/// Current number of live objects in the thread-local (root) heap.
 pub fn heap_arena_len() -> usize {
-    if let Some(len) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.len()) {
-        return len;
-    }
-    HEAP_ARENA.with(|arena| arena.borrow().objects.len())
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.len()).unwrap_or(0)
 }
 
-/// Current capacity of the thread-local heap arena Vec.
+/// Current capacity (bumpalo chunk bytes) of the root heap.
 pub fn heap_arena_capacity() -> usize {
-    if let Some(cap) = crate::value::fiber_heap::with_current_heap_mut(|heap| heap.capacity()) {
-        return cap;
-    }
-    HEAP_ARENA.with(|arena| arena.borrow().objects.capacity())
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.capacity()).unwrap_or(0)
 }
 
-/// Get the current object limit for the global heap arena.
+/// Get the current object limit for the root heap.
 pub fn heap_arena_object_limit() -> Option<usize> {
-    HEAP_ARENA.with(|a| a.borrow().object_limit)
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.object_limit()).flatten()
 }
 
-/// Set the object limit for the global heap arena. Returns the previous limit.
+/// Set the object limit for the root heap. Returns the previous limit.
 pub fn heap_arena_set_object_limit(limit: Option<usize>) -> Option<usize> {
-    HEAP_ARENA.with(|a| {
-        let mut a = a.borrow_mut();
-        let prev = a.object_limit;
-        a.object_limit = limit;
-        prev
-    })
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.set_object_limit(limit)).flatten()
 }
 
-/// Get the peak object count for the global heap arena.
+/// Get the peak object count for the root heap.
 pub fn heap_arena_peak() -> usize {
-    HEAP_ARENA.with(|a| a.borrow().peak_object_count)
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.peak_alloc_count()).unwrap_or(0)
 }
 
 /// Reset peak to current count. Returns previous peak.
 pub fn heap_arena_reset_peak() -> usize {
-    HEAP_ARENA.with(|a| {
-        let mut a = a.borrow_mut();
-        let prev = a.peak_object_count;
-        a.peak_object_count = a.objects.len();
-        prev
-    })
+    crate::value::fiber_heap::with_current_heap_mut(|h| h.reset_peak()).unwrap_or(0)
 }
 
-/// Allocate a heap object on the thread-local arena and return a Value pointing to it.
+/// Allocate a heap object and return a Value pointing to it.
 ///
-/// Single thread-local read: check the raw pointer once, then dispatch.
-/// `HeapObject` is not `Copy`, so we must not move it into a closure that
-/// might not execute (that would silently drop the object).
+/// Dispatches through the current FiberHeap. If no heap is installed
+/// (test code running without a VM), ensures and installs the root
+/// heap lazily before allocating.
 pub fn alloc(obj: HeapObject) -> Value {
     let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-    if !heap_ptr.is_null() {
-        return unsafe { (*heap_ptr).alloc(obj) };
-    }
-    HEAP_ARENA.with(|arena| {
-        let mut a = arena.borrow_mut();
-        if let Some(limit) = a.object_limit {
-            let count = a.objects.len();
-            if count >= limit {
-                // alloc_error handled by FiberHeap
-                return Value::NIL;
-            }
-        }
-        let boxed = Box::new(obj);
-        let ptr = &*boxed as *const HeapObject as *const ();
-        a.objects.push(boxed);
-        if a.objects.len() > a.peak_object_count {
-            a.peak_object_count = a.objects.len();
-        }
-        Value::from_heap_ptr(ptr)
-    })
+    let heap_ptr = if !heap_ptr.is_null() {
+        heap_ptr
+    } else {
+        // Lazy init: test code or pre-VM allocation. Install root heap.
+        crate::value::fiber_heap::ensure_and_install_root_heap()
+    };
+    unsafe { (*heap_ptr).alloc(obj) }
 }
 
 /// Allocate a heap object permanently (bypasses arena tracking).
