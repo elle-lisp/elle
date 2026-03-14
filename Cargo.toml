@@ -26,7 +26,7 @@ path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 
 # Async I/O (Linux io_uring)
-io-uring = { version = "0.7", optional = true }
+io-uring = "0.7"
 
 # JIT compilation
 cranelift-codegen = "0.116"
@@ -44,7 +44,7 @@ stats_alloc = { version = "0.1.10", features = ["nightly"] }
 
 [features]
 default = []
-io-uring = ["dep:io-uring"]
+jit-suspend-tests = []
 
 [profile.release]
 lto = "fat"

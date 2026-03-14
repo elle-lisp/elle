@@ -91,7 +91,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `logic.rs` | `not` |
 | `list.rs` | `cons`, `first`, `rest`, `list`, `length`, `empty?`, `append`, `concat`, `reverse`, `last`, `butlast`, `take`, `drop` |
 | `array.rs` | `array`, `@array`, `array/new`, `push`, `pop`, `popn`, `insert`, `remove` |
-| `string.rs` | `@string` (constructor), `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join` |
+| `string.rs` | `@string` (constructor), `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/size-of` |
 | `format.rs` | `string/format` |
 | `table.rs` | `@struct`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
 | `access.rs` | `get`, `put` — polymorphic collection access |
@@ -214,6 +214,41 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 2. **Arity enforcement.** Positional mode requires exactly as many args as placeholders. Named mode requires even args (key-value pairs).
 3. **Type safety.** Format specs are validated against value types (e.g., `d` requires integer, `f` requires number).
 4. **Brace escaping.** `{{` and `}}` are unescaped only in literal segments, not inside placeholders.
+
+## string/size-of primitive
+
+**Location:** `src/primitives/string.rs`
+
+**Signature:** `(string/size-of s)`
+
+**Purpose:** Returns the byte length of string `s` in UTF-8 encoding (not character count). Used for accurate `Content-Length` headers and other byte-level operations.
+
+**Behavior:**
+- Accepts a single string argument
+- Returns an integer representing the number of bytes in the UTF-8 encoding
+- For ASCII strings, byte length equals character count
+- For multi-byte UTF-8 characters, byte length > character count
+
+**Examples:**
+```lisp
+(string/size-of "hello")           #=> 5
+(string/size-of "café")            #=> 5 (é is 2 bytes in UTF-8)
+(string/size-of "🎉")              #=> 4 (emoji is 4 bytes in UTF-8)
+(string/size-of "")                #=> 0
+```
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| Argument not string | `type-error` | `"string/size-of: expected string, got {type}"` |
+| Wrong arity | `arity-error` | `"string/size-of: expected 1 argument, got N"` |
+
+**Invariants:**
+
+1. **Byte-level semantics.** Returns UTF-8 byte count, not character count. This is essential for HTTP headers and binary protocols.
+2. **No mutation.** The operation is pure and does not modify the string.
+3. **Consistent with UTF-8.** The result matches `(length (bytes s))` for the UTF-8 encoding of the string.
 
 ## Network Primitives
 

@@ -85,6 +85,8 @@ fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Ve
 }
 
 /// Extract keyword→value pairs from an exports struct.
+///
+/// Reads the signal directly from each exported value's compiled representation.
 fn extract_exports(
     exports_val: Value,
     symbols: &mut SymbolTable,
@@ -100,9 +102,17 @@ fn extract_exports(
     for (key, value) in exports_struct.iter() {
         if let crate::value::types::TableKey::Keyword(name) = key {
             let sym_id = symbols.intern(name);
-            // Use errors() as a conservative signal — stdlib functions can error
-            // but we don't know their exact signals statically.
-            result.insert(sym_id, (*value, Signal::errors()));
+            let signal = if let Some(closure) = value.as_closure() {
+                closure.template.signal
+            } else if value.is_parameter() {
+                Signal::inert()
+            } else {
+                panic!(
+                    "stdlib export '{}' is neither closure nor parameter: {}",
+                    name, value
+                )
+            };
+            result.insert(sym_id, (*value, signal));
         }
     }
     result

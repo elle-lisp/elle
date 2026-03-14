@@ -34,6 +34,8 @@ pub(crate) enum IoOp {
     RecvFrom { count: usize },
     /// Shutdown a socket connection. Returns nil.
     Shutdown { how: i32 },
+    /// Async sleep. No port — just a timer. Returns nil after duration elapses.
+    Sleep { duration: Duration },
 }
 
 /// Address for connect operations.
@@ -73,6 +75,19 @@ impl IoRequest {
     #[allow(clippy::new_ret_no_self)]
     pub fn with_timeout(op: IoOp, port: Value, timeout: Option<Duration>) -> Value {
         Value::external("io-request", IoRequest { op, port, timeout })
+    }
+
+    /// Create a portless IoRequest (e.g., Sleep).
+    #[allow(clippy::new_ret_no_self)]
+    pub fn portless(op: IoOp) -> Value {
+        Value::external(
+            "io-request",
+            IoRequest {
+                op,
+                port: Value::NIL,
+                timeout: None,
+            },
+        )
     }
 }
 

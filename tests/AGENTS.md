@@ -68,7 +68,7 @@ generate random inputs and verify properties like:
 - Mathematical laws (commutativity, associativity, identity, inverse)
 - Type discrimination (exactly one type predicate is true for any Value)
 - Determinism (same source always produces same result)
-- Effect inference soundness (pure expressions never inferred as yielding)
+- Signal inference soundness (silent expressions never inferred as yielding)
 - Bug regression across input ranges (not just the single case that triggered it)
 
 Property tests answer: "Does this invariant hold for *all* valid inputs?"

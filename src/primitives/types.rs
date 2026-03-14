@@ -316,7 +316,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "nil?",
         func: prim_is_nil,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is nil.",
         params: &["value"],
@@ -327,7 +327,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pair?",
         func: prim_is_pair,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a pair (cons cell).",
         params: &["value"],
@@ -338,7 +338,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "list?",
         func: prim_is_list,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a list (empty list or cons cell).",
         params: &["value"],
@@ -349,7 +349,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "number?",
         func: prim_is_number,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a number.",
         params: &["value"],
@@ -360,7 +360,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "integer?",
         func: prim_is_integer,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is an integer (48-bit signed, range ±2^47).",
         params: &["value"],
@@ -371,7 +371,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "float?",
         func: prim_is_float,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a floating-point number.",
         params: &["value"],
@@ -382,7 +382,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "symbol?",
         func: prim_is_symbol,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a symbol.",
         params: &["value"],
@@ -393,7 +393,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string?",
         func: prim_is_string,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a string (immutable or mutable).",
         params: &["value"],
@@ -405,7 +405,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "boolean?",
         func: prim_is_boolean,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a boolean.",
         params: &["value"],
@@ -416,7 +416,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "keyword?",
         func: prim_is_keyword,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a keyword.",
         params: &["value"],
@@ -427,7 +427,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "type",
         func: prim_type_of,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the type of a value as a keyword.",
         params: &["value"],
@@ -438,7 +438,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pointer?",
         func: prim_is_pointer,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a raw C pointer.",
         params: &["value"],
@@ -449,7 +449,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "array?",
         func: prim_is_array,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is an array (immutable or mutable indexed sequence).",
         params: &["value"],
@@ -460,7 +460,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "struct?",
         func: prim_is_struct,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a struct (immutable or mutable key-value map).",
         params: &["value"],
@@ -471,7 +471,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "bytes?",
         func: prim_is_bytes,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is bytes (immutable or mutable binary data).",
         params: &["value"],
@@ -482,7 +482,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "function?",
         func: prim_is_function,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a function (closure or primitive).",
         params: &["value"],
@@ -493,7 +493,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "primitive?",
         func: prim_is_primitive,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is a built-in primitive function.",
         params: &["value"],
@@ -504,7 +504,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mutable?",
         func: prim_is_mutable,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is mutable (can be modified in-place).",
         params: &["value"],
@@ -515,7 +515,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "zero?",
         func: prim_is_zero,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Check if value is numerically zero.",
         params: &["value"],

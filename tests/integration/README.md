@@ -57,7 +57,7 @@ Tests are organized by feature:
 - **Control flow**: If, while, match, break
 - **Binding forms**: Let, def, var, destructuring
 - **Macros**: Expansion, hygiene, quasiquote
-- **Effects**: Inert, yields, polymorphic
+- **Signals**: Silent, yields, polymorphic
 - **Error handling**: Error propagation, recovery
 
 ## See Also

@@ -5,7 +5,9 @@
 
 use crate::compiler::bytecode::Instruction;
 use crate::error::LocationMap;
-use crate::value::{SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD};
+use crate::value::{
+    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD,
+};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -502,7 +504,7 @@ impl VM {
 
         let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
 
-        let frame = SuspendedFrame {
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
             bytecode: bytecode.clone(),
             constants: constants.clone(),
             env: closure_env.clone(),
@@ -510,7 +512,7 @@ impl VM {
             stack: saved_stack,
             active_allocator: crate::value::fiber_heap::save_active_allocator(),
             location_map: location_map.clone(),
-        };
+        });
 
         self.fiber.signal = Some((SIG_YIELD, yielded_value));
         self.fiber.suspended = Some(vec![frame]);

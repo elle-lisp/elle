@@ -329,6 +329,35 @@ fn prim_port_set_options(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::NIL)
 }
 
+/// (port/path port) → string or nil
+///
+/// Returns the path or address the port was opened on:
+/// - File port: the file path string (e.g. "/tmp/foo.txt")
+/// - TCP listener: the bound address string (e.g. "127.0.0.1:8080")
+/// - TCP stream: the peer address string (e.g. "127.0.0.1:54321")
+/// - Stdio ports (stdin/stdout/stderr): nil
+///
+/// Signals :type-error if argument is not a port.
+fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("port/path: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let port = match extract_port(&args[0], "port/path") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    match port.path() {
+        Some(p) => (SIG_OK, Value::string(p)),
+        None => (SIG_OK, Value::NIL),
+    }
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open",
@@ -429,6 +458,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(port/set-options p :timeout 5000)",
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "port/path",
+        func: prim_port_path,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the path or address the port was opened on, or nil for stdio ports.",
+        params: &["port"],
+        category: "port",
+        example: "(port/path (tcp/listen \"127.0.0.1\" 0))",
+        aliases: &[],
+    },
 ];
 
 #[cfg(test)]
@@ -487,5 +527,76 @@ mod tests {
         let port_val = make_port();
         let (bits, _) = prim_port_set_options(&[port_val, Value::keyword("timeout")]);
         assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_path_file_port() {
+        // Create a real file port and check its path
+        use std::fs::OpenOptions;
+        use std::os::unix::io::OwnedFd;
+        let path = "/tmp/elle-test-port-path";
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .unwrap();
+        let fd: OwnedFd = file.into();
+        let port = Port::new_file(
+            fd,
+            crate::port::Direction::Write,
+            crate::port::Encoding::Text,
+            path.to_string(),
+        );
+        let port_val = Value::external("port", port);
+        let (bits, result) = prim_port_path(&[port_val]);
+        assert_eq!(bits, SIG_OK);
+        result
+            .with_string(|s| assert_eq!(s, path))
+            .expect("expected string result");
+    }
+
+    #[test]
+    fn test_port_path_stdin_returns_nil() {
+        let port_val = Value::external("port", Port::stdin());
+        let (bits, result) = prim_port_path(&[port_val]);
+        assert_eq!(bits, SIG_OK);
+        assert!(result.is_nil());
+    }
+
+    #[test]
+    fn test_port_path_stdout_returns_nil() {
+        let port_val = Value::external("port", Port::stdout());
+        let (bits, result) = prim_port_path(&[port_val]);
+        assert_eq!(bits, SIG_OK);
+        assert!(result.is_nil());
+    }
+
+    #[test]
+    fn test_port_path_non_port_errors() {
+        let (bits, _) = prim_port_path(&[Value::int(42)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_path_wrong_arity_errors() {
+        let (bits, _) = prim_port_path(&[]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_path_tcp_listener() {
+        use std::net::TcpListener;
+        use std::os::unix::io::{FromRawFd, IntoRawFd, OwnedFd};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap().to_string();
+        let fd = unsafe { OwnedFd::from_raw_fd(listener.into_raw_fd()) };
+        let port = Port::new_tcp_listener(fd, addr.clone());
+        let port_val = Value::external("port", port);
+        let (bits, result) = prim_port_path(&[port_val]);
+        assert_eq!(bits, SIG_OK);
+        result
+            .with_string(|s| assert_eq!(s, &addr))
+            .expect("expected string result");
     }
 }

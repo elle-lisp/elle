@@ -165,7 +165,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/gensym",
         func: prim_gensym,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Range(0, 1),
         doc: "Generate a unique symbol with optional prefix",
         params: &["prefix"],
@@ -176,7 +176,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/datum->syntax",
         func: prim_datum_to_syntax,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(2),
         doc: "Create a syntax object with lexical context from another syntax object",
         params: &["context", "datum"],
@@ -187,7 +187,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "meta/syntax->datum",
         func: prim_syntax_to_datum,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Strip scope information from a syntax object, returning the plain value",
         params: &["stx"],

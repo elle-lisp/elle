@@ -360,7 +360,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/disasm",
         func: prim_disbit,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's bytecode into a list of instruction strings.",
         params: &["closure"],
@@ -371,7 +371,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/disasm-jit",
         func: prim_disjit,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Disassemble a closure's JIT-compiled Cranelift IR, or nil if not JIT'd.",
         params: &["closure"],
@@ -382,7 +382,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "fn/flow",
         func: prim_fn_flow,
-        signal: Signal::inert(),
+        signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Return the LIR control flow graph of a closure or fiber as structured data.",
         params: &["closure-or-fiber"],
@@ -393,7 +393,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/list-primitives",
         func: prim_list_primitives,
-        signal: Signal::inert(),
+        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Range(0, 1),
         doc: "List registered names as a sorted list of strings. Optional category filter.",
         params: &["category?"],
@@ -404,7 +404,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/primitive-meta",
         func: prim_primitive_meta,
-        signal: Signal::inert(),
+        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Get structured metadata for a primitive as a struct.",
         params: &["name"],
