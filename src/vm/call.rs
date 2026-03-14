@@ -602,6 +602,65 @@ impl VM {
         list
     }
 
+    /// Call a compiled closure with the given argument values.
+    ///
+    /// Used by macro expansion to invoke cached transformer closures
+    /// without going through the full `eval_syntax` pipeline.
+    ///
+    /// Returns the closure's return value on success. Returns `Err` on
+    /// arity mismatch, error signal, or halt.
+    ///
+    /// Callers must not pass closures that may yield (signal includes
+    /// `SIG_YIELD`). Macro transformer closures are always inert.
+    pub fn call_closure(
+        &mut self,
+        closure: &crate::value::Closure,
+        args: &[Value],
+    ) -> Result<Value, String> {
+        // Arity check — sets fiber.signal on mismatch.
+        if !self.check_arity(&closure.template.arity, args.len()) {
+            let (_, err) = self.fiber.signal.take().unwrap();
+            return Err(self.format_error_with_location(err));
+        }
+
+        // Build the closure environment (captures + param slots + local slots).
+        let new_env = match self.build_closure_env(closure, args) {
+            Some(env) => env,
+            None => {
+                let (_, err) = self.fiber.signal.take().unwrap();
+                return Err(self.format_error_with_location(err));
+            }
+        };
+
+        // Execute the closure bytecode, saving/restoring the caller's stack.
+        let result = self.execute_bytecode_saving_stack(
+            &closure.template.bytecode,
+            &closure.template.constants,
+            &new_env,
+            &closure.template.location_map,
+        );
+
+        let bits = result.bits;
+        if bits.is_ok() || bits == crate::value::SIG_HALT {
+            let (_, value) = self.fiber.signal.take().unwrap();
+            Ok(value)
+        } else if bits.contains(crate::value::SIG_ERROR) {
+            let (_, err) = self
+                .fiber
+                .signal
+                .take()
+                .unwrap_or_else(|| (crate::value::SIG_ERROR, Value::NIL));
+            Err(self.format_error_with_location(err))
+        } else {
+            // Unexpected suspending signal (yield from macro body — not supported).
+            self.fiber.signal.take();
+            Err(format!(
+                "Unexpected signal from macro transformer: 0x{:x}",
+                bits.0
+            ))
+        }
+    }
+
     /// Collect alternating key-value args into an immutable struct.
     /// Returns `None` if odd number of args or non-keyword keys (error set on fiber).
     /// If `valid_keys` is `Some`, returns error on unknown keys (strict `&named` mode).
@@ -675,5 +734,79 @@ impl VM {
             map.insert(table_key, args[i + 1]);
         }
         Some(Value::struct_from(map))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitives::register_primitives;
+    use crate::symbol::SymbolTable;
+    use crate::value::Value;
+
+    fn make_vm_with_primitives() -> (VM, SymbolTable) {
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        register_primitives(&mut vm, &mut symbols);
+        (vm, symbols)
+    }
+
+    /// Verify that call_closure with a trivial identity closure returns the argument.
+    #[test]
+    fn test_call_closure_identity() {
+        use crate::pipeline::eval_syntax;
+        use crate::syntax::Expander;
+
+        let (mut vm, mut symbols) = make_vm_with_primitives();
+        let mut expander = Expander::new();
+        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+        // Compile (fn (x) x) to a closure
+        let syntax = crate::reader::read_syntax("(fn (x) x)", "<test>").unwrap();
+        let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
+        let closure = closure_val.as_closure().expect("should be a closure");
+
+        let arg = Value::int(42);
+        let result = vm.call_closure(closure, &[arg]).unwrap();
+        assert_eq!(result, Value::int(42));
+    }
+
+    /// Verify that call_closure propagates errors from the closure body.
+    #[test]
+    fn test_call_closure_error_propagation() {
+        use crate::pipeline::eval_syntax;
+        use crate::syntax::Expander;
+
+        let (mut vm, mut symbols) = make_vm_with_primitives();
+        let mut expander = Expander::new();
+        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+        // Compile (fn () (error "boom")) — always errors
+        let syntax = crate::reader::read_syntax(r#"(fn () (error "boom"))"#, "<test>").unwrap();
+        let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
+        let closure = closure_val.as_closure().expect("should be a closure");
+
+        let result = vm.call_closure(closure, &[]);
+        assert!(result.is_err(), "should propagate error from closure body");
+    }
+
+    /// Counterfactual: verify the identity test assertion fires if we break it.
+    #[test]
+    #[ignore = "counterfactual — run manually to verify assertion strength"]
+    fn test_call_closure_counterfactual() {
+        use crate::pipeline::eval_syntax;
+        use crate::syntax::Expander;
+
+        let (mut vm, mut symbols) = make_vm_with_primitives();
+        let mut expander = Expander::new();
+        expander.load_prelude(&mut symbols, &mut vm).unwrap();
+
+        let syntax = crate::reader::read_syntax("(fn (x) x)", "<test>").unwrap();
+        let closure_val = eval_syntax(syntax, &mut expander, &mut symbols, &mut vm).unwrap();
+        let closure = closure_val.as_closure().expect("should be a closure");
+
+        let result = vm.call_closure(closure, &[Value::int(42)]).unwrap();
+        // This should fail — intentionally wrong:
+        assert_eq!(result, Value::int(99), "counterfactual: should fail here");
     }
 }
