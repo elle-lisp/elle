@@ -168,8 +168,8 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `StructRest` | struct → struct | Collect all keys not in exclude set into a new immutable struct; variable-length operands: u16 count + count x u16 const_idx |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
-| `RegionExit` | (none) | Pop scope mark and release scoped objects (no-op for root fiber) |
+| `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
+| `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
 
 ## Invariants
 

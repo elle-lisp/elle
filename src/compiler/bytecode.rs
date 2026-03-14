@@ -218,12 +218,12 @@ pub enum Instruction {
 
     /// Enter an allocation region (scope boundary for allocator).
     /// No operands. Pushes a scope mark on the current FiberHeap.
-    /// No-op for the root fiber (no FiberHeap installed).
+    /// Effective for all fibers including root (after issue-525).
     RegionEnter,
 
     /// Exit an allocation region (scope boundary for allocator).
     /// No operands. Pops scope mark and releases scoped objects.
-    /// No-op for the root fiber (no FiberHeap installed).
+    /// Effective for all fibers including root (after issue-525).
     RegionExit,
 
     /// Push a parameter frame onto the fiber's param_frames stack.

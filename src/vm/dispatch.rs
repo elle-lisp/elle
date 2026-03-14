@@ -50,31 +50,32 @@ impl VM {
             }
 
             // Check for allocation limit violation from previous instruction.
-            // Temporarily remove the limit so the error struct can be allocated.
-            if let Some((count, limit)) = crate::value::heap::take_alloc_error() {
+            // The error flag is stored on the current FiberHeap (always installed
+            // after chunk 1). Temporarily remove the limit so the error struct
+            // can be allocated.
+            {
                 let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-                let saved_limit = if heap_ptr.is_null() {
-                    crate::value::heap::heap_arena_set_object_limit(None)
+                let alloc_err = if !heap_ptr.is_null() {
+                    unsafe { (*heap_ptr).take_alloc_error() }
                 } else {
-                    unsafe { (*heap_ptr).set_object_limit(None) }
+                    None
                 };
-                let err = crate::value::error_val(
-                    "allocation-error",
-                    format!(
-                        "heap object limit exceeded ({} objects, limit {})",
-                        count, limit
-                    ),
-                );
-                if heap_ptr.is_null() {
-                    crate::value::heap::heap_arena_set_object_limit(saved_limit);
-                } else {
+                if let Some((count, limit)) = alloc_err {
+                    let saved_limit = unsafe { (*heap_ptr).set_object_limit(None) };
+                    let err = crate::value::error_val(
+                        "allocation-error",
+                        format!(
+                            "heap object limit exceeded ({} objects, limit {})",
+                            count, limit
+                        ),
+                    );
                     unsafe { (*heap_ptr).set_object_limit(saved_limit) };
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    if self.error_loc.is_none() {
+                        self.error_loc = location_map.get(&instr_ip).cloned();
+                    }
+                    return (SIG_ERROR, ip);
                 }
-                self.fiber.signal = Some((SIG_ERROR, err));
-                if self.error_loc.is_none() {
-                    self.error_loc = location_map.get(&instr_ip).cloned();
-                }
-                return (SIG_ERROR, ip);
             }
 
             if ip >= bc.len() {
@@ -393,7 +394,7 @@ impl VM {
                 }
 
                 // Allocation region markers: push/pop scope marks on FiberHeap.
-                // No-op for root fiber (no FiberHeap installed).
+                // Effective for both root and child fibers.
                 Instruction::RegionEnter => {
                     crate::value::fiber_heap::region_enter();
                 }
