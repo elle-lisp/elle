@@ -587,3 +587,56 @@
     (fiber/resume f)
     (fiber/propagate f)))
   "fiber propagate rejects dead fiber")
+
+# ============================================================================
+# Issue #525: escape analysis — fiber stored into outer @array via push
+# ============================================================================
+#
+# Regression test for a use-after-free caused by the escape analysis marking
+# a let scope as safe to region-allocate even though a heap-allocated value
+# (a fiber) created inside the scope escapes via push into an outer @array.
+#
+# Before the fix, walk_for_outward_set only detected escape through
+# HirKind::Assign. Calls like (push outer-array scope-local-fiber) were
+# not recognized as outward escapes, so RegionExit freed the fiber while
+# it was still live in the outer array. Subsequent fiber/bits (or any
+# fiber primitive) on the freed slot produced "expected fiber, got array"
+# or a segfault.
+
+# Basic pattern: fiber created in let, stored into outer @array, accessed after scope
+(begin
+  (var fibers @[])
+  (let ([f (fiber/new (fn [] (emit 2 :ping) :done) 2)])
+    (push fibers f))
+  # The let scope has exited. If the escape analysis incorrectly freed f,
+  # fiber/bits will crash or return the wrong type.
+  (assert-true (fiber? (get fibers 0))
+    "issue 525: fiber survives let scope exit after push into outer array")
+  (assert-eq (fiber/resume (get fibers 0)) :ping
+    "issue 525: fiber stored in outer array is still resumable"))
+
+# Multiple fibers pushed from different let scopes into the same outer array
+(begin
+  (var store @[])
+  (let ([a (fiber/new (fn [] 1) 0)])
+    (push store a))
+  (let ([b (fiber/new (fn [] 2) 0)])
+    (push store b))
+  (assert-eq (fiber/resume (get store 0)) 1
+    "issue 525: first fiber from separate let scope is valid")
+  (assert-eq (fiber/resume (get store 1)) 2
+    "issue 525: second fiber from separate let scope is valid"))
+
+# Fiber created in nested let, pushed to outer array, resumed via bits check
+(begin
+  (var bucket @[])
+  (let ([pid 0]
+        [f (fiber/new (fn [] (emit 2 :hello) :world) 3)])
+    (push bucket f)
+    (assign pid (length bucket)))
+  (let ([f (get bucket 0)]
+        [result (fiber/resume (get bucket 0))])
+    (assert-eq result :hello
+      "issue 525: nested let fiber push — first resume value correct")
+    (assert-eq (fiber/bits f) 2
+      "issue 525: nested let fiber push — fiber/bits returns yield bit")))

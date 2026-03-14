@@ -173,8 +173,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `TableGetOrNil` | table → value | Get key from table/struct, or nil if missing/wrong type (u16 const_idx operand) |
 | `PushParamFrame` | (none) | Push a new parameter binding frame (operand: count u8) |
 | `PopParamFrame` | (none) | Pop the current parameter binding frame |
-| `RegionEnter` | (none) | Push scope mark on FiberHeap (no-op for root fiber) |
-| `RegionExit` | (none) | Pop scope mark and release scoped objects (no-op for root fiber) |
+| `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
+| `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
 
 ## Yield and Call Site Metadata
 
@@ -200,8 +200,8 @@ This matches the interpreter's stack state when yield propagates through a call.
 
 `RegionEnter` and `RegionExit` are no-register, no-stack-effect instructions
 that push/pop scope marks on the current FiberHeap. In the VM, they call
-`region_enter()`/`region_exit()` which are no-ops for the root fiber
-(no FiberHeap installed).
+`region_enter()`/`region_exit()`, which are effective for all fibers including
+root (after issue-525, the root fiber always has a FiberHeap installed).
 
 The lowerer emits these instructions when escape analysis (in `lower/escape.rs`)
 determines the scope's allocations are safe to release at scope exit.

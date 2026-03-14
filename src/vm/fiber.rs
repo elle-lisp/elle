@@ -69,7 +69,7 @@ impl VM {
         std::mem::swap(&mut self.fiber, &mut child_fiber);
 
         // 3a. Install child's fiber heap as the active allocation target.
-        //     Save whatever was active (parent's heap or null for root fiber).
+        //     Save whatever was active (parent's heap, always non-null after issue-525).
         let saved_heap = crate::value::fiber_heap::save_current_heap();
         unsafe {
             crate::value::fiber_heap::install_fiber_heap(
@@ -81,19 +81,18 @@ impl VM {
 
         // 3b. Provide shared allocator to child (for yielding or I/O fibers).
         //     After the swap: self.fiber is child, child_fiber is parent.
-        //     Three cases:
+        //     Two cases:
         //     (a) Parent already has shared_alloc → propagate down the chain.
-        //     (b) Root fiber parent (saved_heap is null) → child creates its own.
-        //     (c) Non-root parent, no existing shared_alloc → create on parent's heap.
+        //     (c) Parent has no shared_alloc → create on parent's heap.
+        //         After issue-525, saved_heap is never null (root always has FiberHeap),
+        //         so root→child transitions use this path too.
         if self.fiber.closure.signal().may_yield() || self.fiber.closure.signal().may_io() {
             let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
                 // Case (a): parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
-            } else if saved_heap.is_null() {
-                // Case (b): root→child — child creates and owns its own
-                self.fiber.heap.create_shared_allocator()
             } else {
-                // Case (c): non-root parent, first in chain — create on parent's heap
+                // Case (c): create shared allocator on parent's heap.
+                // After issue-525, this handles root→child too (root always has FiberHeap).
                 child_fiber.heap.create_shared_allocator()
             };
             self.fiber.heap.set_shared_alloc(shared_ptr);

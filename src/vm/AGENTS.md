@@ -224,19 +224,20 @@ Key methods:
 - `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
   manages per-fiber heap routing: saves the current thread-local heap pointer,
   installs the child fiber's `FiberHeap`, executes, then restores the saved
-  pointer on swap-back. Root fibers have no heap installed (allocate to the
-  global `HEAP_ARENA`); only child fibers get per-fiber heap routing.
+  pointer on swap-back. All fibers (including root) have a FiberHeap installed
+  after issue-525.
   For yielding fibers (signal includes `SIG_YIELD`), also provisions a shared allocator
-  via a three-way branch (step 3b): (a) parent has shared_alloc → propagate
-  down, (b) root parent → child creates its own, (c) non-root parent →
-  create on parent's heap. Cleared on swap-back (step 7a).
+  via a two-way branch (step 3b): (a) parent has shared_alloc → propagate
+  down, (c) parent has no shared_alloc → create on parent's heap (handles
+  root→child too). Cleared on swap-back (step 7a).
 
 ## Allocation region instructions
 
 `RegionEnter` and `RegionExit` push/pop scope marks on the current FiberHeap
-via `region_enter()`/`region_exit()`. No-op for the root fiber (no FiberHeap
-installed). The lowerer gates emission on escape analysis — currently maximally
-conservative, so no region instructions are emitted in normal code.
+via `region_enter()`/`region_exit()`. Effective for all fibers including root
+(after issue-525, the root fiber always has a FiberHeap installed). The lowerer
+gates emission on escape analysis — currently maximally conservative, so no
+region instructions are emitted in normal code.
 
 ## Active allocator pointer
 
@@ -258,17 +259,16 @@ value via `save_active_allocator()`.
 **Fiber swap:** `with_child_fiber` handles heap swapping. Each fiber's `active_allocator`
 lives on its own `FiberHeap`, so fiber transitions naturally switch allocator context.
 
-**Root fiber:** Has no FiberHeap installed. `save_active_allocator()` returns null,
-`restore_active_allocator()` is a no-op.
+**Root fiber:** Has a FiberHeap installed (the persistent `ROOT_HEAP` thread-local,
+set up by `VM::new()`). `save_active_allocator()` returns the root heap's allocator.
 
 ## Fiber heap routing
 
 Child fibers each own a `Box<FiberHeap>` (on the `Fiber` struct). When the
 VM swaps to a child fiber via `with_child_fiber`, it installs the child's
 heap as the thread-local allocation target. All `Value::cons()`, `Value::closure()`,
-etc. calls during child execution route to the child's `FiberHeap` instead of
-the global `HEAP_ARENA`. On swap-back, the parent's heap (or null for root)
-is restored.
+etc. calls during child execution route to the child's `FiberHeap`. On swap-back,
+the parent's heap (always non-null after issue-525) is restored.
 
 `FiberHeap` uses bumpalo for bump allocation. Destructor tracking ensures
 `HeapObject` variants with inner heap allocations (`Vec`, `Rc`, `BTreeMap`,
@@ -277,13 +277,12 @@ The bump itself only fully resets on `clear()` (fiber death); partial
 `release()` runs destructors but does not reclaim bump memory (bumpalo has
 no partial reset).
 
-The root fiber does NOT install a heap. This is intentional: `execute_bytecode`
-returns `Value`s that outlive the VM. If the root fiber's allocations went to
-a `FiberHeap` owned by the VM, those Values would dangle after `VM::drop()`.
-Root fiber allocations go to `HEAP_ARENA` (thread-local, outlives any VM).
+The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
+created by `ensure_root_heap()`). The heap outlives any individual VM, so Values
+returned by `execute_bytecode` remain valid after VM drop.
 
-`reset_fiber()` in `core.rs` extracts, clears, and reuses the heap `Box` to
-maintain pointer stability (the thread-local stores a raw pointer to the heap).
+`reset_fiber()` in `core.rs` does not clear the root heap — root fiber objects
+accumulate across resets, so Values returned across multiple invocations remain valid.
 
 ## Shared allocator provisioning
 
@@ -292,14 +291,16 @@ a `SharedAllocator` for zero-copy value exchange. The child's `FiberHeap`
 receives a raw `*mut SharedAllocator` pointer — all allocations during child
 execution route to this shared allocator instead of the child's private bump.
 
-**Three-way branch** (after swap, `self.fiber` = child, `child_fiber` = parent):
+**Two-way branch** (after swap, `self.fiber` = child, `child_fiber` = parent):
 
 1. **Parent has shared_alloc** (case a): Parent already received a shared_alloc
    from its own parent (A→B→C chain). Propagate the same pointer down.
-2. **Root parent** (case b, `saved_heap.is_null()`): Root fiber has no FiberHeap.
-   Child creates the shared allocator on its own FiberHeap's `owned_shared`.
-3. **Non-root parent, no shared_alloc** (case c): Create a new shared allocator
-   on the parent's FiberHeap's `owned_shared`.
+2. **Parent has no shared_alloc** (case c): Create a new shared allocator on the
+   parent's FiberHeap's `owned_shared`. After issue-525, this handles root→child
+   too — root always has a FiberHeap installed.
+
+Note: case (b) `saved_heap.is_null()` no longer exists after issue-525. The root
+fiber always has a FiberHeap installed. Root→child transitions use case (c).
 
 **Signal gate (M1)**: Fibers whose closure has signal bits `SIG_YIELD` or `SIG_IO`
 (checked via `may_yield() || may_io()`) get shared allocators. I/O fibers yield

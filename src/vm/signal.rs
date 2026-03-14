@@ -367,38 +367,42 @@ impl VM {
                 }
             }
             "arena/stats" => {
-                use crate::value::heap::{
-                    heap_arena_capacity, heap_arena_len, heap_arena_object_limit, heap_arena_peak,
-                    TableKey,
-                };
+                use crate::value::heap::TableKey;
                 use std::collections::BTreeMap;
+                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
+                let (count, capacity, limit_opt, bytes, peak) = unsafe {
+                    let h = &*heap_ptr;
+                    (
+                        h.len(),
+                        h.capacity(),
+                        h.object_limit(),
+                        h.allocated_bytes(),
+                        h.peak_alloc_count(),
+                    )
+                };
                 let mut fields = BTreeMap::new();
                 fields.insert(
                     TableKey::Keyword("count".to_string()),
-                    Value::int(heap_arena_len() as i64),
+                    Value::int(count as i64),
                 );
                 fields.insert(
                     TableKey::Keyword("capacity".to_string()),
-                    Value::int(heap_arena_capacity() as i64),
+                    Value::int(capacity as i64),
                 );
-                let limit_val = match heap_arena_object_limit() {
+                let limit_val = match limit_opt {
                     Some(n) => Value::int(n as i64),
                     None => Value::NIL,
                 };
                 fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
-                // Bytes: estimate from object count × 128 bytes per object
                 fields.insert(
                     TableKey::Keyword("bytes".to_string()),
-                    Value::int((heap_arena_len() * 128) as i64),
+                    Value::int(bytes as i64),
                 );
-                // Peak object count (high-water mark)
-                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-                let peak = if heap_ptr.is_null() {
-                    heap_arena_peak() as i64
-                } else {
-                    unsafe { (*heap_ptr).peak_alloc_count() as i64 }
-                };
-                fields.insert(TableKey::Keyword("peak".to_string()), Value::int(peak));
+                fields.insert(
+                    TableKey::Keyword("peak".to_string()),
+                    Value::int(peak as i64),
+                );
                 (SIG_OK, Value::struct_from(fields))
             }
             "arena/scope-stats" => {
@@ -509,11 +513,8 @@ impl VM {
         // Snapshot count before
         let before = {
             let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-            if heap_ptr.is_null() {
-                crate::value::heap::heap_arena_len()
-            } else {
-                unsafe { (*heap_ptr).len() }
-            }
+            debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
+            unsafe { (*heap_ptr).len() }
         };
 
         // Build a proper env (captures + local slots) for the thunk.
@@ -547,11 +548,7 @@ impl VM {
         // Snapshot count after
         let after = {
             let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-            if heap_ptr.is_null() {
-                crate::value::heap::heap_arena_len()
-            } else {
-                unsafe { (*heap_ptr).len() }
-            }
+            unsafe { (*heap_ptr).len() }
         };
 
         let net = (after as i64) - (before as i64);

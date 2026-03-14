@@ -59,7 +59,7 @@
 use std::rc::Rc;
 
 use crate::value::allocator::AllocatorBox;
-use crate::value::arena::{set_alloc_error, ArenaMark};
+use crate::value::arena::ArenaMark;
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::Value;
 
@@ -133,6 +133,12 @@ pub struct FiberHeap {
     custom_alloc_stack: Vec<CustomAllocState>,
     /// Maximum number of objects this fiber may allocate. `None` = unlimited.
     object_limit: Option<usize>,
+    /// Allocation limit violation flag. Set by `alloc()` when `object_limit`
+    /// is exceeded; read and cleared by the dispatch loop.
+    ///
+    /// Replaces the global `ALLOC_ERROR` thread-local — making it per-heap
+    /// prevents cross-fiber confusion and eliminates a thread-local.
+    alloc_error: Option<(usize, usize)>,
 }
 
 impl FiberHeap {
@@ -151,6 +157,7 @@ impl FiberHeap {
             scope_dtors_run: 0,
             custom_alloc_stack: Vec::new(),
             object_limit: None,
+            alloc_error: None,
         }
     }
 
@@ -219,7 +226,7 @@ impl FiberHeap {
         // Check object limit before allocating
         if let Some(limit) = self.object_limit {
             if self.alloc_count >= limit {
-                set_alloc_error(self.alloc_count, limit);
+                self.alloc_error = Some((self.alloc_count, limit));
                 return Value::NIL;
             }
         }
@@ -352,6 +359,14 @@ impl FiberHeap {
         let prev = self.object_limit;
         self.object_limit = limit;
         prev
+    }
+
+    /// Take the allocation error flag, clearing it.
+    ///
+    /// Returns `Some((count, limit))` if an allocation limit was exceeded
+    /// since the last call, `None` otherwise. Used by the dispatch loop.
+    pub fn take_alloc_error(&mut self) -> Option<(usize, usize)> {
+        self.alloc_error.take()
     }
 
     /// Bytes consumed by all bump allocators (root + scope bumps).
@@ -497,6 +512,7 @@ impl FiberHeap {
         }
 
         self.scope_marks.clear();
+        self.alloc_error = None;
         self.alloc_count = 0;
         self.peak_alloc_count = 0;
         self.scope_enters = 0;
