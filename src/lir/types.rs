@@ -312,7 +312,7 @@ pub enum LirInstr {
     /// Used for &opt/(required) parameter destructuring.
     CdrOrNil { dst: Reg, src: Reg },
     /// Array ref with silent nil: returns nil if out of bounds or not an array.
-    /// Used for &opt/\[required\] parameter destructuring.
+    /// Used for `&opt`/\[required\] parameter destructuring.
     ArrayMutRefOrNil { dst: Reg, src: Reg, index: u16 },
 
     // === Coroutines ===

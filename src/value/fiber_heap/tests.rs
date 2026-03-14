@@ -470,6 +470,111 @@ fn test_clear_clears_scope_bumps() {
     assert_eq!(heap.allocated_bytes(), 0);
 }
 
+// ── ROOT_HEAP tests (Chunk 1) ─────────────────────────────────────
+
+#[test]
+fn test_ensure_root_heap_idempotent() {
+    // ensure_root_heap() must return the same pointer on every call.
+    let p1 = ensure_root_heap();
+    let p2 = ensure_root_heap();
+    let p3 = ensure_root_heap();
+    assert!(!p1.is_null());
+    assert_eq!(p1, p2);
+    assert_eq!(p2, p3);
+}
+
+#[test]
+fn test_root_heap_active_allocator_initialized() {
+    // After ensure_root_heap(), active_allocator must be non-null.
+    let ptr = ensure_root_heap();
+    let heap = unsafe { &*ptr };
+    assert!(!heap.active_allocator().is_null());
+}
+
+#[test]
+fn test_vm_new_installs_root_heap() {
+    use crate::vm::core::VM;
+    let _vm = VM::new();
+    // After VM::new(), the current heap pointer must be non-null.
+    assert!(is_fiber_heap_installed());
+    // Clean up: uninstall so we don't interfere with subsequent tests.
+    // (ROOT_HEAP thread-local persists, but CURRENT_FIBER_HEAP can be
+    //  uninstalled for test isolation.)
+    uninstall_fiber_heap();
+}
+
+// ── ALLOC_ERROR / FiberHeap.alloc_error tests (Chunk 2) ──────────────────────
+
+#[test]
+fn test_take_alloc_error_initially_none() {
+    let mut heap = FiberHeap::new();
+    heap.init_active_allocator();
+    assert!(heap.take_alloc_error().is_none());
+}
+
+#[test]
+fn test_alloc_error_set_on_limit_exceeded() {
+    let mut heap = FiberHeap::new();
+    heap.init_active_allocator();
+    heap.set_object_limit(Some(2));
+
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    // Third allocation should trigger error
+    let v = heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+
+    assert_eq!(v, Value::NIL); // returned NIL on error
+    let err = heap.take_alloc_error();
+    assert!(err.is_some());
+    let (count, limit) = err.unwrap();
+    assert_eq!(count, 2);
+    assert_eq!(limit, 2);
+}
+
+#[test]
+fn test_take_alloc_error_clears_flag() {
+    let mut heap = FiberHeap::new();
+    heap.init_active_allocator();
+    heap.set_object_limit(Some(0));
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+
+    assert!(heap.take_alloc_error().is_some());
+    // Second take returns None (flag cleared)
+    assert!(heap.take_alloc_error().is_none());
+}
+
+#[test]
+fn test_alloc_error_cleared_by_clear() {
+    let mut heap = FiberHeap::new();
+    heap.init_active_allocator();
+    heap.set_object_limit(Some(0));
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    assert!(heap.take_alloc_error().is_some()); // consume it first
+                                                // Set limit, trigger error again, then clear
+    heap.set_object_limit(Some(0));
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    heap.clear();
+    assert!(heap.take_alloc_error().is_none());
+}
+
+// ── Chunk 3: lazy root heap init via alloc() ──────────────────────
+
+#[test]
+fn test_alloc_without_installed_heap_lazy_inits() {
+    // alloc() with no heap installed triggers lazy root heap installation.
+    uninstall_fiber_heap();
+    // alloc() should not panic even with no heap installed.
+    let v = crate::value::arena::alloc(HeapObject::LString {
+        s: "lazy-test".into(),
+        traits: Value::NIL,
+    });
+    assert!(v.is_heap());
+    // Root heap is now installed.
+    assert!(is_fiber_heap_installed());
+    // Clean up
+    uninstall_fiber_heap();
+}
+
 // ── Shared allocator ownership tests ──────────────────────────────
 
 #[test]

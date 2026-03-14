@@ -355,3 +355,85 @@
 (assert-eq (length results) 50 "long lived coroutine: 50 yields")
 (assert-eq (first (get results 0)) 0 "long lived coroutine: first yield")
 (assert-eq (first (get results 49)) 49 "long lived coroutine: last yield")
+
+# ── Root fiber scope management (new in issue-525) ──────────────────
+
+# test_root_fiber_scope_stats_nonnegative
+# After issue-525, RegionEnter/RegionExit are effective on the root fiber.
+# scope-stats :enters should be >= 0 (may be > 0 due to stdlib scopes).
+(let* ((stats (arena/scope-stats))
+       (enters (get stats :enters))
+       (dtors (get stats :dtors-run)))
+  (assert-true (>= enters 0) "root fiber scope-stats :enters is non-negative")
+  (assert-true (>= dtors 0) "root fiber scope-stats :dtors-run is non-negative"))
+
+# test_root_fiber_count_nonzero
+# After a full VM startup (stdlib loaded), arena/count on root must be > 0.
+(assert-true (> (arena/count) 0) "root fiber arena/count is positive after stdlib load")
+
+# ── arena/checkpoint (opaque mark) ────────────────────────────────
+
+# test_checkpoint_reset_roundtrip
+# After reset, any allocations after the checkpoint are gone.
+# Note: (arena/checkpoint) itself allocates an External, so snapshot
+# count BEFORE taking the checkpoint, then verify reset returns to that count.
+(let* ((before (arena/count))
+       (m (arena/checkpoint))
+       (_ (list 1 2 3))
+       (after-alloc (arena/count))
+       (_ (arena/reset m))
+       (after-reset (arena/count)))
+  (assert-eq (> after-alloc before) true "count increased after alloc")
+  (assert-eq after-reset before "count restored after reset"))
+
+# test_checkpoint_is_opaque
+# arena/reset should reject integers (old checkpoint format).
+(assert-err-kind (fn [] (arena/reset 42)) :type-error
+  "arena/reset rejects integer (expected opaque checkpoint)")
+
+# test_checkpoint_reset_destructors_run
+# Objects allocated after checkpoint are logically freed (destructors run).
+# We verify via arena/count decreasing after reset.
+# Snapshot count BEFORE taking the checkpoint (checkpoint itself allocates an External).
+(let* ((before (arena/count))
+       (m (arena/checkpoint))
+       (_ (string "hello"))
+       (_ (string "world"))
+       (after-alloc (arena/count))
+       (_ (arena/reset m))
+       (after-reset (arena/count)))
+  (assert-eq (> after-alloc before) true "strings allocated")
+  (assert-eq after-reset before "count restored: destructors ran"))
+
+# ── Scope parameter removal regression (issue-525 follow-up) ────────
+# Use apply to bypass compile-time arity checking; the runtime arity-error
+# is what we're asserting against.
+
+# test_arena_count_rejects_scope_arg
+# After removing the scope parameter, passing :global must be an arity-error.
+(assert-err-kind (fn [] (apply arena/count [:global])) :arity-error
+  "arena/count rejects :global after arity reduction")
+(assert-err-kind (fn [] (apply arena/count [:fiber])) :arity-error
+  "arena/count rejects :fiber after arity reduction")
+
+# test_arena_bytes_rejects_scope_arg
+(assert-err-kind (fn [] (apply arena/bytes [:global])) :arity-error
+  "arena/bytes rejects :global after arity reduction")
+(assert-err-kind (fn [] (apply arena/bytes [:fiber])) :arity-error
+  "arena/bytes rejects :fiber after arity reduction")
+
+# test_arena_peak_rejects_scope_arg
+(assert-err-kind (fn [] (apply arena/peak [:global])) :arity-error
+  "arena/peak rejects :global after arity reduction")
+
+# test_arena_reset_peak_rejects_scope_arg
+(assert-err-kind (fn [] (apply arena/reset-peak [:global])) :arity-error
+  "arena/reset-peak rejects :global after arity reduction")
+
+# test_arena_object_limit_rejects_scope_arg
+(assert-err-kind (fn [] (apply arena/object-limit [:global])) :arity-error
+  "arena/object-limit rejects :global after arity reduction")
+
+# test_arena_set_object_limit_rejects_scope_arg
+(assert-err-kind (fn [] (apply arena/set-object-limit [100 :global])) :arity-error
+  "arena/set-object-limit rejects second :global arg after arity reduction")

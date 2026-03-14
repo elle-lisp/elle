@@ -94,6 +94,9 @@ fn root_closure() -> Rc<Closure> {
 
 impl VM {
     pub fn new() -> Self {
+        // Install the root fiber heap before any allocation can happen.
+        crate::value::fiber_heap::install_root_heap();
+
         let mut fiber = Fiber::new(root_closure(), SIG_OK);
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;
@@ -123,15 +126,13 @@ impl VM {
     /// Resets: fiber, call state, location map,
     /// loaded modules, closure call counts.
     pub fn reset_fiber(&mut self) {
-        // Extract and clear the heap Box so the thread-local pointer stays valid.
-        let mut heap = std::mem::replace(
-            &mut self.fiber.heap,
-            Box::new(crate::value::fiber_heap::FiberHeap::new()),
-        );
-        heap.clear();
-
+        // The root heap is persistent (lives in ROOT_HEAP thread-local).
+        // Do not clear it — root fiber objects accumulate across resets,
+        // so Values returned by execute_bytecode remain valid.
+        // self.fiber.heap is an unused Box<FiberHeap>; it is dropped and
+        // recreated with the new Fiber, costing one allocation. This is
+        // acceptable; making fiber.heap Option<> would add branches everywhere.
         self.fiber = Fiber::new(root_closure(), SIG_OK);
-        self.fiber.heap = heap;
         self.fiber.status = crate::value::FiberStatus::Alive;
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
