@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use elle::pipeline::{compile, eval};
+use elle::pipeline::{compile, eval, eval_all};
 use elle::primitives::register_primitives;
 use elle::{read_str, SymbolTable, VM};
 
@@ -315,6 +315,76 @@ fn bench_memory_operations(c: &mut Criterion) {
     group.finish();
 }
 
+// Fresh VM + SymbolTable with primitives registered, no prelude loaded.
+// Used by bench_macro_expansion so prelude loading is included in each iteration.
+fn setup_vm() -> (VM, SymbolTable) {
+    let mut vm = VM::new();
+    let mut symbols = SymbolTable::new();
+    register_primitives(&mut vm, &mut symbols);
+    (vm, symbols)
+}
+
+// DEFENSE: Macro expansion throughput — measures the full pipeline cost
+// (including prelude loading) for macro-heavy Elle snippets.
+//
+// Each iteration uses a fresh VM so the transformer cache starts cold,
+// matching the cost a user pays per compilation unit. The caching benefit
+// (issue #562) shows up within a single iteration when the same macro is
+// invoked many times: the first call compiles the transformer closure;
+// subsequent calls reuse it via VM::call_closure.
+fn bench_macro_expansion(c: &mut Criterion) {
+    let mut group = c.benchmark_group("macro_expansion");
+
+    // 100 `when` invocations — prelude macro, used extensively.
+    // After the first expansion, the `when` transformer closure is cached;
+    // invocations 2–100 call it directly without recompiling.
+    group.bench_function("when_100", |b| {
+        let source = (0..100)
+            .map(|i| format!("(when true {})", i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        b.iter_batched(
+            setup_vm,
+            |(mut vm, mut symbols)| {
+                black_box(eval_all(&source, &mut symbols, &mut vm, "<bench>").unwrap())
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    // Thread-first macro — 9 chained applications.
+    // `->` is a recursive prelude macro; the transformer closure is compiled
+    // once and reused for each application in the chain.
+    group.bench_function("thread_first_9", |b| {
+        let source = "(-> 1 (+ 2) (+ 3) (+ 4) (+ 5) (+ 6) (+ 7) (+ 8) (+ 9) (+ 10))";
+        b.iter_batched(
+            setup_vm,
+            |(mut vm, mut symbols)| {
+                black_box(eval_all(source, &mut symbols, &mut vm, "<bench>").unwrap())
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    // `defn` — the most commonly used prelude macro.
+    // 50 function definitions, each expanding `defn` to `(def name (fn ...))`.
+    group.bench_function("defn_50", |b| {
+        let source = (0..50)
+            .map(|i| format!("(defn f{} (x) (+ x {}))", i, i))
+            .collect::<Vec<_>>()
+            .join("\n");
+        b.iter_batched(
+            setup_vm,
+            |(mut vm, mut symbols)| {
+                black_box(eval_all(&source, &mut symbols, &mut vm, "<bench>").unwrap())
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_parsing,
@@ -325,6 +395,7 @@ criterion_group!(
     bench_end_to_end,
     bench_scalability,
     bench_memory_operations,
+    bench_macro_expansion,
 );
 
 criterion_main!(benches);
