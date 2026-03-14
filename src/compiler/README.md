@@ -42,7 +42,7 @@ resolution, capture analysis, and source location tracking.
 
 The `Signal` type (in `src/signals/`) tracks static signals:
 
-- `Inert` - no signals emitted, can be optimized
+- `Silent` - no signals emitted, can be optimized
 - `Yields` - may yield (for coroutines)
 - `Polymorphic` - signal depends on arguments
 

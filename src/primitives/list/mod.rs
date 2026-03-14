@@ -498,7 +498,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "list",
         func: prim_list,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Create a list from arguments",
         params: &["elements"],

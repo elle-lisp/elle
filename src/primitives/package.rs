@@ -26,7 +26,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "elle/version",
         func: prim_package_version,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Get the current package version",
         params: &[],
@@ -37,7 +37,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "elle/info",
         func: prim_package_info,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Get package information (name, version, description)",
         params: &[],

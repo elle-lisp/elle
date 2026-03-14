@@ -384,4 +384,4 @@ See `docs/signals.md` for the signal system design.
 | `fiber/closure`, `fiber/stack`, `fiber/env` | Not started |
 | Dynamic bindings (`dyn`/`setdyn`) | `env` field exists, no primitives |
 | User-defined signal types (bits 16–31) | Infrastructure exists, no allocation API |
-| JIT signal-aware calling convention | JIT still restricted to inert functions |
+| JIT signal-aware calling convention | JIT still restricted to silent functions |

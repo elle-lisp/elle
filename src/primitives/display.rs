@@ -447,7 +447,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "display",
         func: prim_display,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Human-readable output without quotes on strings.",
         params: &["vals"],
@@ -458,7 +458,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "print",
         func: prim_print,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Human-readable output with trailing newline.",
         params: &["vals"],
@@ -469,7 +469,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "write",
         func: prim_write,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Write values in readable literal form. Strings are quoted.",
         params: &["vals"],
@@ -480,7 +480,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "newline",
         func: prim_newline,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Print a newline.",
         params: &[],
@@ -491,7 +491,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pp",
         func: prim_pp,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Pretty-print a value with indentation. Returns the value.",
         params: &["value"],
@@ -502,7 +502,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "describe",
         func: prim_describe,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Return a string describing a value's type and content.",
         params: &["value"],

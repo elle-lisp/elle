@@ -186,6 +186,19 @@ impl SignalBits {
     pub fn contains(self, other: SignalBits) -> bool {
         self.0 & other.0 != 0
     }
+    /// True iff this mask handles `other` for signal routing purposes.
+    ///
+    /// Uses overlap (any shared bit) for semantic bits, but requires full
+    /// containment of infrastructure bits (specifically SIG_IO). This
+    /// ensures that a coroutine with mask SIG_YIELD does not accidentally
+    /// swallow SIG_YIELD|SIG_IO signals that must reach the scheduler,
+    /// while still allowing user-defined compound signals (e.g. |:log :audit|)
+    /// to be caught by a partial mask (e.g. |:log|).
+    pub fn covers(self, other: SignalBits) -> bool {
+        use crate::signals::SIG_IO;
+        other.is_ok()
+            || (self.0 & other.0 != 0 && (!other.contains(SIG_IO) || self.contains(SIG_IO)))
+    }
     pub fn bits(self) -> u32 {
         self.0
     }
@@ -418,7 +431,7 @@ mod tests {
                 num_captures: 0,
                 num_params: 0,
                 constants: Rc::new(vec![]),
-                signal: Signal::inert(),
+                signal: Signal::silent(),
                 lbox_params_mask: 0,
                 lbox_locals_mask: 0,
                 symbol_names: Rc::new(HashMap::new()),
@@ -597,6 +610,29 @@ mod tests {
         // User-defined signals in upper 16 bits
         let user_sig = SignalBits::new(1 << 16);
         assert!(!user_sig.contains(mask));
+    }
+
+    #[test]
+    fn test_signal_bits_covers() {
+        // covers: exact match — mask handles exact signal
+        assert!(SIG_YIELD.covers(SIG_YIELD));
+        // covers: SIG_YIELD mask does NOT handle SIG_YIELD|SIG_IO (missing SIG_IO infrastructure bit)
+        assert!(!SIG_YIELD.covers(SIG_YIELD | SIG_IO));
+        // covers: mask with SIG_IO handles SIG_YIELD|SIG_IO (IO bit present, overlap on YIELD)
+        assert!((SIG_ERROR | SIG_IO).covers(SIG_YIELD | SIG_IO));
+        // covers: all-bits mask handles any compound signal
+        assert!(SignalBits::new(!0).covers(SIG_YIELD | SIG_IO));
+        // covers: SIG_OK (zero) is always handled by any mask
+        assert!(SIG_YIELD.covers(SIG_OK));
+        assert!(SIG_OK.covers(SIG_OK));
+        // covers: user-defined signals use overlap semantics (no SIG_IO involved)
+        // mask |:log| catches |:log :audit| because :log overlaps
+        let log_bit = SignalBits::new(1 << 16);
+        let audit_bit = SignalBits::new(1 << 17);
+        assert!(log_bit.covers(log_bit | audit_bit));
+        assert!(audit_bit.covers(log_bit | audit_bit));
+        // covers: mask does not catch a completely disjoint signal
+        assert!(!SIG_YIELD.covers(SIG_ERROR));
     }
 
     #[test]

@@ -90,8 +90,8 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 
 | Primitive | Signal | Purpose |
 |-----------|--------|---------|
-| `io-request?` | inert | Check if value is an I/O request |
-| `io-backend?` | inert | Check if value is an I/O backend |
+| `io-request?` | silent | Check if value is an I/O request |
+| `io-backend?` | silent | Check if value is an I/O backend |
 | `io/backend` | errors | Create an I/O backend (`:sync` or `:async`) |
 | `io/execute` | errors | Execute an I/O request on a backend (blocking) |
 | `io/submit` | errors | Submit async I/O request, return submission ID |

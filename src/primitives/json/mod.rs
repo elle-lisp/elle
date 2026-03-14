@@ -86,7 +86,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/parse",
         func: prim_json_parse,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Parse a JSON string into Elle values",
         params: &["json-string"],
@@ -97,7 +97,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/serialize",
         func: prim_json_serialize,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to compact JSON",
         params: &["value"],
@@ -108,7 +108,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "json/pretty",
         func: prim_json_serialize_pretty,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Serialize an Elle value to pretty-printed JSON with 2-space indentation",
         params: &["value"],
@@ -403,7 +403,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            signal: crate::signals::Signal::inert(),
+            signal: crate::signals::Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),

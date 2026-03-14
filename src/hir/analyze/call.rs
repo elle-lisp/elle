@@ -213,7 +213,7 @@ impl<'a> Analyzer<'a> {
     /// Resolve a polymorphic signal by examining the arguments at the specified indices.
     pub(crate) fn resolve_polymorphic_signal(&self, signal: &Signal, args: &[&Hir]) -> Signal {
         if signal.is_polymorphic() {
-            let mut resolved = Signal::inert();
+            let mut resolved = Signal::silent();
             for param_idx in signal.propagated_params() {
                 if param_idx < args.len() {
                     resolved = resolved.combine(self.resolve_arg_signal(args[param_idx]));
@@ -253,7 +253,7 @@ impl<'a> Analyzer<'a> {
     pub(crate) fn compute_inferred_signal(&self, body: &Hir, params: &[Binding]) -> Signal {
         // If body doesn't suspend, lambda doesn't suspend
         if !body.signal.may_suspend() {
-            return Signal::inert();
+            return Signal::silent();
         }
 
         // If there's a direct yield or non-parameter yield, it's Yields

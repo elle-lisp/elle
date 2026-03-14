@@ -825,7 +825,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 1;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load argument 0 into register 0
@@ -850,7 +850,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(2));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         // Load arguments into registers
@@ -981,7 +981,7 @@ mod tests {
         f.name = Some("f".to_string());
         f.num_regs = 8;
         f.num_captures = 0;
-        f.signal = Signal::inert();
+        f.signal = Signal::silent();
 
         // Block 0 (entry): load arg, check condition
         let mut b0 = BasicBlock::new(Label(0));
@@ -1064,7 +1064,7 @@ mod tests {
         g.name = Some("g".to_string());
         g.num_regs = 4;
         g.num_captures = 0;
-        g.signal = Signal::inert();
+        g.signal = Signal::silent();
 
         let mut gb0 = BasicBlock::new(Label(0));
         gb0.instructions.push(SpannedInstr::new(

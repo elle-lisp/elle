@@ -77,7 +77,7 @@ HIR (bindings are inline — no separate HashMap)
    lboxes. Immutable captured locals are captured by value directly.
 
 4. **Signals combine upward.** A `begin` has the combined signal of its
-   children. A `fn` body's signal is stored but the fn itself is Inert.
+   children. A `fn` body's signal is stored but the fn itself is Silent.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.

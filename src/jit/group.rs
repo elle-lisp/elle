@@ -183,7 +183,7 @@ mod tests {
         func.name = Some(name.to_string());
         func.num_regs = 4;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -221,7 +221,7 @@ mod tests {
         func.name = Some("leaf".to_string());
         func.num_regs = 1;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -350,7 +350,7 @@ mod tests {
         callee.name = Some("callee_with_closure".to_string());
         callee.num_regs = 3;
         callee.num_captures = 0;
-        callee.signal = Signal::inert();
+        callee.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -455,7 +455,7 @@ mod tests {
             num_captures: 0,
             num_params: 0,
             constants: Rc::new(vec![]),
-            signal: Signal::inert(),
+            signal: Signal::silent(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
@@ -487,7 +487,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(
@@ -587,7 +587,7 @@ mod tests {
         let mut func = LirFunction::new(Arity::Exact(1));
         func.num_regs = 3;
         func.num_captures = 0;
-        func.signal = Signal::inert();
+        func.signal = Signal::silent();
 
         let mut entry = BasicBlock::new(Label(0));
         entry.instructions.push(SpannedInstr::new(

@@ -27,7 +27,7 @@ Bytecode instruction definitions and debug formatting.
    bytecode. Add new instructions at the end.
 
 2. **Signal inference is conservative.** Unknown calls are `IO`. Only proven
-   inert code is `Inert`.
+   silent code is `Silent`.
 
 ## Key types
 

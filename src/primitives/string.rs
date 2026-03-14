@@ -743,7 +743,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "string/size-of",
         func: prim_string_size_of,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Return the UTF-8 byte length of a string.",
         params: &["s"],

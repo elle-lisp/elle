@@ -179,7 +179,7 @@ impl VM {
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
             None
-        } else if mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL) {
+        } else if mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL) {
             // Signal is caught by the mask — parent handles it, clear child chain.
             // SIG_TERMINAL signals are uncatchable regardless of mask.
             self.fiber.child = None;
@@ -262,7 +262,7 @@ impl VM {
         }
 
         let caught = result_bits.is_ok()
-            || (mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL));
+            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -538,8 +538,7 @@ impl VM {
 
         let mask = handle.with(|fiber| fiber.mask);
 
-        if result_bits.is_ok()
-            || (mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL))
+        if result_bits.is_ok() || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL))
         {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -585,7 +584,7 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         let caught = result_bits.is_ok()
-            || (mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL));
+            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -642,7 +641,7 @@ impl VM {
         }
 
         let caught = result_bits.is_ok()
-            || (mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL));
+            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
@@ -728,7 +727,7 @@ impl VM {
         let mask = handle.with(|fiber| fiber.mask);
 
         let caught = result_bits.is_ok()
-            || (mask.contains(result_bits) && !result_bits.contains(SIG_TERMINAL));
+            || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;

@@ -105,7 +105,7 @@ fn extract_exports(
             let signal = if let Some(closure) = value.as_closure() {
                 closure.template.signal
             } else if value.is_parameter() {
-                Signal::inert()
+                Signal::silent()
             } else {
                 panic!(
                     "stdlib export '{}' is neither closure nor parameter: {}",

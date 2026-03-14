@@ -2,7 +2,7 @@
 //
 // Verifies that the signal system satisfies algebraic laws:
 // - Signal combine is commutative, associative, and idempotent
-// - Signal::inert() is the identity element
+// - Signal::silent() is the identity element
 // - Propagates field is correctly ORed during combine
 // - Signal predicates (may_yield, may_error, may_suspend, etc.) work correctly
 // Converted from property tests to deterministic unit tests with concrete cases.
@@ -148,7 +148,7 @@ fn signal_combine_identity_none_right() {
         bits: SignalBits(0),
         propagates: 0,
     };
-    assert_eq!(e.combine(Signal::inert()), e);
+    assert_eq!(e.combine(Signal::silent()), e);
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn signal_combine_identity_none_left() {
         bits: SignalBits(0),
         propagates: 0,
     };
-    assert_eq!(Signal::inert().combine(e), e);
+    assert_eq!(Signal::silent().combine(e), e);
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn signal_combine_identity_1_right() {
         bits: SignalBits(1),
         propagates: 0,
     };
-    assert_eq!(e.combine(Signal::inert()), e);
+    assert_eq!(e.combine(Signal::silent()), e);
 }
 
 #[test]
@@ -175,7 +175,7 @@ fn signal_combine_identity_1_left() {
         bits: SignalBits(1),
         propagates: 0,
     };
-    assert_eq!(Signal::inert().combine(e), e);
+    assert_eq!(Signal::silent().combine(e), e);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn signal_combine_identity_7_right() {
         bits: SignalBits(7),
         propagates: 0,
     };
-    assert_eq!(e.combine(Signal::inert()), e);
+    assert_eq!(e.combine(Signal::silent()), e);
 }
 
 #[test]
@@ -193,7 +193,7 @@ fn signal_combine_identity_7_left() {
         bits: SignalBits(7),
         propagates: 0,
     };
-    assert_eq!(Signal::inert().combine(e), e);
+    assert_eq!(Signal::silent().combine(e), e);
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn signal_combine_identity_15_right() {
         bits: SignalBits(15),
         propagates: 0,
     };
-    assert_eq!(e.combine(Signal::inert()), e);
+    assert_eq!(e.combine(Signal::silent()), e);
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn signal_combine_identity_15_left() {
         bits: SignalBits(15),
         propagates: 0,
     };
-    assert_eq!(Signal::inert().combine(e), e);
+    assert_eq!(Signal::silent().combine(e), e);
 }
 
 // =========================================================================
@@ -408,7 +408,7 @@ fn polymorphic_errors_has_error_bit_7() {
 
 #[test]
 fn none_signal_is_not_yielding() {
-    let signal = Signal::inert();
+    let signal = Signal::silent();
     assert!(!signal.may_yield());
     assert!(!signal.may_ffi());
     assert!(!signal.may_suspend());

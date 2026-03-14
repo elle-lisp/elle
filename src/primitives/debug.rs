@@ -210,7 +210,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "debug/memory",
         func: prim_memory_usage,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Returns memory usage statistics as (rss-bytes virtual-bytes)",
         params: &[],

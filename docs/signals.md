@@ -28,7 +28,7 @@ trade-offs and pick up where we left off.
 Elle previously had separate mechanisms for coroutines (continuation
 capture/replay), exception handling (handler stack with unwind semantics),
 and signal inference (boolean fields for yields and errors). The JIT could
-only compile inert functions.
+only compile silent functions.
 
 These have been unified into a single mechanism: **fibers with signals**.
 Coroutines are fibers that yield. Errors are signals. The signal system
@@ -243,9 +243,9 @@ caller can provide a pre-allocated buffer, deny the allocation, or grant it.
 capability. If the callee never needs FFI, no signal — full speed. If it
 does need FFI, it signals, and the caller handles the denial.
 
-**"This callback must be inert"**: The caller grants *no* capabilities. If the
+**"This callback must be silent"**: The caller grants *no* capabilities. If the
 callback tries to do anything — yield, error, IO, allocate — it signals.
-The caller treats any signal as a contract violation. (Note: inert functions are a superset of pure functions — inert means only that no signals are emitted, not that there are no side-effects.)
+The caller treats any signal as a contract violation. (Note: silent functions are a superset of pure functions — silent means only that no signals are emitted, not that there are no side-effects.)
 
 ### Narrowing, Not Widening
 
@@ -442,18 +442,18 @@ Operations:
 
 - **Combine**: `a | b` (union — a block's signal is the union of its parts)
 - **Check**: `actual & ~permitted == 0` (subset — are all actual signals permitted?)
-- **Inert**: `bits == 0` (no signals)
+- **Silent**: `bits == 0` (no signals)
 - **Has**: `bits & YIELD != 0` (membership test)
 
 ### Compile-Time Inference
 
 The compiler walks the AST and infers signals:
 
-- A literal is inert (no bits)
+- A literal is silent (no bits)
 - A primitive has known signal bits (declared at registration)
 - A call's signal is the callee's signal combined with the call overhead
 - A `begin` block's signal is the union of its children
-- A lambda's body signal is stored on the lambda but the lambda itself is inert
+- A lambda's body signal is stored on the lambda but the lambda itself is silent
 - A handler that catches signal X removes bit X from the enclosed expression's
   signal
 
@@ -523,7 +523,7 @@ signal, specifically).
 
 ### The Current Problem
 
-The JIT can only compile inert functions because it can't handle yields or
+The JIT can only compile silent functions because it can't handle yields or
 errors — it would need to save and restore the native stack, which is
 complex and platform-specific.
 
@@ -541,9 +541,9 @@ The JIT doesn't need to capture continuations or switch stacks. It just
 checks a return code and propagates. This is the same thing Janet's C code
 does — check the signal, propagate if not caught.
 
-This means the JIT can compile *any* function, not just inert ones. The
-overhead for non-inert functions is one branch per call (checking the signal).
-For inert functions (where the compiler can prove no signals), the branch can
+This means the JIT can compile *any* function, not just silent ones. The
+overhead for non-silent functions is one branch per call (checking the signal).
+For silent functions (where the compiler can prove no signals), the branch can
 be elided entirely.
 
 ### Signal-Guided Optimization
@@ -554,8 +554,8 @@ The compiler's signal information guides JIT decisions:
 - **Errors only**: signal checks needed, but no yield/continuation overhead
 - **Yields**: full signal protocol, but the JIT still compiles the function —
   it just includes the propagation path
-- **Known inert callback**: when a higher-order function is called with a
-   provably-inert callback, the JIT can specialize the inner loop to skip
+- **Known silent callback**: when a higher-order function is called with a
+   provably-silent callback, the JIT can specialize the inner loop to skip
    signal checks
 
 
@@ -681,7 +681,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 # Function-level restriction (specific signals allowed)
 (silence :kw1 :kw2)
 
-# Parameter-level restriction (parameter must be inert)
+# Parameter-level restriction (parameter must be silent)
 (silence param)
 
 # Parameter-level restriction (parameter may emit specific signals)
@@ -690,9 +690,9 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 
 **Semantics:**
 
-- `(silence)` — This function emits no signals (inert)
+- `(silence)` — This function emits no signals (silent)
 - `(silence :kw1 :kw2)` — This function may emit only these signals
-- `(silence param)` — Parameter `param` must be inert (no signals)
+- `(silence param)` — Parameter `param` must be silent (no signals)
 - `(silence param :kw1 :kw2)` — Parameter `param` may emit at most these signals
 - Multiple `silence` forms allowed in one lambda (one per parameter + one function-level)
 - Keywords must be registered (via `signal` or built-in)
@@ -708,7 +708,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 
 **Examples:**
 ```janet
-# Inert function
+# Silent function
 (defn add (x y)
   (silence)
   (+ x y))
@@ -718,9 +718,9 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
   (silence :error)
   (if (< x 0) (error "negative") x))
 
-# Higher-order function with inert callback
-(defn apply-inert (f x)
-  "Apply f to x, requiring f to be inert."
+# Higher-order function with silent callback
+(defn apply-silent (f x)
+  "Apply f to x, requiring f to be silent."
   (silence f)
   (f x))
 
@@ -755,23 +755,23 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 **Example:**
 ```janet
 # Function with parameter bound
-(defn apply-inert (f x)
-  (silence f)  # f must be inert
+(defn apply-silent (f x)
+  (silence f)  # f must be silent
   (f x))
 
-# Inferred signal: inert (because f is bounded to inert)
+# Inferred signal: silent (because f is bounded to silent)
 # No polymorphism — f's signal is known to be zero bits
 
-# This works: + is inert
-(apply-inert + 42)
+# This works: + is silent
+(apply-silent + 42)
 
 # This fails at compile time: yielding function violates bound
-(apply-inert (fn () (yield 1)) 42)
+(apply-silent (fn () (yield 1)) 42)
 ```
 
 ### Parameter Bounds Eliminate Polymorphism
 
-A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be inert, so the function's signal is determined by its own body only, not by what `f` might do.
+A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be silent, so the function's signal is determined by its own body only, not by what `f` might do.
 
 **Example:**
 ```janet
@@ -781,10 +781,10 @@ A function with `(silence f)` is no longer polymorphic with respect to `f`. The 
 # Signal: Polymorphic(0) — depends on f's signal
 
 # With bound: not polymorphic
-(defn map-inert (f xs)
+(defn map-silent (f xs)
   (silence f)
   (map f xs))
-# Signal: inert — f is guaranteed inert, so map is inert
+# Signal: silent — f is guaranteed silent, so map is silent
 ```
 
 ### Call-Site Checking
@@ -793,15 +793,15 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 
 **Example:**
 ```janet
-(defn apply-inert (f x)
+(defn apply-silent (f x)
   (silence f)
   (f x))
 
-# Compile-time check passes: + is inert
-(apply-inert + 42)
+# Compile-time check passes: + is silent
+(apply-silent + 42)
 
 # Compile-time check fails: yielding function violates bound
-(apply-inert (fn () (yield 1)) 42)
+(apply-silent (fn () (yield 1)) 42)
 # Error: argument violates signal bound
 ```
 
@@ -816,13 +816,13 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 **Example:**
 ```janet
-(defn apply-inert (f x)
+(defn apply-silent (f x)
   (silence f)
   (f x))
 
 # At runtime, if f's signal violates the bound, error is signaled
 (var f (eval '(fn () (yield 1))))
-(apply-inert f 42)
+(apply-silent f 42)
 # Runtime error: argument violates signal bound
 ```
 
@@ -830,8 +830,8 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 Signal bounds enable JIT optimizations:
 
-1. **Loop specialization**: When a higher-order function is called with a provably-inert callback, the JIT can specialize the inner loop to skip signal checks
-2. **Inlining**: Inert callbacks can be inlined more aggressively
+1. **Loop specialization**: When a higher-order function is called with a provably-silent callback, the JIT can specialize the inner loop to skip signal checks
+2. **Inlining**: Silent callbacks can be inlined more aggressively
 3. **Elimination of polymorphism**: Bounded parameters eliminate the need to track polymorphic signals, simplifying JIT compilation
 
 **Example:**
@@ -840,8 +840,8 @@ Signal bounds enable JIT optimizations:
 (defn map-any (f xs)
   (map f xs))
 
-# With bounds: JIT can specialize for inert f
-(defn map-inert (f xs)
+# With bounds: JIT can specialize for silent f
+(defn map-silent (f xs)
   (silence f)
   (map f xs))
 ```
@@ -942,15 +942,15 @@ A struct mapping signal keywords to bit positions. Includes both built-in and us
 ### Signal Restrictions
 
 ```janet
-(defn inert-add (x y)
-  (silence)           ;# no signals — inert
+(defn silent-add (x y)
+  (silence)           ;# no signals — silent
   (+ x y))
 
 (defn may-fail (x)
   (silence :error)   ;# may error, nothing else
   (/ 1 x))
 
-(defn callback-must-be-inert (f xs)
+(defn callback-must-be-silent (f xs)
   (silence f) ;# f must have no signals
   (map f xs))
 ```
@@ -971,7 +971,7 @@ Steps 1–3 are complete. Steps 4–7 are future work.
    propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
     and `may_error` fields replaced.
 
-4. ❌ **Relax JIT restrictions.** JIT still restricted to inert functions.
+4. ❌ **Relax JIT restrictions.** JIT still restricted to silent functions.
    Signal-aware calling convention not yet implemented.
 
 5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no

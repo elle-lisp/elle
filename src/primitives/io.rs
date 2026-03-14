@@ -303,7 +303,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-request?",
         func: prim_is_io_request,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O request.",
         params: &["value"],
@@ -314,7 +314,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-backend?",
         func: prim_is_io_backend,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Check if value is an I/O backend.",
         params: &["value"],

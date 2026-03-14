@@ -45,7 +45,7 @@ impl<'a> Analyzer<'a> {
         span: Span,
     ) -> Result<Hir, String> {
         if forms.is_empty() {
-            return Ok(Hir::inert(HirKind::Nil, span));
+            return Ok(Hir::silent(HirKind::Nil, span));
         }
 
         self.push_scope(false);
@@ -132,7 +132,7 @@ impl<'a> Analyzer<'a> {
 
         // Pass 2: analyze all initializers sequentially.
         let mut bindings = Vec::new();
-        let mut signal = Signal::inert();
+        let mut signal = Signal::silent();
         let mut last_binding: Option<Binding> = None;
         // Track lambda bindings for fixpoint signal propagation (Pass 3).
         // Each entry: (index in `bindings`, binding, reference to value syntax).
@@ -196,17 +196,17 @@ impl<'a> Analyzer<'a> {
                     self.pre_bindings.clear();
 
                     for leaf_binding in &pattern.bindings().bindings {
-                        bindings.push((*leaf_binding, Hir::inert(HirKind::Nil, span.clone())));
+                        bindings.push((*leaf_binding, Hir::silent(HirKind::Nil, span.clone())));
                         last_binding = Some(*leaf_binding);
                     }
 
                     let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
                     bindings.push((tmp, value));
 
-                    let destructure_hir = Hir::inert(
+                    let destructure_hir = Hir::silent(
                         HirKind::Destructure {
                             pattern,
-                            value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
                             strict: true,
                         },
                         span.clone(),
@@ -244,7 +244,7 @@ impl<'a> Analyzer<'a> {
                         .signal_env
                         .get(&binding)
                         .copied()
-                        .unwrap_or_else(Signal::inert);
+                        .unwrap_or_else(Signal::silent);
                     let new_hir = self.analyze_expr(value_syntax)?;
                     if let HirKind::Lambda {
                         inferred_signals, ..
@@ -265,8 +265,8 @@ impl<'a> Analyzer<'a> {
 
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
-            Some(binding) => Hir::inert(HirKind::Var(binding), span.clone()),
-            None => Hir::inert(HirKind::Nil, span.clone()),
+            Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
+            None => Hir::silent(HirKind::Nil, span.clone()),
         };
 
         self.pop_scope();
@@ -313,7 +313,7 @@ impl<'a> Analyzer<'a> {
         // Seed signal_env and arity_env for lambda forms so self-recursive
         // calls don't default to Yields during analysis.
         if Self::is_lambda_syntax(value_syntax) {
-            self.signal_env.insert(binding, Signal::inert());
+            self.signal_env.insert(binding, Signal::silent());
             if let Some(list) = value_syntax.as_list() {
                 if let Some(params_syn) = list.get(1).and_then(|s| s.as_list_or_tuple()) {
                     self.arity_env

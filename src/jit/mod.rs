@@ -1,7 +1,7 @@
 //! JIT compilation for Elle
 //!
 //! This module provides JIT compilation of LIR functions to native code
-//! using Cranelift. Functions with `Signal::inert()` or `Signal::yields()` are
+//! using Cranelift. Functions with `Signal::silent()` or `Signal::yields()` are
 //! JIT candidates. Polymorphic functions remain excluded.
 //!
 //! ## Architecture

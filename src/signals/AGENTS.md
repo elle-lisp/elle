@@ -15,7 +15,7 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | Type/Function | Purpose |
 |---------------|---------|
 | `Signal` | `{ bits: SignalBits, propagates: u32 }` — Copy, const fn constructors |
-| `Signal::inert()` | No signals |
+| `Signal::silent()` | No signals |
 | `Signal::errors()` | May error (SIG_ERROR) |
 | `Signal::yields()` | May yield (SIG_YIELD) |
 | `Signal::yields_errors()` | May yield and error |
@@ -44,7 +44,7 @@ Each predicate asks a specific question. No vague "is_inert".
 
 | Constant | Value |
 |----------|-------|
-| `Signal::INERT` | `Signal::inert()` |
+| `Signal::SILENT` | `Signal::silent()` |
 | `Signal::YIELDS` | `Signal::yields()` |
 
 ## Signal Registry
@@ -151,7 +151,7 @@ Used across the pipeline and the runtime:
 
 ## Invariants
 
-1. **Signal::inert() is the default.** Unknown signals start as inert. This is
+1. **Signal::silent() is the default.** Unknown signals start as silent. This is
    conservative — we may miss some suspension propagation but never produce
    false positives.
 

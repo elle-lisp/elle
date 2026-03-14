@@ -395,7 +395,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stdin",
         func: prim_port_stdin,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard input.",
         params: &[],
@@ -406,7 +406,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stdout",
         func: prim_port_stdout,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard output.",
         params: &[],
@@ -417,7 +417,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/stderr",
         func: prim_port_stderr,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(0),
         doc: "Return a port for standard error.",
         params: &[],
@@ -428,7 +428,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port?",
         func: prim_is_port,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Check if value is a port.",
         params: &["value"],

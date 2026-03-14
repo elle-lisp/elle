@@ -538,9 +538,9 @@ fn test_mutual_recursion_three_way_signal_propagation() {
 }
 
 #[test]
-fn test_mutual_recursion_inert_stays_inert() {
-    // Mutually recursive functions that are genuinely inert should stay inert.
-    // The fixpoint must not incorrectly promote inert to Yields.
+fn test_mutual_recursion_silent_stays_silent() {
+    // Mutually recursive functions that are genuinely silent should stay silent.
+    // The fixpoint must not incorrectly promote silent to Yields.
     let result = eval_file_source(
         r#"
         (def even? (fn [n] (if (= n 0) true (odd? (- n 1)))))

@@ -64,7 +64,7 @@ pub struct Signal {
 
 impl Default for Signal {
     fn default() -> Self {
-        Signal::inert()
+        Signal::silent()
     }
 }
 
@@ -72,7 +72,7 @@ impl Default for Signal {
 
 impl Signal {
     /// No signals: does not signal, does not propagate.
-    pub const fn inert() -> Self {
+    pub const fn silent() -> Self {
         Signal {
             bits: SignalBits::new(0),
             propagates: 0,
@@ -157,7 +157,7 @@ impl Signal {
     pub fn combine_all(signals: impl IntoIterator<Item = Signal>) -> Signal {
         signals
             .into_iter()
-            .fold(Signal::inert(), |a, b| a.combine(b))
+            .fold(Signal::silent(), |a, b| a.combine(b))
     }
 }
 
@@ -214,7 +214,7 @@ impl Signal {
 // ── Constants ───────────────────────────────────────────────────────
 
 impl Signal {
-    pub const INERT: Signal = Signal::inert();
+    pub const SILENT: Signal = Signal::silent();
     pub const YIELDS: Signal = Signal::yields();
 }
 
@@ -226,7 +226,7 @@ impl fmt::Display for Signal {
         } else if self.bits.contains(SIG_YIELD) {
             write!(f, "yields")?;
         } else {
-            write!(f, "inert")?;
+            write!(f, "silent")?;
         }
 
         // Append capability flags
@@ -255,25 +255,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_signal_combine_inert() {
-        assert_eq!(Signal::inert().combine(Signal::inert()), Signal::inert());
+    fn test_signal_combine_silent() {
+        assert_eq!(Signal::silent().combine(Signal::silent()), Signal::silent());
     }
 
     #[test]
     fn test_signal_combine_yields() {
-        assert_eq!(Signal::inert().combine(Signal::yields()), Signal::yields());
-        assert_eq!(Signal::yields().combine(Signal::inert()), Signal::yields());
+        assert_eq!(Signal::silent().combine(Signal::yields()), Signal::yields());
+        assert_eq!(Signal::yields().combine(Signal::silent()), Signal::yields());
         assert_eq!(Signal::yields().combine(Signal::yields()), Signal::yields());
     }
 
     #[test]
     fn test_signal_combine_polymorphic() {
         assert_eq!(
-            Signal::inert().combine(Signal::polymorphic(0)),
+            Signal::silent().combine(Signal::polymorphic(0)),
             Signal::polymorphic(0)
         );
         assert_eq!(
-            Signal::polymorphic(1).combine(Signal::inert()),
+            Signal::polymorphic(1).combine(Signal::silent()),
             Signal::polymorphic(1)
         );
         // Polymorphic + Yields = both
@@ -300,18 +300,18 @@ mod tests {
     #[test]
     fn test_signal_combine_all() {
         assert_eq!(
-            Signal::combine_all([Signal::inert(), Signal::inert(), Signal::inert()]),
-            Signal::inert()
+            Signal::combine_all([Signal::silent(), Signal::silent(), Signal::silent()]),
+            Signal::silent()
         );
         assert_eq!(
-            Signal::combine_all([Signal::inert(), Signal::yields(), Signal::inert()]),
+            Signal::combine_all([Signal::silent(), Signal::yields(), Signal::silent()]),
             Signal::yields()
         );
     }
 
     #[test]
     fn test_may_suspend() {
-        assert!(!Signal::inert().may_suspend());
+        assert!(!Signal::silent().may_suspend());
         assert!(!Signal::errors().may_suspend());
         assert!(Signal::yields().may_suspend());
         assert!(Signal::polymorphic(0).may_suspend());
@@ -324,27 +324,27 @@ mod tests {
 
     #[test]
     fn test_may_yield() {
-        assert!(!Signal::inert().may_yield());
+        assert!(!Signal::silent().may_yield());
         assert!(Signal::yields().may_yield());
         assert!(!Signal::errors().may_yield());
     }
 
     #[test]
     fn test_may_error() {
-        assert!(!Signal::inert().may_error());
+        assert!(!Signal::silent().may_error());
         assert!(Signal::errors().may_error());
         assert!(!Signal::yields().may_error());
         assert!(Signal::yields_errors().may_error());
 
         // Combining errors
-        let combined = Signal::inert().combine(Signal::errors());
+        let combined = Signal::silent().combine(Signal::errors());
         assert!(combined.may_error());
         assert!(!combined.may_suspend());
     }
 
     #[test]
     fn test_may_ffi() {
-        assert!(!Signal::inert().may_ffi());
+        assert!(!Signal::silent().may_ffi());
         assert!(Signal::ffi().may_ffi());
         assert!(Signal::ffi_errors().may_ffi());
     }
@@ -361,23 +361,23 @@ mod tests {
 
     #[test]
     fn test_is_polymorphic() {
-        assert!(!Signal::inert().is_polymorphic());
+        assert!(!Signal::silent().is_polymorphic());
         assert!(Signal::polymorphic(0).is_polymorphic());
     }
 
     #[test]
     fn test_signal_display() {
-        assert_eq!(format!("{}", Signal::inert()), "inert");
+        assert_eq!(format!("{}", Signal::silent()), "silent");
         assert_eq!(format!("{}", Signal::yields()), "yields");
-        assert_eq!(format!("{}", Signal::errors()), "inert+errors");
+        assert_eq!(format!("{}", Signal::errors()), "silent+errors");
         assert_eq!(format!("{}", Signal::yields_errors()), "yields+errors");
         assert_eq!(format!("{}", Signal::polymorphic(0)), "polymorphic(0)");
         assert_eq!(
             format!("{}", Signal::polymorphic_errors(0)),
             "polymorphic(0)+errors"
         );
-        assert_eq!(format!("{}", Signal::ffi()), "inert+ffi");
-        assert_eq!(format!("{}", Signal::ffi_errors()), "inert+errors+ffi");
+        assert_eq!(format!("{}", Signal::ffi()), "silent+ffi");
+        assert_eq!(format!("{}", Signal::ffi_errors()), "silent+errors+ffi");
     }
 
     #[test]
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_constants() {
-        assert_eq!(Signal::INERT, Signal::inert());
+        assert_eq!(Signal::SILENT, Signal::silent());
         assert_eq!(Signal::YIELDS, Signal::yields());
     }
 }

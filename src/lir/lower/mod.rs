@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn test_lower_int() {
         let mut lowerer = Lowerer::new();
-        let hir = Hir::inert(HirKind::Int(42), make_span());
+        let hir = Hir::silent(HirKind::Int(42), make_span());
         let func = lowerer.lower(&hir).unwrap();
         assert!(!func.blocks.is_empty());
     }
@@ -497,11 +497,11 @@ mod tests {
     #[test]
     fn test_lower_if() {
         let mut lowerer = Lowerer::new();
-        let hir = Hir::inert(
+        let hir = Hir::silent(
             HirKind::If {
-                cond: Box::new(Hir::inert(HirKind::Bool(true), make_span())),
-                then_branch: Box::new(Hir::inert(HirKind::Int(1), make_span())),
-                else_branch: Box::new(Hir::inert(HirKind::Int(2), make_span())),
+                cond: Box::new(Hir::silent(HirKind::Bool(true), make_span())),
+                then_branch: Box::new(Hir::silent(HirKind::Int(1), make_span())),
+                else_branch: Box::new(Hir::silent(HirKind::Int(2), make_span())),
             },
             make_span(),
         );
@@ -518,10 +518,10 @@ mod tests {
     #[test]
     fn test_lower_begin() {
         let mut lowerer = Lowerer::new();
-        let hir = Hir::inert(
+        let hir = Hir::silent(
             HirKind::Begin(vec![
-                Hir::inert(HirKind::Int(1), make_span()),
-                Hir::inert(HirKind::Int(2), make_span()),
+                Hir::silent(HirKind::Int(1), make_span()),
+                Hir::silent(HirKind::Int(2), make_span()),
             ]),
             make_span(),
         );

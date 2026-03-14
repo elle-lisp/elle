@@ -197,11 +197,11 @@ impl<'a> Analyzer<'a> {
             let mut exprs: Vec<Hir> = param_destructures
                 .into_iter()
                 .map(|(pattern, tmp, strict)| {
-                    Hir::inert(
+                    Hir::silent(
                         HirKind::Destructure {
                             pattern,
                             strict,
-                            value: Box::new(Hir::inert(HirKind::Var(tmp), span.clone())),
+                            value: Box::new(Hir::silent(HirKind::Var(tmp), span.clone())),
                         },
                         span.clone(),
                     )
@@ -298,7 +298,7 @@ impl<'a> Analyzer<'a> {
                 syntax: original_syntax,
             },
             span,
-            Signal::inert(),
+            Signal::silent(),
         ))
     }
 }

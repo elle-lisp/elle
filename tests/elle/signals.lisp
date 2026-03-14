@@ -35,11 +35,11 @@
 # silence runtime checks — passing cases
 # ============================================================================
 
-# silence with inert function passes at runtime
+# silence with silent function passes at runtime
 (begin
   (def apply-inert (fn (f x y) (silence f) (f x y)))
   (assert-eq (apply-inert + 42 1) 43
-    "silence runtime: inert function passes"))
+    "silence runtime: silent function passes"))
 
 # silence with non-closure (primitive) passes at runtime
 (begin
@@ -47,19 +47,19 @@
   (assert-eq (apply-inert2 + 42 1) 43
     "silence runtime: non-closure passes"))
 
-# silence with bounded keyword passes for inert closure
+# silence with bounded keyword passes for silent closure
 (begin
   (signal :rt_c5a)
   (def apply-bounded (fn (f) (silence f :rt_c5a) (f)))
   (assert-eq (apply-bounded (fn () nil)) nil
     "silence runtime: bounded keyword passes"))
 
-# silence with dynamic variable passes for inert function
+# silence with dynamic variable passes for silent function
 (begin
   (def apply-inert3 (fn (f x y) (silence f) (f x y)))
   (var g +)
   (assert-eq (apply-inert3 g 42 1) 43
-    "silence runtime: dynamic inert passes"))
+    "silence runtime: dynamic silent passes"))
 
 # ============================================================================
 # silence runtime checks — failing cases

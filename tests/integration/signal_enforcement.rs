@@ -4,7 +4,7 @@
 // - Direct yield has Yields signal
 // - Calling a yielding function propagates Yields signal
 // - Polymorphic signals (like map) resolve based on argument signals
-// - Inert functions remain inert
+// - Silent functions remain silent
 // - assign invalidates signal tracking
 
 use elle::hir::HirKind;
@@ -33,7 +33,7 @@ fn test_signal_direct_yield() {
     let result = analyze("(fn () (yield 1))", &mut symbols, &mut vm, "<test>").unwrap();
 
     // Lambda creation is pure
-    assert_eq!(result.hir.signal, Signal::inert());
+    assert_eq!(result.hir.signal, Signal::silent());
 
     // But the body should be Yields
     if let HirKind::Lambda { body, .. } = &result.hir.kind {
@@ -122,7 +122,7 @@ fn test_signal_pure_call() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
+        Signal::silent(),
         "Calling a pure function should remain Pure"
     );
 }
@@ -298,7 +298,7 @@ fn test_signal_direct_lambda_call_pure() {
     let result = analyze("((fn () 42))", &mut symbols, &mut vm, "<test>").unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::inert(),
+        Signal::silent(),
         "Direct call to pure lambda should be Pure"
     );
 }
@@ -376,7 +376,7 @@ fn test_signal_closure_captures_yielding() {
 #[test]
 fn test_signal_pure_primitives() {
     // Most primitives now have errors signal (can raise type/arity errors).
-    // `list` is genuinely inert (variadic, no type checks).
+    // `list` is genuinely silent (variadic, no type checks).
     let (mut symbols, mut vm) = setup();
 
     let errors_calls = [
@@ -406,14 +406,14 @@ fn test_signal_pure_primitives() {
         );
     }
 
-    // list is inert — variadic constructor with no type checks
+    // list is silent — variadic constructor with no type checks
     let inert_calls = ["(list 1 2 3)"];
     for call in inert_calls {
         let result = analyze(call, &mut symbols, &mut vm, "<test>").unwrap();
         assert_eq!(
             result.hir.signal,
-            Signal::inert(),
-            "Primitive call '{}' should be inert",
+            Signal::silent(),
+            "Primitive call '{}' should be silent",
             call
         );
     }
@@ -808,7 +808,7 @@ fn test_polymorphic_inference_pure_function() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::inert(),
+                Signal::silent(),
                 "Pure function should have Pure signal"
             );
         } else {
@@ -843,7 +843,7 @@ fn test_polymorphic_inference_pure_function() {
 // ============================================================================
 
 #[test]
-fn test_silence_parses_function_level_inert() {
+fn test_silence_parses_function_level_silent() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(fn (x) (silence) (+ x 1))",
@@ -856,7 +856,7 @@ fn test_silence_parses_function_level_inert() {
 }
 
 #[test]
-fn test_silence_parses_param_level_inert() {
+fn test_silence_parses_param_level_silent() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(fn (f x) (silence f) (f x))",
@@ -1108,7 +1108,7 @@ fn test_silence_ceiling_fails_bounded_param() {
 // test_signals_primitive_contains_user_signals: migrated to tests/elle/signals.lisp
 
 #[test]
-fn test_signals_primitive_is_inert() {
+fn test_signals_primitive_is_silent() {
     let (mut symbols, mut vm) = setup();
     let result = analyze("(fn () (signals))", &mut symbols, &mut vm, "<test>");
     // Should parse without error

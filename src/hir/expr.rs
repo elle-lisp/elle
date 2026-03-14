@@ -21,12 +21,12 @@ impl Hir {
         Hir { kind, span, signal }
     }
 
-    /// Create an inert HIR node (no signals)
-    pub fn inert(kind: HirKind, span: Span) -> Self {
+    /// Create a silent HIR node (no signals)
+    pub fn silent(kind: HirKind, span: Span) -> Self {
         Hir {
             kind,
             span,
-            signal: Signal::inert(),
+            signal: Signal::silent(),
         }
     }
 }

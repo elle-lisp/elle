@@ -41,7 +41,7 @@ Analyzer
     ├─► resolve variables → Binding (heap-allocated, shared by reference)
     ├─► track mutations → binding.mark_mutated()
     ├─► track captures → binding.mark_captured() + CaptureInfo
-    ├─► infer signals → Signal (Inert, Yields, Polymorphic)
+    ├─► infer signals → Signal (Silent, Yields, Polymorphic)
     ├─► validate scope rules (hygienic resolution)
     ├─► validate control flow (break targeting)
     └─► extract docstrings → Option<Value>
@@ -94,7 +94,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
 
-4. **Signals combine upward.** A `begin` has the combined signal of its children. A `fn` body's signal is stored but the fn itself is Inert.
+4. **Signals combine upward.** A `begin` has the combined signal of its children. A `fn` body's signal is stored but the fn itself is Silent.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its own `Vec<CaptureInfo>` listing what it captures and how.
 
@@ -118,7 +118,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
 
-16. **Signal bounds are parsed from `silence` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` forms in the lambda body preamble. `(silence)` declares the function is inert. `(silence :kw ...)` declares the function may emit only these signals. `(silence param)` declares the parameter must be inert. `(silence param :kw ...)` declares the parameter may emit at most these signals. Multiple `silence` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-silence form ends the preamble.
+16. **Signal bounds are parsed from `silence` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` forms in the lambda body preamble. `(silence)` declares the function is silent. `(silence :kw ...)` declares the function may emit only these signals. `(silence param)` declares the parameter must be silent. `(silence param :kw ...)` declares the parameter may emit at most these signals. Multiple `silence` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-silence form ends the preamble.
 
 17. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
 

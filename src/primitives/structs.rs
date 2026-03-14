@@ -44,7 +44,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "pairs",
         func: prim_pairs,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
         doc: "Iterate over struct key-value pairs as [key value] arrays.",
         params: &["struct"],

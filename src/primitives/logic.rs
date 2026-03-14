@@ -121,7 +121,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "and",
         func: prim_and,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Logical AND operation",
         params: &[],
@@ -132,7 +132,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "or",
         func: prim_or,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Logical OR operation",
         params: &[],
@@ -143,7 +143,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "xor",
         func: prim_xor,
-        signal: Signal::inert(),
+        signal: Signal::silent(),
         arity: Arity::AtLeast(0),
         doc: "Logical XOR operation",
         params: &[],
