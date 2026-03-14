@@ -36,8 +36,8 @@ jobs:
             echo "source=false" >> "$GITHUB_OUTPUT"
           fi
 
-  fmt:
-    name: Rustfmt
+  qa:
+    name: QA (fmt, clippy, doc)
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -45,22 +45,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - run: cargo fmt -- --check
-
-  clippy:
-    name: Clippy
-    needs: changes
-    runs-on: ubuntu-latest
-    if: needs.changes.outputs.source == 'true'
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+          components: rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt -- --check
       - name: Run clippy on workspace
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Check documentation
+        run: cargo doc --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
 
   elle-tests:
     name: Elle Tests
@@ -99,15 +93,12 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, fmt, clippy, elle-tests, tests-combined]
+    needs: [changes, qa, elle-tests, tests-combined]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check fmt
-        if: needs.fmt.result == 'failure'
-        run: exit 1
-      - name: Check clippy
-        if: needs.clippy.result == 'failure'
+      - name: Check QA
+        if: needs.qa.result == 'failure'
         run: exit 1
       - name: Check Elle Tests
         if: needs.elle-tests.result == 'failure'
