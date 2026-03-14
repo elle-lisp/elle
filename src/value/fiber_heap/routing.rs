@@ -11,8 +11,8 @@ thread_local! {
 // Thread-local storage for the root fiber's persistent FiberHeap.
 //
 // Created once per thread on first access via `ensure_root_heap()`.
-// Never freed (leaked via `Box::leak`) — semantically equivalent to
-// HEAP_ARENA, which also lived for the thread's lifetime.
+// Never freed (leaked via `Box::leak`) — lives for the thread's lifetime,
+// so Values allocated on it remain valid after any individual VM is dropped.
 //
 // Stores a raw pointer to the leaked `FiberHeap`. Null until first
 // `ensure_root_heap()` call.
@@ -110,7 +110,7 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
 }
 
 /// Save the current `active_allocator` pointer from the installed FiberHeap.
-/// Returns null if no FiberHeap is installed (root fiber).
+/// Returns null if no FiberHeap is installed (only possible in test contexts before VM::new()).
 pub fn save_active_allocator() -> *const bumpalo::Bump {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();
@@ -123,7 +123,7 @@ pub fn save_active_allocator() -> *const bumpalo::Bump {
 }
 
 /// Restore a previously saved `active_allocator` pointer on the installed FiberHeap.
-/// No-op if no FiberHeap is installed (root fiber).
+/// No-op if no FiberHeap is installed (only possible in test contexts before VM::new()).
 pub fn restore_active_allocator(saved: *const bumpalo::Bump) {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();

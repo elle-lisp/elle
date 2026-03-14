@@ -15,8 +15,9 @@
 //! intro scope on the result.
 //!
 //! Arena management: two phases with distinct guard scopes. Phase 1 (closure
-//! compilation) has no guard — closures are allocated on HEAP_ARENA via `alloc()`
-//! and a guard would free them. The one-time compilation cost stays in the arena.
+//! compilation) has no guard — closures are allocated on the root FiberHeap via
+//! `alloc()` and a guard would free them. The one-time compilation cost stays in
+//! the arena.
 //! Phase 2 (closure call + result conversion) has its own guard that frees the
 //! transient result values after converting to owned Syntax. This keeps the
 //! per-invocation arena cost constant after the first call.

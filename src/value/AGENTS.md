@@ -22,9 +22,9 @@ Runtime value representation using NaN-boxing.
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
 | `error.rs` | `error_val()` and `format_error()` helpers for error structs |
 | `ffi.rs` | `LibHandle` for C interop |
-| `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit` |
+| `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit`. Used by all fibers including root. |
 | `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
-| `arena.rs` | Heap arena: `alloc`, `deref`, `ArenaMark`, `ArenaGuard`, mark/release lifecycle |
+| `arena.rs` | Heap arena: `alloc`, `deref`, `ArenaMark`, `ArenaGuard`, mark/release lifecycle. All allocations go through `FiberHeap`. |
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope`, `LSet`, `LSetMut` (re-exports arena functions) |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |

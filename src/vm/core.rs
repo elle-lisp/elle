@@ -128,7 +128,7 @@ impl VM {
     pub fn reset_fiber(&mut self) {
         // The root heap is persistent (lives in ROOT_HEAP thread-local).
         // Do not clear it — root fiber objects accumulate across resets,
-        // identical to the old HEAP_ARENA behavior.
+        // so Values returned by execute_bytecode remain valid.
         // self.fiber.heap is an unused Box<FiberHeap>; it is dropped and
         // recreated with the new Fiber, costing one allocation. This is
         // acceptable; making fiber.heap Option<> would add branches everywhere.
