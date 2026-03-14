@@ -138,7 +138,7 @@ fn extract_allocator_rc(value: Value) -> Option<Rc<AllocatorBox>> {
     }
     unsafe {
         match deref(value) {
-            HeapObject::External(ext) => {
+            HeapObject::External { obj: ext, .. } => {
                 // Try to downcast Rc<dyn Any> to Rc<AllocatorBox>.
                 // Rc::downcast is available for Rc<dyn Any>.
                 let rc_any: Rc<dyn std::any::Any> = ext.data.clone();

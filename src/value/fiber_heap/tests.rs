@@ -7,13 +7,16 @@ use crate::value::heap::{Cons, HeapObject};
 fn test_fiber_heap_alloc() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
-    let v = heap.alloc(HeapObject::LString("hello".into()));
+    let v = heap.alloc(HeapObject::LString {
+        s: "hello".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 1);
     assert!(v.is_heap());
     unsafe {
         let obj = crate::value::arena::deref(v);
         match obj {
-            HeapObject::LString(s) => assert_eq!(&**s, "hello"),
+            HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
             _ => panic!("Expected String"),
         }
     }
@@ -24,9 +27,18 @@ fn test_fiber_heap_mark_release() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     let mark = heap.mark();
-    heap.alloc(HeapObject::LString("a".into()));
-    heap.alloc(HeapObject::LString("b".into()));
-    heap.alloc(HeapObject::LString("c".into()));
+    heap.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
+    heap.alloc(HeapObject::LString {
+        s: "b".into(),
+        traits: Value::NIL,
+    });
+    heap.alloc(HeapObject::LString {
+        s: "c".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 3);
     heap.release(mark);
     assert_eq!(heap.len(), 0);
@@ -37,9 +49,15 @@ fn test_fiber_heap_nested_mark_release() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     let outer_mark = heap.mark();
-    heap.alloc(HeapObject::LString("outer".into()));
+    heap.alloc(HeapObject::LString {
+        s: "outer".into(),
+        traits: Value::NIL,
+    });
     let inner_mark = heap.mark();
-    heap.alloc(HeapObject::LString("inner".into()));
+    heap.alloc(HeapObject::LString {
+        s: "inner".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 2);
     heap.release(inner_mark);
     assert_eq!(heap.len(), 1);
@@ -51,8 +69,14 @@ fn test_fiber_heap_nested_mark_release() {
 fn test_fiber_heap_clear_runs_destructors() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
-    heap.alloc(HeapObject::LString("a".into()));
-    heap.alloc(HeapObject::LString("b".into()));
+    heap.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
+    heap.alloc(HeapObject::LString {
+        s: "b".into(),
+        traits: Value::NIL,
+    });
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.len(), 3); // 3 total objects allocated
     assert_eq!(heap.dtors.len(), 2); // 2 need Drop (Strings)
@@ -67,7 +91,10 @@ fn test_clear_resets_scope_counters() {
     heap.init_active_allocator();
     // Simulate a scope region with an allocation
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("scoped".into()));
+    heap.alloc(HeapObject::LString {
+        s: "scoped".into(),
+        traits: Value::NIL,
+    });
     heap.pop_scope_mark_and_release();
     assert_eq!(heap.scope_enters(), 1);
     assert_eq!(heap.scope_dtors_run(), 1);
@@ -83,7 +110,11 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
     heap.init_active_allocator();
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     heap.alloc(HeapObject::Float(42.5));
-    heap.alloc(HeapObject::LBox(std::cell::RefCell::new(Value::NIL), false));
+    heap.alloc(HeapObject::LBox {
+        cell: std::cell::RefCell::new(Value::NIL),
+        is_local: false,
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 3); // 3 total objects
     assert_eq!(heap.dtors.len(), 0); // None need Drop tracking
 }
@@ -100,6 +131,7 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::LibHandle));
     assert!(!needs_drop(HeapTag::ManagedPointer));
     assert!(!needs_drop(HeapTag::Binding));
+    assert!(!needs_drop(HeapTag::Parameter));
 
     assert!(needs_drop(HeapTag::LString));
     assert!(needs_drop(HeapTag::LArrayMut));
@@ -116,6 +148,8 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(needs_drop(HeapTag::FFISignature));
     assert!(needs_drop(HeapTag::FFIType));
     assert!(needs_drop(HeapTag::External));
+    assert!(needs_drop(HeapTag::LSet));
+    assert!(needs_drop(HeapTag::LSetMut));
 }
 
 #[test]
@@ -145,9 +179,18 @@ fn test_save_restore() {
     let mut heap_b = Box::new(FiberHeap::new());
     heap_a.init_active_allocator();
     heap_b.init_active_allocator();
-    heap_a.alloc(HeapObject::LString("a".into()));
-    heap_b.alloc(HeapObject::LString("b1".into()));
-    heap_b.alloc(HeapObject::LString("b2".into()));
+    heap_a.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
+    heap_b.alloc(HeapObject::LString {
+        s: "b1".into(),
+        traits: Value::NIL,
+    });
+    heap_b.alloc(HeapObject::LString {
+        s: "b2".into(),
+        traits: Value::NIL,
+    });
 
     let ptr_a = &mut *heap_a as *mut FiberHeap;
     let ptr_b = &mut *heap_b as *mut FiberHeap;
@@ -193,7 +236,10 @@ fn test_active_allocator_survives_clear() {
     let mut heap = Box::new(FiberHeap::new());
     heap.init_active_allocator();
     let ptr_before = heap.active_allocator();
-    heap.alloc(HeapObject::LString("x".into()));
+    heap.alloc(HeapObject::LString {
+        s: "x".into(),
+        traits: Value::NIL,
+    });
     heap.clear();
     let ptr_after = heap.active_allocator();
     // Pointer should still be valid and point to the same bump.
@@ -246,11 +292,17 @@ fn test_restore_active_allocator_no_heap_installed() {
 fn test_scope_mark_push_pop_lifecycle() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
-    heap.alloc(HeapObject::LString("before".into()));
+    heap.alloc(HeapObject::LString {
+        s: "before".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 1);
 
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("scoped".into()));
+    heap.alloc(HeapObject::LString {
+        s: "scoped".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 2);
 
     heap.pop_scope_mark_and_release();
@@ -264,10 +316,16 @@ fn test_scope_mark_nested() {
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
 
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("outer".into()));
+    heap.alloc(HeapObject::LString {
+        s: "outer".into(),
+        traits: Value::NIL,
+    });
 
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("inner".into()));
+    heap.alloc(HeapObject::LString {
+        s: "inner".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.len(), 3);
 
     heap.pop_scope_mark_and_release(); // pops inner
@@ -284,8 +342,14 @@ fn test_scope_mark_runs_destructors() {
     assert_eq!(heap.dtors.len(), 0);
 
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("a".into()));
-    heap.alloc(HeapObject::LString("b".into()));
+    heap.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
+    heap.alloc(HeapObject::LString {
+        s: "b".into(),
+        traits: Value::NIL,
+    });
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.dtors.len(), 2); // 2 Strings need Drop
 
@@ -310,7 +374,10 @@ fn test_scope_bump_reclaims_memory() {
     heap.push_scope_mark();
     // Allocate many objects in the scope bump
     for i in 0..100 {
-        heap.alloc(HeapObject::LString(format!("obj-{}", i).into()));
+        heap.alloc(HeapObject::LString {
+            s: format!("obj-{}", i).into(),
+            traits: Value::NIL,
+        });
     }
     let bytes_during = heap.allocated_bytes();
     assert!(
@@ -334,12 +401,18 @@ fn test_scope_bump_nested_reclaims_inner_only() {
     heap.init_active_allocator();
 
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("outer".into()));
+    heap.alloc(HeapObject::LString {
+        s: "outer".into(),
+        traits: Value::NIL,
+    });
     let bytes_after_outer = heap.allocated_bytes();
 
     heap.push_scope_mark();
     for i in 0..50 {
-        heap.alloc(HeapObject::LString(format!("inner-{}", i).into()));
+        heap.alloc(HeapObject::LString {
+            s: format!("inner-{}", i).into(),
+            traits: Value::NIL,
+        });
     }
     let bytes_during_inner = heap.allocated_bytes();
     assert!(bytes_during_inner > bytes_after_outer);
@@ -360,9 +433,15 @@ fn test_clear_clears_scope_marks() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("a".into()));
+    heap.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("b".into()));
+    heap.alloc(HeapObject::LString {
+        s: "b".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.scope_marks.len(), 2);
 
     heap.clear();
@@ -375,9 +454,15 @@ fn test_clear_clears_scope_bumps() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("a".into()));
+    heap.alloc(HeapObject::LString {
+        s: "a".into(),
+        traits: Value::NIL,
+    });
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString("b".into()));
+    heap.alloc(HeapObject::LString {
+        s: "b".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.scope_bumps.len(), 2);
 
     heap.clear();
@@ -414,7 +499,10 @@ fn test_shared_alloc_routing() {
     heap.set_shared_alloc(sa_ptr);
 
     // Allocate via FiberHeap — should route to shared
-    heap.alloc(HeapObject::LString("routed".into()));
+    heap.alloc(HeapObject::LString {
+        s: "routed".into(),
+        traits: Value::NIL,
+    });
 
     // Private bump should be untouched
     assert_eq!(heap.alloc_count, 0);
@@ -432,7 +520,10 @@ fn test_private_alloc_when_no_shared() {
     // shared_alloc is null by default
     assert!(heap.shared_alloc.is_null());
 
-    heap.alloc(HeapObject::LString("private".into()));
+    heap.alloc(HeapObject::LString {
+        s: "private".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.alloc_count, 1);
     assert_eq!(heap.dtors.len(), 1);
 }
@@ -444,7 +535,10 @@ fn test_clear_tears_down_owned_shared() {
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
 
-    heap.alloc(HeapObject::LString("shared-val".into()));
+    heap.alloc(HeapObject::LString {
+        s: "shared-val".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(unsafe { &*sa_ptr }.len(), 1);
 
     heap.clear();
@@ -460,7 +554,10 @@ fn test_drop_tears_down_owned_shared() {
     heap.init_active_allocator();
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
-    heap.alloc(HeapObject::LString("will-be-dropped".into()));
+    heap.alloc(HeapObject::LString {
+        s: "will-be-dropped".into(),
+        traits: Value::NIL,
+    });
     // Drop runs here — should not leak or panic.
     drop(heap);
 }
@@ -477,8 +574,14 @@ fn test_clear_tears_down_shared_alloc_dtors() {
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
 
-    heap.alloc(HeapObject::LString("str-a".into()));
-    heap.alloc(HeapObject::LString("str-b".into()));
+    heap.alloc(HeapObject::LString {
+        s: "str-a".into(),
+        traits: Value::NIL,
+    });
+    heap.alloc(HeapObject::LString {
+        s: "str-b".into(),
+        traits: Value::NIL,
+    });
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     {
         let sa = unsafe { &*sa_ptr };
@@ -502,17 +605,26 @@ fn test_multiple_shared_allocs_all_torn_down() {
     // Create 3 shared allocs, allocate strings into each
     let sa1 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa1);
-    heap.alloc(HeapObject::LString("sa1-val".into()));
+    heap.alloc(HeapObject::LString {
+        s: "sa1-val".into(),
+        traits: Value::NIL,
+    });
     heap.clear_shared_alloc();
 
     let sa2 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa2);
-    heap.alloc(HeapObject::LString("sa2-val".into()));
+    heap.alloc(HeapObject::LString {
+        s: "sa2-val".into(),
+        traits: Value::NIL,
+    });
     heap.clear_shared_alloc();
 
     let sa3 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa3);
-    heap.alloc(HeapObject::LString("sa3-val".into()));
+    heap.alloc(HeapObject::LString {
+        s: "sa3-val".into(),
+        traits: Value::NIL,
+    });
     heap.clear_shared_alloc();
 
     assert_eq!(heap.owned_shared.len(), 3);
@@ -534,17 +646,26 @@ fn test_shared_alloc_survives_private_clear() {
 
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
-    heap.alloc(HeapObject::LString("in-shared".into()));
+    heap.alloc(HeapObject::LString {
+        s: "in-shared".into(),
+        traits: Value::NIL,
+    });
     heap.clear_shared_alloc();
 
     // Allocate privately
-    heap.alloc(HeapObject::LString("in-private".into()));
+    heap.alloc(HeapObject::LString {
+        s: "in-private".into(),
+        traits: Value::NIL,
+    });
     assert_eq!(heap.alloc_count, 1); // private count
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared count
 
     // Mark/release on private bump does not touch shared
     let mark = heap.mark();
-    heap.alloc(HeapObject::LString("scoped".into()));
+    heap.alloc(HeapObject::LString {
+        s: "scoped".into(),
+        traits: Value::NIL,
+    });
     heap.release(mark);
     assert_eq!(heap.alloc_count, 1); // back to 1
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared unchanged

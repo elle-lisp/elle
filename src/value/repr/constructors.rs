@@ -159,7 +159,10 @@ impl Value {
         } else {
             // Heap alloc without interning
             use crate::value::heap::{alloc, HeapObject};
-            alloc(HeapObject::LString(boxed))
+            alloc(HeapObject::LString {
+                s: boxed,
+                traits: Value::NIL,
+            })
         }
     }
 
@@ -170,6 +173,7 @@ impl Value {
         alloc(HeapObject::Cons(Cons {
             first: car,
             rest: cdr,
+            traits: Value::NIL,
         }))
     }
 
@@ -178,7 +182,10 @@ impl Value {
     pub fn array_mut(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LArrayMut(RefCell::new(elements)))
+        alloc(HeapObject::LArrayMut {
+            data: RefCell::new(elements),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an empty mutable @struct.
@@ -187,7 +194,10 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
         use std::collections::BTreeMap;
-        alloc(HeapObject::LStructMut(RefCell::new(BTreeMap::new())))
+        alloc(HeapObject::LStructMut {
+            data: RefCell::new(BTreeMap::new()),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an @struct with initial entries.
@@ -197,7 +207,10 @@ impl Value {
     ) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LStructMut(RefCell::new(entries)))
+        alloc(HeapObject::LStructMut {
+            data: RefCell::new(entries),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an immutable struct.
@@ -206,7 +219,10 @@ impl Value {
         fields: std::collections::BTreeMap<crate::value::heap::TableKey, Value>,
     ) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::LStruct(fields))
+        alloc(HeapObject::LStruct {
+            data: fields,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a closure.
@@ -214,7 +230,10 @@ impl Value {
     pub fn closure(c: crate::value::heap::Closure) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::rc::Rc;
-        alloc(HeapObject::Closure(Rc::new(c)))
+        alloc(HeapObject::Closure {
+            closure: Rc::new(c),
+            traits: Value::NIL,
+        })
     }
 
     /// Create a user box (mutable LBox) — NOT auto-unwrapped by LoadUpvalue.
@@ -222,7 +241,11 @@ impl Value {
     pub fn lbox(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LBox(RefCell::new(value), false))
+        alloc(HeapObject::LBox {
+            cell: RefCell::new(value),
+            is_local: false,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a compiler local box — auto-unwrapped by LoadUpvalue.
@@ -231,7 +254,11 @@ impl Value {
     pub fn local_lbox(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LBox(RefCell::new(value), true))
+        alloc(HeapObject::LBox {
+            cell: RefCell::new(value),
+            is_local: true,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a native function value.
@@ -246,7 +273,10 @@ impl Value {
     #[inline]
     pub fn array(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::LArray(elements))
+        alloc(HeapObject::LArray {
+            elements,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a mutable @string value.
@@ -254,14 +284,20 @@ impl Value {
     pub fn string_mut(bytes: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LStringMut(RefCell::new(bytes)))
+        alloc(HeapObject::LStringMut {
+            data: RefCell::new(bytes),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an immutable bytes value.
     #[inline]
     pub fn bytes(data: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::LBytes(data))
+        alloc(HeapObject::LBytes {
+            data,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a mutable @bytes value.
@@ -269,7 +305,10 @@ impl Value {
     pub fn bytes_mut(data: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LBytesMut(RefCell::new(data)))
+        alloc(HeapObject::LBytesMut {
+            data: RefCell::new(data),
+            traits: Value::NIL,
+        })
     }
 
     /// Create a fiber value.
@@ -277,14 +316,20 @@ impl Value {
     pub fn fiber(f: crate::value::fiber::Fiber) -> Self {
         use crate::value::fiber::FiberHandle;
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::Fiber(FiberHandle::new(f)))
+        alloc(HeapObject::Fiber {
+            handle: FiberHandle::new(f),
+            traits: Value::NIL,
+        })
     }
 
     /// Create a fiber value from an existing FiberHandle.
     #[inline]
     pub fn fiber_from_handle(handle: crate::value::fiber::FiberHandle) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::Fiber(handle))
+        alloc(HeapObject::Fiber {
+            handle,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a syntax object value.
@@ -293,7 +338,10 @@ impl Value {
     pub fn syntax(s: crate::syntax::Syntax) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::rc::Rc;
-        alloc(HeapObject::Syntax(Rc::new(s)))
+        alloc(HeapObject::Syntax {
+            syntax: Rc::new(s),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an FFI signature value.
@@ -336,7 +384,10 @@ impl Value {
         }
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::Cell;
-        alloc(HeapObject::ManagedPointer(Cell::new(Some(addr))))
+        alloc(HeapObject::ManagedPointer {
+            addr: Cell::new(Some(addr)),
+            traits: Value::NIL,
+        })
     }
 
     /// Create an external object value (for plugin-provided types).
@@ -344,10 +395,13 @@ impl Value {
     pub fn external<T: Any + 'static>(type_name: &'static str, data: T) -> Self {
         use crate::value::heap::{alloc, ExternalObject, HeapObject};
         use std::rc::Rc;
-        alloc(HeapObject::External(ExternalObject {
-            type_name,
-            data: Rc::new(data),
-        }))
+        alloc(HeapObject::External {
+            obj: ExternalObject {
+                type_name,
+                data: Rc::new(data),
+            },
+            traits: Value::NIL,
+        })
     }
 
     /// Create a dynamic parameter value.
@@ -360,7 +414,11 @@ impl Value {
         use std::sync::atomic::{AtomicU32, Ordering};
         static NEXT_ID: AtomicU32 = AtomicU32::new(0);
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        alloc(HeapObject::Parameter { id, default })
+        alloc(HeapObject::Parameter {
+            id,
+            default,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a binding value (compile-time only).
@@ -385,7 +443,10 @@ impl Value {
     #[inline]
     pub fn set(items: BTreeSet<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        alloc(HeapObject::LSet(items))
+        alloc(HeapObject::LSet {
+            data: items,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a mutable set value.
@@ -393,6 +454,9 @@ impl Value {
     pub fn set_mut(items: BTreeSet<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LSetMut(RefCell::new(items)))
+        alloc(HeapObject::LSetMut {
+            data: RefCell::new(items),
+            traits: Value::NIL,
+        })
     }
 }

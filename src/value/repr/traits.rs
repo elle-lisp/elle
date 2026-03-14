@@ -1,4 +1,8 @@
 //! Trait implementations for Value (PartialEq, Eq, Hash).
+//!
+//! The `traits` field on heap variants is NOT compared by PartialEq, NOT
+//! hashed by Hash, and NOT compared by Ord. Trait identity is a separate
+//! concern checked via `identical?`.
 
 use std::hash::{Hash, Hasher};
 
@@ -25,37 +29,50 @@ impl PartialEq for Value {
 
             match (self_obj, other_obj) {
                 // String comparison
-                (HeapObject::LString(s1), HeapObject::LString(s2)) => s1 == s2,
+                (HeapObject::LString { s: s1, .. }, HeapObject::LString { s: s2, .. }) => s1 == s2,
 
-                // Cons cell comparison
+                // Cons cell comparison (Cons::PartialEq ignores traits)
                 (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
 
                 // Array comparison (compare contents)
-                (HeapObject::LArrayMut(v1), HeapObject::LArrayMut(v2)) => {
-                    v1.borrow().as_slice() == v2.borrow().as_slice()
-                }
+                (
+                    HeapObject::LArrayMut { data: v1, .. },
+                    HeapObject::LArrayMut { data: v2, .. },
+                ) => v1.borrow().as_slice() == v2.borrow().as_slice(),
 
                 // Table comparison (compare contents)
-                (HeapObject::LStructMut(t1), HeapObject::LStructMut(t2)) => {
-                    *t1.borrow() == *t2.borrow()
-                }
+                (
+                    HeapObject::LStructMut { data: t1, .. },
+                    HeapObject::LStructMut { data: t2, .. },
+                ) => *t1.borrow() == *t2.borrow(),
 
                 // Struct comparison (compare contents)
-                (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1 == s2,
-
-                // Closure comparison (compare by reference)
-                (HeapObject::Closure(c1), HeapObject::Closure(c2)) => std::rc::Rc::ptr_eq(c1, c2),
-
-                // Array comparison (compare contents element-wise)
-                (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1 == t2,
-
-                // @string comparison (compare contents)
-                (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
-                    *b1.borrow() == *b2.borrow()
+                (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
+                    s1 == s2
                 }
 
+                // Closure comparison (compare by reference)
+                (
+                    HeapObject::Closure { closure: c1, .. },
+                    HeapObject::Closure { closure: c2, .. },
+                ) => std::rc::Rc::ptr_eq(c1, c2),
+
+                // Array comparison (compare contents element-wise)
+                (
+                    HeapObject::LArray { elements: t1, .. },
+                    HeapObject::LArray { elements: t2, .. },
+                ) => t1 == t2,
+
+                // @string comparison (compare contents)
+                (
+                    HeapObject::LStringMut { data: b1, .. },
+                    HeapObject::LStringMut { data: b2, .. },
+                ) => *b1.borrow() == *b2.borrow(),
+
                 // Box comparison (compare contents)
-                (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => *c1.borrow() == *c2.borrow(),
+                (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
+                    *c1.borrow() == *c2.borrow()
+                }
 
                 // Float comparison — bitwise, not IEEE, so NaN == NaN (same bits)
                 (HeapObject::Float(f1), HeapObject::Float(f2)) => f1.to_bits() == f2.to_bits(),
@@ -69,17 +86,19 @@ impl PartialEq for Value {
                 (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1 == h2,
 
                 // ThreadHandle comparison (compare by reference)
-                (HeapObject::ThreadHandle(_), HeapObject::ThreadHandle(_)) => {
+                (HeapObject::ThreadHandle { .. }, HeapObject::ThreadHandle { .. }) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
                 // Fiber comparison (compare by reference)
-                (HeapObject::Fiber(_), HeapObject::Fiber(_)) => {
+                (HeapObject::Fiber { .. }, HeapObject::Fiber { .. }) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
                 // Syntax comparison (by reference — same Rc)
-                (HeapObject::Syntax(s1), HeapObject::Syntax(s2)) => std::rc::Rc::ptr_eq(s1, s2),
+                (HeapObject::Syntax { syntax: s1, .. }, HeapObject::Syntax { syntax: s2, .. }) => {
+                    std::rc::Rc::ptr_eq(s1, s2)
+                }
 
                 // Binding comparison (by reference — same heap allocation)
                 (HeapObject::Binding(_), HeapObject::Binding(_)) => {
@@ -93,12 +112,12 @@ impl PartialEq for Value {
                 (HeapObject::FFIType(t1), HeapObject::FFIType(t2)) => t1 == t2,
 
                 // Managed pointer comparison (by identity, not address)
-                (HeapObject::ManagedPointer(_), HeapObject::ManagedPointer(_)) => {
+                (HeapObject::ManagedPointer { .. }, HeapObject::ManagedPointer { .. }) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
                 // External object comparison (by identity — same heap object)
-                (HeapObject::External(_), HeapObject::External(_)) => {
+                (HeapObject::External { .. }, HeapObject::External { .. }) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
@@ -108,18 +127,23 @@ impl PartialEq for Value {
                 }
 
                 // Bytes comparison (compare contents)
-                (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1 == b2,
-
-                // @bytes comparison (compare contents)
-                (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
-                    *b1.borrow() == *b2.borrow()
+                (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => {
+                    b1 == b2
                 }
 
+                // @bytes comparison (compare contents)
+                (
+                    HeapObject::LBytesMut { data: b1, .. },
+                    HeapObject::LBytesMut { data: b2, .. },
+                ) => *b1.borrow() == *b2.borrow(),
+
                 // Set comparison (compare contents)
-                (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1 == s2,
+                (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => s1 == s2,
 
                 // Mutable set comparison (compare contents)
-                (HeapObject::LSetMut(s1), HeapObject::LSetMut(s2)) => *s1.borrow() == *s2.borrow(),
+                (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
+                    *s1.borrow() == *s2.borrow()
+                }
 
                 // Different types are not equal
                 _ => false,
@@ -162,11 +186,12 @@ impl Hash for Value {
 
             match obj {
                 // Structural content types (immutable)
-                HeapObject::LString(s) => s.hash(state),
+                HeapObject::LString { s, .. } => s.hash(state),
+                // Cons::hash ignores traits field
                 HeapObject::Cons(c) => c.hash(state),
-                HeapObject::LArray(elems) => elems.hash(state),
-                HeapObject::LBytes(b) => b.hash(state),
-                HeapObject::LStruct(map) => {
+                HeapObject::LArray { elements, .. } => elements.hash(state),
+                HeapObject::LBytes { data, .. } => data.hash(state),
+                HeapObject::LStruct { data: map, .. } => {
                     for (k, v) in map {
                         k.hash(state);
                         v.hash(state);
@@ -174,14 +199,14 @@ impl Hash for Value {
                 }
 
                 // Structural content types (mutable — hash current contents)
-                HeapObject::LArrayMut(rc) => {
+                HeapObject::LArrayMut { data: rc, .. } => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for v in borrowed.iter() {
                         v.hash(state);
                     }
                 }
-                HeapObject::LStructMut(rc) => {
+                HeapObject::LStructMut { data: rc, .. } => {
                     let borrowed = rc.borrow();
                     borrowed.len().hash(state);
                     for (k, v) in borrowed.iter() {
@@ -189,9 +214,9 @@ impl Hash for Value {
                         v.hash(state);
                     }
                 }
-                HeapObject::LStringMut(rc) => rc.borrow().hash(state),
-                HeapObject::LBytesMut(rc) => rc.borrow().hash(state),
-                HeapObject::LBox(rc, _) => rc.borrow().hash(state),
+                HeapObject::LStringMut { data: rc, .. } => rc.borrow().hash(state),
+                HeapObject::LBytesMut { data: rc, .. } => rc.borrow().hash(state),
+                HeapObject::LBox { cell: rc, .. } => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
                 HeapObject::Float(f) => f.to_bits().hash(state),
@@ -362,41 +387,45 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
     let b_obj = deref(*b);
 
     match (a_obj, b_obj) {
-        // Cons — (first, rest) lexicographic
+        // Cons — (first, rest) lexicographic (Cons::cmp ignores traits)
         (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1.cmp(c2),
 
         // Array — element-wise lexicographic
-        (HeapObject::LArray(t1), HeapObject::LArray(t2)) => t1.cmp(t2),
+        (HeapObject::LArray { elements: t1, .. }, HeapObject::LArray { elements: t2, .. }) => {
+            t1.cmp(t2)
+        }
 
         // Array — element-wise lexicographic (borrow)
-        (HeapObject::LArrayMut(a1), HeapObject::LArrayMut(a2)) => {
+        (HeapObject::LArrayMut { data: a1, .. }, HeapObject::LArrayMut { data: a2, .. }) => {
             let b1 = a1.borrow();
             let b2 = a2.borrow();
             b1.as_slice().cmp(b2.as_slice())
         }
 
         // Bytes — byte-wise lexicographic
-        (HeapObject::LBytes(b1), HeapObject::LBytes(b2)) => b1.cmp(b2),
+        (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => b1.cmp(b2),
 
         // @string — byte-wise lexicographic (borrow)
-        (HeapObject::LStringMut(b1), HeapObject::LStringMut(b2)) => {
+        (HeapObject::LStringMut { data: b1, .. }, HeapObject::LStringMut { data: b2, .. }) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
         // @bytes — byte-wise lexicographic (borrow)
-        (HeapObject::LBytesMut(b1), HeapObject::LBytesMut(b2)) => {
+        (HeapObject::LBytesMut { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. }) => {
             let r1 = b1.borrow();
             let r2 = b2.borrow();
             r1.cmp(&*r2)
         }
 
         // Struct — entry-wise lexicographic (BTreeMap iteration is sorted)
-        (HeapObject::LStruct(s1), HeapObject::LStruct(s2)) => s1.iter().cmp(s2.iter()),
+        (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
+            s1.iter().cmp(s2.iter())
+        }
 
         // Box — by contained value (borrow)
-        (HeapObject::LBox(c1, _), HeapObject::LBox(c2, _)) => {
+        (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
             let v1 = c1.borrow();
             let v2 = c2.borrow();
             v1.cmp(&*v2)
@@ -406,10 +435,12 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
         (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
 
         // LSet — element-wise lexicographic (BTreeSet iteration is sorted)
-        (HeapObject::LSet(s1), HeapObject::LSet(s2)) => s1.iter().cmp(s2.iter()),
+        (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => {
+            s1.iter().cmp(s2.iter())
+        }
 
         // LSetMut — element-wise lexicographic (borrow)
-        (HeapObject::LSetMut(s1), HeapObject::LSetMut(s2)) => {
+        (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
             let b1 = s1.borrow();
             let b2 = s2.borrow();
             b1.iter().cmp(b2.iter())

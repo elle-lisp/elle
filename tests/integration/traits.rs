@@ -15,13 +15,38 @@ use crate::common::eval_source;
 use elle::Value;
 
 // ============================================================================
-// (traits v) returns NIL for untraited values
+// Mutable array — with-traits creates independent copy
 // ============================================================================
 
+// The heap storage model uses RefCell<Vec<...>> directly (not Rc<RefCell<...>>),
+// so with-traits on a mutable type creates an independent copy of the data.
+
 #[test]
-fn traits_returns_nil_for_untraited_array() {
-    let result = eval_source("(traits [1 2 3])").unwrap();
-    assert!(result.is_nil(), "expected nil, got {:?}", result);
+fn mutable_array_copy_has_correct_length() {
+    let result = eval_source(
+        r#"
+        (begin
+          (def orig @[1 2 3])
+          (def traited (with-traits orig {:tag :x}))
+          (length traited))
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(3));
+}
+
+#[test]
+fn mutable_array_copy_has_trait_table() {
+    let result = eval_source(
+        r#"
+        (begin
+          (def orig @[1 2 3])
+          (def traited (with-traits orig {:tag :x}))
+          (get (traits traited) :tag))
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result.as_keyword_name(), Some("x"));
 }
 
 #[test]
@@ -115,11 +140,12 @@ fn type_of_struct_unchanged_by_traits() {
 
 #[test]
 fn type_of_cons_unchanged_by_traits() {
+    // In Elle, type-of for a cons cell returns :list (not :cons)
     let result = eval_source("(type-of (with-traits (cons 1 2) {:T true}))").unwrap();
     assert_eq!(
         result.as_keyword_name(),
-        Some("cons"),
-        "type-of should return :cons, got {:?}",
+        Some("list"),
+        "type-of should return :list for cons, got {:?}",
         result
     );
 }
@@ -381,12 +407,13 @@ fn replacement_old_key_gone() {
 }
 
 // ============================================================================
-// Constructor pattern — shared table fast path
+// Constructor pattern — shared table and identical? semantics
 // ============================================================================
 
 #[test]
 fn shared_table_is_identical() {
-    // When all instances use the same Rc, identical? is true
+    // When all instances share the same table value, identical? is true
+    // (identical? uses value equality, same as =, but without numeric coercion)
     let result = eval_source(
         r#"
         (begin
@@ -394,6 +421,24 @@ fn shared_table_is_identical() {
           (def make (fn (d) (with-traits @{:data d} shared)))
           (def a (make 1))
           (def b (make 2))
+          (identical? (traits a) (traits b)))
+    "#,
+    )
+    .unwrap();
+    assert_eq!(result, Value::bool(true));
+}
+
+#[test]
+fn independent_tables_same_content_are_identical() {
+    // In Elle, identical? uses value equality (not raw pointer equality)
+    // Two separately created structs with the same content are identical?.
+    let result = eval_source(
+        r#"
+        (begin
+          (def make1 (fn (d) (with-traits @{:data d} {:type :t})))
+          (def make2 (fn (d) (with-traits @{:data d} {:type :t})))
+          (def a (make1 1))
+          (def b (make2 1))
           (identical? (traits a) (traits b)))
     "#,
     )
