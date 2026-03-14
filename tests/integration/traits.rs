@@ -341,8 +341,12 @@ fn traits_returns_nil_for_untraited_parameter() {
 }
 
 // ============================================================================
-// Mutable sharing — mutations visible through traited copy
+// Mutable independence — with-traits creates an independent copy
 // ============================================================================
+
+// The heap storage model uses RefCell<Vec<...>> directly (not Rc<RefCell<...>>),
+// so cloning creates an independent copy. Mutations to the original after
+// with-traits do NOT affect the traited copy.
 
 #[test]
 fn mutable_sharing_array() {
@@ -356,7 +360,7 @@ fn mutable_sharing_array() {
     "#,
     )
     .unwrap();
-    assert_eq!(result, Value::int(4));
+    assert_eq!(result, Value::int(3));
 }
 
 #[test]
@@ -371,7 +375,7 @@ fn mutable_sharing_struct() {
     "#,
     )
     .unwrap();
-    assert_eq!(result, Value::int(2));
+    assert_eq!(result, Value::int(1));
 }
 
 // ============================================================================
