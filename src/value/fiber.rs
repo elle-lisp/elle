@@ -133,10 +133,6 @@ pub struct BytecodeFrame {
     pub ip: usize,
     /// Operand stack state (empty for signal suspension)
     pub stack: Vec<Value>,
-    /// Saved `active_allocator` pointer from the FiberHeap at suspension time.
-    /// Null only in test contexts before VM::new() is called. Restored on resume
-    /// via `restore_active_allocator()`.
-    pub active_allocator: *const bumpalo::Bump,
     /// Location map for mapping bytecode offsets to source locations
     pub location_map: Rc<LocationMap>,
 }

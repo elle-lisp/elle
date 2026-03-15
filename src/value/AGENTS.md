@@ -22,7 +22,7 @@ Runtime value representation using NaN-boxing.
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
 | `error.rs` | `error_val()` and `format_error()` helpers for error structs |
 | `ffi.rs` | `LibHandle` for C interop |
-| `fiber_heap.rs` | `FiberHeap` struct (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit`. Used by all fibers including root. |
+| `fiber_heap.rs` | `FiberHeap` struct (RootSlab + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership), thread-local routing, `region_enter`/`region_exit`. Used by all fibers including root. |
 | `shared_alloc.rs` | `SharedAllocator` for zero-copy inter-fiber value exchange |
 | `arena.rs` | Heap arena: `alloc`, `deref`, `ArenaMark`, `ArenaGuard`, mark/release lifecycle. All allocations go through `FiberHeap`. |
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope`, `LSet`, `LSetMut` (re-exports arena functions) |
@@ -39,7 +39,7 @@ Runtime value representation using NaN-boxing.
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
 | `WeakFiberHandle` | `fiber.rs` | Weak reference for parent back-pointers (avoids Rc cycles) |
-| `FiberHeap` | `fiber_heap.rs` | Per-fiber bump allocator (bumpalo) with destructor tracking and shared alloc ownership |
+| `FiberHeap` | `fiber_heap.rs` | Per-fiber slab allocator (RootSlab) with destructor tracking and shared alloc ownership |
 | `SharedAllocator` | `shared_alloc.rs` | Bump allocator for zero-copy inter-fiber value exchange |
 | `Parameter` | `heap.rs` | Dynamic binding with id and default value, looked up at runtime |
 | `LSet` | `heap.rs` | Immutable set (`BTreeSet<Value>`), no `RefCell` |
@@ -59,7 +59,7 @@ so that `fiber/parent` and `fiber/child` return identity-preserving values
 | `child_value` | `Option<Value>` | Cached NaN-boxed Value for child |
 
 These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
-| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack/active_allocator for resuming a suspended fiber |
+| `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
 | `Frame` | `fiber.rs` | Single call frame (closure + ip + base) |
 | `FiberStatus` | `fiber.rs` | Fiber lifecycle: New, Alive, Suspended, Dead, Error |
 | `SignalBits` | `fiber.rs` | u32 bitmask: SIG_OK(0), SIG_ERROR(1), SIG_YIELD(2), SIG_DEBUG(4), SIG_RESUME(8), SIG_FFI(16), SIG_PROPAGATE(32), SIG_CANCEL(64), SIG_HALT(256) |
@@ -227,7 +227,7 @@ Each `SendValue` variant for the 19 traitable types carries a
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
 | `fiber.rs` | ~540 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |
-| `fiber_heap.rs` | ~890 | FiberHeap (bumpalo + destructor tracking + scope marks + scope stats + active_allocator + shared alloc ownership/routing), thread-local routing, `needs_drop`, `region_enter`/`region_exit` |
+| `fiber_heap.rs` | ~890 | FiberHeap (RootSlab + destructor tracking + scope marks + scope stats + ActiveAlloc + shared alloc ownership/routing), thread-local routing, `needs_drop`, `region_enter`/`region_exit` |
 | `shared_alloc.rs` | ~180 | SharedAllocator (bump + destructor tracking), teardown, Drop impl |
 | `error.rs` | ~130 | error_val() and format_error() helpers |
 | `ffi.rs` | ~22 | LibHandle |

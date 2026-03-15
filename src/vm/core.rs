@@ -493,8 +493,6 @@ impl VM {
                                     env: exec.env,
                                     ip: exec.ip,
                                     stack: vec![],
-                                    active_allocator:
-                                        crate::value::fiber_heap::save_active_allocator(),
                                     location_map: exec.location_map,
                                 })]);
                         }

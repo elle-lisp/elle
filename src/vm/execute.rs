@@ -156,8 +156,8 @@ impl VM {
         closure_env: &Rc<Vec<Value>>,
         location_map: &Rc<LocationMap>,
     ) -> ExecResult {
-        // Save the caller's stack and active allocator (Package 4 plumbing;
-        // the allocator pointer is write-only until Package 5 activates it).
+        // Save the caller's stack and active allocator. The active allocator
+        // may change during execution (scope bumps pushed/popped); restore on return.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
         let saved_allocator = crate::value::fiber_heap::save_active_allocator();
 

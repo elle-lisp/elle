@@ -225,8 +225,6 @@ impl VM {
                                     env: closure_env.clone(),
                                     ip: *ip,
                                     stack: caller_stack,
-                                    active_allocator:
-                                        crate::value::fiber_heap::save_active_allocator(),
                                     location_map: location_map.clone(),
                                 });
                                 let mut frames = self.fiber.suspended.take().unwrap_or_default();
@@ -286,7 +284,6 @@ impl VM {
                         env: closure_env.clone(),
                         ip: *ip,
                         stack: caller_stack,
-                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         location_map: location_map.clone(),
                     });
 

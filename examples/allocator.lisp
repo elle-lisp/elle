@@ -23,8 +23,8 @@
 # ========================================
 
 (let ((stats (arena/stats)))
-  (assert-true (>= (get stats :count) 0) "arena count is non-negative")
-  (assert-true (>= (get stats :capacity) (get stats :count)) "capacity >= count"))
+  (assert-true (>= (get stats :object-count) 0) "arena object-count is non-negative")
+  (assert-true (>= (get stats :allocated-bytes) 0) "allocated-bytes is non-negative"))
 
 (let ((c (arena/count)))
   (assert-true (number? c) "arena/count returns a number")
@@ -197,12 +197,12 @@
 # 7. Runtime scope stats in a child fiber
 # ========================================
 
-# arena/scope-stats returns {:enters N :dtors-run N}.
+# arena/stats includes :scope-enter-count and :scope-dtor-count.
 # After issue-525, the root fiber has a FiberHeap, so scope stats are
-# tracked there too. :enters may be > 0 from stdlib scope regions.
+# tracked there too. :scope-enter-count may be > 0 from stdlib scope regions.
 
-(let ((stats (arena/scope-stats)))
-  (assert-true (>= (get stats :enters) 0) "root fiber scope enters is non-negative")
+(let ((stats (arena/stats)))
+  (assert-true (>= (get stats :scope-enter-count) 0) "root fiber scope-enter-count is non-negative")
   (display "  root fiber:   ") (print stats))
 
 # Non-yielding fibers (arity 1) use private FiberHeap where scope
@@ -216,9 +216,9 @@
 # Single scope allocation with an array (arrays need Drop).
 (let ((stats (run-in-fiber (fn []
                (let ((x @[1 2 3])) (length x))
-               (arena/scope-stats)))))
-  (assert-eq (get stats :enters) 1 "1 scope enter")
-  (assert-eq (get stats :dtors-run) 1 "1 destructor run")
+               (arena/stats)))))
+  (assert-eq (get stats :scope-enter-count) 1 "1 scope enter")
+  (assert-eq (get stats :scope-dtor-count) 1 "1 destructor run")
   (display "  single scope: ") (print stats))
 
 # 100 iterations — each scope allocates and frees an array.
@@ -229,9 +229,9 @@
                (while (< i 100)
                  (let ((x @[1 2 3])) (length x))
                  (assign i (+ i 1)))
-               (arena/scope-stats)))))
-  (assert-eq (get stats :enters) 101 "101 scope enters (100 inner let + 1 while block)")
-  (assert-eq (get stats :dtors-run) 100 "100 destructors run")
+               (arena/stats)))))
+  (assert-eq (get stats :scope-enter-count) 101 "101 scope enters (100 inner let + 1 while block)")
+  (assert-eq (get stats :scope-dtor-count) 100 "100 destructors run")
   (display "  100-iter loop: ") (print stats))
 
 
