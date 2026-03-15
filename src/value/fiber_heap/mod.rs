@@ -419,6 +419,39 @@ impl FiberHeap {
         self.peak_alloc_count
     }
 
+    /// Number of active scope bumps (scope depth).
+    pub(crate) fn scope_depth(&self) -> usize {
+        self.scope_bumps.len()
+    }
+
+    /// Number of objects in the destructor list.
+    pub(crate) fn dtor_count(&self) -> usize {
+        self.dtors.len()
+    }
+
+    /// Number of live slots in the root slab.
+    pub(crate) fn root_live(&self) -> usize {
+        self.root_slab.live_count()
+    }
+
+    /// Number of root allocations tracked for release().
+    pub(crate) fn root_alloc_count(&self) -> usize {
+        self.root_allocs.len()
+    }
+
+    /// Number of owned shared allocators.
+    pub(crate) fn shared_count(&self) -> usize {
+        self.owned_shared.len()
+    }
+
+    /// Active allocator discriminant as a keyword: `"slab"` or `"bump"`.
+    pub(crate) fn active_allocator_keyword(&self) -> &'static str {
+        match self.active_allocator {
+            ActiveAlloc::Slab => "slab",
+            ActiveAlloc::Bump(_) => "bump",
+        }
+    }
+
     /// Reset peak to current count. Returns previous peak.
     pub fn reset_peak(&mut self) -> usize {
         let prev = self.peak_alloc_count;

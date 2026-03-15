@@ -206,9 +206,9 @@ impl VM {
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     /// - (:"list-primitives" . _) — return sorted list of all primitive names
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
-    /// - (:"arena/stats" . _) — return struct with heap arena :count and :capacity
+    /// - (:"arena/stats" . nil) — return unified stats struct (12 fields) for current fiber
+    /// - (:"arena/stats" . fiber) — return unified stats struct for a suspended/dead fiber
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
-    /// - (:"arena/scope-stats" . _) — return scope allocation stats {:enters N :dtors-run N}
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -368,111 +368,95 @@ impl VM {
             "arena/stats" => {
                 use crate::value::heap::TableKey;
                 use std::collections::BTreeMap;
-                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
-                debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
-                let (count, capacity, limit_opt, bytes, peak) = unsafe {
-                    let h = &*heap_ptr;
-                    (
-                        h.len(),
-                        h.capacity(),
-                        h.object_limit(),
-                        h.allocated_bytes(),
-                        h.peak_alloc_count(),
-                    )
-                };
-                let mut fields = BTreeMap::new();
-                fields.insert(
-                    TableKey::Keyword("count".to_string()),
-                    Value::int(count as i64),
-                );
-                fields.insert(
-                    TableKey::Keyword("capacity".to_string()),
-                    Value::int(capacity as i64),
-                );
-                let limit_val = match limit_opt {
-                    Some(n) => Value::int(n as i64),
-                    None => Value::NIL,
-                };
-                fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
-                fields.insert(
-                    TableKey::Keyword("bytes".to_string()),
-                    Value::int(bytes as i64),
-                );
-                fields.insert(
-                    TableKey::Keyword("peak".to_string()),
-                    Value::int(peak as i64),
-                );
-                (SIG_OK, Value::struct_from(fields))
-            }
-            "arena/scope-stats" => {
-                use crate::value::fiber_heap::with_current_heap_mut;
-                use crate::value::heap::TableKey;
-                use std::collections::BTreeMap;
-                let (enters, dtors_run) =
-                    with_current_heap_mut(|heap| (heap.scope_enters(), heap.scope_dtors_run()))
-                        .unwrap_or((0, 0));
-                let mut fields = BTreeMap::new();
-                fields.insert(
-                    TableKey::Keyword("enters".to_string()),
-                    Value::int(enters as i64),
-                );
-                fields.insert(
-                    TableKey::Keyword("dtors-run".to_string()),
-                    Value::int(dtors_run as i64),
-                );
-                (SIG_OK, Value::struct_from(fields))
-            }
-            "arena/fiber-stats" => {
-                use crate::value::heap::TableKey;
-                use std::collections::BTreeMap;
-                let fiber_handle = match arg.as_fiber() {
-                    Some(h) => h,
-                    None => {
-                        return (
-                            SIG_ERROR,
-                            error_val(
-                                "type-error",
-                                format!(
-                                    "arena/fiber-stats: expected fiber, got {}",
-                                    arg.type_name()
-                                ),
-                            ),
-                        );
-                    }
-                };
-                match fiber_handle.try_with(|fiber| {
-                    let heap = &fiber.heap;
+
+                /// Build the unified stats struct from a FiberHeap reference.
+                /// Fields: :object-count, :peak-count, :allocated-bytes, :object-limit,
+                /// :scope-depth, :dtor-count, :root-live-count, :root-alloc-count,
+                /// :shared-count, :active-allocator, :scope-enter-count, :scope-dtor-count.
+                fn build_stats(heap: &crate::value::FiberHeap) -> Value {
                     let mut fields = BTreeMap::new();
                     fields.insert(
-                        TableKey::Keyword("count".to_string()),
+                        TableKey::Keyword("object-count".to_string()),
                         Value::int(heap.len() as i64),
                     );
                     fields.insert(
-                        TableKey::Keyword("bytes".to_string()),
-                        Value::int((heap.len() * 128) as i64),
-                    );
-                    fields.insert(
-                        TableKey::Keyword("peak".to_string()),
+                        TableKey::Keyword("peak-count".to_string()),
                         Value::int(heap.peak_alloc_count() as i64),
                     );
                     fields.insert(
-                        TableKey::Keyword("scope-enters".to_string()),
+                        TableKey::Keyword("allocated-bytes".to_string()),
+                        Value::int(heap.allocated_bytes() as i64),
+                    );
+                    let limit_val = match heap.object_limit() {
+                        Some(n) => Value::int(n as i64),
+                        None => Value::NIL,
+                    };
+                    fields.insert(TableKey::Keyword("object-limit".to_string()), limit_val);
+                    fields.insert(
+                        TableKey::Keyword("scope-depth".to_string()),
+                        Value::int(heap.scope_depth() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("dtor-count".to_string()),
+                        Value::int(heap.dtor_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("root-live-count".to_string()),
+                        Value::int(heap.root_live() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("root-alloc-count".to_string()),
+                        Value::int(heap.root_alloc_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("shared-count".to_string()),
+                        Value::int(heap.shared_count() as i64),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("active-allocator".to_string()),
+                        Value::keyword(heap.active_allocator_keyword()),
+                    );
+                    fields.insert(
+                        TableKey::Keyword("scope-enter-count".to_string()),
                         Value::int(heap.scope_enters() as i64),
                     );
                     fields.insert(
-                        TableKey::Keyword("dtors-run".to_string()),
+                        TableKey::Keyword("scope-dtor-count".to_string()),
                         Value::int(heap.scope_dtors_run() as i64),
                     );
                     Value::struct_from(fields)
-                }) {
-                    Some(v) => (SIG_OK, v),
-                    None => (
-                        SIG_ERROR,
-                        error_val(
-                            "error",
-                            "arena/fiber-stats: fiber is currently executing".to_string(),
+                }
+
+                if arg.is_nil() {
+                    // 0-arg path: read from the current fiber's heap.
+                    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                    debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
+                    let stats = unsafe { build_stats(&*heap_ptr) };
+                    (SIG_OK, stats)
+                } else {
+                    // 1-arg path: read from the provided fiber's heap.
+                    let fiber_handle = match arg.as_fiber() {
+                        Some(h) => h,
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "type-error",
+                                    format!("arena/stats: expected fiber, got {}", arg.type_name()),
+                                ),
+                            );
+                        }
+                    };
+                    match fiber_handle.try_with(|fiber| build_stats(&fiber.heap)) {
+                        Some(v) => (SIG_OK, v),
+                        None => (
+                            SIG_ERROR,
+                            error_val(
+                                "error",
+                                "arena/stats: fiber is currently executing".to_string(),
+                            ),
                         ),
-                    ),
+                    }
                 }
             }
             _ => (

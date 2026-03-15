@@ -27,47 +27,31 @@ pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(count as i64))
 }
 
-/// (arena/stats) — return heap arena statistics
+/// (arena/stats) or (arena/stats fiber) — return heap arena statistics
 ///
-/// Returns a struct with :count (live objects) and :capacity (vec capacity).
+/// 0 args → stats for the current (live) fiber.
+/// 1 arg  → stats for a suspended or dead fiber.
+/// Returns a struct with :object-count, :peak-count, :allocated-bytes, :object-limit, :scope-depth,
+/// :dtor-count, :root-live-count, :root-alloc-count, :shared-count, :active-allocator,
+/// :scope-enter-count, :scope-dtor-count.
 pub(crate) fn prim_arena_stats(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
+    match args.len() {
+        0 => (
+            SIG_QUERY,
+            Value::cons(Value::keyword("arena/stats"), Value::NIL),
+        ),
+        1 => (
+            SIG_QUERY,
+            Value::cons(Value::keyword("arena/stats"), args[0]),
+        ),
+        n => (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("arena/stats: expected 0 arguments, got {}", args.len()),
+                format!("arena/stats: expected 0 or 1 arguments, got {n}"),
             ),
-        );
+        ),
     }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("arena/stats"), Value::NIL),
-    )
-}
-
-/// (arena/scope-stats) — return scope allocation runtime statistics
-///
-/// Returns a struct with :enters (RegionEnter count) and :dtors-run
-/// (destructors run by RegionExit). Returns live scope stats for the
-/// current fiber (root or child).
-pub(crate) fn prim_scope_stats(args: &[Value]) -> (SignalBits, Value) {
-    if !args.is_empty() {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!(
-                    "arena/scope-stats: expected 0 arguments, got {}",
-                    args.len()
-                ),
-            ),
-        );
-    }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("arena/scope-stats"), Value::NIL),
-    )
 }
 
 /// (arena/set-object-limit n)
@@ -318,32 +302,15 @@ pub(crate) fn prim_arena_reset_peak(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(prev as i64))
 }
 
-/// (arena/fiber-stats fiber) — return heap stats for a suspended or dead fiber
-pub(crate) fn prim_arena_fiber_stats(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("arena/fiber-stats: expected 1 argument, got {}", args.len()),
-            ),
-        );
-    }
-    (
-        SIG_QUERY,
-        Value::cons(Value::keyword("arena/fiber-stats"), args[0]),
-    )
-}
-
 /// Declarative primitive definitions for arena operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/stats",
         func: prim_arena_stats,
         signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
-        arity: Arity::Exact(0),
-        doc: "Return heap arena statistics as a struct with :count and :capacity.",
-        params: &[],
+        arity: Arity::Range(0, 1),
+        doc: "Return heap arena statistics. With no args: stats for the current fiber. With a fiber arg: stats for a suspended/dead fiber. Returns a struct with :object-count, :peak-count, :allocated-bytes, :object-limit, :scope-depth, :dtor-count, :root-live-count, :root-alloc-count, :shared-count, :active-allocator, :scope-enter-count, :scope-dtor-count.",
+        params: &["fiber?"],
         category: "meta",
         example: "(arena/stats)",
         aliases: &["vm/arena", "arena-stats"],
@@ -358,17 +325,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(arena/count)",
         aliases: &["arena-count"],
-    },
-    PrimitiveDef {
-        name: "arena/scope-stats",
-        func: prim_scope_stats,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
-        arity: Arity::Exact(0),
-        doc: "Return scope allocation runtime stats as {:enters N :dtors-run N}. Returns live scope stats for the current fiber.",
-        params: &[],
-        category: "meta",
-        example: "(arena/scope-stats)",
-        aliases: &[],
     },
     PrimitiveDef {
         name: "arena/set-object-limit",
@@ -456,17 +412,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "meta",
         example: "(arena/reset-peak)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "arena/fiber-stats",
-        func: prim_arena_fiber_stats,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
-        arity: Arity::Exact(1),
-        doc: "Return heap stats for a suspended or dead fiber as a struct with :count, :bytes, :peak, :object-limit, :scope-enters, :dtors-run.",
-        params: &["fiber"],
-        category: "meta",
-        example: "(let* ([f (fiber/new (fn [] 42) 1)] [_ (fiber/resume f nil)]) (arena/fiber-stats f))",
         aliases: &[],
     },
 

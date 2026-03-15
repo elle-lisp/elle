@@ -118,7 +118,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum` |
 | `introspection.rs` | `closure?`, `jit?`, `silent?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
-| `arena.rs` | `arena/count`, `arena/stats`, `arena/scope-stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `arena/fiber-stats`, `environment` |
+| `arena.rs` | `arena/count`, `arena/stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `environment` |
 | `debug.rs` | `debug/print`, `debug/trace`, `debug/memory` |
 | `ffi.rs` | `resolve_type_desc`, `extract_pointer_addr` helpers; FFI tests |
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |

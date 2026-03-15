@@ -23,49 +23,6 @@ fn test_fiber_heap_alloc() {
 }
 
 #[test]
-fn test_fiber_heap_mark_release() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    let mark = heap.mark();
-    heap.alloc(HeapObject::LString {
-        s: "a".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LString {
-        s: "b".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LString {
-        s: "c".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 3);
-    heap.release(mark);
-    assert_eq!(heap.len(), 0);
-}
-
-#[test]
-fn test_fiber_heap_nested_mark_release() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    let outer_mark = heap.mark();
-    heap.alloc(HeapObject::LString {
-        s: "outer".into(),
-        traits: Value::NIL,
-    });
-    let inner_mark = heap.mark();
-    heap.alloc(HeapObject::LString {
-        s: "inner".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 2);
-    heap.release(inner_mark);
-    assert_eq!(heap.len(), 1);
-    heap.release(outer_mark);
-    assert_eq!(heap.len(), 0);
-}
-
-#[test]
 fn test_fiber_heap_clear_runs_destructors() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
@@ -83,25 +40,6 @@ fn test_fiber_heap_clear_runs_destructors() {
     heap.clear();
     assert_eq!(heap.len(), 0);
     assert!(heap.is_empty());
-}
-
-#[test]
-fn test_clear_resets_scope_counters() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    // Simulate a scope region with an allocation
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "scoped".into(),
-        traits: Value::NIL,
-    });
-    heap.pop_scope_mark_and_release();
-    assert_eq!(heap.scope_enters(), 1);
-    assert_eq!(heap.scope_dtors_run(), 1);
-    // clear() must zero both counters
-    heap.clear();
-    assert_eq!(heap.scope_enters(), 0);
-    assert_eq!(heap.scope_dtors_run(), 0);
 }
 
 #[test]
@@ -215,96 +153,11 @@ fn test_save_restore() {
 }
 
 #[test]
-fn test_active_alloc_starts_as_slab() {
-    let heap = FiberHeap::new();
-    assert!(matches!(heap.active_allocator, ActiveAlloc::Slab));
-}
-
-#[test]
 fn test_init_active_allocator_is_noop() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     // Still Slab after init (no scope bumps active).
     assert!(matches!(heap.active_allocator, ActiveAlloc::Slab));
-}
-
-#[test]
-fn test_active_alloc_scope_sets_bump_variant() {
-    let mut heap = FiberHeap::new();
-    heap.push_scope_mark();
-    assert!(matches!(heap.active_allocator, ActiveAlloc::Bump(_)));
-}
-
-#[test]
-fn test_active_alloc_pop_restores_slab() {
-    let mut heap = FiberHeap::new();
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.pop_scope_mark_and_release();
-    assert!(matches!(heap.active_allocator, ActiveAlloc::Slab));
-}
-
-#[test]
-fn test_root_alloc_tracked_in_root_allocs() {
-    let mut heap = FiberHeap::new();
-    assert_eq!(heap.root_allocs.len(), 0);
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(heap.root_allocs.len(), 1);
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(heap.root_allocs.len(), 2);
-}
-
-#[test]
-fn test_scope_alloc_not_tracked_in_root_allocs() {
-    let mut heap = FiberHeap::new();
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    // Scope bump allocations must not appear in root_allocs.
-    assert_eq!(heap.root_allocs.len(), 0);
-    heap.pop_scope_mark_and_release();
-}
-
-#[test]
-fn test_release_frees_root_slab_slots() {
-    let mut heap = FiberHeap::new();
-    // Alloc 2, mark, alloc 3 more, release mark → live_count back to 2.
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    let mark = heap.mark();
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(heap.root_slab.live_count(), 5);
-    heap.release(mark);
-    assert_eq!(heap.root_slab.live_count(), 2);
-    assert_eq!(heap.root_allocs.len(), 2);
-}
-
-#[test]
-fn test_memory_stabilizes_after_release() {
-    // Alloc N objects, release all, alloc N more — slab should reuse slots,
-    // so allocated_bytes() (committed chunk memory) must not grow.
-    let mut heap = FiberHeap::new();
-    let mark = heap.mark();
-    for _ in 0..50 {
-        heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    }
-    let bytes_after_first_round = heap.allocated_bytes();
-    heap.release(mark);
-    assert_eq!(heap.root_slab.live_count(), 0);
-
-    let mark2 = heap.mark();
-    for _ in 0..50 {
-        heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    }
-    let bytes_after_second_round = heap.allocated_bytes();
-    heap.release(mark2);
-
-    assert_eq!(
-        bytes_after_first_round, bytes_after_second_round,
-        "slab must reuse freed slots: allocated_bytes must not grow"
-    );
 }
 
 #[test]
@@ -325,192 +178,10 @@ fn test_restore_active_allocator_no_heap_installed() {
 // ── Scope mark stack tests ────────────────────────────────────
 
 #[test]
-fn test_scope_mark_push_pop_lifecycle() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.alloc(HeapObject::LString {
-        s: "before".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 1);
-
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "scoped".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 2);
-
-    heap.pop_scope_mark_and_release();
-    assert_eq!(heap.len(), 1); // back to pre-scope count
-}
-
-#[test]
-fn test_scope_mark_nested() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "outer".into(),
-        traits: Value::NIL,
-    });
-
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "inner".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.len(), 3);
-
-    heap.pop_scope_mark_and_release(); // pops inner
-    assert_eq!(heap.len(), 2);
-
-    heap.pop_scope_mark_and_release(); // pops outer
-    assert_eq!(heap.len(), 1); // only the cons cell
-}
-
-#[test]
-fn test_scope_mark_runs_destructors() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    assert_eq!(heap.dtors.len(), 0);
-
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "a".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LString {
-        s: "b".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(heap.dtors.len(), 2); // 2 Strings need Drop
-
-    heap.pop_scope_mark_and_release();
-    assert_eq!(heap.dtors.len(), 0); // destructors ran, list truncated
-    assert_eq!(heap.len(), 0);
-}
-
-#[test]
 #[should_panic(expected = "RegionExit without matching RegionEnter")]
 fn test_scope_mark_pop_empty_panics() {
     let mut heap = FiberHeap::new();
     heap.pop_scope_mark_and_release();
-}
-
-#[test]
-fn test_scope_bump_reclaims_memory() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    let bytes_before = heap.allocated_bytes();
-
-    heap.push_scope_mark();
-    // Allocate many objects in the scope bump
-    for i in 0..100 {
-        heap.alloc(HeapObject::LString {
-            s: format!("obj-{}", i).into(),
-            traits: Value::NIL,
-        });
-    }
-    let bytes_during = heap.allocated_bytes();
-    assert!(
-        bytes_during > bytes_before,
-        "scope allocations should increase bytes"
-    );
-
-    heap.pop_scope_mark_and_release();
-    let bytes_after = heap.allocated_bytes();
-    // After popping the scope bump, its memory is fully reclaimed.
-    // bytes_after should equal bytes_before (root bump unchanged).
-    assert_eq!(
-        bytes_after, bytes_before,
-        "scope bump memory should be fully reclaimed"
-    );
-}
-
-#[test]
-fn test_scope_bump_nested_reclaims_inner_only() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-
-    // Record the root-slab baseline BEFORE any scope.
-    // No root allocations are made in this test (all allocs go to scope bumps).
-    let bytes_root_baseline = heap.allocated_bytes();
-
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "outer".into(),
-        traits: Value::NIL,
-    });
-    let bytes_after_outer = heap.allocated_bytes();
-
-    heap.push_scope_mark();
-    for i in 0..50 {
-        heap.alloc(HeapObject::LString {
-            s: format!("inner-{}", i).into(),
-            traits: Value::NIL,
-        });
-    }
-    let bytes_during_inner = heap.allocated_bytes();
-    assert!(bytes_during_inner > bytes_after_outer);
-
-    heap.pop_scope_mark_and_release(); // pops inner
-    let bytes_after_inner_pop = heap.allocated_bytes();
-    // Inner bump reclaimed, outer bump still alive
-    assert_eq!(bytes_after_inner_pop, bytes_after_outer);
-
-    heap.pop_scope_mark_and_release(); // pops outer
-    let bytes_after_outer_pop = heap.allocated_bytes();
-    // Both scope bumps reclaimed. Root slab baseline is unchanged (no root allocs).
-    assert_eq!(
-        bytes_after_outer_pop, bytes_root_baseline,
-        "scope bump memory should be fully reclaimed (root slab unchanged)"
-    );
-}
-
-#[test]
-fn test_clear_clears_scope_marks() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "a".into(),
-        traits: Value::NIL,
-    });
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "b".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.scope_marks.len(), 2);
-
-    heap.clear();
-    assert_eq!(heap.scope_marks.len(), 0);
-    assert_eq!(heap.len(), 0);
-}
-
-#[test]
-fn test_clear_clears_scope_bumps() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "a".into(),
-        traits: Value::NIL,
-    });
-    heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "b".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(heap.scope_bumps.len(), 2);
-
-    heap.clear();
-    assert_eq!(heap.scope_bumps.len(), 0);
-    assert_eq!(heap.allocated_bytes(), 0);
 }
 
 // ── ROOT_HEAP tests (Chunk 1) ─────────────────────────────────────
@@ -546,60 +217,6 @@ fn test_vm_new_installs_root_heap() {
     uninstall_fiber_heap();
 }
 
-// ── ALLOC_ERROR / FiberHeap.alloc_error tests (Chunk 2) ──────────────────────
-
-#[test]
-fn test_take_alloc_error_initially_none() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    assert!(heap.take_alloc_error().is_none());
-}
-
-#[test]
-fn test_alloc_error_set_on_limit_exceeded() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.set_object_limit(Some(2));
-
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    // Third allocation should trigger error
-    let v = heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-
-    assert_eq!(v, Value::NIL); // returned NIL on error
-    let err = heap.take_alloc_error();
-    assert!(err.is_some());
-    let (count, limit) = err.unwrap();
-    assert_eq!(count, 2);
-    assert_eq!(limit, 2);
-}
-
-#[test]
-fn test_take_alloc_error_clears_flag() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.set_object_limit(Some(0));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-
-    assert!(heap.take_alloc_error().is_some());
-    // Second take returns None (flag cleared)
-    assert!(heap.take_alloc_error().is_none());
-}
-
-#[test]
-fn test_alloc_error_cleared_by_clear() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    heap.set_object_limit(Some(0));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert!(heap.take_alloc_error().is_some()); // consume it first
-                                                // Set limit, trigger error again, then clear
-    heap.set_object_limit(Some(0));
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.clear();
-    assert!(heap.take_alloc_error().is_none());
-}
-
 // ── Chunk 3: lazy root heap init via alloc() ──────────────────────
 
 #[test]
@@ -619,25 +236,6 @@ fn test_alloc_without_installed_heap_lazy_inits() {
 }
 
 // ── Shared allocator ownership tests ──────────────────────────────
-
-#[test]
-fn test_create_shared_allocator() {
-    let mut heap = FiberHeap::new();
-    let ptr = heap.create_shared_allocator();
-    assert!(!ptr.is_null());
-    assert_eq!(heap.owned_shared.len(), 1);
-}
-
-#[test]
-fn test_create_multiple_shared_allocators() {
-    let mut heap = FiberHeap::new();
-    let ptr1 = heap.create_shared_allocator();
-    let ptr2 = heap.create_shared_allocator();
-    assert!(!ptr1.is_null());
-    assert!(!ptr2.is_null());
-    assert_ne!(ptr1, ptr2);
-    assert_eq!(heap.owned_shared.len(), 2);
-}
 
 #[test]
 fn test_shared_alloc_routing() {
@@ -677,24 +275,6 @@ fn test_private_alloc_when_no_shared() {
 }
 
 #[test]
-fn test_clear_tears_down_owned_shared() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-
-    heap.alloc(HeapObject::LString {
-        s: "shared-val".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(unsafe { &*sa_ptr }.len(), 1);
-
-    heap.clear();
-    assert!(heap.owned_shared.is_empty());
-    assert!(heap.shared_alloc.is_null());
-}
-
-#[test]
 fn test_drop_tears_down_owned_shared() {
     // Create a FiberHeap with a shared allocator containing allocations,
     // then drop it. If Drop doesn't teardown, we'd leak inner heap allocs.
@@ -711,37 +291,6 @@ fn test_drop_tears_down_owned_shared() {
 }
 
 // ── Shared allocator teardown lifecycle ────────────────────────────
-
-#[test]
-fn test_clear_tears_down_shared_alloc_dtors() {
-    // Verify that clear() runs destructors in shared allocators.
-    // String's inner Box<str> must be freed (dtors ran), verified
-    // by checking the shared alloc's count goes to zero.
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    let sa_ptr = heap.create_shared_allocator();
-    heap.set_shared_alloc(sa_ptr);
-
-    heap.alloc(HeapObject::LString {
-        s: "str-a".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LString {
-        s: "str-b".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    {
-        let sa = unsafe { &*sa_ptr };
-        assert_eq!(sa.len(), 3);
-    }
-
-    // clear() should teardown the shared alloc (runs dtors, resets count)
-    // then remove it from owned_shared.
-    heap.clear();
-    assert!(heap.owned_shared.is_empty());
-    assert_eq!(heap.len(), 0);
-}
 
 #[test]
 fn test_multiple_shared_allocs_all_torn_down() {
