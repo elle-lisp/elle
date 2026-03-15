@@ -8,107 +8,107 @@
       :assert-err-kind assert-err-kind}
   ((import-file "tests/elle/assert.lisp")))
 
-# ── sys/exec ──────────────────────────────────────────────────────────────────
+# ── process/exec ──────────────────────────────────────────────────────────────
 
-# sys/exec: basic struct shape
-(let [[proc (ev/spawn (fn [] (sys/exec "echo" ["hello"])))]]
-  (assert-true (integer? (get proc :pid))          "sys/exec: :pid is integer")
-  (assert-true (port? (get proc :stdout))          "sys/exec: :stdout is port")
-  (assert-true (port? (get proc :stderr))          "sys/exec: :stderr is port")
-  (assert-true (port? (get proc :stdin))           "sys/exec: :stdin is port")
-  (assert-true (not (nil? (get proc :process)))    "sys/exec: :process is set")
-  (assert-true (> (get proc :pid) 0)               "sys/exec: pid > 0")
-  (ev/spawn (fn [] (sys/wait proc))))
+# process/exec: basic struct shape
+(let [[proc (ev/spawn (fn [] (process/exec "echo" ["hello"])))]]
+  (assert-true (integer? (get proc :pid))          "process/exec: :pid is integer")
+  (assert-true (port? (get proc :stdout))          "process/exec: :stdout is port")
+  (assert-true (port? (get proc :stderr))          "process/exec: :stderr is port")
+  (assert-true (port? (get proc :stdin))           "process/exec: :stdin is port")
+  (assert-true (not (nil? (get proc :process)))    "process/exec: :process is set")
+  (assert-true (> (get proc :pid) 0)               "process/exec: pid > 0")
+  (ev/spawn (fn [] (process/wait proc))))
 
-# sys/exec: stdout is binary by default (bytes, not string)
+# process/exec: stdout is binary by default (bytes, not string)
 (let [[raw (ev/spawn (fn []
-              (let [[proc (sys/exec "echo" ["hello"])]]
+              (let [[proc (process/exec "echo" ["hello"])]]
                 (stream/read-all (get proc :stdout)))))]]
-  (assert-true (bytes? raw) "sys/exec: stdout is bytes"))
+  (assert-true (bytes? raw) "process/exec: stdout is bytes"))
 
-# sys/exec: decode bytes to string
+# process/exec: decode bytes to string
 (assert-eq
   (ev/spawn (fn []
-    (let [[proc (sys/exec "echo" ["hello"])]]
+    (let [[proc (process/exec "echo" ["hello"])]]
       (string (stream/read-all (get proc :stdout))))))
   "hello\n"
-  "sys/exec: stdout bytes decode to string")
+  "process/exec: stdout bytes decode to string")
 
-# sys/exec: binary output (head -c 4 /dev/urandom)
+# process/exec: binary output (head -c 4 /dev/urandom)
 (let [[raw (ev/spawn (fn []
-              (let [[proc (sys/exec "head" ["-c" "4" "/dev/urandom"])]]
+              (let [[proc (process/exec "head" ["-c" "4" "/dev/urandom"])]]
                 (stream/read-all (get proc :stdout)))))]]
-  (assert-true (bytes? raw) "sys/exec: binary output is bytes")
-  (assert-eq (length raw) 4 "sys/exec: binary output is 4 bytes"))
+  (assert-true (bytes? raw) "process/exec: binary output is bytes")
+  (assert-eq (length raw) 4 "process/exec: binary output is 4 bytes"))
 
-# sys/exec: stdin :null — no stdin pipe
-(let [[proc (ev/spawn (fn [] (sys/exec "echo" ["hi"] {:stdin :null})))]]
-  (assert-true (nil? (get proc :stdin)) "sys/exec :stdin :null: stdin is nil")
-  (ev/spawn (fn [] (sys/wait proc))))
+# process/exec: stdin :null — no stdin pipe
+(let [[proc (ev/spawn (fn [] (process/exec "echo" ["hi"] {:stdin :null})))]]
+  (assert-true (nil? (get proc :stdin)) "process/exec :stdin :null: stdin is nil")
+  (ev/spawn (fn [] (process/wait proc))))
 
-# ── sys/wait ──────────────────────────────────────────────────────────────────
+# ── process/wait ──────────────────────────────────────────────────────────────
 
-# sys/wait: exit 0
+# process/wait: exit 0
 (assert-eq
-  (ev/spawn (fn [] (sys/wait (sys/exec "true" []))))
+  (ev/spawn (fn [] (process/wait (process/exec "true" []))))
   0
-  "sys/wait: /bin/true exits 0")
+  "process/wait: /bin/true exits 0")
 
-# sys/wait: exit 1
+# process/wait: exit 1
 (assert-eq
-  (ev/spawn (fn [] (sys/wait (sys/exec "false" []))))
+  (ev/spawn (fn [] (process/wait (process/exec "false" []))))
   1
-  "sys/wait: /bin/false exits 1")
+  "process/wait: /bin/false exits 1")
 
-# sys/wait: with direct handle (not struct)
+# process/wait: with direct handle (not struct)
 (assert-eq
   (ev/spawn (fn []
-    (let [[proc (sys/exec "true" [])]]
-      (sys/wait (get proc :process)))))
+    (let [[proc (process/exec "true" [])]]
+      (process/wait (get proc :process)))))
   0
-  "sys/wait: works with direct process handle")
+  "process/wait: works with direct process handle")
 
 # ── process/pid ───────────────────────────────────────────────────────────────
 
 # process/pid: returns positive integer matching :pid field
 (ev/spawn (fn []
-  (let [[proc (sys/exec "sleep" ["10"])]]
+  (let [[proc (process/exec "sleep" ["10"])]]
     (assert-true (> (process/pid proc) 0)
                  "process/pid: returns positive integer")
     (assert-eq (process/pid proc) (get proc :pid)
                "process/pid: matches :pid field")
-    (sys/kill proc 15)
-    (sys/wait proc))))
+    (process/kill proc 15)
+    (process/wait proc))))
 
-# ── sys/kill ──────────────────────────────────────────────────────────────────
+# ── process/kill ──────────────────────────────────────────────────────────────
 
-# sys/kill: send SIGTERM, wait, exit is nonzero
+# process/kill: send SIGTERM, wait, exit is nonzero
 (let [[exit (ev/spawn (fn []
-               (let [[proc (sys/exec "sleep" ["60"])]]
-                 (sys/kill proc 15)
-                 (sys/wait proc))))]]
-  (assert-true (not (= exit 0)) "sys/kill: killed process has nonzero exit"))
+               (let [[proc (process/exec "sleep" ["60"])]]
+                 (process/kill proc 15)
+                 (process/wait proc))))]]
+  (assert-true (not (= exit 0)) "process/kill: killed process has nonzero exit"))
 
-# sys/kill: with explicit signal number 9 (SIGKILL)
+# process/kill: with explicit signal number 9 (SIGKILL)
 (let [[exit (ev/spawn (fn []
-               (let [[proc (sys/exec "sleep" ["60"])]]
-                 (sys/kill proc 9)
-                 (sys/wait proc))))]]
-  (assert-true (not (= exit 0)) "sys/kill SIGKILL: nonzero exit"))
+               (let [[proc (process/exec "sleep" ["60"])]]
+                 (process/kill proc 9)
+                 (process/wait proc))))]]
+  (assert-true (not (= exit 0)) "process/kill SIGKILL: nonzero exit"))
 
-# sys/kill: keyword :sigterm terminates the process
+# process/kill: keyword :sigterm terminates the process
 (let [[exit (ev/spawn (fn []
-               (let [[proc (sys/exec "sleep" ["60"])]]
-                 (sys/kill proc :sigterm)
-                 (sys/wait proc))))]]
-  (assert-true (not (= exit 0)) "sys/kill :sigterm: nonzero exit"))
+               (let [[proc (process/exec "sleep" ["60"])]]
+                 (process/kill proc :sigterm)
+                 (process/wait proc))))]]
+  (assert-true (not (= exit 0)) "process/kill :sigterm: nonzero exit"))
 
 # ── port/lines with subprocess ────────────────────────────────────────────────
 
 # port/lines on subprocess stdout
 (assert-eq
   (ev/spawn (fn []
-    (let [[proc (sys/exec "printf" ["a\\nb\\nc\\n"])]]
+    (let [[proc (process/exec "printf" ["a\\nb\\nc\\n"])]]
       (stream/collect (port/lines (get proc :stdout))))))
   (list "a" "b" "c")
   "port/lines on subprocess stdout")
@@ -118,46 +118,46 @@
 # Write to subprocess stdin, read from stdout
 (assert-eq
   (ev/spawn (fn []
-    (let [[proc (sys/exec "cat" [])]]
+    (let [[proc (process/exec "cat" [])]]
       (stream/write (get proc :stdin) "hello from stdin")
       (port/close (get proc :stdin))
       (string (stream/read-all (get proc :stdout))))))
   "hello from stdin"
   "write stdin -> read stdout via cat")
 
-# ── sys/system ────────────────────────────────────────────────────────────────
+# ── process/system ────────────────────────────────────────────────────────────
 
-# sys/system: basic success — exit code
+# process/system: basic success — exit code
 (assert-eq
-  (ev/spawn (fn [] (get (sys/system "echo" ["hello"]) :exit)))
+  (ev/spawn (fn [] (get (process/system "echo" ["hello"]) :exit)))
   0
-  "sys/system: echo exits 0")
+  "process/system: echo exits 0")
 
-# sys/system: stdout captured
+# process/system: stdout captured
 (assert-eq
-  (ev/spawn (fn [] (get (sys/system "echo" ["hello"]) :stdout)))
+  (ev/spawn (fn [] (get (process/system "echo" ["hello"]) :stdout)))
   "hello\n"
-  "sys/system: echo stdout")
+  "process/system: echo stdout")
 
-# sys/system: stderr captured and empty
+# process/system: stderr captured and empty
 (assert-eq
-  (ev/spawn (fn [] (get (sys/system "echo" ["hello"]) :stderr)))
+  (ev/spawn (fn [] (get (process/system "echo" ["hello"]) :stderr)))
   ""
-  "sys/system: echo stderr is empty")
+  "process/system: echo stderr is empty")
 
-# sys/system: nonzero exit
-(let [[result (ev/spawn (fn [] (sys/system "false" [])))]]
+# process/system: nonzero exit
+(let [[result (ev/spawn (fn [] (process/system "false" [])))]]
   (assert-true (not (= (get result :exit) 0))
-               "sys/system: false has nonzero exit"))
+               "process/system: false has nonzero exit"))
 
-# sys/system: result struct shape
-(let [[result (ev/spawn (fn [] (sys/system "echo" ["test"])))]]
-  (assert-true (integer? (get result :exit))   "sys/system: :exit is integer")
-  (assert-true (string?  (get result :stdout)) "sys/system: :stdout is string")
-  (assert-true (string?  (get result :stderr)) "sys/system: :stderr is string"))
+# process/system: result struct shape
+(let [[result (ev/spawn (fn [] (process/system "echo" ["test"])))]]
+  (assert-true (integer? (get result :exit))   "process/system: :exit is integer")
+  (assert-true (string?  (get result :stdout)) "process/system: :stdout is string")
+  (assert-true (string?  (get result :stderr)) "process/system: :stderr is string"))
 
-# sys/system: concurrent subprocesses
-(let [[f1 (ev/spawn (fn [] (get (sys/system "echo" ["one"]) :stdout)))]
-      [f2 (ev/spawn (fn [] (get (sys/system "echo" ["two"]) :stdout)))]]
-  (assert-eq f1 "one\n" "concurrent sys/system: fiber 1")
-  (assert-eq f2 "two\n" "concurrent sys/system: fiber 2"))
+# process/system: concurrent subprocesses
+(let [[f1 (ev/spawn (fn [] (get (process/system "echo" ["one"]) :stdout)))]
+      [f2 (ev/spawn (fn [] (get (process/system "echo" ["two"]) :stdout)))]]
+  (assert-eq f1 "one\n" "concurrent process/system: fiber 1")
+  (assert-eq f2 "two\n" "concurrent process/system: fiber 2"))

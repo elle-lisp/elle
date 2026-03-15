@@ -46,8 +46,8 @@ bytecode. Error messages include file:line:col information.
 | `io` | I/O request types, backends, timeout handling; includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle` for subprocess lifecycle |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, `traits`, `sys/exec`, `sys/wait`, `sys/kill`, and `process/pid` |
-| `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) and subprocess convenience (`sys/system`) |
+| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, `traits`, `process/exec`, `process/wait`, `process/kill`, and `process/pid` |
+| `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) and subprocess convenience (`process/system`) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift |
 | `formatter` | Code formatting for Elle source |
@@ -200,11 +200,11 @@ When in doubt, run the tests.
 
 ## Standard Library Functions
 
-### sys/system
+### process/system
 
 **Location:** `stdlib.lisp`
 
-**Signature:** `(sys/system program args [opts])`
+**Signature:** `(process/system program args [opts])`
 
 **Purpose:** Run a command to completion, capturing stdout and stderr as text. Returns `{:exit int :stdout string :stderr string}`.
 
@@ -217,13 +217,13 @@ When in doubt, run the tests.
 
 **Examples:**
 ```lisp
-(sys/system "echo" ["hello"])
+(process/system "echo" ["hello"])
 #=> {:exit 0 :stdout "hello\n" :stderr ""}
 
-(sys/system "false" [])
+(process/system "false" [])
 #=> {:exit 1 :stdout "" :stderr ""}
 
-(sys/system "ls" ["-la"] {:cwd "/tmp"})
+(process/system "ls" ["-la"] {:cwd "/tmp"})
 #=> {:exit 0 :stdout "..." :stderr ""}
 ```
 
@@ -231,13 +231,13 @@ When in doubt, run the tests.
 
 | Condition | Error kind | Message |
 |-----------|-----------|---------|
-| Program not found | `exec-error` | `"sys/exec: {program}: {error}"` |
+| Program not found | `exec-error` | `"process/exec: {program}: {error}"` |
 | Invalid UTF-8 in output | `encoding-error` | `"invalid UTF-8 at byte {offset}"` |
-| I/O error | `exec-error` | `"sys/wait: {error}"` |
+| I/O error | `exec-error` | `"process/wait: {error}"` |
 
 **Invariants:**
 
-1. **Deadlock prevention.** Pipes are read before `sys/wait` to ensure neither side blocks on buffer overflow.
+1. **Deadlock prevention.** Pipes are read before `process/wait` to ensure neither side blocks on buffer overflow.
 2. **Text decoding.** Output is decoded as strict UTF-8; invalid UTF-8 propagates an error.
 3. **Exit code preservation.** The returned `:exit` code matches the subprocess exit status (0 = success, nonzero = failure).
 4. **Subprocess cleanup.** The process is reaped on exit; no zombies are left behind.

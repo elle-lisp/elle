@@ -91,7 +91,7 @@ type ExecOpts = (
     StdioDisposition,
 );
 
-/// Parse the optional opts struct for sys/exec.
+/// Parse the optional opts struct for process/exec.
 /// Returns (env, cwd, stdin, stdout, stderr) or an error tuple.
 fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
     let fields = match opts.as_struct() {
@@ -101,7 +101,10 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("sys/exec: opts must be struct, got {}", opts.type_name()),
+                    format!(
+                        "process/exec: opts must be struct, got {}",
+                        opts.type_name()
+                    ),
                 ),
             ))
         }
@@ -116,7 +119,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
                 None => {
                     return Err((
                         SIG_ERROR,
-                        error_val("type-error", "sys/exec: :env must be a struct"),
+                        error_val("type-error", "process/exec: :env must be a struct"),
                     ))
                 }
             };
@@ -130,7 +133,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
                             SIG_ERROR,
                             error_val(
                                 "type-error",
-                                "sys/exec: :env keys must be keywords or strings",
+                                "process/exec: :env keys must be keywords or strings",
                             ),
                         ))
                     }
@@ -140,7 +143,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
                     None => {
                         return Err((
                             SIG_ERROR,
-                            error_val("type-error", "sys/exec: :env values must be strings"),
+                            error_val("type-error", "process/exec: :env values must be strings"),
                         ))
                     }
                 };
@@ -159,7 +162,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
             None => {
                 return Err((
                     SIG_ERROR,
-                    error_val("type-error", "sys/exec: :cwd must be a string"),
+                    error_val("type-error", "process/exec: :cwd must be a string"),
                 ))
             }
         }),
@@ -176,7 +179,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("sys/exec: {} must be :pipe, :inherit, or :null", field),
+                    format!("process/exec: {} must be :pipe, :inherit, or :null", field),
                 ),
             )),
         }
@@ -234,17 +237,17 @@ fn extract_process_handle(val: &Value, fn_name: &str) -> Result<Value, (SignalBi
 
 /// Spawn a subprocess, returning an IoRequest that the scheduler will execute.
 ///
-/// (sys/exec program args)
-/// (sys/exec program args opts)
+/// (process/exec program args)
+/// (process/exec program args opts)
 ///
 /// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
-fn prim_sys_exec(args: &[Value]) -> (SignalBits, Value) {
+fn prim_process_exec(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 || args.len() > 3 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("sys/exec: expected 2-3 arguments, got {}", args.len()),
+                format!("process/exec: expected 2-3 arguments, got {}", args.len()),
             ),
         );
     }
@@ -257,7 +260,7 @@ fn prim_sys_exec(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "sys/exec: program must be string, got {}",
+                        "process/exec: program must be string, got {}",
                         args[0].type_name()
                     ),
                 ),
@@ -272,7 +275,10 @@ fn prim_sys_exec(args: &[Value]) -> (SignalBits, Value) {
                 SIG_ERROR,
                 error_val(
                     "type-error",
-                    format!("sys/exec: args must be array, got {}", args[1].type_name()),
+                    format!(
+                        "process/exec: args must be array, got {}",
+                        args[1].type_name()
+                    ),
                 ),
             )
         }
@@ -286,7 +292,7 @@ fn prim_sys_exec(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("sys/exec: args must be strings, got {}", v.type_name()),
+                        format!("process/exec: args must be strings, got {}", v.type_name()),
                     ),
                 )
             }
@@ -322,20 +328,20 @@ fn prim_sys_exec(args: &[Value]) -> (SignalBits, Value) {
 
 /// Wait for a subprocess to exit, returning an IoRequest that the scheduler executes.
 ///
-/// (sys/wait handle-or-struct) → exit-code
+/// (process/wait handle-or-struct) → exit-code
 ///
 /// Returns (SIG_EXEC | SIG_IO | SIG_YIELD, io-request).
-fn prim_sys_wait(args: &[Value]) -> (SignalBits, Value) {
+fn prim_process_wait(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("sys/wait: expected 1 argument, got {}", args.len()),
+                format!("process/wait: expected 1 argument, got {}", args.len()),
             ),
         );
     }
-    let handle_val = match extract_process_handle(&args[0], "sys/wait") {
+    let handle_val = match extract_process_handle(&args[0], "process/wait") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -343,7 +349,7 @@ fn prim_sys_wait(args: &[Value]) -> (SignalBits, Value) {
     if handle_val.as_external::<ProcessHandle>().is_none() {
         return (
             SIG_ERROR,
-            error_val("type-error", "sys/wait: invalid process handle"),
+            error_val("type-error", "process/wait: invalid process handle"),
         );
     }
     let request = IoRequest::new(IoOp::ProcessWait, handle_val);
@@ -375,22 +381,22 @@ fn keyword_to_signal(name: &str) -> Option<libc::c_int> {
 
 /// Send a signal to a subprocess.
 ///
-/// (sys/kill handle-or-struct)           ; sends SIGTERM
-/// (sys/kill handle-or-struct 15)        ; integer signal number
-/// (sys/kill handle-or-struct :sigterm)  ; keyword signal name
+/// (process/kill handle-or-struct)           ; sends SIGTERM
+/// (process/kill handle-or-struct 15)        ; integer signal number
+/// (process/kill handle-or-struct :sigterm)  ; keyword signal name
 ///
 /// Synchronous — returns (SIG_OK, nil) on success, (SIG_ERROR, error) on failure.
-fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
+fn prim_process_kill(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("sys/kill: expected 1-2 arguments, got {}", args.len()),
+                format!("process/kill: expected 1-2 arguments, got {}", args.len()),
             ),
         );
     }
-    let handle_val = match extract_process_handle(&args[0], "sys/kill") {
+    let handle_val = match extract_process_handle(&args[0], "process/kill") {
         Ok(v) => v,
         Err(e) => return e,
     };
@@ -399,7 +405,7 @@ fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("type-error", "sys/kill: invalid process handle"),
+                error_val("type-error", "process/kill: invalid process handle"),
             )
         }
     };
@@ -415,7 +421,7 @@ fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
                         error_val(
                             "type-error",
                             format!(
-                                "sys/kill: unknown signal keyword :{name}; expected integer or one of :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch"
+                                "process/kill: unknown signal keyword :{name}; expected integer or one of :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch"
                             ),
                         ),
                     )
@@ -427,7 +433,7 @@ fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "sys/kill: signal must be integer or keyword, got {}",
+                        "process/kill: signal must be integer or keyword, got {}",
                         args[1].type_name()
                     ),
                 ),
@@ -442,7 +448,7 @@ fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "exec-error",
-                format!("sys/kill: {}", std::io::Error::last_os_error()),
+                format!("process/kill: {}", std::io::Error::last_os_error()),
             ),
         )
     } else {
@@ -517,8 +523,8 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "sys/exec",
-        func: prim_sys_exec,
+        name: "process/exec",
+        func: prim_process_exec,
         signal: Signal {
             // SIG_EXEC: capability bit for fiber mask access control.
             // SIG_IO: dispatch bit — routes through the I/O scheduler.
@@ -530,14 +536,14 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Spawn a subprocess. Returns {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <process>}",
         params: &["program", "args", "opts"],
         category: "sys",
-        example: "(sys/exec \"ls\" [\"-la\"])",
+        example: "(process/exec \"ls\" [\"-la\"])",
         aliases: &[],
     },
     PrimitiveDef {
-        name: "sys/wait",
-        func: prim_sys_wait,
+        name: "process/wait",
+        func: prim_process_wait,
         signal: Signal {
-            // SIG_EXEC: capability bit (same fiber mask semantics as sys/exec).
+            // SIG_EXEC: capability bit (same fiber mask semantics as process/exec).
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0 | SIG_EXEC.0),
             propagates: 0,
         },
@@ -545,18 +551,18 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Wait for a subprocess to exit. Returns exit code (0 = success).",
         params: &["handle"],
         category: "sys",
-        example: "(sys/wait proc)",
+        example: "(process/wait proc)",
         aliases: &[],
     },
     PrimitiveDef {
-        name: "sys/kill",
-        func: prim_sys_kill,
+        name: "process/kill",
+        func: prim_process_kill,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
         doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm).",
         params: &["handle", "signal"],
         category: "sys",
-        example: "(sys/kill proc :sigterm)",
+        example: "(process/kill proc :sigterm)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -620,19 +626,19 @@ mod tests {
         assert_eq!(signal, SIG_ERROR);
     }
 
-    // --- sys/exec ---
+    // --- process/exec ---
 
     #[test]
-    fn test_sys_exec_arity_too_few() {
-        let (sig, _) = prim_sys_exec(&[]);
+    fn test_process_exec_arity_too_few() {
+        let (sig, _) = prim_process_exec(&[]);
         assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_sys_exec(&[Value::string("echo")]);
+        let (sig, _) = prim_process_exec(&[Value::string("echo")]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_exec_arity_too_many() {
-        let (sig, _) = prim_sys_exec(&[
+    fn test_process_exec_arity_too_many() {
+        let (sig, _) = prim_process_exec(&[
             Value::string("echo"),
             Value::array(vec![]),
             Value::struct_from(std::collections::BTreeMap::new()),
@@ -642,26 +648,27 @@ mod tests {
     }
 
     #[test]
-    fn test_sys_exec_program_not_string() {
-        let (sig, _) = prim_sys_exec(&[Value::int(42), Value::array(vec![])]);
+    fn test_process_exec_program_not_string() {
+        let (sig, _) = prim_process_exec(&[Value::int(42), Value::array(vec![])]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_exec_args_not_array() {
-        let (sig, _) = prim_sys_exec(&[Value::string("echo"), Value::string("not-array")]);
+    fn test_process_exec_args_not_array() {
+        let (sig, _) = prim_process_exec(&[Value::string("echo"), Value::string("not-array")]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_exec_args_element_not_string() {
-        let (sig, _) = prim_sys_exec(&[Value::string("echo"), Value::array(vec![Value::int(99)])]);
+    fn test_process_exec_args_element_not_string() {
+        let (sig, _) =
+            prim_process_exec(&[Value::string("echo"), Value::array(vec![Value::int(99)])]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_exec_returns_sig_exec_io_yield() {
-        let (sig, val) = prim_sys_exec(&[
+    fn test_process_exec_returns_sig_exec_io_yield() {
+        let (sig, val) = prim_process_exec(&[
             Value::string("echo"),
             Value::array(vec![Value::string("hi")]),
         ]);
@@ -671,64 +678,67 @@ mod tests {
         assert_eq!(val.external_type_name(), Some("io-request"));
     }
 
-    // --- sys/wait ---
+    // --- process/wait ---
 
     #[test]
-    fn test_sys_wait_arity() {
-        let (sig, _) = prim_sys_wait(&[]);
+    fn test_process_wait_arity() {
+        let (sig, _) = prim_process_wait(&[]);
         assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_sys_wait(&[Value::NIL, Value::NIL]);
-        assert_eq!(sig, SIG_ERROR);
-    }
-
-    #[test]
-    fn test_sys_wait_wrong_type() {
-        let (sig, _) = prim_sys_wait(&[Value::int(42)]);
+        let (sig, _) = prim_process_wait(&[Value::NIL, Value::NIL]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_wait_signal_bits() {
+    fn test_process_wait_wrong_type() {
+        let (sig, _) = prim_process_wait(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_process_wait_signal_bits() {
         use crate::io::request::ProcessHandle;
         use std::process::Command;
         let child = Command::new("/bin/true").spawn().unwrap();
         let pid = child.id();
         let handle = ProcessHandle::new(pid, child);
         let handle_val = Value::external("process", handle);
-        let (sig, val) = prim_sys_wait(&[handle_val]);
+        let (sig, val) = prim_process_wait(&[handle_val]);
         assert!(sig.contains(SIG_EXEC), "expected SIG_EXEC in {:?}", sig);
         assert!(sig.contains(SIG_IO), "expected SIG_IO in {:?}", sig);
         assert!(sig.contains(SIG_YIELD));
         assert_eq!(val.external_type_name(), Some("io-request"));
     }
 
-    // --- sys/kill ---
+    // --- process/kill ---
 
     #[test]
-    fn test_sys_kill_arity() {
-        let (sig, _) = prim_sys_kill(&[]);
+    fn test_process_kill_arity() {
+        let (sig, _) = prim_process_kill(&[]);
         assert_eq!(sig, SIG_ERROR);
-        let (sig, _) = prim_sys_kill(&[Value::NIL, Value::NIL, Value::NIL]);
+        let (sig, _) = prim_process_kill(&[Value::NIL, Value::NIL, Value::NIL]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_kill_wrong_type() {
+    fn test_process_kill_wrong_type() {
         // Single int arg — not a process handle or struct, triggers type error
-        let (sig, _) = prim_sys_kill(&[Value::int(42)]);
+        let (sig, _) = prim_process_kill(&[Value::int(42)]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_kill_signal_is_errors() {
-        // sys/kill is synchronous — it does not yield.
-        let def = PRIMITIVES.iter().find(|d| d.name == "sys/kill").unwrap();
-        assert!(!def.signal.may_yield(), "sys/kill must not yield");
+    fn test_process_kill_signal_is_errors() {
+        // process/kill is synchronous — it does not yield.
+        let def = PRIMITIVES
+            .iter()
+            .find(|d| d.name == "process/kill")
+            .unwrap();
+        assert!(!def.signal.may_yield(), "process/kill must not yield");
         assert!(def.signal.may_error());
     }
 
     #[test]
-    fn test_sys_kill_keyword_sigterm() {
+    fn test_process_kill_keyword_sigterm() {
         use crate::io::request::ProcessHandle;
         use std::process::Command;
         let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
@@ -736,12 +746,12 @@ mod tests {
         let handle = ProcessHandle::new(pid, child);
         let handle_val = Value::external("process", handle);
         let sig_kw = Value::keyword("sigterm");
-        let (sig, _) = prim_sys_kill(&[handle_val, sig_kw]);
+        let (sig, _) = prim_process_kill(&[handle_val, sig_kw]);
         assert_eq!(sig, SIG_OK);
     }
 
     #[test]
-    fn test_sys_kill_unknown_keyword() {
+    fn test_process_kill_unknown_keyword() {
         use crate::io::request::ProcessHandle;
         use std::process::Command;
         let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
@@ -749,19 +759,19 @@ mod tests {
         let handle = ProcessHandle::new(pid, child);
         let handle_val = Value::external("process", handle);
         let sig_kw = Value::keyword("sigfoo");
-        let (sig, _) = prim_sys_kill(&[handle_val, sig_kw]);
+        let (sig, _) = prim_process_kill(&[handle_val, sig_kw]);
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
-    fn test_sys_kill_integer_still_works() {
+    fn test_process_kill_integer_still_works() {
         use crate::io::request::ProcessHandle;
         use std::process::Command;
         let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
         let pid = child.id();
         let handle = ProcessHandle::new(pid, child);
         let handle_val = Value::external("process", handle);
-        let (sig, _) = prim_sys_kill(&[handle_val, Value::int(15)]);
+        let (sig, _) = prim_process_kill(&[handle_val, Value::int(15)]);
         assert_eq!(sig, SIG_OK);
     }
 
