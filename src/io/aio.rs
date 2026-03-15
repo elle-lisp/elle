@@ -656,7 +656,7 @@ impl AsyncBackend {
             }
             Err(e) => Err(error_val(
                 "exec-error",
-                format!("sys/exec: {}: {}", req.program, e),
+                format!("process/exec: {}: {}", req.program, e),
             )),
         };
 
@@ -719,21 +719,27 @@ impl AsyncBackend {
                     return Err(e);
                 }
             }
-            PlatformBackend::ThreadPool(_) => {
-                // SAFETY: same as above — reclaim on unsupported path.
+            PlatformBackend::ThreadPool(ref mut pool) => {
+                // No siginfo needed for thread pool path — reclaim the allocation.
                 unsafe { drop(Box::from_raw(siginfo_ptr)) };
-                return Err(
-                    "io/submit: ProcessWait not supported on thread-pool backend".to_string(),
-                );
+                pool.submit(id, PoolOp::ProcessWait { pid })?;
             }
         }
+
+        // For the thread pool path, siginfo_ptr was already freed above.
+        // Store null so the completion handler knows to use the raw result integer.
+        let stored_siginfo = match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(_) => siginfo_ptr,
+            PlatformBackend::ThreadPool(_) => std::ptr::null_mut(),
+        };
 
         pending.insert(
             id,
             PendingOp::ProcessWait {
                 buffer_handle: buf_handle,
                 handle_val: *handle_val,
-                siginfo: siginfo_ptr,
+                siginfo: stored_siginfo,
             },
         );
         Ok(id)

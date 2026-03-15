@@ -30,39 +30,48 @@ pub(super) fn process_raw_completion(
             ..
         } => {
             // buffer_pool.release is already called at the top of process_raw_completion.
-            // Reclaim the siginfo_t allocation.
-            // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
-            // This completion arm is the single exit point — the CQE fires exactly once
-            // per SQE. The pointer is non-null (fast path for already-exited processes
-            // never inserts a PendingOp::ProcessWait).
-            let si = unsafe { Box::from_raw(*siginfo) };
 
             if result_code < 0 {
+                // On the uring path, reclaim siginfo before returning.
+                if !siginfo.is_null() {
+                    unsafe { drop(Box::from_raw(*siginfo)) };
+                }
                 let errno = -result_code;
                 return Completion {
                     id,
                     result: Err(error_val(
                         "exec-error",
-                        format!("sys/wait: waitid failed: errno {}", errno),
+                        format!("process/wait: waitid failed: errno {}", errno),
                     )),
                 };
             }
 
-            // Extract exit status from siginfo.
-            // si_code values for SIGCHLD:
-            //   CLD_EXITED (1): si_status is exit code
-            //   CLD_KILLED (2): si_status is signal number (return as negative)
-            //   CLD_DUMPED (3): killed + core dump (return signal as negative)
-            //
-            // SAFETY: si is fully initialized (kernel wrote it on child exit;
-            // result_code >= 0 confirms the waitid completed successfully).
-            let exit_code: i32 = unsafe {
-                let si_code = si.si_code;
-                let si_status = si.si_status();
-                match si_code {
-                    1 => si_status,      // CLD_EXITED: normal exit
-                    2 | 3 => -si_status, // CLD_KILLED / CLD_DUMPED: negative signal number
-                    _ => -1,             // unknown
+            let exit_code: i32 = if siginfo.is_null() {
+                // Thread pool path: exit code comes directly as the raw result integer
+                // (from waitpid in PoolOp::ProcessWait dispatch).
+                result_code
+            } else {
+                // io_uring path: exit status is in siginfo_t filled by the kernel.
+                // Reclaim the siginfo_t allocation.
+                // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
+                // This completion arm is the single exit point — the CQE fires exactly once
+                // per SQE.
+                let si = unsafe { Box::from_raw(*siginfo) };
+                // si_code values for SIGCHLD:
+                //   CLD_EXITED (1): si_status is exit code
+                //   CLD_KILLED (2): si_status is signal number (return as negative)
+                //   CLD_DUMPED (3): killed + core dump (return signal as negative)
+                //
+                // SAFETY: si is fully initialized (kernel wrote it on child exit;
+                // result_code >= 0 confirms the waitid completed successfully).
+                unsafe {
+                    let si_code = si.si_code;
+                    let si_status = si.si_status();
+                    match si_code {
+                        1 => si_status,      // CLD_EXITED: normal exit
+                        2 | 3 => -si_status, // CLD_KILLED / CLD_DUMPED: negative signal number
+                        _ => -1,             // unknown
+                    }
                 }
             };
 

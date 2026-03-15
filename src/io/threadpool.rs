@@ -41,6 +41,9 @@ pub(super) enum PoolOp {
     Sleep {
         nanos: u64,
     },
+    ProcessWait {
+        pid: u32,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -283,6 +286,24 @@ impl ThreadPoolBackend {
                     std::thread::sleep(std::time::Duration::from_nanos(nanos));
                     (0, Vec::new())
                 }
+                PoolOp::ProcessWait { pid } => {
+                    let mut status: libc::c_int = 0;
+                    let ret = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) };
+                    if ret < 0 {
+                        let code = -std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                        (code, vec![])
+                    } else {
+                        let code = if libc::WIFEXITED(status) {
+                            libc::WEXITSTATUS(status)
+                        } else if libc::WIFSIGNALED(status) {
+                            // killed by signal — return negative signal number by convention
+                            -libc::WTERMSIG(status)
+                        } else {
+                            -1
+                        };
+                        (code, vec![])
+                    }
+                }
             };
             let _ = sender.send(PoolCompletion {
                 id,
@@ -478,5 +499,43 @@ impl StdinThread {
             results.push(c);
         }
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_threadpool_process_wait_success() {
+        let mut pool = ThreadPoolBackend::new();
+        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id();
+        pool.submit(1, PoolOp::ProcessWait { pid }).unwrap();
+        let completions = pool.wait(Some(5000)).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, 1);
+        assert_eq!(
+            completions[0].result_code, 0,
+            "expected exit code 0 from /bin/true"
+        );
+        // Reap from std::process::Child to avoid zombie
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn test_threadpool_process_wait_failure() {
+        let mut pool = ThreadPoolBackend::new();
+        let mut child = std::process::Command::new("/bin/false").spawn().unwrap();
+        let pid = child.id();
+        pool.submit(2, PoolOp::ProcessWait { pid }).unwrap();
+        let completions = pool.wait(Some(5000)).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, 2);
+        assert_ne!(
+            completions[0].result_code, 0,
+            "expected non-zero exit code from /bin/false"
+        );
+        let _ = child.wait();
     }
 }
