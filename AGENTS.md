@@ -42,12 +42,12 @@ bytecode. Error messages include file:line:col information.
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed); trait table field on 19 user-facing heap variants |
-| `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping |
-| `io` | I/O request types, backends, timeout handling |
+| `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping; includes `SIG_EXEC` (bit 11) for subprocess operations |
+| `io` | I/O request types, backends, timeout handling; includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle` for subprocess lifecycle |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, and `traits` |
-| `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) |
+| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, `traits`, `process/exec`, `process/wait`, `process/kill`, and `process/pid` |
+| `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) and subprocess convenience (`process/system`) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift |
 | `formatter` | Code formatting for Elle source |
@@ -199,6 +199,48 @@ When in doubt, run the tests.
 6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how to add new tests.
 
 ## Standard Library Functions
+
+### process/system
+
+**Location:** `stdlib.lisp`
+
+**Signature:** `(process/system program args [opts])`
+
+**Purpose:** Run a command to completion, capturing stdout and stderr as text. Returns `{:exit int :stdout string :stderr string}`.
+
+**Behavior:**
+- Spawns a subprocess with the given program and arguments
+- Captures stdout and stderr as binary pipes, then decodes to UTF-8 strings
+- Waits for subprocess exit and returns the exit code
+- Reads pipes before waiting to avoid deadlock when output exceeds OS pipe buffer (~64KB)
+- Optional third argument: opts struct with keys `:env` (struct of env vars), `:cwd` (working directory string), `:stdin` (default `:null`)
+
+**Examples:**
+```lisp
+(process/system "echo" ["hello"])
+#=> {:exit 0 :stdout "hello\n" :stderr ""}
+
+(process/system "false" [])
+#=> {:exit 1 :stdout "" :stderr ""}
+
+(process/system "ls" ["-la"] {:cwd "/tmp"})
+#=> {:exit 0 :stdout "..." :stderr ""}
+```
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| Program not found | `exec-error` | `"process/exec: {program}: {error}"` |
+| Invalid UTF-8 in output | `encoding-error` | `"invalid UTF-8 at byte {offset}"` |
+| I/O error | `exec-error` | `"process/wait: {error}"` |
+
+**Invariants:**
+
+1. **Deadlock prevention.** Pipes are read before `process/wait` to ensure neither side blocks on buffer overflow.
+2. **Text decoding.** Output is decoded as strict UTF-8; invalid UTF-8 propagates an error.
+3. **Exit code preservation.** The returned `:exit` code matches the subprocess exit status (0 = success, nonzero = failure).
+4. **Subprocess cleanup.** The process is reaped on exit; no zombies are left behind.
 
 ### merge
 

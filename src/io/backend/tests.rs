@@ -483,3 +483,181 @@ fn test_accept_on_non_listener_errors() {
     assert_eq!(bits, SIG_ERROR);
     std::fs::remove_file(&path).ok();
 }
+
+// --- bytes_to_value tests ---
+
+#[test]
+fn test_bytes_to_value_valid_utf8_text_port() {
+    use std::os::unix::io::OwnedFd;
+    let file = std::fs::File::open("/dev/null").unwrap();
+    let fd: OwnedFd = file.into();
+    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+    let (sig, val) = SyncBackend::bytes_to_value_pub(&port, b"hello".to_vec());
+    assert_eq!(sig, SIG_OK);
+    assert!(val.with_string(|_| ()).is_some(), "expected string value");
+}
+
+#[test]
+fn test_bytes_to_value_invalid_utf8_text_port() {
+    use crate::value::heap::TableKey;
+    use std::os::unix::io::OwnedFd;
+    let file = std::fs::File::open("/dev/null").unwrap();
+    let fd: OwnedFd = file.into();
+    let port = Port::new_file(fd, Direction::Read, Encoding::Text, "/dev/null".to_string());
+    let (sig, val) = SyncBackend::bytes_to_value_pub(&port, vec![0xFF, 0xFE, 0x00]);
+    assert_eq!(sig, SIG_ERROR);
+    // Error kind is stored in the `:error` key as a keyword
+    // (error_val uses {:error :encoding-error :message "..."})
+    let error_keyword = val
+        .as_struct()
+        .and_then(|f| f.get(&TableKey::Keyword("error".into())))
+        .and_then(|v| v.as_keyword_name().map(|s| s.to_string()));
+    assert_eq!(error_keyword.as_deref(), Some("encoding-error"));
+}
+
+#[test]
+fn test_bytes_to_value_binary_port() {
+    use std::os::unix::io::OwnedFd;
+    let file = std::fs::File::open("/dev/null").unwrap();
+    let fd: OwnedFd = file.into();
+    let port = Port::new_file(
+        fd,
+        Direction::Read,
+        Encoding::Binary,
+        "/dev/null".to_string(),
+    );
+    let (sig, val) = SyncBackend::bytes_to_value_pub(&port, vec![0xFF, 0x00, 0xAB]);
+    assert_eq!(sig, SIG_OK);
+    assert!(val.as_bytes().is_some(), "binary port → bytes value");
+}
+
+// --- subprocess tests ---
+
+#[test]
+fn test_execute_spawn_echo() {
+    use crate::io::request::{SpawnRequest, StdioDisposition};
+    let backend = SyncBackend::new();
+    let request = IoRequest {
+        op: IoOp::Spawn(SpawnRequest {
+            program: "/bin/echo".to_string(),
+            args: vec!["hello".to_string()],
+            env: None,
+            cwd: None,
+            stdin: StdioDisposition::Null,
+            stdout: StdioDisposition::Pipe,
+            stderr: StdioDisposition::Null,
+        }),
+        port: Value::NIL,
+        timeout: None,
+    };
+    let (sig, val) = backend.execute(&request);
+    assert_eq!(sig, SIG_OK, "spawn failed: {:?}", val);
+    let fields = val.as_struct().expect("expected struct");
+    use crate::value::heap::TableKey;
+    assert!(
+        fields
+            .get(&TableKey::Keyword("pid".into()))
+            .unwrap()
+            .as_int()
+            .unwrap()
+            > 0
+    );
+    assert_eq!(
+        fields
+            .get(&TableKey::Keyword("stdout".into()))
+            .unwrap()
+            .external_type_name(),
+        Some("port")
+    );
+    assert!(fields
+        .get(&TableKey::Keyword("stdin".into()))
+        .unwrap()
+        .is_nil()); // Null disposition → nil
+    assert_eq!(
+        fields
+            .get(&TableKey::Keyword("process".into()))
+            .unwrap()
+            .external_type_name(),
+        Some("process")
+    );
+}
+
+#[test]
+fn test_execute_spawn_nonexistent() {
+    use crate::io::request::{SpawnRequest, StdioDisposition};
+    let backend = SyncBackend::new();
+    let request = IoRequest {
+        op: IoOp::Spawn(SpawnRequest {
+            program: "/nonexistent/command".to_string(),
+            args: vec![],
+            env: None,
+            cwd: None,
+            stdin: StdioDisposition::Null,
+            stdout: StdioDisposition::Null,
+            stderr: StdioDisposition::Null,
+        }),
+        port: Value::NIL,
+        timeout: None,
+    };
+    let (sig, _) = backend.execute(&request);
+    assert_eq!(sig, SIG_ERROR);
+}
+
+#[test]
+fn test_execute_process_wait_exit_zero() {
+    use crate::io::request::{IoOp, IoRequest, ProcessHandle};
+    use std::process::Command;
+    let child = Command::new("/bin/true").spawn().unwrap();
+    let pid = child.id();
+    let handle = ProcessHandle::new(pid, child);
+    let handle_val = Value::external("process", handle);
+    let request = IoRequest {
+        op: IoOp::ProcessWait,
+        port: handle_val,
+        timeout: None,
+    };
+    let backend = SyncBackend::new();
+    let (sig, val) = backend.execute(&request);
+    assert_eq!(sig, SIG_OK);
+    assert_eq!(val.as_int(), Some(0));
+}
+
+#[test]
+fn test_execute_process_wait_exit_nonzero() {
+    use crate::io::request::{IoOp, IoRequest, ProcessHandle};
+    use std::process::Command;
+    let child = Command::new("/bin/false").spawn().unwrap();
+    let pid = child.id();
+    let handle = ProcessHandle::new(pid, child);
+    let handle_val = Value::external("process", handle);
+    let request = IoRequest {
+        op: IoOp::ProcessWait,
+        port: handle_val,
+        timeout: None,
+    };
+    let backend = SyncBackend::new();
+    let (sig, val) = backend.execute(&request);
+    assert_eq!(sig, SIG_OK);
+    assert_ne!(val.as_int(), Some(0));
+}
+
+#[test]
+fn test_execute_process_wait_idempotent() {
+    // Second wait returns cached status, does not panic.
+    use crate::io::request::{IoOp, IoRequest, ProcessHandle};
+    use std::process::Command;
+    let child = Command::new("/bin/true").spawn().unwrap();
+    let pid = child.id();
+    let handle = ProcessHandle::new(pid, child);
+    let handle_val = Value::external("process", handle);
+    let backend = SyncBackend::new();
+    let req = IoRequest {
+        op: IoOp::ProcessWait,
+        port: handle_val,
+        timeout: None,
+    };
+    let (_, v1) = backend.execute(&req);
+    let (_, v2) = backend.execute(&req);
+    assert_eq!(v1.as_int(), Some(0));
+    assert_eq!(v2.as_int(), Some(0));
+}

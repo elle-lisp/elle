@@ -124,7 +124,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
 | `calling.rs` | `ffi/call` |
 | `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
-| `process.rs` | `exit`, `halt` |
+| `process.rs` | `exit`, `halt`, `process/exec`, `process/wait`, `process/kill`, `process/pid` |
 
 ## string/format primitive
 
@@ -250,6 +250,33 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 1. **Byte-level semantics.** Returns UTF-8 byte count, not character count. This is essential for HTTP headers and binary protocols.
 2. **No mutation.** The operation is pure and does not modify the string.
 3. **Consistent with UTF-8.** The result matches `(length (bytes s))` for the UTF-8 encoding of the string.
+
+## Subprocess Primitives
+
+**Location:** `src/primitives/process.rs`
+
+**Capability bit:** `SIG_EXEC` (bit 11) is a capability bit for fiber mask access control. Subprocess primitives emit `SIG_EXEC | SIG_IO | SIG_YIELD` so that fiber signal masks can selectively allow or deny subprocess operations independently of general I/O. The dispatch mechanism remains `SIG_IO`-based — the `SIG_EXEC` bit exists for access control granularity, not for routing.
+
+**Primitives:**
+
+- `process/exec program args [opts]` — Spawns a subprocess. Returns `{:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}`. Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Pipes are binary by default; text decoding is the caller's responsibility.
+  - `program` (string): path to executable
+  - `args` (array of strings): command-line arguments
+  - `opts` (optional struct): configuration with keys `:env` (struct of env vars, default: inherit), `:cwd` (string, default: inherit), `:stdin` (keyword `:pipe`/`:inherit`/`:null`, default: `:pipe`), `:stdout` (keyword, default: `:pipe`), `:stderr` (keyword, default: `:pipe`)
+
+- `process/wait handle` — Waits for a subprocess to exit. Returns exit code as integer (0 = success). Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
+
+- `process/kill handle [signal]` — Sends a signal to a subprocess synchronously. Returns `nil` on success. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct.
+
+- `process/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
+
+**Handle extraction pattern:** `process/wait`, `process/kill`, and `process/pid` all accept either:
+1. A direct process handle (external with type name "process")
+2. An exec result struct with a `:process` key containing the handle
+
+This allows both `(process/wait proc)` (where `proc` is the result of `process/exec`) and `(process/wait (get proc :process))` (extracting the handle directly).
+
+**Pipe ports:** Ports returned by `process/exec` are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
 
 ## Network Primitives
 

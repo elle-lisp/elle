@@ -61,8 +61,9 @@ The global signal registry maps signal keywords to bit positions. It is a proces
 | `:ffi` | 4 | Calls foreign code |
 | `:halt` | 8 | Graceful VM termination |
 | `:io` | 9 | I/O request to scheduler |
+| `:exec` | 11 | Subprocess execution (spawn, wait, kill) |
 
-Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use.
+Bits 3, 5, 6, 7, 10 are reserved for VM-internal use.
 
 ### User-Defined Signals
 
