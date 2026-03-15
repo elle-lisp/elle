@@ -676,6 +676,11 @@ impl<'a> FunctionTranslator<'a> {
                     "CheckSignalBound".to_string(),
                 ));
             }
+            LirInstr::CheckSignalForbidden { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "CheckSignalForbidden".to_string(),
+                ));
+            }
         }
         Ok(false)
     }

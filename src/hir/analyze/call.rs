@@ -1,7 +1,7 @@
 //! Call analysis and signal tracking
 
 use super::*;
-use crate::hir::expr::CallArg;
+use crate::hir::expr::{BoundKind, CallArg};
 use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
@@ -42,14 +42,39 @@ impl<'a> Analyzer<'a> {
         // First, get the raw callee signal (before polymorphic resolution)
         let raw_callee_signal = self.get_raw_callee_signal(&func);
 
-        // Refine fiber/signal signal when first arg is a constant integer.
-        // fiber/signal's registered signal is yields_errors() (conservative),
-        // but when the signal bits are known at compile time, use them directly.
+        // Refine emit's signal when first arg is known at compile time.
+        // emit's registered signal is yields_errors() (conservative), but:
+        // - When the signal bits are a constant integer, use them directly.
+        // - When the signal is a keyword registered in the signal registry,
+        //   look up its bit position and use that.
+        // This enables accurate signal inference for (emit :kw value) forms
+        // where the signal keyword was declared with (signal :kw) earlier.
         let raw_callee_signal = if self.is_emit(&func) {
-            if let Some(HirKind::Int(bits)) = args.first().map(|a| &a.expr.kind) {
-                Signal {
-                    bits: crate::value::fiber::SignalBits(*bits as u32),
-                    propagates: 0,
+            if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
+                match first_arg_kind {
+                    HirKind::Int(bits) => Signal {
+                        bits: crate::value::fiber::SignalBits(*bits as u32),
+                        propagates: 0,
+                    },
+                    HirKind::Keyword(kw) => {
+                        let reg = crate::signals::registry::global_registry().lock().unwrap();
+                        if let Some(bit_pos) = reg.lookup(kw) {
+                            // User signals are emitted via the yield mechanism.
+                            // Include SIG_YIELD so may_suspend() returns true,
+                            // enabling correct signal inference for the enclosing lambda.
+                            // Also include the specific user signal bit for accurate
+                            // squelch checking at the static type level.
+                            Signal {
+                                bits: crate::value::fiber::SignalBits(
+                                    (1 << bit_pos) | crate::signals::SIG_YIELD.0,
+                                ),
+                                propagates: 0,
+                            }
+                        } else {
+                            raw_callee_signal
+                        }
+                    }
+                    _ => raw_callee_signal,
                 }
             } else {
                 raw_callee_signal
@@ -269,13 +294,26 @@ impl<'a> Analyzer<'a> {
         }
 
         // All suspension comes from parameter calls - infer Polymorphic over them.
-        // Bounded parameters contribute their bound's bits directly (not polymorphic).
+        // silence-bounded parameters contribute their bound's bits directly (not polymorphic).
+        // squelch-bounded parameters remain polymorphic (blacklist only says what's forbidden,
+        // not what's allowed).
         let mut propagates: u32 = 0;
         let mut bound_bits: u32 = 0;
         for binding_id in &self.current_signal_sources.param_calls {
-            if let Some(bound) = self.current_param_bounds.get(binding_id) {
-                // Bounded: contribute bound's bits directly (not polymorphic)
-                bound_bits |= bound.bits.0;
+            if let Some((bound, kind)) = self.current_param_bounds.get(binding_id) {
+                match kind {
+                    BoundKind::Silence => {
+                        // Silence: contribute bound's bits directly (not polymorphic)
+                        bound_bits |= bound.bits.0;
+                    }
+                    BoundKind::Squelch => {
+                        // Squelch: bound constrains what's forbidden, not what's allowed.
+                        // Parameter stays polymorphic — fall through to the unbounded case.
+                        if let Some(idx) = params.iter().position(|p| p == binding_id) {
+                            propagates |= 1 << idx;
+                        }
+                    }
+                }
             } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
                 // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;
