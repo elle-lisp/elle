@@ -203,12 +203,54 @@
   (:signal-violation (display "  safe-map: callback tried to signal mid-iteration\n"))
   (_ (error err)))
 
+# squelch forbids specific signals (blacklist), allowing everything else.
+# silence is a total suppressor — (silence f) means f must emit nothing at all.
+# squelch is ideal for composition: "f must not yield, but may error."
+
+# safe-iterate requires its callback to not yield.
+# Errors (e.g. bad input) are still allowed to propagate — only yielding is forbidden.
+(defn safe-iterate [f xs]
+  "Iterate f over xs. f must not yield — errors are still allowed."
+  (squelch f :yield)
+  (map f xs))
+
+# double is a silent callback — pure arithmetic, no signals
+(defn double [x]
+  "Return x doubled."
+  (* x 2))
+
+# safe-iterate accepts double because double has no :yield signal
+(def doubled-results (safe-iterate double [1 2 3]))
+(assert (= doubled-results (list 2 4 6)) "squelch: silent callback passes")
+(display "  doubled results: ")  # display prompt
+(print doubled-results)          # print the results
+
+# yielding-callback yields — violates the squelch bound
+(defn yielding-callback [x]
+  "Process x but also yield — violates squelch."
+  (yield :escape)
+  (* x 2))
+
+# safe-iterate rejects yielding-callback because :yield is squelched
+(def [ok4? err4] (protect (safe-iterate yielding-callback [1 2 3])))
+(display "  squelch violation: ")  # display prompt
+(print err4)                         # print the error
+(assert (not ok4?) "squelch: yielding callback rejected")
+(assert (= (-> err4 (get :error)) :signal-violation) "squelch: signal-violation error")
+
+# match on the error kind to handle the violation
+(match err4:error
+  (:signal-violation (display "  squelch: callback tried to yield — rejected\n"))
+  (_ (error err4)))
+
 # ========================================
 # 6. silence — ensuring callbacks are silent
 # ========================================
 
 # run-pure requires its plugin to be silent — no signals at all.
 # This is the strongest guarantee: the plugin cannot interrupt execution.
+# silence is the right tool for sandboxing (total suppression).
+# squelch (from section 5) is for composition safety (targeted prohibition).
 (defn run-pure [plugin data]
   "Run plugin on data. plugin must be silent — no signals allowed."
   (silence plugin)

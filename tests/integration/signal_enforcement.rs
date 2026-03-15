@@ -877,8 +877,17 @@ fn test_silence_parses_param_level_with_keyword() {
         &mut vm,
         "<test>",
     );
-    // Should parse without error
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    // silence no longer accepts signal keywords — should be a compile error
+    assert!(
+        result.is_err(),
+        "expected error: silence takes no signal keywords"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -890,9 +899,14 @@ fn test_silence_unknown_keyword_error() {
         &mut vm,
         "<test>",
     );
+    // silence no longer accepts signal keywords — error is about keywords not being accepted
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.contains("not registered") || err.contains("unknown"));
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -908,12 +922,12 @@ fn test_silence_unknown_param_error() {
 fn test_silence_duplicate_param_last_wins() {
     let (mut symbols, mut vm) = setup();
     let result = analyze_file(
-        "(signal :dup_p_c3c) (def _ (fn (f) (silence f) (silence f :dup_p_c3c) (f)))",
+        "(signal :dup_p_c3c) (def _ (fn (f) (silence f) (silence f) (f)))",
         &mut symbols,
         &mut vm,
         "<test>",
     );
-    // Should parse without error
+    // Two (silence f) forms: last wins — should parse without error
     assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
 }
 
@@ -939,8 +953,17 @@ fn test_silence_function_level_with_keywords() {
         &mut vm,
         "<test>",
     );
-    // Should parse without error (runtime error handling is separate)
-    assert!(result.is_ok() || result.is_err()); // Just verify it parses
+    // silence no longer accepts signal keywords — should be a compile error
+    assert!(
+        result.is_err(),
+        "expected error: silence takes no signal keywords"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -987,8 +1010,17 @@ fn test_silence_param_contributes_bound_bits() {
         &mut vm,
         "<test>",
     );
-    // Should parse without error
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    // silence no longer accepts signal keywords — should be a compile error
+    assert!(
+        result.is_err(),
+        "expected error: silence takes no signal keywords"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -1026,7 +1058,17 @@ fn test_silence_function_ceiling_error_passes() {
         &mut vm,
         "<test>",
     );
-    assert!(result.is_ok());
+    // silence no longer accepts signal keywords — should be a compile error
+    assert!(
+        result.is_err(),
+        "expected error: silence takes no signal keywords"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -1038,7 +1080,14 @@ fn test_silence_function_ceiling_error_fails_yield() {
         &mut vm,
         "<test>",
     );
+    // silence no longer accepts signal keywords — error is about keywords
     assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -1063,8 +1112,17 @@ fn test_silence_param_with_user_signal() {
         &mut vm,
         "<test>",
     );
-    // Should parse without error
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    // silence no longer accepts signal keywords — should be a compile error
+    assert!(
+        result.is_err(),
+        "expected error: silence takes no signal keywords"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 #[test]
@@ -1076,9 +1134,14 @@ fn test_silence_ceiling_fails_bounded_param() {
         &mut vm,
         "<test>",
     );
+    // silence no longer accepts signal keywords — error is about keywords
     assert!(result.is_err(), "expected error but got ok");
     let err = result.unwrap_err();
-    assert!(err.contains("restricted") || err.contains("ceil_c4c"));
+    assert!(
+        err.contains("silence takes no signal keywords"),
+        "expected 'silence takes no signal keywords', got: {}",
+        err
+    );
 }
 
 // ============================================================================
@@ -1098,6 +1161,183 @@ fn test_silence_ceiling_fails_bounded_param() {
 // test_silence_runtime_dynamic_passes: migrated to tests/elle/signals.lisp
 
 // test_silence_runtime_dynamic_fails: migrated to tests/elle/signals.lisp
+
+// ============================================================================
+// CHUNK 5b: squelch form parsing and semantic tests
+// ============================================================================
+
+#[test]
+fn test_squelch_parses_param_level() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f x) (squelch f :yield) (f x))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    // (squelch f :yield) should compile without error
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+}
+
+#[test]
+fn test_squelch_parses_param_level_multi() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f x) (squelch f :yield :error) (f x))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    // (squelch f :yield :error) should compile without error
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+}
+
+#[test]
+fn test_squelch_no_keywords_param_error() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f x) (squelch f) (f x))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    // (squelch f) with no keywords is a compile error
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("squelch requires at least one signal keyword"),
+        "expected 'squelch requires at least one signal keyword', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_no_keywords_bare_error() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze("(fn (x) (squelch) x)", &mut symbols, &mut vm, "<test>");
+    // (squelch) with no arguments is a compile error
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("squelch requires at least one signal keyword"),
+        "expected 'squelch requires at least one signal keyword', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_unknown_keyword_error() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f) (squelch f :not-a-signal) (f))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    // :not-a-signal is not registered — should be a compile error
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("not registered"),
+        "expected 'not registered', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_unknown_param_error() {
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f) (squelch not-a-param :yield) (f))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    // not-a-param is not a parameter of this function — should be a compile error
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("not a parameter"),
+        "expected 'not a parameter', got: {}",
+        err
+    );
+}
+
+// test_squelch_outside_lambda_not_special: migrated to tests/elle/signals.lisp
+
+#[test]
+fn test_squelch_param_stays_polymorphic() {
+    // A squelch-bounded parameter remains polymorphic in signal inference.
+    // (squelch f :yield) says f must NOT yield, but f's signal is still polymorphic.
+    // Verify: the lambda with (squelch f :yield) should NOT be silent — it
+    // should propagate f's signal.
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (f x) (squelch f :yield) (f x))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    let result = result.expect("expected ok");
+    // The outer lambda (fn (f x) ...) wraps the inner; we check the lambda signal
+    if let HirKind::Lambda { body, .. } = &result.hir.kind {
+        // Body signal should propagate f — not silent
+        // (If body were silent, (f x) would be unreachable for signal purposes)
+        assert_ne!(
+            body.signal,
+            Signal::silent(),
+            "squelch-bounded param should keep lambda polymorphic, not silence it"
+        );
+    } else {
+        panic!("Expected Lambda");
+    }
+}
+
+// test_squelch_function_floor_passes: migrated to tests/elle/signals.lisp
+
+#[test]
+fn test_squelch_function_floor_fails() {
+    // (squelch :yield) at function level — body DOES yield — should be a compile error.
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (x) (squelch :yield) (yield x))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("squelched"),
+        "expected 'squelched' in error, got: {}",
+        err
+    );
+}
+
+// test_squelch_with_user_signal: migrated to tests/elle/signals.lisp
+
+#[test]
+fn test_squelch_mixed_function_level_error() {
+    // Using both (silence) and (squelch :yield) at function level is a compile error.
+    let (mut symbols, mut vm) = setup();
+    let result = analyze(
+        "(fn (x) (silence) (squelch :yield) (+ x 1))",
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("cannot use both"),
+        "expected 'cannot use both' in error, got: {}",
+        err
+    );
+}
+
+// test_squelch_and_silence_different_params: migrated to tests/elle/signals.lisp
+
+// test_squelch_overrides_silence_same_param: migrated to tests/elle/signals.lisp
 
 // ============================================================================
 // CHUNK 6: (signals) introspection primitive tests

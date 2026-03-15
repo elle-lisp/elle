@@ -245,8 +245,15 @@ pub enum Instruction {
     /// Operand: u32 allowed_bits.
     /// Pops the value from the stack. If it's a closure whose
     /// `signal.bits & !allowed_bits != 0`, signals `:error`.
-    /// If the value is not a closure, signals `:error`.
+    /// Non-closures pass silently.
     CheckSignalBound,
+
+    /// Check that a closure's signal does not contain forbidden bits.
+    /// Operand: u32 forbidden_bits.
+    /// Pops the value from the stack. If it's a closure whose
+    /// `signal.bits & forbidden_bits != 0`, signals `:error`.
+    /// Non-closures pass silently.
+    CheckSignalForbidden,
 
     /// Struct rest for destructuring: collect all keys from src NOT in excluded keys.
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).

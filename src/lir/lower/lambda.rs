@@ -1,7 +1,7 @@
 //! Lambda lowering: closure construction and body compilation
 
 use super::*;
-use crate::hir::CaptureInfo;
+use crate::hir::{BoundKind, CaptureInfo, ParamBound};
 use crate::value::Arity;
 
 impl Lowerer {
@@ -17,7 +17,7 @@ impl Lowerer {
         body: &Hir,
         num_locals: u16,
         inferred_signal: &crate::signals::Signal,
-        param_bounds: &[(Binding, crate::signals::Signal)],
+        param_bounds: &[ParamBound],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<Reg, String> {
@@ -127,7 +127,7 @@ impl Lowerer {
         body: &Hir,
         _num_locals: u16,
         inferred_signal: crate::signals::Signal,
-        param_bounds: &[(Binding, crate::signals::Signal)],
+        param_bounds: &[ParamBound],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
     ) -> Result<LirFunction, String> {
@@ -192,9 +192,9 @@ impl Lowerer {
         }
         self.current_func.lbox_params_mask = lbox_params_mask;
 
-        // Emit CheckSignalBound for each bounded parameter
-        for (bound_binding, bound_signal) in param_bounds {
-            if let Some(&slot) = self.binding_to_slot.get(bound_binding) {
+        // Emit signal bound checks for each bounded parameter
+        for pb in param_bounds {
+            if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {
                 let src = self.fresh_reg();
                 // All params are upvalues in lambda body — use LoadCapture.
                 // LoadCapture auto-unwraps LocalCell, giving us the closure
@@ -203,10 +203,20 @@ impl Lowerer {
                     dst: src,
                     index: slot,
                 });
-                self.emit(LirInstr::CheckSignalBound {
-                    src,
-                    allowed_bits: bound_signal.bits.0,
-                });
+                match pb.kind {
+                    BoundKind::Silence => {
+                        self.emit(LirInstr::CheckSignalBound {
+                            src,
+                            allowed_bits: pb.signal.bits.0,
+                        });
+                    }
+                    BoundKind::Squelch => {
+                        self.emit(LirInstr::CheckSignalForbidden {
+                            src,
+                            forbidden_bits: pb.signal.bits.0,
+                        });
+                    }
+                }
             }
         }
 

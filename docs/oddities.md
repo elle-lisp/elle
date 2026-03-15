@@ -20,18 +20,33 @@ Lists are `EMPTY_LIST`-terminated, not `NIL`-terminated. `(rest (list 1))` retur
 
 `assign` is the form for variable mutation: `(assign var value)`. This is distinct from the `set` constructor primitive for creating set values. Agents reflexively write `(set x val)` — this creates a set, not a mutation.
 
-### `silence` is a preamble declaration, not an expression
+### `silence` and `squelch` are preamble declarations, not expressions
 
-`silence` only appears inside lambda bodies as a preamble declaration (after optional docstring, before first non-declaration expression). It is NOT a general expression form. Using `silence` outside a lambda body is a call to the stdlib `silence` function, which signals `:error` at runtime.
+`silence` and `squelch` only appear inside lambda bodies as preamble declarations (after optional docstring, before first non-declaration expression). They are NOT general expression forms. Using them outside a lambda body is a call to the stdlib function, which signals `:error` at runtime.
+
+**Key distinction:** `silence` is a **total suppressor** — `(silence f)` means f must emit nothing at all. Signal keywords are not accepted; `(silence f :error)` is a compile error. `squelch` is a **blacklist** (open-world) — `(squelch f :yield)` means f must **not** emit `:yield`, but may emit anything else including user-defined signals.
 
 ```janet
-# Correct: silence in lambda body preamble
+# Correct: silence in lambda body preamble (total suppression)
 (fn (f x)
-  (silence f)
+  (silence f)  # f must be completely silent
+  (f x))
+
+# Correct: squelch in lambda body preamble (blacklist)
+(fn (f x)
+  (squelch f :yield)  # f must not yield, but may emit other signals
   (f x))
 
 # Runtime error: silence outside lambda body
 (silence f)  # Error: signals :error at runtime
+
+# Runtime error: squelch outside lambda body
+(squelch f :yield)  # Error: signals :error at runtime
+
+# Compile error: squelch with no keywords
+(fn (f x)
+  (squelch f)  # Error: squelch requires at least one signal keyword
+  (f x))
 ```
 
 ### Collection literal mutable/immutable split

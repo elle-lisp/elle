@@ -293,6 +293,9 @@ impl<'a> Analyzer<'a> {
                         "parameterize" => return self.analyze_parameterize(items, span),
 
                         "silence" => return self.analyze_silence(items, span),
+                        // squelch is only a special form inside a lambda body.
+                        // Outside a lambda, it falls through to be resolved as a symbol.
+                        "squelch" if self.fn_depth > 0 => return self.analyze_squelch(items, span),
 
                         "signal" => {
                             if items.len() != 2 {
