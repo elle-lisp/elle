@@ -66,6 +66,10 @@ use crate::value::Value;
 mod routing;
 pub use routing::*;
 
+mod slab;
+#[allow(unused_imports)]
+pub(crate) use slab::RootSlab;
+
 /// Tracks objects allocated by a single `with-allocator` invocation.
 ///
 /// # Safety invariant
