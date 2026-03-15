@@ -20,6 +20,7 @@ pub(crate) enum PortKind {
     UdpSocket,
     UnixListener,
     UnixStream,
+    Pipe, // subprocess stdin/stdout/stderr pipe fd
 }
 
 /// Which operations are permitted on this port.
@@ -171,6 +172,23 @@ impl Port {
             encoding: Encoding::Text,
             closed: Cell::new(false),
             path: Some(peer_path),
+            timeout: Cell::new(None),
+        }
+    }
+
+    /// Create a pipe port from a subprocess stdio fd.
+    ///
+    /// `label` is displayed as the path: `"pid:1234:stdout"` etc.
+    /// Encoding is always Binary — subprocess output is an arbitrary byte
+    /// stream. Text decoding is the caller's responsibility.
+    pub fn new_pipe(fd: OwnedFd, direction: Direction, encoding: Encoding, label: String) -> Self {
+        Port {
+            fd: RefCell::new(Some(fd)),
+            kind: PortKind::Pipe,
+            direction,
+            encoding,
+            closed: Cell::new(false),
+            path: Some(label),
             timeout: Cell::new(None),
         }
     }
@@ -331,6 +349,25 @@ impl fmt::Display for Port {
                 }
                 write!(f, ">")
             }
+            PortKind::Pipe => {
+                write!(f, "#<port:pipe")?;
+                if let Some(ref path) = self.path {
+                    write!(f, " \"{}\"", path)?;
+                }
+                match self.direction {
+                    Direction::Read => write!(f, " :read")?,
+                    Direction::Write => write!(f, " :write")?,
+                    Direction::ReadWrite => write!(f, " :read-write")?,
+                }
+                match self.encoding {
+                    Encoding::Text => write!(f, " :text")?,
+                    Encoding::Binary => write!(f, " :binary")?,
+                }
+                if self.closed.get() {
+                    write!(f, " [closed]")?;
+                }
+                write!(f, ">")
+            }
         }
     }
 }
@@ -429,5 +466,66 @@ mod tests {
         assert_eq!(p.timeout_ms(), Some(5000));
         p.set_timeout_ms(None);
         assert_eq!(p.timeout_ms(), None);
+    }
+
+    #[test]
+    fn test_new_pipe_kind() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let p = Port::new_pipe(
+            fd,
+            Direction::Read,
+            Encoding::Binary,
+            "pid:42:stdout".to_string(),
+        );
+        assert_eq!(p.kind(), PortKind::Pipe);
+        assert_eq!(p.direction(), Direction::Read);
+        assert_eq!(p.encoding(), Encoding::Binary);
+        assert_eq!(p.path(), Some("pid:42:stdout"));
+    }
+
+    #[test]
+    fn test_pipe_display_binary() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let p = Port::new_pipe(
+            fd,
+            Direction::Read,
+            Encoding::Binary,
+            "pid:1234:stdout".to_string(),
+        );
+        let s = format!("{}", p);
+        assert!(s.contains("pipe"), "display: {}", s);
+        assert!(s.contains("pid:1234:stdout"), "display: {}", s);
+        assert!(s.contains(":read"), "display: {}", s);
+        assert!(s.contains(":binary"), "display: {}", s);
+    }
+
+    #[test]
+    fn test_pipe_display_write() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let p = Port::new_pipe(
+            fd,
+            Direction::Write,
+            Encoding::Binary,
+            "pid:5:stdin".to_string(),
+        );
+        let s = format!("{}", p);
+        assert!(s.contains(":write"), "display: {}", s);
+    }
+
+    #[test]
+    fn test_pipe_display_closed() {
+        let file = File::open("/dev/null").unwrap();
+        let fd: OwnedFd = file.into();
+        let p = Port::new_pipe(
+            fd,
+            Direction::Read,
+            Encoding::Binary,
+            "pid:1:stdout".to_string(),
+        );
+        p.close();
+        assert!(format!("{}", p).contains("[closed]"));
     }
 }

@@ -4,7 +4,9 @@
 
 use crate::io::completion;
 use crate::io::pool::{BufferHandle, BufferPool};
-use crate::io::request::{ConnectAddr, IoOp, IoRequest};
+use crate::io::request::{
+    ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, StdioDisposition,
+};
 use crate::io::threadpool::{PoolCompletion, PoolOp, StdinOpKind, StdinThread, ThreadPoolBackend};
 use crate::io::types::{FdState, PortKey};
 use crate::io::Completion;
@@ -42,6 +44,15 @@ pub(crate) enum PendingOp {
     },
     /// Async timer. No port.
     Sleep { buffer_handle: BufferHandle },
+    /// Waiting for subprocess exit via IORING_OP_WAITID.
+    ///
+    /// SAFETY: `siginfo` is a heap-allocated `siginfo_t` (via Box::into_raw).
+    /// It must live until the CQE arrives. Released in completion processing.
+    ProcessWait {
+        buffer_handle: BufferHandle,
+        handle_val: Value, // ProcessHandle — to cache exit code on completion
+        siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
+    },
 }
 
 impl PendingOp {
@@ -50,6 +61,7 @@ impl PendingOp {
             PendingOp::Port { buffer_handle, .. } => *buffer_handle,
             PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
             PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
+            PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
         }
     }
 }
@@ -134,6 +146,14 @@ impl AsyncBackend {
             return self.submit_sleep(duration);
         }
 
+        // Subprocess ops: portless (Spawn) or ProcessHandle-in-port (ProcessWait).
+        if let IoOp::Spawn(ref req) = request.op {
+            return self.submit_spawn(req);
+        }
+        if let IoOp::ProcessWait = request.op {
+            return self.submit_process_wait(&request.port);
+        }
+
         let port = request
             .port
             .as_external::<Port>()
@@ -164,12 +184,12 @@ impl AsyncBackend {
 
         let buf_handle = inner.buffer_pool.alloc(4096);
 
-        // Flush on socket ports is a no-op: fsync(2) returns EINVAL on sockets.
+        // Flush on socket/pipe ports is a no-op: fsync(2) returns EINVAL on sockets.
         // Return an immediate successful completion rather than submitting to the pool.
         if matches!(&request.op, IoOp::Flush)
             && matches!(
                 port.kind(),
-                PortKind::TcpStream | PortKind::UnixStream | PortKind::UdpSocket
+                PortKind::TcpStream | PortKind::UnixStream | PortKind::UdpSocket | PortKind::Pipe
             )
         {
             inner.buffer_pool.release(buf_handle);
@@ -557,6 +577,174 @@ impl AsyncBackend {
         Ok(id)
     }
 
+    fn submit_spawn(&self, req: &SpawnRequest) -> Result<u64, String> {
+        use crate::value::heap::TableKey;
+
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        let mut cmd = std::process::Command::new(&req.program);
+        cmd.args(&req.args);
+        if let Some(ref env_pairs) = req.env {
+            cmd.env_clear();
+            for (k, v) in env_pairs {
+                cmd.env(k, v);
+            }
+        }
+        if let Some(ref dir) = req.cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.stdin(stdio_to_std(req.stdin));
+        cmd.stdout(stdio_to_std(req.stdout));
+        cmd.stderr(stdio_to_std(req.stderr));
+
+        let result = match cmd.spawn() {
+            Ok(mut child) => {
+                let pid = child.id();
+                let stdin_val = child
+                    .stdin
+                    .take()
+                    .map(|s| {
+                        crate::io::backend::pipe_to_port(
+                            s,
+                            crate::port::Direction::Write,
+                            crate::port::Encoding::Binary,
+                            pid,
+                            "stdin",
+                        )
+                    })
+                    .unwrap_or(Value::NIL);
+                let stdout_val = child
+                    .stdout
+                    .take()
+                    .map(|s| {
+                        crate::io::backend::pipe_to_port(
+                            s,
+                            crate::port::Direction::Read,
+                            crate::port::Encoding::Binary,
+                            pid,
+                            "stdout",
+                        )
+                    })
+                    .unwrap_or(Value::NIL);
+                let stderr_val = child
+                    .stderr
+                    .take()
+                    .map(|s| {
+                        crate::io::backend::pipe_to_port(
+                            s,
+                            crate::port::Direction::Read,
+                            crate::port::Encoding::Binary,
+                            pid,
+                            "stderr",
+                        )
+                    })
+                    .unwrap_or(Value::NIL);
+
+                let handle = ProcessHandle::new(pid, child);
+                let handle_val = Value::external("process", handle);
+
+                let mut fields = std::collections::BTreeMap::new();
+                fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
+                fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
+                fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
+                fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
+                fields.insert(TableKey::Keyword("process".into()), handle_val);
+                Ok(Value::struct_from(fields))
+            }
+            Err(e) => Err(error_val(
+                "exec-error",
+                format!("process/exec: {}: {}", req.program, e),
+            )),
+        };
+
+        inner.completions.push_back(Completion { id, result });
+
+        // Spawn is an immediate completion — no CQE will arrive.
+        // Release the placeholder buffer (was alloc(0), nothing stored).
+        inner.buffer_pool.release(buf_handle);
+        Ok(id)
+    }
+
+    fn submit_process_wait(&self, handle_val: &Value) -> Result<u64, String> {
+        let handle = handle_val
+            .as_external::<ProcessHandle>()
+            .ok_or_else(|| "io/submit: ProcessWait requires a process handle".to_string())?;
+
+        // Fast path: already exited (cached). Push immediate completion, no pending entry.
+        {
+            let state = handle.inner.borrow();
+            if let ProcessState::Exited(code) = &*state {
+                let mut inner = self.inner.borrow_mut();
+                let id = inner.next_id;
+                inner.next_id += 1;
+                inner.completions.push_back(Completion {
+                    id,
+                    result: Ok(Value::int(*code as i64)),
+                });
+                return Ok(id);
+            }
+        }
+
+        let pid = handle.pid();
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        // Allocate siginfo_t for the kernel to fill on child exit.
+        // Must live until the CQE arrives — stored in PendingOp.
+        // SAFETY: zeroed() is valid for siginfo_t (all-zero is a valid initialized state).
+        let siginfo_ptr = {
+            let si: Box<libc::siginfo_t> = unsafe { Box::new(std::mem::zeroed()) };
+            Box::into_raw(si)
+        };
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut pending,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                if let Err(e) =
+                    crate::io::uring::submit_uring_process_wait(ring, id, pid, siginfo_ptr)
+                {
+                    // SAFETY: we own siginfo_ptr, just allocated above; reclaim it on error.
+                    unsafe { drop(Box::from_raw(siginfo_ptr)) };
+                    return Err(e);
+                }
+            }
+            PlatformBackend::ThreadPool(ref mut pool) => {
+                // No siginfo needed for thread pool path — reclaim the allocation.
+                unsafe { drop(Box::from_raw(siginfo_ptr)) };
+                pool.submit(id, PoolOp::ProcessWait { pid })?;
+            }
+        }
+
+        // For the thread pool path, siginfo_ptr was already freed above.
+        // Store null so the completion handler knows to use the raw result integer.
+        let stored_siginfo = match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(_) => siginfo_ptr,
+            PlatformBackend::ThreadPool(_) => std::ptr::null_mut(),
+        };
+
+        pending.insert(
+            id,
+            PendingOp::ProcessWait {
+                buffer_handle: buf_handle,
+                handle_val: *handle_val,
+                siginfo: stored_siginfo,
+            },
+        );
+        Ok(id)
+    }
+
     /// Cancel a pending I/O operation by submission ID.
     ///
     /// For io_uring: submits IORING_OP_ASYNC_CANCEL. The original SQE will
@@ -842,7 +1030,9 @@ impl AsyncBackendInner {
             | IoOp::SendTo { .. }
             | IoOp::RecvFrom { .. }
             | IoOp::Shutdown { .. }
-            | IoOp::Sleep { .. } => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::Sleep { .. }
+            | IoOp::Spawn(_)
+            | IoOp::ProcessWait => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)
@@ -901,6 +1091,15 @@ impl AsyncBackendInner {
         for c in completions_to_add {
             self.completions.push_back(c);
         }
+    }
+}
+
+fn stdio_to_std(disp: StdioDisposition) -> std::process::Stdio {
+    use std::process::Stdio;
+    match disp {
+        StdioDisposition::Pipe => Stdio::piped(),
+        StdioDisposition::Inherit => Stdio::inherit(),
+        StdioDisposition::Null => Stdio::null(),
     }
 }
 
@@ -1335,5 +1534,88 @@ mod tests {
         let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
         assert!(ids.contains(&accept_id), "missing accept");
         assert!(ids.contains(&connect_id), "missing connect");
+    }
+
+    #[test]
+    fn test_async_submit_spawn_echo() {
+        use crate::io::request::{SpawnRequest, StdioDisposition};
+        let backend = AsyncBackend::new().unwrap();
+        let req = IoRequest {
+            op: IoOp::Spawn(SpawnRequest {
+                program: "/bin/echo".to_string(),
+                args: vec!["hello-async".to_string()],
+                env: None,
+                cwd: None,
+                stdin: StdioDisposition::Null,
+                stdout: StdioDisposition::Pipe,
+                stderr: StdioDisposition::Null,
+            }),
+            port: Value::NIL,
+            timeout: None,
+        };
+        let id = backend.submit(&req).unwrap();
+        let completions = backend.wait(-1).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        let val = completions[0].result.as_ref().expect("spawn failed");
+        let fields = val.as_struct().expect("expected struct");
+        assert!(
+            fields
+                .get(&TableKey::Keyword("pid".into()))
+                .unwrap()
+                .as_int()
+                .unwrap()
+                > 0
+        );
+    }
+
+    /// Test IORING_OP_WAITID via async backend.
+    /// Requires Linux kernel 6.7+. The test skips gracefully on older kernels
+    /// by checking for -EINVAL completion.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_async_submit_process_wait_uring() {
+        use crate::io::request::{IoOp, IoRequest, ProcessHandle};
+
+        let child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        let handle_val = Value::external("process", handle);
+
+        let backend = AsyncBackend::new().unwrap();
+        let req = IoRequest {
+            op: IoOp::ProcessWait,
+            port: handle_val,
+            timeout: None,
+        };
+        let id = backend.submit(&req);
+
+        match id {
+            Err(e) if e.contains("thread-pool") => {
+                // Thread-pool backend: ProcessWait not supported. Skip.
+            }
+            Err(e) => panic!("submit failed unexpectedly: {}", e),
+            Ok(id) => {
+                let completions = backend.wait(5000).unwrap();
+                assert_eq!(completions.len(), 1);
+                assert_eq!(completions[0].id, id);
+                match &completions[0].result {
+                    Err(e) => {
+                        // -EINVAL means IORING_OP_WAITID not supported on this kernel. Skip.
+                        let msg = format!("{:?}", e);
+                        if msg.contains("22")
+                            || msg.contains("EINVAL")
+                            || msg.contains("waitid failed")
+                        {
+                            return; // kernel < 6.7
+                        }
+                        panic!("ProcessWait failed: {:?}", e);
+                    }
+                    Ok(val) => {
+                        assert_eq!(val.as_int(), Some(0), "expected exit 0");
+                    }
+                }
+            }
+        }
     }
 }

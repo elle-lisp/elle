@@ -465,6 +465,44 @@ pub(super) fn submit_uring_sleep(
     Ok(())
 }
 
+/// Submit IORING_OP_WAITID to wait for a subprocess to exit.
+///
+/// The kernel fills `infop` when the child exits. The `siginfo_t` must
+/// remain valid until the CQE arrives — the caller stores it in PendingOp.
+///
+/// Requires Linux kernel 6.7+. If the opcode is unsupported, the CQE
+/// returns result = -EINVAL (22).
+///
+/// # Safety
+/// `siginfo_ptr` must point to a valid, heap-allocated `siginfo_t`
+/// that outlives the submitted SQE. The caller (submit_process_wait) allocates
+/// via `Box::into_raw` and frees via completion processing or error path.
+pub(super) fn submit_uring_process_wait(
+    ring: &mut io_uring::IoUring,
+    id: u64,
+    pid: u32,
+    siginfo_ptr: *mut libc::siginfo_t,
+) -> Result<(), String> {
+    use io_uring::opcode;
+
+    let entry = opcode::WaitId::new(libc::P_PID, pid as libc::id_t, libc::WEXITED)
+        .infop(siginfo_ptr as *const libc::siginfo_t)
+        .build()
+        .user_data(id);
+
+    // SAFETY: `entry` references `siginfo_ptr` which is kept alive by the
+    // caller for the lifetime of the pending op. The SQE is submitted
+    // immediately here, and the kernel will fill siginfo on child exit.
+    unsafe {
+        ring.submission()
+            .push(&entry)
+            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+    }
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
+    Ok(())
+}
+
 /// Submit an AsyncCancel SQE to cancel a pending operation.
 ///
 /// The cancelled operation will generate a CQE with result = -ECANCELED.

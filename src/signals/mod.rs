@@ -29,7 +29,8 @@ use std::fmt;
 //   Bit  8:     Halt — graceful VM termination with return value
 //   Bit  9:     IO — I/O request to scheduler
 //   Bit  10:    Terminal — non-resumable signal
-//   Bits 11-15: Reserved for future use
+//   Bit  11:    Exec — subprocess capability (access control; NOT a dispatch bit)
+//   Bits 12-15: Reserved for future use
 //   Bits 16-31: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
@@ -44,6 +45,7 @@ pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM
 pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
 pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
+pub const SIG_EXEC: SignalBits = SignalBits::new(1 << 11); // subprocess capability (capability bit, not dispatch)
 
 /// Signal classification for expressions and functions.
 ///
@@ -401,5 +403,26 @@ mod tests {
     fn test_constants() {
         assert_eq!(Signal::SILENT, Signal::silent());
         assert_eq!(Signal::YIELDS, Signal::yields());
+    }
+
+    #[test]
+    fn test_sig_exec_bit_is_distinct() {
+        // SIG_EXEC must be a unique bit (bit 11).
+        assert_eq!(SIG_EXEC.0, 1 << 11);
+        // Must not overlap with any other defined signal bits.
+        assert_eq!(SIG_EXEC.0 & SIG_IO.0, 0);
+        assert_eq!(SIG_EXEC.0 & SIG_YIELD.0, 0);
+        assert_eq!(SIG_EXEC.0 & SIG_TERMINAL.0, 0);
+    }
+
+    #[test]
+    fn test_exec_keyword_registered() {
+        use crate::signals::registry::global_registry;
+        // The :exec keyword must be registered and map to SIG_EXEC.
+        let reg = global_registry().lock().unwrap();
+        let bit_pos = reg.lookup("exec").expect(":exec must be registered");
+        // lookup returns the bit position (11), not the bitmask; verify both.
+        assert_eq!(bit_pos, 11);
+        assert_eq!(1u32 << bit_pos, SIG_EXEC.0);
     }
 }

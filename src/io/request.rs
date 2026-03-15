@@ -5,7 +5,32 @@
 //! for execution.
 
 use crate::value::Value;
+use std::cell::RefCell;
+use std::process::Child;
 use std::time::Duration;
+
+/// How to configure a subprocess stdio stream.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum StdioDisposition {
+    /// Create a pipe; return it as a port.
+    Pipe,
+    /// Inherit the parent process fd.
+    Inherit,
+    /// Redirect to /dev/null.
+    Null,
+}
+
+/// Subprocess configuration, shared between IoOp::Spawn and the backend helpers.
+#[derive(Debug)]
+pub(crate) struct SpawnRequest {
+    pub program: String,
+    pub args: Vec<String>,
+    pub env: Option<Vec<(String, String)>>,
+    pub cwd: Option<String>,
+    pub stdin: StdioDisposition,
+    pub stdout: StdioDisposition,
+    pub stderr: StdioDisposition,
+}
 
 /// I/O operation descriptor.
 #[derive(Debug)]
@@ -36,6 +61,12 @@ pub(crate) enum IoOp {
     Shutdown { how: i32 },
     /// Async sleep. No port — just a timer. Returns nil after duration elapses.
     Sleep { duration: Duration },
+    /// Spawn a subprocess. Returns a struct:
+    /// {:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}
+    Spawn(SpawnRequest),
+    /// Wait for a subprocess to exit. Returns exit code (int).
+    /// The request.port field carries the ProcessHandle value.
+    ProcessWait,
 }
 
 /// Address for connect operations.
@@ -91,6 +122,44 @@ impl IoRequest {
     }
 }
 
+/// Handle to a running subprocess. Stored as ExternalObject with type_name "process".
+#[derive(Debug)]
+pub(crate) struct ProcessHandle {
+    pid: u32,
+    pub(crate) inner: RefCell<ProcessState>,
+}
+
+/// Lifecycle state of a subprocess.
+#[derive(Debug)]
+pub(crate) enum ProcessState {
+    Running(Child),
+    Exited(i32), // cached exit code
+}
+
+impl ProcessHandle {
+    pub fn new(pid: u32, child: Child) -> Self {
+        ProcessHandle {
+            pid,
+            inner: RefCell::new(ProcessState::Running(child)),
+        }
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+}
+
+/// Reap the subprocess on drop to prevent zombie accumulation.
+/// `try_wait` is non-blocking; if the process hasn't exited yet,
+/// it stays in the OS process table until it does.
+impl Drop for ProcessHandle {
+    fn drop(&mut self) {
+        if let ProcessState::Running(ref mut child) = *self.inner.borrow_mut() {
+            let _ = child.try_wait();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -113,5 +182,35 @@ mod tests {
         let req = IoRequest::with_timeout(IoOp::ReadLine, Value::NIL, timeout);
         let extracted = req.as_external::<IoRequest>().unwrap();
         assert_eq!(extracted.timeout, timeout);
+    }
+
+    #[test]
+    fn test_stdio_disposition_derives() {
+        // Smoke test that StdioDisposition is Copy + Clone + Debug
+        let d = StdioDisposition::Pipe;
+        let _ = d; // Copy
+        let _ = format!("{:?}", d); // Debug
+    }
+
+    #[test]
+    fn test_process_handle_pid() {
+        // Spawn /bin/true, verify pid() returns a nonzero value.
+        // This test requires /bin/true to exist.
+        use std::process::Command;
+        let child = Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        assert_eq!(handle.pid(), pid);
+        assert!(handle.pid() > 0);
+    }
+
+    #[test]
+    fn test_process_handle_drop_does_not_panic() {
+        // Drop with a running child should not panic.
+        use std::process::Command;
+        let child = Command::new("/bin/true").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        drop(handle); // should not panic
     }
 }
