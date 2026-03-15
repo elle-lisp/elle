@@ -176,9 +176,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Re-entrancy
 
 `execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
-operand stack and active allocator pointer, runs inner bytecode from IP 0, then
-restores both on return. The inner execution sees an empty stack and runs on the
-same fiber (same heap, globals, parameter frames).
+operand stack and active allocator state (`ActiveAlloc`), runs inner bytecode
+from IP 0, then restores both on return. The inner execution sees an empty stack
+and runs on the same fiber (same heap, globals, parameter frames).
 
 ### Callers
 
@@ -219,7 +219,7 @@ When a fiber suspends (via yield instruction or `emit`):
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
-- `execute_bytecode_saving_stack`: Saves/restores caller's stack and active_allocator, handles tail calls
+- `execute_bytecode_saving_stack`: Saves/restores caller's stack and `ActiveAlloc` state, handles tail calls
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
 - `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
   manages per-fiber heap routing: saves the current thread-local heap pointer,
@@ -239,28 +239,30 @@ via `region_enter()`/`region_exit()`. Effective for all fibers including root
 gates emission on escape analysis — currently maximally conservative, so no
 region instructions are emitted in normal code.
 
-## Active allocator pointer
+## Active allocator state
 
-`FiberHeap` has an `active_allocator: *const bumpalo::Bump` pointer that currently
-always points to the fiber's root bump. Supports future scope-level redirection.
+`FiberHeap` has an `active_allocator: ActiveAlloc` enum field (defined in
+`value/fiber_heap/mod.rs`) that tracks which allocator is currently active:
+- `ActiveAlloc::Slab` — allocate from the fiber's root slab (the default)
+- `ActiveAlloc::Bump(ptr)` — allocate from a scope bump (inside a `RegionEnter`)
 
-**Initialization:** `init_active_allocator()` is called in `with_child_fiber` after
-the child's heap is installed as thread-local (pointer stability requires the heap
-to be in its final Box location).
+**Initialization:** `init_active_allocator()` is a no-op — `active_allocator` starts
+as `ActiveAlloc::Slab` at `FiberHeap::new()`. It is still called in `with_child_fiber`
+after the child's heap is installed as thread-local for forward compatibility.
 
 **Save/restore on Call/Return:** `execute_bytecode_saving_stack` saves the active
-allocator pointer before execution and restores it after, so callee scope changes
-don't leak into the caller's context.
+allocator state via `save_active_allocator()` before execution and restores it via
+`restore_active_allocator()` after, so callee scope changes don't leak into the
+caller's context. `BytecodeFrame`/`SuspendedFrame` do NOT carry this state.
 
-**Save/restore on Yield/Resume:** `SuspendedFrame` carries `active_allocator` so the
-pointer can be restored when a fiber resumes. All construction sites write the current
-value via `save_active_allocator()`.
-
-**Fiber swap:** `with_child_fiber` handles heap swapping. Each fiber's `active_allocator`
-lives on its own `FiberHeap`, so fiber transitions naturally switch allocator context.
+**Fiber swap:** `with_child_fiber` swaps the thread-local `FiberHeap` pointer via
+`restore_saved_heap()`. Each fiber's `active_allocator` lives on its own `FiberHeap`,
+so the swap naturally switches allocator context. The child's allocator is
+recomputed from `scope_bumps` by `init_active_allocator()` (currently a no-op
+because scope bumps are only active inside `RegionEnter`/`RegionExit` pairs).
 
 **Root fiber:** Has a FiberHeap installed (the persistent `ROOT_HEAP` thread-local,
-set up by `VM::new()`). `save_active_allocator()` returns the root heap's allocator.
+set up by `VM::new()`). `save_active_allocator()` reads from the installed heap.
 
 ## Fiber heap routing
 
