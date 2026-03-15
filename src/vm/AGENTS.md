@@ -57,7 +57,7 @@ inner dispatch loop):
 - `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
 - `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
 - `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
-- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (call counts, global bindings, arena stats/count/scope-stats/fiber-stats). `arena/allocs` is intercepted before dispatch (re-entrant).
+- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (call counts, global bindings, arena stats/count). `arena/allocs` is intercepted before dispatch (re-entrant).
 - `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
 
 The public `execute_bytecode` method is the translation boundary — it converts
@@ -94,7 +94,7 @@ dispatches the return signal in `handle_primitive_signal()` (`signal.rs`):
 - `SIG_RESUME` → dispatch to fiber handler
 - `SIG_PROPAGATE` → propagate child fiber's signal, preserve child chain
 - `SIG_CANCEL` → inject error into target fiber
-- `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats`, `arena/scope-stats`, `arena/fiber-stats`, `call-count`, `doc`, `global?`, `fiber/self`, `list-primitives`, `primitive-meta`
+- `SIG_QUERY` → dispatch to `dispatch_query()`, push result to stack. Operations: `arena/allocs` (re-entrant, handled before dispatch), `arena/stats` (0-arg: current fiber; 1-arg: suspended fiber; includes scope-enter/dtor counts), `call-count`, `doc`, `global?`, `fiber/self`, `list-primitives`, `primitive-meta`
 
 All SIG_RESUME primitives (including coroutine wrappers) return
 `(SIG_RESUME, fiber_value)`. The VM uses `FiberHandle::take()`/`put()` to swap
@@ -176,9 +176,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Re-entrancy
 
 `execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
-operand stack and active allocator pointer, runs inner bytecode from IP 0, then
-restores both on return. The inner execution sees an empty stack and runs on the
-same fiber (same heap, globals, parameter frames).
+operand stack and active allocator state (`ActiveAlloc`), runs inner bytecode
+from IP 0, then restores both on return. The inner execution sees an empty stack
+and runs on the same fiber (same heap, globals, parameter frames).
 
 ### Callers
 
@@ -219,7 +219,7 @@ When a fiber suspends (via yield instruction or `emit`):
 
 Key methods:
 - `execute_bytecode_from_ip`: Executes from a given IP with Rc bytecode/constants
-- `execute_bytecode_saving_stack`: Saves/restores caller's stack and active_allocator, handles tail calls
+- `execute_bytecode_saving_stack`: Saves/restores caller's stack and `ActiveAlloc` state, handles tail calls
 - `resume_suspended`: Replays `Vec<SuspendedFrame>`, handles re-yields and errors
 - `with_child_fiber`: Shared swap protocol for fiber resume/cancel. Also
   manages per-fiber heap routing: saves the current thread-local heap pointer,
@@ -239,28 +239,30 @@ via `region_enter()`/`region_exit()`. Effective for all fibers including root
 gates emission on escape analysis — currently maximally conservative, so no
 region instructions are emitted in normal code.
 
-## Active allocator pointer
+## Active allocator state
 
-`FiberHeap` has an `active_allocator: *const bumpalo::Bump` pointer that currently
-always points to the fiber's root bump. Supports future scope-level redirection.
+`FiberHeap` has an `active_allocator: ActiveAlloc` enum field (defined in
+`value/fiber_heap/mod.rs`) that tracks which allocator is currently active:
+- `ActiveAlloc::Slab` — allocate from the fiber's root slab (the default)
+- `ActiveAlloc::Bump(ptr)` — allocate from a scope bump (inside a `RegionEnter`)
 
-**Initialization:** `init_active_allocator()` is called in `with_child_fiber` after
-the child's heap is installed as thread-local (pointer stability requires the heap
-to be in its final Box location).
+**Initialization:** `init_active_allocator()` is a no-op — `active_allocator` starts
+as `ActiveAlloc::Slab` at `FiberHeap::new()`. It is still called in `with_child_fiber`
+after the child's heap is installed as thread-local for forward compatibility.
 
 **Save/restore on Call/Return:** `execute_bytecode_saving_stack` saves the active
-allocator pointer before execution and restores it after, so callee scope changes
-don't leak into the caller's context.
+allocator state via `save_active_allocator()` before execution and restores it via
+`restore_active_allocator()` after, so callee scope changes don't leak into the
+caller's context. `BytecodeFrame`/`SuspendedFrame` do NOT carry this state.
 
-**Save/restore on Yield/Resume:** `SuspendedFrame` carries `active_allocator` so the
-pointer can be restored when a fiber resumes. All construction sites write the current
-value via `save_active_allocator()`.
-
-**Fiber swap:** `with_child_fiber` handles heap swapping. Each fiber's `active_allocator`
-lives on its own `FiberHeap`, so fiber transitions naturally switch allocator context.
+**Fiber swap:** `with_child_fiber` swaps the thread-local `FiberHeap` pointer via
+`restore_saved_heap()`. Each fiber's `active_allocator` lives on its own `FiberHeap`,
+so the swap naturally switches allocator context. The child's allocator is
+recomputed from `scope_bumps` by `init_active_allocator()` (currently a no-op
+because scope bumps are only active inside `RegionEnter`/`RegionExit` pairs).
 
 **Root fiber:** Has a FiberHeap installed (the persistent `ROOT_HEAP` thread-local,
-set up by `VM::new()`). `save_active_allocator()` returns the root heap's allocator.
+set up by `VM::new()`). `save_active_allocator()` reads from the installed heap.
 
 ## Fiber heap routing
 
@@ -270,12 +272,12 @@ heap as the thread-local allocation target. All `Value::cons()`, `Value::closure
 etc. calls during child execution route to the child's `FiberHeap`. On swap-back,
 the parent's heap (always non-null after issue-525) is restored.
 
-`FiberHeap` uses bumpalo for bump allocation. Destructor tracking ensures
-`HeapObject` variants with inner heap allocations (`Vec`, `Rc`, `BTreeMap`,
-`Box<str>`) have their `Drop` impls called on `release()` and `clear()`.
-The bump itself only fully resets on `clear()` (fiber death); partial
-`release()` runs destructors but does not reclaim bump memory (bumpalo has
-no partial reset).
+`FiberHeap` uses a chunk-based slab allocator (`RootSlab`) for root-context
+allocations. Destructor tracking ensures `HeapObject` variants with inner heap
+allocations (`Vec`, `Rc`, `BTreeMap`, `Box<str>`) have their `Drop` impls
+called on `release()` and `clear()`. `release()` returns freed slots to the
+slab free list for reuse. Scope allocations still use `bumpalo::Bump` (freed
+atomically on `RegionExit`).
 
 The root fiber uses the persistent `ROOT_HEAP` thread-local (a leaked `Box<FiberHeap>`
 created by `ensure_root_heap()`). The heap outlives any individual VM, so Values
@@ -340,7 +342,7 @@ to see parent-established parameter bindings.
 | `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
 | `call.rs` | ~683 | Call, TailCall, environment building, `call_closure` macro helper |
 | `jit_entry.rs` | ~282 | JIT compilation profiling, dispatch, batch compilation |
-| `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/scope-stats, arena/fiber-stats, arena/allocs), re-entrant thunk execution |
+| `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/allocs), re-entrant thunk execution |
 | `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |
 | `execute.rs` | ~250 | `execute_bytecode_from_ip`, `execute_bytecode_saving_stack`, re-entrancy documentation |
 | `core.rs` | ~456 | VM struct, `resume_suspended`, stack trace helpers |

@@ -1,5 +1,6 @@
 //! Thread-local fiber heap routing.
 
+use super::ActiveAlloc;
 use super::FiberHeap;
 use std::cell::Cell;
 
@@ -109,22 +110,22 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
 }
 
-/// Save the current `active_allocator` pointer from the installed FiberHeap.
-/// Returns null if no FiberHeap is installed (only possible in test contexts before VM::new()).
-pub fn save_active_allocator() -> *const bumpalo::Bump {
+/// Save the current `active_allocator` from the installed FiberHeap.
+/// Returns `ActiveAlloc::Slab` if no FiberHeap is installed.
+pub(crate) fn save_active_allocator() -> ActiveAlloc {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();
         if ptr.is_null() {
-            std::ptr::null()
+            ActiveAlloc::Slab
         } else {
             unsafe { (*ptr).active_allocator }
         }
     })
 }
 
-/// Restore a previously saved `active_allocator` pointer on the installed FiberHeap.
-/// No-op if no FiberHeap is installed (only possible in test contexts before VM::new()).
-pub fn restore_active_allocator(saved: *const bumpalo::Bump) {
+/// Restore a previously saved `active_allocator` on the installed FiberHeap.
+/// No-op if no FiberHeap is installed.
+pub(crate) fn restore_active_allocator(saved: ActiveAlloc) {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();
         if !ptr.is_null() {

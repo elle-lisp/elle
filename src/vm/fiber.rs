@@ -231,7 +231,6 @@ impl VM {
                         env: closure_env.clone(),
                         ip: *ip,
                         stack: caller_stack,
-                        active_allocator: crate::value::fiber_heap::save_active_allocator(),
                         location_map: location_map.clone(),
                     });
                     self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
@@ -402,7 +401,6 @@ impl VM {
                 env: result.env,
                 ip: result.ip,
                 stack: vec![],
-                active_allocator: crate::value::fiber_heap::save_active_allocator(),
                 location_map: result.location_map,
             })]);
         }

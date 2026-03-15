@@ -1,4 +1,4 @@
-//! Shared bump allocator for zero-copy inter-fiber value exchange.
+//! Shared slab allocator for zero-copy inter-fiber value exchange.
 //!
 //! `SharedAllocator` is owned by a parent fiber's `FiberHeap` (or by the
 //! child itself for root→child chains). Child fibers receive a raw pointer
@@ -9,17 +9,22 @@
 //! - Created by the parent's `FiberHeap::create_shared_allocator()`
 //! - Child allocates fiber-escaping values into it via raw pointer
 //! - Parent reads yielded values directly (zero copy)
-//! - Torn down when the owner's `FiberHeap::clear()` runs
+//! - Torn down when the owner's `FiberHeap::clear()` runs;
+//!   `teardown()` runs destructors and returns all slab slots to the free list
 
 use crate::value::fiber_heap::needs_drop;
+use crate::value::fiber_heap::RootSlab;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 pub(crate) struct SharedAllocator {
-    bump: bumpalo::Bump,
-    /// Raw pointers to bump-allocated HeapObjects that need Drop.
+    slab: RootSlab,
+    /// Raw pointers to slab-allocated HeapObjects that need Drop.
     /// Ordered by allocation time (oldest first).
     dtors: Vec<*mut HeapObject>,
+    /// ALL slab allocations (not just drop-needing ones).
+    /// Used by `teardown()` and `Drop` to return every slot to the free list.
+    allocs: Vec<*mut HeapObject>,
     /// Total number of objects allocated (including those not needing Drop).
     alloc_count: usize,
 }
@@ -27,24 +32,25 @@ pub(crate) struct SharedAllocator {
 impl SharedAllocator {
     pub fn new() -> Self {
         SharedAllocator {
-            bump: bumpalo::Bump::new(),
+            slab: RootSlab::new(),
             dtors: Vec::new(),
+            allocs: Vec::new(),
             alloc_count: 0,
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         let drop = needs_drop(obj.tag());
-        let ptr: &mut HeapObject = self.bump.alloc(obj);
-        let raw = ptr as *mut HeapObject;
+        let ptr = self.slab.alloc(obj);
+        self.allocs.push(ptr);
         if drop {
-            self.dtors.push(raw);
+            self.dtors.push(ptr);
         }
         self.alloc_count += 1;
-        Value::from_heap_ptr(raw as *const ())
+        Value::from_heap_ptr(ptr as *const ())
     }
 
-    /// Run destructors, clear tracking, and reset the bump allocator.
+    /// Run destructors, return all slots to the slab free list, and reset.
     pub fn teardown(&mut self) {
         // Run destructors in reverse order (LIFO).
         for i in (0..self.dtors.len()).rev() {
@@ -53,8 +59,14 @@ impl SharedAllocator {
             }
         }
         self.dtors.clear();
+        // Return all allocated slots to the slab free list.
+        // Dtors have already run — safe to dealloc.
+        for &ptr in self.allocs.iter().rev() {
+            self.slab.dealloc(ptr);
+        }
+        self.allocs.clear();
+        self.slab.clear();
         self.alloc_count = 0;
-        self.bump.reset();
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -66,23 +78,17 @@ impl SharedAllocator {
     pub fn is_empty(&self) -> bool {
         self.alloc_count == 0
     }
-
-    /// Access the underlying bump allocator.
-    /// Needed for future `active_allocator` tightening phases.
-    #[allow(dead_code)]
-    pub fn bump(&self) -> &bumpalo::Bump {
-        &self.bump
-    }
 }
 
 impl Drop for SharedAllocator {
     fn drop(&mut self) {
-        // Run destructors before the bump deallocates its memory.
+        // Run destructors before the slab drops.
         for i in (0..self.dtors.len()).rev() {
             unsafe {
                 std::ptr::drop_in_place(self.dtors[i]);
             }
         }
+        // slab drops implicitly; MaybeUninit slots do not call HeapObject::drop.
     }
 }
 
@@ -121,6 +127,7 @@ mod tests {
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
         assert_eq!(sa.dtors.len(), 0);
+        assert_eq!(sa.allocs.len(), 1);
     }
 
     #[test]
@@ -133,6 +140,7 @@ mod tests {
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
         assert_eq!(sa.dtors.len(), 1); // only String
+        assert_eq!(sa.allocs.len(), 2);
     }
 
     #[test]
@@ -154,30 +162,47 @@ mod tests {
         assert_eq!(sa.len(), 0);
         assert!(sa.is_empty());
         assert_eq!(sa.dtors.len(), 0);
+        assert_eq!(sa.allocs.len(), 0);
     }
 
     #[test]
-    fn test_shared_alloc_teardown_resets_bump() {
+    fn test_shared_alloc_teardown_reuses_memory() {
         let mut sa = SharedAllocator::new();
+        // Alloc 3 objects and teardown.
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         sa.alloc(HeapObject::LString {
-            s: "first".into(),
+            s: "x".into(),
             traits: Value::NIL,
         });
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        let live_after_first = sa.slab.live_count();
+        assert_eq!(live_after_first, 3);
+        sa.teardown();
+        assert_eq!(sa.slab.live_count(), 0);
+        assert_eq!(sa.len(), 0);
+
+        // Alloc again — slab must reuse slots (live_count stays at 3 after 3 allocs).
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::LString {
+            s: "y".into(),
+            traits: Value::NIL,
+        });
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        assert_eq!(sa.slab.live_count(), 3);
+        // Allocated bytes must not have grown (slots were reused).
+        // With chunk_size=256, one chunk covers 3 objects easily.
+        let bytes_round1 = sa.slab.allocated_bytes();
         sa.teardown();
 
-        // Allocate again after teardown — should work fine
-        let v = sa.alloc(HeapObject::LString {
-            s: "second".into(),
-            traits: Value::NIL,
-        });
-        assert_eq!(sa.len(), 1);
-        unsafe {
-            let obj = crate::value::heap::deref(v);
-            match obj {
-                HeapObject::LString { s, .. } => assert_eq!(&**s, "second"),
-                _ => panic!("Expected String"),
-            }
-        }
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+        assert_eq!(
+            sa.slab.allocated_bytes(),
+            bytes_round1,
+            "slab must reuse freed slots, not allocate new chunks"
+        );
+        sa.teardown();
     }
 
     #[test]

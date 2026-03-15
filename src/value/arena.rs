@@ -38,6 +38,9 @@ pub struct ArenaMark {
     /// Depth of the scope bump stack at mark time. Used by `RegionExit`
     /// to verify that exactly one scope bump was pushed since this mark.
     bump_depth: usize,
+    /// Length of `FiberHeap.root_allocs` at mark time.
+    /// Used by `release()` to dealloc root-slab slots allocated after the mark.
+    root_allocs_len: usize,
 }
 
 impl ArenaMark {
@@ -46,12 +49,14 @@ impl ArenaMark {
         dtor_len: usize,
         custom_ptrs_len: usize,
         bump_depth: usize,
+        root_allocs_len: usize,
     ) -> Self {
         ArenaMark {
             position,
             dtor_len,
             custom_ptrs_len,
             bump_depth,
+            root_allocs_len,
         }
     }
 
@@ -69,6 +74,10 @@ impl ArenaMark {
 
     pub(crate) fn bump_depth(&self) -> usize {
         self.bump_depth
+    }
+
+    pub(crate) fn root_allocs_len(&self) -> usize {
+        self.root_allocs_len
     }
 }
 

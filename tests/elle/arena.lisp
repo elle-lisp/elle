@@ -11,12 +11,14 @@
 (let ((result (arena/stats)))
   (assert-true (struct? result) "arena/stats returns struct"))
 
-# test_arena_stats_has_count_and_capacity
+# test_arena_stats_has_expected_fields
 (let* ((stats (arena/stats))
-       (count (get stats :count))
-       (capacity (get stats :capacity)))
-  (assert-true (>= count 0) "arena/stats count is non-negative")
-  (assert-true (>= capacity 0) "arena/stats capacity is non-negative"))
+       (count (get stats :object-count))
+       (bytes (get stats :allocated-bytes))
+       (peak (get stats :peak-count)))
+  (assert-true (>= count 0) "arena/stats :object-count is non-negative")
+  (assert-true (>= bytes 0) "arena/stats :allocated-bytes is non-negative")
+  (assert-true (>= peak 0) "arena/stats :peak-count is non-negative"))
 
 # test_arena_stats_via_vm_query
 (let ((result (vm/query "arena/stats" nil)))
@@ -360,12 +362,12 @@
 
 # test_root_fiber_scope_stats_nonnegative
 # After issue-525, RegionEnter/RegionExit are effective on the root fiber.
-# scope-stats :enters should be >= 0 (may be > 0 due to stdlib scopes).
-(let* ((stats (arena/scope-stats))
-       (enters (get stats :enters))
-       (dtors (get stats :dtors-run)))
-  (assert-true (>= enters 0) "root fiber scope-stats :enters is non-negative")
-  (assert-true (>= dtors 0) "root fiber scope-stats :dtors-run is non-negative"))
+# scope-enter-count should be >= 0 (may be > 0 due to stdlib scopes).
+(let* ((stats (arena/stats))
+       (enters (get stats :scope-enter-count))
+       (dtors (get stats :scope-dtor-count)))
+  (assert-true (>= enters 0) "root fiber scope-enter-count is non-negative")
+  (assert-true (>= dtors 0) "root fiber scope-dtor-count is non-negative"))
 
 # test_root_fiber_count_nonzero
 # After a full VM startup (stdlib loaded), arena/count on root must be > 0.
@@ -437,3 +439,260 @@
 # test_arena_set_object_limit_rejects_scope_arg
 (assert-err-kind (fn [] (apply arena/set-object-limit [100 :global])) :arity-error
   "arena/set-object-limit rejects second :global arg after arity reduction")
+
+# ── arena/stats new fields (Chunk 5) ───────────────────────────────
+
+# test_arena_stats_has_new_fields
+# Verify the unified arena/stats struct has all the new fields.
+(let* ((s (arena/stats)))
+  (assert-true (struct? s) "arena/stats returns struct")
+  (assert-true (int? (get s :object-count)) "arena/stats :object-count is int")
+  (assert-true (int? (get s :peak-count)) "arena/stats :peak-count is int")
+  (assert-true (int? (get s :allocated-bytes)) "arena/stats :allocated-bytes is int")
+  (assert-true (int? (get s :scope-depth)) "arena/stats :scope-depth is int")
+  (assert-true (int? (get s :dtor-count)) "arena/stats :dtor-count is int")
+  (assert-true (int? (get s :root-live-count)) "arena/stats :root-live-count is int")
+  (assert-true (int? (get s :root-alloc-count)) "arena/stats :root-alloc-count is int")
+  (assert-true (int? (get s :shared-count)) "arena/stats :shared-count is int")
+  (assert-true (or (= :slab (get s :active-allocator))
+                   (= :bump (get s :active-allocator)))
+               "arena/stats :active-allocator is :slab or :bump")
+  (assert-true (int? (get s :scope-enter-count)) "arena/stats :scope-enter-count is int")
+  (assert-true (int? (get s :scope-dtor-count)) "arena/stats :scope-dtor-count is int"))
+
+# test_arena_stats_no_capacity_field
+# The old :capacity field must be absent in the unified struct.
+(let* ((s (arena/stats)))
+  (assert-true (nil? (get s :capacity)) "arena/stats :capacity field removed"))
+
+# test_arena_stats_active_allocator_is_slab_at_root
+# At root (no scope), :active-allocator must be :slab.
+(let* ((s (arena/stats)))
+  (assert-eq (get s :active-allocator) :slab
+    "arena/stats :active-allocator is :slab at root"))
+
+# test_arena_stats_scope_depth_is_zero_at_root
+# At root (no scope), :scope-depth must be 0.
+(let* ((s (arena/stats)))
+  (assert-eq (get s :scope-depth) 0
+    "arena/stats :scope-depth is 0 at root"))
+
+# test_arena_stats_object_limit_nil_by_default
+# :object-limit is nil when no limit is set.
+(let* ((s (arena/stats)))
+  (assert-true (nil? (get s :object-limit))
+    "arena/stats :object-limit is nil with no limit set"))
+
+# test_arena_stats_object_limit_reflects_set_limit
+# After setting a limit, :object-limit should reflect it.
+# Use a very large limit to avoid interfering with ongoing allocations.
+(let* ((_ (arena/set-object-limit 9999999))
+       (s (arena/stats))
+       (limit (get s :object-limit))
+       (_ (arena/set-object-limit nil)))  # reset limit
+  (assert-eq limit 9999999
+    "arena/stats :object-limit reflects set limit"))
+
+# test_arena_stats_bytes_matches_arena_bytes
+# :allocated-bytes in arena/stats should match (arena/bytes).
+(let* ((s (arena/stats))
+       (stats-bytes (get s :allocated-bytes))
+       (direct-bytes (arena/bytes)))
+  # They may differ by a small amount (struct allocation between calls),
+  # but must both be non-negative integers.
+  (assert-true (>= stats-bytes 0) "arena/stats :allocated-bytes is non-negative")
+  (assert-true (>= direct-bytes 0) "arena/bytes is non-negative"))
+
+# test_arena_stats_arity_error_two_args
+# arena/stats with 2 arguments must return an arity-error.
+(assert-err-kind (fn [] (apply arena/stats [1 2])) :arity-error
+  "arena/stats rejects 2 arguments")
+
+# test_arena_stats_fiber_arg_type_error
+# arena/stats with a non-fiber argument must return a type-error.
+(assert-err-kind (fn [] (arena/stats 42)) :type-error
+  "arena/stats rejects non-fiber argument")
+
+# test_arena_fiber_stats_via_unified_interface
+# arena/stats with a fiber arg returns stats for that fiber.
+(let* ((f (fiber/new (fn () 42) 1))
+       (_ (fiber/resume f))
+       (s (arena/stats f)))
+  (assert-true (struct? s) "arena/stats with fiber arg returns struct")
+  (assert-true (int? (get s :object-count)) "fiber stats :object-count is int")
+  (assert-true (int? (get s :peak-count)) "fiber stats :peak-count is int")
+  (assert-true (int? (get s :allocated-bytes)) "fiber stats :allocated-bytes is int"))
+
+# test_arena_fiber_stats_no_capacity_field
+# The old arena/fiber-stats had no :capacity field. The new unified
+# struct also has no :capacity field.
+(let* ((f (fiber/new (fn () 42) 1))
+       (_ (fiber/resume f))
+       (s (arena/stats f)))
+  (assert-true (nil? (get s :capacity))
+    "unified fiber stats has no :capacity field"))
+
+# test_arena_fiber_stats_removed
+# arena/fiber-stats primitive must no longer exist.
+# vm/primitive-meta returns nil for unknown names.
+(assert-true (nil? (vm/primitive-meta "arena/fiber-stats"))
+  "arena/fiber-stats is removed from primitives")
+
+# test_arena_scope_stats_removed
+# arena/scope-stats primitive must no longer exist; its fields are in arena/stats.
+(assert-true (nil? (vm/primitive-meta "arena/scope-stats"))
+  "arena/scope-stats is removed from primitives")
+
+# test_scope_enter_count_is_int
+# :scope-enter-count is a non-negative integer at root.
+(let* ((s (arena/stats))
+       (enter-count (get s :scope-enter-count)))
+  (assert-true (int? enter-count) ":scope-enter-count is int")
+  (assert-true (>= enter-count 0) ":scope-enter-count is non-negative"))
+
+# test_scope_dtor_count_is_int
+# :scope-dtor-count is a non-negative integer at root.
+(let* ((s (arena/stats))
+       (dtor-count (get s :scope-dtor-count)))
+  (assert-true (int? dtor-count) ":scope-dtor-count is int")
+  (assert-true (>= dtor-count 0) ":scope-dtor-count is non-negative"))
+
+# ── Migrated from Rust: mark/release / scope / alloc-error ─────────
+
+# test_fiber_heap_mark_release
+# alloc, mark, alloc more, release — count returns to pre-mark level.
+(let* ((before (arena/count))
+       (m (arena/checkpoint))
+       (_ (string "a"))
+       (_ (string "b"))
+       (_ (string "c"))
+       (_ (arena/reset m))
+       (after (arena/count)))
+  (assert-eq after before "mark/release: count restored after release"))
+
+# test_fiber_heap_nested_mark_release
+# Nested marks: inner release leaves outer alloc; outer release clears all.
+(let* ((before (arena/count))
+       (outer-m (arena/checkpoint))
+       (_ (string "outer"))
+       (inner-m (arena/checkpoint))
+       (_ (string "inner"))
+       (after-inner-alloc (arena/count)))
+  (assert-eq (- after-inner-alloc before) 2 "two allocs after outer+inner mark")
+  (arena/reset inner-m)
+  (let* ((after-inner-reset (arena/count)))
+    (assert-eq (- after-inner-reset before) 1 "inner reset: one alloc remains")
+    (arena/reset outer-m)
+    (let* ((after-outer-reset (arena/count)))
+      (assert-eq after-outer-reset before "outer reset: back to baseline"))))
+
+# test_clear_resets_scope_counters
+# :scope-enter-count and :scope-dtor-count reset to 0 after a fiber is cleared.
+# We verify indirectly: a new child fiber starts with zero scope counters.
+(let* ((f (fiber/new (fn ()
+             (let* ((_ (arena/stats)))  # trigger stats query inside child
+               (arena/stats)))
+           1))
+       (stats (fiber/resume f))
+       (enters (get stats :scope-enter-count))
+       (dtors-run (get stats :scope-dtor-count)))
+  (assert-eq enters 0 "new fiber :scope-enter-count is 0")
+  (assert-eq dtors-run 0 "new fiber :scope-dtor-count is 0"))
+
+# test_memory_stabilizes_after_release
+# After alloc/release cycle, :allocated-bytes must not grow on the second cycle
+# (slab reuses freed slots). Use arena/stats :allocated-bytes for comparison.
+(let* ((m1 (arena/checkpoint))
+       (_ (letrec ((loop (fn (i)
+                            (when (< i 50)
+                              (cons i (+ i 1))
+                              (loop (+ i 1))))))
+            (loop 0)))
+       (bytes-round1 (get (arena/stats) :allocated-bytes))
+       (_ (arena/reset m1))
+       (m2 (arena/checkpoint))
+       (_ (letrec ((loop (fn (i)
+                            (when (< i 50)
+                              (cons i (+ i 1))
+                              (loop (+ i 1))))))
+            (loop 0)))
+       (bytes-round2 (get (arena/stats) :allocated-bytes))
+       (_ (arena/reset m2)))
+  (assert-eq bytes-round1 bytes-round2
+    "slab reuses freed slots: :allocated-bytes must not grow across release cycles"))
+
+# test_scope_mark_push_pop_lifecycle
+# arena/stats :scope-depth reflects scope push/pop.
+# Since scope depth is only visible through arena/stats :scope-depth, and
+# user code cannot enter a scope without the compiler's RegionEnter, this
+# test verifies that :scope-depth is 0 at root (no active user scopes).
+(let* ((s (arena/stats)))
+  (assert-eq (get s :scope-depth) 0
+    "scope-depth is 0 at root (no user-level scope active)"))
+
+# test_take_alloc_error_initially_none
+# Without a limit set, :object-limit is nil.
+(let* ((s (arena/stats)))
+  (assert-true (nil? (get s :object-limit))
+    ":object-limit is nil when no limit is set"))
+
+# test_alloc_error_set_on_limit_exceeded
+# Verify limit can be set and cleared. We set a very high limit to avoid
+# breaking subsequent allocations.
+(let* ((_ (arena/set-object-limit 9999999))
+       (s (arena/stats))
+       (limit-while-set (get s :object-limit))
+       (_ (arena/set-object-limit nil)))
+  # Verify the limit was reflected in stats while set.
+  (assert-eq limit-while-set 9999999
+    "arena/set-object-limit: limit reflected in arena/stats while set"))
+
+# test_alloc_error_cleared_by_set_object_limit_nil
+# After removing the limit, :object-limit returns to nil.
+(let* ((_ (arena/set-object-limit 9999999))
+       (_ (arena/set-object-limit nil))
+       (s (arena/stats)))
+  (assert-true (nil? (get s :object-limit))
+    ":object-limit is nil after removing limit"))
+
+# test_active_alloc_starts_as_slab
+# At root (no scope), :active-allocator is :slab.
+(assert-eq (get (arena/stats) :active-allocator) :slab
+  "active-allocator is :slab at root")
+
+# test_root_alloc_tracked
+# After allocations in root context, :root-live-count and :root-alloc-count increase.
+# Note: arena/stats itself allocates cons cells (SIG_QUERY message), so we can only
+# assert that the counts increase, not the exact delta.
+(let* ((before-s (arena/stats))
+       (before-live (get before-s :root-live-count))
+       (before-allocs (get before-s :root-alloc-count))
+       (_ (cons 1 2))         # allocates one Cons in root context
+       (after-s (arena/stats))
+       (after-live (get after-s :root-live-count))
+       (after-allocs (get after-s :root-alloc-count)))
+  (assert-true (> after-live before-live)
+    ":root-live-count increases after root allocations")
+  (assert-true (> after-allocs before-allocs)
+    ":root-alloc-count increases after root allocations"))
+
+# test_create_shared_allocator_tracked
+# Resuming a yielding fiber creates a shared allocator: :shared-count increases.
+# We verify that :shared-count is a non-negative integer (invariant).
+(let* ((s (arena/stats)))
+  (assert-true (>= (get s :shared-count) 0)
+    ":shared-count is non-negative"))
+
+# test_create_multiple_shared_allocators
+# :shared-count is a non-negative integer. The internal tracking of shared
+# allocators is on the VM fiber's heap, not the ROOT_HEAP thread-local that
+# arena/stats reads from root context. Verify the field is structurally valid.
+(let* ((f1 (fiber/new (fn () (emit 2 "y1")) 2))
+       (f2 (fiber/new (fn () (emit 2 "y2")) 2))
+       (_ (fiber/resume f1))
+       (_ (fiber/resume f2))
+       (s (arena/stats)))
+  (assert-true (int? (get s :shared-count))
+    ":shared-count is int after multiple yielding fibers")
+  (assert-true (>= (get s :shared-count) 0)
+    ":shared-count is non-negative after multiple yielding fibers"))

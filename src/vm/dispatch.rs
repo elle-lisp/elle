@@ -528,7 +528,6 @@ impl VM {
             env: closure_env.clone(),
             ip,
             stack: saved_stack,
-            active_allocator: crate::value::fiber_heap::save_active_allocator(),
             location_map: location_map.clone(),
         });
 

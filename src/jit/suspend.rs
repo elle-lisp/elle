@@ -60,7 +60,6 @@ pub extern "C" fn elle_jit_yield(
         env: closure.env.clone(),
         ip: yield_meta.resume_ip,
         stack,
-        active_allocator: crate::value::fiber_heap::save_active_allocator(),
         location_map: closure.template.location_map.clone(),
     });
 
@@ -121,7 +120,6 @@ pub extern "C" fn elle_jit_yield_through_call(
         env: closure.env.clone(),
         ip: call_meta.resume_ip,
         stack,
-        active_allocator: crate::value::fiber_heap::save_active_allocator(),
         location_map: closure.template.location_map.clone(),
     });
 
