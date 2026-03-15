@@ -24,6 +24,59 @@ pub(super) fn process_raw_completion(
     buffer_pool.release(buf_handle);
 
     match pending {
+        PendingOp::ProcessWait {
+            handle_val,
+            siginfo,
+            ..
+        } => {
+            // buffer_pool.release is already called at the top of process_raw_completion.
+            // Reclaim the siginfo_t allocation.
+            // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
+            // This completion arm is the single exit point — the CQE fires exactly once
+            // per SQE. The pointer is non-null (fast path for already-exited processes
+            // never inserts a PendingOp::ProcessWait).
+            let si = unsafe { Box::from_raw(*siginfo) };
+
+            if result_code < 0 {
+                let errno = -result_code;
+                return Completion {
+                    id,
+                    result: Err(error_val(
+                        "exec-error",
+                        format!("sys/wait: waitid failed: errno {}", errno),
+                    )),
+                };
+            }
+
+            // Extract exit status from siginfo.
+            // si_code values for SIGCHLD:
+            //   CLD_EXITED (1): si_status is exit code
+            //   CLD_KILLED (2): si_status is signal number (return as negative)
+            //   CLD_DUMPED (3): killed + core dump (return signal as negative)
+            //
+            // SAFETY: si is fully initialized (kernel wrote it on child exit;
+            // result_code >= 0 confirms the waitid completed successfully).
+            let exit_code: i32 = unsafe {
+                let si_code = si.si_code;
+                let si_status = si.si_status();
+                match si_code {
+                    1 => si_status,      // CLD_EXITED: normal exit
+                    2 | 3 => -si_status, // CLD_KILLED / CLD_DUMPED: negative signal number
+                    _ => -1,             // unknown
+                }
+            };
+
+            // Cache the exit code in the ProcessHandle.
+            if let Some(handle) = handle_val.as_external::<crate::io::request::ProcessHandle>() {
+                let mut state = handle.inner.borrow_mut();
+                *state = crate::io::request::ProcessState::Exited(exit_code);
+            }
+
+            Completion {
+                id,
+                result: Ok(Value::int(exit_code as i64)),
+            }
+        }
         PendingOp::Sleep { .. } => {
             // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
             // Both are success for a timer.
@@ -166,6 +219,11 @@ pub(super) fn process_raw_completion(
                 IoOp::Connect { .. } => {
                     // Connect ops use PendingOp::Connect, not PendingOp::Port
                     unreachable!("Connect should use PendingOp::Connect variant")
+                }
+                IoOp::Spawn { .. } | IoOp::ProcessWait => {
+                    // Subprocess ops are dispatched before the port guard and never
+                    // produce a PendingOp::Port entry — they cannot reach this branch.
+                    unreachable!("Spawn/ProcessWait should be dispatched before port guard")
                 }
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload

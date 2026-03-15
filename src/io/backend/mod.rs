@@ -17,7 +17,7 @@ mod network;
 #[cfg(test)]
 mod tests;
 
-use crate::io::request::{IoOp, IoRequest};
+use crate::io::request::{IoOp, IoRequest, ProcessHandle, ProcessState, StdioDisposition};
 use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -68,6 +68,33 @@ impl SyncBackend {
         if let IoOp::Sleep { duration } = request.op {
             std::thread::sleep(duration);
             return (SIG_OK, Value::NIL);
+        }
+
+        // Subprocess ops — dispatched before the port guard.
+        // Spawn: request.port is Value::NIL (no port needed).
+        // ProcessWait: request.port carries a ProcessHandle (not a Port).
+        if let IoOp::Spawn {
+            ref program,
+            ref args,
+            ref env,
+            ref cwd,
+            stdin,
+            stdout,
+            stderr,
+        } = request.op
+        {
+            return self.execute_spawn(
+                program,
+                args,
+                env.as_deref(),
+                cwd.as_deref(),
+                stdin,
+                stdout,
+                stderr,
+            );
+        }
+        if let IoOp::ProcessWait = request.op {
+            return self.execute_process_wait(&request.port);
         }
 
         // All remaining ops require a valid port.
@@ -127,7 +154,7 @@ impl SyncBackend {
                     SIG_ERROR,
                     error_val("io-error", "accept: port is not a listener"),
                 ),
-                IoOp::Connect { .. } | IoOp::Sleep { .. } => unreachable!(), // handled above
+                IoOp::Connect { .. } | IoOp::Sleep { .. } | IoOp::Spawn { .. } | IoOp::ProcessWait => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
@@ -358,8 +385,12 @@ impl SyncBackend {
                 io::ErrorKind::InvalidInput,
                 "cannot read from output port",
             )),
-            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
-                port.with_fd(|fd| {
+            PortKind::File
+            | PortKind::TcpStream
+            | PortKind::UdpSocket
+            | PortKind::UnixStream
+            | PortKind::Pipe => port
+                .with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe {
                         libc::read(raw, buf.as_mut_ptr() as *mut libc::c_void, buf.len())
@@ -375,8 +406,7 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                })
-            }
+                }),
             PortKind::TcpListener | PortKind::UnixListener => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "cannot read from listener port",
@@ -405,8 +435,12 @@ impl SyncBackend {
                 io::ErrorKind::InvalidInput,
                 "cannot write to input port",
             )),
-            PortKind::File | PortKind::TcpStream | PortKind::UdpSocket | PortKind::UnixStream => {
-                port.with_fd(|fd| {
+            PortKind::File
+            | PortKind::TcpStream
+            | PortKind::UdpSocket
+            | PortKind::UnixStream
+            | PortKind::Pipe => port
+                .with_fd(|fd| {
                     let raw = fd.as_raw_fd();
                     let ret = unsafe {
                         libc::write(raw, data.as_ptr() as *const libc::c_void, data.len())
@@ -422,8 +456,7 @@ impl SyncBackend {
                         io::ErrorKind::BrokenPipe,
                         "port fd unavailable",
                     ))
-                })
-            }
+                }),
             PortKind::TcpListener | PortKind::UnixListener => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "cannot write to listener port",
@@ -439,7 +472,8 @@ impl SyncBackend {
             PortKind::Stdin => Ok(()), // no-op
             // Sockets: fsync(2) returns EINVAL on socket fds. TCP and Unix
             // stream sockets have kernel-managed buffers; flush is a no-op.
-            PortKind::TcpStream | PortKind::UnixStream => Ok(()),
+            // Pipes have kernel-managed buffers; flush is a no-op (like sockets).
+            PortKind::TcpStream | PortKind::UnixStream | PortKind::Pipe => Ok(()),
             PortKind::UdpSocket => Ok(()), // no meaningful flush for UDP
             PortKind::File => port
                 .with_fd(|fd| {
@@ -467,12 +501,142 @@ impl SyncBackend {
             Encoding::Text => match String::from_utf8(data) {
                 Ok(s) => (SIG_OK, Value::string(s)),
                 Err(e) => {
-                    // Lossy conversion for text ports
-                    let s = String::from_utf8_lossy(e.as_bytes());
-                    (SIG_OK, Value::string(s.as_ref()))
+                    let offset = e.utf8_error().valid_up_to();
+                    (
+                        SIG_ERROR,
+                        error_val(
+                            "encoding-error",
+                            format!("invalid UTF-8 at byte {}", offset),
+                        ),
+                    )
                 }
             },
             Encoding::Binary => (SIG_OK, Value::bytes(data)),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn bytes_to_value_pub(port: &Port, data: Vec<u8>) -> (SignalBits, Value) {
+        Self::bytes_to_value(port, data)
+    }
+
+    fn execute_spawn(
+        &self,
+        program: &str,
+        args: &[String],
+        env: Option<&[(String, String)]>,
+        cwd: Option<&str>,
+        stdin_disp: StdioDisposition,
+        stdout_disp: StdioDisposition,
+        stderr_disp: StdioDisposition,
+    ) -> (SignalBits, Value) {
+        use crate::value::heap::TableKey;
+        use std::process::{Command, Stdio};
+
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        if let Some(env_pairs) = env {
+            cmd.env_clear();
+            for (k, v) in env_pairs {
+                cmd.env(k, v);
+            }
+        }
+        if let Some(dir) = cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.stdin(match stdin_disp {
+            StdioDisposition::Pipe => Stdio::piped(),
+            StdioDisposition::Inherit => Stdio::inherit(),
+            StdioDisposition::Null => Stdio::null(),
+        });
+        cmd.stdout(match stdout_disp {
+            StdioDisposition::Pipe => Stdio::piped(),
+            StdioDisposition::Inherit => Stdio::inherit(),
+            StdioDisposition::Null => Stdio::null(),
+        });
+        cmd.stderr(match stderr_disp {
+            StdioDisposition::Pipe => Stdio::piped(),
+            StdioDisposition::Inherit => Stdio::inherit(),
+            StdioDisposition::Null => Stdio::null(),
+        });
+
+        match cmd.spawn() {
+            Ok(mut child) => {
+                let pid = child.id();
+                let stdin_val = child
+                    .stdin
+                    .take()
+                    .map(|s| pipe_to_port(s, Direction::Write, Encoding::Binary, pid, "stdin"))
+                    .unwrap_or(Value::NIL);
+                let stdout_val = child
+                    .stdout
+                    .take()
+                    .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stdout"))
+                    .unwrap_or(Value::NIL);
+                let stderr_val = child
+                    .stderr
+                    .take()
+                    .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stderr"))
+                    .unwrap_or(Value::NIL);
+
+                let handle = ProcessHandle::new(pid, child);
+                let handle_val = Value::external("process", handle);
+
+                let mut fields = std::collections::BTreeMap::new();
+                fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
+                fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
+                fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
+                fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
+                fields.insert(TableKey::Keyword("process".into()), handle_val);
+                (SIG_OK, Value::struct_from(fields))
+            }
+            Err(e) => (
+                SIG_ERROR,
+                error_val("exec-error", format!("sys/exec: {}: {}", program, e)),
+            ),
+        }
+    }
+
+    fn execute_process_wait(&self, handle_val: &Value) -> (SignalBits, Value) {
+        let handle = match handle_val.as_external::<ProcessHandle>() {
+            Some(h) => h,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("type-error", "sys/wait: expected process handle"),
+                )
+            }
+        };
+        let mut state = handle.inner.borrow_mut();
+        match &mut *state {
+            ProcessState::Running(child) => match child.wait() {
+                Ok(status) => {
+                    let code = status.code().unwrap_or(-1);
+                    *state = ProcessState::Exited(code);
+                    (SIG_OK, Value::int(code as i64))
+                }
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val("exec-error", format!("sys/wait: {}", e)),
+                ),
+            },
+            ProcessState::Exited(code) => (SIG_OK, Value::int(*code as i64)),
+        }
+    }
+}
+
+/// Convert a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
+///
+/// `T: Into<OwnedFd>` covers ChildStdin, ChildStdout, ChildStderr — each implements
+/// `From<T> for OwnedFd` on Unix via IntoRawFd.
+pub(crate) fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
+    pipe: T,
+    direction: Direction,
+    encoding: Encoding,
+    pid: u32,
+    name: &str,
+) -> Value {
+    let fd: std::os::unix::io::OwnedFd = pipe.into();
+    let label = format!("pid:{}:{}", pid, name);
+    Value::external("port", Port::new_pipe(fd, direction, encoding, label))
 }

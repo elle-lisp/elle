@@ -38,7 +38,7 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 
 ### IoOp
 
-Enum of I/O operations (11 variants):
+Enum of I/O operations (13 variants):
 
 **Stream operations:** `ReadLine`, `Read { count }`, `ReadAll`, `Write { data }`, `Flush`
 
@@ -46,13 +46,37 @@ Enum of I/O operations (11 variants):
 
 **Timer:** `Sleep { duration }`
 
+**Subprocess operations:** `Spawn { program, args, env, cwd, stdin, stdout, stderr }`, `ProcessWait`
+
+### PortKind
+
+Enum of port types (10 variants):
+
+**File-based:** `File`, `Stdin`, `Stdout`, `Stderr`
+
+**Network:** `TcpListener`, `TcpStream`, `UdpSocket`, `UnixListener`, `UnixStream`
+
+**Subprocess:** `Pipe` — represents a subprocess stdio fd (stdin, stdout, or stderr). Display format: `#<port:pipe "pid:1234:stdout" :read :binary>`. All exhaustive matches on `PortKind` must be updated when adding new variants.
+
+### ProcessHandle
+
+Struct representing a running subprocess. Fields:
+- `pid: u32` — process ID
+- `inner: RefCell<ProcessState>` — lifecycle state (Running or Exited with cached exit code)
+
+Methods:
+- `new(pid, child) → ProcessHandle` — create from spawned child process
+- `pid() → u32` — get process ID
+- `Drop` impl — calls `try_wait()` on the child to reap zombies
+
 ### PendingOp
 
-Enum tracking in-flight async operations (3 variants):
+Enum tracking in-flight async operations (4 variants):
 
 - `Port { op, port_key, port, buffer_handle, listener_kind }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `listener_kind` is `Some(PortKind)` for Accept only.
 - `Connect { addr, buffer_handle, connect_fd }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Sleep { buffer_handle }` — portless timer.
+- `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing.
 
 ### PoolOp / PoolCompletion
 
@@ -118,6 +142,31 @@ Used by `do-shutdown` in stdlib to cancel pending I/O before aborting/cancelling
 
 Buffered data is never lost on EOF or error. The backend drains buffered data before surfacing EOF or error status.
 
+## Backend Execution (Chunk 2)
+
+### Subprocess Operations
+
+Both `SyncBackend` and `AsyncBackend` implement subprocess spawn and wait:
+
+**`SyncBackend::execute_spawn()`** — Spawns a subprocess synchronously using `std::process::Command`. Returns a struct with fields:
+- `:pid` (int) — process ID
+- `:stdin`, `:stdout`, `:stderr` (port or nil) — pipes created per `StdioDisposition`
+- `:process` (external) — `ProcessHandle` for later wait operations
+
+**`SyncBackend::execute_process_wait()`** — Waits for subprocess exit using `child.wait()`. Returns exit code (int). Caches the exit code in `ProcessHandle` for idempotent re-waits.
+
+**`AsyncBackend::submit_spawn()`** — Spawns a subprocess asynchronously. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
+
+**`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+). Fast path: if the process has already exited (cached in `ProcessHandle`), returns immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation.
+
+**`submit_uring_process_wait()`** (in `src/io/uring.rs`) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
+
+**`pipe_to_port()`** (in `src/io/backend/mod.rs`) — Free function converting a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value. Used by both sync and async backends.
+
+### Encoding Error Handling
+
+`SyncBackend::bytes_to_value()` now returns `SIG_ERROR` with kind `"encoding-error"` when `Encoding::Text` encounters invalid UTF-8, instead of silently replacing invalid bytes with the replacement character. This prevents data corruption and makes encoding errors visible to the caller.
+
 ## Invariants
 
 1. `IoRequest` values are only created by stream and network primitives.
@@ -130,3 +179,7 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
+11. **Dispatch-before-port-guard:** In both sync and async backends, `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`). This ensures subprocess ops are handled before the code attempts to extract a Port from the request.
+12. **Encoding errors:** `Encoding::Text` read errors now return `SIG_ERROR` with kind `"encoding-error"` instead of silently replacing invalid UTF-8 with the replacement character.
+13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
+14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.

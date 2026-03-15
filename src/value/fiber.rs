@@ -265,8 +265,8 @@ impl From<SignalBits> for u32 {
 // owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
 // imports continue to work.
 pub use crate::signals::{
-    SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE, SIG_QUERY,
-    SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
+    SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE,
+    SIG_QUERY, SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
 };
 
 /// Fiber lifecycle status. Diverges from Janet: caught SIG_ERROR leaves
