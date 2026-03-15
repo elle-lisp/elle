@@ -487,19 +487,29 @@ simple Copy pair.
 
 ### Signal Restrictions
 
-The programmer can restrict signals on functions using the `silence` form:
+The programmer can restrict signals on functions using `silence` (total suppression) or `squelch` (blacklist):
 
 ```janet
-(defn query (db sql)
-  (silence :io :error)
-  ...)
+# Require the function body to be completely silent
+(defn add (x y)
+  (silence)
+  (+ x y))
+
+# Forbid specific signals in the function body
+(defn no-yield (x)
+  (squelch :yield)
+  (+ x 1))
 ```
 
 And signal bounds on parameters:
 
 ```janet
 (defn fast-map (f xs)
-  (silence f)
+  (silence f)   # f must be completely silent
+  (map f xs))
+
+(defn safe-map (f xs)
+  (squelch f :yield)   # f must not yield (but may error)
   (map f xs))
 ```
 
@@ -678,24 +688,16 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 # Function-level restriction (no signals)
 (silence)
 
-# Function-level restriction (specific signals allowed)
-(silence :kw1 :kw2)
-
 # Parameter-level restriction (parameter must be silent)
 (silence param)
-
-# Parameter-level restriction (parameter may emit specific signals)
-(silence param :kw1 :kw2)
 ```
 
 **Semantics:**
 
 - `(silence)` — This function emits no signals (silent)
-- `(silence :kw1 :kw2)` — This function may emit only these signals
 - `(silence param)` — Parameter `param` must be silent (no signals)
-- `(silence param :kw1 :kw2)` — Parameter `param` may emit at most these signals
+- Signal keywords are not accepted. Use `(squelch ...)` for targeted signal restrictions.
 - Multiple `silence` forms allowed in one lambda (one per parameter + one function-level)
-- Keywords must be registered (via `signal` or built-in)
 - Parameter names must match declared parameters
 - Duplicate restrictions for the same parameter: the last one wins
 
@@ -713,30 +715,93 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
   (silence)
   (+ x y))
 
-# Function that may error
-(defn validate (x)
-  (silence :error)
-  (if (< x 0) (error "negative") x))
-
 # Higher-order function with silent callback
 (defn apply-silent (f x)
   "Apply f to x, requiring f to be silent."
   (silence f)
   (f x))
 
-# Higher-order function with bounded callback
-(defn apply-safe (f x)
-  "Apply f to x, allowing only errors."
-  (silence f :error)
-  (f x))
-
-# Multiple restrictions
+# Multiple restrictions (silence + squelch on different params)
 (defn map-safe (f xs)
-  "Map f over xs, f may only error."
-  (silence f :error)
-  (silence :error)
+  "Map f over xs. f must be silent."
+  (silence f)
+  (silence)
   (map f xs))
 ```
+
+### `(squelch ...)` Form
+
+Declares signal blacklist bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
+
+**Syntax:**
+```janet
+# Function-level restriction (forbid specific signals)
+(squelch :kw1 :kw2)
+
+# Parameter-level restriction (parameter must not emit specific signals)
+(squelch param :kw1 :kw2)
+```
+
+**Semantics:**
+
+- `(squelch :kw1 :kw2)` — This function must not emit these signals (blacklist)
+- `(squelch param :kw1 :kw2)` — Parameter `param` must not emit these signals
+- At least one keyword is required — `(squelch)` and `(squelch param)` with no keywords are compile errors
+- Keywords must be registered (via `signal` or built-in)
+- Parameter names must match declared parameters
+- Duplicate restrictions for the same parameter: the last one wins
+- Cannot mix `silence` and `squelch` at function level — compile error
+
+**Contrast with `silence`:**
+
+`silence` is a **total suppressor**: `(silence f)` means f must be completely silent — no signals at all. There is no keyword form; use `squelch` for targeted restrictions.
+
+`squelch` is a **blacklist** (open-world): `(squelch f :yield)` means f must **not** emit `:yield`. Everything else is allowed, including user-defined signals not listed.
+
+**Examples:**
+```janet
+# Forbid yielding in a function
+(defn no-yield []
+  (squelch :yield)
+  (+ 1 2))
+
+# Forbid yielding in a callback
+(defn safe-iterate (f xs)
+  "Iterate f over xs. f must not yield, but may emit other signals."
+  (squelch f :yield)
+  (map f xs))
+
+# Forbid multiple signals
+(defn strict-callback (f x)
+  "Call f, forbidding both yield and error."
+  (squelch f :yield :error)
+  (f x))
+
+# Composition safety: user-defined signals pass through
+(defn audit-iterate (f xs)
+  "Iterate f over xs. f must not yield, but may emit :audit."
+  (squelch f :yield)
+  (map f xs))
+
+# This works: f emits :audit, which is not squelched
+(audit-iterate (fn [x] (emit :audit x) x) [1 2 3])
+
+# This fails: f yields, which is squelched
+(audit-iterate (fn [x] (yield x) x) [1 2 3])
+```
+
+**Outside lambda bodies**, `squelch` is a call to the stdlib `squelch` function, which signals `:error` at runtime.
+
+**Error cases:**
+
+| Condition | Error |
+|-----------|-------|
+| `(squelch)` with no keywords | `"squelch requires at least one signal keyword"` |
+| `(squelch param)` with no keywords | `"squelch requires at least one signal keyword after parameter name"` |
+| Unknown keyword | `"squelch: signal :X not registered (unknown signal keyword)"` |
+| Unknown parameter | `"squelch: 'X' is not a parameter of this function"` |
+| Mixed with `silence` at function level | `"cannot use both silence and squelch at function level"` |
+| Outside lambda | Treated as a call to stdlib function (signals `:error`) |
 
 ## Compile-Time Verification
 
@@ -748,9 +813,14 @@ Every lambda has `inferred_signals` — the minimum guaranteed set of signals th
 2. **Signals of internal calls** to statically-known functions — their `inferred_signals` bits propagate upward
 3. **Signals contributed by parameter calls:**
    - If a parameter has a `silence` bound, its bound's bits are included in `inferred_signals`
+   - If a parameter has a `squelch` bound, the parameter remains polymorphic (the bound constrains what's forbidden, not what's allowed)
    - If a parameter has NO bound, it contributes conservatively (Yields)
 
-The `inferred_signals: Signal` field is always present and contains the minimum guaranteed set of signals the lambda may produce. The programmer-supplied ceiling constraint from `(silence)` or `(silence :kw ...)` is a separate concept — the `silence` form provides a bound that the compiler checks `inferred_signals` against. When a `silence` bound is present, the compiler checks that `inferred_signals.bits ⊆ bound.bits`. If the check passes, the lambda's final signal is the declared bound (tighter). If it fails, compile-time error.
+The `inferred_signals: Signal` field is always present and contains the minimum guaranteed set of signals the lambda may produce.
+
+**Silence bounds (total suppression):** The programmer-supplied ceiling constraint from `(silence)` declares that the function must emit no signals. When a `silence` bound is present, the compiler checks that `inferred_signals.bits == 0`. If the check fails, compile-time error. For targeted restrictions, use `(squelch :kw ...)` instead.
+
+**Squelch bounds (blacklist):** The programmer-supplied floor constraint from `(squelch :kw ...)` forbids specific signals. When a `squelch` bound is present, the compiler checks that `inferred_signals.bits & forbidden_bits == 0`. If the check fails, compile-time error. Squelch-bounded parameters remain polymorphic for inference — the bound only constrains what's forbidden, not what's allowed.
 
 **Example:**
 ```janet
@@ -769,7 +839,7 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 (apply-silent (fn () (yield 1)) 42)
 ```
 
-### Parameter Bounds Eliminate Polymorphism
+### Silence Bounds Eliminate Polymorphism
 
 A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be silent, so the function's signal is determined by its own body only, not by what `f` might do.
 
@@ -780,11 +850,26 @@ A function with `(silence f)` is no longer polymorphic with respect to `f`. The 
   (map f xs))
 # Signal: Polymorphic(0) — depends on f's signal
 
-# With bound: not polymorphic
+# With silence bound: not polymorphic
 (defn map-silent (f xs)
   (silence f)
   (map f xs))
 # Signal: silent — f is guaranteed silent, so map is silent
+```
+
+### Squelch Bounds Preserve Polymorphism
+
+A function with `(squelch f :yield)` keeps `f` polymorphic. The bound only forbids `:yield`; it doesn't specify what `f` *will* emit. The parameter's signal contribution is whatever the caller passes, minus the forbidden bits.
+
+**Example:**
+```janet
+# With squelch bound: still polymorphic
+(defn safe-iterate (f xs)
+  (squelch f :yield)
+  (map f xs))
+# Signal: Polymorphic(0) — f's signal is whatever the caller passes, minus :yield
+# If caller passes a function that emits :audit, that bit propagates
+# If caller passes a function that yields, compile-time error
 ```
 
 ### Call-Site Checking
@@ -809,9 +894,11 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 
 When a closure is passed to a function with a signal bound, the runtime checks that the closure's signal satisfies the bound. This is necessary for dynamic arguments where the signal cannot be determined at compile time.
 
+### Silence Bounds (Total Suppression Check)
+
 **Mechanism:**
-- The lowerer emits a `CheckSignalBound` instruction at function entry for each bounded parameter
-- The VM checks: `closure.signal.bits & ~allowed != 0`
+- The lowerer emits a `CheckSignalBound` instruction at function entry for each silence-bounded parameter
+- The VM checks: `closure.signal.bits != 0` (any bits set → violation)
 - If the check fails, the VM signals `:error` with a descriptive message
 
 **Example:**
@@ -823,7 +910,31 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # At runtime, if f's signal violates the bound, error is signaled
 (var f (eval '(fn () (yield 1))))
 (apply-silent f 42)
-# Runtime error: argument violates signal bound
+# Runtime error: closure may emit {:yield} but parameter must be silent
+```
+
+### Squelch Bounds (Blacklist Check)
+
+**Mechanism:**
+- The lowerer emits a `CheckSignalForbidden` instruction at function entry for each squelch-bounded parameter
+- The VM checks: `closure.signal.bits & forbidden_bits != 0` (forbidden bits present)
+- If the check fails, the VM signals `:error` with a descriptive message
+
+**Example:**
+```janet
+(defn safe-iterate (f xs)
+  (squelch f :yield)
+  (map f xs))
+
+# At runtime, if f's signal contains forbidden bits, error is signaled
+(var f (eval '(fn () (yield 1))))
+(safe-iterate f [1 2 3])
+# Runtime error: closure may emit {:yield} but {:yield} is squelched
+
+# But user-defined signals pass through
+(var g (eval '(fn [x] (emit :audit x) x)))
+(safe-iterate g [1 2 3])
+# Works fine — :audit is not squelched
 ```
 
 ## JIT Integration
@@ -946,12 +1057,16 @@ A struct mapping signal keywords to bit positions. Includes both built-in and us
   (silence)           ;# no signals — silent
   (+ x y))
 
-(defn may-fail (x)
-  (silence :error)   ;# may error, nothing else
+(defn no-yield (x)
+  (squelch :yield)   ;# forbid yielding; errors still allowed
   (/ 1 x))
 
 (defn callback-must-be-silent (f xs)
   (silence f) ;# f must have no signals
+  (map f xs))
+
+(defn callback-must-not-yield (f xs)
+  (squelch f :yield) ;# f must not yield; other signals allowed
   (map f xs))
 ```
 

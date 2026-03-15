@@ -359,9 +359,15 @@ pub enum LirInstr {
     // === Signal Checking ===
     /// Check that a closure's signal satisfies a bound.
     /// If the value in `src` is a closure whose `signal.bits & !allowed_bits != 0`,
-    /// signal `:error`. If the value is not a closure, signal `:error`.
+    /// signal `:error`. Non-closures pass silently.
     /// If the check passes, execution continues.
     CheckSignalBound { src: Reg, allowed_bits: u32 },
+
+    /// Check that a closure's signal does not contain forbidden bits.
+    /// If the value in `src` is a closure whose `signal.bits & forbidden_bits != 0`,
+    /// signal `:error`. Non-closures pass silently.
+    /// If the check passes, execution continues.
+    CheckSignalForbidden { src: Reg, forbidden_bits: u32 },
 }
 
 /// Binary operations

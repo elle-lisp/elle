@@ -26,7 +26,10 @@ Does NOT:
 | `CaptureInfo` | What a closure captures and how (`Local`, `Capture`, or `Global`) |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |
 | `SignalSources` | Tracks Yields sources within a lambda body for polymorphic inference |
-| `current_param_bounds` | Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis) |
+| `BoundKind` | Enum: `Silence` (whitelist) or `Squelch` (blacklist) — distinguishes bound semantics |
+| `ParamBound` | Struct: `{ binding, signal, kind }` — a parameter bound with its kind |
+| `current_param_bounds` | Maps `Binding` → `(Signal, BoundKind)` for parameters with declared bounds (during lambda analysis) |
+| `current_declared_ceiling` | Maps `Binding` → `(Signal, BoundKind)` for function-level bounds (during lambda analysis) |
 | `param_bounds_env` | Maps `Binding` → `Vec<(usize, Signal)>` for call-site checking of bounded parameters |
 | `ScopedBinding` | Binding with its scope set for hygienic resolution |
 | `Scope` | Lexical scope with bindings HashMap and local index tracking |
@@ -83,7 +86,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 | `fileletrec.rs` | ~360 | File-scope letrec compilation for top-level forms |
 | `destructure.rs` | ~415 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
 | `lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals, docstrings |
-| `special.rs` | ~345 | Special forms: `match`, `yield`, pattern matching |
+| `special.rs` | ~345 | Special forms: `match`, `yield`, `silence`, `squelch`, pattern matching |
 | `call.rs` | ~200 | Call analysis and signal tracking |
 
 ## Invariants
@@ -118,7 +121,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
 
-16. **Signal bounds are parsed from `silence` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` forms in the lambda body preamble. `(silence)` declares the function is silent. `(silence :kw ...)` declares the function may emit only these signals. `(silence param)` declares the parameter must be silent. `(silence param :kw ...)` declares the parameter may emit at most these signals. Multiple `silence` forms are allowed (one per parameter + one function-level). Keywords must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-silence form ends the preamble.
+16. **Signal bounds are parsed from `silence` and `squelch` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` and `squelch` forms in the lambda body preamble. `silence` is a total suppressor: `(silence)` declares the function is silent; `(silence param)` declares the parameter must be silent. Signal keywords are not accepted by `silence` — `(silence :kw ...)` and `(silence param :kw ...)` are compile errors ("silence takes no signal keywords — use (squelch ...) instead"). `squelch` is a blacklist (open-world): `(squelch :kw ...)` declares the function must not emit these signals; `(squelch param :kw ...)` declares the parameter must not emit these signals. Multiple forms are allowed (one per parameter + one function-level). Keywords for squelch must be registered in the global signal registry. Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. Cannot mix `silence` and `squelch` at function level — compile error. `(squelch)` and `(squelch param)` with no keywords are compile errors. The first non-declaration form ends the preamble.
 
 17. **Qualified symbols are desugared to nested `get` calls.** `a:b:c` in `SyntaxKind::Symbol` is desugared during analysis to `(get (get a :b) :c)`. The first segment is resolved as a variable (local or global). Subsequent segments become keyword arguments to `get`. This produces standard `HirKind::Call` nodes — no special HIR variant. The `get` binding always resolves to the global primitive, matching the pattern used for array/@array/struct/@struct literal desugaring. All synthesized nodes carry the original symbol's span.
 
@@ -129,7 +132,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Adding a new special form**: Add a case in `forms.rs::analyze_expr`, implement `analyze_your_form` method
 - **Changing binding semantics**: Update `binding.rs` and `destructure.rs`
 - **Changing signal inference**: Update `call.rs` and `lambda.rs`
-- **Changing signal bounds**: Update `lambda.rs::parse_silence_preamble()` and `call.rs` for call-site checking
+- **Changing signal bounds**: Update `special.rs` for `analyze_silence` and `analyze_squelch`, update `lambda.rs` for ceiling/floor checks, update `call.rs` for call-site checking
 - **Changing pattern matching**: Update `special.rs` and `destructure.rs`
 - **Changing scope resolution**: Update `mod.rs::lookup()` and `bind()`
 
@@ -140,5 +143,6 @@ This prevents accidental capture in macros while allowing intentional capture vi
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use `signal.combine()` to merge signals upward
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node
-- **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `silence` bound, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic
+- **Forgetting to include bounded parameter bits in inferred_signals**: When a parameter has a `silence` bound, its bits must be included in the lambda's `inferred_signals`, not tracked as polymorphic. Squelch-bounded parameters remain polymorphic.
 - **Not checking signal bounds at call sites**: When a concrete function is passed to a parameter with a bound, the analyzer must check the argument's signal against the bound
+- **Mixing silence and squelch at function level**: A function may have at most one function-level constraint. If both `silence` and `squelch` appear, it's a compile error. Check this in both `analyze_silence` and `analyze_squelch` before setting `current_declared_ceiling`.

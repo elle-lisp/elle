@@ -123,7 +123,7 @@ These must remain true. Violating them breaks the system:
    use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
    which parameters need lbox wrapping.
 
-3. **Signals are inferred, not declared — except when `silence` provides explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. The `silence` form constrains inference; it doesn't replace it. The inferred signal must be a subset of the declared bound. When a parameter has a `silence` bound, it is no longer polymorphic — its signal is known to be at most the bound.
+3. **Signals are inferred, not declared — except when `silence` provides explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. `silence` constrains inference; it doesn't replace it. The inferred signal must be a subset of the declared bound. When a parameter has a `silence` bound, it is no longer polymorphic — its signal is known to be zero bits.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the
@@ -151,11 +151,13 @@ Things that look wrong but aren't. The 4 most critical (agents get these wrong):
 - **`assign` not `set` for mutation.** `(assign var value)` mutates. `(set x val)` creates
   a set value. Agents reflexively write `(set x val)` — this is wrong.
 
+- **`silence` is total suppression, `squelch` is blacklist.** `silence` requires zero signals — `(silence f)` means f must emit nothing. `squelch` forbids only the listed signals (open-world) — `(squelch f :yield)` means f must **not** emit `:yield`, but may emit anything else including user-defined signals. `(silence f :kw)` is a compile error — use `(squelch f :kw)` instead. `(squelch f)` with no keywords is also a compile error — use `(silence f)` instead.
+
 - **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array, `@[...]` → @array.
    `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.
    `"..."` → string, `@"..."` → @string. `(bytes ...)` → bytes, `(@bytes ...)` → @bytes.
 
-For the full list of oddities (17 items): [`docs/oddities.md`](docs/oddities.md).
+For the full list of oddities (18 items): [`docs/oddities.md`](docs/oddities.md).
 
 ## Conventions
 

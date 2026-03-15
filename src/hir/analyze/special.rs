@@ -1,6 +1,7 @@
-//! Special forms: yield, match, silence
+//! Special forms: yield, match, silence, squelch
 
 use super::*;
+use crate::hir::expr::BoundKind;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
 use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
@@ -20,9 +21,9 @@ impl<'a> Analyzer<'a> {
     ///
     /// Forms:
     /// - `(silence)` — function-level ceiling = silent
-    /// - `(silence :kw ...)` — function-level ceiling with specific signals
     /// - `(silence param)` — parameter bound = silent
-    /// - `(silence param :kw ...)` — parameter bound with specific signals
+    ///
+    /// Signal keywords are not accepted. Use `(squelch ...)` instead.
     pub(crate) fn analyze_silence(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
         if self.fn_depth == 0 {
             return Err(format!(
@@ -34,20 +35,89 @@ impl<'a> Analyzer<'a> {
         let args = &items[1..];
         if args.is_empty() {
             // (silence) — function-level ceiling = silent
-            self.current_declared_ceiling = Some(Signal::silent());
+            // Check for mixed-form conflict before setting
+            if let Some((_, BoundKind::Squelch)) = self.current_declared_ceiling {
+                return Err(format!(
+                    "{}: cannot use both silence and squelch at function level",
+                    span
+                ));
+            }
+            self.current_declared_ceiling = Some((Signal::silent(), BoundKind::Silence));
             return Ok(Hir::silent(HirKind::Nil, span));
         }
 
         match &args[0].kind {
             SyntaxKind::Keyword(_) => {
-                // (silence :kw1 :kw2 ...) — function-level ceiling
+                // (silence :kw ...) — keywords are no longer accepted
+                return Err(format!(
+                    "{}: silence takes no signal keywords — use (squelch ...) instead",
+                    span
+                ));
+            }
+            SyntaxKind::Symbol(param_name) => {
+                // (silence param) — parameter-level bound = silent
+                let binding =
+                    self.find_current_param_binding(param_name, &args[0].span, "silence")?;
+
+                // No keywords allowed after the parameter name
+                if !args[1..].is_empty() {
+                    return Err(format!(
+                        "{}: silence takes no signal keywords — use (squelch ...) instead",
+                        span
+                    ));
+                }
+
+                // Last wins for duplicate parameter bounds
+                self.current_param_bounds
+                    .insert(binding, (Signal::silent(), BoundKind::Silence));
+            }
+            _ => {
+                return Err(format!(
+                    "{}: silence: expected parameter name, got {}",
+                    args[0].span,
+                    args[0].kind_label()
+                ));
+            }
+        }
+
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
+    /// Analyze a `(squelch ...)` form.
+    ///
+    /// squelch is a declaration with blacklist semantics. It must appear inside
+    /// a lambda body. It accumulates into `current_param_bounds` and
+    /// `current_declared_ceiling`, which `analyze_lambda` reads after
+    /// analyzing the body.
+    ///
+    /// Forms:
+    /// - `(squelch :kw ...)` — function-level floor: body must not emit these signals
+    /// - `(squelch param :kw ...)` — parameter bound: f must not emit these signals
+    ///
+    /// Unlike `silence`, squelch always requires at least one keyword.
+    pub(crate) fn analyze_squelch(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        // Note: fn_depth > 0 is guaranteed by the forms.rs dispatch (squelch is only dispatched
+        // as a special form inside a lambda body).
+
+        let args = &items[1..];
+        if args.is_empty() {
+            // (squelch) — no keywords at all
+            return Err(format!(
+                "{}: squelch requires at least one signal keyword",
+                span
+            ));
+        }
+
+        match &args[0].kind {
+            SyntaxKind::Keyword(_) => {
+                // (squelch :kw1 :kw2 ...) — function-level floor
                 let mut bits = 0u32;
                 for arg in args {
                     let kw = match &arg.kind {
                         SyntaxKind::Keyword(k) => k,
                         _ => {
                             return Err(format!(
-                                "{}: silence: expected keyword, got {}",
+                                "{}: squelch: expected keyword, got {}",
                                 arg.span,
                                 arg.kind_label()
                             ));
@@ -56,59 +126,78 @@ impl<'a> Analyzer<'a> {
                     let reg = registry::global_registry().lock().unwrap();
                     let bit_pos = reg.lookup(kw).ok_or_else(|| {
                         format!(
-                            "{}: silence: signal :{} not registered (unknown signal keyword)",
+                            "{}: squelch: signal :{} not registered (unknown signal keyword)",
                             arg.span, kw
                         )
                     })?;
                     bits |= 1 << bit_pos;
                 }
-                self.current_declared_ceiling = Some(Signal {
-                    bits: crate::value::fiber::SignalBits(bits),
-                    propagates: 0,
-                });
-            }
-            SyntaxKind::Symbol(param_name) => {
-                // (silence param :kw1 :kw2 ...) — parameter-level bound
-                let binding = self.find_current_param_binding(param_name, &args[0].span)?;
-
-                let keywords = &args[1..];
-                let bound = if keywords.is_empty() {
-                    // (silence param) — bound is silent
-                    Signal::silent()
-                } else {
-                    let mut bits = 0u32;
-                    for kw_syntax in keywords {
-                        let kw = match &kw_syntax.kind {
-                            SyntaxKind::Keyword(k) => k,
-                            _ => {
-                                return Err(format!(
-                                    "{}: silence: expected keyword after parameter name, got {}",
-                                    kw_syntax.span,
-                                    kw_syntax.kind_label()
-                                ));
-                            }
-                        };
-                        let reg = registry::global_registry().lock().unwrap();
-                        let bit_pos = reg.lookup(kw).ok_or_else(|| {
-                            format!(
-                                "{}: silence: signal :{} not registered (unknown signal keyword)",
-                                kw_syntax.span, kw
-                            )
-                        })?;
-                        bits |= 1 << bit_pos;
-                    }
+                // Check for mixed-form conflict before setting
+                if let Some((_, BoundKind::Silence)) = self.current_declared_ceiling {
+                    return Err(format!(
+                        "{}: cannot use both silence and squelch at function level",
+                        span
+                    ));
+                }
+                self.current_declared_ceiling = Some((
                     Signal {
                         bits: crate::value::fiber::SignalBits(bits),
                         propagates: 0,
-                    }
-                };
+                    },
+                    BoundKind::Squelch,
+                ));
+            }
+            SyntaxKind::Symbol(param_name) => {
+                // (squelch param :kw1 :kw2 ...) — parameter-level bound
+                let binding =
+                    self.find_current_param_binding(param_name, &args[0].span, "squelch")?;
 
-                // Last wins for duplicate parameter restricts
-                self.current_param_bounds.insert(binding, bound);
+                let keywords = &args[1..];
+                if keywords.is_empty() {
+                    // (squelch param) — no keywords after parameter name
+                    return Err(format!(
+                        "{}: squelch requires at least one signal keyword after parameter name",
+                        args[0].span
+                    ));
+                }
+
+                let mut bits = 0u32;
+                for kw_syntax in keywords {
+                    let kw = match &kw_syntax.kind {
+                        SyntaxKind::Keyword(k) => k,
+                        _ => {
+                            return Err(format!(
+                                "{}: squelch: expected keyword after parameter name, got {}",
+                                kw_syntax.span,
+                                kw_syntax.kind_label()
+                            ));
+                        }
+                    };
+                    let reg = registry::global_registry().lock().unwrap();
+                    let bit_pos = reg.lookup(kw).ok_or_else(|| {
+                        format!(
+                            "{}: squelch: signal :{} not registered (unknown signal keyword)",
+                            kw_syntax.span, kw
+                        )
+                    })?;
+                    bits |= 1 << bit_pos;
+                }
+
+                // Last wins for duplicate parameter bounds
+                self.current_param_bounds.insert(
+                    binding,
+                    (
+                        Signal {
+                            bits: crate::value::fiber::SignalBits(bits),
+                            propagates: 0,
+                        },
+                        BoundKind::Squelch,
+                    ),
+                );
             }
             _ => {
                 return Err(format!(
-                    "{}: silence: expected keyword or parameter name, got {}",
+                    "{}: squelch: expected keyword or parameter name, got {}",
                     args[0].span,
                     args[0].kind_label()
                 ));
@@ -119,15 +208,20 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Find a parameter binding by name in the current lambda's params.
-    fn find_current_param_binding(&self, name: &str, span: &Span) -> Result<Binding, String> {
+    fn find_current_param_binding(
+        &self,
+        name: &str,
+        span: &Span,
+        form_name: &str,
+    ) -> Result<Binding, String> {
         for param in &self.current_lambda_params {
             if self.symbols.name(param.name()) == Some(name) {
                 return Ok(*param);
             }
         }
         Err(format!(
-            "{}: silence: '{}' is not a parameter of this function",
-            span, name
+            "{}: {}: '{}' is not a parameter of this function",
+            span, form_name, name
         ))
     }
 
