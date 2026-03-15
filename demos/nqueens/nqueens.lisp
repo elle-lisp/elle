@@ -1,60 +1,49 @@
 # N-Queens Problem Solver in Elle
 #
-# This implementation solves the N-Queens problem using recursive backtracking.
-# Tests Elle's handling of recursion, list operations, and result accumulation.
+# Solves N-Queens via recursive backtracking with cons-list board state.
+# All recursion through top-level defn — no closure allocation in the
+# hot path.  The board is a cons list: (cons col queens) to place,
+# (rest queens) to backtrack.  This is the natural representation for
+# backtracking search.
 
-(defn check-safe-helper (col remaining row-offset)
+(defn check-safe [col remaining offset]
+  "Walk placed queens checking column conflicts and diagonals."
   (if (empty? remaining)
     true
-    (let* ((placed-col (first remaining)))
-      (if (or (= col placed-col)
-              (= row-offset (abs (- col placed-col))))
-        false
-        (check-safe-helper col (rest remaining) (+ row-offset 1))))))
+    (if (or (= col (first remaining))
+            (= offset (abs (- col (first remaining)))))
+      false
+      (check-safe col (rest remaining) (+ offset 1)))))
 
-(defn safe? (col queens)
-  "Check if column col is safe given previously placed queens.
-   queens = list of columns from previous rows, most recent first."
-  (check-safe-helper col queens 1))
+(defn safe? [col queens]
+  "True when col doesn't conflict with any previously placed queen."
+  (check-safe col queens 1))
 
-(defn try-cols-helper (n col queens row)
-  "Helper to try all columns for a given row."
+(defn try-col [n col queens row count]
+  "Try columns col..n-1 for the given row, returning updated count."
   (if (= col n)
-    (list)
-    (if (safe? col queens)
-      # This column is safe - place queen here
-      (let* ((new-queens (cons col queens)))
-        # Recurse to place remaining queens
-        # solve-helper returns a list of solutions from that subtree
-        # append combines solutions from this branch with remaining branches
-        (append (solve-helper n (+ row 1) new-queens)
-                (try-cols-helper n (+ col 1) queens row)))
-      # Column not safe, try next column
-      (try-cols-helper n (+ col 1) queens row))))
+    count
+    (try-col n (+ col 1) queens row
+      (if (safe? col queens)
+        (search n (+ row 1) (cons col queens) count)
+        count))))
 
-(defn solve-helper (n row queens)
-  "Recursive backtracking solver.
-   Base case (row == n): All queens placed -> one solution found
-   Recursive case: Try each column, recurse, accumulate solutions"
+(defn search [n row queens count]
+  "Recursive backtracking from row, returning total solution count."
   (if (= row n)
-    # BASE CASE: successfully placed all n queens
-    (list (reverse queens))
-    # RECURSIVE CASE: try each column in current row
-    (try-cols-helper n 0 queens row)))
+    (+ count 1)
+    (try-col n 0 queens row count)))
 
-(defn solve-nqueens (n)
-  "Return list of solutions. Each solution is a list of column positions."
-  (solve-helper n 0 (list)))
+(defn solve [n]
+  "Count all N-Queens solutions for an n*n board."
+  (search n 0 (list) 0))
 
-(defn benchmark (n)
+(defn benchmark [n]
   (display "Solving N-Queens for N=")
   (display n)
-  (display "... ")
-  (let* ((solutions (solve-nqueens n)))
-    (display "Found ")
-    (display (length solutions))
-    (display " solution(s)")
-    (newline)))
+  (display "... Found ")
+  (display (solve n))
+  (display " solution(s)\n"))
 
 (display "=== N-Queens Solver (Elle) ===\n\n")
 (benchmark 12)
