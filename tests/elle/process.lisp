@@ -96,6 +96,13 @@
                  (sys/wait proc))))]]
   (assert-true (not (= exit 0)) "sys/kill SIGKILL: nonzero exit"))
 
+# sys/kill: keyword :sigterm terminates the process
+(let [[exit (ev/spawn (fn []
+               (let [[proc (sys/exec "sleep" ["60"])]]
+                 (sys/kill proc :sigterm)
+                 (sys/wait proc))))]]
+  (assert-true (not (= exit 0)) "sys/kill :sigterm: nonzero exit"))
+
 # ── port/lines with subprocess ────────────────────────────────────────────────
 
 # port/lines on subprocess stdout

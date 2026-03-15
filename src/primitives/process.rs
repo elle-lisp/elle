@@ -352,9 +352,34 @@ fn prim_sys_wait(args: &[Value]) -> (SignalBits, Value) {
     (SIG_YIELD | SIG_IO | SIG_EXEC, request)
 }
 
+/// Map a signal name keyword (without the colon) to its libc constant.
+fn keyword_to_signal(name: &str) -> Option<libc::c_int> {
+    match name {
+        "sigterm" => Some(libc::SIGTERM),
+        "sigkill" => Some(libc::SIGKILL),
+        "sighup" => Some(libc::SIGHUP),
+        "sigint" => Some(libc::SIGINT),
+        "sigquit" => Some(libc::SIGQUIT),
+        "sigpipe" => Some(libc::SIGPIPE),
+        "sigalrm" => Some(libc::SIGALRM),
+        "sigusr1" => Some(libc::SIGUSR1),
+        "sigusr2" => Some(libc::SIGUSR2),
+        "sigchld" => Some(libc::SIGCHLD),
+        "sigcont" => Some(libc::SIGCONT),
+        "sigstop" => Some(libc::SIGSTOP),
+        "sigtstp" => Some(libc::SIGTSTP),
+        "sigttin" => Some(libc::SIGTTIN),
+        "sigttou" => Some(libc::SIGTTOU),
+        "sigwinch" => Some(libc::SIGWINCH),
+        _ => None,
+    }
+}
+
 /// Send a signal to a subprocess.
 ///
-/// (sys/kill handle-or-struct signal-num)
+/// (sys/kill handle-or-struct)           ; sends SIGTERM
+/// (sys/kill handle-or-struct 15)        ; integer signal number
+/// (sys/kill handle-or-struct :sigterm)  ; keyword signal name
 ///
 /// Synchronous — returns (SIG_OK, nil) on success, (SIG_ERROR, error) on failure.
 fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
@@ -381,20 +406,34 @@ fn prim_sys_kill(args: &[Value]) -> (SignalBits, Value) {
         }
     };
     let signal = if args.len() > 1 {
-        match args[1].as_int() {
-            Some(n) => n as i32,
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "sys/kill: signal must be integer, got {}",
-                            args[1].type_name()
+        if let Some(n) = args[1].as_int() {
+            n as i32
+        } else if let Some(name) = args[1].as_keyword_name() {
+            match keyword_to_signal(name) {
+                Some(sig) => sig,
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "sys/kill: unknown signal keyword :{name}; expected integer or one of :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch"
+                            ),
                         ),
-                    ),
-                )
+                    )
+                }
             }
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "sys/kill: signal must be integer or keyword, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
         }
     } else {
         libc::SIGTERM
@@ -516,10 +555,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sys_kill,
         signal: Signal::errors(),
         arity: Arity::Range(1, 2),
-        doc: "Send a signal to a subprocess (default: SIGTERM = 15).",
+        doc: "Send a signal to a subprocess. signal is an integer or a keyword like :sigterm, :sigkill, :sighup, :sigint, :sigquit, :sigpipe, :sigalrm, :sigusr1, :sigusr2, :sigchld, :sigcont, :sigstop, :sigtstp, :sigttin, :sigttou, :sigwinch (default: :sigterm).",
         params: &["handle", "signal"],
         category: "sys",
-        example: "(sys/kill proc 9)",
+        example: "(sys/kill proc :sigterm)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -688,6 +727,44 @@ mod tests {
         let def = PRIMITIVES.iter().find(|d| d.name == "sys/kill").unwrap();
         assert!(!def.signal.may_yield(), "sys/kill must not yield");
         assert!(def.signal.may_error());
+    }
+
+    #[test]
+    fn test_sys_kill_keyword_sigterm() {
+        use crate::io::request::ProcessHandle;
+        use std::process::Command;
+        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        let handle_val = Value::external("process", handle);
+        let sig_kw = Value::keyword("sigterm");
+        let (sig, _) = prim_sys_kill(&[handle_val, sig_kw]);
+        assert_eq!(sig, SIG_OK);
+    }
+
+    #[test]
+    fn test_sys_kill_unknown_keyword() {
+        use crate::io::request::ProcessHandle;
+        use std::process::Command;
+        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        let handle_val = Value::external("process", handle);
+        let sig_kw = Value::keyword("sigfoo");
+        let (sig, _) = prim_sys_kill(&[handle_val, sig_kw]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_sys_kill_integer_still_works() {
+        use crate::io::request::ProcessHandle;
+        use std::process::Command;
+        let child = Command::new("/bin/sleep").arg("100").spawn().unwrap();
+        let pid = child.id();
+        let handle = ProcessHandle::new(pid, child);
+        let handle_val = Value::external("process", handle);
+        let (sig, _) = prim_sys_kill(&[handle_val, Value::int(15)]);
+        assert_eq!(sig, SIG_OK);
     }
 
     // --- process/pid ---
