@@ -65,10 +65,21 @@ use super::core::VM;
 
 /// Result of `execute_bytecode_saving_stack`.
 ///
-/// Contains the signal, IP, and the active bytecode/constants/env at exit.
+/// Contains the signal, IP, the active bytecode/constants/env at exit, and
+/// the inner operand stack at the moment of suspension.
+///
 /// When a tail call occurs before a signal, the active context differs from
 /// the original closure — callers that create `SuspendedFrame`s must use
 /// these fields, not the original closure's bytecode/constants.
+///
+/// `stack` captures the inner execution's operand stack at suspension time.
+/// This is essential for fuel-pause resumption: when `SIG_FUEL` fires at a
+/// `TailCall` or `Call` instruction, the args are still on the stack. On
+/// resume the instruction re-executes from `ip`, so the stack must be
+/// restored exactly as it was.  `SIG_YIELD` is exempt — `handle_yield`
+/// drains the stack into `fiber.suspended` before returning, so
+/// `fiber.suspended` is already populated and the `stack` field here is
+/// unused for that signal.
 pub(crate) struct ExecResult {
     pub bits: SignalBits,
     pub ip: usize,
@@ -76,6 +87,9 @@ pub(crate) struct ExecResult {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
+    /// The inner operand stack at suspension. Populated by
+    /// `execute_bytecode_saving_stack`; empty for `execute_bytecode_from_ip`.
+    pub stack: Vec<Value>,
 }
 
 impl VM {
@@ -135,6 +149,7 @@ impl VM {
                         constants: current_constants,
                         env: current_env,
                         location_map: current_location_map,
+                        stack: vec![],
                     };
                 }
                 break ExecResult {
@@ -144,6 +159,11 @@ impl VM {
                     constants: current_constants,
                     env: current_env,
                     location_map: current_location_map,
+                    // execute_bytecode_from_ip does not own a saved outer stack;
+                    // the stack at this point belongs to the caller's context.
+                    // Callers of this function are resume paths that manage the
+                    // stack themselves (see resume_suspended in core.rs).
+                    stack: vec![],
                 };
             }
 
@@ -162,6 +182,7 @@ impl VM {
                     constants: current_constants,
                     env: current_env,
                     location_map: current_location_map,
+                    stack: vec![],
                 };
             }
         }
@@ -231,8 +252,17 @@ impl VM {
                         constants: current_constants,
                         env: current_env,
                         location_map: current_location_map,
+                        stack: vec![],
                     };
                 }
+                // Capture the inner stack before restoring the outer stack.
+                // This is critical for fuel-pause resumption: when SIG_FUEL
+                // fires at a Call/TailCall instruction, the args are still on
+                // the operand stack. On resume the instruction re-executes from
+                // the saved IP, so the stack must be in the same state.
+                // SIG_YIELD is exempt — handle_yield already saved the stack
+                // into fiber.suspended, so callers skip creating a new frame.
+                let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
                 break ExecResult {
                     bits,
                     ip,
@@ -240,6 +270,7 @@ impl VM {
                     constants: current_constants,
                     env: current_env,
                     location_map: current_location_map,
+                    stack: inner_stack,
                 };
             }
 
@@ -257,11 +288,14 @@ impl VM {
                     constants: current_constants,
                     env: current_env,
                     location_map: current_location_map,
+                    stack: vec![],
                 };
             }
         };
 
-        // Restore the caller's stack and active allocator
+        // Restore the caller's stack and active allocator.
+        // Note: in the non-OK path, self.fiber.stack was already taken into
+        // result.stack above, so this restores to the correct caller state.
         self.fiber.stack = saved_stack;
         crate::value::fiber_heap::restore_active_allocator(saved_allocator);
 

@@ -6,7 +6,8 @@
 use crate::compiler::bytecode::Instruction;
 use crate::error::LocationMap;
 use crate::value::{
-    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_YIELD,
+    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_OK,
+    SIG_YIELD,
 };
 use std::rc::Rc;
 
@@ -14,6 +15,27 @@ use super::core::VM;
 use super::{
     arithmetic, cell, closure, comparison, control, data, literals, stack, types, variables,
 };
+
+/// Decrement fuel and return from the dispatch loop if the budget is exhausted.
+///
+/// `$self`      — the `&mut VM` (i.e. `self` inside `execute_bytecode_inner_impl`)
+/// `$resume_ip` — the opcode-start IP to resume from after refueling.
+///                **Must always be `instr_ip`** (not `ip`) so that resume
+///                re-executes the full instruction from scratch.
+///
+/// When fuel is `None` (the common case), the inner `if let` is not taken —
+/// branch predicted not-taken, negligible overhead.
+macro_rules! check_fuel {
+    ($self:expr, $resume_ip:expr) => {
+        if let Some(ref mut fuel) = $self.fiber.fuel {
+            if *fuel == 0 {
+                $self.fiber.signal = Some((SIG_FUEL, Value::NIL));
+                return (SIG_FUEL, $resume_ip);
+            }
+            *fuel -= 1;
+        }
+    };
+}
 
 impl VM {
     /// Inner execution loop that handles all instructions.
@@ -128,6 +150,12 @@ impl VM {
 
                 // Control flow
                 Instruction::Jump => {
+                    // Peek offset (big-endian i16, matching read_i16) to determine
+                    // direction WITHOUT consuming bytes — handle_jump re-reads them.
+                    let offset = i16::from_be_bytes([bc[ip], bc[ip + 1]]);
+                    if offset < 0 {
+                        check_fuel!(self, instr_ip);
+                    }
                     control::handle_jump(bc, &mut ip, self);
                 }
                 Instruction::JumpIfFalse => {
@@ -144,6 +172,7 @@ impl VM {
 
                 // Call instructions
                 Instruction::Call => {
+                    check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call(
                         bytecode,
                         constants,
@@ -156,6 +185,7 @@ impl VM {
                     }
                 }
                 Instruction::TailCall => {
+                    check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_tail_call(&mut ip, bc) {
                         return (bits, ip);
                     }
@@ -376,6 +406,7 @@ impl VM {
                     data::handle_array_push(self);
                 }
                 Instruction::CallArrayMut => {
+                    check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_call_array(
                         bytecode,
                         constants,
@@ -388,6 +419,7 @@ impl VM {
                     }
                 }
                 Instruction::TailCallArrayMut => {
+                    check_fuel!(self, instr_ip);
                     if let Some(bits) = self.handle_tail_call_array(&mut ip, bc) {
                         return (bits, ip);
                     }
@@ -528,6 +560,9 @@ impl VM {
             ip,
             stack: saved_stack,
             location_map: location_map.clone(),
+            // Yield: on resume, the resume argument becomes the result of
+            // the (yield ...) expression — push it onto the restored stack.
+            push_resume_value: true,
         });
 
         self.fiber.signal = Some((SIG_YIELD, yielded_value));

@@ -42,11 +42,11 @@ bytecode. Error messages include file:line:col information.
 | `compiler` | Bytecode instruction definitions, debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
 | `value` | Runtime value representation (NaN-boxed); trait table field on 19 user-facing heap variants |
-| `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping; includes `SIG_EXEC` (bit 11) for subprocess operations |
+| `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping; includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL` (bit 12) for instruction budget exhaustion |
 | `io` | I/O request types, backends, timeout handling; includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle` for subprocess lifecycle |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, `traits`, `process/exec`, `process/wait`, `process/kill`, `process/pid`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e` |
+| `primitives` | Built-in functions; includes `port/path`, `string/size-of`, `with-traits`, `traits`, `process/exec`, `process/wait`, `process/kill`, `process/pid`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `fiber/set-fuel`, `fiber/fuel`, and `fiber/clear-fuel` |
 | `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) and subprocess convenience (`process/system`) |
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift; `JitRejectionInfo` tracks why closures were rejected |

@@ -44,8 +44,8 @@ pub use fiber_heap::FiberHeap;
 pub use closure::{Closure, ClosureTemplate};
 pub use fiber::{
     BytecodeFrame, CallFrame, Fiber, FiberHandle, FiberStatus, Frame, SignalBits, SuspendedFrame,
-    WeakFiberHandle, SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE,
-    SIG_QUERY, SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
+    WeakFiberHandle, SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_IO, SIG_OK,
+    SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
 };
 
 // Export custom allocator types

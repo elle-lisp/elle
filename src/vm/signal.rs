@@ -114,6 +114,10 @@ impl VM {
             ip: *ip,
             stack: saved_stack,
             location_map: location_map.clone(),
+            // Caller frame for a suspending primitive: on resume, the primitive's
+            // eventual return value flows as current_value and must be pushed as
+            // the result of the Call instruction.
+            push_resume_value: true,
         });
         self.fiber.signal = Some((bits, value));
         self.fiber.suspended = Some(vec![frame]);
