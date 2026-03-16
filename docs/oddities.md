@@ -154,3 +154,7 @@ Docstrings are extracted from leading string literals in function bodies. `HirKi
 ### `parameterize` special form
 
 `parameterize` is a special form that creates a dynamic binding frame. Unlike lexical bindings (`let`, `fn` params), parameters are looked up at runtime from a stack of frames. `(make-parameter default)` creates a parameter; calling it reads the current value. `(parameterize ((p1 v1) (p2 v2) ...) body ...)` pushes a frame, executes the body, then pops the frame. Child fibers inherit parent parameter frames. Parameters are useful for simulating I/O ports, configuration, and other dynamic context.
+
+### `syntax-case` generates code, not expansion-time evaluation
+
+`syntax-case` in Elle is NOT evaluated at macro expansion time. It is a code-generating transformation: the expander rewrites it into a chain of `if`/`let` forms using the syntax predicates (`syntax-pair?`, `syntax-list?`, etc.). The scrutinee must be a macro parameter — it has no value at expansion time. The generated code runs when the macro transformer closure executes inside the VM.

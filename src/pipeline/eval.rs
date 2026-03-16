@@ -29,6 +29,10 @@ pub fn eval_syntax(
     let mut analyzer =
         Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
     analyzer.bind_primitives(&meta);
+    // Make compile-time defs (from begin-for-syntax) visible in macro bodies.
+    if !expander.compile_time_env.is_empty() {
+        analyzer.bind_compile_time_env(&expander.compile_time_env);
+    }
     let mut analysis = analyzer.analyze(&expanded)?;
     mark_tail_calls(&mut analysis.hir);
     let prim_values = analyzer.primitive_values().clone();
