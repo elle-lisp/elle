@@ -1,5 +1,5 @@
 use elle::value::allocator::{AllocatorBox, ElleAllocator};
-use elle::value::fiber_heap::FiberHeap;
+use elle::value::fiberheap::FiberHeap;
 use elle::value::heap::{Cons, HeapObject};
 use elle::Value;
 use std::cell::Cell;

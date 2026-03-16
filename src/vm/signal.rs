@@ -433,7 +433,7 @@ impl VM {
 
                 if arg.is_nil() {
                     // 0-arg path: read from the current fiber's heap.
-                    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
                     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
                     let stats = unsafe { build_stats(&*heap_ptr) };
                     (SIG_OK, stats)
@@ -532,7 +532,7 @@ impl VM {
 
         // Snapshot count before
         let before = {
-            let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+            let heap_ptr = crate::value::fiberheap::current_heap_ptr();
             debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
             unsafe { (*heap_ptr).len() }
         };
@@ -567,7 +567,7 @@ impl VM {
 
         // Snapshot count after
         let after = {
-            let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+            let heap_ptr = crate::value::fiberheap::current_heap_ptr();
             unsafe { (*heap_ptr).len() }
         };
 

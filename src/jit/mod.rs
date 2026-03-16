@@ -30,6 +30,7 @@
 //! of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
 //! native loops.
 
+mod calls;
 mod code;
 mod compiler;
 mod data;
@@ -40,6 +41,7 @@ mod helpers;
 mod runtime;
 mod suspend;
 mod translate;
+mod vtable;
 
 pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};

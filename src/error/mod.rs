@@ -1,8 +1,6 @@
 //! Unified error system for Elle
 
-mod builders;
 pub mod formatting;
-mod runtime;
 mod types;
 
 use std::collections::HashMap;
@@ -10,9 +8,6 @@ use std::collections::HashMap;
 // Re-export core types
 pub use crate::reader::SourceLoc;
 pub use types::{ErrorKind, LError, LResult, StackFrame, TraceSource};
-
-// Keep RuntimeError for now (can deprecate later)
-pub use runtime::RuntimeError;
 
 /// Mapping from bytecode instruction index to source location
 pub type LocationMap = HashMap<usize, SourceLoc>;
@@ -235,38 +230,6 @@ mod tests {
         let loc = SourceLoc::from_line_col(42, 13);
         let display = format!("{}", loc);
         assert!(display.contains("42:13"));
-    }
-
-    #[test]
-    fn test_runtime_error_with_location() {
-        let err = RuntimeError::new("test error".to_string())
-            .with_location(SourceLoc::from_line_col(5, 10));
-        assert!(err.location.is_some());
-        assert_eq!(err.location.unwrap().line, 5);
-    }
-
-    #[test]
-    fn test_runtime_error_with_context() {
-        let err =
-            RuntimeError::new("test error".to_string()).with_context("in function foo".to_string());
-        assert!(err.context.is_some());
-        assert_eq!(err.context.as_ref().unwrap(), "in function foo");
-    }
-
-    #[test]
-    fn test_runtime_error_display_with_location() {
-        let err = RuntimeError::new("test error".to_string())
-            .with_location(SourceLoc::from_line_col(42, 5));
-        let display = format!("{}", err);
-        assert!(display.contains("42:5"));
-        assert!(display.contains("test error"));
-    }
-
-    #[test]
-    fn test_runtime_error_display_with_context() {
-        let err = RuntimeError::new("test error".to_string()).with_context("in main".to_string());
-        let display = format!("{}", err);
-        assert!(display.contains("in main"));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! HIR to LIR lowering
 
+mod access;
 mod binding;
 mod control;
 pub(crate) mod decision;

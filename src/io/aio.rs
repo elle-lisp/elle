@@ -3,7 +3,8 @@
 //! Uses io_uring on Linux (feature-gated), thread-pool fallback elsewhere.
 
 use crate::io::completion;
-use crate::io::pool::{BufferHandle, BufferPool};
+use crate::io::pending::PendingOp;
+use crate::io::pool::BufferPool;
 use crate::io::request::{
     ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, StdioDisposition,
 };
@@ -15,56 +16,7 @@ use crate::value::{error_val, Value};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
-use std::os::unix::io::RawFd;
 use std::time::Duration;
-
-/// Pending async I/O operation.
-///
-/// Three variants matching the three port lifecycles:
-/// - `Port`: operates on an existing port (stream I/O, accept, datagram, shutdown)
-/// - `Connect`: creates a new port on completion (no existing port)
-/// - `Sleep`: portless timer
-pub(crate) enum PendingOp {
-    /// Operation on an existing port.
-    Port {
-        op: IoOp,
-        port_key: PortKey,
-        port: Value,
-        buffer_handle: BufferHandle,
-        /// For Accept: which kind of listener (TcpListener or UnixListener).
-        listener_kind: Option<PortKind>,
-    },
-    /// Connect to a remote address. Creates a new port on completion.
-    Connect {
-        addr: ConnectAddr,
-        buffer_handle: BufferHandle,
-        /// io_uring: pre-created socket fd. Thread pool: set to result fd
-        /// on completion. Cleared on connect failure (fd closed).
-        connect_fd: Option<RawFd>,
-    },
-    /// Async timer. No port.
-    Sleep { buffer_handle: BufferHandle },
-    /// Waiting for subprocess exit via IORING_OP_WAITID.
-    ///
-    /// SAFETY: `siginfo` is a heap-allocated `siginfo_t` (via Box::into_raw).
-    /// It must live until the CQE arrives. Released in completion processing.
-    ProcessWait {
-        buffer_handle: BufferHandle,
-        handle_val: Value, // ProcessHandle — to cache exit code on completion
-        siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
-    },
-}
-
-impl PendingOp {
-    pub(crate) fn buffer_handle(&self) -> BufferHandle {
-        match self {
-            PendingOp::Port { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
-            PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
-            PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
-        }
-    }
-}
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
 pub struct AsyncBackend {

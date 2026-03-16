@@ -76,7 +76,7 @@ impl VM {
             // after chunk 1). Temporarily remove the limit so the error struct
             // can be allocated.
             {
-                let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+                let heap_ptr = crate::value::fiberheap::current_heap_ptr();
                 let alloc_err = if !heap_ptr.is_null() {
                     unsafe { (*heap_ptr).take_alloc_error() }
                 } else {
@@ -428,10 +428,10 @@ impl VM {
                 // Allocation region markers: push/pop scope marks on FiberHeap.
                 // Effective for both root and child fibers.
                 Instruction::RegionEnter => {
-                    crate::value::fiber_heap::region_enter();
+                    crate::value::fiberheap::region_enter();
                 }
                 Instruction::RegionExit => {
-                    crate::value::fiber_heap::region_exit();
+                    crate::value::fiberheap::region_exit();
                 }
 
                 // Dynamic parameter frame management

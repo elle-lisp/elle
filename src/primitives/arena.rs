@@ -21,7 +21,7 @@ pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let count = unsafe { (*heap_ptr).len() };
     (SIG_OK, Value::int(count as i64))
@@ -100,7 +100,7 @@ pub(crate) fn prim_arena_set_object_limit(args: &[Value]) -> (SignalBits, Value)
             ),
         );
     };
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let prev = unsafe { (*heap_ptr).set_object_limit(limit) };
     let result = match prev {
@@ -128,7 +128,7 @@ pub(crate) fn prim_arena_object_limit(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let limit = unsafe { (*heap_ptr).object_limit() };
     let result = match limit {
@@ -153,7 +153,7 @@ pub(crate) fn prim_arena_bytes(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let bytes = unsafe { (*heap_ptr).allocated_bytes() };
     (SIG_OK, Value::int(bytes as i64))
@@ -217,7 +217,7 @@ pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
         }
     };
     // Validate that the mark is not in the future.
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     if !heap_ptr.is_null() {
         let current_count = unsafe { (*heap_ptr).len() };
@@ -279,7 +279,7 @@ pub(crate) fn prim_arena_peak(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let peak = unsafe { (*heap_ptr).peak_alloc_count() };
     (SIG_OK, Value::int(peak as i64))
@@ -296,7 +296,7 @@ pub(crate) fn prim_arena_reset_peak(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let heap_ptr = crate::value::fiber_heap::current_heap_ptr();
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
     let prev = unsafe { (*heap_ptr).reset_peak() };
     (SIG_OK, Value::int(prev as i64))
