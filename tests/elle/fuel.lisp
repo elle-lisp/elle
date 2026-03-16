@@ -5,8 +5,6 @@
 ## refuel-and-resume, unlimited fibers, zero fuel, signal masks, remaining-fuel
 ## reads, clear-fuel, and nested-fiber independence.
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
-
 # ============================================================================
 # Scenario 1: Backward jump exhausts fuel
 # ============================================================================
@@ -26,8 +24,8 @@
             |:fuel|)))
   (fiber/set-fuel f 5)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :paused "backward-jump: fiber paused on fuel exhaustion")
-  (assert-eq (fiber/value f) nil "backward-jump: fuel signal carries nil payload"))
+  (assert (= (fiber/status f) :paused) "backward-jump: fiber paused on fuel exhaustion")
+  (assert (= (fiber/value f) nil) "backward-jump: fuel signal carries nil payload"))
 
 # ============================================================================
 # Scenario 2: TailCall instruction exhausts fuel
@@ -51,7 +49,7 @@
             |:fuel|)))
   (fiber/set-fuel f 3)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :paused "call-exhaustion: fiber paused"))
+  (assert (= (fiber/status f) :paused) "call-exhaustion: fiber paused"))
 
 # ============================================================================
 # Scenario 3: Forward jumps do NOT decrement fuel
@@ -72,8 +70,8 @@
             |:fuel|)))
   (fiber/set-fuel f 1)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :dead "forward-jump: fiber completes with fuel=1")
-  (assert-eq (fiber/value f) 42 "forward-jump: correct return value"))
+  (assert (= (fiber/status f) :dead) "forward-jump: fiber completes with fuel=1")
+  (assert (= (fiber/value f) 42) "forward-jump: correct return value"))
 
 # ============================================================================
 # Scenario 4: Refuel and resume
@@ -92,11 +90,11 @@
             |:fuel|)))
   (fiber/set-fuel f 3)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :paused "refuel: initially paused")
+  (assert (= (fiber/status f) :paused) "refuel: initially paused")
   (fiber/set-fuel f 1000)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :dead "refuel: fiber completes after refuel")
-  (assert-eq (fiber/value f) 45 "refuel: correct final value (0+1+...+9=45)"))
+  (assert (= (fiber/status f) :dead) "refuel: fiber completes after refuel")
+  (assert (= (fiber/value f) 45) "refuel: correct final value (0+1+...+9=45)"))
 
 # ============================================================================
 # Scenario 5: Unlimited fiber runs to completion
@@ -114,8 +112,8 @@
                 (loop 0 0)))
             0)))
   (fiber/resume f)
-  (assert-eq (fiber/status f) :dead "unlimited: fiber completes")
-  (assert-eq (fiber/value f) 4950 "unlimited: correct sum (0+...+99=4950)"))
+  (assert (= (fiber/status f) :dead) "unlimited: fiber completes")
+  (assert (= (fiber/value f) 4950) "unlimited: correct sum (0+...+99=4950)"))
 
 # ============================================================================
 # Scenario 6: Zero fuel causes immediate signal
@@ -131,7 +129,7 @@
             |:fuel|)))
   (fiber/set-fuel f 0)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :paused "zero-fuel: pauses immediately"))
+  (assert (= (fiber/status f) :paused) "zero-fuel: pauses immediately"))
 
 # ============================================================================
 # Scenario 7: Fuel signal caught by mask
@@ -147,8 +145,8 @@
             |:fuel|)))
   (fiber/set-fuel f 2)
   (let ((result (fiber/resume f)))
-    (assert-eq (fiber/status f) :paused "mask-catch: fiber is paused")
-    (assert-eq result nil "mask-catch: caught signal delivers nil to parent")))
+    (assert (= (fiber/status f) :paused) "mask-catch: fiber is paused")
+    (assert (= result nil) "mask-catch: caught signal delivers nil to parent")))
 
 # ============================================================================
 # Scenario 8: Fuel signal propagates when not in mask
@@ -172,8 +170,8 @@
                   (fn [] (fiber/resume inner))
                   |:fuel|)))
     (fiber/resume outer)
-    (assert-eq (fiber/status outer) :paused "propagate: outer paused by propagated fuel signal")
-    (assert-eq (fiber/status inner) :paused "propagate: inner also paused")))
+    (assert (= (fiber/status outer) :paused) "propagate: outer paused by propagated fuel signal")
+    (assert (= (fiber/status inner) :paused) "propagate: inner also paused")))
 
 # ============================================================================
 # Scenario 9: fiber/fuel reads remaining budget
@@ -189,9 +187,9 @@
                 (loop 0)))
             |:fuel|)))
   (fiber/set-fuel f 10)
-  (assert-eq (fiber/fuel f) 10 "fuel-read: reads 10 before resume")
+  (assert (= (fiber/fuel f) 10) "fuel-read: reads 10 before resume")
   (fiber/resume f)
-  (assert-eq (fiber/fuel f) 0 "fuel-read: reads 0 after exhaustion"))
+  (assert (= (fiber/fuel f) 0) "fuel-read: reads 0 after exhaustion"))
 
 # ============================================================================
 # Scenario 10: fiber/clear-fuel removes budget
@@ -210,11 +208,11 @@
             |:fuel|)))
   (fiber/set-fuel f 5)
   (fiber/resume f)
-  (assert-eq (fiber/status f) :paused "clear-fuel: paused initially")
+  (assert (= (fiber/status f) :paused) "clear-fuel: paused initially")
   (fiber/clear-fuel f)
-  (assert-eq (fiber/fuel f) nil "clear-fuel: fuel is nil after clear")
+  (assert (= (fiber/fuel f) nil) "clear-fuel: fuel is nil after clear")
   (fiber/resume f)
-  (assert-eq (fiber/status f) :dead "clear-fuel: runs to completion after clear"))
+  (assert (= (fiber/status f) :dead) "clear-fuel: runs to completion after clear"))
 
 # ============================================================================
 # Scenario 11: Nested fibers have independent fuel
@@ -233,11 +231,11 @@
                     (fiber/set-fuel inner 3)
                     (fiber/resume inner)
                     # inner is now paused; outer continues unaffected
-                    (assert-eq (fiber/status inner) :paused "nested: inner paused")
+                    (assert (= (fiber/status inner) :paused) "nested: inner paused")
                     42)
                   |:fuel|)))
     (fiber/set-fuel outer 1000)
     (fiber/resume outer)
-    (assert-eq (fiber/status outer) :dead "nested: outer completes independently")
-    (assert-eq (fiber/value outer) 42 "nested: outer return value correct")
-    (assert-eq (fiber/status inner) :paused "nested: inner remains paused")))
+    (assert (= (fiber/status outer) :dead) "nested: outer completes independently")
+    (assert (= (fiber/value outer) 42) "nested: outer return value correct")
+    (assert (= (fiber/status inner) :paused) "nested: inner remains paused")))
