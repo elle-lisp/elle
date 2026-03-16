@@ -206,3 +206,75 @@
   (def squelched-fn (squelch some-fn :yield))
   (assert-true (closure? squelched-fn)
     "squelch outside lambda: returns a closure"))
+
+# ============================================================================
+# squelch primitive construction tests (Chunk 2)
+# ============================================================================
+
+# squelch returns a closure
+(assert-true (closure? (squelch (fn () (yield 1)) :yield))
+  "squelch returns a closure")
+
+# squelch on non-closure produces type-error
+(assert-err-kind (fn () (squelch 42 :yield)) :type-error
+  "squelch on non-closure produces type-error")
+
+# squelch twice ORs the masks; result is still a closure
+(begin
+  (def sq-composed
+    (let ((f (fn () (begin (yield 1)))))
+      (let ((sq1 (squelch f :yield)))
+        (squelch sq1 :error))))
+  (assert-true (closure? sq-composed)
+    "squelch composable masks: result is a closure"))
+
+# squelch returns a new allocation, not the original closure
+(assert-false (identical? (fn () 1) (squelch (fn () 1) :yield))
+  "squelch returns different allocation from original")
+
+# ============================================================================
+# squelch runtime enforcement tests (Chunk 3)
+# ============================================================================
+
+# squelch catches yield at boundary — use let for non-tail position
+(begin
+  (def [ok-catch? err-catch]
+    (protect (let ((r ((squelch (fn () (yield 42)) :yield)))) r)))
+  (assert-false ok-catch?
+    "squelch catches yield at boundary: call is rejected")
+  (assert-eq (get err-catch :error) :signal-violation
+    "squelch catches yield at boundary: rejection is :signal-violation"))
+
+# squelch catches yield through nested calls — use let for non-tail position
+(begin
+  (def inner-nest (fn () (yield 1)))
+  (def outer-nest (fn () (inner-nest)))
+  (def safe-nest (squelch outer-nest :yield))
+  (def [ok-nest? err-nest] (protect (let ((r (safe-nest))) r)))
+  (assert-false ok-nest?
+    "squelch nested call enforcement: yield through nested calls is rejected")
+  (assert-eq (get err-nest :error) :signal-violation
+    "squelch nested call enforcement: rejection is :signal-violation"))
+
+# squelch catches yield from tail-called yielding function
+(begin
+  (def yielder-tc (fn () (yield 99)))
+  (def safe-tc (squelch (fn () (yielder-tc)) :yield))
+  (def [ok-tc? err-tc] (protect (let ((r (safe-tc))) r)))
+  (assert-false ok-tc?
+    "squelch tail call enforcement: yield is rejected")
+  (assert-eq (get err-tc :error) :signal-violation
+    "squelch tail call enforcement: rejection is :signal-violation"))
+
+# squelch composable runtime: both :yield and :error squelched; f yields; caught
+(begin
+  (def [ok-comp-rt? err-comp-rt]
+    (protect
+      (let* ((f   (fn () (yield 1)))
+             (sq1 (squelch f :yield))
+             (sq2 (squelch sq1 :error)))
+        (let ((r (sq2))) r))))
+  (assert-false ok-comp-rt?
+    "squelch composable runtime: yield is rejected even with multi-signal squelch")
+  (assert-eq (get err-comp-rt :error) :signal-violation
+    "squelch composable runtime: rejection is :signal-violation"))

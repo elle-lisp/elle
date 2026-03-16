@@ -1235,29 +1235,14 @@ fn test_signals_primitive_is_silent() {
 // SQUELCH PRIMITIVE TESTS (Chunk 2 — runtime enforcement in Chunk 3)
 // ============================================================================
 
-#[test]
-fn test_prim_squelch_returns_closure() {
-    let result = crate::common::eval_source_bare("(closure? (squelch (fn () (yield 1)) :yield))");
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-    let val = result.unwrap();
-    assert!(val.is_bool(), "expected bool result");
-    assert_eq!(val, elle::Value::TRUE, "expected true");
-}
+// test_prim_squelch_returns_closure: migrated to tests/elle/signals.lisp
 
-#[test]
-fn test_prim_squelch_non_closure_error() {
-    let result = crate::common::eval_source_bare("(squelch 42 :yield)");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("type-error"),
-        "expected type-error, got: {}",
-        err
-    );
-}
+// test_prim_squelch_non_closure_error: migrated to tests/elle/signals.lisp
 
 #[test]
 fn test_prim_squelch_no_keywords_error() {
+    // Kept in Rust: (squelch f) with no keywords is a compile-time arity error,
+    // not catchable at runtime via protect in Elle.
     let result = crate::common::eval_source_bare("(squelch (fn () 1))");
     assert!(result.is_err(), "expected error, got ok");
     let err = result.unwrap_err();
@@ -1270,6 +1255,8 @@ fn test_prim_squelch_no_keywords_error() {
 
 #[test]
 fn test_prim_squelch_unknown_keyword_error() {
+    // Kept in Rust: requires error message substring check ("not registered").
+    // Elle tests cannot match substrings, only error kinds.
     let result = crate::common::eval_source_bare("(squelch (fn () 1) :not-a-signal)");
     assert!(result.is_err(), "expected error, got ok");
     let err = result.unwrap_err();
@@ -1280,60 +1267,20 @@ fn test_prim_squelch_unknown_keyword_error() {
     );
 }
 
-#[test]
-fn test_prim_squelch_composable_masks() {
-    // Calling squelch twice ORs the masks; result is still a closure (no error at construction time)
-    let result = crate::common::eval_source_bare(
-        "(let ((f (fn () (begin (yield 1))))) (let ((sq1 (squelch f :yield))) (squelch sq1 :error)))"
-    );
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-    let val = result.unwrap();
-    assert!(val.is_closure(), "expected closure, got: {:?}", val);
-}
+// test_prim_squelch_composable_masks: migrated to tests/elle/signals.lisp
 
-#[test]
-fn test_prim_squelch_identity() {
-    // squelch returns a new heap allocation, not the original closure
-    let result =
-        crate::common::eval_source_bare("(identical? (fn () 1) (squelch (fn () 1) :yield))");
-    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
-    let val = result.unwrap();
-    assert_eq!(
-        val,
-        elle::Value::FALSE,
-        "expected false (different allocations)"
-    );
-}
+// test_prim_squelch_identity: migrated to tests/elle/signals.lisp
 
 // ============================================================================
 // SQUELCH RUNTIME ENFORCEMENT TESTS (Chunk 3)
 // ============================================================================
 
-#[test]
-fn test_squelch_catches_yield_at_boundary() {
-    // A squelched closure that yields should produce a signal-violation error
-    let result =
-        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 42)) :yield))) (f))");
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("signal-violation"),
-        "expected signal-violation, got: {}",
-        err
-    );
-    assert!(
-        err.contains("yield"),
-        "expected error to mention 'yield', got: {}",
-        err
-    );
-}
+// test_squelch_catches_yield_at_boundary: migrated to tests/elle/signals.lisp
 
 #[test]
 fn test_squelch_non_squelched_signal_passes() {
-    // Squelch :error but the closure yields — the yield should propagate normally
-    // (squelch doesn't intercept :yield since only :error is squelched)
-    // A yielding closure at top level produces an error about no parent fiber;
-    // what matters is it's NOT a signal-violation error.
+    // Kept in Rust: requires negative substring check ("NOT signal-violation").
+    // Elle tests cannot assert the absence of a substring in an error message.
     let result =
         crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 42)) :error))) (f))");
     // The call propagates a yield signal (no signal-violation, just yield propagation error)
@@ -1348,7 +1295,8 @@ fn test_squelch_non_squelched_signal_passes() {
 
 #[test]
 fn test_squelch_error_passthrough() {
-    // Errors should pass through squelch unchanged (we only squelch :yield here)
+    // Kept in Rust: requires negative substring check ("NOT signal-violation").
+    // Elle tests cannot assert the absence of a substring in an error message.
     let result =
         crate::common::eval_source_bare("(let ((f (squelch (fn () (/ 1 0)) :yield))) (f))");
     assert!(result.is_err(), "expected error, got ok");
@@ -1360,46 +1308,14 @@ fn test_squelch_error_passthrough() {
     );
 }
 
-#[test]
-fn test_squelch_nested_call_enforcement() {
-    // Yield bubbles up through inner and outer, reaching the squelch boundary on outer
-    // Use let* so each binding can reference prior ones
-    let result = crate::common::eval_source_bare(
-        "(let* ((inner (fn () (yield 1)))
-                (outer (fn () (inner)))
-                (safe (squelch outer :yield)))
-           (safe))",
-    );
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("signal-violation"),
-        "expected signal-violation, got: {}",
-        err
-    );
-}
+// test_squelch_nested_call_enforcement: migrated to tests/elle/signals.lisp
 
-#[test]
-fn test_squelch_tail_call_enforcement() {
-    // Squelched closure tail-calls a yielding function; squelch should catch the yield
-    // Use let* so yielder is visible when building the squelched closure
-    let result = crate::common::eval_source_bare(
-        "(let* ((yielder (fn () (yield 99)))
-                (safe (squelch (fn () (yielder)) :yield)))
-           (safe))",
-    );
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("signal-violation"),
-        "expected signal-violation, got: {}",
-        err
-    );
-}
+// test_squelch_tail_call_enforcement: migrated to tests/elle/signals.lisp
 
 #[test]
 fn test_squelch_signal_violation_error_message() {
-    // Error message should mention both "yield" and "squelch"
+    // Kept in Rust: requires checking that error message contains BOTH "yield" AND "squelch"
+    // substrings. Elle tests cannot match substrings.
     let result =
         crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 1)) :yield))) (f))");
     assert!(result.is_err(), "expected error, got ok");
@@ -1416,20 +1332,4 @@ fn test_squelch_signal_violation_error_message() {
     );
 }
 
-#[test]
-fn test_squelch_composable_runtime() {
-    // Both :yield and :error are squelched; f yields; squelch should catch it
-    let result = crate::common::eval_source_bare(
-        "(let* ((f  (fn () (yield 1)))
-                (sq1 (squelch f :yield))
-                (sq2 (squelch sq1 :error)))
-           (sq2))",
-    );
-    assert!(result.is_err(), "expected error, got ok");
-    let err = result.unwrap_err();
-    assert!(
-        err.contains("signal-violation"),
-        "expected signal-violation, got: {}",
-        err
-    );
-}
+// test_squelch_composable_runtime: migrated to tests/elle/signals.lisp
