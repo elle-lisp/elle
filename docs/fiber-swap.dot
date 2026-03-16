@@ -1,0 +1,197 @@
+// Elle fiber swap protocol — with_child_fiber
+//
+// Build: dot -Tsvg docs/fiber-swap.dot -o docs/fiber-swap.svg
+
+digraph fiber_swap {
+    rankdir=TB
+    bgcolor="transparent"
+    fontname="Helvetica"
+    nodesep=0.4
+    ranksep=0.55
+    node [fontname="Helvetica" fontsize=11 shape=box
+          style="rounded,filled" fillcolor="#fef7e0"
+          color="#333333" penwidth=1.2]
+    edge [fontname="Helvetica" fontsize=9 color="#666666"
+          fontcolor="#444444"]
+
+    // ── Entry ───────────────────────────────────────────────────────
+
+    entry [label=<with_child_fiber() called<br/>
+                  <font point-size="9" color="#666666">caller: resume / propagate / abort / cancel</font>>
+           fillcolor="#e8f0fe" shape=note]
+
+    // ── Step 1 ──────────────────────────────────────────────────────
+
+    step1 [label=<Step 1 — Take child fiber<br/>
+                  <font point-size="9" color="#666666">FiberHandle::take() → child_fiber (slot set to None)</font>>]
+
+    // ── Step 2 ──────────────────────────────────────────────────────
+
+    step2 [label=<Step 2 — Wire parent/child chain<br/>
+                  <font point-size="9" color="#666666">parent.child = child_handle<br/>
+                  parent.child_value = child_value<br/>
+                  child.parent = weak(parent)<br/>
+                  child.parent_value = parent_value</font>>]
+
+    // ── Step 3 ──────────────────────────────────────────────────────
+
+    step3 [label=<Step 3 — Swap fibers<br/>
+                  <font point-size="9" color="#666666">save current_fiber_handle / current_fiber_value<br/>
+                  set to child handle + value<br/>
+                  mem::swap(vm.fiber, child_fiber)<br/>
+                  → vm.fiber is now the child</font>>
+           fillcolor="#e0f0e8"]
+
+    // ── Step 3a ─────────────────────────────────────────────────────
+
+    step3a [label=<Step 3a — Install child heap<br/>
+                   <font point-size="9" color="#666666">save_current_heap() → saved_heap<br/>
+                   install_fiber_heap(child.heap)<br/>
+                   heap.init_active_allocator()</font>>
+            fillcolor="#e0f0e8"]
+
+    // ── Step 3b: decision ───────────────────────────────────────────
+
+    step3b_gate [label=<may_yield() || may_io()?<br/>
+                        <font point-size="9" color="#666666">check child closure template signal</font>>
+                 shape=diamond fillcolor="#fff4cc" color="#cc8800"]
+
+    // ── Step 3b: two branches ───────────────────────────────────────
+
+    step3b_a [label=<Case (a): propagate shared_alloc<br/>
+                     <font point-size="9" color="#666666">parent already has shared_alloc<br/>
+                     → give same pointer to child</font>>
+              fillcolor="#fde8e8"]
+
+    step3b_c [label=<Case (c): create shared_alloc<br/>
+                     <font point-size="9" color="#666666">parent has no shared_alloc<br/>
+                     → create on parent heap, give pointer to child<br/>
+                     (handles root→child after issue-525)</font>>
+              fillcolor="#fde8e8"]
+
+    step3b_skip [label=<(skip — silent fiber)<br/>
+                        <font point-size="9" color="#666666">no shared allocator needed</font>>
+                 shape=note fillcolor="#f0f0f0" color="#aaaaaa" fontcolor="#888888"]
+
+    // ── shared_alloc merge back to main flow ────────────────────────
+
+    step3b_join [label="" shape=point width=0.01 style=invis]
+
+    // ── Step 4 ──────────────────────────────────────────────────────
+
+    step4 [label=<Step 4 — Execute child bytecode<br/>
+                  <font point-size="9" color="#666666">execute(vm) → SignalBits</font>>
+           fillcolor="#e0eefc" color="#336699" penwidth=1.5]
+
+    // ── Step 5 ──────────────────────────────────────────────────────
+
+    step5_gate [label=<bits.is_ok()?<br/>
+                       <font point-size="9" color="#666666">SIG_OK vs other signal</font>>
+                shape=diamond fillcolor="#fff4cc" color="#cc8800"]
+
+    step5_dead [label=<Status → Dead<br/>
+                       <font point-size="9" color="#666666">child ran to completion</font>>
+                fillcolor="#e8f0fe"]
+
+    step5_paused [label=<Status → Paused<br/>
+                         <font point-size="9" color="#666666">caller finalizes:<br/>
+                         caught SIG_ERROR → Suspended (resumable)<br/>
+                         uncaught SIG_ERROR → Error (terminal)<br/>
+                         SIG_HALT → Dead (via resume handler)</font>>
+                  fillcolor="#e8f0fe"]
+
+    // ── Step 5 join ─────────────────────────────────────────────────
+
+    step5_join [label="" shape=point width=0.01 style=invis]
+
+    // ── Step 6 ──────────────────────────────────────────────────────
+
+    step6 [label=<Step 6 — Extract result<br/>
+                  <font point-size="9" color="#666666">fiber.signal → (bits, value)<br/>
+                  fallback: (bits, NIL) if signal is None</font>>]
+
+    // ── Step 7a ─────────────────────────────────────────────────────
+
+    step7a [label=<Step 7a — Clear child shared_alloc<br/>
+                   <font point-size="9" color="#666666">heap.clear_shared_alloc()<br/>
+                   pointer no longer valid after swap-back</font>>
+            fillcolor="#fde8e8"]
+
+    // ── Step 7 ──────────────────────────────────────────────────────
+
+    step7 [label=<Step 7 — Swap back<br/>
+                  <font point-size="9" color="#666666">restore_saved_heap(saved_heap)<br/>
+                  mem::swap(vm.fiber, child_fiber)<br/>
+                  → vm.fiber is parent again<br/>
+                  restore current_fiber_handle / current_fiber_value</font>>
+           fillcolor="#e0f0e8"]
+
+    // ── Step 8 ──────────────────────────────────────────────────────
+
+    step8 [label=<Step 8 — Return child fiber<br/>
+                  <font point-size="9" color="#666666">FiberHandle::put(child_fiber)</font>>]
+
+    // ── Exit ────────────────────────────────────────────────────────
+
+    exit [label=<return (SignalBits, Value)<br/>
+                 <font point-size="9" color="#666666">status finalization continues in caller</font>>
+          fillcolor="#e8f0fe" shape=note]
+
+    // ── Main flow edges ─────────────────────────────────────────────
+
+    entry  -> step1
+    step1  -> step2
+    step2  -> step3
+    step3  -> step3a [label="swap in"]
+    step3a -> step3b_gate
+
+    // 3b branches
+    step3b_gate -> step3b_a    [label="yes, parent has\nshared_alloc"
+                                 color="#cc8800" fontcolor="#cc8800"]
+    step3b_gate -> step3b_c    [label="yes, no\nshared_alloc"
+                                 color="#cc8800" fontcolor="#cc8800"]
+    step3b_gate -> step3b_skip [label="no"
+                                 style=dashed color="#aaaaaa" fontcolor="#aaaaaa"]
+
+    // rejoin after 3b
+    step3b_a    -> step4 [color="#cc4400" fontcolor="#cc4400"]
+    step3b_c    -> step4 [color="#cc4400" fontcolor="#cc4400"]
+    step3b_skip -> step4 [style=dashed color="#aaaaaa"]
+
+    // step 4 → 5 decision
+    step4 -> step5_gate
+
+    step5_gate -> step5_dead   [label="SIG_OK"
+                                 color="#cc8800" fontcolor="#cc8800"]
+    step5_gate -> step5_paused [label="other signal"
+                                 color="#cc8800" fontcolor="#cc8800"]
+
+    // rejoin after step 5
+    step5_dead   -> step6
+    step5_paused -> step6
+
+    step6  -> step7a
+    step7a -> step7 [label="swap back"]
+    step7  -> step8
+    step8  -> exit
+
+    // ── Swap-in cluster ─────────────────────────────────────────────
+
+    subgraph cluster_swap_in {
+        label=<swap in (steps 3 / 3a / 3b)<br/>
+               <font point-size="8">vm.fiber → child</font>>
+        labeljust=l fontsize=9 fontcolor="#336633"
+        color="#88bb88" style=dashed
+        step3 step3a step3b_gate step3b_a step3b_c step3b_skip
+    }
+
+    // ── Swap-out cluster ────────────────────────────────────────────
+
+    subgraph cluster_swap_out {
+        label=<swap out (steps 7a / 7 / 8)<br/>
+               <font point-size="8">vm.fiber → parent</font>>
+        labeljust=l fontsize=9 fontcolor="#663333"
+        color="#bb8888" style=dashed
+        step7a step7 step8
+    }
+}

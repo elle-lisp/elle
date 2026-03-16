@@ -376,6 +376,119 @@ compile-time; runtime signals are runtime events. Same bitfield, different timin
 See `docs/signals.md` for the signal system design.
 
 
+## Fiber Swap Protocol
+
+`VM::with_child_fiber()` is the single entry point for switching execution from
+a parent fiber to a child fiber. It owns the full lifecycle of a fiber resume:
+wiring the parent/child chain, swapping the active fiber and heap, executing the
+child's bytecode, and restoring everything before returning the result to the
+caller. All `fiber/resume` calls go through this function.
+
+The protocol is more complex than a simple stack switch because each fiber owns
+its own heap. Swapping fibers therefore requires saving the current heap pointer,
+installing the child's heap, running the child, then restoring the parent's
+heap — in that order, with no leaks.
+
+```mermaid
+sequenceDiagram
+    participant Caller as Caller (fiber/resume)
+    participant VM as VM.with_child_fiber()
+    participant Parent as Parent Fiber
+    participant Child as Child Fiber
+    participant Heap as Thread-Local Heap
+
+    Note over VM: Step 1: Take child from handle
+    VM->>Child: FiberHandle::take()
+    activate Child
+    Note over Child: child_fiber = owned Fiber
+
+    Note over VM: Step 2: Wire parent/child chain
+    VM->>Parent: parent.child = child_handle
+    VM->>Parent: parent.child_value = child_value
+    VM->>Child: child.parent = weak(parent_handle)
+    VM->>Child: child.parent_value = parent_value
+
+    Note over VM: Step 3: Swap fibers
+    VM->>VM: mem::swap(vm.fiber, child_fiber)
+    Note over VM: vm.fiber = child, child_fiber = parent
+
+    Note over VM: Step 3a: Install child's heap
+    VM->>Heap: save_current_heap() [parent's]
+    VM->>Heap: install_fiber_heap(child.heap)
+    VM->>Child: heap.init_active_allocator()
+
+    Note over VM: Step 3b: Shared allocator (if child may yield/IO)
+    alt Parent has shared_alloc (chain: A→B→C)
+        VM->>Child: propagate parent's shared_alloc ptr
+    else Parent has no shared_alloc
+        VM->>Parent: create_shared_allocator() on parent's heap
+        VM->>Child: set_shared_alloc(new ptr)
+    end
+
+    Note over VM: Step 4: Execute
+    VM->>Child: execute(vm) [runs child's bytecode]
+    Child-->>VM: SignalBits (e.g., SIG_YIELD)
+
+    Note over VM: Step 5: Update child status
+    alt SIG_OK
+        VM->>Child: status = Dead
+    else Any other signal
+        VM->>Child: status = Paused
+    end
+
+    Note over VM: Step 6: Extract result
+    VM->>Child: read fiber.signal → (bits, value)
+
+    Note over VM: Step 7a: Clear child's shared_alloc
+    VM->>Child: heap.clear_shared_alloc()
+
+    Note over VM: Step 7: Swap back
+    VM->>Heap: restore_saved_heap() [parent's]
+    VM->>VM: mem::swap(vm.fiber, child_fiber)
+    Note over VM: vm.fiber = parent, child_fiber = child
+
+    Note over VM: Step 8: Return child to handle
+    VM->>Child: FiberHandle::put(child_fiber)
+    deactivate Child
+
+    VM-->>Caller: (result_bits, result_value)
+```
+
+### Swap protocol invariants
+
+**Heap pointer is never lost.** The parent's heap pointer is saved before the
+child's is installed (step 3a), and restored before the swap-back (step 7).
+These two operations are always paired; there is no code path that installs the
+child's heap without a corresponding restore.
+
+**Shared allocator is gated on signal.** A shared allocator is only provisioned
+for children whose signal type includes yield or I/O (step 3b). Silent children
+do not participate in shared allocation, so no unnecessary allocator is created.
+
+**Child's shared allocator is cleared before swap-back.** Step 7a runs before
+step 7. This ordering prevents a dangling pointer: once the parent's heap
+context is restored, any pointer into the child's shared allocator would be
+invalid. Clearing first ensures the child holds no reference it cannot safely
+access after the context changes.
+
+**Child fiber is always returned to its handle.** Step 8 runs unconditionally,
+including on error paths. A fiber that was taken from its handle at step 1 is
+always put back. Callers can always re-resume a paused fiber or inspect a dead
+one; the handle is never left empty by a failed resume.
+
+### Per-resume shared allocator accumulation (tech debt)
+
+Each resume of a yielding or I/O child that has no pre-existing shared
+allocator creates a new shared allocator on the parent's heap (step 3b, else
+branch). Old shared allocators accumulate in `FiberHeap::owned_shared` and are
+not reclaimed until `FiberHeap::clear()` is called (typically at fiber death).
+For long-lived fibers that are resumed many times, this means unbounded growth
+of `owned_shared`. The fix is to reuse the existing shared allocator across
+resumes rather than creating a new one each time.
+
+Source: `src/vm/fiber.rs`
+
+
 ## What's Not Implemented Yet
 
 | Feature | Status |
