@@ -229,11 +229,11 @@ impl VM {
                 Instruction::ArrayMutSliceFrom => {
                     data::handle_array_slice_from(self, bc, &mut ip);
                 }
-                Instruction::TableGetOrNil => {
-                    data::handle_table_get_or_nil(self, bc, &mut ip, constants);
+                Instruction::StructGetOrNil => {
+                    data::handle_struct_get_or_nil(self, bc, &mut ip, constants);
                 }
-                Instruction::TableGetDestructure => {
-                    data::handle_table_get_destructure(self, bc, &mut ip, constants);
+                Instruction::StructGetDestructure => {
+                    data::handle_struct_get_destructure(self, bc, &mut ip, constants);
                 }
                 Instruction::StructRest => {
                     data::handle_struct_rest(self, bc, &mut ip, constants);
@@ -337,8 +337,8 @@ impl VM {
                 Instruction::IsStruct => {
                     types::handle_is_struct(self);
                 }
-                Instruction::IsTable => {
-                    types::handle_is_table(self);
+                Instruction::IsStructMut => {
+                    types::handle_is_struct_mut(self);
                 }
                 Instruction::ArrayMutLen => {
                     types::handle_array_len(self);

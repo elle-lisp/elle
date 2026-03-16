@@ -50,7 +50,7 @@ pub enum HirPattern {
         rest: Option<Box<HirPattern>>,
     },
 
-    /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsTable guard).
+    /// Match a mutable @struct @{...} by keyword or symbol keys (emits IsStructMut guard).
     /// Used by binding forms: missing keys signal an error.
     /// When `rest` is Some, collects all keys NOT explicitly named into a new immutable struct.
     Table {

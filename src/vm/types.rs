@@ -89,12 +89,12 @@ pub(crate) fn handle_array_len(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(len));
 }
 
-pub(crate) fn handle_is_table(vm: &mut VM) {
+pub(crate) fn handle_is_struct_mut(vm: &mut VM) {
     let val = vm
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on IsTable");
+        .expect("VM bug: Stack underflow on IsStructMut");
     vm.fiber.stack.push(Value::bool(val.is_struct_mut()));
 }
 

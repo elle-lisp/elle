@@ -45,6 +45,10 @@ pub struct JitCode {
     /// Read by `elle_jit_yield_through_call` runtime helper.
     #[allow(dead_code)]
     pub(crate) call_sites: Vec<super::dispatch::CallSiteMeta>,
+    /// Closure template Values referenced by MakeClosure instructions.
+    /// Kept alive to prevent `Rc<ClosureTemplate>` from being freed.
+    #[allow(dead_code)]
+    pub(crate) closure_constants: Vec<crate::value::Value>,
 }
 
 // Safety: The function pointer points to immutable code that doesn't
@@ -61,6 +65,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points: Vec::new(),
             call_sites: Vec::new(),
+            closure_constants: Vec::new(),
         }
     }
 
@@ -74,21 +79,24 @@ impl JitCode {
             _module: module,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
+            closure_constants: Vec::new(),
         }
     }
 
-    /// Create a new JitCode with yield point and call site metadata
+    /// Create a new JitCode with yield point, call site metadata, and closure constants
     pub(crate) fn new_with_metadata(
         fn_ptr: *const u8,
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
+        closure_constants: Vec<crate::value::Value>,
     ) -> Self {
         JitCode {
             fn_ptr,
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites,
+            closure_constants,
         }
     }
 
@@ -141,6 +149,7 @@ impl JitCode {
             _module: Arc::new(ModuleHolder::new(module)),
             yield_points,
             call_sites: Vec::new(),
+            closure_constants: Vec::new(),
         }
     }
 }

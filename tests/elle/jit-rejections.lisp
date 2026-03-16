@@ -3,13 +3,12 @@
 ## Before any hot functions, jit/rejections returns empty list
 (assert (= (jit/rejections) ()) "jit/rejections empty on fresh VM")
 
-## A function containing MakeClosure gets rejected when hot.
-(defn has-closure (n)
-  (let ((f (fn (x) (+ x 1))))
-    (if (<= n 0) 0
-      (+ (f n) (has-closure (- n 1))))))
+## A function containing eval gets rejected when hot.
+(defn has-eval (n)
+  (if (<= n 0) 0
+    (+ (eval '1) (has-eval (- n 1)))))
 
-(has-closure 20)
+(has-eval 20)
 
 (var rejections (jit/rejections))
 
@@ -23,9 +22,9 @@
 (assert (has-key? r :reason) "rejection has :reason")
 (assert (has-key? r :calls) "rejection has :calls")
 
-## Reason mentions MakeClosure
-(assert (string/contains? (get r :reason) "MakeClosure")
-  "reason mentions MakeClosure")
+## Reason mentions Eval
+(assert (string/contains? (get r :reason) "Eval")
+  "reason mentions Eval")
 
 ## Call count is at least the JIT threshold (10)
 (assert (>= (get r :calls) 10) ":calls >= JIT threshold")

@@ -642,12 +642,33 @@ pub(super) fn wait_uring(
                 .sec(ms / 1000)
                 .nsec(((ms % 1000) * 1_000_000) as u32);
             let args = io_uring::types::SubmitArgs::new().timespec(&ts);
-            let _ = ring.submitter().submit_with_args(1, &args);
+            loop {
+                match ring.submitter().submit_with_args(1, &args) {
+                    Ok(_) => break,
+                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => {
+                        // Interrupted by a signal (e.g. SIGCHLD from a subprocess
+                        // in a concurrent test). Retry — the timeout is still active.
+                        continue;
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::ETIME) => {
+                        // Timeout expired with no completions — that's valid.
+                        break;
+                    }
+                    Err(e) => {
+                        return Err(format!("io/wait: io_uring wait failed: {}", e));
+                    }
+                }
+            }
         }
-        None => {
-            ring.submit_and_wait(1)
-                .map_err(|e| format!("io/wait: io_uring wait failed: {}", e))?;
-        }
+        None => loop {
+            match ring.submit_and_wait(1) {
+                Ok(_) => break,
+                Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
+                Err(e) => {
+                    return Err(format!("io/wait: io_uring wait failed: {}", e));
+                }
+            }
+        },
     }
 
     drain_cqes(ring, pending, buffer_pool, fd_states, completions);

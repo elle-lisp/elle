@@ -358,7 +358,7 @@ pub(crate) fn handle_array_slice_from(vm: &mut VM, bytecode: &[u8], ip: &mut usi
 /// Table/struct get with silent nil: returns nil if key missing or wrong type.
 /// Used by pattern matching (match) — absent keys are valid there.
 /// Operand: u16 constant pool index (keyword key).
-pub(crate) fn handle_table_get_or_nil(
+pub(crate) fn handle_struct_get_or_nil(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
@@ -370,7 +370,7 @@ pub(crate) fn handle_table_get_or_nil(
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on TableGetOrNil");
+        .expect("VM bug: Stack underflow on StructGetOrNil");
 
     // Convert the constant to a TableKey for lookup
     let key = match TableKey::from_value(&key_value) {
@@ -401,7 +401,7 @@ pub(crate) fn handle_table_get_or_nil(
 
 /// Table/struct get for destructuring: signals error if key missing or wrong type.
 /// Operand: u16 constant pool index (keyword key).
-pub(crate) fn handle_table_get_destructure(
+pub(crate) fn handle_struct_get_destructure(
     vm: &mut VM,
     bytecode: &[u8],
     ip: &mut usize,
@@ -413,7 +413,7 @@ pub(crate) fn handle_table_get_destructure(
         .fiber
         .stack
         .pop()
-        .expect("VM bug: Stack underflow on TableGetDestructure");
+        .expect("VM bug: Stack underflow on StructGetDestructure");
 
     let key = match TableKey::from_value(&key_value) {
         Some(k) => k,
@@ -519,7 +519,7 @@ pub(crate) fn handle_struct_rest(
             }
         }
     }
-    // Non-struct input → empty struct rest (consistent with TableGetOrNil nil behavior)
+    // Non-struct input → empty struct rest (consistent with StructGetOrNil nil behavior)
 
     vm.fiber.stack.push(Value::struct_from(result));
 }

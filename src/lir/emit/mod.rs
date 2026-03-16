@@ -489,7 +489,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::TableGetOrNil { dst, src, key } => {
+            LirInstr::StructGetOrNil { dst, src, key } => {
                 self.ensure_on_top(*src);
                 let key_value = match key {
                     LirConst::Keyword(name) => Value::keyword(name),
@@ -498,16 +498,16 @@ impl Emitter {
                     LirConst::Symbol(sym) => Value::symbol(sym.0),
                     LirConst::Bool(b) => Value::bool(*b),
                     LirConst::Nil => Value::NIL,
-                    _ => panic!("TableGetOrNil: unsupported key type"),
+                    _ => panic!("StructGetOrNil: unsupported key type"),
                 };
                 let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::TableGetOrNil);
+                self.bytecode.emit(Instruction::StructGetOrNil);
                 self.bytecode.emit_u16(const_idx);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::TableGetDestructure { dst, src, key } => {
+            LirInstr::StructGetDestructure { dst, src, key } => {
                 self.ensure_on_top(*src);
                 let key_value = match key {
                     LirConst::Keyword(name) => Value::keyword(name),
@@ -516,10 +516,10 @@ impl Emitter {
                     LirConst::Symbol(sym) => Value::symbol(sym.0),
                     LirConst::Bool(b) => Value::bool(*b),
                     LirConst::Nil => Value::NIL,
-                    _ => panic!("TableGetDestructure: unsupported key type"),
+                    _ => panic!("StructGetDestructure: unsupported key type"),
                 };
                 let const_idx = self.bytecode.add_constant(key_value);
-                self.bytecode.emit(Instruction::TableGetDestructure);
+                self.bytecode.emit(Instruction::StructGetDestructure);
                 self.bytecode.emit_u16(const_idx);
                 self.pop();
                 self.push_reg(*dst);
@@ -667,9 +667,9 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::IsTable { dst, src } => {
+            LirInstr::IsStructMut { dst, src } => {
                 self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::IsTable);
+                self.bytecode.emit(Instruction::IsStructMut);
                 self.pop();
                 self.push_reg(*dst);
             }

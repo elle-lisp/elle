@@ -162,7 +162,7 @@ impl<'a> Analyzer<'a> {
                 // Build named-param destructure pattern: {:name1 name1 :name2 name2 ...}
                 // Uses NamedStruct (not Struct) so missing keys produce nil, not errors.
                 let pattern = HirPattern::NamedStruct { entries };
-                // NamedStruct always uses TableGetOrNil; strict=false is consistent but unused.
+                // NamedStruct always uses StructGetOrNil; strict=false is consistent but unused.
                 param_destructures.push((pattern, tmp, false));
 
                 (Some(tmp), VarargKind::StrictStruct(valid_keys))
