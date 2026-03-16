@@ -1428,3 +1428,132 @@ fn test_prim_squelch_identity() {
         "expected false (different allocations)"
     );
 }
+
+// ============================================================================
+// SQUELCH RUNTIME ENFORCEMENT TESTS (Chunk 3)
+// ============================================================================
+
+#[test]
+fn test_squelch_catches_yield_at_boundary() {
+    // A squelched closure that yields should produce a signal-violation error
+    let result =
+        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 42)) :yield))) (f))");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("signal-violation"),
+        "expected signal-violation, got: {}",
+        err
+    );
+    assert!(
+        err.contains("yield"),
+        "expected error to mention 'yield', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_non_squelched_signal_passes() {
+    // Squelch :error but the closure yields — the yield should propagate normally
+    // (squelch doesn't intercept :yield since only :error is squelched)
+    // A yielding closure at top level produces an error about no parent fiber;
+    // what matters is it's NOT a signal-violation error.
+    let result =
+        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 42)) :error))) (f))");
+    // The call propagates a yield signal (no signal-violation, just yield propagation error)
+    assert!(result.is_err(), "expected error (yield propagates), got ok");
+    let err = result.unwrap_err();
+    assert!(
+        !err.contains("signal-violation"),
+        "yield should NOT produce signal-violation (only :error is squelched), got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_error_passthrough() {
+    // Errors should pass through squelch unchanged (we only squelch :yield here)
+    let result =
+        crate::common::eval_source_bare("(let ((f (squelch (fn () (/ 1 0)) :yield))) (f))");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        !err.contains("signal-violation"),
+        "division error should not be a signal-violation, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_nested_call_enforcement() {
+    // Yield bubbles up through inner and outer, reaching the squelch boundary on outer
+    // Use let* so each binding can reference prior ones
+    let result = crate::common::eval_source_bare(
+        "(let* ((inner (fn () (yield 1)))
+                (outer (fn () (inner)))
+                (safe (squelch outer :yield)))
+           (safe))",
+    );
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("signal-violation"),
+        "expected signal-violation, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_tail_call_enforcement() {
+    // Squelched closure tail-calls a yielding function; squelch should catch the yield
+    // Use let* so yielder is visible when building the squelched closure
+    let result = crate::common::eval_source_bare(
+        "(let* ((yielder (fn () (yield 99)))
+                (safe (squelch (fn () (yielder)) :yield)))
+           (safe))",
+    );
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("signal-violation"),
+        "expected signal-violation, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_signal_violation_error_message() {
+    // Error message should mention both "yield" and "squelch"
+    let result =
+        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 1)) :yield))) (f))");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("yield"),
+        "error should mention 'yield', got: {}",
+        err
+    );
+    assert!(
+        err.contains("squelch"),
+        "error should mention 'squelch', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_squelch_composable_runtime() {
+    // Both :yield and :error are squelched; f yields; squelch should catch it
+    let result = crate::common::eval_source_bare(
+        "(let* ((f  (fn () (yield 1)))
+                (sq1 (squelch f :yield))
+                (sq2 (squelch sq1 :error)))
+           (sq2))",
+    );
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("signal-violation"),
+        "expected signal-violation, got: {}",
+        err
+    );
+}
