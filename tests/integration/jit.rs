@@ -3,12 +3,12 @@
 // These tests verify that the JIT compiler correctly translates LIR to native
 // code and produces the same results as the interpreter.
 
-use elle::signals::Signal;
 use elle::jit::{JitCompiler, JitError};
 use elle::lir::{
     BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, SpannedInstr,
     SpannedTerminator, Terminator, UnaryOp,
 };
+use elle::signals::Signal;
 use elle::syntax::Span;
 use elle::value::{Arity, Value};
 
@@ -720,8 +720,9 @@ fn test_jit_call_compiles() {
 }
 
 #[test]
-fn test_jit_rejects_make_closure() {
-    // MakeClosure is still unsupported (Phase 4+)
+fn test_jit_compiles_make_closure() {
+    // MakeClosure is now supported — a function that creates an inner closure
+    // should compile successfully and return a closure value.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -743,7 +744,11 @@ fn test_jit_rejects_make_closure() {
 
     let compiler = JitCompiler::new().unwrap();
     let result = compiler.compile(&func, None);
-    assert!(matches!(result, Err(JitError::UnsupportedInstruction(_))));
+    assert!(
+        result.is_ok(),
+        "MakeClosure should compile successfully: {:?}",
+        result
+    );
 }
 
 // =============================================================================

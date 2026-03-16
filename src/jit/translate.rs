@@ -60,6 +60,9 @@ pub(crate) struct FunctionTranslator<'a> {
     /// Sized to the maximum spill requirement across all yield points and
     /// call sites. `None` if the function has no spill points.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
+    /// Closure template Values built during translation of MakeClosure instructions.
+    /// Kept alive here (and later in JitCode) so the `Rc<ClosureTemplate>` doesn't get freed.
+    pub(crate) closure_constants: Vec<crate::value::Value>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -84,6 +87,7 @@ impl<'a> FunctionTranslator<'a> {
             yield_point_index: 0,
             call_site_index: 0,
             shared_spill_slot: None,
+            closure_constants: Vec::new(),
         }
     }
 
@@ -568,10 +572,77 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true); // Block is terminated
             }
 
-            // === Still unsupported (Phase 4+) ===
-            // NOTE: Keep group.rs::has_unsupported_instructions in sync with this list.
-            LirInstr::MakeClosure { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+            LirInstr::MakeClosure {
+                dst,
+                func,
+                captures,
+            } => {
+                // Emit the inner LirFunction to bytecode at JIT-compile time
+                let mut emitter = crate::lir::Emitter::new();
+                let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
+                let mut nested_lir = func.as_ref().clone();
+                nested_lir.yield_points = nested_yield_points;
+                nested_lir.call_sites = nested_call_sites;
+
+                let template = crate::value::ClosureTemplate {
+                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
+                    arity: func.arity,
+                    num_locals: func.num_locals as usize,
+                    num_captures: captures.len(),
+                    num_params: func.num_params,
+                    constants: std::rc::Rc::new(nested_bytecode.constants),
+                    signal: func.signal,
+                    lbox_params_mask: func.lbox_params_mask,
+                    lbox_locals_mask: func.lbox_locals_mask,
+                    symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
+                    location_map: std::rc::Rc::new(nested_bytecode.location_map),
+                    jit_code: None,
+                    lir_function: Some(std::rc::Rc::new(nested_lir)),
+                    doc: func.doc,
+                    syntax: func.syntax.clone(),
+                    vararg_kind: func.vararg_kind.clone(),
+                    name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
+                };
+                let template_closure = crate::value::Closure {
+                    template: std::rc::Rc::new(template),
+                    env: std::rc::Rc::new(vec![]),
+                    squelch_mask: 0,
+                };
+                let template_value = crate::value::Value::closure(template_closure);
+                let template_bits = template_value.to_bits();
+
+                // Keep the Value alive for the lifetime of the JIT code
+                self.closure_constants.push(template_value);
+
+                let template_iconst = builder.ins().iconst(I64, template_bits as i64);
+
+                // Spill captures to a stack slot (or pass null if no captures)
+                let (captures_ptr, count_val) = if captures.is_empty() {
+                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
+                } else {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (captures.len() * 8) as u32,
+                            0,
+                        ));
+                    for (i, cap_reg) in captures.iter().enumerate() {
+                        let cap_val = builder.use_var(var(cap_reg.0));
+                        builder.ins().stack_store(cap_val, slot, (i * 8) as i32);
+                    }
+                    let ptr = builder.ins().stack_addr(I64, slot, 0);
+                    let cnt = builder.ins().iconst(I64, captures.len() as i64);
+                    (ptr, cnt)
+                };
+
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.make_closure,
+                    template_iconst,
+                    captures_ptr,
+                    count_val,
+                )?;
+                builder.def_var(var(dst.0), result);
             }
             LirInstr::LoadResumeValue { dst } => {
                 // Resume goes through the interpreter. This block is

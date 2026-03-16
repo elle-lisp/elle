@@ -109,6 +109,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,
     pub(crate) tail_call_array: FuncId,
+    pub(crate) make_closure: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
@@ -307,6 +308,10 @@ impl JitCompiler {
             "elle_jit_tail_call_array",
             dispatch::elle_jit_tail_call_array as *const u8,
         );
+        builder.symbol(
+            "elle_jit_make_closure",
+            dispatch::elle_jit_make_closure as *const u8,
+        );
         builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
         builder.symbol(
             "elle_jit_yield_through_call",
@@ -467,6 +472,7 @@ impl JitCompiler {
             pop_param_frame: declare(module, "elle_jit_pop_param_frame", &unary_sig)?,
             call_array: declare(module, "elle_jit_call_array", &ternary_sig)?,
             tail_call_array: declare(module, "elle_jit_tail_call_array", &ternary_sig)?,
+            make_closure: declare(module, "elle_jit_make_closure", &ternary_sig)?,
             jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
             jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
             has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,
@@ -520,7 +526,8 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+        let closure_constants =
+            self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
 
         // Compile the function
         self.module
@@ -561,6 +568,7 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
+            closure_constants,
         ))
     }
 
@@ -595,6 +603,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+        // closure_constants from clif_text are discarded — diagnostic only
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
@@ -658,7 +667,12 @@ impl JitCompiler {
             ctx.func.signature = sig.clone();
             ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-            self.translate_function(
+            // closure_constants from batch compile are dropped — batch JitCodes use
+            // new_shared which has no closure_constants field to populate from here.
+            // Closures containing inner lambdas are capture-free, so MakeClosure in
+            // SCC peers is rare; if it occurs the inner template Value leaks its Rc
+            // until the JIT module is freed.
+            let _closure_constants = self.translate_function(
                 member.lir,
                 &mut ctx.func,
                 Some(&scc_peers),
@@ -720,7 +734,7 @@ impl JitCompiler {
         func: &mut Function,
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
         self_sym: Option<SymbolId>,
-    ) -> Result<(), JitError> {
+    ) -> Result<Vec<crate::value::Value>, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
@@ -949,7 +963,7 @@ impl JitCompiler {
         builder.seal_all_blocks();
 
         builder.finalize();
-        Ok(())
+        Ok(translator.closure_constants)
     }
 }
 

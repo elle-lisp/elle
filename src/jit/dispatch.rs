@@ -433,6 +433,39 @@ pub extern "C" fn elle_jit_tail_call_array(func: u64, args_array: u64, vm: *mut 
     }
 }
 
+/// Create a closure from a template Value and captured environment.
+/// template_bits: NaN-boxed Value of a zero-env Closure (the template)
+/// captures_ptr: pointer to array of count u64 NaN-boxed Values
+/// count: number of captured values
+#[no_mangle]
+pub extern "C" fn elle_jit_make_closure(template_bits: u64, captures_ptr: u64, count: u64) -> u64 {
+    let template_val = unsafe { Value::from_bits(template_bits) };
+    let count = count as usize;
+
+    let closure_template = template_val
+        .as_closure()
+        .expect("JIT bug: MakeClosure template is not a closure")
+        .template
+        .clone();
+
+    let env: Vec<Value> = if count == 0 {
+        vec![]
+    } else {
+        let slice = unsafe { std::slice::from_raw_parts(captures_ptr as *const u64, count) };
+        slice
+            .iter()
+            .map(|&bits| unsafe { Value::from_bits(bits) })
+            .collect()
+    };
+
+    Value::closure(crate::value::Closure {
+        template: closure_template,
+        env: std::rc::Rc::new(env),
+        squelch_mask: 0,
+    })
+    .to_bits()
+}
+
 /// Push a value onto a mutable @array. Returns new @array or TAG_NIL on error.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_push(array: u64, value: u64, vm: *mut ()) -> u64 {
