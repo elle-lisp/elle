@@ -63,7 +63,7 @@ pub mod value;
 pub mod vm;
 
 pub use compiler::Bytecode;
-pub use error::{RuntimeError, SourceLoc};
+pub use error::SourceLoc;
 pub use lint::{
     cli::{LintConfig, Linter, OutputFormat},
     diagnostics::{Diagnostic, Severity},
