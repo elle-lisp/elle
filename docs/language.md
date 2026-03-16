@@ -63,6 +63,10 @@ Elle supports both integers and floating-point numbers:
 3.14           # Float
 -17            # Negative numbers
 1.5e-3         # Scientific notation
+0xFF           # Hexadecimal integer (= 255)
+0o755          # Octal integer (= 493)
+0b1010         # Binary integer (= 10)
+1_000_000      # Underscores for readability
 ```
 
 Use `number?` to test for numeric values. Use `type-of` to get the type name:
