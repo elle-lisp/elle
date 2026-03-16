@@ -343,7 +343,7 @@ pub struct Fiber {
     ///
     /// **Root fiber**: this field is structurally present for uniformity but is
     /// never installed as the active allocator. The root fiber allocates through
-    /// the `ROOT_HEAP` thread-local in `src/value/fiber_heap/routing.rs`, which
+    /// the `ROOT_HEAP` thread-local in `src/value/fiberheap/routing.rs`, which
     /// is a separately leaked `Box<FiberHeap>` that lives for the thread's
     /// lifetime. The root `Fiber` struct's `heap` field is constructed in
     /// `Fiber::new()` but immediately superseded by `install_root_heap()` in
@@ -353,7 +353,7 @@ pub struct Fiber {
     /// `self.heap` on every allocation-related path, and wrapping in `Option`
     /// would require `.as_ref().unwrap()` or `.as_deref_mut().unwrap()` at every
     /// such call site with no benefit (child fibers always have a heap).
-    pub heap: Box<crate::value::fiber_heap::FiberHeap>,
+    pub heap: Box<crate::value::fiberheap::FiberHeap>,
     /// Operand stack (temporaries). SmallVec avoids heap allocation for
     /// fibers with fewer than 256 stack entries.
     pub stack: SmallVec<[Value; 256]>,
@@ -411,7 +411,7 @@ impl Fiber {
     /// Create a new fiber from a closure with the given signal mask.
     pub fn new(closure: Rc<Closure>, mask: SignalBits) -> Self {
         Fiber {
-            heap: Box::new(crate::value::fiber_heap::FiberHeap::new()),
+            heap: Box::new(crate::value::fiberheap::FiberHeap::new()),
             stack: SmallVec::new(),
             frames: Vec::new(),
             status: FiberStatus::New,

@@ -243,7 +243,7 @@ region instructions are emitted in normal code.
 ## Active allocator state
 
 `FiberHeap` has an `active_allocator: ActiveAlloc` enum field (defined in
-`value/fiber_heap/mod.rs`) that tracks which allocator is currently active:
+`value/fiberheap/mod.rs`) that tracks which allocator is currently active:
 - `ActiveAlloc::Slab` — allocate from the fiber's root slab (the default)
 - `ActiveAlloc::Bump(ptr)` — allocate from a scope bump (inside a `RegionEnter`)
 
