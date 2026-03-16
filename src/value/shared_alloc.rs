@@ -12,8 +12,8 @@
 //! - Torn down when the owner's `FiberHeap::clear()` runs;
 //!   `teardown()` runs destructors and returns all slab slots to the free list
 
-use crate::value::fiber_heap::needs_drop;
-use crate::value::fiber_heap::RootSlab;
+use crate::value::fiberheap::needs_drop;
+use crate::value::fiberheap::RootSlab;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 

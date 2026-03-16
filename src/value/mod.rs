@@ -10,7 +10,7 @@ pub mod display;
 pub mod error;
 pub mod ffi;
 pub mod fiber;
-pub mod fiber_heap;
+pub mod fiberheap;
 pub mod heap;
 pub mod intern;
 pub mod repr;
@@ -38,7 +38,7 @@ pub use send::SendValue;
 pub use types::{Arity, NativeFn, SymbolId, TableKey};
 
 // Export fiber heap
-pub use fiber_heap::FiberHeap;
+pub use fiberheap::FiberHeap;
 
 // Export closure and fiber types
 pub use closure::{Closure, ClosureTemplate};

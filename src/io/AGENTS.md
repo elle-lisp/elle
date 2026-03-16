@@ -13,6 +13,7 @@ to a backend for execution.
 |--------|----------------|
 | `types.rs` | Shared types: `PortKey`, `FdState`, `FdStatus` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
+| `pending.rs` | `PendingOp` enum — in-flight async operation tracking (4 variants) |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |

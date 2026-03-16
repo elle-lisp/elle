@@ -101,7 +101,7 @@ fn root_closure() -> Rc<Closure> {
 impl VM {
     pub fn new() -> Self {
         // Install the root fiber heap before any allocation can happen.
-        crate::value::fiber_heap::install_root_heap();
+        crate::value::fiberheap::install_root_heap();
 
         let mut fiber = Fiber::new(root_closure(), SIG_OK);
         // Root fiber starts alive (it's the currently executing context)

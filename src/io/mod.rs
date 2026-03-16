@@ -4,6 +4,7 @@ pub mod aio;
 pub mod backend;
 pub(crate) mod completion;
 pub(crate) mod mock;
+pub(crate) mod pending;
 pub(crate) mod pool;
 pub mod request;
 pub(crate) mod sockaddr;

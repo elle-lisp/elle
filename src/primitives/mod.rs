@@ -22,6 +22,7 @@ pub mod fiber_introspect;
 pub mod fibers;
 pub mod fileio;
 pub mod format;
+pub mod formatspec;
 pub mod introspection;
 pub mod io;
 pub mod json;

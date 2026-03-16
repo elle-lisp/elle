@@ -1,4 +1,5 @@
 mod lexer;
+mod numeric;
 mod parser;
 mod syntax;
 mod token;

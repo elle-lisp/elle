@@ -209,7 +209,7 @@ impl VM {
         // Save the caller's stack and active allocator. The active allocator
         // may change during execution (scope bumps pushed/popped); restore on return.
         let saved_stack = std::mem::take(&mut self.fiber.stack);
-        let saved_allocator = crate::value::fiber_heap::save_active_allocator();
+        let saved_allocator = crate::value::fiberheap::save_active_allocator();
 
         let mut current_bytecode = bytecode.clone();
         let mut current_constants = constants.clone();
@@ -297,7 +297,7 @@ impl VM {
         // Note: in the non-OK path, self.fiber.stack was already taken into
         // result.stack above, so this restores to the correct caller state.
         self.fiber.stack = saved_stack;
-        crate::value::fiber_heap::restore_active_allocator(saved_allocator);
+        crate::value::fiberheap::restore_active_allocator(saved_allocator);
 
         result
     }

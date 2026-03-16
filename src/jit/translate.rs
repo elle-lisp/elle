@@ -16,7 +16,7 @@ use crate::lir::{Label, LirInstr, Reg, Terminator};
 use crate::value::repr::TAG_NIL;
 use crate::value::SymbolId;
 
-use super::compiler::RuntimeHelpers;
+use super::vtable::RuntimeHelpers;
 use super::JitError;
 
 /// Helper to create a Variable from a register/slot index
