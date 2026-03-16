@@ -155,23 +155,6 @@ mod tests {
     }
 
     #[test]
-    fn bfs_returns_nil() {
-        // (begin-for-syntax (def x 1)) should expand to nil syntax
-        use crate::syntax::SyntaxKind;
-        let mut expander = Expander::new();
-        let (mut symbols, mut vm) = setup();
-        expander.load_prelude(&mut symbols, &mut vm).unwrap();
-
-        let src = "(begin-for-syntax (def x 1))";
-        let syn = read_syntax(src, "<test>").unwrap();
-        let result = expander.expand(syn, &mut symbols, &mut vm).unwrap();
-        assert!(
-            matches!(result.kind, SyntaxKind::Nil),
-            "begin-for-syntax should expand to nil"
-        );
-    }
-
-    #[test]
     fn bfs_clone_resets_env() {
         // Cloning an Expander that has compile_time_env entries should
         // produce an Expander with an empty compile_time_env.

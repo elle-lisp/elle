@@ -4,6 +4,7 @@ mod compiletime;
 mod introspection;
 mod macro_expand;
 mod quasiquote;
+mod syntaxcase;
 #[cfg(test)]
 mod tests;
 
@@ -133,6 +134,10 @@ impl Expander {
 
                     if name == "begin-for-syntax" {
                         return self.handle_begin_for_syntax(items, &syntax.span, symbols, vm);
+                    }
+
+                    if name == "syntax-case" {
+                        return self.handle_syntax_case(items, &syntax.span, symbols, vm);
                     }
 
                     // Check if it's a macro call

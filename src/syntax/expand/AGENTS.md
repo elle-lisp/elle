@@ -104,6 +104,7 @@ Special forms recognized before macro calls:
 - **`macro?`** — Check if a name is a registered macro. Returns a literal boolean.
 - **`expand-macro`** — Expand a quoted form. Returns the expanded form wrapped in quote.
 - **`begin-for-syntax`** — Compile-time definitions. Evaluates `(def <symbol> <expr>)` forms via `eval_syntax` and stores the resulting values in `Expander.compile_time_env`. Returns nil. Processed in `src/syntax/expand/compiletime.rs`. Only plain-symbol `def` forms are supported; all others are rejected at expansion time.
+- **`syntax-case`** — Pattern matching on syntax objects. Recognized before macro calls. Generates a chain of `let`/`if` forms using the syntax predicates. The scrutinee is bound to a gensym at the outermost level. No `eval_syntax` calls — pure code generation. Implemented in `src/syntax/expand/syntaxcase.rs`.
 
 ## Expander struct
 
@@ -160,6 +161,7 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 | `quasiquote.rs` | ~160 | Quasiquote-to-code conversion |
 | `introspection.rs` | ~100 | `macro?` and `expand-macro` |
 | `compiletime.rs` | ~80 | `begin-for-syntax` handler |
+| `syntaxcase.rs` | ~350 | `syntax-case` code-generating transformation |
 | `tests.rs` | ~540 | Expansion tests |
 
 ## Invariants
@@ -188,6 +190,8 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 9. **Expansion depth is bounded.** Max 200 levels to prevent infinite expansion. If exceeded, compilation fails with "macro expansion depth exceeded" error.
 
 10. **`compile_time_env` is always reset to empty on clone.** This prevents compile-time defs from leaking between pipeline calls via the cached Expander. See the manual `Clone` impl in `mod.rs`.
+
+11. **`syntax-case` is pure code generation, not expansion-time evaluation.** The scrutinee expression is not evaluated at expansion time (it may be a macro parameter with no value). Instead, `syntax-case` generates a chain of `let`/`if` forms that perform pattern matching at runtime using the syntax predicates. The generated code runs when the macro transformer closure executes inside the VM.
 
 ## When to modify
 

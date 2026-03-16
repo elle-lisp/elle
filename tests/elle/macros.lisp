@@ -787,3 +787,97 @@
   (quad (syntax->datum n)))
 
 (assert-eq (quadruple 3) 12 "begin-for-syntax: multi-block, second uses first")
+
+# ============================================================================
+# syntax-case tests (issue #581)
+# ============================================================================
+
+# Wildcard matches anything
+(defmacro sc-wild (stx)
+  (syntax-case stx (_ :matched)))
+(assert-eq (sc-wild 42)    :matched "syntax-case wildcard: int")
+(assert-eq (sc-wild :foo)  :matched "syntax-case wildcard: keyword")
+(assert-eq (sc-wild (a b)) :matched "syntax-case wildcard: list")
+
+# Pattern variable binds scrutinee
+(defmacro sc-var (stx)
+  (syntax-case stx (x (syntax->datum x))))
+(assert-eq (sc-var 99)  99  "syntax-case var binding: int")
+(assert-eq (sc-var :kw) :kw "syntax-case var binding: keyword")
+
+# Literal int matching
+(defmacro sc-int (stx)
+  (syntax-case stx
+    (42 :forty-two)
+    (_  :other)))
+(assert-eq (sc-int 42) :forty-two "syntax-case literal int: match")
+(assert-eq (sc-int 43) :other     "syntax-case literal int: no match")
+
+# Literal keyword matching
+# Keywords arrive as plain Value::keyword in macro args, so (= __sc0 :k) works.
+(defmacro sc-kw (stx)
+  (syntax-case stx
+    (:yes :found-yes)
+    (_    :other)))
+(assert-eq (sc-kw :yes) :found-yes "syntax-case keyword: match")
+(assert-eq (sc-kw :no)  :other     "syntax-case keyword: no match")
+
+# Literal symbol matching via (literal ...)
+(defmacro sc-sym (stx)
+  (syntax-case stx
+    ((literal if) :found-if)
+    (_            :other)))
+(assert-eq (sc-sym if)  :found-if "syntax-case literal symbol: match")
+(assert-eq (sc-sym foo) :other    "syntax-case literal symbol: no match")
+
+# List pattern: exact length 2
+# Body returns the first element's datum for the 2-element case.
+(defmacro sc-pair (stx)
+  (syntax-case stx
+    ((a b) (syntax->datum a))
+    (_     :not-pair)))
+(assert-eq (sc-pair (1 2)) 1       "syntax-case list pattern: 2 elements, first elem")
+(assert-eq (sc-pair (1))   :not-pair "syntax-case list pattern: wrong length")
+
+# Guard clause
+(defmacro sc-guard (stx)
+  (syntax-case stx
+    (x when (syntax-symbol? x) :got-symbol)
+    (_                          :other)))
+(assert-eq (sc-guard foo) :got-symbol "syntax-case guard: symbol matches")
+(assert-eq (sc-guard 42)  :other      "syntax-case guard: int fails guard")
+
+# Multiple clauses — first match wins
+(defmacro sc-multi (stx)
+  (syntax-case stx
+    (1   :one)
+    (2   :two)
+    (_   :other)))
+(assert-eq (sc-multi 1)   :one   "syntax-case multi: first clause")
+(assert-eq (sc-multi 2)   :two   "syntax-case multi: second clause")
+(assert-eq (sc-multi 99)  :other "syntax-case multi: wildcard")
+
+# Empty list pattern
+(defmacro sc-empty (stx)
+  (syntax-case stx
+    (() :empty)
+    (_  :nonempty)))
+(assert-eq (sc-empty ()) :empty   "syntax-case empty list: match")
+(assert-eq (sc-empty (a)) :nonempty "syntax-case empty list: no match")
+
+# No-match: single non-wildcard clause that does match
+(defmacro sc-exact (stx)
+  (syntax-case stx
+    (42 :found-42)))
+(assert-eq (sc-exact 42) :found-42 "syntax-case exact match: correct value")
+
+# End-to-end: syntax-case used in a real macro.
+# Macro with multiple params; uses syntax-case on the condition to dispatch.
+(defmacro my-if (test then else-expr)
+  (syntax-case test
+    (true  (syntax->datum then))
+    (false (syntax->datum else-expr))
+    (_     (list 'if (syntax->datum test) (syntax->datum then) (syntax->datum else-expr)))))
+
+(assert-eq (my-if true 1 2)  1 "end-to-end: my-if true")
+(assert-eq (my-if false 1 2) 2 "end-to-end: my-if false")
