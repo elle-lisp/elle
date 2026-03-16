@@ -263,7 +263,7 @@ pub enum LirInstr {
     /// Check if value is a struct (for pattern matching)
     IsStruct { dst: Reg, src: Reg },
     /// Check if value is an @struct (for pattern matching)
-    IsTable { dst: Reg, src: Reg },
+    IsStructMut { dst: Reg, src: Reg },
     /// Check if value is an immutable set (for pattern matching)
     IsSet { dst: Reg, src: Reg },
     /// Check if value is a mutable set (for pattern matching)
@@ -290,10 +290,10 @@ pub enum LirInstr {
     ArrayMutSliceFrom { dst: Reg, src: Reg, index: u16 },
     /// Table/struct get with silent nil: nil if key missing/wrong type. Used by match.
     /// `key` is a constant pool index holding a keyword Value.
-    TableGetOrNil { dst: Reg, src: Reg, key: LirConst },
+    StructGetOrNil { dst: Reg, src: Reg, key: LirConst },
     /// Table/struct get for destructuring: signals error if key missing or wrong type.
     /// `key` is a constant pool index holding a keyword Value.
-    TableGetDestructure { dst: Reg, src: Reg, key: LirConst },
+    StructGetDestructure { dst: Reg, src: Reg, key: LirConst },
 
     /// Struct rest for destructuring: collect all keys from src NOT in exclude_keys
     /// into a new immutable struct. Used by `{:a a & rest}` patterns.

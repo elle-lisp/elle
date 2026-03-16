@@ -1299,6 +1299,96 @@ mod tests {
         assert!(completions.is_empty());
     }
 
+    /// Regression test: wait() must not return 0 completions when an accept
+    /// SQE is in-flight and a connection arrives within the timeout window.
+    ///
+    /// Previously, submit_with_args() could return early (EINTR or spurious
+    /// wakeup) and the discarded error caused wait() to return 0 completions
+    /// even though the accept had not yet completed. The fix: loop wait() until
+    /// at least one completion arrives or the deadline passes.
+    #[test]
+    fn test_accept_wait_does_not_return_zero_completions_spuriously() {
+        use std::os::unix::io::FromRawFd;
+        use std::sync::{Arc, Barrier};
+
+        let listener_fd = unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            assert!(fd >= 0);
+            let opt: libc::c_int = 1;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                &opt as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0;
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            assert_eq!(
+                libc::bind(
+                    fd,
+                    &addr as *const _ as *const libc::sockaddr,
+                    std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t
+                ),
+                0
+            );
+            assert_eq!(libc::listen(fd, 128), 0);
+            fd
+        };
+        let bound_port = unsafe {
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            libc::getsockname(
+                listener_fd,
+                &mut addr as *mut _ as *mut libc::sockaddr,
+                &mut len,
+            );
+            u16::from_be(addr.sin_port)
+        };
+        let listener_port = Value::external(
+            "port",
+            Port::new_tcp_listener(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                format!("127.0.0.1:{}", bound_port),
+            ),
+        );
+
+        let backend = AsyncBackend::new().unwrap();
+        let accept_id = backend
+            .submit(&IoRequest {
+                op: IoOp::Accept,
+                port: listener_port,
+                timeout: None,
+            })
+            .unwrap();
+
+        // Use a barrier so the connect happens only after we're about to call wait().
+        // This maximises the chance that wait() sees 0 completions on the first
+        // drain and must block — the scenario where the spurious-return bug fires.
+        let barrier = Arc::new(Barrier::new(2));
+        let barrier2 = barrier.clone();
+        let handle = std::thread::spawn(move || {
+            barrier2.wait(); // released just before wait() is called
+            std::net::TcpStream::connect(format!("127.0.0.1:{}", bound_port)).unwrap()
+        });
+
+        barrier.wait(); // release the connector thread
+                        // wait() must return exactly 1 completion — the accept.
+                        // If it returns 0, the bug is confirmed.
+        let completions = backend.wait(5000).unwrap();
+        assert_eq!(
+            completions.len(),
+            1,
+            "wait() returned {} completions — expected 1 (spurious early return bug)",
+            completions.len()
+        );
+        assert_eq!(completions[0].id, accept_id);
+        assert!(completions[0].result.is_ok());
+        handle.join().unwrap();
+    }
+
     #[test]
     fn test_accept_via_uring() {
         use std::os::unix::io::FromRawFd;

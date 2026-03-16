@@ -53,6 +53,226 @@ pub extern "C" fn elle_jit_is_pair(a: u64) -> u64 {
     Value::bool(val.is_cons()).to_bits()
 }
 
+/// Check if value is an immutable array
+#[no_mangle]
+pub extern "C" fn elle_jit_is_array(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_array()).to_bits()
+}
+
+/// Check if value is a mutable @array
+#[no_mangle]
+pub extern "C" fn elle_jit_is_array_mut(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_array_mut()).to_bits()
+}
+
+/// Check if value is an immutable struct
+#[no_mangle]
+pub extern "C" fn elle_jit_is_struct(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_struct()).to_bits()
+}
+
+/// Check if value is a mutable @struct
+#[no_mangle]
+pub extern "C" fn elle_jit_is_struct_mut(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_struct_mut()).to_bits()
+}
+
+/// Check if value is an immutable set
+#[no_mangle]
+pub extern "C" fn elle_jit_is_set(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_set()).to_bits()
+}
+
+/// Check if value is a mutable @set
+#[no_mangle]
+pub extern "C" fn elle_jit_is_set_mut(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    Value::bool(val.is_set_mut()).to_bits()
+}
+
+/// Car for destructuring: returns car if cons, signals error otherwise.
+#[no_mangle]
+pub extern "C" fn elle_jit_car_destructure(a: u64, vm: *mut ()) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    match val.as_cons() {
+        Some(cons) => cons.first.to_bits(),
+        None => {
+            let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+            vm.fiber.signal = Some((
+                crate::value::SIG_ERROR,
+                crate::value::error_val(
+                    "type-error",
+                    format!("destructuring: expected list, got {}", val.type_name()),
+                ),
+            ));
+            crate::value::repr::TAG_NIL
+        }
+    }
+}
+
+/// Cdr for destructuring: returns cdr if cons, signals error otherwise.
+#[no_mangle]
+pub extern "C" fn elle_jit_cdr_destructure(a: u64, vm: *mut ()) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    match val.as_cons() {
+        Some(cons) => cons.rest.to_bits(),
+        None => {
+            let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
+            vm.fiber.signal = Some((
+                crate::value::SIG_ERROR,
+                crate::value::error_val(
+                    "type-error",
+                    format!("destructuring: expected list, got {}", val.type_name()),
+                ),
+            ));
+            crate::value::repr::TAG_NIL
+        }
+    }
+}
+
+/// Array ref for destructuring: signals error if out of bounds or not an array.
+#[no_mangle]
+pub extern "C" fn elle_jit_array_ref_destructure(a: u64, index: u64, vm: *mut ()) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    let idx = index as usize;
+    let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+    if let Some(arr) = val.as_array_mut() {
+        let borrowed = arr.borrow();
+        match borrowed.get(idx).copied() {
+            Some(v) => v.to_bits(),
+            None => {
+                vm_ref.fiber.signal = Some((
+                    crate::value::SIG_ERROR,
+                    crate::value::error_val(
+                        "type-error",
+                        format!(
+                            "destructuring: array index {} out of bounds (length {})",
+                            idx,
+                            borrowed.len()
+                        ),
+                    ),
+                ));
+                crate::value::repr::TAG_NIL
+            }
+        }
+    } else if let Some(elems) = val.as_array() {
+        match elems.get(idx).copied() {
+            Some(v) => v.to_bits(),
+            None => {
+                vm_ref.fiber.signal = Some((
+                    crate::value::SIG_ERROR,
+                    crate::value::error_val(
+                        "type-error",
+                        format!(
+                            "destructuring: array index {} out of bounds (length {})",
+                            idx,
+                            elems.len()
+                        ),
+                    ),
+                ));
+                crate::value::repr::TAG_NIL
+            }
+        }
+    } else {
+        vm_ref.fiber.signal = Some((
+            crate::value::SIG_ERROR,
+            crate::value::error_val(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            ),
+        ));
+        crate::value::repr::TAG_NIL
+    }
+}
+
+/// Array slice from index: returns sub-array from index to end, preserving mutability.
+/// Signals error if not an array.
+#[no_mangle]
+pub extern "C" fn elle_jit_array_slice_from(a: u64, index: u64, vm: *mut ()) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    let idx = index as usize;
+    if let Some(arr) = val.as_array_mut() {
+        let borrowed = arr.borrow();
+        let slice = if idx < borrowed.len() {
+            borrowed[idx..].to_vec()
+        } else {
+            vec![]
+        };
+        Value::array_mut(slice).to_bits()
+    } else if let Some(elems) = val.as_array() {
+        let slice = if idx < elems.len() {
+            elems[idx..].to_vec()
+        } else {
+            vec![]
+        };
+        Value::array(slice).to_bits()
+    } else {
+        let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+        vm_ref.fiber.signal = Some((
+            crate::value::SIG_ERROR,
+            crate::value::error_val(
+                "type-error",
+                format!("destructuring: expected array, got {}", val.type_name()),
+            ),
+        ));
+        crate::value::repr::TAG_NIL
+    }
+}
+
+/// Car with silent nil: returns car if cons, NIL otherwise.
+#[no_mangle]
+pub extern "C" fn elle_jit_car_or_nil(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    match val.as_cons() {
+        Some(cons) => cons.first.to_bits(),
+        None => Value::NIL.to_bits(),
+    }
+}
+
+/// Cdr with silent empty-list: returns cdr if cons, EMPTY_LIST otherwise.
+#[no_mangle]
+pub extern "C" fn elle_jit_cdr_or_nil(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    match val.as_cons() {
+        Some(cons) => cons.rest.to_bits(),
+        None => Value::EMPTY_LIST.to_bits(),
+    }
+}
+
+/// Array length: returns length as int for array or @array, 0 otherwise.
+#[no_mangle]
+pub extern "C" fn elle_jit_array_len(a: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    let len = if let Some(arr) = val.as_array_mut() {
+        arr.borrow().len() as i64
+    } else if let Some(arr) = val.as_array() {
+        arr.len() as i64
+    } else {
+        0
+    };
+    Value::int(len).to_bits()
+}
+
+/// Array ref with silent nil: returns element at index, NIL if out of bounds or not array.
+#[no_mangle]
+pub extern "C" fn elle_jit_array_ref_or_nil(a: u64, index: u64) -> u64 {
+    let val = unsafe { Value::from_bits(a) };
+    let idx = index as usize;
+    let result = if let Some(arr) = val.as_array_mut() {
+        arr.borrow().get(idx).copied()
+    } else if let Some(arr) = val.as_array() {
+        arr.get(idx).copied()
+    } else {
+        None
+    };
+    result.unwrap_or(Value::NIL).to_bits()
+}
+
 // =============================================================================
 // Box Operations
 // =============================================================================

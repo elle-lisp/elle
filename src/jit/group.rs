@@ -144,23 +144,8 @@ fn find_global_call_targets(lir: &LirFunction) -> HashSet<SymbolId> {
 fn has_unsupported_instructions(lir: &LirFunction) -> bool {
     for bb in &lir.blocks {
         for spanned in &bb.instructions {
-            match &spanned.instr {
-                LirInstr::MakeClosure { .. }
-                | LirInstr::CarDestructure { .. }
-                | LirInstr::CdrDestructure { .. }
-                | LirInstr::ArrayMutRefDestructure { .. }
-                | LirInstr::ArrayMutSliceFrom { .. }
-                | LirInstr::IsArrayMut { .. }
-                | LirInstr::IsTable { .. }
-                | LirInstr::ArrayMutLen { .. }
-                | LirInstr::TableGetOrNil { .. }
-                | LirInstr::TableGetDestructure { .. }
-                | LirInstr::StructRest { .. }
-                | LirInstr::CarOrNil { .. }
-                | LirInstr::CdrOrNil { .. }
-                | LirInstr::ArrayMutRefOrNil { .. }
-                | LirInstr::Eval { .. } => return true,
-                _ => {}
+            if let LirInstr::Eval { .. } = &spanned.instr {
+                return true;
             }
         }
     }

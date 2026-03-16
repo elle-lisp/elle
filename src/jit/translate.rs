@@ -60,6 +60,9 @@ pub(crate) struct FunctionTranslator<'a> {
     /// Sized to the maximum spill requirement across all yield points and
     /// call sites. `None` if the function has no spill points.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
+    /// Closure template Values built during translation of MakeClosure instructions.
+    /// Kept alive here (and later in JitCode) so the `Rc<ClosureTemplate>` doesn't get freed.
+    pub(crate) closure_constants: Vec<crate::value::Value>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -84,6 +87,7 @@ impl<'a> FunctionTranslator<'a> {
             yield_point_index: 0,
             call_site_index: 0,
             shared_spill_slot: None,
+            closure_constants: Vec::new(),
         }
     }
 
@@ -568,10 +572,77 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true); // Block is terminated
             }
 
-            // === Still unsupported (Phase 4+) ===
-            // NOTE: Keep group.rs::has_unsupported_instructions in sync with this list.
-            LirInstr::MakeClosure { .. } => {
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+            LirInstr::MakeClosure {
+                dst,
+                func,
+                captures,
+            } => {
+                // Emit the inner LirFunction to bytecode at JIT-compile time
+                let mut emitter = crate::lir::Emitter::new();
+                let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
+                let mut nested_lir = func.as_ref().clone();
+                nested_lir.yield_points = nested_yield_points;
+                nested_lir.call_sites = nested_call_sites;
+
+                let template = crate::value::ClosureTemplate {
+                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
+                    arity: func.arity,
+                    num_locals: func.num_locals as usize,
+                    num_captures: captures.len(),
+                    num_params: func.num_params,
+                    constants: std::rc::Rc::new(nested_bytecode.constants),
+                    signal: func.signal,
+                    lbox_params_mask: func.lbox_params_mask,
+                    lbox_locals_mask: func.lbox_locals_mask,
+                    symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
+                    location_map: std::rc::Rc::new(nested_bytecode.location_map),
+                    jit_code: None,
+                    lir_function: Some(std::rc::Rc::new(nested_lir)),
+                    doc: func.doc,
+                    syntax: func.syntax.clone(),
+                    vararg_kind: func.vararg_kind.clone(),
+                    name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
+                };
+                let template_closure = crate::value::Closure {
+                    template: std::rc::Rc::new(template),
+                    env: std::rc::Rc::new(vec![]),
+                    squelch_mask: 0,
+                };
+                let template_value = crate::value::Value::closure(template_closure);
+                let template_bits = template_value.to_bits();
+
+                // Keep the Value alive for the lifetime of the JIT code
+                self.closure_constants.push(template_value);
+
+                let template_iconst = builder.ins().iconst(I64, template_bits as i64);
+
+                // Spill captures to a stack slot (or pass null if no captures)
+                let (captures_ptr, count_val) = if captures.is_empty() {
+                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
+                } else {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (captures.len() * 8) as u32,
+                            0,
+                        ));
+                    for (i, cap_reg) in captures.iter().enumerate() {
+                        let cap_val = builder.use_var(var(cap_reg.0));
+                        builder.ins().stack_store(cap_val, slot, (i * 8) as i32);
+                    }
+                    let ptr = builder.ins().stack_addr(I64, slot, 0);
+                    let cnt = builder.ins().iconst(I64, captures.len() as i64);
+                    (ptr, cnt)
+                };
+
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.make_closure,
+                    template_iconst,
+                    captures_ptr,
+                    count_val,
+                )?;
+                builder.def_var(var(dst.0), result);
             }
             LirInstr::LoadResumeValue { dst } => {
                 // Resume goes through the interpreter. This block is
@@ -579,102 +650,323 @@ impl<'a> FunctionTranslator<'a> {
                 let nil = builder.ins().iconst(I64, TAG_NIL as i64);
                 builder.def_var(var(dst.0), nil);
             }
-            LirInstr::CarDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CarDestructure".to_string(),
-                ));
+            LirInstr::CarDestructure { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CarDestructure without vm pointer".to_string())
+                })?;
+                let result =
+                    self.call_helper_binary(builder, self.helpers.car_destructure, src_val, vm)?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::CdrDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CdrDestructure".to_string(),
-                ));
+            LirInstr::CdrDestructure { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CdrDestructure without vm pointer".to_string())
+                })?;
+                let result =
+                    self.call_helper_binary(builder, self.helpers.cdr_destructure, src_val, vm)?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutRefDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutRefDestructure".to_string(),
-                ));
+            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+                let src_val = builder.use_var(var(src.0));
+                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutRefDestructure without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_ref_destructure,
+                    src_val,
+                    idx_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutSliceFrom { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutSliceFrom".to_string(),
-                ));
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
+                let src_val = builder.use_var(var(src.0));
+                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutSliceFrom without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_slice_from,
+                    src_val,
+                    idx_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::IsArray { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsArray".to_string()));
+            LirInstr::IsArray { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.is_array, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::IsArrayMut { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsArrayMut".to_string()));
+            LirInstr::IsArrayMut { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.is_array_mut, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::IsStruct { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsStruct".to_string()));
+            LirInstr::IsStruct { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.is_struct, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::IsTable { .. } => {
-                return Err(JitError::UnsupportedInstruction("IsTable".to_string()));
+            LirInstr::IsStructMut { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result =
+                    self.call_helper_unary(builder, self.helpers.is_struct_mut, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutLen { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayMutLen".to_string()));
+            LirInstr::ArrayMutLen { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.array_len, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::TableGetOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "TableGetOrNil".to_string(),
-                ));
+            LirInstr::StructGetOrNil { dst, src, key } => {
+                let src_val = builder.use_var(var(src.0));
+                let key_val = self.translate_const(builder, key);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("StructGetOrNil without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.struct_get_or_nil,
+                    src_val,
+                    key_val,
+                    vm,
+                )?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::TableGetDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "TableGetDestructure".to_string(),
-                ));
+            LirInstr::StructGetDestructure { dst, src, key } => {
+                let src_val = builder.use_var(var(src.0));
+                let key_val = self.translate_const(builder, key);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("StructGetDestructure without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.struct_get_destructure,
+                    src_val,
+                    key_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::StructRest { .. } => {
-                return Err(JitError::UnsupportedInstruction("StructRest".to_string()));
+            LirInstr::StructRest {
+                dst,
+                src,
+                exclude_keys,
+            } => {
+                let src_val = builder.use_var(var(src.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("StructRest without vm pointer".to_string())
+                })?;
+                let count = exclude_keys.len();
+                let (exclude_ptr, count_val) = if count == 0 {
+                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
+                } else {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (count * 8) as u32,
+                            0,
+                        ));
+                    for (i, key) in exclude_keys.iter().enumerate() {
+                        let key_val = self.translate_const(builder, key);
+                        builder.ins().stack_store(key_val, slot, (i * 8) as i32);
+                    }
+                    let ptr = builder.ins().stack_addr(I64, slot, 0);
+                    let cnt = builder.ins().iconst(I64, count as i64);
+                    (ptr, cnt)
+                };
+                let result = self.call_helper_quaternary(
+                    builder,
+                    self.helpers.struct_rest,
+                    src_val,
+                    exclude_ptr,
+                    count_val,
+                    vm,
+                )?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::CarOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction("CarOrNil".to_string()));
+            LirInstr::CarOrNil { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.car_or_nil, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::CdrOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction("CdrOrNil".to_string()));
+            LirInstr::CdrOrNil { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.cdr_or_nil, src_val)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutRefOrNil { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutRefOrNil".to_string(),
-                ));
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+                let src_val = builder.use_var(var(src.0));
+                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let result = self.call_helper_binary(
+                    builder,
+                    self.helpers.array_ref_or_nil,
+                    src_val,
+                    idx_val,
+                )?;
+                builder.def_var(var(dst.0), result);
             }
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
-            LirInstr::ArrayMutExtend { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutExtend".to_string(),
-                ));
+            LirInstr::ArrayMutExtend { dst, array, source } => {
+                let array_val = builder.use_var(var(array.0));
+                let source_val = builder.use_var(var(source.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutExtend without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_extend,
+                    array_val,
+                    source_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutPush { .. } => {
-                return Err(JitError::UnsupportedInstruction("ArrayMutPush".to_string()));
+            LirInstr::ArrayMutPush { dst, array, value } => {
+                let array_val = builder.use_var(var(array.0));
+                let value_val = builder.use_var(var(value.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutPush without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_push,
+                    array_val,
+                    value_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::CallArrayMut { .. } => {
-                return Err(JitError::UnsupportedInstruction("CallArrayMut".to_string()));
+            LirInstr::CallArrayMut { dst, func, args } => {
+                let func_val = builder.use_var(var(func.0));
+                let args_val = builder.use_var(var(args.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CallArrayMut without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.call_array,
+                    func_val,
+                    args_val,
+                    vm,
+                )?;
+                builder.def_var(var(dst.0), result);
+                self.emit_exception_check_after_call(builder)?;
+                if self.lir.signal.may_suspend() {
+                    let idx = self.call_site_index;
+                    self.call_site_index += 1;
+                    self.emit_yield_check_after_call(builder, idx)?;
+                }
             }
-            LirInstr::TailCallArrayMut { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "TailCallArrayMut".to_string(),
-                ));
+            LirInstr::TailCallArrayMut { func, args } => {
+                let func_val = builder.use_var(var(func.0));
+                let args_val = builder.use_var(var(args.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("TailCallArrayMut without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.tail_call_array,
+                    func_val,
+                    args_val,
+                    vm,
+                )?;
+                builder.ins().return_(&[result]);
+                return Ok(true); // block is terminated
             }
             LirInstr::RegionEnter | LirInstr::RegionExit => {
                 // No-op in JIT (allocation regions not yet active)
             }
-            LirInstr::PushParamFrame { .. } | LirInstr::PopParamFrame => {
-                return Err(JitError::UnsupportedInstruction(
-                    "PushParamFrame/PopParamFrame".to_string(),
-                ));
+            LirInstr::PushParamFrame { pairs } => {
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("PushParamFrame without vm pointer".to_string())
+                })?;
+                let count = pairs.len();
+                if count == 0 {
+                    // Empty frame — call with null pointer and count 0
+                    let null_ptr = builder.ins().iconst(I64, 0);
+                    let count_val = builder.ins().iconst(I64, 0);
+                    self.call_helper_ternary(
+                        builder,
+                        self.helpers.push_param_frame,
+                        null_ptr,
+                        count_val,
+                        vm,
+                    )?;
+                } else {
+                    // Spill pairs to a stack slot: [param0, val0, param1, val1, ...]
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (count * 2 * 8) as u32,
+                            0,
+                        ));
+                    for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
+                        let param_val = builder.use_var(var(param_reg.0));
+                        let val_val = builder.use_var(var(val_reg.0));
+                        let offset_param = (i * 2 * 8) as i32;
+                        let offset_val = (i * 2 * 8 + 8) as i32;
+                        builder.ins().stack_store(param_val, slot, offset_param);
+                        builder.ins().stack_store(val_val, slot, offset_val);
+                    }
+                    let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
+                    let count_val = builder.ins().iconst(I64, count as i64);
+                    self.call_helper_ternary(
+                        builder,
+                        self.helpers.push_param_frame,
+                        pairs_ptr,
+                        count_val,
+                        vm,
+                    )?;
+                }
+                self.emit_exception_check_after_call(builder)?;
             }
-            LirInstr::IsSet { .. } | LirInstr::IsSetMut { .. } => {
-                return Err(JitError::UnsupportedInstruction(format!(
-                    "JIT does not support set type checks: {:?}",
-                    instr
-                )));
+            LirInstr::PopParamFrame => {
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("PopParamFrame without vm pointer".to_string())
+                })?;
+                self.call_helper_unary(builder, self.helpers.pop_param_frame, vm)?;
             }
-            LirInstr::CheckSignalBound { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CheckSignalBound".to_string(),
-                ));
+            LirInstr::IsSet { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.is_set, src_val)?;
+                builder.def_var(var(dst.0), result);
+            }
+            LirInstr::IsSetMut { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let result = self.call_helper_unary(builder, self.helpers.is_set_mut, src_val)?;
+                builder.def_var(var(dst.0), result);
+            }
+            LirInstr::CheckSignalBound { src, allowed_bits } => {
+                let src_val = builder.use_var(var(src.0));
+                let allowed_val = builder.ins().iconst(I64, *allowed_bits as i64);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CheckSignalBound without vm pointer".to_string())
+                })?;
+                self.call_helper_ternary(
+                    builder,
+                    self.helpers.check_signal_bound,
+                    src_val,
+                    allowed_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                // No dst — side-effect only
             }
         }
         Ok(false)

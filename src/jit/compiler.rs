@@ -72,6 +72,27 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) make_array: FuncId,
     pub(crate) is_nil: FuncId,
     pub(crate) is_pair: FuncId,
+    pub(crate) is_array: FuncId,
+    pub(crate) is_array_mut: FuncId,
+    pub(crate) is_struct: FuncId,
+    pub(crate) is_struct_mut: FuncId,
+    pub(crate) is_set: FuncId,
+    pub(crate) is_set_mut: FuncId,
+    pub(crate) car_or_nil: FuncId,
+    pub(crate) cdr_or_nil: FuncId,
+    pub(crate) array_len: FuncId,
+    pub(crate) array_ref_or_nil: FuncId,
+    pub(crate) car_destructure: FuncId,
+    pub(crate) cdr_destructure: FuncId,
+    pub(crate) array_ref_destructure: FuncId,
+    pub(crate) array_slice_from: FuncId,
+    pub(crate) struct_get_or_nil: FuncId,
+    pub(crate) struct_get_destructure: FuncId,
+    pub(crate) struct_rest: FuncId,
+    pub(crate) check_signal_bound: FuncId,
+    pub(crate) array_push: FuncId,
+    pub(crate) array_extend: FuncId,
+    pub(crate) push_param_frame: FuncId,
     #[allow(dead_code)]
     pub(crate) is_truthy: FuncId,
     pub(crate) make_lbox: FuncId,
@@ -85,6 +106,10 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) resolve_tail_call: FuncId,
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
+    pub(crate) pop_param_frame: FuncId,
+    pub(crate) call_array: FuncId,
+    pub(crate) tail_call_array: FuncId,
+    pub(crate) make_closure: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
@@ -150,6 +175,87 @@ impl JitCompiler {
         );
         builder.symbol("elle_jit_is_pair", dispatch::elle_jit_is_pair as *const u8);
         builder.symbol(
+            "elle_jit_is_array",
+            dispatch::elle_jit_is_array as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_is_array_mut",
+            dispatch::elle_jit_is_array_mut as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_is_struct",
+            dispatch::elle_jit_is_struct as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_is_struct_mut",
+            dispatch::elle_jit_is_struct_mut as *const u8,
+        );
+        builder.symbol("elle_jit_is_set", dispatch::elle_jit_is_set as *const u8);
+        builder.symbol(
+            "elle_jit_is_set_mut",
+            dispatch::elle_jit_is_set_mut as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_car_or_nil",
+            dispatch::elle_jit_car_or_nil as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_cdr_or_nil",
+            dispatch::elle_jit_cdr_or_nil as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_len",
+            dispatch::elle_jit_array_len as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_ref_or_nil",
+            dispatch::elle_jit_array_ref_or_nil as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_car_destructure",
+            dispatch::elle_jit_car_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_cdr_destructure",
+            dispatch::elle_jit_cdr_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_ref_destructure",
+            dispatch::elle_jit_array_ref_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_slice_from",
+            dispatch::elle_jit_array_slice_from as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_struct_get_or_nil",
+            dispatch::elle_jit_struct_get_or_nil as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_struct_get_destructure",
+            dispatch::elle_jit_struct_get_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_struct_rest",
+            dispatch::elle_jit_struct_rest as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_check_signal_bound",
+            dispatch::elle_jit_check_signal_bound as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_push",
+            dispatch::elle_jit_array_push as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_extend",
+            dispatch::elle_jit_array_extend as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_push_param_frame",
+            dispatch::elle_jit_push_param_frame as *const u8,
+        );
+        builder.symbol(
             "elle_jit_make_lbox",
             dispatch::elle_jit_make_lbox as *const u8,
         );
@@ -189,6 +295,22 @@ impl JitCompiler {
         builder.symbol(
             "elle_jit_call_depth_exit",
             dispatch::elle_jit_call_depth_exit as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_pop_param_frame",
+            dispatch::elle_jit_pop_param_frame as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_call_array",
+            dispatch::elle_jit_call_array as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_tail_call_array",
+            dispatch::elle_jit_tail_call_array as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_make_closure",
+            dispatch::elle_jit_make_closure as *const u8,
         );
         builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
         builder.symbol(
@@ -263,6 +385,13 @@ impl JitCompiler {
                     .map_err(|e| JitError::CompilationFailed(e.to_string()))
             };
 
+        // Quaternary function signature: (i64, i64, i64, i64) -> i64
+        let mut quaternary_sig = module.make_signature();
+        for _ in 0..4 {
+            quaternary_sig.params.push(AbiParam::new(I64));
+        }
+        quaternary_sig.returns.push(AbiParam::new(I64));
+
         // elle_jit_yield: 5 params (yielded, spilled_ptr, yield_index, vm, closure_bits)
         let mut yield_sig = module.make_signature();
         for _ in 0..5 {
@@ -303,6 +432,31 @@ impl JitCompiler {
             make_array: declare(module, "elle_jit_make_array", &make_array_sig)?,
             is_nil: declare(module, "elle_jit_is_nil", &unary_sig)?,
             is_pair: declare(module, "elle_jit_is_pair", &unary_sig)?,
+            is_array: declare(module, "elle_jit_is_array", &unary_sig)?,
+            is_array_mut: declare(module, "elle_jit_is_array_mut", &unary_sig)?,
+            is_struct: declare(module, "elle_jit_is_struct", &unary_sig)?,
+            is_struct_mut: declare(module, "elle_jit_is_struct_mut", &unary_sig)?,
+            is_set: declare(module, "elle_jit_is_set", &unary_sig)?,
+            is_set_mut: declare(module, "elle_jit_is_set_mut", &unary_sig)?,
+            car_or_nil: declare(module, "elle_jit_car_or_nil", &unary_sig)?,
+            cdr_or_nil: declare(module, "elle_jit_cdr_or_nil", &unary_sig)?,
+            array_len: declare(module, "elle_jit_array_len", &unary_sig)?,
+            array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &binary_sig)?,
+            car_destructure: declare(module, "elle_jit_car_destructure", &binary_sig)?,
+            cdr_destructure: declare(module, "elle_jit_cdr_destructure", &binary_sig)?,
+            array_ref_destructure: declare(module, "elle_jit_array_ref_destructure", &ternary_sig)?,
+            array_slice_from: declare(module, "elle_jit_array_slice_from", &ternary_sig)?,
+            struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &ternary_sig)?,
+            struct_get_destructure: declare(
+                module,
+                "elle_jit_struct_get_destructure",
+                &ternary_sig,
+            )?,
+            struct_rest: declare(module, "elle_jit_struct_rest", &quaternary_sig)?,
+            check_signal_bound: declare(module, "elle_jit_check_signal_bound", &ternary_sig)?,
+            array_push: declare(module, "elle_jit_array_push", &ternary_sig)?,
+            array_extend: declare(module, "elle_jit_array_extend", &ternary_sig)?,
+            push_param_frame: declare(module, "elle_jit_push_param_frame", &ternary_sig)?,
             is_truthy: declare(module, "elle_jit_is_truthy", &unary_sig)?,
             make_lbox: declare(module, "elle_jit_make_lbox", &unary_sig)?,
             load_lbox: declare(module, "elle_jit_load_lbox", &unary_sig)?,
@@ -315,6 +469,10 @@ impl JitCompiler {
             resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &binary_sig)?,
             call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
             call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
+            pop_param_frame: declare(module, "elle_jit_pop_param_frame", &unary_sig)?,
+            call_array: declare(module, "elle_jit_call_array", &ternary_sig)?,
+            tail_call_array: declare(module, "elle_jit_tail_call_array", &ternary_sig)?,
+            make_closure: declare(module, "elle_jit_make_closure", &ternary_sig)?,
             jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
             jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
             has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,
@@ -368,7 +526,8 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         // Translate LIR to Cranelift IR
-        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+        let closure_constants =
+            self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
 
         // Compile the function
         self.module
@@ -409,6 +568,7 @@ impl JitCompiler {
             self.module,
             yield_metas,
             call_site_metas,
+            closure_constants,
         ))
     }
 
@@ -443,6 +603,7 @@ impl JitCompiler {
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
         self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+        // closure_constants from clif_text are discarded — diagnostic only
 
         let text = format!("{}", ctx.func);
         Ok(text.lines().map(String::from).collect())
@@ -506,7 +667,12 @@ impl JitCompiler {
             ctx.func.signature = sig.clone();
             ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-            self.translate_function(
+            // closure_constants from batch compile are dropped — batch JitCodes use
+            // new_shared which has no closure_constants field to populate from here.
+            // Closures containing inner lambdas are capture-free, so MakeClosure in
+            // SCC peers is rare; if it occurs the inner template Value leaks its Rc
+            // until the JIT module is freed.
+            let _closure_constants = self.translate_function(
                 member.lir,
                 &mut ctx.func,
                 Some(&scc_peers),
@@ -568,7 +734,7 @@ impl JitCompiler {
         func: &mut Function,
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
         self_sym: Option<SymbolId>,
-    ) -> Result<(), JitError> {
+    ) -> Result<Vec<crate::value::Value>, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
@@ -797,7 +963,7 @@ impl JitCompiler {
         builder.seal_all_blocks();
 
         builder.finalize();
-        Ok(())
+        Ok(translator.closure_constants)
     }
 }
 
