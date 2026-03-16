@@ -115,7 +115,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `traits.rs` | `with-traits`, `traits` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
-| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e` |
+| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `squelch` |
 | `introspection.rs` | `closure?`, `jit?`, `silent?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
 | `arena.rs` | `arena/count`, `arena/stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `environment` |
@@ -318,6 +318,46 @@ Used by network primitives and stream primitives to parse optional timeout argum
 **Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
 
 Sets port-level options. Currently supports `:timeout ms` (non-negative integer in milliseconds, or nil to clear). Stored as `Cell<Option<u64>>` on Port struct. Unknown keywords signal error. Odd trailing args signal error.
+
+## squelch Primitive
+
+**Location:** `src/primitives/meta.rs`
+
+**Signature:** `(squelch closure :kw1 :kw2 ...)`
+
+**Purpose:** Transform a closure by applying a runtime signal squelch mask. Returns a new closure that, when called, intercepts signals matching the keywords and converts them to `:error` with kind `"signal-violation"`.
+
+**Behavior:**
+- Takes a closure as the first argument
+- Takes one or more signal keywords as remaining arguments
+- Returns a **new** closure (same template and environment, new squelch mask)
+- When the returned closure is called, if it emits a squelched signal, the signal is converted to `:error`
+- Non-squelched signals pass through normally
+- Errors are never affected by squelch (they pass through unchanged)
+- Composable: `(squelch (squelch f :yield) :io)` squelches both `:yield` and `:io`
+
+**Signal:** `Signal::errors()` (can error on bad arguments, otherwise silent)
+
+**Arity:** `AtLeast(2)` — closure + at least one keyword
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| `(squelch f)` with no keywords | `arity-error` | `"squelch: expected at least 2 arguments (closure + keywords), got 1"` |
+| `(squelch non-closure :yield)` | `type-error` | `"squelch: first argument must be a closure, got {type}"` |
+| `(squelch f non-keyword)` | `type-error` | `"squelch: expected signal keyword, got {type}"` |
+| Unknown keyword | `error` | `"squelch: signal :X not registered (unknown signal keyword)"` |
+
+**Implementation details:**
+- Validates first argument is a closure via `as_closure()`
+- Validates remaining arguments are keywords via `as_keyword_name()`
+- Looks up each keyword in the global signal registry via `registry::global_registry().lock().unwrap().lookup()`
+- ORs bits into a combined mask
+- Creates new closure with `squelch_mask = closure.squelch_mask | new_bits`
+- Returns the new closure as a Value
+
+**Tail-call enforcement:** Squelch enforcement works correctly on tail-call invocation (fixes issue #588). The `squelch_mask` is carried through the tail-call trampoline loop in `execute_bytecode_saving_stack` via the `TailCallInfo` struct. After each tail-call iteration, the mask is re-applied before the next callee executes.
 
 ## Stream Primitive Timeout Support
 

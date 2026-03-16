@@ -1,9 +1,11 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum,
 //! syntax-pair?, syntax-list?, syntax-symbol?, syntax-keyword?, syntax-nil?,
-//! syntax->list, syntax-first, syntax-rest, syntax-e)
+//! syntax->list, syntax-first, syntax-rest, syntax-e, squelch)
 use crate::primitives::def::PrimitiveDef;
+use crate::signals::registry;
 use crate::signals::Signal;
 use crate::syntax::{Syntax, SyntaxKind};
+use crate::value::closure::Closure;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -394,6 +396,99 @@ pub(crate) fn prim_syntax_e(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// Transform a closure by applying a squelch mask.
+///
+/// `(squelch closure :kw1 :kw2 ...)` returns a new closure that, when called,
+/// intercepts signals matching the keywords and converts them to `:error`.
+/// The new closure shares the same bytecode and environment (Rc clones — cheap).
+///
+/// Error cases:
+/// - 1 argument: arity-error — missing signal keywords
+/// - 0 arguments: arity-error
+/// - First arg not a closure: type-error
+/// - Any keyword arg is not a keyword: type-error
+/// - Any keyword not registered in signal registry: error
+pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("squelch: expected at least 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    if args.len() == 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "squelch: expected at least 2 arguments (closure + keywords), got 1",
+            ),
+        );
+    }
+
+    // Validate first argument is a closure.
+    let closure_rc = match args[0].as_closure() {
+        Some(c) => c,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "squelch: first argument must be a closure, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+
+    // Collect signal bits from keyword arguments.
+    let mut new_bits: u32 = 0;
+    for arg in &args[1..] {
+        let kw = match arg.as_keyword_name() {
+            Some(k) => k,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("squelch: expected signal keyword, got {}", arg.type_name()),
+                    ),
+                );
+            }
+        };
+        let reg = registry::global_registry().lock().unwrap();
+        let bit_pos = match reg.lookup(kw) {
+            Some(p) => p,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!(
+                            "squelch: signal :{} not registered (unknown signal keyword)",
+                            kw
+                        ),
+                    ),
+                );
+            }
+        };
+        new_bits |= 1 << bit_pos;
+    }
+
+    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap).
+    let new_closure = Closure {
+        template: closure_rc.template.clone(),
+        env: closure_rc.env.clone(),
+        squelch_mask: closure_rc.squelch_mask | new_bits,
+    };
+
+    (SIG_OK, Value::closure(new_closure))
+}
+
 /// Declarative primitive definitions for meta-programming operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -527,6 +622,18 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "meta",
         example: "(meta/syntax-e stx)",
         aliases: &["syntax-e"],
+    },
+    PrimitiveDef {
+        name: "squelch",
+        func: prim_squelch,
+        signal: Signal::errors(),
+        arity: Arity::AtLeast(2),
+        doc: "Return a new closure that intercepts and converts the listed signals to :error at runtime. \
+              (squelch f :yield) returns a closure that catches :yield from f and converts it to :error.",
+        params: &["closure", "signal-keyword"],
+        category: "fn",
+        example: "(squelch (fn () (yield 1)) :yield)",
+        aliases: &[],
     },
 ];
 

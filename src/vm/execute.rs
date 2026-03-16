@@ -58,7 +58,7 @@
 //!    same parameter frames. It is not isolated.
 
 use crate::error::LocationMap;
-use crate::value::{SignalBits, Value};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -98,6 +98,7 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
+        let mut accumulated_squelch_mask: u32 = 0;
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -109,6 +110,33 @@ impl VM {
             );
 
             if !bits.is_ok() {
+                // Enforce accumulated squelch mask before exiting.
+                // Skip enforcement for error and halt signals (already terminal).
+                if accumulated_squelch_mask != 0
+                    && !bits.contains(SIG_ERROR)
+                    && !bits.contains(SIG_HALT)
+                    && bits.0 & accumulated_squelch_mask != 0
+                {
+                    let squelched = bits.0 & accumulated_squelch_mask;
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    };
+                    let err = crate::value::error_val(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                    );
+                    self.fiber.suspended = None;
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    break ExecResult {
+                        bits: SIG_ERROR,
+                        ip,
+                        bytecode: current_bytecode,
+                        constants: current_constants,
+                        env: current_env,
+                        location_map: current_location_map,
+                    };
+                }
                 break ExecResult {
                     bits,
                     ip,
@@ -120,6 +148,7 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
+                accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;
@@ -165,6 +194,7 @@ impl VM {
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
+        let mut accumulated_squelch_mask: u32 = 0;
 
         let result = loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -176,6 +206,33 @@ impl VM {
             );
 
             if !bits.is_ok() {
+                // Enforce accumulated squelch mask before exiting.
+                // Skip enforcement for error and halt signals (already terminal).
+                if accumulated_squelch_mask != 0
+                    && !bits.contains(SIG_ERROR)
+                    && !bits.contains(SIG_HALT)
+                    && bits.0 & accumulated_squelch_mask != 0
+                {
+                    let squelched = bits.0 & accumulated_squelch_mask;
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    };
+                    let err = crate::value::error_val(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                    );
+                    self.fiber.suspended = None;
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    break ExecResult {
+                        bits: SIG_ERROR,
+                        ip,
+                        bytecode: current_bytecode,
+                        constants: current_constants,
+                        env: current_env,
+                        location_map: current_location_map,
+                    };
+                }
                 break ExecResult {
                     bits,
                     ip,
@@ -187,6 +244,7 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
+                accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;

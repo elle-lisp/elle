@@ -1152,6 +1152,7 @@ fn test_spawn_primitive() {
             name: None,
         }),
         env: std::rc::Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1680,6 +1681,7 @@ fn test_json_serialize_errors() {
             name: None,
         }),
         env: std::rc::Rc::new(vec![]),
+        squelch_mask: 0,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
@@ -2027,6 +2029,7 @@ fn test_function_predicate() {
             name: None,
         }),
         env: std::rc::Rc::new(vec![]),
+        squelch_mask: 0,
     });
     assert_eq!(
         call_primitive(&fn_pred, &[closure]).unwrap(),
@@ -2074,6 +2077,7 @@ fn test_primitive_predicate() {
             name: None,
         }),
         env: std::rc::Rc::new(vec![]),
+        squelch_mask: 0,
     });
     assert_eq!(
         call_primitive(&prim_pred, &[closure]).unwrap(),

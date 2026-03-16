@@ -151,7 +151,7 @@ Things that look wrong but aren't. The 4 most critical (agents get these wrong):
 - **`assign` not `set` for mutation.** `(assign var value)` mutates. `(set x val)` creates
   a set value. Agents reflexively write `(set x val)` — this is wrong.
 
-- **`silence` is total suppression, `squelch` is blacklist.** `silence` requires zero signals — `(silence f)` means f must emit nothing. `squelch` forbids only the listed signals (open-world) — `(squelch f :yield)` means f must **not** emit `:yield`, but may emit anything else including user-defined signals. `(silence f :kw)` is a compile error — use `(squelch f :kw)` instead. `(squelch f)` with no keywords is also a compile error — use `(silence f)` instead.
+- **`silence` is compile-time total suppression; `squelch` is a runtime closure transform.** `(silence param)` inside a lambda body constrains a parameter: it must be a silent closure. `(squelch f :yield)` is a *primitive function call*, not a declaration — it takes a closure and returns a **new** closure that catches `:yield` at runtime and converts it to `:error`. Usage: `(let ((safe-f (squelch f :yield))) (safe-f))`. `(squelch f)` with no keywords is an arity error (requires at least 2 arguments). `(squelch non-closure :yield)` is a type error.
 
 - **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array, `@[...]` → @array.
    `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.

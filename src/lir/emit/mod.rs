@@ -322,6 +322,7 @@ impl Emitter {
                 let closure = Closure {
                     template: Rc::new(template),
                     env: Rc::new(vec![]),
+                    squelch_mask: 0,
                 };
 
                 // Add closure template to constants
@@ -812,19 +813,6 @@ impl Emitter {
                 // Emit u32 as two u16s (low half first, then high half)
                 self.bytecode.emit_u16(*allowed_bits as u16);
                 self.bytecode.emit_u16((*allowed_bits >> 16) as u16);
-                // Value consumed by the check
-                self.pop();
-            }
-
-            LirInstr::CheckSignalForbidden {
-                src,
-                forbidden_bits,
-            } => {
-                self.ensure_on_top(*src);
-                self.bytecode.emit(Instruction::CheckSignalForbidden);
-                // Emit u32 as two u16s (low half first, then high half)
-                self.bytecode.emit_u16(*forbidden_bits as u16);
-                self.bytecode.emit_u16((*forbidden_bits >> 16) as u16);
                 // Value consumed by the check
                 self.pop();
             }

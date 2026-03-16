@@ -212,6 +212,7 @@ mod tests {
         let closure = crate::value::Closure {
             template: template.clone(),
             env,
+            squelch_mask: 0,
         };
 
         // bytecode_ptr must be captured before Value::closure moves the Closure

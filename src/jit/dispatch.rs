@@ -475,6 +475,7 @@ pub extern "C" fn elle_jit_tail_call(
             constants: closure.template.constants.clone(),
             env: new_env,
             location_map: closure.template.location_map.clone(),
+            squelch_mask: closure.squelch_mask,
         });
 
         return TAIL_CALL_SENTINEL;

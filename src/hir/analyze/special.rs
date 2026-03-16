@@ -1,9 +1,7 @@
-//! Special forms: yield, match, silence, squelch
+//! Special forms: yield, match, silence
 
 use super::*;
-use crate::hir::expr::BoundKind;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
-use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 
 /// Callback type for resolving variable patterns.
@@ -35,14 +33,7 @@ impl<'a> Analyzer<'a> {
         let args = &items[1..];
         if args.is_empty() {
             // (silence) — function-level ceiling = silent
-            // Check for mixed-form conflict before setting
-            if let Some((_, BoundKind::Squelch)) = self.current_declared_ceiling {
-                return Err(format!(
-                    "{}: cannot use both silence and squelch at function level",
-                    span
-                ));
-            }
-            self.current_declared_ceiling = Some((Signal::silent(), BoundKind::Silence));
+            self.current_declared_ceiling = Some(Signal::silent());
             return Ok(Hir::silent(HirKind::Nil, span));
         }
 
@@ -68,136 +59,11 @@ impl<'a> Analyzer<'a> {
                 }
 
                 // Last wins for duplicate parameter bounds
-                self.current_param_bounds
-                    .insert(binding, (Signal::silent(), BoundKind::Silence));
+                self.current_param_bounds.insert(binding, Signal::silent());
             }
             _ => {
                 return Err(format!(
                     "{}: silence: expected parameter name, got {}",
-                    args[0].span,
-                    args[0].kind_label()
-                ));
-            }
-        }
-
-        Ok(Hir::silent(HirKind::Nil, span))
-    }
-
-    /// Analyze a `(squelch ...)` form.
-    ///
-    /// squelch is a declaration with blacklist semantics. It must appear inside
-    /// a lambda body. It accumulates into `current_param_bounds` and
-    /// `current_declared_ceiling`, which `analyze_lambda` reads after
-    /// analyzing the body.
-    ///
-    /// Forms:
-    /// - `(squelch :kw ...)` — function-level floor: body must not emit these signals
-    /// - `(squelch param :kw ...)` — parameter bound: f must not emit these signals
-    ///
-    /// Unlike `silence`, squelch always requires at least one keyword.
-    pub(crate) fn analyze_squelch(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        // Note: fn_depth > 0 is guaranteed by the forms.rs dispatch (squelch is only dispatched
-        // as a special form inside a lambda body).
-
-        let args = &items[1..];
-        if args.is_empty() {
-            // (squelch) — no keywords at all
-            return Err(format!(
-                "{}: squelch requires at least one signal keyword",
-                span
-            ));
-        }
-
-        match &args[0].kind {
-            SyntaxKind::Keyword(_) => {
-                // (squelch :kw1 :kw2 ...) — function-level floor
-                let mut bits = 0u32;
-                for arg in args {
-                    let kw = match &arg.kind {
-                        SyntaxKind::Keyword(k) => k,
-                        _ => {
-                            return Err(format!(
-                                "{}: squelch: expected keyword, got {}",
-                                arg.span,
-                                arg.kind_label()
-                            ));
-                        }
-                    };
-                    let reg = registry::global_registry().lock().unwrap();
-                    let bit_pos = reg.lookup(kw).ok_or_else(|| {
-                        format!(
-                            "{}: squelch: signal :{} not registered (unknown signal keyword)",
-                            arg.span, kw
-                        )
-                    })?;
-                    bits |= 1 << bit_pos;
-                }
-                // Check for mixed-form conflict before setting
-                if let Some((_, BoundKind::Silence)) = self.current_declared_ceiling {
-                    return Err(format!(
-                        "{}: cannot use both silence and squelch at function level",
-                        span
-                    ));
-                }
-                self.current_declared_ceiling = Some((
-                    Signal {
-                        bits: crate::value::fiber::SignalBits(bits),
-                        propagates: 0,
-                    },
-                    BoundKind::Squelch,
-                ));
-            }
-            SyntaxKind::Symbol(param_name) => {
-                // (squelch param :kw1 :kw2 ...) — parameter-level bound
-                let binding =
-                    self.find_current_param_binding(param_name, &args[0].span, "squelch")?;
-
-                let keywords = &args[1..];
-                if keywords.is_empty() {
-                    // (squelch param) — no keywords after parameter name
-                    return Err(format!(
-                        "{}: squelch requires at least one signal keyword after parameter name",
-                        args[0].span
-                    ));
-                }
-
-                let mut bits = 0u32;
-                for kw_syntax in keywords {
-                    let kw = match &kw_syntax.kind {
-                        SyntaxKind::Keyword(k) => k,
-                        _ => {
-                            return Err(format!(
-                                "{}: squelch: expected keyword after parameter name, got {}",
-                                kw_syntax.span,
-                                kw_syntax.kind_label()
-                            ));
-                        }
-                    };
-                    let reg = registry::global_registry().lock().unwrap();
-                    let bit_pos = reg.lookup(kw).ok_or_else(|| {
-                        format!(
-                            "{}: squelch: signal :{} not registered (unknown signal keyword)",
-                            kw_syntax.span, kw
-                        )
-                    })?;
-                    bits |= 1 << bit_pos;
-                }
-
-                // Last wins for duplicate parameter bounds
-                self.current_param_bounds.insert(
-                    binding,
-                    (
-                        Signal {
-                            bits: crate::value::fiber::SignalBits(bits),
-                            propagates: 0,
-                        },
-                        BoundKind::Squelch,
-                    ),
-                );
-            }
-            _ => {
-                return Err(format!(
-                    "{}: squelch: expected keyword or parameter name, got {}",
                     args[0].span,
                     args[0].kind_label()
                 ));

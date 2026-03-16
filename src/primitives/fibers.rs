@@ -460,6 +460,7 @@ mod tests {
         Value::closure(Closure {
             template,
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         })
     }
 

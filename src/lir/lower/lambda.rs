@@ -1,7 +1,7 @@
 //! Lambda lowering: closure construction and body compilation
 
 use super::*;
-use crate::hir::{BoundKind, CaptureInfo, ParamBound};
+use crate::hir::{CaptureInfo, ParamBound};
 use crate::value::Arity;
 
 impl Lowerer {
@@ -203,20 +203,10 @@ impl Lowerer {
                     dst: src,
                     index: slot,
                 });
-                match pb.kind {
-                    BoundKind::Silence => {
-                        self.emit(LirInstr::CheckSignalBound {
-                            src,
-                            allowed_bits: pb.signal.bits.0,
-                        });
-                    }
-                    BoundKind::Squelch => {
-                        self.emit(LirInstr::CheckSignalForbidden {
-                            src,
-                            forbidden_bits: pb.signal.bits.0,
-                        });
-                    }
-                }
+                self.emit(LirInstr::CheckSignalBound {
+                    src,
+                    allowed_bits: pb.signal.bits.0,
+                });
             }
         }
 

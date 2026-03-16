@@ -23,7 +23,7 @@ mod lambda;
 mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};
-use super::expr::{BlockId, BoundKind, Hir, HirKind};
+use super::expr::{BlockId, Hir, HirKind};
 use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -151,12 +151,12 @@ pub struct Analyzer<'a> {
     /// emit `LoadConst` instead of `LoadGlobal`.
     /// No slot allocation is needed.
     primitive_values: HashMap<Binding, Value>,
-    /// Accumulated parameter bounds from silence/squelch forms in current lambda.
-    /// Populated by `analyze_silence`/`analyze_squelch`, consumed by `analyze_lambda`.
-    current_param_bounds: HashMap<Binding, (Signal, BoundKind)>,
-    /// Accumulated function-level constraint from silence/squelch forms in current lambda.
-    /// Populated by `analyze_silence`/`analyze_squelch`, consumed by `analyze_lambda`.
-    current_declared_ceiling: Option<(Signal, BoundKind)>,
+    /// Accumulated parameter bounds from silence forms in current lambda.
+    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    current_param_bounds: HashMap<Binding, Signal>,
+    /// Accumulated function-level constraint from silence forms in current lambda.
+    /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
+    current_declared_ceiling: Option<Signal>,
 }
 
 impl<'a> Analyzer<'a> {

@@ -457,6 +457,7 @@ mod tests {
                 name: None,
             }),
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         })
     }
 

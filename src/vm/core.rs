@@ -18,6 +18,7 @@ pub(crate) struct TailCallInfo {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
+    pub squelch_mask: u32,
 }
 
 pub struct VM {
@@ -93,6 +94,7 @@ fn root_closure() -> Rc<Closure> {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     })
 }
 

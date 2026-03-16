@@ -44,6 +44,7 @@ fn test_closure_type_identification() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     let value = Value::closure(closure);
 
@@ -77,6 +78,7 @@ fn test_closure_display() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     let value = Value::closure(closure);
     let s = format!("{}", value);
@@ -107,6 +109,7 @@ fn test_closure_clone() {
             name: None,
         }),
         env: Rc::new(vec![Value::int(42)]),
+        squelch_mask: 0,
     };
     let value1 = Value::closure(closure.clone());
     let value2 = value1;
@@ -183,6 +186,7 @@ fn test_closure_empty_environment() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -212,6 +216,7 @@ fn test_closure_single_captured_variable() {
             name: None,
         }),
         env: Rc::new(env),
+        squelch_mask: 0,
     };
     assert_eq!(closure.env.len(), 1);
     assert_eq!(closure.env[0], Value::int(42));
@@ -247,6 +252,7 @@ fn test_closure_multiple_captured_variables() {
             name: None,
         }),
         env: Rc::new(env),
+        squelch_mask: 0,
     };
     assert_eq!(closure.env.len(), 4);
     assert_eq!(closure.env[0], Value::int(1));
@@ -279,6 +285,7 @@ fn test_closure_environment_sharing() {
             name: None,
         }),
         env: shared_env.clone(),
+        squelch_mask: 0,
     };
 
     let closure2 = Closure {
@@ -302,6 +309,7 @@ fn test_closure_environment_sharing() {
             name: None,
         }),
         env: shared_env.clone(),
+        squelch_mask: 0,
     };
 
     // Both closures share the same environment
@@ -338,6 +346,7 @@ fn test_closure_bytecode_storage() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert_eq!(*closure.template.bytecode, bytecode);
 }
@@ -367,6 +376,7 @@ fn test_closure_constants_storage() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert_eq!(*closure.template.constants, constants);
 }
@@ -396,6 +406,7 @@ fn test_closure_num_locals() {
                 name: None,
             }),
             env: Rc::new(vec![]),
+        squelch_mask: 0,
         };
         assert_eq!(closure.template.num_locals, num_locals);
     }
@@ -428,6 +439,7 @@ fn test_closure_zero_parameters() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert!(closure.template.arity.matches(0));
     assert!(!closure.template.arity.matches(1));
@@ -456,6 +468,7 @@ fn test_closure_single_parameter() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert!(closure.template.arity.matches(1));
 }
@@ -483,6 +496,7 @@ fn test_closure_multiple_parameters() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert!(closure.template.arity.matches(3));
     assert!(!closure.template.arity.matches(2));
@@ -512,6 +526,7 @@ fn test_closure_variadic_parameters() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert!(closure.template.arity.matches(1));
     assert!(closure.template.arity.matches(2));
@@ -546,6 +561,7 @@ fn test_closures_never_equal() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     let closure2 = Value::closure(Closure {
@@ -569,6 +585,7 @@ fn test_closures_never_equal() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     // Even though they're structurally identical, they should not be equal
@@ -599,6 +616,7 @@ fn test_same_closure_reference_equality() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     let value1 = Value::closure((*closure_rc).clone());
@@ -639,6 +657,7 @@ fn test_closure_with_nested_captured_values() {
             name: None,
         }),
         env: Rc::new(env),
+        squelch_mask: 0,
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -668,6 +687,7 @@ fn test_closure_with_closure_in_constants() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     let outer_closure = Closure {
@@ -691,6 +711,7 @@ fn test_closure_with_closure_in_constants() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
 
     assert_eq!(outer_closure.template.constants.len(), 1);
@@ -722,6 +743,7 @@ fn test_closure_with_many_upvalues() {
             name: None,
         }),
         env: Rc::new(env),
+        squelch_mask: 0,
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -756,6 +778,7 @@ fn test_closure_as_method() {
             name: None,
         }),
         env: Rc::new(vec![Value::int(10)]),
+        squelch_mask: 0,
     };
 
     let value = Value::closure(closure);
@@ -792,6 +815,7 @@ fn test_closure_type_check() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     });
 
     assert!(closure.is_closure());
@@ -831,6 +855,7 @@ fn test_closure_environment_isolation() {
             name: None,
         }),
         env: env1,
+        squelch_mask: 0,
     };
 
     let closure2 = Closure {
@@ -854,6 +879,7 @@ fn test_closure_environment_isolation() {
             name: None,
         }),
         env: env2,
+        squelch_mask: 0,
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -884,6 +910,7 @@ fn test_closure_local_variables_count() {
                 name: None,
             }),
             env: Rc::new(vec![]),
+        squelch_mask: 0,
         };
         assert_eq!(closure.template.num_locals, locals);
     }
@@ -916,6 +943,7 @@ fn test_closure_with_empty_bytecode() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert_eq!(closure.template.bytecode.len(), 0);
 }
@@ -945,6 +973,7 @@ fn test_closure_with_large_bytecode() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
     assert_eq!(closure.template.bytecode.len(), 10000);
 }
@@ -976,6 +1005,7 @@ fn test_closure_rc_reference_counting() {
             name: None,
         }),
         env: Rc::new(vec![]),
+        squelch_mask: 0,
     };
 
     // Reference should still be alive
@@ -1010,6 +1040,7 @@ fn test_closure_debug_format() {
             name: None,
         }),
         env: Rc::new(vec![Value::int(42)]),
+        squelch_mask: 0,
     };
 
     let debug_str = format!("{:?}", closure);

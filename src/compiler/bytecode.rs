@@ -248,13 +248,6 @@ pub enum Instruction {
     /// Non-closures pass silently.
     CheckSignalBound,
 
-    /// Check that a closure's signal does not contain forbidden bits.
-    /// Operand: u32 forbidden_bits.
-    /// Pops the value from the stack. If it's a closure whose
-    /// `signal.bits & forbidden_bits != 0`, signals `:error`.
-    /// Non-closures pass silently.
-    CheckSignalForbidden,
-
     /// Struct rest for destructuring: collect all keys from src NOT in excluded keys.
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
     /// Source struct is popped from the stack; result pushed.
