@@ -341,7 +341,8 @@ to see parent-established parameter bindings.
 |------|-------|---------|
 | `mod.rs` | ~100 | VM struct, VmResult, public interface |
 | `dispatch.rs` | ~373 | Main execution loop, instruction dispatch, allocation error check, returns `(SignalBits, usize)` |
-| `call.rs` | ~683 | Call, TailCall, environment building, `call_closure` macro helper |
+| `call.rs` | ~636 | Call, TailCall, call dispatch, `call_closure` macro helper |
+| `env.rs` | ~254 | Closure environment building: `build_closure_env`, `populate_env`, parameter lbox wrapping, rest-arg collection (list/struct/strict-struct) |
 | `jit_entry.rs` | ~282 | JIT compilation profiling, dispatch, batch compilation |
 | `signal.rs` | ~530 | Primitive signal dispatch (`handle_primitive_signal`), SIG_QUERY dispatch (arena/stats, arena/allocs), re-entrant thunk execution |
 | `fiber.rs` | ~555 | Fiber resume/propagate/cancel, shared swap protocol, shared alloc provisioning |

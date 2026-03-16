@@ -8,6 +8,7 @@ pub mod control;
 pub mod core;
 pub mod data;
 pub mod dispatch;
+pub mod env;
 pub mod eval;
 pub mod execute;
 pub mod fiber;
