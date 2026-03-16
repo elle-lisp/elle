@@ -86,8 +86,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) cdr_destructure: FuncId,
     pub(crate) array_ref_destructure: FuncId,
     pub(crate) array_slice_from: FuncId,
-    pub(crate) table_get_or_nil: FuncId,
-    pub(crate) table_get_destructure: FuncId,
+    pub(crate) struct_get_or_nil: FuncId,
+    pub(crate) struct_get_destructure: FuncId,
     pub(crate) struct_rest: FuncId,
     pub(crate) check_signal_bound: FuncId,
     pub(crate) array_push: FuncId,
@@ -225,12 +225,12 @@ impl JitCompiler {
             dispatch::elle_jit_array_slice_from as *const u8,
         );
         builder.symbol(
-            "elle_jit_table_get_or_nil",
-            dispatch::elle_jit_table_get_or_nil as *const u8,
+            "elle_jit_struct_get_or_nil",
+            dispatch::elle_jit_struct_get_or_nil as *const u8,
         );
         builder.symbol(
-            "elle_jit_table_get_destructure",
-            dispatch::elle_jit_table_get_destructure as *const u8,
+            "elle_jit_struct_get_destructure",
+            dispatch::elle_jit_struct_get_destructure as *const u8,
         );
         builder.symbol(
             "elle_jit_struct_rest",
@@ -431,8 +431,12 @@ impl JitCompiler {
             cdr_destructure: declare(module, "elle_jit_cdr_destructure", &binary_sig)?,
             array_ref_destructure: declare(module, "elle_jit_array_ref_destructure", &ternary_sig)?,
             array_slice_from: declare(module, "elle_jit_array_slice_from", &ternary_sig)?,
-            table_get_or_nil: declare(module, "elle_jit_table_get_or_nil", &ternary_sig)?,
-            table_get_destructure: declare(module, "elle_jit_table_get_destructure", &ternary_sig)?,
+            struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &ternary_sig)?,
+            struct_get_destructure: declare(
+                module,
+                "elle_jit_struct_get_destructure",
+                &ternary_sig,
+            )?,
             struct_rest: declare(module, "elle_jit_struct_rest", &quaternary_sig)?,
             check_signal_bound: declare(module, "elle_jit_check_signal_bound", &ternary_sig)?,
             array_push: declare(module, "elle_jit_array_push", &ternary_sig)?,

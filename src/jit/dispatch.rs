@@ -483,7 +483,7 @@ pub extern "C" fn elle_jit_push_param_frame(pairs_ptr: u64, count: u64, vm: *mut
 
 /// Struct/table get with silent nil: returns value for key, NIL if missing or wrong type.
 #[no_mangle]
-pub extern "C" fn elle_jit_table_get_or_nil(src: u64, key: u64, _vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_struct_get_or_nil(src: u64, key: u64, _vm: *mut ()) -> u64 {
     let val = unsafe { Value::from_bits(src) };
     let key_val = unsafe { Value::from_bits(key) };
     let key = match crate::value::heap::TableKey::from_value(&key_val) {
@@ -505,7 +505,7 @@ pub extern "C" fn elle_jit_table_get_or_nil(src: u64, key: u64, _vm: *mut ()) ->
 
 /// Struct/table get for destructuring: returns value for key, signals error if missing or wrong type.
 #[no_mangle]
-pub extern "C" fn elle_jit_table_get_destructure(src: u64, key: u64, vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut ()) -> u64 {
     let val = unsafe { Value::from_bits(src) };
     let key_val = unsafe { Value::from_bits(key) };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };

@@ -184,11 +184,11 @@ pub enum Instruction {
     ArrayMutLen,
     /// Table/struct get with silent nil (for destructuring): returns nil if key missing or wrong type.
     /// Operand: u16 constant pool index (keyword key)
-    TableGetOrNil,
+    StructGetOrNil,
 
     /// Table/struct get for destructuring: signals error if key missing or wrong type.
     /// Operand: u16 constant pool index (keyword key)
-    TableGetDestructure,
+    StructGetDestructure,
 
     /// Car with silent nil (for parameter destructuring): returns nil if not a cons cell.
     /// Used by &opt/(required) parameter destructuring where absent values → nil.
@@ -452,7 +452,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     i += 2;
                 }
             }
-            Instruction::TableGetOrNil | Instruction::TableGetDestructure => {
+            Instruction::StructGetOrNil | Instruction::StructGetDestructure => {
                 if i + 1 < instructions.len() {
                     let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (const_idx={})", idx));
@@ -598,16 +598,16 @@ mod tests {
         //
         // Counting from 0: LoadConst=0 ... EmptyList=60,
         // CarDestructure=61, CdrDestructure=62, ArrayMutRefDestructure=63,
-        // ArrayMutSliceFrom=64, IsArray=65, ..., TableGetOrNil=70,
-        // TableGetDestructure=71.
+        // ArrayMutSliceFrom=64, IsArray=65, ..., StructGetOrNil=70,
+        // StructGetDestructure=71.
         assert_eq!(Instruction::CarDestructure as u8, 61);
         assert_eq!(Instruction::CdrDestructure as u8, 62);
         assert_eq!(Instruction::ArrayMutRefDestructure as u8, 63);
-        // TableGetDestructure is new — it must differ from TableGetOrNil
+        // StructGetDestructure is new — it must differ from StructGetOrNil
         assert_ne!(
-            Instruction::TableGetDestructure as u8,
-            Instruction::TableGetOrNil as u8,
-            "TableGetDestructure must have a distinct byte value from TableGetOrNil"
+            Instruction::StructGetDestructure as u8,
+            Instruction::StructGetOrNil as u8,
+            "StructGetDestructure must have a distinct byte value from StructGetOrNil"
         );
     }
 

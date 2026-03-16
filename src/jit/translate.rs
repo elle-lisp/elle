@@ -657,30 +657,30 @@ impl<'a> FunctionTranslator<'a> {
                 let result = self.call_helper_unary(builder, self.helpers.array_len, src_val)?;
                 builder.def_var(var(dst.0), result);
             }
-            LirInstr::TableGetOrNil { dst, src, key } => {
+            LirInstr::StructGetOrNil { dst, src, key } => {
                 let src_val = builder.use_var(var(src.0));
                 let key_val = self.translate_const(builder, key);
                 let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("TableGetOrNil without vm pointer".to_string())
+                    JitError::InvalidLir("StructGetOrNil without vm pointer".to_string())
                 })?;
                 let result = self.call_helper_ternary(
                     builder,
-                    self.helpers.table_get_or_nil,
+                    self.helpers.struct_get_or_nil,
                     src_val,
                     key_val,
                     vm,
                 )?;
                 builder.def_var(var(dst.0), result);
             }
-            LirInstr::TableGetDestructure { dst, src, key } => {
+            LirInstr::StructGetDestructure { dst, src, key } => {
                 let src_val = builder.use_var(var(src.0));
                 let key_val = self.translate_const(builder, key);
                 let vm = self.vm_ptr.ok_or_else(|| {
-                    JitError::InvalidLir("TableGetDestructure without vm pointer".to_string())
+                    JitError::InvalidLir("StructGetDestructure without vm pointer".to_string())
                 })?;
                 let result = self.call_helper_ternary(
                     builder,
-                    self.helpers.table_get_destructure,
+                    self.helpers.struct_get_destructure,
                     src_val,
                     key_val,
                     vm,

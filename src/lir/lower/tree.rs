@@ -259,7 +259,7 @@ impl Lowerer {
                     PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                     PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                 };
-                self.emit(LirInstr::TableGetOrNil {
+                self.emit(LirInstr::StructGetOrNil {
                     dst,
                     src: parent,
                     key: lir_key,

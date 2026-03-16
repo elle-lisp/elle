@@ -261,7 +261,7 @@ impl Lowerer {
                     PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                     PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                 };
-                self.emit(LirInstr::TableGetOrNil {
+                self.emit(LirInstr::StructGetOrNil {
                     dst,
                     src: parent,
                     key: lir_key,
@@ -1124,7 +1124,7 @@ impl Lowerer {
             }
             HirPattern::Struct { entries, rest } => {
                 // Struct {...} pattern matching for `match`.
-                // Check if value is a struct, then use TableGetOrNil for each key.
+                // Check if value is a struct, then use StructGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -1179,7 +1179,7 @@ impl Lowerer {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
-                    self.emit(LirInstr::TableGetOrNil {
+                    self.emit(LirInstr::StructGetOrNil {
                         dst: elem_reg,
                         src: reloaded,
                         key: lir_key,
@@ -1221,7 +1221,7 @@ impl Lowerer {
             }
             HirPattern::Table { entries, rest } => {
                 // @struct @{...} pattern matching for `match`.
-                // Check if value is a @struct, then use TableGetOrNil for each key.
+                // Check if value is a @struct, then use StructGetOrNil for each key.
                 let temp_slot = if self.in_lambda {
                     self.num_captures + self.current_func.num_locals
                 } else {
@@ -1276,7 +1276,7 @@ impl Lowerer {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
-                    self.emit(LirInstr::TableGetOrNil {
+                    self.emit(LirInstr::StructGetOrNil {
                         dst: elem_reg,
                         src: reloaded,
                         key: lir_key,
