@@ -1354,3 +1354,77 @@ fn test_signals_primitive_is_silent() {
     // Should parse without error
     assert!(result.is_ok());
 }
+
+// ============================================================================
+// SQUELCH PRIMITIVE TESTS (Chunk 2 — runtime enforcement in Chunk 3)
+// ============================================================================
+
+#[test]
+fn test_prim_squelch_returns_closure() {
+    let result = crate::common::eval_source_bare("(closure? (squelch (fn () (yield 1)) :yield))");
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let val = result.unwrap();
+    assert!(val.is_bool(), "expected bool result");
+    assert_eq!(val, elle::Value::TRUE, "expected true");
+}
+
+#[test]
+fn test_prim_squelch_non_closure_error() {
+    let result = crate::common::eval_source_bare("(squelch 42 :yield)");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("type-error"),
+        "expected type-error, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_prim_squelch_no_keywords_error() {
+    let result = crate::common::eval_source_bare("(squelch (fn () 1))");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("squelch"),
+        "expected error mentioning 'squelch', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_prim_squelch_unknown_keyword_error() {
+    let result = crate::common::eval_source_bare("(squelch (fn () 1) :not-a-signal)");
+    assert!(result.is_err(), "expected error, got ok");
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("not registered"),
+        "expected 'not registered', got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_prim_squelch_composable_masks() {
+    // Calling squelch twice ORs the masks; result is still a closure (no error at construction time)
+    let result = crate::common::eval_source_bare(
+        "(let ((f (fn () (begin (yield 1))))) (let ((sq1 (squelch f :yield))) (squelch sq1 :error)))"
+    );
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let val = result.unwrap();
+    assert!(val.is_closure(), "expected closure, got: {:?}", val);
+}
+
+#[test]
+fn test_prim_squelch_identity() {
+    // squelch returns a new heap allocation, not the original closure
+    let result =
+        crate::common::eval_source_bare("(identical? (fn () 1) (squelch (fn () 1) :yield))");
+    assert!(result.is_ok(), "expected ok, got: {:?}", result.err());
+    let val = result.unwrap();
+    assert_eq!(
+        val,
+        elle::Value::FALSE,
+        "expected false (different allocations)"
+    );
+}
