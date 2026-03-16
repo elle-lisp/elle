@@ -243,6 +243,26 @@ impl<'a> Analyzer<'a> {
         &self.primitive_values
     }
 
+    /// Bind compile-time values (from `begin-for-syntax`) into the Analyzer's
+    /// current scope as immutable local bindings backed by constant values.
+    ///
+    /// Called from `eval_syntax` after `bind_primitives` so that compile-time
+    /// names are visible in macro body analysis. The Lowerer emits `LoadConst`
+    /// for these bindings (same mechanism as primitive functions).
+    ///
+    /// `env`: map from name string to Value, from `Expander.compile_time_env`.
+    pub fn bind_compile_time_env(
+        &mut self,
+        env: &std::collections::HashMap<String, crate::value::Value>,
+    ) {
+        for (name, value) in env {
+            let sym = self.symbols.intern(name);
+            let binding = self.bind_by_sym(sym, BindingScope::Local);
+            binding.mark_immutable();
+            self.primitive_values.insert(binding, *value);
+        }
+    }
+
     // === Scope Management ===
 
     fn push_scope(&mut self, is_function: bool) {

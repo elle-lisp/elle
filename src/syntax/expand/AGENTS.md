@@ -10,6 +10,7 @@ Hygienic macro expansion: macro definition, macro calls, quasiquote, and introsp
 - Desugar `defn` to `(def name (fn ...))`
 - Expand quasiquote to runtime list construction
 - Provide `macro?` and `expand-macro` introspection
+- Handle `begin-for-syntax` compile-time definitions
 - Load the standard prelude macros
 
 Does NOT:
@@ -95,6 +96,25 @@ Two compile-time introspection forms:
 
 Both are handled by the Expander during expansion, not as runtime primitives.
 
+## Expander dispatch
+
+Special forms recognized before macro calls:
+
+- **`defmacro` / `define-macro`** — Define a macro. Stored in the macro registry.
+- **`macro?`** — Check if a name is a registered macro. Returns a literal boolean.
+- **`expand-macro`** — Expand a quoted form. Returns the expanded form wrapped in quote.
+- **`begin-for-syntax`** — Compile-time definitions. Evaluates `(def <symbol> <expr>)` forms via `eval_syntax` and stores the resulting values in `Expander.compile_time_env`. Returns nil. Processed in `src/syntax/expand/compiletime.rs`. Only plain-symbol `def` forms are supported; all others are rejected at expansion time.
+- **`syntax-case`** — Pattern matching on syntax objects. Recognized before macro calls. Generates a chain of `let`/`if` forms using the syntax predicates. The scrutinee is bound to a gensym at the outermost level. No `eval_syntax` calls — pure code generation. Implemented in `src/syntax/expand/syntaxcase.rs`.
+
+## Expander struct
+
+The `Expander` maintains:
+
+- `macros: HashMap<String, MacroDef>` — Registered macro definitions
+- `compile_time_env: HashMap<String, Value>` — Values defined in `begin-for-syntax` blocks. Always starts empty (the custom `Clone` impl resets it). Visible to macro bodies compiled via `eval_syntax` through `Analyzer::bind_compile_time_env`.
+- `next_scope_id: u32` — Counter for generating fresh scope IDs
+- `expansion_depth: usize` — Current recursion depth (bounded at 200)
+
 ## Prelude macros
 
 The standard prelude (`prelude.lisp`) defines:
@@ -140,6 +160,8 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 | `macro_expand.rs` | ~170 | VM-based macro expansion via `eval_syntax` |
 | `quasiquote.rs` | ~160 | Quasiquote-to-code conversion |
 | `introspection.rs` | ~100 | `macro?` and `expand-macro` |
+| `compiletime.rs` | ~80 | `begin-for-syntax` handler |
+| `syntaxcase.rs` | ~350 | `syntax-case` code-generating transformation |
 | `tests.rs` | ~540 | Expansion tests |
 
 ## Invariants
@@ -157,15 +179,19 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 6. **Macro bodies are VM-evaluated.** Macro arguments are quoted and passed to the macro body, which is compiled and executed in the real VM via `pipeline::eval_syntax()`. The result Value is converted back to Syntax via `from_value()`. Macros must use quasiquote to return code templates.
 
 7. **Cached transformer is populated on first use, per pipeline call.**
-   `MacroDef.cached_transformer` holds the compiled `(fn (params...) template)`
-   closure after first expansion. Cloning `MacroDef` copies the `Value` (cheap;
-   it's `Copy` and the closure's heap data is `Rc`). The original in the
-   `CompilationCache` does NOT see the update (different `RefCell`) — the
-   cache warms per pipeline call, not globally. This is by design.
+    `MacroDef.cached_transformer` holds the compiled `(fn (params...) template)`
+    closure after first expansion. Cloning `MacroDef` copies the `Value` (cheap;
+    it's `Copy` and the closure's heap data is `Rc`). The original in the
+    `CompilationCache` does NOT see the update (different `RefCell`) — the
+    cache warms per pipeline call, not globally. This is by design.
 
 8. **Qualified symbols pass through expansion unchanged.** `module:name` is recognized by the lexer as a single token. The Expander does not transform it. The Analyzer desugars it to nested `get` calls.
 
 9. **Expansion depth is bounded.** Max 200 levels to prevent infinite expansion. If exceeded, compilation fails with "macro expansion depth exceeded" error.
+
+10. **`compile_time_env` is always reset to empty on clone.** This prevents compile-time defs from leaking between pipeline calls via the cached Expander. See the manual `Clone` impl in `mod.rs`.
+
+11. **`syntax-case` is pure code generation, not expansion-time evaluation.** The scrutinee expression is not evaluated at expansion time (it may be a macro parameter with no value). Instead, `syntax-case` generates a chain of `let`/`if` forms that perform pattern matching at runtime using the syntax predicates. The generated code runs when the macro transformer closure executes inside the VM.
 
 ## When to modify
 
