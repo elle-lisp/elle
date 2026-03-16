@@ -70,6 +70,27 @@ pub(crate) enum Constructor {
     SetMut,
 }
 
+impl Eq for Constructor {}
+
+impl std::hash::Hash for Constructor {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Constructor::Literal(lit) => lit.hash(state),
+            Constructor::Array(n)
+            | Constructor::ArrayRest(n)
+            | Constructor::ArrayMut(n)
+            | Constructor::ArrayMutRest(n) => n.hash(state),
+            Constructor::Struct(keys) | Constructor::Table(keys) => keys.hash(state),
+            Constructor::Cons
+            | Constructor::Nil
+            | Constructor::EmptyList
+            | Constructor::Set
+            | Constructor::SetMut => {}
+        }
+    }
+}
+
 impl Constructor {
     /// Number of sub-patterns this constructor expands to.
     pub fn arity(&self) -> usize {
@@ -328,13 +349,9 @@ fn select_column(matrix: &PatternMatrix) -> usize {
     let mut best_col = 0;
     let mut best_count = 0;
     for col in 0..ncols {
-        let mut constructors = HashSet::new();
+        let mut constructors: HashSet<Constructor> = HashSet::new();
         for row in &matrix.rows {
-            // TECH DEBT: Using Debug formatting as a hash key because
-            // Constructor doesn't impl Hash (it contains PatternLiteral
-            // which has f64). Fine for the heuristic — worst case we
-            // pick a suboptimal column.
-            collect_constructor_strings(&row.patterns[col], &mut constructors);
+            collect_constructors_for_column(&row.patterns[col], &mut constructors);
         }
         if constructors.len() > best_count {
             best_count = constructors.len();
@@ -344,14 +361,14 @@ fn select_column(matrix: &PatternMatrix) -> usize {
     best_col
 }
 
-/// Collect constructor debug strings from a pattern, looking inside or-patterns.
-fn collect_constructor_strings(pat: &HirPattern, out: &mut HashSet<String>) {
+/// Collect constructors from a pattern into a set, looking inside or-patterns.
+fn collect_constructors_for_column(pat: &HirPattern, out: &mut HashSet<Constructor>) {
     if let HirPattern::Or(alts) = pat {
         for alt in alts {
-            collect_constructor_strings(alt, out);
+            collect_constructors_for_column(alt, out);
         }
     } else if let Some(c) = pattern_constructor(pat) {
-        out.insert(format!("{:?}", c));
+        out.insert(c);
     }
 }
 

@@ -85,6 +85,21 @@ pub enum PatternLiteral {
     Keyword(String),
 }
 
+impl Eq for PatternLiteral {}
+
+impl std::hash::Hash for PatternLiteral {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Discriminant first so different variants never collide.
+        std::mem::discriminant(self).hash(state);
+        match self {
+            PatternLiteral::Bool(b) => b.hash(state),
+            PatternLiteral::Int(n) => n.hash(state),
+            PatternLiteral::Float(f) => f.to_bits().hash(state),
+            PatternLiteral::String(s) | PatternLiteral::Keyword(s) => s.hash(state),
+        }
+    }
+}
+
 /// Key type in struct/table patterns: keyword (:foo) or symbol ('foo)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum PatternKey {
