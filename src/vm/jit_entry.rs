@@ -6,7 +6,7 @@
 //! - Batch JIT compilation for call peers
 //! - Fallback to interpreter on compilation failure
 
-use crate::jit::{JitCode, JitCompiler, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+use crate::jit::{JitCode, JitCompiler, JitRejectionInfo, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
 use crate::value::{SignalBits, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::rc::Rc;
 
@@ -57,12 +57,10 @@ impl VM {
                             return Some(self.run_jit(&jit_code, closure, args, func));
                         }
                         Err(e) => match &e {
-                            crate::jit::JitError::UnsupportedInstruction(_) => {
-                                // MakeClosure and other instructions not yet in JIT.
-                                // Fall back to interpreter — the function still works.
-                            }
-                            crate::jit::JitError::Polymorphic => {
-                                // Polymorphic — fall through to interpreter
+                            crate::jit::JitError::UnsupportedInstruction(_)
+                            | crate::jit::JitError::Polymorphic => {
+                                // Expected rejection — record and fall back to interpreter.
+                                self.record_jit_rejection(bytecode_ptr, closure, e);
                             }
                             _ => {
                                 panic!(
@@ -269,6 +267,29 @@ impl VM {
         }
 
         None
+    }
+
+    /// Record a JIT rejection for a closure. Only the first rejection per
+    /// closure template is stored (deduplicated by bytecode pointer).
+    fn record_jit_rejection(
+        &mut self,
+        bytecode_ptr: *const u8,
+        closure: &crate::value::Closure,
+        error: crate::jit::JitError,
+    ) {
+        self.jit_rejections.entry(bytecode_ptr).or_insert_with(|| {
+            // Prefer LIR name, fall back to closure template name.
+            let name = closure
+                .template
+                .lir_function
+                .as_ref()
+                .and_then(|f| f.name.clone())
+                .or_else(|| closure.template.name.as_ref().map(|n| n.to_string()));
+            JitRejectionInfo {
+                name,
+                reason: error,
+            }
+        });
     }
 
     /// Find the SymbolId for a closure matching the given bytecode pointer.

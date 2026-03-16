@@ -264,6 +264,26 @@ pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (jit/rejections) — list closures rejected from JIT compilation with reasons
+///
+/// Returns a list of structs, each with :name, :reason, and :calls keys.
+/// Sorted by call count ascending (coldest first).
+pub(crate) fn prim_jit_rejections(args: &[Value]) -> (SignalBits, Value) {
+    if !args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("jit/rejections: expected 0 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    (
+        SIG_QUERY,
+        Value::cons(Value::keyword("jit/rejections"), Value::NIL),
+    )
+}
+
 /// Declarative primitive definitions for introspection operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -396,6 +416,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "meta",
         example: "(signals)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "jit/rejections",
+        func: prim_jit_rejections,
+        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        arity: Arity::Exact(0),
+        doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
+        params: &[],
+        category: "meta",
+        example: "(jit/rejections)",
         aliases: &[],
     },
     PrimitiveDef {

@@ -35,6 +35,8 @@ fn print_help() {
     println!("Options:");
     println!("  -h, --help    Show this help");
     println!("  -             Read from stdin\n");
+    println!("Environment:");
+    println!("  ELLE_JIT_STATS=1  Print JIT compilation stats to stderr on exit\n");
     print!("{}", elle::primitives::help_text());
 }
 
@@ -357,6 +359,27 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
     had_errors
 }
 
+fn print_jit_stats(vm: &VM) {
+    let compiled = vm.jit_cache.len();
+    let rejected = vm.jit_rejections.len();
+
+    eprintln!("JIT stats:");
+    eprintln!("  compiled: {}", compiled);
+    eprintln!("  rejected: {}", rejected);
+
+    if rejected > 0 {
+        // Sort by call count ascending
+        let mut entries: Vec<_> = vm.jit_rejections.iter().collect();
+        entries.sort_by_key(|(ptr, _)| vm.closure_call_counts.get(ptr).copied().unwrap_or(0));
+
+        for (ptr, info) in &entries {
+            let name = info.name.as_deref().unwrap_or("<anon>");
+            let calls = vm.closure_call_counts.get(ptr).copied().unwrap_or(0);
+            eprintln!("    {:<24} {}  [called {}x]", name, info.reason, calls);
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -428,6 +451,10 @@ fn main() {
     }
 
     clear_vm_context();
+
+    if env::var_os("ELLE_JIT_STATS").is_some() {
+        print_jit_stats(&vm);
+    }
 
     if args.len() == 1 {
         println!();

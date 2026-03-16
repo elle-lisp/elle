@@ -459,6 +459,39 @@ impl VM {
                     }
                 }
             }
+            "jit/rejections" => {
+                use crate::value::heap::TableKey;
+                use std::collections::BTreeMap;
+
+                // Sort by call count ascending (coldest first, hottest last).
+                let mut entries: Vec<_> = self.jit_rejections.iter().collect();
+                entries.sort_by_key(|(ptr, _)| {
+                    self.closure_call_counts.get(ptr).copied().unwrap_or(0)
+                });
+
+                let structs: Vec<Value> = entries
+                    .into_iter()
+                    .map(|(ptr, info)| {
+                        let mut fields = BTreeMap::new();
+                        let name = info.name.as_deref().unwrap_or("<anon>");
+                        fields.insert(
+                            TableKey::Keyword("name".to_string()),
+                            Value::string(name.to_string()),
+                        );
+                        fields.insert(
+                            TableKey::Keyword("reason".to_string()),
+                            Value::string(info.reason.to_string()),
+                        );
+                        let calls = self.closure_call_counts.get(ptr).copied().unwrap_or(0);
+                        fields.insert(
+                            TableKey::Keyword("calls".to_string()),
+                            Value::int(calls as i64),
+                        );
+                        Value::struct_from(fields)
+                    })
+                    .collect();
+                (SIG_OK, crate::value::list(structs))
+            }
             _ => (
                 SIG_ERROR,
                 error_val(
