@@ -107,6 +107,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) call_depth_enter: FuncId,
     pub(crate) call_depth_exit: FuncId,
     pub(crate) pop_param_frame: FuncId,
+    pub(crate) call_array: FuncId,
+    pub(crate) tail_call_array: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
@@ -297,6 +299,14 @@ impl JitCompiler {
             "elle_jit_pop_param_frame",
             dispatch::elle_jit_pop_param_frame as *const u8,
         );
+        builder.symbol(
+            "elle_jit_call_array",
+            dispatch::elle_jit_call_array as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_tail_call_array",
+            dispatch::elle_jit_tail_call_array as *const u8,
+        );
         builder.symbol("elle_jit_yield", dispatch::elle_jit_yield as *const u8);
         builder.symbol(
             "elle_jit_yield_through_call",
@@ -455,6 +465,8 @@ impl JitCompiler {
             call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
             call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
             pop_param_frame: declare(module, "elle_jit_pop_param_frame", &unary_sig)?,
+            call_array: declare(module, "elle_jit_call_array", &ternary_sig)?,
+            tail_call_array: declare(module, "elle_jit_tail_call_array", &ternary_sig)?,
             jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
             jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
             has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,

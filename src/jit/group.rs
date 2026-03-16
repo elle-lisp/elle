@@ -145,10 +145,7 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
     for bb in &lir.blocks {
         for spanned in &bb.instructions {
             match &spanned.instr {
-                LirInstr::MakeClosure { .. }
-                | LirInstr::Eval { .. }
-                | LirInstr::CallArrayMut { .. }
-                | LirInstr::TailCallArrayMut { .. } => return true,
+                LirInstr::MakeClosure { .. } | LirInstr::Eval { .. } => return true,
                 _ => {}
             }
         }

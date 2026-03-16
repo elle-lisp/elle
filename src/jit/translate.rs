@@ -781,13 +781,42 @@ impl<'a> FunctionTranslator<'a> {
                 self.emit_exception_check_after_call(builder)?;
                 builder.def_var(var(dst.0), result);
             }
-            LirInstr::CallArrayMut { .. } => {
-                return Err(JitError::UnsupportedInstruction("CallArrayMut".to_string()));
+            LirInstr::CallArrayMut { dst, func, args } => {
+                let func_val = builder.use_var(var(func.0));
+                let args_val = builder.use_var(var(args.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CallArrayMut without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.call_array,
+                    func_val,
+                    args_val,
+                    vm,
+                )?;
+                builder.def_var(var(dst.0), result);
+                self.emit_exception_check_after_call(builder)?;
+                if self.lir.signal.may_suspend() {
+                    let idx = self.call_site_index;
+                    self.call_site_index += 1;
+                    self.emit_yield_check_after_call(builder, idx)?;
+                }
             }
-            LirInstr::TailCallArrayMut { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "TailCallArrayMut".to_string(),
-                ));
+            LirInstr::TailCallArrayMut { func, args } => {
+                let func_val = builder.use_var(var(func.0));
+                let args_val = builder.use_var(var(args.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("TailCallArrayMut without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.tail_call_array,
+                    func_val,
+                    args_val,
+                    vm,
+                )?;
+                builder.ins().return_(&[result]);
+                return Ok(true); // block is terminated
             }
             LirInstr::RegionEnter | LirInstr::RegionExit => {
                 // No-op in JIT (allocation regions not yet active)

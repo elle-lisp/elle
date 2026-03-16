@@ -367,6 +367,72 @@ pub extern "C" fn elle_jit_pop_param_frame(vm: *mut ()) -> u64 {
     TAG_NIL
 }
 
+/// Call a function with arguments from an array value.
+/// Unpacks the array and delegates to elle_jit_call.
+#[no_mangle]
+pub extern "C" fn elle_jit_call_array(func: u64, args_array: u64, vm: *mut ()) -> u64 {
+    let args_val = unsafe { Value::from_bits(args_array) };
+    let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+
+    let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
+        arr.borrow().to_vec()
+    } else if let Some(arr) = args_val.as_array() {
+        arr.to_vec()
+    } else {
+        vm_ref.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "splice: expected array or tuple for args, got {}",
+                    args_val.type_name()
+                ),
+            ),
+        ));
+        return TAG_NIL;
+    };
+
+    let nargs = args.len() as u32;
+    if args.is_empty() {
+        elle_jit_call(func, std::ptr::null(), nargs, vm)
+    } else {
+        elle_jit_call(func, args.as_ptr() as *const u64, nargs, vm)
+    }
+}
+
+/// Tail-call a function with arguments from an array value.
+/// Unpacks the array and delegates to elle_jit_tail_call.
+#[no_mangle]
+pub extern "C" fn elle_jit_tail_call_array(func: u64, args_array: u64, vm: *mut ()) -> u64 {
+    let args_val = unsafe { Value::from_bits(args_array) };
+    let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
+
+    let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
+        arr.borrow().to_vec()
+    } else if let Some(arr) = args_val.as_array() {
+        arr.to_vec()
+    } else {
+        vm_ref.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "splice: expected array or tuple for args, got {}",
+                    args_val.type_name()
+                ),
+            ),
+        ));
+        return TAG_NIL;
+    };
+
+    let nargs = args.len() as u32;
+    if args.is_empty() {
+        elle_jit_tail_call(func, std::ptr::null(), nargs, vm)
+    } else {
+        elle_jit_tail_call(func, args.as_ptr() as *const u64, nargs, vm)
+    }
+}
+
 /// Push a value onto a mutable @array. Returns new @array or TAG_NIL on error.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_push(array: u64, value: u64, vm: *mut ()) -> u64 {
