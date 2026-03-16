@@ -482,3 +482,54 @@ fn test_scopes_empty() {
     let result = lex_and_parse("foo").unwrap();
     assert_eq!(result.scopes.len(), 0);
 }
+
+// ---- Numeric literal extensions (#540) ----
+
+#[test]
+fn test_parse_hex_literal() {
+    let result = lex_and_parse("0xFF").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(255)));
+}
+
+#[test]
+fn test_parse_hex_uppercase_prefix() {
+    let result = lex_and_parse("0XFF").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(255)));
+}
+
+#[test]
+fn test_parse_octal_literal() {
+    let result = lex_and_parse("0o755").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(493)));
+}
+
+#[test]
+fn test_parse_binary_literal() {
+    let result = lex_and_parse("0b1010").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(10)));
+}
+
+#[test]
+fn test_parse_scientific_with_dot() {
+    let result = lex_and_parse("1.5e10").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Float(f) if (f - 1.5e10).abs() < 1.0));
+}
+
+#[test]
+fn test_parse_scientific_without_dot() {
+    // Bug fix: previously lexed as integer 1 + symbol e10
+    let result = lex_and_parse("1e10").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Float(f) if (f - 1e10).abs() < 1.0));
+}
+
+#[test]
+fn test_parse_decimal_with_underscore() {
+    let result = lex_and_parse("1_000_000").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(1_000_000)));
+}
+
+#[test]
+fn test_parse_hex_with_underscore() {
+    let result = lex_and_parse("0xFF_FF").unwrap();
+    assert!(matches!(result.kind, SyntaxKind::Int(0xFFFF)));
+}

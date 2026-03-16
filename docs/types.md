@@ -95,9 +95,14 @@ false              # false (falsy)
 48-bit signed integer. Range: -2^47 to 2^47-1.
 
 ```janet
-42              # literal
--17             # literal
-0               # literal
+42              # decimal literal
+-17             # negative literal
+0               # zero
+0xFF            # hexadecimal (= 255)
+0o755           # octal (= 493)
+0b1010          # binary (= 10)
+1_000_000       # underscores for readability
+0xFF_FF         # underscores in hex
 (number? x)     # predicate (true for int or float)
 ```
 
@@ -110,7 +115,9 @@ collision with the NaN-boxing scheme.
 
 ```janet
 3.14            # literal
-1e10            # literal
+1e10            # scientific notation (= 10000000000.0)
+1.5e-3          # negative exponent (= 0.0015)
+1_000.5_5       # underscores for readability
 (number? x)     # predicate (true for int or float)
 ```
 
