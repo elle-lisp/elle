@@ -1,5 +1,6 @@
 //! Hygienic macro expansion
 
+mod compiletime;
 mod introspection;
 mod macro_expand;
 mod quasiquote;
@@ -33,17 +34,32 @@ pub struct MacroDef {
 }
 
 /// Hygienic macro expander
-#[derive(Clone)]
 pub struct Expander {
     macros: HashMap<String, MacroDef>,
+    /// Compile-time values defined by `begin-for-syntax` blocks.
+    /// Always starts empty — the manual `Clone` impl resets it so that
+    /// compile-time defs never leak between pipeline calls via the cache.
+    pub(crate) compile_time_env: HashMap<String, crate::value::Value>,
     next_scope_id: u32,
     expansion_depth: usize,
+}
+
+impl Clone for Expander {
+    fn clone(&self) -> Self {
+        Expander {
+            macros: self.macros.clone(),
+            compile_time_env: HashMap::new(), // always fresh — never inherit compile-time defs
+            next_scope_id: self.next_scope_id,
+            expansion_depth: self.expansion_depth,
+        }
+    }
 }
 
 impl Expander {
     pub fn new() -> Self {
         Expander {
             macros: HashMap::new(),
+            compile_time_env: HashMap::new(),
             next_scope_id: 1, // 0 is reserved for top-level
             expansion_depth: 0,
         }
@@ -113,6 +129,10 @@ impl Expander {
                     }
                     if name == "expand-macro" {
                         return self.handle_expand_macro(items, &syntax.span, symbols, vm);
+                    }
+
+                    if name == "begin-for-syntax" {
+                        return self.handle_begin_for_syntax(items, &syntax.span, symbols, vm);
                     }
 
                     // Check if it's a macro call

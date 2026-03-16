@@ -760,3 +760,30 @@
 # syntax-nil? on non-syntax returns false
 (defmacro test-nil? (x) (syntax-nil? x))
 (assert-false (test-nil? 42)        "syntax-nil? on non-nil non-syntax")
+
+# ============================================================================
+# begin-for-syntax tests
+# ============================================================================
+
+# Define a helper at compile time, use it in a macro
+(begin-for-syntax
+  (def add-one (fn (x) (+ x 1))))
+
+# Use in a macro body: the macro calls add-one at expansion time
+(defmacro inc-literal (n)
+  (add-one (syntax->datum n)))
+
+(assert-eq (inc-literal 5) 6  "begin-for-syntax: helper used in macro")
+(assert-eq (inc-literal 41) 42 "begin-for-syntax: helper used in macro 2")
+
+# Multiple begin-for-syntax blocks — second block can use first's defs
+(begin-for-syntax
+  (def double (fn (x) (* x 2))))
+
+(begin-for-syntax
+  (def quad (fn (x) (double (double x)))))
+
+(defmacro quadruple (n)
+  (quad (syntax->datum n)))
+
+(assert-eq (quadruple 3) 12 "begin-for-syntax: multi-block, second uses first")
