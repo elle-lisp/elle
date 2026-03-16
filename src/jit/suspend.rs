@@ -61,6 +61,9 @@ pub extern "C" fn elle_jit_yield(
         ip: yield_meta.resume_ip,
         stack,
         location_map: closure.template.location_map.clone(),
+        // JIT yield: on resume, the resume argument becomes the result of
+        // the (yield ...) expression — push it onto the restored stack.
+        push_resume_value: true,
     });
 
     vm.fiber.signal = Some((SIG_YIELD, yielded));
@@ -121,6 +124,9 @@ pub extern "C" fn elle_jit_yield_through_call(
         ip: call_meta.resume_ip,
         stack,
         location_map: closure.template.location_map.clone(),
+        // JIT caller frame: on resume, the callee's return value flows as
+        // current_value and must be pushed as the Call instruction's result.
+        push_resume_value: true,
     });
 
     // Append caller frame to the existing suspended chain.

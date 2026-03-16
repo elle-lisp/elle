@@ -355,6 +355,141 @@ pub(crate) fn prim_fiber_value(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, value)
 }
 
+/// (fiber/set-fuel fiber n) → nil
+///
+/// Set the instruction budget on a fiber. `n` must be a non-negative integer.
+/// A fuel of 0 means the very next fuel checkpoint emits `:fuel`.
+pub(crate) fn prim_fiber_set_fuel(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fiber/set-fuel: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let handle = match args[0].as_fiber() {
+        Some(h) => h,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "fiber/set-fuel: expected fiber, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+
+    let fuel = match args[1].as_int() {
+        Some(n) if n >= 0 => n as u32,
+        Some(_) => {
+            return (
+                SIG_ERROR,
+                error_val("type-error", "fiber/set-fuel: fuel must be non-negative"),
+            );
+        }
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "fiber/set-fuel: expected integer, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+
+    handle.with_mut(|fiber| {
+        fiber.fuel = Some(fuel);
+    });
+
+    (SIG_OK, Value::NIL)
+}
+
+/// (fiber/fuel fiber) → integer | nil
+///
+/// Read the remaining instruction budget. Returns an integer if fuel is set,
+/// or `nil` if the fiber has unlimited fuel (the default).
+pub(crate) fn prim_fiber_fuel(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fiber/fuel: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let handle = match args[0].as_fiber() {
+        Some(h) => h,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("fiber/fuel: expected fiber, got {}", args[0].type_name()),
+                ),
+            );
+        }
+    };
+
+    let fuel_val = handle.with(|fiber| {
+        fiber
+            .fuel
+            .map(|f| Value::int(f as i64))
+            .unwrap_or(Value::NIL)
+    });
+
+    (SIG_OK, fuel_val)
+}
+
+/// (fiber/clear-fuel fiber) → nil
+///
+/// Remove the instruction budget, restoring unlimited execution.
+pub(crate) fn prim_fiber_clear_fuel(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fiber/clear-fuel: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let handle = match args[0].as_fiber() {
+        Some(h) => h,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "fiber/clear-fuel: expected fiber, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+
+    handle.with_mut(|fiber| {
+        fiber.fuel = None;
+    });
+
+    (SIG_OK, Value::NIL)
+}
+
 /// Declarative primitive definitions for fiber lifecycle operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -413,6 +548,39 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/value f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/set-fuel",
+        func: prim_fiber_set_fuel,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Set the instruction budget on a fiber. n is a non-negative integer.",
+        params: &["fiber", "n"],
+        category: "fiber",
+        example: "(fiber/set-fuel f 10000)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/fuel",
+        func: prim_fiber_fuel,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Read remaining fuel. Returns integer or nil if unlimited.",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/fuel f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/clear-fuel",
+        func: prim_fiber_clear_fuel,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Remove the instruction budget, restoring unlimited execution.",
+        params: &["fiber"],
+        category: "fiber",
+        example: "(fiber/clear-fuel f)",
         aliases: &[],
     },
 ];
@@ -624,6 +792,141 @@ mod tests {
     #[test]
     fn test_fiber_value_wrong_type() {
         let (sig, _) = prim_fiber_value(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    // ── fiber/set-fuel ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fiber_set_fuel_stores_value() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(1000)]);
+        assert_eq!(sig, SIG_OK);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.fuel, Some(1000));
+        });
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_zero() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(0)]);
+        assert_eq!(sig, SIG_OK);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.fuel, Some(0));
+        });
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_overwrites() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        prim_fiber_set_fuel(&[fiber_val, Value::int(500)]);
+        prim_fiber_set_fuel(&[fiber_val, Value::int(100)]);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.fuel, Some(100));
+        });
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_wrong_arity() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_set_fuel(&[fiber_val]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_not_a_fiber() {
+        let (sig, _) = prim_fiber_set_fuel(&[Value::int(42), Value::int(100)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_negative() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::int(-1)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_set_fuel_non_integer() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_set_fuel(&[fiber_val, Value::keyword("oops")]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    // ── fiber/fuel ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fiber_fuel_returns_nil_when_unlimited() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, val) = prim_fiber_fuel(&[fiber_val]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val, Value::NIL);
+    }
+
+    #[test]
+    fn test_fiber_fuel_returns_integer_when_set() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        prim_fiber_set_fuel(&[fiber_val, Value::int(42)]);
+        let (sig, val) = prim_fiber_fuel(&[fiber_val]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(val, Value::int(42));
+    }
+
+    #[test]
+    fn test_fiber_fuel_wrong_arity() {
+        let (sig, _) = prim_fiber_fuel(&[]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_fuel_not_a_fiber() {
+        let (sig, _) = prim_fiber_fuel(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    // ── fiber/clear-fuel ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_fiber_clear_fuel_removes_limit() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        prim_fiber_set_fuel(&[fiber_val, Value::int(100)]);
+        let (sig, _) = prim_fiber_clear_fuel(&[fiber_val]);
+        assert_eq!(sig, SIG_OK);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.fuel, None);
+        });
+    }
+
+    #[test]
+    fn test_fiber_clear_fuel_on_unlimited_is_noop() {
+        let closure = make_test_closure();
+        let (_, fiber_val) = prim_fiber_new(&[closure, Value::int(0)]);
+        let (sig, _) = prim_fiber_clear_fuel(&[fiber_val]);
+        assert_eq!(sig, SIG_OK);
+        fiber_val.as_fiber().unwrap().with(|fiber| {
+            assert_eq!(fiber.fuel, None);
+        });
+    }
+
+    #[test]
+    fn test_fiber_clear_fuel_wrong_arity() {
+        let (sig, _) = prim_fiber_clear_fuel(&[]);
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_fiber_clear_fuel_not_a_fiber() {
+        let (sig, _) = prim_fiber_clear_fuel(&[Value::int(42)]);
         assert_eq!(sig, SIG_ERROR);
     }
 }

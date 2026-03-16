@@ -118,9 +118,12 @@ impl std::fmt::Debug for WeakFiberHandle {
 /// stack state. Used for both signal-based suspension (`fiber/signal`) and
 /// yield-based suspension (`yield` instruction).
 ///
-/// For signal suspension, `stack` is empty (the fiber's own stack is
-/// preserved). For yield suspension, `stack` captures the operand stack
-/// at the point of yield.
+/// `stack` always captures the full operand stack at the moment of suspension.
+/// For yield suspension, `ip` points past the `Yield` instruction and the
+/// resume value needs to be pushed as the result of the `(yield ...)` expression.
+/// For instruction-pause suspension (fuel, signal), `ip` points at the paused
+/// instruction and the stack is already complete — no extra value is pushed.
+/// The `push_resume_value` field encodes which case applies.
 #[derive(Debug, Clone)]
 pub struct BytecodeFrame {
     /// Bytecode to resume executing
@@ -131,10 +134,18 @@ pub struct BytecodeFrame {
     pub env: Rc<Vec<Value>>,
     /// Instruction pointer to resume at
     pub ip: usize,
-    /// Operand stack state (empty for signal suspension)
+    /// Operand stack state at suspension
     pub stack: Vec<Value>,
     /// Location map for mapping bytecode offsets to source locations
     pub location_map: Rc<LocationMap>,
+    /// Whether to push `current_value` onto the stack before resuming.
+    ///
+    /// `true` for yield frames and caller frames: the resume value is the
+    /// "return value" of the suspended operation (the yield expression result,
+    /// or the return value of a call).  `false` for fuel-pause and
+    /// signal-pause frames: the instruction at `ip` re-executes from scratch
+    /// with the stack exactly as saved — no extra value is injected.
+    pub push_resume_value: bool,
 }
 
 /// A suspended execution step — either a bytecode frame or a sub-fiber resume.
@@ -261,8 +272,8 @@ impl From<SignalBits> for u32 {
 // owner). Re-exported here so existing `use crate::value::fiber::SIG_*`
 // imports continue to work.
 pub use crate::signals::{
-    SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_HALT, SIG_IO, SIG_OK, SIG_PROPAGATE,
-    SIG_QUERY, SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
+    SIG_ABORT, SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_HALT, SIG_IO, SIG_OK,
+    SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_TERMINAL, SIG_YIELD,
 };
 
 /// Fiber lifecycle status. Diverges from Janet: caught SIG_ERROR leaves
@@ -389,6 +400,11 @@ pub struct Fiber {
     pub call_depth: usize,
     /// Call stack for stack traces (name + ip + frame_base)
     pub call_stack: Vec<CallFrame>,
+    /// Instruction budget. `None` = unlimited (default). `Some(n)` = `n` units
+    /// remaining. Decremented at backward jumps and call instructions. When it
+    /// reaches zero the VM emits `SIG_FUEL`, pausing the fiber. Refuel via
+    /// `fiber/set-fuel` then call `fiber/resume` to continue.
+    pub fuel: Option<u32>,
 }
 
 impl Fiber {
@@ -410,6 +426,7 @@ impl Fiber {
             suspended: None,
             call_depth: 0,
             call_stack: Vec::new(),
+            fuel: None,
         }
     }
 }

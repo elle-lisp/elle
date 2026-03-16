@@ -5,7 +5,7 @@ use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
     BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
-    SIG_HALT, SIG_OK,
+    SIG_FUEL, SIG_HALT, SIG_OK,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -466,12 +466,18 @@ impl VM {
                 }
 
                 SuspendedFrame::Bytecode(frame) => {
-                    // Restore this frame's stack (empty for signal suspension)
+                    // Restore this frame's stack
                     self.fiber.stack.clear();
                     self.fiber.stack.extend(frame.stack.iter().copied());
 
-                    // Push the value from the inner frame (or resume value for innermost)
-                    self.fiber.stack.push(current_value);
+                    // For yield frames and caller frames: the resume value is the
+                    // "return value" of the suspended operation (yield result, or
+                    // call return). Push it so the next instruction sees it.
+                    // For fuel/signal-pause frames: the instruction at frame.ip
+                    // re-executes from scratch — no extra value is injected.
+                    if frame.push_resume_value {
+                        self.fiber.stack.push(current_value);
+                    }
 
                     let exec = self.execute_bytecode_from_ip(
                         &frame.bytecode,
@@ -500,8 +506,16 @@ impl VM {
                                     constants: exec.constants,
                                     env: exec.env,
                                     ip: exec.ip,
-                                    stack: vec![],
+                                    // Use the captured inner stack so that on resume the
+                                    // instruction at exec.ip sees the same operand stack
+                                    // it had when it paused (essential for SIG_FUEL).
+                                    stack: exec.stack,
                                     location_map: exec.location_map,
+                                    // SIG_FUEL: re-execute the paused instruction from
+                                    // scratch — args are on the stack, nothing to push.
+                                    // All other signals: the instruction at exec.ip
+                                    // expects a value on the stack (e.g. Return pops it).
+                                    push_resume_value: !exec.bits.contains(SIG_FUEL),
                                 })]);
                         }
 
