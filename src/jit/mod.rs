@@ -78,3 +78,13 @@ impl fmt::Display for JitError {
 }
 
 impl std::error::Error for JitError {}
+
+/// Record of a closure that was rejected from JIT compilation.
+/// One entry per closure template, deduplicated by bytecode pointer.
+#[derive(Debug, Clone)]
+pub struct JitRejectionInfo {
+    /// Function name (from `LirFunction.name`), if available.
+    pub name: Option<String>,
+    /// Why the JIT rejected this closure.
+    pub reason: JitError,
+}
