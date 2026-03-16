@@ -131,6 +131,21 @@ impl<'a> FunctionTranslator<'a> {
         Ok(builder.inst_results(call)[0])
     }
 
+    /// Call a quaternary helper function (4 args)
+    pub(crate) fn call_helper_quaternary(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        func_id: FuncId,
+        a: cranelift_codegen::ir::Value,
+        b: cranelift_codegen::ir::Value,
+        c: cranelift_codegen::ir::Value,
+        d: cranelift_codegen::ir::Value,
+    ) -> Result<cranelift_codegen::ir::Value, JitError> {
+        let func_ref = self.module.declare_func_in_func(func_id, builder.func);
+        let call = builder.ins().call(func_ref, &[a, b, c, d]);
+        Ok(builder.inst_results(call)[0])
+    }
+
     /// Call a ternary helper function
     pub(crate) fn call_helper_ternary(
         &mut self,

@@ -505,7 +505,7 @@ impl Lowerer {
                         PatternKey::Keyword(k) => LirConst::Keyword(k.clone()),
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
-                    self.emit(LirInstr::TableGetOrNil {
+                    self.emit(LirInstr::StructGetOrNil {
                         dst: elem,
                         src: reloaded,
                         key: lir_key,
@@ -535,13 +535,13 @@ impl Lowerer {
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
                     if strict {
-                        self.emit(LirInstr::TableGetDestructure {
+                        self.emit(LirInstr::StructGetDestructure {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
                         });
                     } else {
-                        self.emit(LirInstr::TableGetOrNil {
+                        self.emit(LirInstr::StructGetOrNil {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
@@ -594,13 +594,13 @@ impl Lowerer {
                         PatternKey::Symbol(sid) => LirConst::Symbol(*sid),
                     };
                     if strict {
-                        self.emit(LirInstr::TableGetDestructure {
+                        self.emit(LirInstr::StructGetDestructure {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,
                         });
                     } else {
-                        self.emit(LirInstr::TableGetOrNil {
+                        self.emit(LirInstr::StructGetOrNil {
                             dst: elem,
                             src: reloaded,
                             key: lir_key,

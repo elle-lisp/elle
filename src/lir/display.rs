@@ -157,7 +157,7 @@ impl fmt::Display for LirInstr {
             LirInstr::IsArray { dst, src } => write!(f, "{} ← tuple?({})", dst, src),
             LirInstr::IsArrayMut { dst, src } => write!(f, "{} ← array?({})", dst, src),
             LirInstr::IsStruct { dst, src } => write!(f, "{} ← struct?({})", dst, src),
-            LirInstr::IsTable { dst, src } => write!(f, "{} ← struct?({})", dst, src),
+            LirInstr::IsStructMut { dst, src } => write!(f, "{} ← @struct?({})", dst, src),
             LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
             // === Box Operations ===
@@ -174,10 +174,10 @@ impl fmt::Display for LirInstr {
             LirInstr::ArrayMutSliceFrom { dst, src, index } => {
                 write!(f, "{} ← {}[{}..]", dst, src, index)
             }
-            LirInstr::TableGetOrNil { dst, src, key } => {
+            LirInstr::StructGetOrNil { dst, src, key } => {
                 write!(f, "{} ← {}.{}?", dst, src, key)
             }
-            LirInstr::TableGetDestructure { dst, src, key } => {
+            LirInstr::StructGetDestructure { dst, src, key } => {
                 write!(f, "{} ← {}.{}!", dst, src, key)
             }
             LirInstr::StructRest {
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{}",
-                LirInstr::TableGetOrNil {
+                LirInstr::StructGetOrNil {
                     dst: Reg(3),
                     src: Reg(0),
                     key: LirConst::Keyword("name".into())
@@ -410,7 +410,7 @@ mod tests {
         assert_eq!(
             format!(
                 "{}",
-                LirInstr::TableGetDestructure {
+                LirInstr::StructGetDestructure {
                     dst: Reg(3),
                     src: Reg(0),
                     key: LirConst::Keyword("name".into())

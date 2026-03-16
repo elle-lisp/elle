@@ -386,7 +386,7 @@ impl<'a> Analyzer<'a> {
             }
             SyntaxKind::Struct(items) | SyntaxKind::StructMut(items) => {
                 // Both {...} and @{...} destructure the same way in binding forms
-                // (no type guard — TableGetOrNil handles both)
+                // (no type guard — StructGetOrNil handles both)
                 let (key_val_items, rest_syntax) = Self::split_struct_rest(items, span)?;
                 let mut entries = Vec::new();
                 for pair in key_val_items.chunks(2) {
