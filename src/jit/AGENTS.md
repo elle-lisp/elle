@@ -91,14 +91,19 @@ Supported in yielding functions (via side-exit):
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~70 | Public API, `JitError` type |
-| `compiler.rs` | ~910 | `JitCompiler`, `RuntimeHelpers`, compilation entry point |
-| `translate.rs` | ~940 | `FunctionTranslator`, LIR instruction translation |
+| `mod.rs` | ~90 | Public API, `JitError` type |
+| `compiler.rs` | ~1046 | `JitCompiler`, compilation entry point (`new`, `compile`, `compile_batch`, `translate_function`) |
+| `vtable.rs` | ~412 | `RuntimeHelpers` struct + `register_symbols` + `declare_helpers` — the JIT vtable |
+| `translate.rs` | ~1155 | `FunctionTranslator`, LIR instruction translation |
 | `runtime.rs` | ~460 | Arithmetic, comparison, type-checking helpers |
-| `dispatch.rs` | ~640 | Data structure, lbox, global, function call helpers (incl. JIT-to-JIT) |
-| `code.rs` | ~100 | `JitCode` wrapper type |
+| `dispatch.rs` | ~285 | Re-exports from `calls`, `data`, `suspend`; array push/extend, param frame, struct helpers, signal bound check |
+| `calls.rs` | ~758 | Sentinels, `YieldPointMeta`/`CallSiteMeta`, `elle_jit_call`, `elle_jit_tail_call`, call-related helpers, env building |
+| `data.rs` | ~422 | Data structure ops: cons/car/cdr, array, lbox, captures |
+| `suspend.rs` | ~511 | Yield side-exit helpers: `elle_jit_yield`, `elle_jit_yield_through_call`, `elle_jit_has_signal` |
+| `code.rs` | ~163 | `JitCode` wrapper type |
 | `fastpath.rs` | ~250 | Inline integer fast paths for arithmetic/comparison |
 | `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
+| `helpers.rs` | ~368 | Helper methods on `FunctionTranslator` (call emission, exception checks) |
 
 ## Runtime Helpers
 
@@ -113,12 +118,31 @@ These handle type checking and NaN-boxing.
 - **Comparison**: `elle_jit_eq`, `_ne`, `_lt`, `_le`, `_gt`, `_ge`
 - **Type checking**: `elle_jit_is_nil`, `elle_jit_is_truthy`, `elle_jit_is_int`
 
-### dispatch.rs (heap/VM interaction)
+### dispatch.rs (thin re-export layer + non-call helpers)
 
-- **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_vector`, `elle_jit_is_pair`
-- **LBoxes**: `elle_jit_make_lbox`, `elle_jit_load_lbox`, `elle_jit_store_lbox`, `elle_jit_store_capture`
-- **Globals**: `elle_jit_load_global`, `elle_jit_store_global` (require VM pointer)
-- **Function calls**: `elle_jit_call` (dispatches to native functions, JIT-cached closures, or interpreter fallback)
+`dispatch.rs` re-exports everything from `calls.rs`, `data.rs`, and `suspend.rs` so that
+`vtable.rs` can reference all helpers as `dispatch::elle_jit_*`. It also houses:
+
+- **Array mutation**: `elle_jit_array_push`, `elle_jit_array_extend`
+- **Parameter frames**: `elle_jit_push_param_frame`
+- **Struct access**: `elle_jit_struct_get_or_nil`, `elle_jit_struct_get_destructure`, `elle_jit_struct_rest`
+- **Signal bound checking**: `elle_jit_check_signal_bound`
+
+### calls.rs (function call dispatch)
+
+- **Sentinels**: `TAIL_CALL_SENTINEL`, `YIELD_SENTINEL`
+- **Metadata types**: `YieldPointMeta`, `CallSiteMeta`
+- **Exception check**: `elle_jit_has_exception`
+- **Function calls**: `elle_jit_call`, `elle_jit_tail_call`, `elle_jit_call_array`, `elle_jit_tail_call_array`
+- **Call depth**: `elle_jit_call_depth_enter`, `elle_jit_call_depth_exit`
+- **Misc call helpers**: `elle_jit_resolve_tail_call`, `elle_jit_pop_param_frame`, `elle_jit_make_closure`
+- **Env building**: `build_closure_env_for_jit` (interpreter fallback env construction)
+
+### data.rs (heap/VM interaction)
+
+- **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
+- **LBoxes**: `elle_jit_make_lbox`, `elle_jit_load_lbox`, `elle_jit_store_lbox`, `elle_jit_load_capture`, `elle_jit_store_capture`
+- **Type checks**: `elle_jit_is_array`, `elle_jit_is_struct`, `elle_jit_is_set`, etc.
 
 ## Self-Tail-Call Optimization
 

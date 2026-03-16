@@ -70,9 +70,9 @@ impl VM {
 
         // 3a. Install child's fiber heap as the active allocation target.
         //     Save whatever was active (parent's heap, always non-null after issue-525).
-        let saved_heap = crate::value::fiber_heap::save_current_heap();
+        let saved_heap = crate::value::fiberheap::save_current_heap();
         unsafe {
-            crate::value::fiber_heap::install_fiber_heap(
+            crate::value::fiberheap::install_fiber_heap(
                 &mut *self.fiber.heap as *mut crate::value::FiberHeap,
             );
         }
@@ -134,7 +134,7 @@ impl VM {
 
         // 7. Swap back: parent in, child out; restore parent's heap and handle
         unsafe {
-            crate::value::fiber_heap::restore_saved_heap(saved_heap);
+            crate::value::fiberheap::restore_saved_heap(saved_heap);
         }
         std::mem::swap(&mut self.fiber, &mut child_fiber);
         self.current_fiber_handle = parent_handle;

@@ -388,7 +388,8 @@ Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is 
 | `calling.rs` | ~95 | FFI function call dispatch |
 | `memory.rs` | ~530 | FFI memory management, typed access, type construction |
 | `chan.rs` | varies | `chan/new`, `chan/send`, `chan/recv`, `chan/clone`, `chan/close`, `chan/close-recv`, `chan/select` |
-| `format.rs` | ~967 | `string/format` with positional/named modes, format specs, brace escaping |
+| `format.rs` | ~525 | `string/format` entry point, template parsing, value formatting, mode dispatch |
+| `formatspec.rs` | ~202 | `FormatSpec` type, `Align`, `FormatType`, `parse_format_spec`, `spec_type_char` |
 | `net.rs` | ~683 | TCP and UDP primitives, shared helpers, PRIMITIVES array, tests |
 | `unix.rs` | ~160 | Unix domain socket primitives |
 | `access.rs` | ~634 | Polymorphic `get`/`put` for all collection types |

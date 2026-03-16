@@ -55,8 +55,8 @@ Everything. Key consumers:
 2. **`ErrorKind` is exhaustive.** Add new variants for new error categories.
    Don't use `Generic` for things that deserve their own kind.
 
-3. **`RuntimeError` is legacy.** New code should use `LError`. `RuntimeError`
-   exists for compatibility during migration.
+3. **`LError` is the sole error type.** New code uses `LError` exclusively.
+   There is no `RuntimeError`.
 
 4. **Builders exist for all common cases.** Don't construct `LError::new()`
    directly; use `LError::type_mismatch()` etc. from `builders.rs`.
@@ -65,10 +65,8 @@ Everything. Key consumers:
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | 320 | Re-exports + comprehensive tests |
-| `types.rs` | 300 | `LError`, `ErrorKind`, `LResult`, Display impl |
-| `builders.rs` | 160 | Constructor methods on `LError` |
-| `runtime.rs` | 53 | Legacy `RuntimeError` (deprecate eventually) |
+| `mod.rs` | ~275 | Re-exports + comprehensive tests |
+| `types.rs` | ~444 | `LError`, `ErrorKind`, `LResult`, Display impl, builder methods |
 | `formatting.rs` | ~100 | Rich error formatting |
 
 ## Anti-patterns

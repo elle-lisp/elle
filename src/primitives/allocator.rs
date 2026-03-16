@@ -23,7 +23,7 @@ use crate::signals::Signal;
 use crate::value::allocator::AllocatorBox;
 use crate::value::fiber::SignalBits;
 use crate::value::fiber::{SIG_ERROR, SIG_OK};
-use crate::value::fiber_heap::with_current_heap_mut;
+use crate::value::fiberheap::with_current_heap_mut;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 

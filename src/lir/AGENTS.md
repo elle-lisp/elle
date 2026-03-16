@@ -309,8 +309,10 @@ No new bytecode instructions — break compiles to existing Move + Jump.
 | `lower/binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lower/lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |
 | `lower/control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
-| `lower/pattern.rs` | ~200 | Pattern matching lowering |
-| `emit.rs` | 902 | `Emitter`, LIR→Bytecode with stack simulation |
+| `lower/pattern.rs` | ~1135 | Pattern matching lowering: decision tree walking, constructor tests |
+| `lower/access.rs` | ~85 | Access path loading: navigate cons/array/struct to extract matched values |
+| `emit/mod.rs` | ~820 | `Emitter`, LIR→Bytecode instruction encoding |
+| `emit/stack.rs` | ~85 | Stack simulation helpers: `push_reg`, `pop`, `ensure_on_top`, `ensure_binary_on_top` |
 
 ## Constants
 
