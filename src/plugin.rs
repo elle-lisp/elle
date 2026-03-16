@@ -53,7 +53,28 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
 pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {
-    // Load the shared library
+    // Load the shared library.
+    //
+    // On Linux we use RTLD_GLOBAL so that the plugin's symbols are visible to
+    // subsequently loaded DSOs.  This is required for C++ runtime state —
+    // vtables, `std::type_info`, and global constructors — to be shared
+    // correctly across plugin boundaries (e.g. when a plugin links libstdc++
+    // via oxrocksdb-sys).  Without it, each DSO gets its own copy of C++
+    // runtime globals, breaking dynamic_cast and RTTI.
+    //
+    // Note: if dlopen fails with "cannot allocate memory in static TLS block",
+    // that is a separate glibc static-TLS-reservation issue and is NOT fixed by
+    // RTLD_GLOBAL.  The workaround on glibc 2.41+ is to set the environment
+    // variable GLIBC_TUNABLES=glibc.rtld.optional_static_tls=<N> to a value
+    // large enough for the plugin's TLS needs.
+    #[cfg(target_os = "linux")]
+    let lib = {
+        use libloading::os::unix::Library as UnixLibrary;
+        unsafe { UnixLibrary::open(Some(path), libc::RTLD_NOW | libc::RTLD_GLOBAL) }
+            .map(libloading::Library::from)
+            .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?
+    };
+    #[cfg(not(target_os = "linux"))]
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?;
 

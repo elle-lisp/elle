@@ -25,6 +25,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 |--------|---------|-----------|
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
 | `glob/` | Filesystem globbing | `glob/match`, `glob/glob` |
+| `oxigraph/` | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
 | `random/` | Random number generation | `random/int`, `random/float`, `random/shuffle` |
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | `selkie/` | HTTP client | `http/get`, `http/post`, `http/request` |
@@ -123,6 +124,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 |------|---------|
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
+| `oxigraph/` | RDF quad store with SPARQL query and update |
 | `random/` | Random number generation |
 | `regex/` | Regular expression matching and replacement |
 | `selkie/` | HTTP client library |
