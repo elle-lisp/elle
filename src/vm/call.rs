@@ -226,6 +226,10 @@ impl VM {
                                     ip: *ip,
                                     stack: caller_stack,
                                     location_map: location_map.clone(),
+                                    // Caller frame: on resume, the callee's return value
+                                    // flows as current_value and must be pushed as the
+                                    // Call instruction's result.
+                                    push_resume_value: true,
                                 });
                                 let mut frames = self.fiber.suspended.take().unwrap_or_default();
                                 frames.push(caller_frame);
@@ -325,6 +329,10 @@ impl VM {
                         ip: *ip,
                         stack: caller_stack,
                         location_map: location_map.clone(),
+                        // Caller frame: on resume, the callee's return value
+                        // flows as current_value and must be pushed as the
+                        // Call instruction's result.
+                        push_resume_value: true,
                     });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();

@@ -21,8 +21,8 @@
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
 use crate::value::{
-    BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK,
-    SIG_TERMINAL,
+    BytecodeFrame, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT,
+    SIG_OK, SIG_TERMINAL,
 };
 use std::rc::Rc;
 
@@ -238,6 +238,10 @@ impl VM {
                         ip: *ip,
                         stack: caller_stack,
                         location_map: location_map.clone(),
+                        // Caller frame: on resume, the sub-fiber's return value
+                        // flows as current_value and must be pushed as the result
+                        // of the (fiber/resume ...) call expression.
+                        push_resume_value: true,
                     });
                     self.fiber.suspended = Some(vec![fiber_resume_frame, caller_frame]);
                     Some(result_bits)
@@ -406,8 +410,18 @@ impl VM {
                 constants: result.constants,
                 env: result.env,
                 ip: result.ip,
-                stack: vec![],
+                // Use the captured inner stack so that on resume the instruction
+                // at result.ip sees the same operand stack it had when it paused.
+                // This is essential for SIG_FUEL: check_fuel! fires before any
+                // stack reads, so args are still present and must be restored.
+                stack: result.stack,
                 location_map: result.location_map,
+                // SIG_FUEL: re-execute the paused instruction from scratch —
+                // args are on the stack, nothing extra to push.
+                // All other signals (SIG_ERROR, user-defined, etc.): the
+                // instruction at result.ip expects the signal's "return value"
+                // on the stack (e.g. Return needs a value to pop). Push it.
+                push_resume_value: !result.bits.contains(SIG_FUEL),
             })]);
         }
 

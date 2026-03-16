@@ -1,4 +1,4 @@
-use super::{SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_HALT, SIG_IO, SIG_YIELD};
+use super::{SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_HALT, SIG_IO, SIG_YIELD};
 /// Signal registry for mapping signal keywords to bit positions.
 ///
 /// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
@@ -15,8 +15,8 @@ pub struct SignalEntry {
 
 /// Global registry mapping signal keywords to bit positions.
 ///
-/// Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`, `:exec`) are
-/// pre-registered at bits 0, 1, 2, 4, 8, 9, 11 respectively. Bits 3, 5, 6, 7, 10 are
+/// Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`, `:exec`, `:fuel`) are
+/// pre-registered at bits 0, 1, 2, 4, 8, 9, 11, 12 respectively. Bits 3, 5, 6, 7, 10 are
 /// reserved for VM-internal use and not registered.
 ///
 /// User-defined signals are allocated starting at bit 16 and proceeding upward.
@@ -45,6 +45,7 @@ impl SignalRegistry {
     /// - `:halt` at bit 8
     /// - `:io` at bit 9
     /// - `:exec` at bit 11
+    /// - `:fuel` at bit 12
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -55,6 +56,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("halt", SIG_HALT.0.trailing_zeros());
         let _ = registry.register_builtin("io", SIG_IO.0.trailing_zeros());
         let _ = registry.register_builtin("exec", SIG_EXEC.0.trailing_zeros());
+        let _ = registry.register_builtin("fuel", SIG_FUEL.0.trailing_zeros());
         registry
     }
 
@@ -173,6 +175,7 @@ mod tests {
         assert_eq!(registry.lookup("ffi"), Some(SIG_FFI.0.trailing_zeros()));
         assert_eq!(registry.lookup("halt"), Some(SIG_HALT.0.trailing_zeros()));
         assert_eq!(registry.lookup("io"), Some(SIG_IO.0.trailing_zeros()));
+        assert_eq!(registry.lookup("fuel"), Some(SIG_FUEL.0.trailing_zeros()));
     }
 
     #[test]

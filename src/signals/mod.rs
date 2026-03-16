@@ -30,7 +30,8 @@ use std::fmt;
 //   Bit  9:     IO — I/O request to scheduler
 //   Bit  10:    Terminal — non-resumable signal
 //   Bit  11:    Exec — subprocess capability (access control; NOT a dispatch bit)
-//   Bits 12-15: Reserved for future use
+//   Bit  12:    Fuel — instruction budget exhaustion
+//   Bits 13-15: Reserved for future use
 //   Bits 16-31: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
@@ -46,6 +47,7 @@ pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termina
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
 pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
 pub const SIG_EXEC: SignalBits = SignalBits::new(1 << 11); // subprocess capability (capability bit, not dispatch)
+pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget exhaustion
 
 /// Signal classification for expressions and functions.
 ///
@@ -424,5 +426,24 @@ mod tests {
         // lookup returns the bit position (11), not the bitmask; verify both.
         assert_eq!(bit_pos, 11);
         assert_eq!(1u32 << bit_pos, SIG_EXEC.0);
+    }
+
+    #[test]
+    fn test_fuel_bit_is_distinct() {
+        // SIG_FUEL must be a unique bit (bit 12).
+        assert_eq!(SIG_FUEL.0, 1 << 12);
+        // Must not overlap with any other defined signal bits.
+        assert_eq!(SIG_FUEL.0 & SIG_EXEC.0, 0);
+        assert_eq!(SIG_FUEL.0 & SIG_IO.0, 0);
+        assert_eq!(SIG_FUEL.0 & SIG_TERMINAL.0, 0);
+    }
+
+    #[test]
+    fn test_fuel_keyword_registered() {
+        use crate::signals::registry::global_registry;
+        let reg = global_registry().lock().unwrap();
+        let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
+        assert_eq!(bit_pos, 12);
+        assert_eq!(1u32 << bit_pos, SIG_FUEL.0);
     }
 }
