@@ -7,19 +7,11 @@ use crate::syntax::Span;
 use crate::value::Value;
 use std::rc::Rc;
 
-/// How a parameter signal bound was declared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundKind {
-    /// Whitelist: the Signal's bits are the allowed signals (from `silence`).
-    Silence,
-}
-
 /// A declared signal bound on a function parameter.
 #[derive(Debug, Clone)]
 pub struct ParamBound {
     pub binding: Binding,
     pub signal: Signal,
-    pub kind: BoundKind,
 }
 
 /// HIR expression with source location and signal

@@ -1,7 +1,6 @@
 //! Special forms: yield, match, silence
 
 use super::*;
-use crate::hir::expr::BoundKind;
 use crate::hir::pattern::{HirPattern, PatternKey, PatternLiteral};
 use crate::syntax::{Syntax, SyntaxKind};
 
@@ -34,7 +33,7 @@ impl<'a> Analyzer<'a> {
         let args = &items[1..];
         if args.is_empty() {
             // (silence) — function-level ceiling = silent
-            self.current_declared_ceiling = Some((Signal::silent(), BoundKind::Silence));
+            self.current_declared_ceiling = Some(Signal::silent());
             return Ok(Hir::silent(HirKind::Nil, span));
         }
 
@@ -60,8 +59,7 @@ impl<'a> Analyzer<'a> {
                 }
 
                 // Last wins for duplicate parameter bounds
-                self.current_param_bounds
-                    .insert(binding, (Signal::silent(), BoundKind::Silence));
+                self.current_param_bounds.insert(binding, Signal::silent());
             }
             _ => {
                 return Err(format!(

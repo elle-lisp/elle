@@ -298,7 +298,7 @@ impl<'a> Analyzer<'a> {
         let mut propagates: u32 = 0;
         let mut bound_bits: u32 = 0;
         for binding_id in &self.current_signal_sources.param_calls {
-            if let Some((bound, _kind)) = self.current_param_bounds.get(binding_id) {
+            if let Some(bound) = self.current_param_bounds.get(binding_id) {
                 // Silence: contribute bound's bits directly (not polymorphic)
                 bound_bits |= bound.bits.0;
             } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
