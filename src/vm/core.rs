@@ -11,7 +11,7 @@ use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::jit::JitCode;
+use crate::jit::{JitCode, JitRejectionInfo};
 
 pub(crate) struct TailCallInfo {
     pub bytecode: Rc<Vec<u8>>,
@@ -55,6 +55,10 @@ pub struct VM {
     /// Documentation for all named forms (primitives, special forms, macros).
     /// Keyed by name string for direct lookup via `doc` and `vm/primitive-meta`.
     pub docs: HashMap<String, Doc>,
+    /// JIT rejection log: bytecode pointer → rejection info.
+    /// Records first rejection per closure template. Used by
+    /// `(jit/rejections)` primitive and `ELLE_JIT_STATS` env var.
+    pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
@@ -114,6 +118,7 @@ impl VM {
             pending_tail_call: None,
             error_loc: None,
             jit_cache: FxHashMap::default(),
+            jit_rejections: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
         }
@@ -139,6 +144,7 @@ impl VM {
         self.pending_tail_call = None;
         self.error_loc = None;
         self.closure_call_counts.clear();
+        self.jit_rejections.clear();
         self.location_map = LocationMap::new();
         self.loading_modules.clear();
     }
