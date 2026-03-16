@@ -7,21 +7,11 @@ use crate::syntax::Span;
 use crate::value::Value;
 use std::rc::Rc;
 
-/// How a parameter signal bound was declared.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoundKind {
-    /// Whitelist: the Signal's bits are the allowed signals (from `silence`).
-    Silence,
-    /// Blacklist: the Signal's bits are the forbidden signals (from `squelch`).
-    Squelch,
-}
-
 /// A declared signal bound on a function parameter.
 #[derive(Debug, Clone)]
 pub struct ParamBound {
     pub binding: Binding,
     pub signal: Signal,
-    pub kind: BoundKind,
 }
 
 /// HIR expression with source location and signal
@@ -126,13 +116,11 @@ pub enum HirKind {
         ///   from calling parameter i
         /// - When `silence` bounds are present, bounded parameter calls contribute
         ///   their bound's bits directly (not polymorphic).
-        /// - When `squelch` bounds are present, bounded parameter calls remain
-        ///   polymorphic (squelch restricts what's forbidden, not what's allowed).
         inferred_signals: Signal,
-        /// Declared signal bounds for parameters (from `(silence param)` or
-        /// `(squelch param :kw ...)`). Only parameters with explicit bounds appear here.
+        /// Declared signal bounds for parameters (from `(silence param)`).
+        /// Only parameters with explicit bounds appear here.
         /// These bounds feed into inferred_signals computation and into runtime checking
-        /// (`CheckSignalBound` for silence, `CheckSignalForbidden` for squelch).
+        /// (`CheckSignalBound` for silence).
         param_bounds: Vec<ParamBound>,
         /// Optional docstring extracted from the lambda body
         doc: Option<Value>,

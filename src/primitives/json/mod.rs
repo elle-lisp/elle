@@ -418,6 +418,7 @@ mod tests {
         let closure = Value::closure(crate::value::Closure {
             template,
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         });
         assert!(serialize_value(&closure).is_err());
 

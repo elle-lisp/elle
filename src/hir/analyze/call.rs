@@ -1,7 +1,7 @@
 //! Call analysis and signal tracking
 
 use super::*;
-use crate::hir::expr::{BoundKind, CallArg};
+use crate::hir::expr::CallArg;
 use crate::syntax::{Syntax, SyntaxKind};
 
 impl<'a> Analyzer<'a> {
@@ -295,25 +295,12 @@ impl<'a> Analyzer<'a> {
 
         // All suspension comes from parameter calls - infer Polymorphic over them.
         // silence-bounded parameters contribute their bound's bits directly (not polymorphic).
-        // squelch-bounded parameters remain polymorphic (blacklist only says what's forbidden,
-        // not what's allowed).
         let mut propagates: u32 = 0;
         let mut bound_bits: u32 = 0;
         for binding_id in &self.current_signal_sources.param_calls {
-            if let Some((bound, kind)) = self.current_param_bounds.get(binding_id) {
-                match kind {
-                    BoundKind::Silence => {
-                        // Silence: contribute bound's bits directly (not polymorphic)
-                        bound_bits |= bound.bits.0;
-                    }
-                    BoundKind::Squelch => {
-                        // Squelch: bound constrains what's forbidden, not what's allowed.
-                        // Parameter stays polymorphic — fall through to the unbounded case.
-                        if let Some(idx) = params.iter().position(|p| p == binding_id) {
-                            propagates |= 1 << idx;
-                        }
-                    }
-                }
+            if let Some(bound) = self.current_param_bounds.get(binding_id) {
+                // Silence: contribute bound's bits directly (not polymorphic)
+                bound_bits |= bound.bits.0;
             } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
                 // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;

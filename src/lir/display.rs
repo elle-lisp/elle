@@ -239,16 +239,6 @@ impl fmt::Display for LirInstr {
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 write!(f, "check-signal-bound {} allowed=0x{:x}", src, allowed_bits)
             }
-            LirInstr::CheckSignalForbidden {
-                src,
-                forbidden_bits,
-            } => {
-                write!(
-                    f,
-                    "check-signal-forbidden {} forbidden=0x{:x}",
-                    src, forbidden_bits
-                )
-            }
         }
     }
 }

@@ -1,7 +1,7 @@
 //! Lambda analysis: (fn (params...) body...)
 
 use super::*;
-use crate::hir::expr::{BoundKind, ParamBound};
+use crate::hir::expr::ParamBound;
 use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::Value;
@@ -219,49 +219,27 @@ impl<'a> Analyzer<'a> {
         // compute_inferred_signal reads them for bounded params.
         let inferred_signals = self.compute_inferred_signal(&body, &params);
 
-        // Read bound accumulators (populated by analyze_silence/analyze_squelch during body analysis)
+        // Read bound accumulators (populated by analyze_silence during body analysis)
         let param_bounds: Vec<ParamBound> = self
             .current_param_bounds
             .drain()
-            .map(|(binding, (signal, kind))| ParamBound {
-                binding,
-                signal,
-                kind,
-            })
+            .map(|(binding, signal)| ParamBound { binding, signal })
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
 
         // Check function-level constraint if present.
-        // silence (whitelist): excess = inferred & !ceiling  — any excess is an error.
-        // squelch (blacklist): violation = inferred & forbidden — any forbidden is an error.
-        if let Some((ceiling, kind)) = declared_ceiling {
-            match kind {
-                BoundKind::Silence => {
-                    let excess_bits = inferred_signals.bits.0 & !ceiling.bits.0;
-                    if excess_bits != 0 {
-                        let reg = registry::global_registry().lock().unwrap();
-                        let excess = crate::value::fiber::SignalBits(excess_bits);
-                        return Err(format!(
-                            "{}: function restricted to {} but body may emit {}",
-                            span,
-                            reg.format_signal_bits(ceiling.bits),
-                            reg.format_signal_bits(excess),
-                        ));
-                    }
-                }
-                BoundKind::Squelch => {
-                    let violation_bits = inferred_signals.bits.0 & ceiling.bits.0;
-                    if violation_bits != 0 {
-                        let reg = registry::global_registry().lock().unwrap();
-                        let violation = crate::value::fiber::SignalBits(violation_bits);
-                        return Err(format!(
-                            "{}: function body may emit {} but {} is squelched",
-                            span,
-                            reg.format_signal_bits(violation),
-                            reg.format_signal_bits(violation),
-                        ));
-                    }
-                }
+        // silence (whitelist): excess = inferred & !ceiling — any excess is an error.
+        if let Some(ceiling) = declared_ceiling {
+            let excess_bits = inferred_signals.bits.0 & !ceiling.bits.0;
+            if excess_bits != 0 {
+                let reg = registry::global_registry().lock().unwrap();
+                let excess = crate::value::fiber::SignalBits(excess_bits);
+                return Err(format!(
+                    "{}: function restricted to {} but body may emit {}",
+                    span,
+                    reg.format_signal_bits(ceiling.bits),
+                    reg.format_signal_bits(excess),
+                ));
             }
         }
 

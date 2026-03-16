@@ -209,10 +209,11 @@
 
 # safe-iterate requires its callback to not yield.
 # Errors (e.g. bad input) are still allowed to propagate — only yielding is forbidden.
+# (squelch f :yield) returns a new closure; we call map with the squelched version.
 (defn safe-iterate [f xs]
   "Iterate f over xs. f must not yield — errors are still allowed."
-  (squelch f :yield)
-  (map f xs))
+  (let ((safe-f (squelch f :yield)))
+    (map safe-f xs)))
 
 # double is a silent callback — pure arithmetic, no signals
 (defn double [x]

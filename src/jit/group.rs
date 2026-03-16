@@ -267,6 +267,7 @@ mod tests {
         let closure = crate::value::Closure {
             template,
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         };
         Value::closure(closure)
     }
@@ -471,6 +472,7 @@ mod tests {
         let closure = crate::value::Closure {
             template,
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         };
 
         let mut globals = vec![Value::NIL; 10];

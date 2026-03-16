@@ -82,22 +82,18 @@ User signals are allocated bits 16–31 (up to 16 user signals per compilation u
 Every lambda has a signal-related field:
 
 1. **`inferred_signals: Signal`** (always present, never Optional) — The minimum guaranteed set of signals the lambda may produce, accumulated from:
-   - Direct signal emissions in the body
-   - Signals of internal calls to statically-known functions
-   - Signals contributed by silence-bounded parameters (their bound's bits are included)
-   - Squelch-bounded parameters remain polymorphic (the bound constrains what's forbidden, not what's allowed)
-   - Unbounded callable parameters contribute conservatively (Yields)
+    - Direct signal emissions in the body
+    - Signals of internal calls to statically-known functions
+    - Signals contributed by silence-bounded parameters (their bound's bits are included)
+    - Unbounded callable parameters contribute conservatively (Yields)
 
-The programmer-supplied ceiling constraint from `(silence)` is a separate concept — the `silence` form provides a total-silence bound that the compiler checks `inferred_signals` against. When a `silence` bound is present, the compiler checks `inferred_signals.bits == 0`. If the check fails, compile-time error. Signal keywords are not accepted by `silence`; use `(squelch :kw ...)` for targeted signal restrictions.
-
-The programmer-supplied floor constraint from `(squelch :kw ...)` forbids specific signals. When a `squelch` bound is present, the compiler checks `inferred_signals.bits & forbidden_bits == 0`. If the check fails, compile-time error.
+The programmer-supplied ceiling constraint from `(silence)` is a separate concept — the `silence` form provides a total-silence bound that the compiler checks `inferred_signals` against. When a `silence` bound is present, the compiler checks `inferred_signals.bits == 0`. If the check fails, compile-time error. Signal keywords are not accepted by `silence`.
 
 ### Parameter Bounds
 
-Parameter bounds are stored as `param_bounds: Vec<ParamBound>` on the Lambda node, where `ParamBound = { binding, signal, kind }` and `kind` is either `BoundKind::Silence` or `BoundKind::Squelch`.
+Parameter bounds are stored as `param_bounds: Vec<ParamBound>` on the Lambda node, where `ParamBound = { binding, signal }` (after Chunk 4b, `kind` field is removed).
 
 - **Silence bounds:** When a parameter has a `silence` bound, it is no longer polymorphic — its signal contribution to the lambda is the bound's bits, not a polymorphic reference.
-- **Squelch bounds:** When a parameter has a `squelch` bound, it remains polymorphic — the bound only constrains what's forbidden, not what's allowed. The parameter's signal is whatever the caller passes, minus the forbidden bits.
 
 ## Interprocedural Signal Tracking
 
@@ -105,15 +101,14 @@ The analyzer performs interprocedural signal tracking:
 
 1. **signal_env**: Maps `Binding` → `Signal` for locally-defined functions
 2. **primitive_signals**: Maps `SymbolId` → `Signal` for primitive functions
-3. **current_param_bounds**: Maps `Binding` → `(Signal, BoundKind)` for parameters with declared bounds (during lambda analysis)
-4. **current_declared_ceiling**: Maps `Binding` → `(Signal, BoundKind)` for function-level bounds (during lambda analysis)
+3. **current_param_bounds**: Maps `Binding` → `Signal` for parameters with declared bounds (during lambda analysis)
+4. **current_declared_ceiling**: Maps `Binding` → `Signal` for function-level bounds (during lambda analysis)
 
 When analyzing a call:
 - Direct fn calls: use the fn body's signal
 - Variable calls: look up in `signal_env` (local) or `primitive_signals` (global)
 - Polymorphic signals: resolve by examining the argument's signal via `propagated_params()` iterator over the `propagates` bitmask
 - Silence-bounded parameters: their signal contribution is the bound's bits, not polymorphic
-- Squelch-bounded parameters: remain polymorphic; the bound only constrains what's forbidden
 
 ### Limitations
 

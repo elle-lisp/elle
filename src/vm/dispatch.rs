@@ -486,36 +486,6 @@ impl VM {
                     // Non-closure values (primitives, etc.) are silent — they pass
                     // any signal bound check. Only closures carry signal metadata.
                 }
-                Instruction::CheckSignalForbidden => {
-                    // Read u32 as two u16s (low half first, then high half)
-                    let lo = self.read_u16(bc, &mut ip) as u32;
-                    let hi = self.read_u16(bc, &mut ip) as u32;
-                    let forbidden_bits = lo | (hi << 16);
-                    let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
-                    if let Some(closure) = val.as_closure() {
-                        let signal_bits = closure.signal().bits.0;
-                        let violation = signal_bits & forbidden_bits;
-                        if violation != 0 {
-                            let registry =
-                                crate::signals::registry::global_registry().lock().unwrap();
-                            let violation_str = registry
-                                .format_signal_bits(crate::value::fiber::SignalBits(violation));
-                            let forbidden_str = registry.format_signal_bits(
-                                crate::value::fiber::SignalBits(forbidden_bits),
-                            );
-                            let err = crate::value::error_val(
-                                "signal-violation",
-                                format!(
-                                    "squelch: closure may emit {} but {} is squelched",
-                                    violation_str, forbidden_str
-                                ),
-                            );
-                            self.fiber.signal = Some((SIG_ERROR, err));
-                        }
-                    }
-                    // Non-closure values (primitives, etc.) are silent — they pass
-                    // any signal forbidden check. Only closures carry signal metadata.
-                }
             }
 
             // Check for error signal set by this instruction's handler

@@ -455,6 +455,7 @@ mod tests {
         Rc::new(Closure {
             template,
             env: Rc::new(vec![]),
+            squelch_mask: 0,
         })
     }
 
@@ -557,6 +558,7 @@ mod tests {
         let closure = Rc::new(Closure {
             template,
             env: Rc::new(vec![Value::int(99)]), // 1 capture
+            squelch_mask: 0,
         });
         let args = vec![Value::int(42)];
         let env = build_callback_env(&closure, &args);

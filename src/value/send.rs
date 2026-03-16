@@ -45,6 +45,7 @@ pub struct SendableClosure {
     pub doc: Option<Box<SendValue>>,
     pub vararg_kind: VarargKind,
     pub name: Option<String>,
+    pub squelch_mask: u32,
     pub env: Vec<SendValue>,
 }
 
@@ -297,6 +298,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 doc: None,
                 vararg_kind: closure_rc.template.vararg_kind.clone(),
                 name: None,
+                squelch_mask: 0,
                 env: Vec::new(),
             });
             ctx.visited.insert(key, idx);
@@ -340,6 +342,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 doc,
                 vararg_kind: closure_rc.template.vararg_kind.clone(),
                 name: closure_rc.template.name.as_ref().map(|s| s.to_string()),
+                squelch_mask: closure_rc.squelch_mask,
                 env,
             };
 
@@ -760,6 +763,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let val = Value::closure(Closure {
                 template,
                 env: Rc::new(env),
+                squelch_mask: sc.squelch_mask,
             });
             ctx.states[idx] = ReconState::Done(val);
             val

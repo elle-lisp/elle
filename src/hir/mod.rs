@@ -19,7 +19,7 @@ pub mod tailcall;
 
 pub use analyze::{AnalysisResult, Analyzer, FileForm};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
-pub use expr::{BlockId, BoundKind, CallArg, Hir, HirKind, ParamBound, VarargKind};
+pub use expr::{BlockId, CallArg, Hir, HirKind, ParamBound, VarargKind};
 pub use lint::HirLinter;
 pub use pattern::{HirPattern, PatternBindings, PatternKey, PatternLiteral};
 pub use symbols::extract_symbols_from_hir;

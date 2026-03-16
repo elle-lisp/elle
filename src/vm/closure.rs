@@ -32,6 +32,7 @@ pub(crate) fn handle_make_closure(
     let closure = Closure {
         template: template_closure.template.clone(),
         env: Rc::new(captured),
+        squelch_mask: 0,
     };
 
     vm.fiber.stack.push(Value::closure(closure));

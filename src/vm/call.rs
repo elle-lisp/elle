@@ -249,6 +249,11 @@ impl VM {
                 }
             };
 
+            // Extract squelch_mask before execute_bytecode_saving_stack to avoid
+            // borrow lifetime conflicts: `closure` borrows from `func`, and we
+            // need `closure_squelch_mask` after the call returns.
+            let closure_squelch_mask = closure.squelch_mask;
+
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.
             let result = self.execute_bytecode_saving_stack(
@@ -261,6 +266,41 @@ impl VM {
             self.fiber.call_depth -= 1;
 
             let bits = result.bits;
+
+            // Squelch enforcement: if the closure has a squelch mask and the callee
+            // returned a non-OK, non-error, non-halt signal that matches the mask,
+            // convert to a signal-violation error.
+            //
+            // We do NOT intercept SIG_ERROR (already an error) or SIG_HALT (terminal).
+            // We DO intercept SIG_YIELD and user-defined signals.
+            //
+            // Note: do_fiber_first_resume is intentionally exempt — fiber root bodies
+            // execute outside any call_inner, so squelch enforcement does not apply
+            // to the initial fiber execution.
+            //
+            // Discard suspended frames: we're converting to error, not suspending.
+            if closure_squelch_mask != 0
+                && !bits.is_ok()
+                && !bits.contains(SIG_ERROR)
+                && !bits.contains(SIG_HALT)
+            {
+                let squelched = bits.0 & closure_squelch_mask;
+                if squelched != 0 {
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    };
+                    let err = crate::value::error_val(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                    );
+                    // Discard suspended frames — we're converting to error, not suspending.
+                    self.fiber.suspended = None;
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    self.fiber.call_stack.pop();
+                    return Some(SIG_ERROR);
+                }
+            }
             if bits.is_ok() {
                 let (_, value) = self.fiber.signal.take().unwrap();
                 self.fiber.stack.push(value);
@@ -436,6 +476,7 @@ impl VM {
                 constants: closure.template.constants.clone(),
                 env: new_env_rc,
                 location_map: closure.template.location_map.clone(),
+                squelch_mask: closure.squelch_mask,
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));
