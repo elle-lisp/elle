@@ -82,6 +82,10 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) cdr_or_nil: FuncId,
     pub(crate) array_len: FuncId,
     pub(crate) array_ref_or_nil: FuncId,
+    pub(crate) car_destructure: FuncId,
+    pub(crate) cdr_destructure: FuncId,
+    pub(crate) array_ref_destructure: FuncId,
+    pub(crate) array_slice_from: FuncId,
     pub(crate) array_push: FuncId,
     pub(crate) array_extend: FuncId,
     pub(crate) push_param_frame: FuncId,
@@ -199,6 +203,22 @@ impl JitCompiler {
         builder.symbol(
             "elle_jit_array_ref_or_nil",
             dispatch::elle_jit_array_ref_or_nil as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_car_destructure",
+            dispatch::elle_jit_car_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_cdr_destructure",
+            dispatch::elle_jit_cdr_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_ref_destructure",
+            dispatch::elle_jit_array_ref_destructure as *const u8,
+        );
+        builder.symbol(
+            "elle_jit_array_slice_from",
+            dispatch::elle_jit_array_slice_from as *const u8,
         );
         builder.symbol(
             "elle_jit_array_push",
@@ -380,6 +400,10 @@ impl JitCompiler {
             cdr_or_nil: declare(module, "elle_jit_cdr_or_nil", &unary_sig)?,
             array_len: declare(module, "elle_jit_array_len", &unary_sig)?,
             array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &binary_sig)?,
+            car_destructure: declare(module, "elle_jit_car_destructure", &binary_sig)?,
+            cdr_destructure: declare(module, "elle_jit_cdr_destructure", &binary_sig)?,
+            array_ref_destructure: declare(module, "elle_jit_array_ref_destructure", &ternary_sig)?,
+            array_slice_from: declare(module, "elle_jit_array_slice_from", &ternary_sig)?,
             array_push: declare(module, "elle_jit_array_push", &ternary_sig)?,
             array_extend: declare(module, "elle_jit_array_extend", &ternary_sig)?,
             push_param_frame: declare(module, "elle_jit_push_param_frame", &ternary_sig)?,

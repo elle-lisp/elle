@@ -579,25 +579,57 @@ impl<'a> FunctionTranslator<'a> {
                 let nil = builder.ins().iconst(I64, TAG_NIL as i64);
                 builder.def_var(var(dst.0), nil);
             }
-            LirInstr::CarDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CarDestructure".to_string(),
-                ));
+            LirInstr::CarDestructure { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CarDestructure without vm pointer".to_string())
+                })?;
+                let result =
+                    self.call_helper_binary(builder, self.helpers.car_destructure, src_val, vm)?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::CdrDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "CdrDestructure".to_string(),
-                ));
+            LirInstr::CdrDestructure { dst, src } => {
+                let src_val = builder.use_var(var(src.0));
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("CdrDestructure without vm pointer".to_string())
+                })?;
+                let result =
+                    self.call_helper_binary(builder, self.helpers.cdr_destructure, src_val, vm)?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutRefDestructure { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutRefDestructure".to_string(),
-                ));
+            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+                let src_val = builder.use_var(var(src.0));
+                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutRefDestructure without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_ref_destructure,
+                    src_val,
+                    idx_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
-            LirInstr::ArrayMutSliceFrom { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "ArrayMutSliceFrom".to_string(),
-                ));
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
+                let src_val = builder.use_var(var(src.0));
+                let idx_val = builder.ins().iconst(I64, *index as i64);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("ArrayMutSliceFrom without vm pointer".to_string())
+                })?;
+                let result = self.call_helper_ternary(
+                    builder,
+                    self.helpers.array_slice_from,
+                    src_val,
+                    idx_val,
+                    vm,
+                )?;
+                self.emit_exception_check_after_call(builder)?;
+                builder.def_var(var(dst.0), result);
             }
             LirInstr::IsArray { dst, src } => {
                 let src_val = builder.use_var(var(src.0));
