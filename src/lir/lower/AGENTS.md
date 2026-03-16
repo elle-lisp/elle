@@ -140,7 +140,8 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 | `binding.rs` | ~280 | Binding forms: `let`, `def`, `var`, `fn` |
 | `lambda.rs` | ~250 | fn lowering, closure capture, lbox wrapping |
 | `control.rs` | ~200 | Control flow: `if`, `begin`, `match` |
-| `pattern.rs` | ~1426 | Pattern matching lowering: decision tree walking, access path loading, constructor tests |
+| `pattern.rs` | ~1135 | Pattern matching lowering: decision tree walking, constructor tests |
+| `access.rs` | ~85 | Access path loading: navigate cons/array/struct to extract values at a path |
 | `escape.rs` | ~693 | Escape analysis helpers: `result_is_safe`, `body_contains_dangerous_outward_set`, `body_contains_escaping_break`, `all_break_values_safe` |
 | `decision.rs` | ~100 | Decision tree compilation for pattern matching |
 

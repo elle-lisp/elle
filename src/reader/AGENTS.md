@@ -131,7 +131,8 @@ The `@` in `:@name` is consumed by the lexer and prepended to the keyword name.
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | 130 | Entry points: `read_str`, `read_syntax`, `read_syntax_all` |
-| `lexer.rs` | ~300 | Tokenization |
+| `lexer.rs` | ~490 | Tokenization: character dispatch, string/symbol/keyword/delimiter reading |
+| `numeric.rs` | ~300 | Numeric literal parsing: integer, float, radix (hex/octal/binary), underscore separators, scientific notation |
 | `token.rs` | ~100 | Token types, SourceLoc |
 | `parser.rs` | ~200 | Token → Value parsing |
 | `syntax.rs` | ~425 | Token → Syntax parsing |
