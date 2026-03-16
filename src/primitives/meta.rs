@@ -162,7 +162,7 @@ pub(crate) fn prim_syntax_to_datum(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, syntax_rc.to_value(symbols))
 }
 
-/// Extract a syntax object from args[0], or return a type-error.
+/// Extract a syntax object from args\[0\], or return a type-error.
 /// `prim_name` is the function name for the error message.
 fn require_syntax(
     args: &[Value],

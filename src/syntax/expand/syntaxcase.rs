@@ -7,18 +7,16 @@
 //! Syntax, never evaluates anything.
 //!
 //! Grammar:
-//!   (syntax-case <expr>
-//!     (<pattern> <body> ...)
-//!     (<pattern> when <guard> <body> ...)
+//!   (syntax-case `<expr>`
+//!     (`<pattern>` `<body>` ...)
+//!     (`<pattern>` when `<guard>` `<body>` ...)
 //!     ...)
 //!
 //! Patterns:
 //!   _              — wildcard (always matches, no binding)
-//!   <symbol>       — pattern variable (binds scrutinee)
-//!   <int/float/
-//!    string/bool/
-//!    nil>          — literal match
-//!   <keyword>      — literal keyword match (with type guard)
+//!   `<symbol>`                    — pattern variable (binds scrutinee)
+//!   `<int/float/string/bool/nil>` — literal match
+//!   `<keyword>`                   — literal keyword match (with type guard)
 //!   (literal sym)  — literal symbol match (with type guard)
 //!   (p1 p2 ... pN) — list pattern (exact length)
 
