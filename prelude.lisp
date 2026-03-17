@@ -79,23 +79,27 @@
 
 ## protect - run body, return [success? value]
 ## Does not propagate errors — captures them as data.
-## :dead means normal completion# anything else means error.
+## :dead means normal completion; anything else means error.
+##
+## WARNING: protect is synchronous. The body must not perform async I/O
+## (port/open, stream/read-line, tcp/connect, etc.). Use protect inside
+## ev/spawn if you need error capture around async work.
 (defmacro protect (& body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
      (fiber/resume f nil)
      [(= (fiber/status f) :dead) (fiber/value f)]))
 
-## defer - run cleanup-expr unconditionally after body, even on error.
+## defer - run cleanup unconditionally after body, even on error.
 ##
-## First argument:    cleanup-expr — evaluated after body completes (success or error).
-## Remaining arguments: body — evaluated in a fiber; produces the return value.
+## First argument:  cleanup — evaluated after body completes (success or error).
+## Remaining args:  body    — evaluated in a fiber; produces the return value.
 ##
 ## Returns the body's value on success; propagates the body's error after cleanup.
 ##
 ## Example:
-##   (defer (port/close p)           # cleanup: always closes p
-##     (stream/read-all p)           # body: produces the file contents
-##     )
+##   (let ((p (port/open "data.txt" :read)))
+##     (defer (port/close p)         # cleanup: always runs, closes port
+##       (stream/read-all p)))       # body: reads contents, return value
 (defmacro defer (cleanup & body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
      (fiber/resume f nil)
