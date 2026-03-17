@@ -23,7 +23,7 @@
 //!    a break targeting an outer block carries a value past `RegionExit`.
 //!    Breaks targeting blocks inside the scope are safe (Tier 7).
 //!
-//! All five conditions must be satisfied for scope allocation to be safe.
+//! All six conditions must be satisfied for scope allocation to be safe.
 //!
 //! ## What `RegionExit` frees
 //!

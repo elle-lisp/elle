@@ -4,6 +4,17 @@
 //! might emit (error, yield, debug, ffi, user-defined) and which
 //! parameter indices propagate their callee's signals (for higher-order
 //! functions like map/filter/fold).
+//!
+//! ## Compile-time vs. runtime signal representation
+//!
+//! `Signal` (this module) is a **compile-time** type used during HIR analysis
+//! and LIR lowering. Its `propagates` field is a bitmask of parameter indices
+//! whose signals flow through the function — this is needed to infer the signal
+//! of a call site based on its arguments. `SignalBits` (in `value/fiber.rs`) is
+//! the **runtime** representation: a flat bitmask stored on closures and used by
+//! the VM and JIT for dispatch. These are intentionally separate types serving
+//! different phases. The `propagates` field has no runtime analogue. Do not
+//! attempt to unify them.
 
 pub mod registry;
 

@@ -44,7 +44,6 @@ stats_alloc = { version = "0.1.10", features = ["nightly"] }
 
 [features]
 default = []
-jit-suspend-tests = []
 
 [profile.release]
 lto = "fat"
