@@ -112,7 +112,7 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
         // arena/allocs needs mutable VM access to call the thunk —
         // handle before dispatch_query (which takes &self).
         if let Some(cons) = value.as_cons() {
-            if cons.first.as_keyword_name() == Some("arena/allocs") {
+            if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                 let thunk = cons.rest;
                 return match vm.handle_arena_allocs(thunk) {
                     Ok(val) => val.to_bits(),
@@ -189,7 +189,7 @@ pub extern "C" fn elle_jit_has_exception(vm: u64) -> u64 {
 /// and `*const Value` have identical layout. Handles the null-pointer case
 /// when `nargs` is 0 (JIT may pass null for zero-arg calls).
 #[inline]
-fn args_ptr_to_value_slice(args_ptr: *const u64, nargs: u32) -> &'static [Value] {
+pub(crate) fn args_ptr_to_value_slice(args_ptr: *const u64, nargs: u32) -> &'static [Value] {
     if nargs == 0 {
         &[]
     } else {

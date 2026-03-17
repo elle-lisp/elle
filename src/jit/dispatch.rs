@@ -19,7 +19,6 @@ pub use super::suspend::*;
 // =============================================================================
 // Array and Collection Mutation Helpers
 // =============================================================================
-
 /// Push a value onto a mutable @array. Returns new @array or TAG_NIL on error.
 #[no_mangle]
 pub extern "C" fn elle_jit_array_push(array: u64, value: u64, vm: *mut ()) -> u64 {
@@ -282,4 +281,44 @@ pub extern "C" fn elle_jit_check_signal_bound(src: u64, allowed_bits: u64, vm: *
         }
     }
     TAG_NIL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_has_exception() {
+        use crate::primitives::register_primitives;
+        use crate::symbol::SymbolTable;
+        use crate::vm::VM;
+
+        let mut symbols = SymbolTable::new();
+        let mut vm = VM::new();
+        let _signals = register_primitives(&mut vm, &mut symbols);
+
+        // Initially no exception
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(false));
+
+        // Set an error signal
+        vm.fiber.signal = Some((
+            crate::value::SIG_ERROR,
+            crate::value::error_val("division-by-zero", "test"),
+        ));
+
+        // Now should return true
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(true));
+
+        // Clear signal
+        vm.fiber.signal = None;
+
+        // Should return false again
+        let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
+        let val = unsafe { Value::from_bits(result) };
+        assert_eq!(val.as_bool(), Some(false));
+    }
 }

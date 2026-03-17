@@ -123,7 +123,7 @@ impl TableKey {
         } else if let Some(id) = val.as_symbol() {
             Some(TableKey::Symbol(SymbolId(id)))
         } else if let Some(name) = val.as_keyword_name() {
-            Some(TableKey::Keyword(name.to_string()))
+            Some(TableKey::Keyword(name))
         } else if let Some(s) = val.with_string(|s| s.to_string()) {
             Some(TableKey::String(s))
         } else if val.is_fiber() || val.is_closure() || val.heap_tag() == Some(HeapTag::External) {

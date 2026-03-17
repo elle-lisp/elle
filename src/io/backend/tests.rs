@@ -511,7 +511,7 @@ fn test_bytes_to_value_invalid_utf8_text_port() {
     let error_keyword = val
         .as_struct()
         .and_then(|f| f.get(&TableKey::Keyword("error".into())))
-        .and_then(|v| v.as_keyword_name().map(|s| s.to_string()));
+        .and_then(|v| v.as_keyword_name());
     assert_eq!(error_keyword.as_deref(), Some("encoding-error"));
 }
 

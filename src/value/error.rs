@@ -80,7 +80,7 @@ mod tests {
 
         // Values should be correct
         let error_key = fields.get(&TableKey::Keyword("error".into())).unwrap();
-        assert_eq!(error_key.as_keyword_name(), Some("type-error"));
+        assert_eq!(error_key.as_keyword_name().as_deref(), Some("type-error"));
 
         let msg_key = fields.get(&TableKey::Keyword("message".into())).unwrap();
         assert_eq!(

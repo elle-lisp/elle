@@ -12,7 +12,11 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         use crate::value::heap::{deref, HeapObject};
 
-        // For immediate values, compare bits directly
+        // For immediate values, compare bits directly.
+        //
+        // Keywords store a 47-bit FNV-1a hash in the payload (via TAG_PTRVAL).
+        // Same name → same hash → same bits. This is correct within a single
+        // DSO and across DSO boundaries (all DSOs share the global keyword table).
         if !self.is_heap() && !other.is_heap() {
             return self.0 == other.0;
         }
@@ -172,7 +176,7 @@ impl Hash for Value {
             // Same bits ↔ same value, and PartialEq agrees.
             //
             // SSO strings: same content → same bits → same hash.
-            // Keywords: interned, same name → same pointer → same bits.
+            // Keywords: same name → same 47-bit FNV-1a hash → same bits → same hash.
             // Inline floats: same float bits → same Value bits.
             // TAG_NAN floats: NaN/Infinity encoded deterministically.
             self.0.hash(state);
@@ -359,7 +363,7 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
         5 => {
             let a_name = a.as_keyword_name().unwrap();
             let b_name = b.as_keyword_name().unwrap();
-            a_name.cmp(b_name)
+            a_name.cmp(&b_name)
         }
 
         // C pointer — by address bits

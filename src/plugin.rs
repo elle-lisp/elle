@@ -18,14 +18,27 @@ use crate::vm::VM;
 ///
 /// The plugin calls `register` to declare its primitives. After init
 /// returns, the collected definitions are registered into the VM.
+///
+/// The plugin must call `init_keywords()` at the start of `elle_plugin_init`
+/// to route keyword operations to the host's global name table. Without this,
+/// keywords created in the host are invisible to `as_keyword_name()` in the
+/// plugin (each DSO has its own copy of the `elle` statics).
 pub struct PluginContext {
     primitives: Vec<&'static PrimitiveDef>,
+    /// Host's `intern_keyword` function. Passed to `set_keyword_fns` during
+    /// `init_keywords()` so the plugin routes keyword interning to the host.
+    intern_keyword_fn: fn(&str) -> u64,
+    /// Host's `keyword_name` function. Passed to `set_keyword_fns` during
+    /// `init_keywords()` so the plugin routes name lookup to the host.
+    keyword_name_fn: fn(u64) -> Option<String>,
 }
 
 impl PluginContext {
     fn new() -> Self {
         PluginContext {
             primitives: Vec::new(),
+            intern_keyword_fn: crate::value::keyword::intern_keyword,
+            keyword_name_fn: crate::value::keyword::keyword_name,
         }
     }
 
@@ -33,6 +46,19 @@ impl PluginContext {
     /// (typically a const or static in the plugin).
     pub fn register(&mut self, def: &'static PrimitiveDef) {
         self.primitives.push(def);
+    }
+
+    /// Route this DSO's keyword operations to the host's global name table.
+    ///
+    /// Must be called at the start of `elle_plugin_init`, before any keyword
+    /// is created or looked up. Calling it after keyword creation will leave
+    /// some hashes unregistered in the host's table.
+    ///
+    /// Each cdylib plugin has its own copy of the `elle` statics (including
+    /// `KEYWORD_NAMES`). Without this call, keywords created in the host are
+    /// invisible to `as_keyword_name()` in the plugin, and vice versa.
+    pub fn init_keywords(&self) {
+        crate::value::keyword::set_keyword_fns(self.intern_keyword_fn, self.keyword_name_fn);
     }
 }
 
@@ -53,7 +79,28 @@ pub type PluginInitFn = unsafe extern "C" fn(ctx: &mut PluginContext) -> Value;
 /// Calling this twice with the same path will register primitives twice and
 /// leak a second library handle.
 pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResult<Value> {
-    // Load the shared library
+    // Load the shared library.
+    //
+    // On Linux we use RTLD_GLOBAL so that the plugin's symbols are visible to
+    // subsequently loaded DSOs.  This is required for C++ runtime state —
+    // vtables, `std::type_info`, and global constructors — to be shared
+    // correctly across plugin boundaries (e.g. when a plugin links libstdc++
+    // via oxrocksdb-sys).  Without it, each DSO gets its own copy of C++
+    // runtime globals, breaking dynamic_cast and RTTI.
+    //
+    // Note: if dlopen fails with "cannot allocate memory in static TLS block",
+    // that is a separate glibc static-TLS-reservation issue and is NOT fixed by
+    // RTLD_GLOBAL.  The workaround on glibc 2.41+ is to set the environment
+    // variable GLIBC_TUNABLES=glibc.rtld.optional_static_tls=<N> to a value
+    // large enough for the plugin's TLS needs.
+    #[cfg(target_os = "linux")]
+    let lib = {
+        use libloading::os::unix::Library as UnixLibrary;
+        unsafe { UnixLibrary::open(Some(path), libc::RTLD_NOW | libc::RTLD_GLOBAL) }
+            .map(libloading::Library::from)
+            .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?
+    };
+    #[cfg(not(target_os = "linux"))]
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?;
 

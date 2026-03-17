@@ -199,7 +199,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
 
     // :stdin / :stdout / :stderr — keywords :pipe, :inherit, :null
     fn parse_disp(v: &Value, field: &str) -> Result<StdioDisposition, (SignalBits, Value)> {
-        match v.as_keyword_name() {
+        match v.as_keyword_name().as_deref() {
             Some("pipe") => Ok(StdioDisposition::Pipe),
             Some("inherit") => Ok(StdioDisposition::Inherit),
             Some("null") => Ok(StdioDisposition::Null),
@@ -539,7 +539,7 @@ fn prim_subprocess_kill(args: &[Value]) -> (SignalBits, Value) {
         if let Some(n) = args[1].as_int() {
             n as i32
         } else if let Some(name) = args[1].as_keyword_name() {
-            match keyword_to_signal(name) {
+            match keyword_to_signal(&name) {
                 Some(sig) => sig,
                 None => {
                     return (

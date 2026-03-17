@@ -87,15 +87,25 @@ impl Value {
         }
     }
 
-    /// Extract keyword name if this is a keyword.
+    /// Extract the 47-bit keyword hash. Returns None if not a keyword.
+    /// Fast path — no lock acquisition, no allocation.
     #[inline]
-    pub fn as_keyword_name(&self) -> Option<&str> {
+    pub fn keyword_hash(&self) -> Option<u64> {
         if self.is_keyword() {
-            let ptr = (self.0 & PTRVAL_PAYLOAD_MASK) as *const crate::value::heap::HeapObject;
-            match unsafe { &*ptr } {
-                crate::value::heap::HeapObject::LString { s, .. } => Some(s),
-                _ => None,
-            }
+            Some(self.0 & PTRVAL_PAYLOAD_MASK)
+        } else {
+            None
+        }
+    }
+
+    /// Extract keyword name if this is a keyword.
+    /// Acquires RwLock read lock and allocates a String.
+    /// Use `keyword_hash()` when only comparing, not displaying.
+    #[inline]
+    pub fn as_keyword_name(&self) -> Option<String> {
+        if self.is_keyword() {
+            let hash = self.0 & PTRVAL_PAYLOAD_MASK;
+            crate::value::keyword::keyword_name(hash)
         } else {
             None
         }
@@ -277,7 +287,7 @@ impl Value {
     /// Returns None if either value is not a keyword.
     pub fn compare_keyword(&self, other: &Value) -> Option<std::cmp::Ordering> {
         match (self.as_keyword_name(), other.as_keyword_name()) {
-            (Some(a), Some(b)) => Some(a.cmp(b)),
+            (Some(a), Some(b)) => Some(a.cmp(&b)),
             _ => None,
         }
     }

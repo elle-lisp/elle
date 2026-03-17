@@ -44,7 +44,7 @@ fn resolve_keyword_slice(
                 ),
             )
         })?;
-        let b = reg.to_signal_bits(name).ok_or_else(|| {
+        let b = reg.to_signal_bits(&name).ok_or_else(|| {
             (
                 SIG_ERROR,
                 error_val(
@@ -67,7 +67,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
     // 2. Single keyword
     if let Some(name) = val.as_keyword_name() {
         let reg = crate::signals::registry::global_registry().lock().unwrap();
-        return match reg.to_signal_bits(name) {
+        return match reg.to_signal_bits(&name) {
             Some(bits) => Ok(bits),
             None => Err((
                 SIG_ERROR,
@@ -97,7 +97,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
                     ),
                 )
             })?;
-            let b = reg.to_signal_bits(name).ok_or_else(|| {
+            let b = reg.to_signal_bits(&name).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     error_val(
@@ -141,7 +141,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
                     ),
                 )
             })?;
-            let b = reg.to_signal_bits(name).ok_or_else(|| {
+            let b = reg.to_signal_bits(&name).ok_or_else(|| {
                 (
                     SIG_ERROR,
                     error_val(

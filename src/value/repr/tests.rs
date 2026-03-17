@@ -84,7 +84,7 @@ fn test_symbol() {
 fn test_keyword() {
     let v = Value::keyword("test");
     assert!(v.is_keyword());
-    assert_eq!(v.as_keyword_name(), Some("test"));
+    assert_eq!(v.as_keyword_name().as_deref(), Some("test"));
 }
 
 #[test]

@@ -87,7 +87,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
         }
         Ok(format!("{{{}}}", pairs.join(",")))
     } else if let Some(name) = value.as_keyword_name() {
-        Ok(escape_json_string(name))
+        Ok(escape_json_string(&name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {
@@ -264,7 +264,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
             indent
         ))
     } else if let Some(name) = value.as_keyword_name() {
-        Ok(escape_json_string(name))
+        Ok(escape_json_string(&name))
     } else if value.is_closure() {
         Err("Cannot serialize closures to JSON".to_string())
     } else if value.is_symbol() {

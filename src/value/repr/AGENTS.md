@@ -39,7 +39,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | Pointer | 0x7FFB | 48-bit heap pointer | Cons, Array, Table, Closure, Fiber, etc. |
 | Truthy | 0x7FFC | Bit 47=0: singleton (0=true, 1=undefined), Bit 47=1: symbol (32-bit ID) | True, Undefined, or Symbol |
 | NaN/Inf | 0x7FFD | 64-bit float bits | NaN or Infinity |
-| PtrVal | 0x7FFE | Bit 47=0: keyword (47-bit ptr), Bit 47=1: cpointer (47-bit ptr) | Keyword or C pointer |
+| PtrVal | 0x7FFE | Bit 47=0: keyword (47-bit FNV-1a hash of name), Bit 47=1: cpointer (47-bit ptr) | Keyword or C pointer |
 | SSO | 0x7FFF | Up to 6 UTF-8 bytes | Short string (reserved) |
 
 ## Files
@@ -60,7 +60,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | `Value::float(f)` | Float | Handles NaN/Infinity specially |
 | `Value::bool(b)` | Bool | True or False |
 | `Value::symbol(id)` | Symbol | From SymbolId |
-| `Value::keyword(name)` | Keyword | Interned string |
+| `Value::keyword(name)` | Keyword | FNV-1a hash of name; registers in global name table |
 | `Value::nil()` | Nil | Falsy, represents absence |
 | `Value::EMPTY_LIST` | EmptyList | Truthy, represents empty list |
 | `Value::TRUE` | True | Truthy singleton |
@@ -96,7 +96,8 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 | `is_symbol()` | bool | Type check |
 | `as_symbol()` | Option<SymbolId> | Extract symbol ID |
 | `is_keyword()` | bool | Type check |
-| `as_keyword()` | Option<&str> | Extract keyword name |
+| `keyword_hash()` | Option<u64> | Extract 47-bit keyword hash (fast path — no lock) |
+| `as_keyword_name()` | Option<String> | Extract keyword name (acquires RwLock + allocates) |
 | `is_nil()` | bool | Type check (only matches nil, not empty list) |
 | `is_empty_list()` | bool | Type check (only matches empty list, not nil) |
 | `is_cons()` | bool | Type check |
