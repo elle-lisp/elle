@@ -7,8 +7,8 @@ use super::{
     allocator, arena, arithmetic, array, bitwise, bytes, calling, cell, chan, comparison,
     concurrency, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers,
     fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
-    modules, net, package, parameters, path, ports, process, read, sets, sort, stream, string,
-    structs, time, traits, types, unix,
+    modules, net, package, parameters, path, ports, read, sets, sort, stream, string, structs,
+    subprocess, time, traits, types, unix,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -50,7 +50,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     parameters::PRIMITIVES,
     path::PRIMITIVES,
     ports::PRIMITIVES,
-    process::PRIMITIVES,
+    subprocess::PRIMITIVES,
     read::PRIMITIVES,
     sets::PRIMITIVES,
     sort::PRIMITIVES,

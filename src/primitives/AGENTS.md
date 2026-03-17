@@ -74,8 +74,11 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 2. **All primitives return `(SignalBits, Value)`.** No exceptions. Errors are
     signaled via SIG_ERROR with an error struct `{:error :keyword :message "message"}`.
 
-3. **No primitive has VM access.** Operations that need the VM (fiber
+3. **Most primitives have no VM access.** Operations that need the VM (fiber
    execution) return SIG_RESUME and let the VM dispatch loop handle it.
+   Exceptions: primitives that read ambient VM state (`sys/args`, `ffi/native`,
+   `import-file`, etc.) use `get_vm_context()` to access the VM as a
+   read-only context. Do not use VM context for I/O or execution.
 
 4. **Symbol table pointers are set before use.** The `length` primitive needs
    symbol table access to resolve symbol names. Call `set_length_symbol_table`
@@ -124,7 +127,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
 | `calling.rs` | `ffi/call` |
 | `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
-| `process.rs` | `exit`, `halt`, `process/exec`, `process/wait`, `process/kill`, `process/pid` |
+| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after `--`, empty without `--`), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
 
 ## string/format primitive
 
@@ -251,32 +254,51 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 2. **No mutation.** The operation is pure and does not modify the string.
 3. **Consistent with UTF-8.** The result matches `(length (bytes s))` for the UTF-8 encoding of the string.
 
+## Sys Primitives
+
+**Location:** `src/primitives/subprocess.rs`
+
+- `sys/args` — Returns user-provided command-line arguments as an immutable
+  array of strings. Arguments are those passed after the first `--` separator
+  in the process argv. Without `--`, returns an empty array `[]`. Reads from
+  `vm.user_args` via `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
+  - Shebang usage: `#!/usr/bin/env -S elle --`
+  - Example: `elle script.lisp -- foo bar` → `sys/args` returns `["foo" "bar"]`
+  - Without separator: `elle script.lisp` → `sys/args` returns `[]`
+
+- `sys/env` — Returns the process environment as an immutable struct
+  `{:KEY "value" ...}`. Uses `std::env::vars_os()` with `filter_map` to
+  skip non-UTF-8 entries. Returns empty struct `{}` if no env vars.
+  Signal: `Signal::silent()`. Arity: `Exact(0)`.
+
 ## Subprocess Primitives
 
-**Location:** `src/primitives/process.rs`
+**Location:** `src/primitives/subprocess.rs`
 
 **Capability bit:** `SIG_EXEC` (bit 11) is a capability bit for fiber mask access control. Subprocess primitives emit `SIG_EXEC | SIG_IO | SIG_YIELD` so that fiber signal masks can selectively allow or deny subprocess operations independently of general I/O. The dispatch mechanism remains `SIG_IO`-based — the `SIG_EXEC` bit exists for access control granularity, not for routing.
 
 **Primitives:**
 
-- `process/exec program args [opts]` — Spawns a subprocess. Returns `{:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}`. Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Pipes are binary by default; text decoding is the caller's responsibility.
+- `subprocess/exec program args [opts]` — Spawns a subprocess. Returns `{:pid int :stdin port|nil :stdout port|nil :stderr port|nil :process <external:process>}`. Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Pipes are binary by default; text decoding is the caller's responsibility.
   - `program` (string): path to executable
-  - `args` (array of strings): command-line arguments
+  - `args` (list or array of strings): command-line arguments — accepts empty list `()`, cons list, immutable array `[...]`, or mutable array `@[...]`
   - `opts` (optional struct): configuration with keys `:env` (struct of env vars, default: inherit), `:cwd` (string, default: inherit), `:stdin` (keyword `:pipe`/`:inherit`/`:null`, default: `:pipe`), `:stdout` (keyword, default: `:pipe`), `:stderr` (keyword, default: `:pipe`)
+  - Error cases: non-sequence `args` → `type-error "subprocess/exec: args must be list, array, or @array, got {type}"`; non-string element → `type-error "subprocess/exec: args element must be string, got {type}"`; improper list → `type-error "subprocess/exec: improper list ending in {type}"`
+  - Note: `subprocess/system` gets sequence widening for free via pass-through — it calls `subprocess/exec` directly with the `args` argument unchanged.
 
-- `process/wait handle` — Waits for a subprocess to exit. Returns exit code as integer (0 = success). Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
+- `subprocess/wait handle` — Waits for a subprocess to exit. Returns exit code as integer (0 = success). Emits `SIG_EXEC | SIG_IO | SIG_YIELD`. Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
 
-- `process/kill handle [signal]` — Sends a signal to a subprocess synchronously. Returns `nil` on success. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct.
+- `subprocess/kill handle [signal]` — Sends a signal to a subprocess synchronously. Returns `nil` on success. Emits `SIG_ERROR` only (no yield). Default signal is `SIGTERM` (15). Accepts either a process handle or an exec result struct.
 
-- `process/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
+- `subprocess/pid handle` — Extracts the OS process ID from a process handle or exec result struct. Returns integer PID. Emits `SIG_ERROR` only (no yield). Accepts either a process handle (external) or an exec result struct (extracts `:process` key).
 
-**Handle extraction pattern:** `process/wait`, `process/kill`, and `process/pid` all accept either:
+**Handle extraction pattern:** `subprocess/wait`, `subprocess/kill`, and `subprocess/pid` all accept either:
 1. A direct process handle (external with type name "process")
 2. An exec result struct with a `:process` key containing the handle
 
-This allows both `(process/wait proc)` (where `proc` is the result of `process/exec`) and `(process/wait (get proc :process))` (extracting the handle directly).
+This allows both `(subprocess/wait proc)` (where `proc` is the result of `subprocess/exec`) and `(subprocess/wait (get proc :process))` (extracting the handle directly).
 
-**Pipe ports:** Ports returned by `process/exec` are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
+**Pipe ports:** Ports returned by `subprocess/exec` are created with `PortKind::Pipe` and `Encoding::Binary`. Subprocess output is an arbitrary byte stream; text decoding is the caller's responsibility via `(string bytes-val)` or `port/lines`.
 
 ## Network Primitives
 

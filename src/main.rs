@@ -28,7 +28,7 @@ fn print_error_context(input: &str, _msg: &str, line: usize, col: usize) {
 
 fn print_help() {
     println!("Elle v1.0.0\n");
-    println!("Usage: elle [file...]                    Run files or start REPL");
+    println!("Usage: elle [file...] [-- args...]       Run files or start REPL");
     println!("       elle lint [options] <file|dir>... Static analysis");
     println!("       elle lsp                          Start language server");
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
@@ -422,11 +422,23 @@ fn main() {
 
     set_vm_context(&mut vm as *mut VM);
 
+    // Split at the first "--": everything before goes to Elle's parser,
+    // everything after becomes user_args for sys/args.
+    let (elle_args, user_args) = match args[1..].iter().position(|a| a == "--") {
+        Some(idx) => {
+            let (before, after) = args[1..].split_at(idx);
+            (before.to_vec(), after[1..].to_vec()) // skip the "--" itself
+        }
+        None => (args[1..].to_vec(), vec![]),
+    };
+
+    vm.user_args = user_args;
+
     let mut had_errors = false;
     let mut files = Vec::new();
     let mut read_stdin = false;
 
-    for arg in &args[1..] {
+    for arg in &elle_args {
         if arg == "-" {
             read_stdin = true;
         } else if !arg.starts_with('-') {

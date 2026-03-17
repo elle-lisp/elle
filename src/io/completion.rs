@@ -41,7 +41,7 @@ pub(super) fn process_raw_completion(
                     id,
                     result: Err(error_val(
                         "exec-error",
-                        format!("process/wait: waitid failed: errno {}", errno),
+                        format!("subprocess/wait: waitid failed: errno {}", errno),
                     )),
                 };
             }
