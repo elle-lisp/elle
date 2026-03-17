@@ -259,4 +259,53 @@
           (assert-eq (get server-got 0) "ping"
             "server received data from client (Bug 7)")
           (assert-eq (get client-got 0) "pong"
-            "client received response from server (Bug 7)"))))))
+            "client received response from server (Bug 7)")))))) 
+
+# ============================================================================
+# Bug 612: cond/match corrupt previously-evaluated arguments in variadic calls
+#
+# When cond or match appeared as a non-first argument to a variadic native
+# function, the emitter emitted the done/merge block before the arm blocks
+# (because done_label was allocated first, giving it a lower label number
+# than the arm blocks, and blocks were sorted by label). The done block's
+# stack state was then cleared (no predecessor had yet saved it), causing
+# previously-evaluated arguments to be invisible to the Call instruction.
+#
+# Fix: the emitter now emits blocks in append order (the order finish_block
+# was called) rather than sorted by label. Merge/done blocks are always
+# appended last, so their predecessor arm blocks have already emitted their
+# Jump terminators and saved the correct stack state before the done block
+# is processed.
+# ============================================================================
+
+# cond as non-first arg to native variadic call
+(assert-eq (path/join "a" (cond (true "b"))) "a/b"
+  "cond as second arg to path/join")
+
+# match as non-first arg to native variadic call
+(assert-eq (path/join "a" (match 1 (1 "b") (_ "c"))) "a/b"
+  "match as second arg to path/join")
+
+# cond in second position of three-arg list
+(assert-list-eq (list 1 (cond (true 2)) 3) (list 1 2 3)
+  "cond as second arg in list")
+
+# cond in third position of three-arg list
+(assert-list-eq (list 1 2 (cond (true 3))) (list 1 2 3)
+  "cond as third arg in list")
+
+# match in second position of three-arg list
+(assert-list-eq (list 1 (match 1 (1 2) (_ 0)) 3) (list 1 2 3)
+  "match as second arg in list")
+
+# match in third position (wildcard arm)
+(assert-list-eq (list 1 2 (match 5 (1 "nope") (_ 3))) (list 1 2 3)
+  "match wildcard as third arg in list")
+
+# cond with multiple clauses, non-first arg
+(assert-eq (path/join "a" (cond (false "x") (true "b"))) "a/b"
+  "cond with two clauses as second arg to path/join")
+
+# cond as first arg still works (was never broken)
+(assert-eq (path/join (cond (true "a")) "b") "a/b"
+  "cond as first arg to path/join (regression guard)")
