@@ -66,7 +66,7 @@ impl VM {
             // arena/allocs needs mutable VM access to call the thunk —
             // handle before dispatch_query (which takes &self).
             if let Some(cons) = value.as_cons() {
-                if cons.first.as_keyword_name() == Some("arena/allocs") {
+                if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                     let thunk = cons.rest;
                     match self.handle_arena_allocs(thunk) {
                         Ok(val) => {
@@ -160,7 +160,7 @@ impl VM {
             // arena/allocs needs mutable VM access to call the thunk —
             // handle before dispatch_query (which takes &self).
             if let Some(cons) = value.as_cons() {
-                if cons.first.as_keyword_name() == Some("arena/allocs") {
+                if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                     let thunk = cons.rest;
                     match self.handle_arena_allocs(thunk) {
                         Ok(val) => {
@@ -226,7 +226,7 @@ impl VM {
 
         // Accept keyword or string as operation identifier.
         let op_name: String = if let Some(name) = cons.first.as_keyword_name() {
-            name.to_string()
+            name
         } else if let Some(s) = cons.first.with_string(|s| s.to_string()) {
             s
         } else {
@@ -258,7 +258,7 @@ impl VM {
                 let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
                     s
                 } else if let Some(s) = arg.as_keyword_name() {
-                    s.to_string()
+                    s
                 } else {
                     return (
                         SIG_ERROR,
@@ -283,7 +283,7 @@ impl VM {
                 let category_filter: Option<String> = if arg.is_nil() {
                     None
                 } else if let Some(k) = arg.as_keyword_name() {
-                    Some(k.to_string())
+                    Some(k)
                 } else {
                     arg.with_string(|s| s.to_string())
                 };
@@ -306,7 +306,7 @@ impl VM {
                 let name = if let Some(s) = arg.with_string(|s| s.to_string()) {
                     s
                 } else if let Some(s) = arg.as_keyword_name() {
-                    s.to_string()
+                    s
                 } else {
                     return (
                         SIG_ERROR,

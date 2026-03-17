@@ -14,7 +14,7 @@
 //! Pointer:   0x7FFB_XXXX_XXXX_XXXX where X = 48-bit heap pointer
 //! Truthy:    0x7FFC — bit 47=0: singletons (True=0, Undefined=1), bit 47=1: symbol (32-bit ID)
 //! NaN/Inf:   0x7FFD_XXXX_XXXX_XXXX where X = 64-bit float bits (NaN or Infinity)
-//! PtrVal:    0x7FFE — bit 47=0: keyword (47-bit ptr), bit 47=1: cpointer (47-bit ptr)
+//! PtrVal:    0x7FFE — bit 47=0: keyword (47-bit hash), bit 47=1: cpointer (47-bit ptr)
 //! SSO:       0x7FFF (reserved for short string optimization)
 
 mod accessors;
@@ -70,7 +70,7 @@ pub const TAG_NAN: u64 = 0x7FFD_0000_0000_0000;
 pub(crate) const TAG_NAN_MASK: u64 = 0xFFFF_0000_0000_0000;
 
 /// Pointer values tag - upper 16 bits = 0x7FFE
-/// Bit 47 = 0: keyword (bits 0-46 = interned string pointer)
+/// Bit 47 = 0: keyword (bits 0-46 = 47-bit FNV-1a hash of name)
 /// Bit 47 = 1: cpointer (bits 0-46 = raw C pointer address)
 pub const TAG_PTRVAL: u64 = 0x7FFE_0000_0000_0000;
 pub(crate) const TAG_PTRVAL_MASK: u64 = 0xFFFF_0000_0000_0000;

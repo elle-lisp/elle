@@ -152,7 +152,7 @@ struct SerContext {
 fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, String> {
     // Keywords carry their name for cross-thread re-interning
     if let Some(name) = value.as_keyword_name() {
-        return Ok(SendValue::Keyword(name.to_string()));
+        return Ok(SendValue::Keyword(name));
     }
 
     // Immediate values are always safe

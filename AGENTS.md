@@ -51,7 +51,7 @@ bytecode. Error messages include file:line:col information.
 | `ffi` | C interop via libloading/bindgen |
 | `jit` | JIT compilation via Cranelift; `JitRejectionInfo` tracks why closures were rejected |
 | `formatter` | Code formatting for Elle source |
-| `plugin` | Dynamic plugin loading for Rust cdylib primitives |
+| `plugin` | Dynamic plugin loading for Rust cdylib primitives; available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`, `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP) |
 | `path` | UTF-8 path operations |
 | `pipeline` | Compilation entry points (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md)) |
 | `error` | `LocationMap` for bytecode offset → source location mapping |

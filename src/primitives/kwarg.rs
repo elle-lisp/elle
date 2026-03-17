@@ -41,7 +41,7 @@ pub(crate) fn extract_keyword_timeout(
         let key = &remaining[i];
         let val = &remaining[i + 1];
 
-        match key.as_keyword_name() {
+        match key.as_keyword_name().as_deref() {
             Some("timeout") => match val.as_int() {
                 Some(ms) if ms >= 0 => {
                     timeout = Some(Duration::from_millis(ms as u64));

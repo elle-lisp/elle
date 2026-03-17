@@ -13,6 +13,7 @@ pub mod fiber;
 pub mod fiberheap;
 pub mod heap;
 pub mod intern;
+pub mod keyword;
 pub mod repr;
 pub mod send;
 pub mod shared_alloc;
