@@ -63,6 +63,10 @@ pub struct VM {
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
     pub eval_expander: Option<crate::syntax::Expander>,
+    /// User-provided command-line arguments, from everything after `--`
+    /// in the argv passed to the elle binary. Empty if no `--` was given.
+    /// Set by `main.rs` before the file-execution loop. Read by `sys/args`.
+    pub user_args: Vec<String>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -123,6 +127,7 @@ impl VM {
             jit_rejections: FxHashMap::default(),
             docs: HashMap::new(),
             eval_expander: None,
+            user_args: Vec::new(),
         }
     }
 

@@ -14,7 +14,7 @@
 ## - Stream sinks: stream/for-each, stream/fold, stream/collect, stream/into-array
 ## - Stream transforms: stream/map, stream/filter, stream/take, stream/drop, stream/concat, stream/zip, stream/pipe
 ## - Stream ports: port/lines, port/chunks, port/writer
-## - Subprocess convenience: process/system
+## - Subprocess convenience: subprocess/system
 
 ## ── Higher-order functions ──────────────────────────────────────────
 
@@ -1056,7 +1056,7 @@
 
 ## ── Subprocess convenience ────────────────────────────────────────────
 
-(defn process/system [program args & opts]
+(defn subprocess/system [program args & opts]
   "Run a command to completion, capturing stdout and stderr as text.
    Returns {:exit int :stdout string :stderr string}.
    Optional third argument: opts struct with keys:
@@ -1066,21 +1066,21 @@
    Output is decoded as strict UTF-8. If subprocess produces invalid
    UTF-8, the error propagates.
 
-   IMPORTANT: reads pipes BEFORE process/wait to avoid deadlock. If subprocess
+   IMPORTANT: reads pipes BEFORE subprocess/wait to avoid deadlock. If subprocess
    output exceeds the OS pipe buffer (~64KB), the subprocess blocks on write.
    Reading first ensures neither side is blocked."
   (let* ((exec-opts (if (empty? opts)
                        {:stdin :null}
                        (merge {:stdin :null} (first opts))))
-         (proc         (process/exec program args exec-opts))
-         # Drain pipes BEFORE process/wait (deadlock invariant — see docstring).
+         (proc         (subprocess/exec program args exec-opts))
+         # Drain pipes BEFORE subprocess/wait (deadlock invariant — see docstring).
          (stdout-bytes (if (nil? (get proc :stdout))
                          (bytes)
                          (stream/read-all (get proc :stdout))))
          (stderr-bytes (if (nil? (get proc :stderr))
                          (bytes)
                          (stream/read-all (get proc :stderr))))
-         (exit-code    (process/wait proc)))
+         (exit-code    (subprocess/wait proc)))
     (when (not (nil? (get proc :stdout))) (port/close (get proc :stdout)))
     (when (not (nil? (get proc :stderr))) (port/close (get proc :stderr)))
     {:exit   exit-code
@@ -1117,4 +1117,4 @@
      :stream/concat stream/concat :stream/zip stream/zip
      :stream/pipe stream/pipe
       :port/lines port/lines :port/chunks port/chunks :port/writer port/writer
-       :process/system process/system})
+        :subprocess/system subprocess/system})

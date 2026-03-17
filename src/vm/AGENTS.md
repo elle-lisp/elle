@@ -156,6 +156,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `env_cache` | `Vec<Value>` | Reusable buffer for `build_closure_env` (avoids alloc per call) |
 | `tail_call_env_cache` | `Vec<Value>` | Reusable buffer for `handle_tail_call` env building |
 | `eval_expander` | `Option<Expander>` | Cached Expander for runtime `eval` (avoids re-loading prelude) |
+| `user_args` | `Vec<String>` | User-provided arguments from `--` separator on the command line. Empty if no `--` was given. Read by `sys/args` primitive. |
 
 ### Key Fiber fields (on `vm.fiber`)
 
