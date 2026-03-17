@@ -94,6 +94,36 @@ pub(super) fn process_raw_completion(
                 result: Ok(Value::NIL),
             }
         }
+        PendingOp::Open {
+            path,
+            direction,
+            encoding,
+            ..
+        } => {
+            if result_code < 0 {
+                let errno = -result_code;
+                let is_timeout = errno == 125; // ECANCELED from linked timeout
+                let msg = if is_timeout {
+                    "I/O operation timed out".to_string()
+                } else {
+                    let os_err = std::io::Error::from_raw_os_error(errno);
+                    format!("port/open: {}: {}", path, os_err)
+                };
+                let error_type = if is_timeout { "timeout" } else { "io-error" };
+                return Completion {
+                    id,
+                    result: Err(error_val(error_type, msg)),
+                };
+            }
+            // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
+            // No fallible operations between here and OwnedFd::from_raw_fd.
+            let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
+            let port = Port::new_file(fd, *direction, *encoding, path.clone());
+            Completion {
+                id,
+                result: Ok(Value::external("port", port)),
+            }
+        }
         PendingOp::Connect {
             addr, connect_fd, ..
         } => {
@@ -233,6 +263,10 @@ pub(super) fn process_raw_completion(
                     // Subprocess ops are dispatched before the port guard and never
                     // produce a PendingOp::Port entry — they cannot reach this branch.
                     unreachable!("Spawn/ProcessWait should be dispatched before port guard")
+                }
+                IoOp::Open { .. } => {
+                    // Open ops use PendingOp::Open, not PendingOp::Port — cannot reach here.
+                    unreachable!("Open should use PendingOp::Open variant")
                 }
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload

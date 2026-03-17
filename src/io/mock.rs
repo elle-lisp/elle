@@ -118,6 +118,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::Sleep { .. } => "sleep",
             IoOp::Spawn(_) => "spawn",
             IoOp::ProcessWait => "process-wait",
+            IoOp::Open { .. } => "open",
         };
         inner.log.push(op_name.to_string());
 
@@ -190,6 +191,7 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::Spawn(_) | IoOp::ProcessWait => {
                     Err(error_val("io-error", "mock: subprocess ops not supported"))
                 }
+                IoOp::Open { .. } => Err(error_val("io-error", "mock: open not supported")),
             }
         };
 

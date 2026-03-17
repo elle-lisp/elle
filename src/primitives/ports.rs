@@ -1,9 +1,11 @@
 //! Port primitives — lifecycle management for file descriptors.
 
+use crate::io::request::{IoOp, IoRequest};
 use crate::port::{Direction, Encoding, Port};
 use crate::primitives::def::PrimitiveDef;
+use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -25,16 +27,45 @@ fn extract_port<'a>(value: &'a Value, prim_name: &str) -> Result<&'a Port, (Sign
     })
 }
 
+/// Map an Elle mode keyword name to POSIX open(2) flags and direction.
+///
+/// All flags include O_CLOEXEC for atomic close-on-exec at openat() time,
+/// avoiding the race window between openat() and a post-hoc fcntl().
+fn mode_to_flags(mode: &str) -> Option<(i32, Direction)> {
+    match mode {
+        "read" => Some((libc::O_RDONLY | libc::O_CLOEXEC, Direction::Read)),
+        "write" => Some((
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC,
+            Direction::Write,
+        )),
+        "append" => Some((
+            libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND | libc::O_CLOEXEC,
+            Direction::Write,
+        )),
+        "read-write" => Some((
+            libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC,
+            Direction::ReadWrite,
+        )),
+        _ => None,
+    }
+}
+
 /// Helper: open a file with the given encoding.
 ///
 /// Shared implementation for `port/open` and `port/open-bytes`.
+/// Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Open`.
+/// Argument validation (path type, mode keyword, timeout) happens here before yielding.
 fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits, Value) {
-    if args.len() != 2 {
+    if args.len() < 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("{}: expected 2 arguments, got {}", prim_name, args.len()),
+                format!(
+                    "{}: expected at least 2 arguments, got {}",
+                    prim_name,
+                    args.len()
+                ),
             ),
         );
     }
@@ -73,30 +104,9 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
         }
     };
 
-    use std::fs::OpenOptions;
-
-    let (opts, direction) = match mode_name {
-        "read" => {
-            let mut o = OpenOptions::new();
-            o.read(true);
-            (o, Direction::Read)
-        }
-        "write" => {
-            let mut o = OpenOptions::new();
-            o.write(true).create(true).truncate(true);
-            (o, Direction::Write)
-        }
-        "append" => {
-            let mut o = OpenOptions::new();
-            o.write(true).create(true).append(true);
-            (o, Direction::Write)
-        }
-        "read-write" => {
-            let mut o = OpenOptions::new();
-            o.read(true).write(true).create(true);
-            (o, Direction::ReadWrite)
-        }
-        _ => {
+    let (flags, direction) = match mode_to_flags(mode_name) {
+        Some(pair) => pair,
+        None => {
             return (
                 SIG_ERROR,
                 error_val(
@@ -110,18 +120,25 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
         }
     };
 
-    match opts.open(&path) {
-        Ok(file) => {
-            // File implements Into<OwnedFd> (stable since Rust 1.63)
-            let fd: std::os::unix::io::OwnedFd = file.into();
-            let port = Port::new_file(fd, direction, encoding, path);
-            (SIG_OK, Value::external("port", port))
-        }
-        Err(e) => (
-            SIG_ERROR,
-            error_val("io-error", format!("{}: {}", prim_name, e)),
+    let timeout = match extract_keyword_timeout(args, 2, prim_name) {
+        Ok(t) => t,
+        Err(e) => return e,
+    };
+
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::with_timeout(
+            IoOp::Open {
+                path,
+                flags,
+                mode: 0o666,
+                direction,
+                encoding,
+            },
+            Value::NIL,
+            timeout,
         ),
-    }
+    )
 }
 
 /// (port/open path mode) → port
@@ -362,23 +379,30 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open",
         func: prim_port_open,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Open a file as a text (UTF-8) port.",
+        signal: Signal {
+            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::AtLeast(2),
+        doc: "Open a file as a text (UTF-8) port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
         category: "port",
-        example: "(port/open \"data.txt\" :read)",
+        example: "(port/open \"data.txt\" :read)\n(port/open \"fifo\" :read :timeout 5000)",
         aliases: &[],
     },
     PrimitiveDef {
         name: "port/open-bytes",
         func: prim_port_open_bytes,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Open a file as a binary port.",
+        signal: Signal {
+            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::AtLeast(2),
+        doc: "Open a file as a binary port. Accepts optional :timeout ms keyword.",
         params: &["path", "mode"],
         category: "port",
-        example: "(port/open-bytes \"data.bin\" :read)",
+        example:
+            "(port/open-bytes \"data.bin\" :read)\n(port/open-bytes \"fifo\" :read :timeout 5000)",
         aliases: &[],
     },
     PrimitiveDef {
@@ -474,10 +498,277 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::fiber::SIG_OK;
+    use crate::io::request::{IoOp, IoRequest};
+    use crate::value::fiber::{SIG_IO, SIG_OK, SIG_YIELD};
 
     fn make_port() -> Value {
         Value::external("port", Port::stdin())
+    }
+
+    // ── port/open yield behavior ──────────────────────────────────────────────
+
+    #[test]
+    fn test_port_open_yields_sig_io_for_valid_args() {
+        let (bits, val) = prim_port_open(&[
+            Value::string("/tmp/elle-test-port-open-yield"),
+            Value::keyword("write"),
+        ]);
+        // Must yield, not succeed or error synchronously.
+        assert_eq!(
+            bits,
+            SIG_YIELD | SIG_IO,
+            "port/open must yield SIG_YIELD|SIG_IO for valid args"
+        );
+        // The yielded value must be an IoRequest.
+        assert_eq!(
+            val.external_type_name(),
+            Some("io-request"),
+            "yielded value must be an IoRequest"
+        );
+    }
+
+    #[test]
+    fn test_port_open_bytes_yields_sig_io_for_valid_args() {
+        let (bits, val) = prim_port_open_bytes(&[
+            Value::string("/tmp/elle-test-port-open-bytes-yield"),
+            Value::keyword("write"),
+        ]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(val.external_type_name(), Some("io-request"));
+    }
+
+    #[test]
+    fn test_port_open_iorequest_has_open_op_with_correct_flags() {
+        let (bits, val) = prim_port_open(&[
+            Value::string("/tmp/test-flags-check"),
+            Value::keyword("read"),
+        ]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        let req = val.as_external::<IoRequest>().expect("must be IoRequest");
+        match &req.op {
+            IoOp::Open {
+                path,
+                flags,
+                mode,
+                direction,
+                encoding,
+            } => {
+                assert_eq!(path, "/tmp/test-flags-check");
+                // O_RDONLY | O_CLOEXEC
+                assert!(
+                    *flags & libc::O_CLOEXEC != 0,
+                    "O_CLOEXEC must be set in flags"
+                );
+                assert_eq!(
+                    *flags & libc::O_WRONLY,
+                    0,
+                    "O_WRONLY must not be set for :read"
+                );
+                assert_eq!(*mode, 0o666, "mode must be 0o666");
+                assert_eq!(*direction, Direction::Read);
+                assert_eq!(*encoding, Encoding::Text);
+            }
+            _ => panic!("expected IoOp::Open, got {:?}", req.op),
+        }
+    }
+
+    #[test]
+    fn test_port_open_bytes_iorequest_has_binary_encoding() {
+        let (bits, val) = prim_port_open_bytes(&[
+            Value::string("/tmp/test-encoding-check"),
+            Value::keyword("write"),
+        ]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        let req = val.as_external::<IoRequest>().expect("must be IoRequest");
+        match &req.op {
+            IoOp::Open { encoding, .. } => {
+                assert_eq!(
+                    *encoding,
+                    Encoding::Binary,
+                    "port/open-bytes must use Binary encoding"
+                );
+            }
+            _ => panic!("expected IoOp::Open"),
+        }
+    }
+
+    #[test]
+    fn test_port_open_write_mode_flags() {
+        let (_, val) = prim_port_open(&[
+            Value::string("/tmp/test-write-flags"),
+            Value::keyword("write"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Open {
+                flags, direction, ..
+            } => {
+                assert!(
+                    *flags & libc::O_WRONLY != 0,
+                    "O_WRONLY must be set for :write"
+                );
+                assert!(
+                    *flags & libc::O_CREAT != 0,
+                    "O_CREAT must be set for :write"
+                );
+                assert!(
+                    *flags & libc::O_TRUNC != 0,
+                    "O_TRUNC must be set for :write"
+                );
+                assert!(
+                    *flags & libc::O_CLOEXEC != 0,
+                    "O_CLOEXEC must be set for :write"
+                );
+                assert_eq!(*direction, Direction::Write);
+            }
+            _ => panic!("expected IoOp::Open"),
+        }
+    }
+
+    #[test]
+    fn test_port_open_append_mode_flags() {
+        let (_, val) = prim_port_open(&[
+            Value::string("/tmp/test-append-flags"),
+            Value::keyword("append"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Open {
+                flags, direction, ..
+            } => {
+                assert!(
+                    *flags & libc::O_APPEND != 0,
+                    "O_APPEND must be set for :append"
+                );
+                assert!(
+                    *flags & libc::O_CREAT != 0,
+                    "O_CREAT must be set for :append"
+                );
+                assert_eq!(*direction, Direction::Write);
+            }
+            _ => panic!("expected IoOp::Open"),
+        }
+    }
+
+    #[test]
+    fn test_port_open_read_write_mode_flags() {
+        let (_, val) = prim_port_open(&[
+            Value::string("/tmp/test-rw-flags"),
+            Value::keyword("read-write"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Open {
+                flags, direction, ..
+            } => {
+                assert!(
+                    *flags & libc::O_RDWR != 0,
+                    "O_RDWR must be set for :read-write"
+                );
+                assert!(
+                    *flags & libc::O_CREAT != 0,
+                    "O_CREAT must be set for :read-write"
+                );
+                assert_eq!(*direction, Direction::ReadWrite);
+            }
+            _ => panic!("expected IoOp::Open"),
+        }
+    }
+
+    #[test]
+    fn test_port_open_with_timeout_extracts_correctly() {
+        let (bits, val) = prim_port_open(&[
+            Value::string("/tmp/test-timeout"),
+            Value::keyword("read"),
+            Value::keyword("timeout"),
+            Value::int(5000),
+        ]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        let req = val.as_external::<IoRequest>().unwrap();
+        assert_eq!(
+            req.timeout,
+            Some(std::time::Duration::from_millis(5000)),
+            "timeout must be extracted from :timeout keyword"
+        );
+    }
+
+    #[test]
+    fn test_port_open_without_timeout_has_none() {
+        let (_, val) = prim_port_open(&[
+            Value::string("/tmp/test-no-timeout"),
+            Value::keyword("read"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        assert_eq!(req.timeout, None, "no timeout keyword → None");
+    }
+
+    // ── port/open early-error cases (before yielding) ─────────────────────────
+
+    #[test]
+    fn test_port_open_too_few_args_errors() {
+        let (bits, _) = prim_port_open(&[Value::string("/tmp/foo")]);
+        assert_eq!(bits, SIG_ERROR, "too few args must error before yielding");
+    }
+
+    #[test]
+    fn test_port_open_no_args_errors() {
+        let (bits, _) = prim_port_open(&[]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_open_non_string_path_errors() {
+        let (bits, _) = prim_port_open(&[Value::int(42), Value::keyword("read")]);
+        assert_eq!(
+            bits, SIG_ERROR,
+            "non-string path must error before yielding"
+        );
+    }
+
+    #[test]
+    fn test_port_open_bad_mode_errors() {
+        let (bits, _) = prim_port_open(&[Value::string("/tmp/foo"), Value::keyword("badmode")]);
+        assert_eq!(
+            bits, SIG_ERROR,
+            "bad mode keyword must error before yielding"
+        );
+    }
+
+    #[test]
+    fn test_port_open_non_keyword_mode_errors() {
+        let (bits, _) = prim_port_open(&[Value::string("/tmp/foo"), Value::string("read")]);
+        assert_eq!(
+            bits, SIG_ERROR,
+            "non-keyword mode must error before yielding"
+        );
+    }
+
+    #[test]
+    fn test_port_open_bad_timeout_value_errors() {
+        let (bits, _) = prim_port_open(&[
+            Value::string("/tmp/foo"),
+            Value::keyword("read"),
+            Value::keyword("timeout"),
+            Value::int(-1),
+        ]);
+        assert_eq!(
+            bits, SIG_ERROR,
+            "negative timeout must error before yielding"
+        );
+    }
+
+    #[test]
+    fn test_port_open_unknown_keyword_errors() {
+        let (bits, _) = prim_port_open(&[
+            Value::string("/tmp/foo"),
+            Value::keyword("read"),
+            Value::keyword("unknown"),
+            Value::int(100),
+        ]);
+        assert_eq!(
+            bits, SIG_ERROR,
+            "unknown keyword must error before yielding"
+        );
     }
 
     #[test]

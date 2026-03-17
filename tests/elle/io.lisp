@@ -143,15 +143,17 @@
 
 # === io/submit on sync backend errors ===
 
-(assert-err
-  (fn ()
-    (spit "/tmp/elle-test-submit-sync-lisp" "test")
-    (let* ((backend (io/backend :sync))
-           (port (port/open "/tmp/elle-test-submit-sync-lisp" :read))
-           (f (fiber/new (fn [] (stream/read-all port)) 512)))
-      (fiber/resume f)
-      (io/submit backend (fiber/value f))))
-  "io/submit on sync backend errors")
+# port/open must be opened BEFORE the assert-err lambda so it doesn't yield
+# inside protect's fiber (protect uses mask=1 which doesn't handle SIG_IO).
+(spit "/tmp/elle-test-submit-sync-lisp" "test")
+(let ((submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)))
+  (assert-err
+    (fn ()
+      (let* ((backend (io/backend :sync))
+             (f (fiber/new (fn [] (stream/read-all submit-sync-port)) 512)))
+        (fiber/resume f)
+        (io/submit backend (fiber/value f))))
+    "io/submit on sync backend errors"))
 
 # === io/submit + io/wait roundtrip ===
 

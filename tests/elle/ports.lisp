@@ -51,8 +51,10 @@
 
 # === Error cases ===
 
+# port/open on nonexistent path must use ev/spawn because the error arrives
+# asynchronously (port/open yields SIG_IO; the backend returns the ENOENT error).
 (assert-err
-  (fn () (port/open "/tmp/elle-nonexistent-dir-474/file" :read))
+  (fn () (ev/spawn (fn [] (port/open "/tmp/elle-nonexistent-dir-474/file" :read))))
   "port/open on nonexistent path errors")
 
 (assert-err
@@ -107,6 +109,18 @@
 (let ((p (port/open "/tmp/elle-test-ports-append-474" :append)))
   (assert-true (port? p) "append port is a port")
   (assert-true (port/open? p) "append port is open")
+  (port/close p))
+
+# === :timeout keyword argument ===
+
+# port/open with :timeout on a regular file completes before the timeout expires.
+(let ((p (port/open "/tmp/elle-test-ports-timeout-474" :write :timeout 5000)))
+  (assert-true (port/open? p) "port/open with :timeout works on regular file")
+  (port/close p))
+
+# port/open-bytes with :timeout on a regular file completes before the timeout expires.
+(let ((p (port/open-bytes "/tmp/elle-test-ports-bytes-timeout-474" :write :timeout 5000)))
+  (assert-true (port/open? p) "port/open-bytes with :timeout works on regular file")
   (port/close p))
 
 # ============================================================================
