@@ -87,6 +87,9 @@ mod file_scope {
 mod sys_args {
     include!("sys_args.rs");
 }
+mod cond_match_args {
+    include!("cond_match_args.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

@@ -94,14 +94,27 @@ impl Emitter {
         self.current_func_may_suspend = func.signal.may_suspend();
         self.current_func_num_locals = func.num_locals;
 
-        // First pass: record label offsets (simplified - emit all blocks in order)
-        // Second pass handled inline since we emit sequentially
-
-        // Sort blocks by label for deterministic output
-        let mut blocks: Vec<_> = func.blocks.iter().collect();
-        blocks.sort_by_key(|b| b.label.0);
-
-        for block in &blocks {
+        // Emit blocks in the order they were appended by the lowerer.
+        //
+        // The lowerer appends blocks by calling finish_block(), which means
+        // predecessor blocks are always appended before their successors —
+        // EXCEPT for merge/done blocks, which are left as `current_block`
+        // and appended last (after all blocks that jump to them). This
+        // guarantees that by the time the emitter processes a done/merge
+        // block, all predecessors have already emitted their Jump/Branch
+        // terminators and saved their stack state into yield_stack_state.
+        //
+        // Do NOT sort by label number. Labels are allocated in creation
+        // order, not emission order. Constructs like `cond` and `match`
+        // allocate the done_label first (giving it a low number) and the
+        // arm blocks later (higher numbers). Sorting by label would cause
+        // the done block to be emitted before its predecessors, losing the
+        // stack state they carry.
+        //
+        // Invariant: func.blocks[0] is always the entry block (Label 0),
+        // because the lowerer always starts with BasicBlock::new(Label(0))
+        // and finish_block() appends it when the first branch is encountered.
+        for block in &func.blocks {
             self.label_offsets
                 .insert(block.label, self.bytecode.current_pos());
             self.emit_block(block, func);
