@@ -388,8 +388,8 @@ fn format_named(
 
     // Build keyword map
     use std::collections::HashMap;
-    let mut kwargs: HashMap<&str, Value> = HashMap::new();
-    let mut provided_keys: Vec<&str> = Vec::new();
+    let mut kwargs: HashMap<String, Value> = HashMap::new();
+    let mut provided_keys: Vec<String> = Vec::new();
     for i in (0..args.len()).step_by(2) {
         let key = match args[i].as_keyword_name() {
             Some(name) => name,
@@ -406,7 +406,7 @@ fn format_named(
                 );
             }
         };
-        kwargs.insert(key, args[i + 1]);
+        kwargs.insert(key.clone(), args[i + 1]);
         provided_keys.push(key);
     }
 
@@ -427,7 +427,7 @@ fn format_named(
     use std::collections::HashSet;
     let used_keys: HashSet<&str> = placeholders.iter().map(|p| p.name).collect();
     for key in &provided_keys {
-        if !used_keys.contains(key) {
+        if !used_keys.contains(key.as_str()) {
             return (
                 SIG_ERROR,
                 error_val(

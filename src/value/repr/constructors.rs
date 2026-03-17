@@ -56,17 +56,13 @@ impl Value {
     }
 
     /// Create a keyword value from a name string.
-    /// The name is interned for O(1) equality and display.
+    /// The name is hashed (47-bit FNV-1a) and registered in the global keyword table.
+    /// Equality is O(1) bit comparison; name recovery via `as_keyword_name()`.
     #[inline]
     pub fn keyword(name: &str) -> Self {
-        use crate::value::intern::intern_string;
-        let ptr = intern_string(name) as *const ();
-        let addr = ptr as u64;
-        assert!(
-            addr & !PTRVAL_PAYLOAD_MASK == 0,
-            "Keyword pointer exceeds 47-bit address space"
-        );
-        Value(TAG_PTRVAL | addr)
+        let hash = crate::value::keyword::intern_keyword(name);
+        // hash is already masked to 47 bits by intern_keyword
+        Value(TAG_PTRVAL | hash)
     }
 
     /// Create a boolean value.

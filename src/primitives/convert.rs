@@ -26,7 +26,7 @@ pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
         return result;
     }
     if let Some(name) = args[0].as_keyword_name() {
-        return parse_int(name);
+        return parse_int(&name);
     }
     (
         SIG_ERROR,
@@ -74,7 +74,7 @@ pub(crate) fn prim_to_float(args: &[Value]) -> (SignalBits, Value) {
         return result;
     }
     if let Some(name) = args[0].as_keyword_name() {
-        return parse_float(name);
+        return parse_float(&name);
     }
     (
         SIG_ERROR,

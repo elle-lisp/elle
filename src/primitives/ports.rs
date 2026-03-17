@@ -87,7 +87,7 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
         }
     };
 
-    let mode_name = match args[1].as_keyword_name() {
+    let mode_name_owned = match args[1].as_keyword_name() {
         Some(name) => name,
         None => {
             return (
@@ -104,7 +104,7 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
         }
     };
 
-    let (flags, direction) = match mode_to_flags(mode_name) {
+    let (flags, direction) = match mode_to_flags(&mode_name_owned) {
         Some(pair) => pair,
         None => {
             return (
@@ -113,7 +113,7 @@ fn open_file(args: &[Value], encoding: Encoding, prim_name: &str) -> (SignalBits
                     "type-error",
                     format!(
                         "{}: unknown mode :{}, expected :read, :write, :append, or :read-write",
-                        prim_name, mode_name
+                        prim_name, mode_name_owned
                     ),
                 ),
             );
@@ -282,7 +282,7 @@ fn prim_port_set_options(args: &[Value]) -> (SignalBits, Value) {
         let key = &remaining[i];
         let val = &remaining[i + 1];
 
-        match key.as_keyword_name() {
+        match key.as_keyword_name().as_deref() {
             Some("timeout") => {
                 if val.is_nil() {
                     port.set_timeout_ms(None);

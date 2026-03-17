@@ -16,7 +16,7 @@ pub(crate) fn resolve_type_desc(
 ) -> Result<TypeDesc, (SignalBits, Value)> {
     // First try keyword
     if let Some(name) = value.as_keyword_name() {
-        return TypeDesc::from_keyword(name).ok_or_else(|| {
+        return TypeDesc::from_keyword(&name).ok_or_else(|| {
             (
                 SIG_ERROR,
                 error_val("ffi-error", format!("{}: unknown type :{}", context, name)),

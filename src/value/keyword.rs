@@ -91,7 +91,9 @@ mod tests {
     #[test]
     fn hash_is_const() {
         const H: u64 = keyword_hash("test");
-        assert!(H > 0);
+        // Verify it's usable as a const — the specific value is deterministic
+        // but not important; we just check it fits in 47 bits.
+        assert_eq!(H & !((1u64 << 47) - 1), 0, "const hash must fit in 47 bits");
     }
 
     #[test]

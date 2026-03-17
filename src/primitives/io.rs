@@ -56,7 +56,7 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    match args[0].as_keyword_name() {
+    match args[0].as_keyword_name().as_deref() {
         Some("sync") => {
             let backend = SyncBackend::new();
             (SIG_OK, Value::external("io-backend", backend))

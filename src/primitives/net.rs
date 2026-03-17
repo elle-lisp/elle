@@ -101,7 +101,7 @@ pub(crate) fn parse_shutdown_how(
     value: &Value,
     prim_name: &str,
 ) -> Result<i32, (SignalBits, Value)> {
-    match value.as_keyword_name() {
+    match value.as_keyword_name().as_deref() {
         Some("read") => Ok(libc::SHUT_RD),
         Some("write") => Ok(libc::SHUT_WR),
         Some("read-write") => Ok(libc::SHUT_RDWR),

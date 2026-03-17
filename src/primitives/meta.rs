@@ -461,7 +461,7 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let reg = registry::global_registry().lock().unwrap();
-        let bit_pos = match reg.lookup(kw) {
+        let bit_pos = match reg.lookup(&kw) {
             Some(p) => p,
             None => {
                 return (

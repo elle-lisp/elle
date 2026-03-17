@@ -14,16 +14,10 @@ impl PartialEq for Value {
 
         // For immediate values, compare bits directly.
         //
-        // Exception: keywords store a heap pointer (via TAG_PTRVAL), so two
-        // keywords with the same name can have different pointer bits when they
-        // come from different string-interning tables (e.g. a plugin DSO has
-        // its own intern table).  We compare keyword names by content instead,
-        // which is equivalent within a single DSO (same name → same pointer →
-        // same bits) and correct across DSO boundaries.
+        // Keywords store a 47-bit FNV-1a hash in the payload (via TAG_PTRVAL).
+        // Same name → same hash → same bits. This is correct within a single
+        // DSO and across DSO boundaries (all DSOs share the global keyword table).
         if !self.is_heap() && !other.is_heap() {
-            if self.is_keyword() && other.is_keyword() {
-                return self.as_keyword_name() == other.as_keyword_name();
-            }
             return self.0 == other.0;
         }
 
@@ -182,24 +176,9 @@ impl Hash for Value {
             // Same bits ↔ same value, and PartialEq agrees.
             //
             // SSO strings: same content → same bits → same hash.
-            // Keywords: normally interned (same name → same pointer → same bits),
-            //   but across plugin DSO boundaries the same name may have different
-            //   pointers.  PartialEq compares keyword names by content, so we must
-            //   hash keyword names by content too (Hash must agree with PartialEq).
+            // Keywords: same name → same 47-bit FNV-1a hash → same bits → same hash.
             // Inline floats: same float bits → same Value bits.
             // TAG_NAN floats: NaN/Infinity encoded deterministically.
-            if self.is_keyword() {
-                if let Some(name) = self.as_keyword_name() {
-                    // Hash the keyword tag constant as a type discriminator,
-                    // then hash the name string.
-                    use super::TAG_PTRVAL;
-                    TAG_PTRVAL.hash(state);
-                    name.hash(state);
-                    return;
-                } else {
-                    unreachable!("keyword value with no interned name — intern table corrupted");
-                }
-            }
             self.0.hash(state);
             return;
         }
@@ -384,7 +363,7 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
         5 => {
             let a_name = a.as_keyword_name().unwrap();
             let b_name = b.as_keyword_name().unwrap();
-            a_name.cmp(b_name)
+            a_name.cmp(&b_name)
         }
 
         // C pointer — by address bits

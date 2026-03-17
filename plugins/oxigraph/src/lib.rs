@@ -119,7 +119,7 @@ fn elle_to_term(val: Value, prim: &str) -> Result<Term, (SignalBits, Value)> {
             )
         })?;
 
-    match tag {
+    match tag.as_str() {
         "iri" => {
             let s = string_at(elems, 1, prim, "IRI string")?;
             NamedNode::new(s.clone())
@@ -147,7 +147,7 @@ fn elle_to_term(val: Value, prim: &str) -> Result<Term, (SignalBits, Value)> {
                     )
                 })?;
                 let tag_val = string_at(elems, 3, prim, "tag value")?;
-                match key {
+                match key.as_str() {
                     "lang" => Literal::new_language_tagged_literal(value.clone(), tag_val.clone())
                         .map(Term::from)
                         .map_err(|e| oxigraph_err(prim, e)),
@@ -502,7 +502,7 @@ fn elle_quad_to_oxigraph(val: Value, prim: &str) -> Result<Quad, (SignalBits, Va
     }
 
     // Subject: IRI or blank node only.
-    let subject_term = elle_to_term(elems[0].clone(), prim)?;
+    let subject_term = elle_to_term(elems[0], prim)?;
     let subject: Subject = match subject_term {
         Term::NamedNode(n) => Subject::NamedNode(n),
         Term::BlankNode(b) => Subject::BlankNode(b),
@@ -518,7 +518,7 @@ fn elle_quad_to_oxigraph(val: Value, prim: &str) -> Result<Quad, (SignalBits, Va
     };
 
     // Predicate: IRI only.
-    let pred_term = elle_to_term(elems[1].clone(), prim)?;
+    let pred_term = elle_to_term(elems[1], prim)?;
     let predicate = match pred_term {
         Term::NamedNode(n) => n,
         _ => {
@@ -530,10 +530,10 @@ fn elle_quad_to_oxigraph(val: Value, prim: &str) -> Result<Quad, (SignalBits, Va
     };
 
     // Object: any term.
-    let object = elle_to_term(elems[2].clone(), prim)?;
+    let object = elle_to_term(elems[2], prim)?;
 
     // Graph-name: nil, IRI, or blank node.
-    let graph_name = elle_to_graph_name(elems[3].clone(), prim)?;
+    let graph_name = elle_to_graph_name(elems[3], prim)?;
 
     Ok(Quad::new(subject, predicate, object, graph_name))
 }
@@ -547,7 +547,7 @@ fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/insert") {
+    let quad = match elle_quad_to_oxigraph(args[1], "oxigraph/insert") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -562,7 +562,7 @@ fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/remove") {
+    let quad = match elle_quad_to_oxigraph(args[1], "oxigraph/remove") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -577,7 +577,7 @@ fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/contains") {
+    let quad = match elle_quad_to_oxigraph(args[1], "oxigraph/contains") {
         Ok(q) => q,
         Err(e) => return e,
     };
@@ -733,7 +733,7 @@ fn keyword_to_format(val: Value, prim: &str) -> Result<RdfFormat, (SignalBits, V
             ),
         )
     })?;
-    match kw {
+    match kw.as_str() {
         "turtle" => Ok(RdfFormat::Turtle),
         "ntriples" => Ok(RdfFormat::NTriples),
         "nquads" => Ok(RdfFormat::NQuads),
@@ -773,7 +773,7 @@ fn prim_load(args: &[Value]) -> (SignalBits, Value) {
             );
         }
     };
-    let format = match keyword_to_format(args[2].clone(), PRIM) {
+    let format = match keyword_to_format(args[2], PRIM) {
         Ok(f) => f,
         Err(e) => return e,
     };
@@ -789,7 +789,7 @@ fn prim_dump(args: &[Value]) -> (SignalBits, Value) {
         Ok(s) => s,
         Err(e) => return e,
     };
-    let format = match keyword_to_format(args[1].clone(), PRIM) {
+    let format = match keyword_to_format(args[1], PRIM) {
         Ok(f) => f,
         Err(e) => return e,
     };
