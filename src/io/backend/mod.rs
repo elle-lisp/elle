@@ -570,7 +570,7 @@ impl SyncBackend {
                 SIG_ERROR,
                 error_val(
                     "exec-error",
-                    format!("process/exec: {}: {}", req.program, e),
+                    format!("subprocess/exec: {}: {}", req.program, e),
                 ),
             ),
         }
@@ -582,7 +582,7 @@ impl SyncBackend {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("type-error", "process/wait: expected process handle"),
+                    error_val("type-error", "subprocess/wait: expected process handle"),
                 )
             }
         };
@@ -596,7 +596,7 @@ impl SyncBackend {
                 }
                 Err(e) => (
                     SIG_ERROR,
-                    error_val("exec-error", format!("process/wait: {}", e)),
+                    error_val("exec-error", format!("subprocess/wait: {}", e)),
                 ),
             },
             ProcessState::Exited(code) => (SIG_OK, Value::int(*code as i64)),

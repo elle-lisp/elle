@@ -608,7 +608,7 @@ impl AsyncBackend {
             }
             Err(e) => Err(error_val(
                 "exec-error",
-                format!("process/exec: {}: {}", req.program, e),
+                format!("subprocess/exec: {}: {}", req.program, e),
             )),
         };
 

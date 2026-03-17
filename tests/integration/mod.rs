@@ -84,6 +84,9 @@ mod file_scope {
     include!("file_scope.rs");
 }
 // traits tests migrated to tests/elle/traits.lisp
+mod sys_args {
+    include!("sys_args.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
