@@ -162,3 +162,105 @@
   (fn () (iri "not a valid IRI"))
   :oxigraph-error
   "iri with malformed IRI signals oxigraph-error")
+
+## ── Scenario 3: Quad CRUD ──────────────────────────────────────────
+
+(def insert   (get plugin :insert))
+(def remove   (get plugin :remove))
+(def contains (get plugin :contains))
+(def quads    (get plugin :quads))
+
+(def ex-s  (iri "http://example.org/alice"))
+(def ex-p  (iri "http://xmlns.com/foaf/0.1/name"))
+(def ex-o  (literal "Alice"))
+(def ex-g  (iri "http://example.org/graph1"))
+
+(def quad-default [ex-s ex-p ex-o nil])
+(def quad-named   [ex-s ex-p ex-o ex-g])
+
+## quads on empty store returns empty array
+(def fresh-store (store-new))
+(assert-eq
+  (length (quads fresh-store))
+  0
+  "quads on empty store returns array of length 0")
+
+## insert with nil graph, contains returns true
+(def store1 (store-new))
+(insert store1 quad-default)
+(assert-true
+  (contains store1 quad-default)
+  "contains returns true after insert with nil graph")
+
+## insert with named graph, contains returns true
+(def store2 (store-new))
+(insert store2 quad-named)
+(assert-true
+  (contains store2 quad-named)
+  "contains returns true after insert with named graph")
+
+## contains on absent quad returns false
+(def store3 (store-new))
+(assert-false
+  (contains store3 quad-default)
+  "contains returns false for quad not in store")
+
+## insert two quads, quads returns array of length 2
+(def store4 (store-new))
+(insert store4 quad-default)
+(insert store4 quad-named)
+(assert-eq
+  (length (quads store4))
+  2
+  "quads returns array of length 2 after two inserts")
+
+## remove a quad, contains returns false, quads length decreases
+(def store5 (store-new))
+(insert store5 quad-default)
+(insert store5 quad-named)
+(remove store5 quad-default)
+(assert-false
+  (contains store5 quad-default)
+  "contains returns false after remove")
+(assert-eq
+  (length (quads store5))
+  1
+  "quads length decreases by 1 after remove")
+
+## remove non-existent quad is a no-op (no error)
+(def store6 (store-new))
+(remove store6 quad-default)
+(assert-eq
+  (length (quads store6))
+  0
+  "remove of non-existent quad leaves store unchanged")
+
+## structural verification: quad array elements are term arrays
+(def store7 (store-new))
+(insert store7 quad-default)
+(def result-quads (quads store7))
+(def q (get result-quads 0))
+
+## subject: [:iri "http://example.org/alice"]
+(assert-eq
+  (get q 0)
+  [:iri "http://example.org/alice"]
+  "quad element 0 (subject) is [:iri ...] array")
+
+## predicate: [:iri "http://xmlns.com/foaf/0.1/name"]
+(assert-eq
+  (get q 1)
+  [:iri "http://xmlns.com/foaf/0.1/name"]
+  "quad element 1 (predicate) is [:iri ...] array")
+
+## object: [:literal "Alice"]
+(assert-eq
+  (get q 2)
+  [:literal "Alice"]
+  "quad element 2 (object) is [:literal ...] array")
+
+## graph-name: nil (default graph)
+(assert-eq
+  (get q 3)
+  nil
+  "quad element 3 (graph-name) is nil for default graph")

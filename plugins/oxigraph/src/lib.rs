@@ -9,7 +9,7 @@ use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::value::types::Arity;
 use elle::value::{error_val, TableKey, Value};
 
-use oxigraph::model::{BlankNode, GraphName, Literal, NamedNode, Term};
+use oxigraph::model::{BlankNode, GraphName, Literal, NamedNode, Quad, Subject, Term};
 use oxigraph::store::Store;
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,6 @@ fn bnode_to_elle(b: &BlankNode) -> Value {
     Value::array(vec![Value::keyword("bnode"), Value::string(b.as_str())])
 }
 
-#[allow(dead_code)]
 /// Build an Elle array representing an RDF literal.
 ///
 /// Plain:    `[:literal "hello"]`
@@ -79,7 +78,6 @@ fn literal_to_elle(l: &Literal) -> Value {
     }
 }
 
-#[allow(dead_code)]
 /// Convert an oxigraph `Term` to an Elle array.
 fn term_to_elle(term: &Term) -> Value {
     match term {
@@ -90,7 +88,6 @@ fn term_to_elle(term: &Term) -> Value {
     }
 }
 
-#[allow(dead_code)]
 /// Convert an Elle term array to an oxigraph `Term`.
 ///
 /// Returns an error `(SignalBits, Value)` if the shape is invalid.
@@ -184,7 +181,6 @@ fn elle_to_term(val: Value, prim: &str) -> Result<Term, (SignalBits, Value)> {
     }
 }
 
-#[allow(dead_code)]
 /// Convert an Elle graph-name value to an oxigraph `GraphName`.
 ///
 /// `nil` → `DefaultGraph`, `[:iri "..."]` or `[:bnode "..."]` → named/blank.
@@ -245,7 +241,6 @@ fn oxigraph_err(prim: &str, e: impl std::fmt::Display) -> (SignalBits, Value) {
     )
 }
 
-#[allow(dead_code)]
 /// Extract `Store` from `args[0]`, or return a type-error.
 fn get_store<'a>(args: &'a [Value], prim: &str) -> Result<&'a Store, (SignalBits, Value)> {
     args[0].as_external::<Store>().ok_or_else(|| {
@@ -440,35 +435,167 @@ fn prim_blank_node(args: &[Value]) -> (SignalBits, Value) {
 }
 
 // ---------------------------------------------------------------------------
-// Stub primitives (Chunks 2–4 — not-yet-implemented)
+// Quad conversion helpers
 // ---------------------------------------------------------------------------
 
-fn prim_insert(_args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_ERROR,
-        error_val("not-implemented", "oxigraph/insert: not yet implemented"),
-    )
+/// Convert an oxigraph `GraphName` to an Elle value.
+///
+/// `DefaultGraph` → `nil`, named/blank → term array.
+fn graph_name_to_elle(gn: &GraphName) -> Value {
+    match gn {
+        GraphName::DefaultGraph => Value::NIL,
+        GraphName::NamedNode(n) => iri_to_elle(n),
+        GraphName::BlankNode(b) => bnode_to_elle(b),
+    }
 }
 
-fn prim_remove(_args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_ERROR,
-        error_val("not-implemented", "oxigraph/remove: not yet implemented"),
-    )
+/// Convert an oxigraph `Subject` to an Elle value.
+fn subject_to_elle(s: &Subject) -> Value {
+    match s {
+        Subject::NamedNode(n) => iri_to_elle(n),
+        Subject::BlankNode(b) => bnode_to_elle(b),
+        Subject::Triple(_) => Value::NIL, // rdf-star not supported
+    }
 }
 
-fn prim_contains(_args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_ERROR,
-        error_val("not-implemented", "oxigraph/contains: not yet implemented"),
-    )
+/// Convert an oxigraph `Quad` to a 4-element Elle array `[s p o g]`.
+fn oxigraph_quad_to_elle(quad: &Quad) -> Value {
+    Value::array(vec![
+        subject_to_elle(&quad.subject),
+        iri_to_elle(&quad.predicate),
+        term_to_elle(&quad.object),
+        graph_name_to_elle(&quad.graph_name),
+    ])
 }
 
-fn prim_quads(_args: &[Value]) -> (SignalBits, Value) {
-    (
-        SIG_ERROR,
-        error_val("not-implemented", "oxigraph/quads: not yet implemented"),
-    )
+/// Convert an Elle quad array `[s p o g]` to an oxigraph `Quad`.
+///
+/// Subject must be IRI or blank node. Predicate must be IRI.
+/// Object can be any term. Graph-name is `nil` or IRI/blank node.
+fn elle_quad_to_oxigraph(val: Value, prim: &str) -> Result<Quad, (SignalBits, Value)> {
+    let elems = val.as_array().ok_or_else(|| {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("{}: expected quad array, got {}", prim, val.type_name()),
+            ),
+        )
+    })?;
+
+    if elems.len() != 4 {
+        return Err((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "{}: quad array must have length 4, got {}",
+                    prim,
+                    elems.len()
+                ),
+            ),
+        ));
+    }
+
+    // Subject: IRI or blank node only.
+    let subject_term = elle_to_term(elems[0].clone(), prim)?;
+    let subject: Subject = match subject_term {
+        Term::NamedNode(n) => Subject::NamedNode(n),
+        Term::BlankNode(b) => Subject::BlankNode(b),
+        Term::Literal(_) | Term::Triple(_) => {
+            return Err((
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("{}: subject must be an IRI or blank node", prim),
+                ),
+            ));
+        }
+    };
+
+    // Predicate: IRI only.
+    let pred_term = elle_to_term(elems[1].clone(), prim)?;
+    let predicate = match pred_term {
+        Term::NamedNode(n) => n,
+        _ => {
+            return Err((
+                SIG_ERROR,
+                error_val("type-error", format!("{}: predicate must be an IRI", prim)),
+            ));
+        }
+    };
+
+    // Object: any term.
+    let object = elle_to_term(elems[2].clone(), prim)?;
+
+    // Graph-name: nil, IRI, or blank node.
+    let graph_name = elle_to_graph_name(elems[3].clone(), prim)?;
+
+    Ok(Quad::new(subject, predicate, object, graph_name))
+}
+
+// ---------------------------------------------------------------------------
+// Quad CRUD primitives
+// ---------------------------------------------------------------------------
+
+fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
+    let store = match get_store(args, "oxigraph/insert") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/insert") {
+        Ok(q) => q,
+        Err(e) => return e,
+    };
+    match store.insert(quad.as_ref()) {
+        Ok(_) => (SIG_OK, Value::NIL),
+        Err(e) => oxigraph_err("oxigraph/insert", e),
+    }
+}
+
+fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
+    let store = match get_store(args, "oxigraph/remove") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/remove") {
+        Ok(q) => q,
+        Err(e) => return e,
+    };
+    match store.remove(quad.as_ref()) {
+        Ok(_) => (SIG_OK, Value::NIL),
+        Err(e) => oxigraph_err("oxigraph/remove", e),
+    }
+}
+
+fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
+    let store = match get_store(args, "oxigraph/contains") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let quad = match elle_quad_to_oxigraph(args[1].clone(), "oxigraph/contains") {
+        Ok(q) => q,
+        Err(e) => return e,
+    };
+    match store.contains(quad.as_ref()) {
+        Ok(result) => (SIG_OK, Value::bool(result)),
+        Err(e) => oxigraph_err("oxigraph/contains", e),
+    }
+}
+
+fn prim_quads(args: &[Value]) -> (SignalBits, Value) {
+    let store = match get_store(args, "oxigraph/quads") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let mut result = Vec::new();
+    for item in store.quads_for_pattern(None, None, None, None) {
+        match item {
+            Ok(quad) => result.push(oxigraph_quad_to_elle(&quad)),
+            Err(e) => return oxigraph_err("oxigraph/quads", e),
+        }
+    }
+    (SIG_OK, Value::array(result))
 }
 
 fn prim_query(_args: &[Value]) -> (SignalBits, Value) {
@@ -564,7 +691,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_insert,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Insert a quad into the store. (not yet implemented)",
+        doc: "Insert a quad into the store.",
         params: &["store", "quad"],
         category: "oxigraph",
         example: "(oxigraph/insert store [s p o nil])",
@@ -575,7 +702,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_remove,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Remove a quad from the store. (not yet implemented)",
+        doc: "Remove a quad from the store. No error if quad doesn't exist.",
         params: &["store", "quad"],
         category: "oxigraph",
         example: "(oxigraph/remove store quad)",
@@ -586,7 +713,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_contains,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Check if a quad exists in the store. (not yet implemented)",
+        doc: "Check if a quad exists in the store.",
         params: &["store", "quad"],
         category: "oxigraph",
         example: "(oxigraph/contains store quad)",
@@ -597,7 +724,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_quads,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Return all quads in the store as an array. (not yet implemented)",
+        doc: "Return all quads in the store as an immutable array.",
         params: &["store"],
         category: "oxigraph",
         example: "(oxigraph/quads store)",
