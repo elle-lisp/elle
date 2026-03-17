@@ -24,6 +24,7 @@ use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, Value};
+use std::os::unix::io::{FromRawFd, OwnedFd};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -80,6 +81,20 @@ impl SyncBackend {
         }
         if let IoOp::ProcessWait = request.op {
             return self.execute_process_wait(&request.port);
+        }
+
+        // Open is portless — it creates a new port rather than operating on one.
+        // Sync backend: blocking openat() is fine — single-fiber, no concurrent work to
+        // protect. The timeout from IoRequest is intentionally ignored here.
+        if let IoOp::Open {
+            ref path,
+            flags,
+            mode,
+            direction,
+            encoding,
+        } = request.op
+        {
+            return self.execute_open(path, flags, mode, direction, encoding);
         }
 
         // All remaining ops require a valid port.
@@ -139,7 +154,11 @@ impl SyncBackend {
                     SIG_ERROR,
                     error_val("io-error", "accept: port is not a listener"),
                 ),
-                IoOp::Connect { .. } | IoOp::Sleep { .. } | IoOp::Spawn(_) | IoOp::ProcessWait => unreachable!(), // handled above
+                IoOp::Connect { .. }
+                | IoOp::Sleep { .. }
+                | IoOp::Spawn(_)
+                | IoOp::ProcessWait
+                | IoOp::Open { .. } => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
@@ -601,6 +620,46 @@ impl SyncBackend {
             },
             ProcessState::Exited(code) => (SIG_OK, Value::int(*code as i64)),
         }
+    }
+
+    /// Execute a file open synchronously via libc::openat.
+    ///
+    /// The sync backend is used in single-fiber contexts (VM run loop fallback,
+    /// test harnesses). Blocking on openat() is acceptable — nothing else is
+    /// waiting. The timeout from IoRequest is intentionally ignored.
+    fn execute_open(
+        &self,
+        path: &str,
+        flags: i32,
+        mode: u32,
+        direction: Direction,
+        encoding: Encoding,
+    ) -> (SignalBits, Value) {
+        let c_path = match std::ffi::CString::new(path) {
+            Ok(p) => p,
+            Err(_) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "io-error",
+                        format!("port/open: {}: invalid path (contains null byte)", path),
+                    ),
+                )
+            }
+        };
+        let fd =
+            unsafe { libc::openat(libc::AT_FDCWD, c_path.as_ptr(), flags, mode as libc::mode_t) };
+        if fd < 0 {
+            let err = std::io::Error::last_os_error();
+            return (
+                SIG_ERROR,
+                error_val("io-error", format!("port/open: {}: {}", path, err)),
+            );
+        }
+        // SAFETY: fd is a valid file descriptor returned by openat on success.
+        let owned = unsafe { OwnedFd::from_raw_fd(fd) };
+        let port = Port::new_file(owned, direction, encoding, path.to_string());
+        (SIG_OK, Value::external("port", port))
     }
 }
 

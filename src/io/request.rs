@@ -4,6 +4,7 @@
 //! The scheduler catches SIG_IO and passes the request to a backend
 //! for execution.
 
+use crate::port::{Direction, Encoding};
 use crate::value::Value;
 use std::cell::RefCell;
 use std::process::Child;
@@ -67,6 +68,18 @@ pub(crate) enum IoOp {
     /// Wait for a subprocess to exit. Returns exit code (int).
     /// The request.port field carries the ProcessHandle value.
     ProcessWait,
+    /// Open a file. Returns a port on completion.
+    /// No existing port — the port is created on completion.
+    Open {
+        path: String,
+        /// POSIX open(2) flags: O_RDONLY, O_WRONLY|O_CREAT|O_TRUNC, etc.
+        /// O_CLOEXEC is always included.
+        flags: i32,
+        /// File creation mode (permissions). Standard value: 0o666 (umask applied).
+        mode: u32,
+        direction: Direction,
+        encoding: Encoding,
+    },
 }
 
 /// Address for connect operations.

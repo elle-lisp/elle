@@ -3,7 +3,7 @@
 use crate::io::pool::BufferHandle;
 use crate::io::request::{ConnectAddr, IoOp};
 use crate::io::types::PortKey;
-use crate::port::PortKind;
+use crate::port::{Direction, Encoding, PortKind};
 use crate::value::Value;
 use std::os::unix::io::RawFd;
 
@@ -42,6 +42,19 @@ pub(crate) enum PendingOp {
         handle_val: Value, // ProcessHandle — to cache exit code on completion
         siginfo: *mut libc::siginfo_t, // kernel fills this when child exits
     },
+    /// Open a file path. Creates a new port on completion.
+    ///
+    /// For io_uring: the null-terminated path bytes are stored in the buffer
+    /// pool slot (via buffer_handle) so they stay pinned until the CQE arrives.
+    /// For thread pool: path is owned by the PoolOp::Open; buffer_handle is a
+    /// dummy allocation (0 bytes).
+    Open {
+        /// The file path (for error messages and Port construction).
+        path: String,
+        direction: Direction,
+        encoding: Encoding,
+        buffer_handle: BufferHandle,
+    },
 }
 
 impl PendingOp {
@@ -51,6 +64,7 @@ impl PendingOp {
             PendingOp::Connect { buffer_handle, .. } => *buffer_handle,
             PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
             PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Open { buffer_handle, .. } => *buffer_handle,
         }
     }
 }

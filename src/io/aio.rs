@@ -11,7 +11,7 @@ use crate::io::request::{
 use crate::io::threadpool::{PoolCompletion, PoolOp, StdinOpKind, StdinThread, ThreadPoolBackend};
 use crate::io::types::{FdState, PortKey};
 use crate::io::Completion;
-use crate::port::{Encoding, Port, PortKind};
+use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::{error_val, Value};
 
 use std::cell::RefCell;
@@ -104,6 +104,18 @@ impl AsyncBackend {
         }
         if let IoOp::ProcessWait = request.op {
             return self.submit_process_wait(&request.port);
+        }
+
+        // Open is portless — creates a new port rather than operating on one.
+        if let IoOp::Open {
+            ref path,
+            flags,
+            mode,
+            direction,
+            encoding,
+        } = request.op
+        {
+            return self.submit_open(path, flags, mode, direction, encoding, request.timeout);
         }
 
         let port = request
@@ -523,6 +535,72 @@ impl AsyncBackend {
         pending.insert(
             id,
             PendingOp::Sleep {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Submit a file open operation. Open creates a new port, so
+    /// request.port is Value::NIL — we handle it before the port guard.
+    fn submit_open(
+        &self,
+        path: &str,
+        flags: i32,
+        mode: u32,
+        direction: Direction,
+        encoding: Encoding,
+        timeout: Option<Duration>,
+    ) -> Result<u64, String> {
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        let c_path = std::ffi::CString::new(path)
+            .map_err(|_| format!("port/open: path contains null byte: {}", path))?;
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ref mut buffer_pool,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                crate::io::uring::submit_uring_open(
+                    ring,
+                    id,
+                    &c_path,
+                    flags,
+                    mode,
+                    timeout,
+                    buffer_pool,
+                    buf_handle,
+                )?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                let _ = buffer_pool;
+                network_pool.submit(
+                    id,
+                    PoolOp::Open {
+                        path: c_path,
+                        flags,
+                        mode,
+                    },
+                )?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::Open {
+                path: path.to_string(),
+                direction,
+                encoding,
                 buffer_handle: buf_handle,
             },
         );
@@ -984,7 +1062,8 @@ impl AsyncBackendInner {
             | IoOp::Shutdown { .. }
             | IoOp::Sleep { .. }
             | IoOp::Spawn(_)
-            | IoOp::ProcessWait => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::ProcessWait
+            | IoOp::Open { .. } => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)
@@ -1659,5 +1738,100 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── IoOp::Open integration tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_async_open_regular_file_returns_port() {
+        let path = format!("/tmp/elle-test-async-open-{}", std::process::id());
+        std::fs::write(&path, "async open test").unwrap();
+
+        let backend = AsyncBackend::new().unwrap();
+        let req = IoRequest {
+            op: IoOp::Open {
+                path: path.clone(),
+                flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                mode: 0o666,
+                direction: crate::port::Direction::Read,
+                encoding: crate::port::Encoding::Text,
+            },
+            port: Value::NIL,
+            timeout: None,
+        };
+        let id = backend.submit(&req).unwrap();
+        let completions = backend.wait(-1).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        assert!(
+            completions[0].result.is_ok(),
+            "open should succeed for existing file: {:?}",
+            completions[0].result
+        );
+        // Result must be a port value
+        let val = completions[0].result.as_ref().unwrap();
+        assert_eq!(
+            val.external_type_name(),
+            Some("port"),
+            "open result must be a port"
+        );
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_async_open_nonexistent_path_errors() {
+        let path = "/tmp/elle-test-async-open-nonexistent-dir/nofile";
+        let backend = AsyncBackend::new().unwrap();
+        let req = IoRequest {
+            op: IoOp::Open {
+                path: path.to_string(),
+                flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                mode: 0o666,
+                direction: crate::port::Direction::Read,
+                encoding: crate::port::Encoding::Text,
+            },
+            port: Value::NIL,
+            timeout: None,
+        };
+        let id = backend.submit(&req).unwrap();
+        let completions = backend.wait(-1).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        assert!(
+            completions[0].result.is_err(),
+            "open must error for nonexistent path"
+        );
+    }
+
+    #[test]
+    fn test_async_open_with_timeout_succeeds_on_regular_file() {
+        let path = format!("/tmp/elle-test-async-open-timeout-{}", std::process::id());
+        std::fs::write(&path, "timeout test").unwrap();
+
+        let backend = AsyncBackend::new().unwrap();
+        let req = IoRequest {
+            op: IoOp::Open {
+                path: path.clone(),
+                flags: libc::O_RDONLY | libc::O_CLOEXEC,
+                mode: 0o666,
+                direction: crate::port::Direction::Read,
+                encoding: crate::port::Encoding::Text,
+            },
+            port: Value::NIL,
+            timeout: Some(std::time::Duration::from_millis(5000)),
+        };
+        let id = backend.submit(&req).unwrap();
+        let completions = backend.wait(-1).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        // Regular file opens instantly — should succeed before the 5s timeout.
+        assert!(
+            completions[0].result.is_ok(),
+            "open with generous timeout must succeed for regular file: {:?}",
+            completions[0].result
+        );
+
+        std::fs::remove_file(&path).ok();
     }
 }

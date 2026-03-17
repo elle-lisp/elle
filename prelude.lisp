@@ -85,8 +85,17 @@
      (fiber/resume f nil)
      [(= (fiber/status f) :dead) (fiber/value f)]))
 
-## defer - run cleanup after body regardless of success/failure
-## If the body errors, cleanup runs then the error is propagated.
+## defer - run cleanup-expr unconditionally after body, even on error.
+##
+## First argument:    cleanup-expr — evaluated after body completes (success or error).
+## Remaining arguments: body — evaluated in a fiber; produces the return value.
+##
+## Returns the body's value on success; propagates the body's error after cleanup.
+##
+## Example:
+##   (defer (port/close p)           # cleanup: always closes p
+##     (stream/read-all p)           # body: produces the file contents
+##     )
 (defmacro defer (cleanup & body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
      (fiber/resume f nil)

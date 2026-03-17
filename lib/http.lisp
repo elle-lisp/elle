@@ -346,11 +346,12 @@
       (assert (= h:x-foo "bar baz") "read-headers trims whitespace")))
 
   # read-headers malformed
+  # port/open must be called before protect because port/open now yields SIG_IO;
+  # protect's fiber mask (1 = SIG_ERROR only) cannot handle SIG_IO propagation.
   (spit "/tmp/elle-http-test-headers-bad" "no-colon-here\r\n\r\n")
-  (let [[[ok? _] (protect
-                   (let [[p (port/open "/tmp/elle-http-test-headers-bad" :read)]]
-                     (ev/spawn (fn [] (read-headers p)))))]]
-    (assert (not ok?) "read-headers malformed signals error"))
+  (let [[p-bad (port/open "/tmp/elle-http-test-headers-bad" :read)]]
+    (let [[[ok? _] (protect (ev/spawn (fn [] (read-headers p-bad))))]]
+      (assert (not ok?) "read-headers malformed signals error")))
 
   # write-headers
   (let [[p (port/open "/tmp/elle-http-test-write-headers" :write)]]
