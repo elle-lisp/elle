@@ -26,6 +26,10 @@ use oxigraph::store::Store;
 /// `PluginContext` reference. Only safe when called from `load_plugin`.
 #[no_mangle]
 pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
+    // Route keyword operations to the host's global name table.
+    // Must be called before any keyword is created or looked up.
+    ctx.init_keywords();
+
     let mut fields = BTreeMap::new();
     for def in PRIMITIVES {
         ctx.register(def);
