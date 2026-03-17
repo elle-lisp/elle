@@ -65,70 +65,106 @@ pub(crate) struct CallSiteMeta {
 
 /// Handle signal bits from a primitive call in JIT context.
 ///
-/// With the relaxed JIT gate, SIG_YIELD can now appear here from primitives
-/// like `fiber/resume`. VM-internal signals (SIG_RESUME, SIG_PROPAGATE,
-/// SIG_ABORT) are dispatched to the VM's fiber handlers, which run the
-/// child fiber synchronously and return a result.
-/// SIG_ERROR sets the exception on the fiber for the JIT caller to check.
-/// SIG_QUERY is dispatched to the VM's query handler (for primitives like
-/// `list-primitives` and `primitive-meta` that read VM state).
+/// Mirrors `VM::handle_primitive_signal`: exact-match for VM-internal signals
+/// (which are produced by specific primitives with known bit patterns) and
+/// `contains()` for user-facing signals (which can be composed, e.g.
+/// `SIG_ERROR | SIG_IO` from an I/O primitive that errors, or
+/// `SIG_YIELD | SIG_IO` from an I/O primitive that suspends).
+///
+/// VM-internal signals (SIG_RESUME, SIG_PROPAGATE, SIG_ABORT) are dispatched
+/// to the VM's fiber handlers, which run the child fiber synchronously and
+/// return a result.
+///
+/// SIG_ERROR (and any composed error signal) stores the exception on the fiber
+/// for the JIT caller to check. SIG_QUERY is dispatched to the VM's query
+/// handler. SIG_YIELD (bare or composed, e.g. SIG_YIELD|SIG_IO) returns
+/// YIELD_SENTINEL — fiber.signal is already set by the primitive. Any
+/// remaining signal (user-defined, SIG_DEBUG, SIG_FUEL, etc.) is treated as
+/// a suspension: fiber.signal is set and YIELD_SENTINEL is returned.
 fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
-    match bits {
-        SIG_OK => value.to_bits(),
-        SIG_ERROR | SIG_HALT => {
-            vm.fiber.signal = Some((bits, value));
-            TAG_NIL
-        }
-        SIG_QUERY => {
-            // arena/allocs needs mutable VM access to call the thunk —
-            // handle before dispatch_query (which takes &self).
-            if let Some(cons) = value.as_cons() {
-                if cons.first.as_keyword_name() == Some("arena/allocs") {
-                    let thunk = cons.rest;
-                    match vm.handle_arena_allocs(thunk) {
-                        Ok(val) => return val.to_bits(),
-                        Err(_bits) => return TAG_NIL,
-                    }
-                }
+    if bits.is_ok() {
+        return value.to_bits();
+    }
+
+    // --- VM-internal signals (exact match — never composed) ---
+
+    if bits == SIG_RESUME {
+        // Fiber primitive (fiber/resume, coro/resume) returned SIG_RESUME.
+        // Dispatch to the VM's fiber handler which runs the child fiber
+        // synchronously and returns value bits, TAG_NIL (error), or
+        // YIELD_SENTINEL (yield propagation).
+        return vm.handle_fiber_resume_signal_jit(value);
+    }
+
+    if bits == SIG_PROPAGATE {
+        // fiber/propagate: propagate the child fiber's signal.
+        return vm.handle_fiber_propagate_signal_jit(value);
+    }
+
+    if bits == SIG_ABORT && value.as_fiber().is_some() {
+        // fiber/abort: inject error into suspended fiber (abort).
+        // SIG_ABORT == SIG_ERROR | SIG_TERMINAL; check exact bits before
+        // the contains(SIG_ERROR) arm below to avoid misrouting.
+        return vm.handle_fiber_abort_signal_jit(value);
+    }
+
+    if bits == SIG_QUERY {
+        // arena/allocs needs mutable VM access to call the thunk —
+        // handle before dispatch_query (which takes &self).
+        if let Some(cons) = value.as_cons() {
+            if cons.first.as_keyword_name() == Some("arena/allocs") {
+                let thunk = cons.rest;
+                return match vm.handle_arena_allocs(thunk) {
+                    Ok(val) => val.to_bits(),
+                    Err(_bits) => TAG_NIL,
+                };
             }
-            // Dispatch VM state query and return the result.
-            let (sig, result) = vm.dispatch_query(value);
-            if sig == SIG_ERROR {
-                vm.fiber.signal = Some((SIG_ERROR, result));
-                TAG_NIL
-            } else {
-                result.to_bits()
-            }
         }
-        SIG_YIELD => {
-            // A primitive yielded (e.g., fiber/resume). fiber.signal is
-            // already set by the primitive. Return YIELD_SENTINEL so the
-            // JIT caller can side-exit.
-            YIELD_SENTINEL
-        }
-        SIG_RESUME => {
-            // Fiber primitive (fiber/resume, coro/resume) returned
-            // SIG_RESUME. Dispatch to the VM's fiber handler which runs
-            // the child fiber synchronously and returns value bits,
-            // TAG_NIL (error), or YIELD_SENTINEL (yield propagation).
-            vm.handle_fiber_resume_signal_jit(value)
-        }
-        SIG_PROPAGATE => {
-            // fiber/propagate: propagate the child fiber's signal.
-            vm.handle_fiber_propagate_signal_jit(value)
-        }
-        SIG_ABORT if value.as_fiber().is_some() => {
-            // fiber/abort: inject error into suspended fiber (abort).
-            vm.handle_fiber_abort_signal_jit(value)
-        }
-        _ => {
-            panic!(
-                "Unhandled signal {} reached JIT-compiled code. \
-                 This indicates a missing signal handler in jit_handle_primitive_signal.",
-                bits
-            );
+        // Dispatch VM state query and return the result.
+        let (sig, result) = vm.dispatch_query(value);
+        if sig == SIG_ERROR {
+            vm.fiber.signal = Some((SIG_ERROR, result));
+            return TAG_NIL;
+        } else {
+            return result.to_bits();
         }
     }
+
+    // --- User-facing signals (contains — handles composed bits) ---
+
+    if bits.contains(SIG_ERROR) {
+        // Handles SIG_ERROR, SIG_ERROR|SIG_IO, SIG_ERROR|SIG_TERMINAL, etc.
+        // fiber.signal is set here; the JIT caller checks for exception after
+        // return (elle_jit_has_exception).
+        vm.fiber.signal = Some((bits, value));
+        return TAG_NIL;
+    }
+
+    if bits.contains(SIG_HALT) {
+        vm.fiber.signal = Some((bits, value));
+        return TAG_NIL;
+    }
+
+    if bits.contains(SIG_YIELD) {
+        // Handles SIG_YIELD, SIG_YIELD|SIG_IO, SIG_YIELD|SIG_EXEC, etc.
+        // fiber.signal is already set by the primitive before returning.
+        // Return YIELD_SENTINEL so the JIT caller can side-exit.
+        return YIELD_SENTINEL;
+    }
+
+    // Any remaining signal: user-defined (bits 16+), SIG_DEBUG, SIG_FUEL, or
+    // any other suspension signal not covered above. Mirror the VM's catch-all:
+    // store the signal on the fiber and return YIELD_SENTINEL. The JIT caller's
+    // yield check (elle_jit_has_signal) detects the pending signal and
+    // propagates it.
+    //
+    // NOTE: SIG_FUEL is emitted by the VM dispatch loop's check_fuel! macro,
+    // not by primitives, so it should not appear here in practice. User-defined
+    // signals (bits 16+) from primitives would require explicit registration
+    // and emission, which no current primitive does. SIG_DEBUG has no current
+    // emitter. All are handled gracefully rather than panicking.
+    vm.fiber.signal = Some((bits, value));
+    YIELD_SENTINEL
 }
 
 // =============================================================================
@@ -720,12 +756,17 @@ pub(crate) fn build_closure_env_for_jit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::fiber::{SIG_DEBUG, SIG_IO};
+    use crate::vm::VM;
+
+    fn make_vm() -> VM {
+        VM::new()
+    }
 
     #[test]
     fn test_has_exception() {
         use crate::primitives::register_primitives;
         use crate::symbol::SymbolTable;
-        use crate::vm::VM;
 
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
@@ -754,5 +795,113 @@ mod tests {
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
         let val = unsafe { Value::from_bits(result) };
         assert_eq!(val.as_bool(), Some(false));
+    }
+
+    // -- jit_handle_primitive_signal: composed signal coverage --
+    //
+    // These tests exercise the cases previously unreachable through the
+    // old exact-match dispatch, which would have panicked on any composed
+    // or non-listed signal bit pattern.
+
+    #[test]
+    fn sig_ok_returns_value() {
+        let mut vm = make_vm();
+        let result = jit_handle_primitive_signal(&mut vm, SIG_OK, Value::int(42));
+        assert_eq!(unsafe { Value::from_bits(result) }, Value::int(42));
+        assert!(vm.fiber.signal.is_none());
+    }
+
+    #[test]
+    fn bare_sig_error_stores_signal_returns_nil() {
+        let mut vm = make_vm();
+        let err = Value::string("boom");
+        let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
+        assert_eq!(result, TAG_NIL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_ERROR);
+    }
+
+    #[test]
+    fn composed_sig_error_io_stores_signal_returns_nil() {
+        // SIG_ERROR | SIG_IO is returned by I/O primitives that fail.
+        // This previously hit the panic arm.
+        let mut vm = make_vm();
+        let bits = SIG_ERROR | SIG_IO;
+        let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
+        assert_eq!(result, TAG_NIL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR));
+        assert!(sig.contains(SIG_IO));
+    }
+
+    #[test]
+    fn bare_sig_yield_returns_yield_sentinel() {
+        let mut vm = make_vm();
+        vm.fiber.signal = Some((SIG_YIELD, Value::int(1)));
+        let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
+        assert_eq!(result, YIELD_SENTINEL);
+    }
+
+    #[test]
+    fn composed_sig_yield_io_returns_yield_sentinel() {
+        // SIG_YIELD | SIG_IO is returned by every I/O primitive.
+        // This is the primary real-world trigger for the panic — any JIT-compiled
+        // function calling an I/O primitive (port/read, socket/accept, etc.)
+        // would have panicked before this fix.
+        let mut vm = make_vm();
+        let bits = SIG_YIELD | SIG_IO;
+        vm.fiber.signal = Some((bits, Value::int(99)));
+        let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
+        assert_eq!(result, YIELD_SENTINEL);
+        // Signal must still be on the fiber for the scheduler to pick up.
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, bits);
+    }
+
+    #[test]
+    fn sig_halt_stores_signal_returns_nil() {
+        let mut vm = make_vm();
+        let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0));
+        assert_eq!(result, TAG_NIL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_HALT);
+    }
+
+    #[test]
+    fn sig_debug_treated_as_suspension() {
+        // SIG_DEBUG has no current primitive emitter but must not panic.
+        let mut vm = make_vm();
+        vm.fiber.signal = Some((SIG_DEBUG, Value::NIL));
+        let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL);
+        assert_eq!(result, YIELD_SENTINEL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_DEBUG);
+    }
+
+    #[test]
+    fn user_defined_signal_treated_as_suspension() {
+        // A user-defined signal (bits 16+) must not panic.
+        let user_bit = SignalBits::new(1 << 16);
+        let mut vm = make_vm();
+        vm.fiber.signal = Some((user_bit, Value::NIL));
+        let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);
+        assert_eq!(result, YIELD_SENTINEL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, user_bit);
+    }
+
+    #[test]
+    fn sig_error_terminal_stored_as_error_not_panic() {
+        // SIG_ABORT == SIG_ERROR | SIG_TERMINAL but without a fiber value,
+        // the SIG_ABORT exact-match guard fails (value.as_fiber() is None).
+        // It must fall through to the contains(SIG_ERROR) arm, not panic.
+        use crate::value::fiber::SIG_TERMINAL;
+        let bits = SIG_ERROR | SIG_TERMINAL;
+        let mut vm = make_vm();
+        let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
+        assert_eq!(result, TAG_NIL);
+        let (sig, _) = vm.fiber.signal.take().unwrap();
+        assert!(sig.contains(SIG_ERROR));
+        assert!(sig.contains(SIG_TERMINAL));
     }
 }
