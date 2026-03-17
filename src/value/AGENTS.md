@@ -28,7 +28,8 @@ Runtime value representation using NaN-boxing.
 | `heap.rs` | `HeapObject` enum, `Cons`, `ThreadHandle`, `BindingInner`, `BindingScope`, `LSet`, `LSetMut` (re-exports arena functions) |
 | `send.rs` | `SendValue` wrapper for thread-safe transfer |
 | `display.rs` | `Display` implementation for values |
-| `intern.rs` | String interning (used by both strings and keywords) |
+| `intern.rs` | String interning (SSO fallback and heap interning for strings only) |
+| `keyword.rs` | Hash-based keyword identity: FNV-1a hash, global name table, DSO routing |
 
 ## Key types
 
