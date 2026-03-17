@@ -127,7 +127,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
 | `calling.rs` | `ffi/call` |
 | `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
-| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after `--`, empty without `--`), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
+| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after the source file in argv, empty if none), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
 
 ## string/format primitive
 
@@ -259,12 +259,13 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 **Location:** `src/primitives/subprocess.rs`
 
 - `sys/args` — Returns user-provided command-line arguments as an immutable
-  array of strings. Arguments are those passed after the first `--` separator
-  in the process argv. Without `--`, returns an empty array `[]`. Reads from
-  `vm.user_args` via `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
-  - Shebang usage: `#!/usr/bin/env -S elle --`
-  - Example: `elle script.lisp -- foo bar` → `sys/args` returns `["foo" "bar"]`
-  - Without separator: `elle script.lisp` → `sys/args` returns `[]`
+  array of strings. Arguments are those that follow the source file (or `-` for
+  stdin) in the process argv. Returns an empty array `[]` if no args follow the
+  source file, or if running in REPL mode. Reads from `vm.user_args` via
+  `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
+  - Example: `elle script.lisp foo bar` → `sys/args` returns `["foo" "bar"]`
+  - Flags after source: `elle script.lisp -v foo` → `sys/args` returns `["-v" "foo"]`
+  - No trailing args: `elle script.lisp` → `sys/args` returns `[]`
 
 - `sys/env` — Returns the process environment as an immutable struct
   `{"KEY" "value" ...}` with string keys. Uses `std::env::vars_os()` with
