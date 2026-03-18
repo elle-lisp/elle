@@ -14,6 +14,7 @@
 #   JSON parse        — json-parse for null, bool, int, float, string,
 #                       array, object, nested
 #   JSON serialize    — json-serialize, json-serialize-pretty, round-trip
+#   File seeking      — port/tell, port/seek :from :start/:current/:end
 
 # import-file loads another .lisp file and returns its last expression's
 # value. assertions.lisp is loaded at the top of every example — this
@@ -158,7 +159,50 @@
 
 
 # ========================================
-# 7. JSON: parsing scalars
+# 5.5. File seeking and positioning
+# ========================================
+
+(let ((p (port/open "/tmp/elle-example-seek-tell" :read-write)))
+  # Write 10 bytes
+  (stream/write p "0123456789")
+  (display "  wrote 10 bytes\n")
+
+  # Seek to start and read
+  (port/seek p 0 :from :start)
+  (let ((first (stream/read p 1)))
+    (display "  seek to start, read: ") (display first) (display "\n")
+    (assert-eq first "0" "byte at position 0 is '0'"))
+
+  # Seek to position 5
+  (port/seek p 5 :from :start)
+  (let ((mid (stream/read p 1)))
+    (display "  seek to 5, read: ") (display mid) (display "\n")
+    (assert-eq mid "5" "byte at position 5 is '5'"))
+
+  # Tell at current position
+  (port/seek p 0 :from :start)
+  (let ((pos (port/tell p)))
+    (display "  tell at start: ") (display pos) (display "\n")
+    (assert-eq pos 0 "tell at start is 0"))
+
+  # Seek relative to current
+  (port/seek p 3 :from :current)
+  (let ((pos2 (port/tell p)))
+    (display "  tell after +3 relative seek: ") (display pos2) (display "\n")
+    (assert-eq pos2 3 "relative seek +3 gives position 3"))
+
+  # Seek from end
+  (port/seek p -2 :from :end)
+  (let ((last (stream/read p 1)))
+    (display "  seek to -2 from end, read: ") (display last) (display "\n")
+    (assert-eq last "8" "byte at -2 from end of 10-byte file is '8'"))
+
+  (port/close p)
+  (subprocess/system "rm" ["-f" "/tmp/elle-example-seek-tell"]))
+
+
+# ========================================
+# 6. JSON: parsing scalars
 # ========================================
 
 (assert-eq (json-parse "null") nil "json-parse null")
@@ -170,7 +214,7 @@
 
 
 # ========================================
-# 8. JSON: serializing scalars
+# 7. JSON: serializing scalars
 # ========================================
 
 (assert-eq (json-serialize nil) "null" "json-serialize nil")
@@ -182,7 +226,7 @@
 
 
 # ========================================
-# 9. JSON: collections and nesting
+# 8. JSON: collections and nesting
 # ========================================
 
 (def arr (json-parse "[1, \"two\", true, null]"))
@@ -202,7 +246,7 @@
 
 
 # ========================================
-# 10. JSON: round-trip
+# 9. JSON: round-trip
 # ========================================
 
 # Serialize a list as a JSON array.
@@ -226,7 +270,7 @@
 
 
 # ========================================
-# 11. JSON: file I/O integration
+# 10. JSON: file I/O integration
 # ========================================
 
 # Write JSON to a file and read it back — the natural use case.

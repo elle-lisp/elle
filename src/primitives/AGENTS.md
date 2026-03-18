@@ -102,7 +102,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `structs.rs` | `struct` |
 | `fileio.rs` | `file/read` (`slurp`), `file/write` (`spit`), `file/append`, `file/delete`, `file/delete-dir`, `file/mkdir`, `file/mkdir-all`, `file/rename`, `file/copy`, `file/size`, `file/ls`, `file/lines`, `file/stat`, `file/lstat` |
 | `path.rs` | `path/join`, `path/parent`, `path/filename`, `path/stem`, `path/extension`, `path/with-extension`, `path/normalize`, `path/absolute`, `path/canonicalize`, `path/relative`, `path/components`, `path/absolute?`, `path/relative?`, `path/cwd`, `path/exists?`, `path/file?`, `path/dir?` |
-| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options` |
+| `ports.rs` | `port/open`, `port/open-bytes`, `port/close`, `port/stdin`, `port/stdout`, `port/stderr`, `port?`, `port/open?`, `port/set-options`, `port/path`, `port/seek`, `port/tell` |
 | `net.rs` | `tcp/listen`, `tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/bind`, `udp/send-to`, `udp/recv-from` |
 | `unix.rs` | `unix/listen`, `unix/accept`, `unix/connect`, `unix/shutdown` |
 | `kwarg.rs` | `extract_keyword_timeout` helper function |
@@ -343,6 +343,68 @@ Used by network primitives and stream primitives to parse optional timeout argum
 **Primitive:** `port/set-options port :timeout ms` (or `:timeout nil` to clear)
 
 Sets port-level options. Currently supports `:timeout ms` (non-negative integer in milliseconds, or nil to clear). Stored as `Cell<Option<u64>>` on Port struct. Unknown keywords signal error. Odd trailing args signal error.
+
+## port/seek and port/tell Primitives
+
+**Location:** `src/primitives/ports.rs`
+
+### port/seek
+
+**Signature:** `(port/seek port offset)` or `(port/seek port offset :from :start|:current|:end)`
+
+**Purpose:** Seek to a byte offset in a file port. Returns the new absolute byte offset as int. Discards the per-fd read buffer before seeking to prevent stale buffered data from diverging from the kernel position.
+
+**Behavior:**
+- Validates arity (2 or 4 args; 0, 1, 3, or 5+ are errors)
+- Validates port is a file port (`PortKind::File`); errors on stdio or network ports
+- Validates offset is an integer
+- Parses optional `:from :start|:current|:end` pair; default is `:start` (SEEK_SET)
+- Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Seek { offset, whence }`
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| 0, 1, or 5+ args | `arity-error` | `"port/seek: expected 2 or 4 arguments, got N"` |
+| 3 args (incomplete :from pair) | `arity-error` | `"port/seek: :from keyword requires a value"` |
+| First arg not a port | `type-error` | `"port/seek: expected port, got {type}"` |
+| Port is not a file port | `type-error` | `"port/seek: expected file port, got {kind}"` |
+| Offset not an integer | `type-error` | `"port/seek: expected integer for offset, got {type}"` |
+| args[2] not the keyword `:from` | `value-error` | `"port/seek: unknown keyword :{other}, expected :from"` |
+| args[2] not a keyword at all | `type-error` | `"port/seek: expected keyword for third argument, got {type}"` |
+| args[3] not `:start`/`:current`/`:end` keyword | `value-error` | `"port/seek: invalid :from value :{other}, expected :start, :current, or :end"` |
+| args[3] not a keyword | `type-error` | `"port/seek: expected keyword for :from value, got {type}"` |
+
+**Invariants:**
+
+1. **Buffer discard on seek.** The scheduler/backend must discard any buffered read data after seek so that subsequent reads start from the new position.
+2. **Default origin is SEEK_SET.** Omitting `:from` seeks from the start of the file.
+3. **File ports only.** Non-file ports (stdin, stdout, stderr, TCP streams, etc.) always return type-error.
+
+### port/tell
+
+**Signature:** `(port/tell port)`
+
+**Purpose:** Return the current logical read position in a file port. Logical position = kernel file offset minus buffered-but-unconsumed bytes.
+
+**Behavior:**
+- Validates arity (exactly 1 arg)
+- Validates port is a file port; errors on other kinds
+- Yields `SIG_YIELD | SIG_IO` with an `IoRequest` containing `IoOp::Tell`
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| Wrong arity | `arity-error` | `"port/tell: expected 1 argument, got N"` |
+| Argument not a port | `type-error` | `"port/tell: expected port, got {type}"` |
+| Port is not a file port | `type-error` | `"port/tell: expected file port, got {kind}"` |
+
+**Invariants:**
+
+1. **Logical position.** The returned offset reflects the user-visible read position, not the raw kernel offset. The backend subtracts any buffered bytes from the kernel offset.
+2. **Coherent with seek.** `(port/seek p N)` followed by `(port/tell p)` returns `N` (assuming no buffered bytes after seek).
+3. **File ports only.** Non-file ports always return type-error.
 
 ## squelch Primitive
 

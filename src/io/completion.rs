@@ -268,6 +268,13 @@ pub(super) fn process_raw_completion(
                     // Open ops use PendingOp::Open, not PendingOp::Port — cannot reach here.
                     unreachable!("Open should use PendingOp::Open variant")
                 }
+                IoOp::Seek { .. } | IoOp::Tell => {
+                    // Seek/Tell are immediate completions (lseek syscall, no io_uring).
+                    // They never produce a PendingOp::Port entry — cannot reach here.
+                    unreachable!(
+                        "Seek/Tell are handled as immediate completions before PendingOp insertion"
+                    )
+                }
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
                     if data.len() < 4 {
