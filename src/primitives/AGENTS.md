@@ -97,7 +97,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `string.rs` | `@string` (constructor), `string/upcase`, `string/downcase`, `string/slice`, `string/find`, `string/split`, `string/replace`, `string/trim`, `string/contains?`, `string/starts-with?`, `string/ends-with?`, `string/join`, `string/size-of` |
 | `format.rs` | `string/format` |
 | `table.rs` | `@struct`, `del`, `keys`, `values`, `has-key?` (imports `get`/`put` from `access.rs`) |
-| `access.rs` | `get`, `put` — polymorphic collection access |
+| `access.rs` | `get`, `put` — polymorphic collection access; @string `put` uses grapheme-cluster indexing (matching immutable `string`), value must be a string |
 | `sets.rs` | `set`, `@set`, `set?`, `contains?`, `add`, `del`, `union`, `intersection`, `difference`, `set->array`, `seq->set` |
 | `structs.rs` | `struct` |
 | `fileio.rs` | `slurp`, `spit` |

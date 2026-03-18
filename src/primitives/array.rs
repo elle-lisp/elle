@@ -77,31 +77,22 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(buf_ref) = args[0].as_string_mut() {
-        let byte = match args[1].as_int() {
-            Some(n) if (0..=255).contains(&n) => n as u8,
-            Some(n) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!("push: byte value out of range 0-255: {}", n),
-                    ),
-                )
-            }
+        let s = match args[1].with_string(|s| s.to_string()) {
+            Some(s) => s,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "push: @string value must be integer, got {}",
+                            "push: @string value must be string, got {}",
                             args[1].type_name()
                         ),
                     ),
                 )
             }
         };
-        buf_ref.borrow_mut().push(byte);
+        buf_ref.borrow_mut().extend_from_slice(s.as_bytes());
         return (SIG_OK, args[0]);
     }
 
@@ -177,19 +168,32 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(buf_ref) = args[0].as_string_mut() {
         let mut buf = buf_ref.borrow_mut();
-        match buf.pop() {
-            Some(byte) => {
-                drop(buf);
-                return (SIG_OK, Value::int(byte as i64));
-            }
-            None => {
+        if buf.is_empty() {
+            drop(buf);
+            return (
+                SIG_ERROR,
+                error_val("error", "pop: empty @string".to_string()),
+            );
+        }
+        let s = match std::str::from_utf8(&buf) {
+            Ok(s) => s,
+            Err(_) => {
                 drop(buf);
                 return (
                     SIG_ERROR,
-                    error_val("error", "pop: empty @string".to_string()),
+                    error_val(
+                        "encoding-error",
+                        "pop: @string contains invalid UTF-8".to_string(),
+                    ),
                 );
             }
-        }
+        };
+        use unicode_segmentation::UnicodeSegmentation;
+        let cluster = s.graphemes(true).next_back().unwrap().to_string();
+        let new_len = buf.len() - cluster.len();
+        buf.truncate(new_len);
+        drop(buf);
+        return (SIG_OK, Value::string(cluster));
     }
 
     if let Some(blob_ref) = args[0].as_bytes_mut() {
