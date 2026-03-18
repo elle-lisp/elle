@@ -43,3 +43,8 @@ fn run_elle_script(name: &str) {
 fn jit() {
     run_elle_script("jit");
 }
+
+#[test]
+fn file_stat() {
+    run_elle_script("file_stat");
+}
