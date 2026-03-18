@@ -3,7 +3,9 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, TableKey, Value};
+use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Read entire file as a string
 pub(crate) fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
@@ -429,6 +431,135 @@ pub(crate) fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+fn kw(name: &str) -> TableKey {
+    TableKey::Keyword(name.to_string())
+}
+
+fn system_time_to_value(result: std::io::Result<SystemTime>) -> Value {
+    match result {
+        Ok(t) => match t.duration_since(UNIX_EPOCH) {
+            Ok(d) => Value::float(d.as_secs_f64()),
+            Err(_) => Value::NIL,
+        },
+        Err(_) => Value::NIL,
+    }
+}
+
+fn file_type_string(meta: &std::fs::Metadata) -> &'static str {
+    let ft = meta.file_type();
+    if ft.is_file() {
+        "file"
+    } else if ft.is_dir() {
+        "dir"
+    } else if ft.is_symlink() {
+        "symlink"
+    } else {
+        "other"
+    }
+}
+
+#[cfg(unix)]
+fn insert_unix_fields(fields: &mut BTreeMap<TableKey, Value>, meta: &std::fs::Metadata) {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    fields.insert(
+        kw("permissions"),
+        Value::int(meta.permissions().mode() as i64),
+    );
+    fields.insert(kw("uid"), Value::int(meta.uid() as i64));
+    fields.insert(kw("gid"), Value::int(meta.gid() as i64));
+    fields.insert(kw("nlinks"), Value::int(meta.nlink() as i64));
+    fields.insert(kw("inode"), Value::int(meta.ino() as i64));
+    fields.insert(kw("dev"), Value::int(meta.dev() as i64));
+    fields.insert(kw("rdev"), Value::int(meta.rdev() as i64));
+    fields.insert(kw("blocks"), Value::int(meta.blocks() as i64));
+    fields.insert(kw("blksize"), Value::int(meta.blksize() as i64));
+}
+
+#[cfg(not(unix))]
+fn insert_unix_fields(fields: &mut BTreeMap<TableKey, Value>, _meta: &std::fs::Metadata) {
+    for name in [
+        "permissions",
+        "uid",
+        "gid",
+        "nlinks",
+        "inode",
+        "dev",
+        "rdev",
+        "blocks",
+        "blksize",
+    ] {
+        fields.insert(kw(name), Value::NIL);
+    }
+}
+
+fn build_stat_struct(meta: &std::fs::Metadata) -> Value {
+    let mut fields = BTreeMap::new();
+    fields.insert(kw("accessed"), system_time_to_value(meta.accessed()));
+    fields.insert(kw("created"), system_time_to_value(meta.created()));
+    fields.insert(kw("file-type"), Value::string(file_type_string(meta)));
+    fields.insert(kw("is-dir"), Value::bool(meta.is_dir()));
+    fields.insert(kw("is-file"), Value::bool(meta.is_file()));
+    fields.insert(kw("is-symlink"), Value::bool(meta.is_symlink()));
+    fields.insert(kw("modified"), system_time_to_value(meta.modified()));
+    fields.insert(kw("readonly"), Value::bool(meta.permissions().readonly()));
+    fields.insert(kw("size"), Value::int(meta.len() as i64));
+    insert_unix_fields(&mut fields, meta);
+    Value::struct_from(fields)
+}
+
+fn stat_impl(
+    args: &[Value],
+    name: &str,
+    metadata_fn: fn(&str) -> std::io::Result<std::fs::Metadata>,
+) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("{}: expected 1 argument, got {}", name, args.len()),
+            ),
+        );
+    }
+    if args[0].is_string() {
+        args[0]
+            .with_string(|path| match metadata_fn(path) {
+                Ok(meta) => (SIG_OK, build_stat_struct(&meta)),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val("io-error", format!("{}: {}: {}", name, path, e)),
+                ),
+            })
+            .unwrap()
+    } else {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("{}: expected string, got {}", name, args[0].type_name()),
+            ),
+        )
+    }
+}
+
+fn metadata_follow(path: &str) -> std::io::Result<std::fs::Metadata> {
+    std::fs::metadata(path)
+}
+
+fn metadata_nofollow(path: &str) -> std::io::Result<std::fs::Metadata> {
+    std::fs::symlink_metadata(path)
+}
+
+/// Get filesystem metadata for a path (follows symlinks).
+pub(crate) fn prim_file_stat(args: &[Value]) -> (SignalBits, Value) {
+    stat_impl(args, "file/stat", metadata_follow)
+}
+
+/// Get filesystem metadata for a path (does not follow symlinks).
+pub(crate) fn prim_file_lstat(args: &[Value]) -> (SignalBits, Value) {
+    stat_impl(args, "file/lstat", metadata_nofollow)
+}
+
 /// List directory contents
 pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -640,6 +771,28 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "file",
         example: "(file/size \"data.txt\")",
         aliases: &["file-size"],
+    },
+    PrimitiveDef {
+        name: "file/stat",
+        func: prim_file_stat,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Get filesystem metadata as a struct (follows symlinks)",
+        params: &["path"],
+        category: "file",
+        example: "(file/stat \"data.txt\")",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "file/lstat",
+        func: prim_file_lstat,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Get filesystem metadata as a struct (does not follow symlinks)",
+        params: &["path"],
+        category: "file",
+        example: "(file/lstat \"link.txt\")",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "file/ls",
