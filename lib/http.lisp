@@ -156,7 +156,7 @@
                         :content-length (string (string/size-of body))}]
          [merged (if (nil? headers)
                    base-headers
-                   (merge base-headers headers))]]
+                   (merge base-headers (freeze headers)))]]
     {:status status :headers merged :body body}))
 
 # ============================================================================
@@ -172,7 +172,7 @@
   "Build request headers. Sets connection: keep-alive or close."
   (let [[headers (merge {:host host
                          :connection (if keep-alive "keep-alive" "close")}
-                        (or extra-headers {}))]]
+                        (freeze (or extra-headers {})))]]
     (if (nil? body)
         headers
         (merge headers {:content-length (string (string/size-of body))}))))

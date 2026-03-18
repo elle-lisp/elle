@@ -572,6 +572,107 @@
 (assert-err (fn () (concat @[1 2] [3 4])) "concat mismatched types error")
 (assert-err (fn () (concat 42 99)) "concat unsupported type error")
 
+## === concat - bytes ===
+
+(assert-eq (concat (bytes 1 2) (bytes 3 4)) (bytes 1 2 3 4) "concat bytes basic")
+(assert-eq (concat (bytes) (bytes 1 2)) (bytes 1 2) "concat bytes empty left")
+(assert-eq (concat (bytes 1 2) (bytes)) (bytes 1 2) "concat bytes empty right")
+(assert-eq (concat (bytes 1) (bytes 2) (bytes 3)) (bytes 1 2 3) "concat bytes three")
+(assert-eq (concat (bytes 1)) (bytes 1) "concat bytes single identity")
+(assert-eq (let ((a (bytes 1 2)))
+             (let ((b (concat a (bytes 3 4))))
+               (list (length a) (length b))))
+           (list 2 4)
+           "concat bytes non-destructive")
+
+## === concat - @bytes ===
+
+(assert-eq (concat (@bytes 1 2) (@bytes 3 4)) (@bytes 1 2 3 4) "concat @bytes basic")
+(assert-eq (concat (@bytes) (@bytes 1 2)) (@bytes 1 2) "concat @bytes empty left")
+(assert-eq (concat (@bytes 1 2) (@bytes)) (@bytes 1 2) "concat @bytes empty right")
+(assert-eq (concat (@bytes 1) (@bytes 2) (@bytes 3)) (@bytes 1 2 3) "concat @bytes three")
+(assert-eq (concat (@bytes 1)) (@bytes 1) "concat @bytes single identity")
+
+## === concat - set ===
+
+(assert-eq (concat |1 2| |3 4|) |1 2 3 4| "concat sets disjoint")
+(assert-eq (concat |1 2| |2 3|) |1 2 3| "concat sets overlapping")
+(assert-eq (concat || |1 2|) |1 2| "concat set empty left")
+(assert-eq (concat |1 2| ||) |1 2| "concat set empty right")
+(assert-eq (concat |1| |2| |3|) |1 2 3| "concat sets three")
+(assert-eq (concat |1|) |1| "concat set single identity")
+
+## === concat - @set ===
+
+(assert-eq (concat @|1 2| @|3 4|) @|1 2 3 4| "concat @sets disjoint")
+(assert-eq (concat @|1 2| @|2 3|) @|1 2 3| "concat @sets overlapping")
+(assert-eq (concat @|| @|1 2|) @|1 2| "concat @set empty left")
+(assert-eq (concat @|1 2| @||) @|1 2| "concat @set empty right")
+(assert-eq (concat @|1| @|2| @|3|) @|1 2 3| "concat @sets three")
+(assert-eq (concat @|1|) @|1| "concat @set single identity")
+
+## === concat - struct ===
+
+(assert-eq (concat {:a 1} {:b 2}) {:a 1 :b 2} "concat structs disjoint")
+(assert-eq (concat {:a 1 :b 2} {:b 3 :c 4}) {:a 1 :b 3 :c 4} "concat structs right wins")
+(assert-eq (concat {} {:a 1}) {:a 1} "concat struct empty left")
+(assert-eq (concat {:a 1} {}) {:a 1} "concat struct empty right")
+(assert-eq (concat {:a 1} {:b 2} {:c 3}) {:a 1 :b 2 :c 3} "concat structs three")
+(assert-eq (concat {:a 1} {:a 2} {:a 3}) {:a 3} "concat structs three last wins")
+(assert-eq (concat {:a 1}) {:a 1} "concat struct single identity")
+
+## === concat - @struct ===
+
+(assert-eq (concat @{:a 1} @{:b 2}) @{:a 1 :b 2} "concat @structs disjoint")
+(assert-eq (concat @{:a 1 :b 2} @{:b 3 :c 4}) @{:a 1 :b 3 :c 4} "concat @structs right wins")
+(assert-eq (concat @{} @{:a 1}) @{:a 1} "concat @struct empty left")
+(assert-eq (concat @{:a 1} @{}) @{:a 1} "concat @struct empty right")
+(assert-eq (concat @{:a 1} @{:b 2} @{:c 3}) @{:a 1 :b 2 :c 3} "concat @structs three")
+(assert-eq (concat @{:a 1} @{:a 2} @{:a 3}) @{:a 3} "concat @structs three last wins")
+(assert-eq (concat @{:a 1}) @{:a 1} "concat @struct single identity")
+
+## === concat - new type mismatch errors ===
+
+(assert-err (fn () (concat (bytes 1) [2])) "concat bytes/array mismatch")
+(assert-err (fn () (concat |1| [1])) "concat set/array mismatch")
+(assert-err (fn () (concat {:a 1} [1])) "concat struct/array mismatch")
+(assert-err (fn () (concat (bytes 1) (@bytes 2))) "concat bytes/@bytes mismatch")
+(assert-err (fn () (concat |1| @|1|)) "concat set/@set mismatch")
+(assert-err (fn () (concat {:a 1} @{:a 1})) "concat struct/@struct mismatch")
+
+## === merge - mutability matching ===
+
+(assert-eq (merge {:a 1} {:b 2}) {:a 1 :b 2}
+  "merge: immutable + immutable")
+(assert-eq (merge {:a 1 :b 2} {:b 3 :c 4}) {:a 1 :b 3 :c 4}
+  "merge: immutable right overrides left")
+(assert-eq (merge @{:a 1} @{:b 2}) @{:a 1 :b 2}
+  "merge: mutable + mutable")
+(assert-eq (merge @{:a 1 :b 2} @{:b 3 :c 4}) @{:a 1 :b 3 :c 4}
+  "merge: mutable right overrides left")
+(assert-eq (merge {} {:a 1}) {:a 1}
+  "merge: empty immutable left")
+(assert-eq (merge {:a 1} {}) {:a 1}
+  "merge: empty immutable right")
+(assert-eq (merge @{} @{:a 1}) @{:a 1}
+  "merge: empty mutable left")
+(assert-eq (merge @{:a 1} @{}) @{:a 1}
+  "merge: empty mutable right")
+
+## merge - mutability mismatch errors
+(assert-err-kind (fn () (merge {:a 1} @{:b 2})) :type-error
+  "merge: struct/@struct mismatch")
+(assert-err-kind (fn () (merge @{:a 1} {:b 2})) :type-error
+  "merge: @struct/struct mismatch")
+
+## merge - non-struct errors
+(assert-err-kind (fn () (merge 42 {:a 1})) :type-error
+  "merge: non-struct first arg")
+(assert-err-kind (fn () (merge {:a 1} 42)) :type-error
+  "merge: non-struct second arg")
+(assert-err-kind (fn () (merge {:a 1} [1 2])) :type-error
+  "merge: array second arg")
+
 ## === get on lists ===
 
 (assert-eq (get (list 10 20 30) 0) 10 "get list by index")

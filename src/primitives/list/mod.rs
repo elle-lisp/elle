@@ -554,7 +554,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_concat,
         signal: Signal::errors(),
         arity: Arity::AtLeast(1),
-        doc: "Concatenate one or more collections of the same type. Returns a new value.",
+        doc: "Concatenate one or more collections of the same type. Supports: list, array, @array, string, @string, bytes, @bytes, set, @set, struct, @struct. For sets, performs union. For structs, merges left-to-right (right wins on key conflict). Returns a new value.",
         params: &["collections"],
         category: "list",
         example: "(concat [1 2] [3 4]) #=> [1 2 3 4]",

@@ -344,13 +344,171 @@ pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
         return (SIG_OK, result);
     }
 
+    // @bytes (mutable)
+    if args[0].as_bytes_mut().is_some() {
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_bytes_mut() {
+                Some(blob_ref) => total_len += blob_ref.borrow().len(),
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected @bytes",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+        let mut result = Vec::with_capacity(total_len);
+        for arg in args {
+            let blob_ref = arg.as_bytes_mut().unwrap();
+            result.extend(blob_ref.borrow().iter().copied());
+        }
+        return (SIG_OK, Value::bytes_mut(result));
+    }
+
+    // bytes (immutable)
+    if args[0].as_bytes().is_some() {
+        let mut total_len = 0usize;
+        for (i, arg) in args.iter().enumerate() {
+            match arg.as_bytes() {
+                Some(slice) => total_len += slice.len(),
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "type-error",
+                            format!(
+                                "concat: argument {} is {}, expected bytes",
+                                i + 1,
+                                arg.type_name()
+                            ),
+                        ),
+                    )
+                }
+            }
+        }
+        let mut result = Vec::with_capacity(total_len);
+        for arg in args {
+            let slice = arg.as_bytes().unwrap();
+            result.extend(slice.iter().copied());
+        }
+        return (SIG_OK, Value::bytes(result));
+    }
+
+    // @set (mutable)
+    if args[0].as_set_mut().is_some() {
+        for (i, arg) in args.iter().enumerate() {
+            if arg.as_set_mut().is_none() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "concat: argument {} is {}, expected @set",
+                            i + 1,
+                            arg.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        let mut result = std::collections::BTreeSet::new();
+        for arg in args {
+            let set_ref = arg.as_set_mut().unwrap();
+            result.extend(set_ref.borrow().iter().copied());
+        }
+        return (SIG_OK, Value::set_mut(result));
+    }
+
+    // set (immutable)
+    if args[0].as_set().is_some() {
+        for (i, arg) in args.iter().enumerate() {
+            if arg.as_set().is_none() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "concat: argument {} is {}, expected set",
+                            i + 1,
+                            arg.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        let mut result = std::collections::BTreeSet::new();
+        for arg in args {
+            let set = arg.as_set().unwrap();
+            result.extend(set.iter().copied());
+        }
+        return (SIG_OK, Value::set(result));
+    }
+
+    // @struct (mutable)
+    if args[0].as_struct_mut().is_some() {
+        for (i, arg) in args.iter().enumerate() {
+            if arg.as_struct_mut().is_none() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "concat: argument {} is {}, expected @struct",
+                            i + 1,
+                            arg.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        let mut result = std::collections::BTreeMap::new();
+        for arg in args {
+            let table_ref = arg.as_struct_mut().unwrap();
+            result.extend(table_ref.borrow().iter().map(|(k, v)| (k.clone(), *v)));
+        }
+        return (SIG_OK, Value::struct_mut_from(result));
+    }
+
+    // struct (immutable)
+    if args[0].as_struct().is_some() {
+        for (i, arg) in args.iter().enumerate() {
+            if arg.as_struct().is_none() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "concat: argument {} is {}, expected struct",
+                            i + 1,
+                            arg.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+        let mut result = std::collections::BTreeMap::new();
+        for arg in args {
+            let map = arg.as_struct().unwrap();
+            result.extend(map.iter().map(|(k, v)| (k.clone(), *v)));
+        }
+        return (SIG_OK, Value::struct_from(result));
+    }
+
     // Unsupported type
     (
         SIG_ERROR,
         error_val(
             "type-error",
             format!(
-                "concat: expected collection (list, array, @array, string, or @string), got {}",
+                "concat: expected collection (list, array, @array, string, @string, bytes, @bytes, set, @set, struct, or @struct), got {}",
                 args[0].type_name()
             ),
         ),
