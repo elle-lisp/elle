@@ -46,6 +46,12 @@ pub(crate) enum IoOp {
     Write { data: Value },
     /// Flush port's write buffer. Returns nil.
     Flush,
+    /// Seek to a position in a file. Returns new absolute byte offset.
+    /// `whence`: libc::SEEK_SET (0), libc::SEEK_CUR (1), libc::SEEK_END (2).
+    Seek { offset: i64, whence: i32 },
+    /// Query current logical file position (kernel offset minus buffer len).
+    /// Returns the logical byte offset as int.
+    Tell,
     /// Accept a connection on a listener. Returns new stream port.
     Accept,
     /// Connect to a remote address. Returns connected stream port.
@@ -176,6 +182,7 @@ impl Drop for ProcessHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use libc;
 
     #[test]
     fn test_io_request_type_name() {
@@ -225,5 +232,26 @@ mod tests {
         let pid = child.id();
         let handle = ProcessHandle::new(pid, child);
         drop(handle); // should not panic
+    }
+
+    #[test]
+    fn test_ioop_seek_variant_carries_offset_and_whence() {
+        let op = IoOp::Seek {
+            offset: 42,
+            whence: libc::SEEK_END,
+        };
+        match op {
+            IoOp::Seek { offset, whence } => {
+                assert_eq!(offset, 42);
+                assert_eq!(whence, libc::SEEK_END);
+            }
+            _ => panic!("expected Seek variant"),
+        }
+    }
+
+    #[test]
+    fn test_ioop_tell_variant_is_unit() {
+        let op = IoOp::Tell;
+        assert!(matches!(op, IoOp::Tell));
     }
 }

@@ -144,3 +144,90 @@
 
 # port_type_of
 (assert-eq (type (port/stdin)) :port "type-of port is :port")
+
+# ==============================
+# Seek and Tell on file ports
+# ==============================
+
+(def seek-test-path "/tmp/elle-test-seek-tell-474")
+
+# --- Basic seek/tell lifecycle ---
+
+(let ((p (port/open seek-test-path :read-write)))
+  # Write 10 bytes
+  (stream/write p "0123456789")
+  # Seek to start
+  (assert-eq (port/seek p 0 :from :start) 0 "seek to start returns 0")
+  (assert-eq (port/tell p) 0 "tell at start returns 0")
+
+  # Seek to position 5
+  (assert-eq (port/seek p 5 :from :start) 5 "seek to 5 returns 5")
+  (assert-eq (port/tell p) 5 "tell at 5 returns 5")
+
+  # Seek from end: 0 from end = past last byte = 10
+  (assert-eq (port/seek p 0 :from :end) 10 "seek 0 from end of 10-byte file returns 10")
+
+  # Seek -2 from end = position 8
+  (assert-eq (port/seek p -2 :from :end) 8 "seek -2 from end returns 8")
+
+  # Seek relative to current (now at 8, go +1 = 9)
+  (assert-eq (port/seek p 1 :from :current) 9 "seek +1 from current returns 9")
+
+  # Seek default (no :from) = SEEK_SET
+  (assert-eq (port/seek p 3) 3 "seek with default :from returns 3")
+
+  (port/close p))
+
+# --- Seek + read coherence ---
+
+(let ((p (port/open seek-test-path :read-write)))
+  (stream/write p "hello")
+  (port/seek p 0 :from :start)
+  (assert-eq (stream/read p 5) "hello" "read after seek to start returns written data")
+  (port/close p))
+
+# --- Seek clears buffered data ---
+# Re-establish known content before testing buffer clear behavior
+
+(spit seek-test-path "0123456789")
+(let ((p (port/open seek-test-path :read)))
+  # This read may buffer more than one character
+  (stream/read p 1)
+  # Seek back to 0 must discard buffer so next read starts from byte 0
+  (port/seek p 0 :from :start)
+  (assert-eq (stream/read p 1) "0" "first char after seek to 0 is '0'")
+  (port/close p))
+
+# --- Error cases ---
+
+# port/stdin and port/stdout are synchronous — no SIG_IO inside the thunk
+(assert-err
+  (fn () (port/seek (port/stdin) 0))
+  "port/seek on stdin returns error")
+
+(assert-err
+  (fn () (port/tell (port/stdout)))
+  "port/tell on stdout returns error")
+
+# port/open inside assert-err yields SIG_IO which protect cannot handle.
+# Pre-open ports before the assert-err lambda.
+(let ((p-bad-offset (port/open seek-test-path :read)))
+  (assert-err
+    (fn () (port/seek p-bad-offset "not-an-int"))
+    "port/seek with non-integer offset returns error")
+  (port/close p-bad-offset))
+
+(let ((p-bad-from (port/open seek-test-path :read)))
+  (assert-err
+    (fn () (port/seek p-bad-from 0 :from :bogus))
+    "port/seek with invalid :from value returns error")
+  (port/close p-bad-from))
+
+(let ((p-incomplete (port/open seek-test-path :read)))
+  (assert-err
+    (fn () (port/seek p-incomplete 0 :from))
+    "port/seek with incomplete :from pair returns error")
+  (port/close p-incomplete))
+
+# --- Cleanup ---
+(subprocess/system "rm" ["-f" seek-test-path])
