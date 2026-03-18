@@ -714,14 +714,19 @@
 ## ── Struct operations ───────────────────────────────────────────────
 
 (def merge (fn (a b)
-  "Merge struct b into struct a, returning the same mutability as a.
-   Keys in b override keys in a. Signals :type-error if a is not a struct."
+  "Merge struct b into struct a. Both must be structs of the same mutability.
+   Keys in b override keys in a. Returns the same mutability as the inputs.
+   Signals :type-error if either argument is not a struct or mutabilities differ."
   (if (not (struct? a))
     (error {:error :type-error :message "merge: first argument must be a struct"})
-    (let ((result (@struct)))
-      (each k in (keys a) (put result k (get a k)))
-      (each k in (keys b) (put result k (get b k)))
-      (if (mutable? a) result (freeze result))))))
+    (if (not (struct? b))
+      (error {:error :type-error :message "merge: second argument must be a struct"})
+      (if (not (= (mutable? a) (mutable? b)))
+        (error {:error :type-error :message "merge: mutability mismatch — both arguments must be the same mutability"})
+        (let ((result (@struct)))
+          (each k in (keys a) (put result k (get a k)))
+          (each k in (keys b) (put result k (get b k)))
+          (if (mutable? a) result (freeze result))))))))
 
 ## ── Stream combinators ─────────────────────────────────────────────
 ##
@@ -1071,7 +1076,7 @@
    Reading first ensures neither side is blocked."
   (let* ((exec-opts (if (empty? opts)
                        {:stdin :null}
-                       (merge {:stdin :null} (first opts))))
+                       (merge {:stdin :null} (freeze (first opts)))))
          (proc         (subprocess/exec program args exec-opts))
          # Drain pipes BEFORE subprocess/wait (deadlock invariant — see docstring).
          (stdout-bytes (if (nil? (get proc :stdout))

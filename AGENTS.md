@@ -250,21 +250,21 @@ When in doubt, run the tests.
 
 **Signature:** `(merge a b)`
 
-**Purpose:** Merges struct `b` into struct `a`, returning the same type as `a`. Keys in `b` override keys in `a`.
+**Purpose:** Merges struct `b` into struct `a`. Both must be structs of the same mutability. Keys in `b` override keys in `a`.
 
 **Behavior:**
-- If `a` is an immutable struct `{...}`, returns an immutable struct
-- If `a` is a mutable struct `@{...}`, returns a mutable struct
+- Both `a` and `b` must be structs of the same mutability
+- If both are immutable structs `{...}`, returns an immutable struct
+- If both are mutable structs `@{...}`, returns a mutable struct
 - All keys from `a` are preserved
 - All keys from `b` are added or override existing keys in `a`
-- The type of the result matches the type of `a`
 
 **Examples:**
 ```lisp
 (merge {:x 1 :y 2} {:y 3 :z 4})
 #=> {:x 1 :y 3 :z 4}
 
-(merge @{:x 1 :y 2} {:y 3 :z 4})
+(merge @{:x 1 :y 2} @{:y 3 :z 4})
 #=> @{:x 1 :y 3 :z 4}
 
 (merge {:a 1} {})
@@ -278,13 +278,14 @@ When in doubt, run the tests.
 
 | Condition | Error kind | Message |
 |-----------|-----------|---------|
-| `a` is not a struct | `type-error` | `"merge: first argument must be struct, got {type}"` |
-| `b` is not a struct | `type-error` | `"merge: second argument must be struct, got {type}"` |
+| `a` is not a struct | `type-error` | `"merge: first argument must be a struct"` |
+| `b` is not a struct | `type-error` | `"merge: second argument must be a struct"` |
+| Mutability mismatch | `type-error` | `"merge: mutability mismatch — both arguments must be the same mutability"` |
 | Wrong arity | `arity-error` | `"merge: expected 2 arguments, got N"` |
 
 **Invariants:**
 
-1. **Type preservation.** The result type matches the type of the first argument.
+1. **Mutability agreement.** Both arguments must be the same mutability. The result matches.
 2. **Non-destructive.** Neither `a` nor `b` is modified; a new struct is returned.
 3. **Override semantics.** Keys in `b` take precedence over keys in `a`.
-4. **Immutability respected.** If `a` is immutable, the result is immutable. If `a` is mutable, the result is mutable.
+4. **Immutability respected.** If both args are immutable, the result is immutable. If both are mutable, the result is mutable.
