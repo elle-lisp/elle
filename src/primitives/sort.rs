@@ -5,11 +5,10 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, list, Value};
 
-/// Sort a collection of numbers in ascending order.
+/// Sort a collection in ascending order using the built-in value ordering.
 ///
-/// Type-preserving: lists return new sorted lists, arrays are mutated
-/// in place and returned, arrays return new sorted arrays.
-/// All elements must be numbers.
+/// Type-preserving: @arrays mutated in place, arrays and lists return new sorted values.
+/// Supports any comparable values via Value::Ord.
 pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -24,27 +23,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     // Array — mutate in place
     if let Some(arr) = args[0].as_array_mut() {
         let mut vec = arr.borrow_mut();
-        // Validate all elements are numbers
-        for (i, v) in vec.iter().enumerate() {
-            if v.as_number().is_none() {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "sort: element at index {} is {}, expected number",
-                            i,
-                            v.type_name()
-                        ),
-                    ),
-                );
-            }
-        }
-        vec.sort_by(|a, b| {
-            let fa = a.as_number().unwrap();
-            let fb = b.as_number().unwrap();
-            fa.total_cmp(&fb)
-        });
+        vec.sort();
         drop(vec);
         return (SIG_OK, args[0]);
     }
@@ -52,26 +31,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     // Array — return new sorted array
     if let Some(elems) = args[0].as_array() {
         let mut vec = elems.to_vec();
-        for (i, v) in vec.iter().enumerate() {
-            if v.as_number().is_none() {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "sort: element at index {} is {}, expected number",
-                            i,
-                            v.type_name()
-                        ),
-                    ),
-                );
-            }
-        }
-        vec.sort_by(|a, b| {
-            let fa = a.as_number().unwrap();
-            let fb = b.as_number().unwrap();
-            fa.total_cmp(&fb)
-        });
+        vec.sort();
         return (SIG_OK, Value::array(vec));
     }
 
@@ -87,26 +47,7 @@ pub(crate) fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => return (SIG_ERROR, error_val("type-error", format!("sort: {}", e))),
         };
         let mut sorted = vec;
-        for (i, v) in sorted.iter().enumerate() {
-            if v.as_number().is_none() {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!(
-                            "sort: element at index {} is {}, expected number",
-                            i,
-                            v.type_name()
-                        ),
-                    ),
-                );
-            }
-        }
-        sorted.sort_by(|a, b| {
-            let fa = a.as_number().unwrap();
-            let fb = b.as_number().unwrap();
-            fa.total_cmp(&fb)
-        });
+        sorted.sort();
         return (SIG_OK, list(sorted));
     }
 
@@ -262,10 +203,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sort,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Sort a collection of numbers in ascending order. Type-preserving: arrays mutated in place, lists return new values.",
+        doc: "Sort a collection in ascending order using the built-in value ordering. Type-preserving: @arrays mutated in place, arrays and lists return new sorted values.",
         params: &["coll"],
         category: "collection",
-        example: "(sort @[3 1 2]) #=> @[1 2 3]",
+        example: "(sort @[3 1 2]) #=> @[1 2 3]\n(sort [\"b\" \"a\" \"c\"]) #=> [\"a\" \"b\" \"c\"]",
         aliases: &[],
     },
     PrimitiveDef {

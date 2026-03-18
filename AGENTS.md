@@ -1,6 +1,7 @@
 # Elle
 
-Elle is a Lisp. Source text becomes bytecode; bytecode runs on a register-based VM.
+Elle is a Lisp. Source text becomes bytecode; bytecode runs on a
+register-based VM.
 
 This is not a toy. The implementation targets correctness, performance, and
 clarity — in that order. We compile through multiple IRs, we have proper
@@ -33,45 +34,97 @@ bytecode. Error messages include file:line:col information.
 
 ### Key modules
 
-| Module | Responsibility |
-|--------|----------------|
-| `reader` | Lexing and parsing to `Syntax` |
-| `syntax` | Syntax types, macro expansion |
-| `hir` | Binding resolution, capture analysis, signal inference, linting, symbol extraction, docstring extraction |
-| `lir` | SSA form with virtual registers, basic blocks, `SpannedInstr` for source tracking |
-| `compiler` | Bytecode instruction definitions, debug formatting |
-| `vm` | Bytecode execution, builtin documentation storage |
-| `value` | Runtime value representation (NaN-boxed); trait table field on 19 user-facing heap variants |
-| `signals` | Signal type (`Silent`, `Yields`, `Polymorphic`), signal registry for keyword-to-bit mapping; includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL` (bit 12) for instruction budget exhaustion |
-| `io` | I/O request types, backends, timeout handling; includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle` for subprocess lifecycle |
-| `lint` | Diagnostic types and lint rules |
-| `symbols` | Symbol index types for IDE features |
-| `primitives` | Built-in functions; includes `port/path`, `port/seek`, `port/tell`, `string/size-of`, `with-traits`, `traits`, `sys/args` (returns args after the source file in argv, empty if none), `sys/env` (returns env as struct with string keys; optional single-var lookup), `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel`, `meta/origin` (returns source location of a closure as `{:file :line :col}`, or `nil`), `file/stat` (filesystem metadata struct, follows symlinks), `file/lstat` (filesystem metadata struct, does not follow symlinks), `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` (pointer arithmetic: byte offset, distance, address extraction, address construction), `number->string` (optional radix 2–36: `(number->string 255 16)` → `"ff"`), and `seq->hex` (hex-encode bytes, @bytes, array, @array, list, or integer; mutability-preserving; `bytes->hex` and `bytes->hex-string` are aliases) |
-| `stdlib` | Standard library functions (loaded at startup); includes stream combinators (`port/lines`, `port/chunks`, `port/writer`, `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`, `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`, `stream/into-array`, `stream/pipe`) and subprocess convenience (`subprocess/system`) |
-| `ffi` | C interop via libloading/bindgen |
-| `jit` | JIT compilation via Cranelift; `JitRejectionInfo` tracks why closures were rejected |
-| `formatter` | Code formatting for Elle source |
-| `plugin` | Dynamic plugin loading for Rust cdylib primitives; available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`, `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP) |
-| `path` | UTF-8 path operations |
-| `pipeline` | Compilation entry points (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md)) |
-| `error` | `LocationMap` for bytecode offset → source location mapping |
+- **`reader`** — Lexing and parsing to `Syntax`
+- **`syntax`** — Syntax types, macro expansion
+- **`hir`** — Binding resolution, capture analysis, signal inference, linting,
+  symbol extraction, docstring extraction
+- **`lir`** — SSA form with virtual registers, basic blocks, `SpannedInstr`
+  for source tracking
+- **`compiler`** — Bytecode instruction definitions, debug formatting
+- **`vm`** — Bytecode execution, builtin documentation storage
+- **`value`** — Runtime value representation (NaN-boxed); trait table field on
+  19 user-facing heap variants
+- **`signals`** — Signal type (`Silent`, `Yields`, `Polymorphic`), signal
+  registry for keyword-to-bit mapping;
+  includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL`
+  (bit 12) for instruction budget exhaustion
+- **`io`** — I/O request types, backends, timeout handling;
+  includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle`
+  for subprocess lifecycle
+- **`lint`** — Diagnostic types and lint rules
+- **`symbols`** — Symbol index types for IDE features
+- **`primitives`** — Built-in functions; includes:
+  `port/path`, `port/seek`, `port/tell`,
+  `string/size-of`,
+  `with-traits`, `traits`,
+  `sys/args` (returns args after the source file in argv, empty if none),
+  `sys/env` (returns env as struct with string keys; optional single-var
+  lookup),
+  `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
+  `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`,
+  `syntax-nil?`,
+  `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`,
+  `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel`,
+  `compare` (three-way comparison returning -1/0/1, uses same ordering as
+  `sort`),
+  `meta/origin` (returns source location of a closure as
+  `{:file :line :col}`, or `nil`),
+  `file/stat` (filesystem metadata struct, follows symlinks),
+  `file/lstat` (filesystem metadata struct, does not follow symlinks),
+  `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int`
+  (pointer arithmetic: byte offset, distance, address extraction, address
+  construction),
+  `number->string` (optional radix 2–36:
+  `(number->string 255 16)` → `"ff"`),
+  `seq->hex` (hex-encode bytes, @bytes, array, @array, list, or integer;
+  mutability-preserving; `bytes->hex` and `bytes->hex-string` are aliases)
+- **`stdlib`** — Standard library functions (loaded at startup); includes:
+  stream combinators: `port/lines`, `port/chunks`, `port/writer`,
+  `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`,
+  `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`,
+  `stream/into-array`, `stream/pipe`;
+  subprocess convenience: `subprocess/system`
+- **`ffi`** — C interop via libloading/bindgen
+- **`jit`** — JIT compilation via Cranelift; `JitRejectionInfo` tracks why
+  closures were rejected
+- **`formatter`** — Code formatting for Elle source
+- **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
+  available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
+  `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP)
+- **`path`** — UTF-8 path operations
+- **`pipeline`** — Compilation entry points
+  (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
+- **`error`** — `LocationMap` for bytecode offset → source location mapping
 
 ### The Value type
 
-`Value` is the runtime representation using NaN-boxing. Create values via methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
-- `Closure` — bytecode + captured environment + arity + signal + `location_map` + `doc` + `syntax` + `traits`
+`Value` is the runtime representation using NaN-boxing. Create values via
+methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than
+enum variants. Notable types:
+- `Closure` — bytecode + captured environment + arity + signal +
+  `location_map` + `doc` + `syntax` + `traits`
 - `LBox` / `LocalLBox` — mutable lboxes for captured variables
 - `Fiber` — independent execution context with stack, frames, signal mask
 - `Parameter` — dynamic binding with default value, looked up at runtime
-- `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type name)
+- `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type
+  name)
 
 All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 
-**Trait table field:** Every user-facing heap variant carries a `traits: Value` field (8 bytes). Initialized to `Value::NIL` (meaning "no traits"). Only an immutable `LStruct` may be stored here; the `with-traits` primitive validates this at call time. The field is invisible to structural equality, ordering, and hashing.
+**Trait table field:** Every user-facing heap variant carries a
+`traits: Value` field (8 bytes). Initialized to `Value::NIL` (meaning "no
+traits"). Only an immutable `LStruct` may be stored here; the `with-traits`
+primitive validates this at call time. The field is invisible to structural
+equality, ordering, and hashing.
 
-**Variants that carry `traits` (19 types):** `LArray`, `LArrayMut`, `LStruct`, `LStructMut`, `LString`, `LStringMut`, `LBytes`, `LBytesMut`, `LSet`, `LSetMut`, `Cons`, `Closure`, `LBox`, `Fiber`, `Syntax`, `ManagedPointer`, `External`, `Parameter`, `ThreadHandle`.
+**Variants that carry `traits` (19 types):** `LArray`, `LArrayMut`,
+`LStruct`, `LStructMut`, `LString`, `LStringMut`, `LBytes`, `LBytesMut`,
+`LSet`, `LSetMut`, `Cons`, `Closure`, `LBox`, `Fiber`, `Syntax`,
+`ManagedPointer`, `External`, `Parameter`, `ThreadHandle`.
 
-**Variants that do NOT carry `traits` (6 infrastructure types):** `Float`, `NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`. `with-traits` on these returns a `:type-error`.
+**Variants that do NOT carry `traits` (6 infrastructure types):** `Float`,
+`NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`. `with-traits`
+on these returns a `:type-error`.
 
 ## Products
 
@@ -99,7 +152,8 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 
 ## Testing
 
-**⚠️ NEVER run `cargo test --workspace` without explicit user instruction.** It takes ~30 minutes. Use `make test` (~2min) for pre-commit verification.
+**⚠️ NEVER run `cargo test --workspace` without explicit user instruction.**
+It takes ~30 minutes. Use `make test` (~2min) for pre-commit verification.
 
 | Command | Runtime | What it does |
 |---------|---------|-------------|
@@ -107,23 +161,29 @@ All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 | `make test` | ~2min | build + examples + elle scripts + unit tests |
 | `cargo test --workspace` | ~30min | full suite — **ask first** |
 
-For test organization, helpers, and how to add tests: [`docs/testing.md`](docs/testing.md).
+For test organization, helpers, and how to add tests:
+[`docs/testing.md`](docs/testing.md).
 For CI structure and failure triage: [`docs/debugging.md`](docs/debugging.md).
 
 ## Invariants
 
 These must remain true. Violating them breaks the system:
 
-1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed
-   Value pointing to heap `BindingInner`), not symbols. If you see symbol
-   lookup at runtime, something is wrong.
+1. **Bindings are resolved at analysis time.** HIR contains `Binding`
+   (NaN-boxed Value pointing to heap `BindingInner`), not symbols. If you see
+   symbol lookup at runtime, something is wrong.
 
 2. **Closures capture by value into their environment.** Immutable captured
    locals are captured directly. Mutable captured locals and mutated parameters
    use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
    which parameters need lbox wrapping.
 
-3. **Signals are inferred, not declared — except when `silence` provides explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`) propagates from leaves to root during analysis. `silence` constrains inference; it doesn't replace it. The inferred signal must be a subset of the declared bound. When a parameter has a `silence` bound, it is no longer polymorphic — its signal is known to be zero bits.
+3. **Signals are inferred, not declared — except when `silence` provides
+   explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`)
+   propagates from leaves to root during analysis. `silence` constrains
+   inference; it doesn't replace it. The inferred signal must be a subset of
+   the declared bound. When a parameter has a `silence` bound, it is no longer
+   polymorphic — its signal is known to be zero bits.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the
@@ -135,29 +195,41 @@ These must remain true. Violating them breaks the system:
 
 ## Intentional oddities
 
-Things that look wrong but aren't. The 4 most critical (agents get these wrong):
+Things that look wrong but aren't. The 4 most critical (agents get these
+wrong):
 
 - **Elle has no `-e` flag.** To run one-liners, use `echo '(expr)' | elle`.
 
 - **Elle has no `-` flags at all.** See `elle --help`.
 
-- **`nil` vs `()` are distinct.** `nil` is falsy (absence). `()` is truthy (empty list).
-  Lists terminate with `EMPTY_LIST`. Use `empty?` (not `nil?`) for end-of-list.
-  **Getting this wrong causes infinite recursion.**
+- **`nil` vs `()` are distinct.** `nil` is falsy (absence). `()` is truthy
+  (empty list). Lists terminate with `EMPTY_LIST`. Use `empty?` (not `nil?`)
+  for end-of-list. **Getting this wrong causes infinite recursion.**
 
-- **`#` is comment, `;` is splice.** `#` starts a comment. `;expr` is the splice operator
-  (array-spreading). `true`/`false` are booleans (not `#t`/`#f`).
+- **`#` is comment, `;` is splice.** `#` starts a comment. `;expr` is the
+  splice operator (array-spreading). `true`/`false` are booleans (not
+  `#t`/`#f`).
 
-- **`assign` not `set` for mutation.** `(assign var value)` mutates. `(set x val)` creates
-  a set value. Agents reflexively write `(set x val)` — this is wrong.
+- **`assign` not `set` for mutation.** `(assign var value)` mutates.
+  `(set x val)` creates a set value. Agents reflexively write `(set x val)`
+  — this is wrong.
 
-- **`silence` is compile-time total suppression; `squelch` is a runtime closure transform.** `(silence param)` inside a lambda body constrains a parameter: it must be a silent closure. `(squelch f :yield)` is a *primitive function call*, not a declaration — it takes a closure and returns a **new** closure that catches `:yield` at runtime and converts it to `:error`. Usage: `(let ((safe-f (squelch f :yield))) (safe-f))`. `(squelch f)` with no keywords is an arity error (requires at least 2 arguments). `(squelch non-closure :yield)` is a type error.
+- **`silence` is compile-time total suppression; `squelch` is a runtime
+  closure transform.** `(silence param)` inside a lambda body constrains a
+  parameter: it must be a silent closure. `(squelch f :yield)` is a
+  *primitive function call*, not a declaration — it takes a closure and
+  returns a **new** closure that catches `:yield` at runtime and converts it
+  to `:error`. Usage: `(let ((safe-f (squelch f :yield))) (safe-f))`.
+  `(squelch f)` with no keywords is an arity error (requires at least 2
+  arguments). `(squelch non-closure :yield)` is a type error.
 
-- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array, `@[...]` → @array.
-   `{...}` → struct, `@{...}` → @struct. `|...|` → set, `@|...|` → @set.
-   `"..."` → string, `@"..."` → @string. `(bytes ...)` → bytes, `(@bytes ...)` → @bytes.
+- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array,
+  `@[...]` → @array. `{...}` → struct, `@{...}` → @struct. `|...|` → set,
+  `@|...|` → @set. `"..."` → string, `@"..."` → @string. `(bytes ...)` →
+  bytes, `(@bytes ...)` → @bytes.
 
-For the full list of oddities (18 items): [`docs/oddities.md`](docs/oddities.md).
+For the full list of oddities (18 items):
+[`docs/oddities.md`](docs/oddities.md).
 
 ## Conventions
 
@@ -172,7 +244,8 @@ For the full list of oddities (18 items): [`docs/oddities.md`](docs/oddities.md)
 
 ## Maintaining documentation
 
-AGENTS.md and README.md files exist throughout the codebase. Keep them current:
+AGENTS.md and README.md files exist throughout the codebase. Keep them
+current:
 
 - **When you change a module's interface**, update its AGENTS.md. Changed
   exports, new invariants, altered data flow — these matter to the next agent.
@@ -183,10 +256,11 @@ AGENTS.md and README.md files exist throughout the codebase. Keep them current:
 - **When you violate a documented invariant**, either fix your code or update
   the invariant. Stale invariants are worse than none.
 
-- **When you discover undocumented behavior**, document it. If it's intentional,
-  add to `docs/oddities.md`. If it's a bug, file an issue.
+- **When you discover undocumented behavior**, document it. If it's
+  intentional, add to `docs/oddities.md`. If it's a bug, file an issue.
 
-Documentation debt compounds. A few minutes now saves hours of confusion later.
+Documentation debt compounds. A few minutes now saves hours of confusion
+later.
 
 ## Where to start
 
@@ -197,8 +271,10 @@ Documentation debt compounds. A few minutes now saves hours of confusion later.
 
 When in doubt, run the tests.
 
-5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for common cross-cutting changes.
-6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how to add new tests.
+5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for
+   common cross-cutting changes.
+6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how
+   to add new tests.
 
 ## Standard Library Functions
 
@@ -208,14 +284,17 @@ When in doubt, run the tests.
 
 **Signature:** `(subprocess/system program args [opts])`
 
-**Purpose:** Run a command to completion, capturing stdout and stderr as text. Returns `{:exit int :stdout string :stderr string}`.
+**Purpose:** Run a command to completion, capturing stdout and stderr as
+text. Returns `{:exit int :stdout string :stderr string}`.
 
 **Behavior:**
 - Spawns a subprocess with the given program and arguments
 - Captures stdout and stderr as binary pipes, then decodes to UTF-8 strings
 - Waits for subprocess exit and returns the exit code
-- Reads pipes before waiting to avoid deadlock when output exceeds OS pipe buffer (~64KB)
-- Optional third argument: opts struct with keys `:env` (struct of env vars), `:cwd` (working directory string), `:stdin` (default `:null`)
+- Reads pipes before waiting to avoid deadlock when output exceeds OS pipe
+  buffer (~64KB)
+- Optional third argument: opts struct with keys `:env` (struct of env
+  vars), `:cwd` (working directory string), `:stdin` (default `:null`)
 
 **Examples:**
 ```lisp
@@ -239,10 +318,14 @@ When in doubt, run the tests.
 
 **Invariants:**
 
-1. **Deadlock prevention.** Pipes are read before `subprocess/wait` to ensure neither side blocks on buffer overflow.
-2. **Text decoding.** Output is decoded as strict UTF-8; invalid UTF-8 propagates an error.
-3. **Exit code preservation.** The returned `:exit` code matches the subprocess exit status (0 = success, nonzero = failure).
-4. **Subprocess cleanup.** The process is reaped on exit; no zombies are left behind.
+1. **Deadlock prevention.** Pipes are read before `subprocess/wait` to
+   ensure neither side blocks on buffer overflow.
+2. **Text decoding.** Output is decoded as strict UTF-8; invalid UTF-8
+   propagates an error.
+3. **Exit code preservation.** The returned `:exit` code matches the
+   subprocess exit status (0 = success, nonzero = failure).
+4. **Subprocess cleanup.** The process is reaped on exit; no zombies are
+   left behind.
 
 ### merge
 
@@ -250,7 +333,8 @@ When in doubt, run the tests.
 
 **Signature:** `(merge a b)`
 
-**Purpose:** Merges struct `b` into struct `a`. Both must be structs of the same mutability. Keys in `b` override keys in `a`.
+**Purpose:** Merges struct `b` into struct `a`. Both must be structs of the
+same mutability. Keys in `b` override keys in `a`.
 
 **Behavior:**
 - Both `a` and `b` must be structs of the same mutability
@@ -285,7 +369,46 @@ When in doubt, run the tests.
 
 **Invariants:**
 
-1. **Mutability agreement.** Both arguments must be the same mutability. The result matches.
-2. **Non-destructive.** Neither `a` nor `b` is modified; a new struct is returned.
+1. **Mutability agreement.** Both arguments must be the same mutability.
+   The result matches.
+2. **Non-destructive.** Neither `a` nor `b` is modified; a new struct is
+   returned.
 3. **Override semantics.** Keys in `b` take precedence over keys in `a`.
-4. **Immutability respected.** If both args are immutable, the result is immutable. If both are mutable, the result is mutable.
+4. **Immutability respected.** If both args are immutable, the result is
+   immutable. If both are mutable, the result is mutable.
+
+### sort-with
+
+**Location:** `stdlib.lisp`
+
+**Signature:** `(sort-with cmp coll)`
+
+**Alias:** `sort-by-cmp`
+
+**Purpose:** Sort a collection using a custom comparator function. The
+comparator receives two elements and returns a negative integer (first <
+second), zero (equal), or positive integer (first > second).
+
+**Behavior:**
+- Type-preserving: lists return lists, arrays return arrays, @arrays return
+  new @arrays
+- Merge sort (stable): equal elements preserve their relative order
+- @arrays are NOT sorted in place (unlike the `sort` primitive) — a new
+  @array is returned
+
+**Examples:**
+```lisp
+(sort-with (fn (a b) (compare b a)) (list 1 3 2))
+#=> (3 2 1)
+
+(sort-with (fn (a b) (- (length a) (length b)))
+           ["bbb" "a" "cc"])
+#=> ["a" "cc" "bbb"]
+```
+
+**Error cases:**
+
+| Condition | Error kind | Message |
+|-----------|-----------|---------|
+| Not a sequence | `type-error` | `"sort-with: not a sequence"` |
+| Comparator returns non-number | `type-error` | (from `<=` primitive) |
