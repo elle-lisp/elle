@@ -102,14 +102,18 @@
 # @string pop
 # ============================================================================
 
-(assert-eq (begin (var b @"hi") (pop b)) 105 "pop returns byte value (i=105)")
+(assert-eq (begin (var b @"hi") (pop b)) "i" "pop returns last grapheme as string")
+(assert-eq (begin (var b @"café") (pop b)) "é" "pop returns last multibyte grapheme")
 (assert-err (fn () (begin (var b @"") (pop b))) "pop on empty @string errors")
 
 # ============================================================================
 # @string push
 # ============================================================================
 
-(assert-true (string? (begin (var b @"hi") (push b 33) b)) "push returns @string")
+(assert-true (string? (begin (var b @"hi") (push b "!") b)) "push returns @string")
+(assert-eq (freeze (begin (var b @"hi") (push b "!") b)) "hi!" "push appends string to @string")
+(assert-eq (freeze (begin (var b @"café") (push b "x") b)) "caféx" "push appends to multibyte @string")
+(assert-err (fn () (begin (var b @"hi") (push b 33))) "push rejects integer for @string")
 
 # ============================================================================
 # @string append
