@@ -395,7 +395,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_list_primitives,
         signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Range(0, 1),
-        doc: "List registered names as a sorted list of strings. Optional category filter.",
+        doc: "List registered names as a sorted list of symbols. Optional category filter.",
         params: &["category?"],
         category: "meta",
         example: "(vm/list-primitives)\n(vm/list-primitives :math)\n(vm/list-primitives :\"special form\")",
