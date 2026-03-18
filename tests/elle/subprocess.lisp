@@ -229,7 +229,7 @@
 (assert-true (struct? (sys/env)) "sys/env: returns a struct")
 
 # sys/env contains PATH (always set on Linux)
-(assert-true (string? (get (sys/env) :PATH)) "sys/env: PATH is a string")
+(assert-true (string? (get (sys/env) "PATH")) "sys/env: PATH is a string")
 
 # sys/env arity is enforced by the PrimitiveDef layer (Arity::Exact(0)),
 # not inside the function body — consistent with sys/args.

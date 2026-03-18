@@ -118,7 +118,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `traits.rs` | `with-traits`, `traits` |
 | `time.rs` | `clock/monotonic`, `clock/realtime`, `clock/cpu`, `time/sleep` |
 | `time_def.rs` | `time/stopwatch`, `time/elapsed` (Elle definitions via `eval`) |
-| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `squelch` |
+| `meta.rs` | `gensym`, `datum->syntax`, `syntax->datum`, `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`, `syntax-nil?`, `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`, `squelch`, `meta/origin` |
 | `introspection.rs` | `closure?`, `jit?`, `silent?`, `coroutine?`, `fn/mutates-params?`, `fn/errors?`, `fn/arity`, `fn/captures`, `fn/bytecode-size`, `doc`, `vm/query`, `jit/rejections`, `keyword` (alias: `string->keyword`) |
 | `disassembly.rs` | `fn/disasm`, `fn/disasm-jit`, `fn/flow`, `vm/list-primitives`, `vm/primitive-meta` |
 | `arena.rs` | `arena/count`, `arena/stats`, `arena/set-object-limit`, `arena/object-limit`, `arena/bytes`, `arena/checkpoint`, `arena/reset`, `arena/allocs`, `arena/peak`, `arena/reset-peak`, `environment` |
@@ -127,7 +127,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
 | `calling.rs` | `ffi/call` |
 | `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
-| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after `--`, empty without `--`), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
+| `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after the source file in argv, empty if none), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
 
 ## string/format primitive
 
@@ -259,17 +259,20 @@ Syntax: `{[name][:spec]}` where spec is `[[fill]align][width][.precision][type]`
 **Location:** `src/primitives/subprocess.rs`
 
 - `sys/args` — Returns user-provided command-line arguments as an immutable
-  array of strings. Arguments are those passed after the first `--` separator
-  in the process argv. Without `--`, returns an empty array `[]`. Reads from
-  `vm.user_args` via `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
-  - Shebang usage: `#!/usr/bin/env -S elle --`
-  - Example: `elle script.lisp -- foo bar` → `sys/args` returns `["foo" "bar"]`
-  - Without separator: `elle script.lisp` → `sys/args` returns `[]`
+  array of strings. Arguments are those that follow the source file (or `-` for
+  stdin) in the process argv. Returns an empty array `[]` if no args follow the
+  source file, or if running in REPL mode. Reads from `vm.user_args` via
+  `get_vm_context()`. Signal: `Signal::silent()`. Arity: `Exact(0)`.
+  - Example: `elle script.lisp foo bar` → `sys/args` returns `["foo" "bar"]`
+  - Flags after source: `elle script.lisp -v foo` → `sys/args` returns `["-v" "foo"]`
+  - No trailing args: `elle script.lisp` → `sys/args` returns `[]`
 
 - `sys/env` — Returns the process environment as an immutable struct
-  `{:KEY "value" ...}`. Uses `std::env::vars_os()` with `filter_map` to
-  skip non-UTF-8 entries. Returns empty struct `{}` if no env vars.
-  Signal: `Signal::silent()`. Arity: `Exact(0)`.
+  `{"KEY" "value" ...}` with string keys. Uses `std::env::vars_os()` with
+  `filter_map` to skip non-UTF-8 entries. Returns empty struct `{}` if no
+  env vars. With an optional string argument `(sys/env "NAME")`, looks up a
+  single variable and returns its value as a string, or `nil` if not set.
+  Signal: `Signal::silent()`. Arity: `Range(0, 1)`.
 
 ## Subprocess Primitives
 
@@ -380,6 +383,44 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 - Returns the new closure as a Value
 
 **Tail-call enforcement:** Squelch enforcement works correctly on tail-call invocation (fixes issue #588). The `squelch_mask` is carried through the tail-call trampoline loop in `execute_bytecode_saving_stack` via the `TailCallInfo` struct. After each tail-call iteration, the mask is re-applied before the next callee executes.
+
+## meta/origin Primitive
+
+**Location:** `src/primitives/meta.rs`
+
+**Signature:** `(meta/origin f)`
+
+**Purpose:** Return the source location of a closure as `{:file :line :col}`, or `nil` if unavailable.
+
+**Behavior:**
+- If `f` is not a closure, returns `nil`
+- If the closure has no stored `syntax` field, returns `nil`
+- If the syntax span has no `file`, returns `nil`
+- Otherwise returns `{:file "path" :line N :col N}` where `:file` is the path string, `:line` is 1-based line number, `:col` is 0-based column number
+
+**Examples:**
+```lisp
+(defn foo () 42)
+(meta/origin foo)
+#=> {:col 0 :file "/path/to/script.lisp" :line 1}
+
+(meta/origin 42)
+#=> nil
+
+(meta/origin nil)
+#=> nil
+```
+
+**Signal:** `Signal::silent()` — never errors, returns `nil` for non-closures
+
+**Arity:** `Exact(1)`
+
+**Invariants:**
+
+1. **Always returns or nil.** Never errors. Non-closures and closures without file info return `nil`.
+2. **File path is the canonical string from the span.** It matches the path passed to the compiler, which is set by the reader when parsing a named file.
+3. **Line and col are integers.** `:line` is the 1-based line number; `:col` is the 0-based column offset within the line.
+4. **Result is an immutable struct.** The returned value is a `{...}` struct, not a mutable `@{...}`.
 
 ## Stream Primitive Timeout Support
 

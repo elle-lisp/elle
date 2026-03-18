@@ -95,17 +95,42 @@ pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::array(user_args))
 }
 
-/// Return the process environment as an immutable struct.
-/// Keys are keywords (env var names as-is), values are strings.
+/// Return the process environment as an immutable struct, or look up a single variable.
+/// Keys are strings (env var names as-is), values are strings.
 /// Non-UTF-8 keys or values are silently skipped.
 ///
-/// (sys/env) => {:HOME "/home/user" :PATH "/usr/bin:..." ...}
-pub(crate) fn prim_sys_env(_args: &[Value]) -> (SignalBits, Value) {
+/// (sys/env) => {"HOME" "/home/user" "PATH" "/usr/bin:..." ...}
+/// (sys/env "HOME") => "/home/user" or nil if not set
+pub(crate) fn prim_sys_env(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() > 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("sys/env: expected 0-1 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    if args.len() == 1 {
+        let name = match args[0].with_string(|s| s.to_string()) {
+            Some(s) => s,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val("type-error", "sys/env: expected string argument"),
+                )
+            }
+        };
+        return match std::env::var(&name) {
+            Ok(val) => (SIG_OK, Value::string(&*val)),
+            Err(_) => (SIG_OK, Value::NIL),
+        };
+    }
     let mut fields: std::collections::BTreeMap<TableKey, Value> = std::collections::BTreeMap::new();
     for (key, val) in
         std::env::vars_os().filter_map(|(k, v)| k.into_string().ok().zip(v.into_string().ok()))
     {
-        fields.insert(TableKey::Keyword(key), Value::string(val));
+        fields.insert(TableKey::String(key), Value::string(val));
     }
     (SIG_OK, Value::struct_from(fields))
 }
@@ -652,11 +677,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "sys/env",
         func: prim_sys_env,
         signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Return the process environment as a struct with keyword keys and string values. Non-UTF-8 entries are silently skipped.",
-        params: &[],
+        arity: Arity::Range(0, 1),
+        doc: "Return the process environment as a struct with string keys and string values, or look up a single variable by name. Non-UTF-8 entries are silently skipped.",
+        params: &["name"],
         category: "sys",
-        example: "(sys/env)",
+        example: "(sys/env) ; or (sys/env \"HOME\")",
         aliases: &[],
     },
     PrimitiveDef {
@@ -812,13 +837,37 @@ mod tests {
         let (sig, val) = prim_sys_env(&[]);
         assert_eq!(sig, SIG_OK);
         let fields = val.as_struct().expect("sys/env should return a struct");
-        let path_val = fields.get(&TableKey::Keyword("PATH".into()));
+        let path_val = fields.get(&TableKey::String("PATH".into()));
         assert!(
             path_val
                 .map(|v| v.with_string(|_| true).unwrap_or(false))
                 .unwrap_or(false),
             "sys/env should contain PATH as a string"
         );
+    }
+
+    #[test]
+    fn test_sys_env_single_lookup_path_is_string() {
+        // PATH is always set in a real environment.
+        let (sig, val) = prim_sys_env(&[Value::string("PATH")]);
+        assert_eq!(sig, SIG_OK);
+        assert!(
+            val.with_string(|_| true).unwrap_or(false),
+            "sys/env with 'PATH' should return a non-nil string"
+        );
+    }
+
+    #[test]
+    fn test_sys_env_single_lookup_unset_returns_nil() {
+        let (sig, val) = prim_sys_env(&[Value::string("DEFINITELY_NOT_SET_XYZ_ELLE_123")]);
+        assert_eq!(sig, SIG_OK);
+        assert!(val.is_nil(), "sys/env with unset var should return nil");
+    }
+
+    #[test]
+    fn test_sys_env_single_lookup_non_string_type_error() {
+        let (sig, _) = prim_sys_env(&[Value::int(42)]);
+        assert_eq!(sig, SIG_ERROR);
     }
 
     // --- subprocess/exec ---

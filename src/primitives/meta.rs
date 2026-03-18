@@ -1,12 +1,13 @@
 //! Meta-programming primitives (gensym, datum->syntax, syntax->datum,
 //! syntax-pair?, syntax-list?, syntax-symbol?, syntax-keyword?, syntax-nil?,
-//! syntax->list, syntax-first, syntax-rest, syntax-e, squelch)
+//! syntax->list, syntax-first, syntax-rest, syntax-e, squelch, meta/origin)
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::registry;
 use crate::signals::Signal;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::closure::Closure;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -489,6 +490,38 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::closure(new_closure))
 }
 
+/// Return the source location of a closure as `{:file :line :col}`, or `nil`.
+///
+/// `(meta/origin f)` extracts the span from the closure's stored syntax node.
+/// Returns `nil` if `f` is not a closure, the closure has no syntax, or the
+/// syntax span has no file.
+pub(crate) fn prim_meta_origin(args: &[Value]) -> (SignalBits, Value) {
+    let val = args[0];
+    let closure_rc = match val.as_closure() {
+        Some(c) => c,
+        None => return (SIG_OK, Value::NIL),
+    };
+    let syntax = match closure_rc.template.syntax.as_ref() {
+        Some(s) => s,
+        None => return (SIG_OK, Value::NIL),
+    };
+    let file = match syntax.span.file.as_ref() {
+        Some(f) => f.clone(),
+        None => return (SIG_OK, Value::NIL),
+    };
+    let mut fields = std::collections::BTreeMap::new();
+    fields.insert(TableKey::Keyword("file".to_string()), Value::string(&*file));
+    fields.insert(
+        TableKey::Keyword("line".to_string()),
+        Value::int(syntax.span.line as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("col".to_string()),
+        Value::int(syntax.span.col as i64),
+    );
+    (SIG_OK, Value::struct_from(fields))
+}
+
 /// Declarative primitive definitions for meta-programming operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -635,7 +668,122 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(squelch (fn () (yield 1)) :yield)",
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "meta/origin",
+        func: prim_meta_origin,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "Return the source location of a closure as {:file :line :col}, or nil if unavailable.",
+        params: &["f"],
+        category: "meta",
+        example: r#"(defn foo () 42) (meta/origin foo)"#,
+        aliases: &[],
+    },
 ];
 
 // Behavioral tests for the primitives in this module are in
 // tests/elle/syntax-predicates.lisp and tests/elle/macros.lisp.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::LocationMap;
+    use crate::hir::VarargKind;
+    use crate::signals::Signal;
+    use crate::syntax::{Span, Syntax, SyntaxKind};
+    use crate::value::closure::{Closure, ClosureTemplate};
+    use crate::value::types::Arity;
+    use std::collections::HashMap;
+    use std::rc::Rc;
+
+    fn make_closure_with_syntax(syntax: Option<Rc<Syntax>>) -> Value {
+        let template = Rc::new(ClosureTemplate {
+            bytecode: Rc::new(vec![]),
+            arity: Arity::Exact(0),
+            num_locals: 0,
+            num_captures: 0,
+            num_params: 0,
+            constants: Rc::new(vec![]),
+            signal: Signal::silent(),
+            lbox_params_mask: 0,
+            lbox_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            syntax,
+            vararg_kind: VarargKind::List,
+            name: None,
+        });
+        Value::closure(Closure {
+            template,
+            env: Rc::new(vec![]),
+            squelch_mask: 0,
+        })
+    }
+
+    #[test]
+    fn meta_origin_closure_returns_struct() {
+        let span = Span::new(0, 10, 3, 5).with_file("/tmp/foo.lisp");
+        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
+        let closure = make_closure_with_syntax(Some(syntax));
+
+        let (sig, result) = prim_meta_origin(&[closure]);
+        assert_eq!(sig, SIG_OK);
+
+        let fields = result.as_struct().expect("expected struct");
+        let file_val = fields
+            .get(&TableKey::Keyword("file".to_string()))
+            .expect(":file key missing");
+        let line_val = fields
+            .get(&TableKey::Keyword("line".to_string()))
+            .expect(":line key missing");
+        let col_val = fields
+            .get(&TableKey::Keyword("col".to_string()))
+            .expect(":col key missing");
+
+        assert!(
+            file_val
+                .with_string(|s| s.contains("foo.lisp"))
+                .unwrap_or(false),
+            "expected :file to contain 'foo.lisp'"
+        );
+        assert_eq!(line_val.as_int(), Some(3));
+        assert_eq!(col_val.as_int(), Some(5));
+    }
+
+    #[test]
+    fn meta_origin_non_closure_returns_nil() {
+        let (sig, result) = prim_meta_origin(&[Value::int(42)]);
+        assert_eq!(sig, SIG_OK);
+        assert!(result.is_nil());
+    }
+
+    #[test]
+    fn meta_origin_nil_returns_nil() {
+        let (sig, result) = prim_meta_origin(&[Value::NIL]);
+        assert_eq!(sig, SIG_OK);
+        assert!(result.is_nil());
+    }
+
+    #[test]
+    fn meta_origin_closure_without_syntax_returns_nil() {
+        let closure = make_closure_with_syntax(None);
+        let (sig, result) = prim_meta_origin(&[closure]);
+        assert_eq!(sig, SIG_OK);
+        assert!(result.is_nil());
+    }
+
+    #[test]
+    fn meta_origin_closure_with_synthetic_span_returns_nil() {
+        // Span with no file should return nil.
+        let span = Span::new(0, 5, 1, 0); // no file set
+        let syntax = Rc::new(Syntax::new(SyntaxKind::Nil, span));
+        let closure = make_closure_with_syntax(Some(syntax));
+
+        let (sig, result) = prim_meta_origin(&[closure]);
+        assert_eq!(sig, SIG_OK);
+        assert!(result.is_nil());
+    }
+}
