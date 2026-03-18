@@ -51,22 +51,69 @@
 # @string put
 # ============================================================================
 
-(assert-err (fn () (put @"hello" 10 88)) "put out of bounds errors")
-(assert-err (fn () (put @"hello" -1 88)) "put negative index errors")
-(assert-err (fn () (put @"" 0 88)) "put on empty @string errors")
+(assert-err (fn () (put @"hello" 10 "x")) "put out of bounds errors")
+(assert-err (fn () (put @"hello" -1 "x")) "put negative index errors")
+(assert-err (fn () (put @"" 0 "x")) "put on empty @string errors")
+
+# ============================================================================
+# @string grapheme-consistent indexing
+# ============================================================================
+
+# length counts grapheme clusters, not bytes
+(assert-eq (length @"café") 4 "length @\"café\" is 4 graphemes, not 5 bytes")
+(assert-eq (length @"🎉🎊") 2 "length of emoji @string is grapheme count")
+(assert-eq (length @"naïve") 5 "length @\"naïve\" counts combining sequence as one grapheme")
+
+# put replaces grapheme cluster at the given position
+(let ((s @"café"))
+  (put s 3 "E")
+  (assert-eq (freeze s) "cafE" "put replaces grapheme at index 3"))
+
+(let ((s @"hello"))
+  (put s 0 "H")
+  (assert-eq (freeze s) "Hello" "put replaces first grapheme"))
+
+(let ((s @"hello"))
+  (put s 4 "O")
+  (assert-eq (freeze s) "hellO" "put replaces last grapheme"))
+
+# put accepts multi-byte replacement string
+(let ((s @"cafe"))
+  (put s 3 "é")
+  (assert-eq (freeze s) "café" "put can replace with multi-byte grapheme"))
+
+# round-trip: get then put restores original
+(let ((s @"café"))
+  (let ((g (get s 3)))
+    (put s 3 "E")
+    (put s 3 g)
+    (assert-eq (freeze s) "café" "get/put round-trip preserves original value")))
+
+# put type errors
+(assert-err (fn () (put @"hello" 0 88)) "put @string rejects integer value")
+(assert-err (fn () (put @"hello" "a" "b")) "put @string rejects non-integer index")
+
+# put bounds errors (use string values, matching new semantics)
+(assert-err (fn () (put @"hello" 10 "x")) "put out of bounds errors (new)")
+(assert-err (fn () (put @"hello" -1 "x")) "put negative index errors (new)")
+(assert-err (fn () (put @"" 0 "x")) "put on empty @string errors (new)")
 
 # ============================================================================
 # @string pop
 # ============================================================================
 
-(assert-eq (begin (var b @"hi") (pop b)) 105 "pop returns byte value (i=105)")
+(assert-eq (begin (var b @"hi") (pop b)) "i" "pop returns last grapheme as string")
+(assert-eq (begin (var b @"café") (pop b)) "é" "pop returns last multibyte grapheme")
 (assert-err (fn () (begin (var b @"") (pop b))) "pop on empty @string errors")
 
 # ============================================================================
 # @string push
 # ============================================================================
 
-(assert-true (string? (begin (var b @"hi") (push b 33) b)) "push returns @string")
+(assert-true (string? (begin (var b @"hi") (push b "!") b)) "push returns @string")
+(assert-eq (freeze (begin (var b @"hi") (push b "!") b)) "hi!" "push appends string to @string")
+(assert-eq (freeze (begin (var b @"café") (push b "x") b)) "caféx" "push appends to multibyte @string")
+(assert-err (fn () (begin (var b @"hi") (push b 33))) "push rejects integer for @string")
 
 # ============================================================================
 # @string append
