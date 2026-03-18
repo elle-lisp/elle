@@ -555,7 +555,7 @@ impl Value {
         } else if self.is_keyword() {
             "keyword"
         } else if self.is_pointer() {
-            "pointer"
+            "ptr"
         } else if self.is_heap() {
             unsafe { deref(*self).type_name() }
         } else {
