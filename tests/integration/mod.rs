@@ -93,6 +93,9 @@ mod cond_match_args {
 mod meta {
     include!("meta.rs");
 }
+mod elle_scripts {
+    include!("elle_scripts.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {
