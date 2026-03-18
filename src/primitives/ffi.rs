@@ -94,7 +94,8 @@ mod tests {
     use super::super::loading::{prim_ffi_native, prim_ffi_signature};
     use super::super::memory::{
         prim_ffi_align, prim_ffi_array, prim_ffi_free, prim_ffi_malloc, prim_ffi_read,
-        prim_ffi_size, prim_ffi_string, prim_ffi_struct, prim_ffi_write,
+        prim_ffi_size, prim_ffi_string, prim_ffi_struct, prim_ffi_write, prim_ptr_add,
+        prim_ptr_diff, prim_ptr_from_int, prim_ptr_to_int,
     };
 
     #[test]
@@ -450,5 +451,205 @@ mod tests {
         assert!((arr[1].as_float().unwrap() - test_float).abs() < 1e-10);
 
         prim_ffi_free(&[ptr]);
+    }
+
+    // ── ptr/add ─────────────────────────────────────────────────────────
+
+    fn error_kind(v: &crate::value::Value) -> Option<String> {
+        use crate::value::heap::TableKey;
+        v.as_struct()
+            .and_then(|fields| fields.get(&TableKey::Keyword("error".into())))
+            .and_then(|k| k.as_keyword_name())
+    }
+
+    #[test]
+    fn test_ptr_add_basic() {
+        let alloc = prim_ffi_malloc(&[Value::int(64)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+        let addr = buf.as_managed_pointer().unwrap().get().unwrap();
+
+        let result = prim_ptr_add(&[buf, Value::int(16)]);
+        assert_eq!(result.0, SIG_OK);
+        assert_eq!(result.1.as_pointer(), Some(addr + 16));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_add_negative() {
+        let alloc = prim_ffi_malloc(&[Value::int(64)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+        let addr = buf.as_managed_pointer().unwrap().get().unwrap();
+
+        // Advance by 32, then retreat by 8 → net +24
+        let p2 = prim_ptr_add(&[buf, Value::int(32)]);
+        assert_eq!(p2.0, SIG_OK);
+        let p3 = prim_ptr_add(&[p2.1, Value::int(-8)]);
+        assert_eq!(p3.0, SIG_OK);
+        assert_eq!(p3.1.as_pointer(), Some(addr + 24));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_add_null_error() {
+        let result = prim_ptr_add(&[Value::NIL, Value::int(8)]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+    }
+
+    #[test]
+    fn test_ptr_add_freed_error() {
+        let alloc = prim_ffi_malloc(&[Value::int(8)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+
+        prim_ffi_free(&[buf]);
+
+        let result = prim_ptr_add(&[buf, Value::int(4)]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("use-after-free"));
+    }
+
+    #[test]
+    fn test_ptr_add_wrong_type() {
+        let result = prim_ptr_add(&[Value::int(42), Value::int(8)]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("type-error"));
+    }
+
+    #[test]
+    fn test_ptr_add_non_int_offset() {
+        let alloc = prim_ffi_malloc(&[Value::int(8)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+
+        let result = prim_ptr_add(&[buf, Value::string("hello")]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("type-error"));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_add_overflow() {
+        let alloc = prim_ffi_malloc(&[Value::int(8)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+
+        // INT_MAX == MAX_PTR == (1i64 << 47) - 1. Any non-zero address plus
+        // INT_MAX exceeds MAX_PTR, triggering the range check. The i64
+        // checked_add overflow path is unreachable given current value encoding
+        // (both operands ≤ 2^47-1, sum ≤ 2^48-2, well within i64::MAX).
+        use crate::value::repr::INT_MAX;
+        let result = prim_ptr_add(&[buf, Value::int(INT_MAX)]);
+        assert_eq!(result.0, SIG_ERROR);
+        // We expect argument-error (range exceeded), not overflow-error
+        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    // ── ptr/diff ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_ptr_diff_basic() {
+        let alloc = prim_ffi_malloc(&[Value::int(64)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+
+        let p2 = prim_ptr_add(&[buf, Value::int(24)]);
+        assert_eq!(p2.0, SIG_OK);
+
+        let diff = prim_ptr_diff(&[p2.1, buf]);
+        assert_eq!(diff.0, SIG_OK);
+        assert_eq!(diff.1.as_int(), Some(24));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_diff_negative() {
+        let alloc = prim_ffi_malloc(&[Value::int(64)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+
+        let p2 = prim_ptr_add(&[buf, Value::int(24)]);
+        assert_eq!(p2.0, SIG_OK);
+
+        // Reverse order → negative
+        let diff = prim_ptr_diff(&[buf, p2.1]);
+        assert_eq!(diff.0, SIG_OK);
+        assert_eq!(diff.1.as_int(), Some(-24));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    // ── ptr/to-int ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_ptr_to_int_basic() {
+        let alloc = prim_ffi_malloc(&[Value::int(8)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+        let expected = buf.as_managed_pointer().unwrap().get().unwrap() as i64;
+
+        let result = prim_ptr_to_int(&[buf]);
+        assert_eq!(result.0, SIG_OK);
+        assert_eq!(result.1.as_int(), Some(expected));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_to_int_null_error() {
+        let result = prim_ptr_to_int(&[Value::NIL]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+    }
+
+    // ── ptr/from-int ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_ptr_from_int_basic() {
+        let alloc = prim_ffi_malloc(&[Value::int(8)]);
+        assert_eq!(alloc.0, SIG_OK);
+        let buf = alloc.1;
+        let addr = buf.as_managed_pointer().unwrap().get().unwrap() as i64;
+
+        let result = prim_ptr_from_int(&[Value::int(addr)]);
+        assert_eq!(result.0, SIG_OK);
+        assert_eq!(result.1.as_pointer(), Some(addr as usize));
+
+        prim_ffi_free(&[buf]);
+    }
+
+    #[test]
+    fn test_ptr_from_int_zero() {
+        let result = prim_ptr_from_int(&[Value::int(0)]);
+        assert_eq!(result.0, SIG_OK);
+        // ptr/from-int 0 → nil (Value::pointer(0) == Value::NIL)
+        assert!(result.1.is_nil());
+    }
+
+    #[test]
+    fn test_ptr_from_int_negative() {
+        let result = prim_ptr_from_int(&[Value::int(-1)]);
+        assert_eq!(result.0, SIG_ERROR);
+        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+    }
+
+    #[test]
+    fn test_ptr_from_int_exceeds_47bit() {
+        // INT_MAX == (1i64 << 47) - 1 == MAX_PTR, so no representable Value::int
+        // can exceed the 47-bit pointer range. The guard in prim_ptr_from_int
+        // is a defensive invariant for future encoding changes. We verify the
+        // boundary value (INT_MAX) is accepted — it equals MAX_PTR exactly.
+        use crate::value::repr::INT_MAX;
+        let result = prim_ptr_from_int(&[Value::int(INT_MAX)]);
+        assert_eq!(result.0, SIG_OK);
+        assert_eq!(result.1.as_pointer(), Some(INT_MAX as usize));
     }
 }

@@ -157,7 +157,7 @@ the absence of one).
 Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
 
 ```janet
-(pointer? x)    # predicate
+(ptr? x)        # predicate (alias: pointer?)
 ```
 
 ---
@@ -447,7 +447,7 @@ Heap-tracked C pointer. Tracks freed state to prevent use-after-free.
 Created by `ffi/malloc`.
 
 ```janet
-(pointer? x)    # predicate (matches both raw and managed pointers)
+(ptr? x)        # predicate (matches both raw and managed pointers; alias: pointer?)
 ```
 
 ---
@@ -478,7 +478,7 @@ Created by `ffi/malloc`.
 | `closure?` | closure only |
 | `primitive?` | native function only |
 | `fiber?` | fiber |
-| `pointer?` | raw C pointer or managed pointer |
+| `ptr?` / `pointer?` | raw C pointer or managed pointer |
 | `zero?` | zero (integer or float) |
 | `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
 

@@ -401,7 +401,7 @@ Exactly two values are falsy. Everything else is truthy.
 | `box?` | box (mutable box) |
 | `parameter?` | dynamic parameter |
 | `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
-| `pointer?` | raw or managed C pointer |
+| `ptr?` / `pointer?` | raw or managed C pointer |
 | `zero?` | zero (integer or float) |
 | `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
 

@@ -320,7 +320,7 @@ fn test_pointer() {
     assert!(!ptr.is_heap());
     assert!(!ptr.is_int());
     assert_eq!(ptr.as_pointer(), Some(0x7F4A_2B3C_0000));
-    assert_eq!(ptr.type_name(), "pointer");
+    assert_eq!(ptr.type_name(), "ptr");
 
     // Pointer equality
     let ptr2 = Value::pointer(0x7F4A_2B3C_0000);

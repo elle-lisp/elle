@@ -85,6 +85,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "array?",
     "struct?",
     "bytes?",
+    "ptr?",
     "pointer?",
     "fiber?",
     "closure?",

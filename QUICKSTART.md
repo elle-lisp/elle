@@ -463,6 +463,7 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (type-of true)      # => :boolean
 (type-of (fn [] 1)) # => :closure  (use fn? to test)
 (type-of +)         # => :native-fn
+(type-of ptr)       # => :ptr
 
 # Predicates
 (nil? x)      (boolean? x)   (number? x)
@@ -551,7 +552,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 ## I/O and Subprocesses
 
-### Ports
+### Ports (not-thread-safe)
 
 ```lisp
 (port/open "file.txt" :read)

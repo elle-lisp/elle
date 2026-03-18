@@ -389,7 +389,7 @@ impl HeapObject {
             HeapObject::Binding(_) => "binding",
             HeapObject::FFISignature(_, _) => "ffi-signature",
             HeapObject::FFIType(_) => "ffi-type",
-            HeapObject::ManagedPointer { .. } => "pointer",
+            HeapObject::ManagedPointer { .. } => "ptr",
             HeapObject::External { obj, .. } => obj.type_name,
             HeapObject::Parameter { .. } => "parameter",
             HeapObject::LSet { .. } => "set",
