@@ -85,17 +85,41 @@ jobs:
             ./target/release/elle "$f" || exit 1
           done
           echo "✓ All Elle script tests passed"
+
+  plugin-tests:
+    name: Plugin Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore plugin .so cache
+        id: plugin-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/release/libelle_glob.so
+            target/release/libelle_regex.so
+            target/release/libelle_sqlite.so
+            target/release/libelle_crypto.so
+            target/release/libelle_random.so
+            target/release/libelle_selkie.so
+            target/release/libelle_oxigraph.so
+          key: plugins-so-${{ runner.os }}-${{ hashFiles('plugins/**', 'src/**', 'Cargo.toml', 'Cargo.lock') }}
+
+      - name: Install GNU parallel
+        run: sudo apt-get install -y parallel
+
+      - name: Build release binary
+        run: cargo build --release -p elle
+
       - name: Build plugins
+        if: steps.plugin-cache.outputs.cache-hit != 'true'
         run: make plugins
+
       - name: Run plugin tests
-        run: |
-          echo "Running plugin tests:"
-          echo "===================="
-          for f in tests/elle/plugins/*.lisp; do
-            echo "  $f"
-            ./target/release/elle "$f" || exit 1
-          done
-          echo "✓ All plugin tests passed"
+        run: make plugin-tests
 
   audit:
     name: Dependency Audit
