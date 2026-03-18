@@ -130,12 +130,12 @@ pub extern "C" fn elle_jit_yield_through_call(
     });
 
     // Append caller frame to the existing suspended chain.
-    // The callee MUST have set fiber.suspended — if not, it's a VM bug.
-    let frames = vm.fiber.suspended.as_mut().expect(
-        "VM bug: elle_jit_yield_through_call called but fiber.suspended is None. \
-         The callee should have set fiber.suspended before returning YIELD_SENTINEL.",
-    );
+    // fiber.suspended may be None when the callee is a primitive — primitives
+    // only set fiber.signal, not fiber.suspended. Use unwrap_or_default() to
+    // start a new chain in that case, mirroring the interpreter path in call.rs.
+    let mut frames = vm.fiber.suspended.take().unwrap_or_default();
     frames.push(caller_frame);
+    vm.fiber.suspended = Some(frames);
 
     YIELD_SENTINEL
 }

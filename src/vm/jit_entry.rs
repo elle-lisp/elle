@@ -112,10 +112,18 @@ impl VM {
 
         // Check for yield sentinel (JIT function yielded directly)
         if result.to_bits() == YIELD_SENTINEL {
-            // fiber.signal and fiber.suspended are already set by the JIT
-            // yield helpers. Return Some(SIG_YIELD) to call_inner, which
-            // will build the interpreter-level caller frame.
-            return Some(SIG_YIELD);
+            // fiber.signal is set by jit_handle_primitive_signal (or elle_jit_yield
+            // for Yield terminators). Read the actual bits — do not hardcode SIG_YIELD,
+            // as the signal may be a composed value such as SIG_YIELD | SIG_IO.
+            // call_inner uses these bits to build the interpreter-level caller frame
+            // and propagate the correct signal to execute_scheduled.
+            let sig = self
+                .fiber
+                .signal
+                .as_ref()
+                .map(|(b, _)| *b)
+                .unwrap_or(SIG_YIELD);
+            return Some(sig);
         }
 
         // Check for pending tail call (JIT function did a TailCall)
