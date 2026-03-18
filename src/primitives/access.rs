@@ -331,7 +331,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // @string (mutable byte sequence) - mutate in place
+    // @string (mutable string — indexed by grapheme cluster position)
     if let Some(buf_ref) = args[0].as_string_mut() {
         let index = match args[1].as_int() {
             Some(i) => i,
@@ -348,42 +348,59 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let byte = match args[2].as_int() {
-            Some(n) if (0..=255).contains(&n) => n as u8,
-            Some(n) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "error",
-                        format!("put: byte value out of range 0-255: {}", n),
-                    ),
-                )
-            }
+        let replacement = match args[2].with_string(|r| r.to_string()) {
+            Some(r) => r,
             None => {
                 return (
                     SIG_ERROR,
                     error_val(
                         "type-error",
                         format!(
-                            "put: @string value must be integer, got {}",
+                            "put: @string value must be string, got {}",
                             args[2].type_name()
                         ),
                     ),
                 )
             }
         };
-        let len = buf_ref.borrow().len();
-        if index < 0 || (index as usize) >= len {
+        let borrowed = buf_ref.borrow();
+        let s = match std::str::from_utf8(&borrowed) {
+            Ok(s) => s,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "error",
+                        format!("put: @string contains invalid UTF-8: {}", e),
+                    ),
+                )
+            }
+        };
+        let graphemes: Vec<&str> = s.graphemes(true).collect();
+        if index < 0 || index as usize >= graphemes.len() {
             return (
                 SIG_ERROR,
                 error_val(
                     "error",
-                    format!("put: index {} out of bounds (length {})", index, len),
+                    format!(
+                        "put: index {} out of bounds (length {})",
+                        index,
+                        graphemes.len()
+                    ),
                 ),
             );
         }
-        buf_ref.borrow_mut()[index as usize] = byte;
-        return (SIG_OK, args[0]); // Return the mutated @string
+        let mut result = String::new();
+        for (i, g) in graphemes.iter().enumerate() {
+            if i == index as usize {
+                result.push_str(&replacement);
+            } else {
+                result.push_str(g);
+            }
+        }
+        drop(borrowed); // release immutable borrow
+        *buf_ref.borrow_mut() = result.into_bytes(); // take mutable borrow
+        return (SIG_OK, args[0]);
     }
 
     // @bytes (mutable byte sequence) - mutate in place

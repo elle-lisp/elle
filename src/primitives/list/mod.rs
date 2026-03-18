@@ -238,7 +238,17 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     } else if let Some(buf_ref) = args[0].as_string_mut() {
-        (SIG_OK, Value::int(buf_ref.borrow().len() as i64))
+        let borrowed = buf_ref.borrow();
+        match std::str::from_utf8(&borrowed) {
+            Ok(s) => (SIG_OK, Value::int(s.graphemes(true).count() as i64)),
+            Err(e) => (
+                SIG_ERROR,
+                error_val(
+                    "error",
+                    format!("length: @string contains invalid UTF-8: {}", e),
+                ),
+            ),
+        }
     } else if let Some(b) = args[0].as_bytes() {
         (SIG_OK, Value::int(b.len() as i64))
     } else if let Some(blob_ref) = args[0].as_bytes_mut() {
