@@ -71,7 +71,42 @@ jobs:
         run: cargo build --release
       - name: Run examples and Elle script tests
         run: make smoke
-      - name: Build plugins and run plugin tests
+
+  plugin-tests:
+    name: Plugin Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore plugin .so cache
+        id: plugin-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            target/release/libelle_glob.so
+            target/release/libelle_regex.so
+            target/release/libelle_sqlite.so
+            target/release/libelle_crypto.so
+            target/release/libelle_random.so
+            target/release/libelle_selkie.so
+            target/release/libelle_oxigraph.so
+          key: plugins-so-${{ runner.os }}-${{ hashFiles('plugins/**', 'src/**', 'Cargo.toml', 'Cargo.lock') }}
+
+      - name: Install GNU parallel
+        run: sudo apt-get install -y parallel
+
+      - name: Build release binary
+        run: cargo build --release -p elle
+
+      - name: Build plugins
+        if: steps.plugin-cache.outputs.cache-hit != 'true'
+        run: make plugins
+
+      - name: Run plugin tests
         run: make plugin-tests
 
   tests-combined:
@@ -93,7 +128,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, elle-tests, tests-combined]
+    needs: [changes, qa, elle-tests, tests-combined, plugin-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -105,6 +140,9 @@ jobs:
         run: exit 1
       - name: Check combined tests
         if: needs.tests-combined.result == 'failure'
+        run: exit 1
+      - name: Check plugin tests
+        if: needs.plugin-tests.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'
