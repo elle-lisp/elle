@@ -133,3 +133,47 @@
 # (bytes->hex x) preserves mutability: bytes→string, @bytes→@string
 (assert-eq (type (bytes->hex (bytes 72 101 108))) :string "bytes->hex from bytes is immutable")
 (assert-eq (type (bytes->hex (@bytes 72 101 108))) :@string "bytes->hex from @bytes is mutable")
+
+# ============================================================================
+# seq->hex — bytes input (same as bytes->hex, backward compat)
+# ============================================================================
+
+(assert-eq (seq->hex (bytes 72 101 108)) "48656c" "seq->hex bytes")
+(assert-eq (freeze (seq->hex (@bytes 72 101 108))) "48656c" "seq->hex @bytes value")
+(assert-eq (type (seq->hex (@bytes 72 101 108))) :@string "seq->hex @bytes is mutable")
+
+# ============================================================================
+# seq->hex — integer input (big-endian minimal bytes)
+# ============================================================================
+
+(assert-eq (seq->hex 0) "00" "seq->hex zero")
+(assert-eq (seq->hex 255) "ff" "seq->hex 255")
+(assert-eq (seq->hex 256) "0100" "seq->hex 256")
+(assert-eq (seq->hex 65535) "ffff" "seq->hex 65535")
+(assert-err-kind (fn () (seq->hex -1)) :value-error "seq->hex negative int errors")
+
+# ============================================================================
+# seq->hex — array input
+# ============================================================================
+
+(assert-eq (seq->hex [72 101 108]) "48656c" "seq->hex array")
+(assert-eq (type (seq->hex [72 101 108])) :string "seq->hex array is immutable")
+(assert-eq (freeze (seq->hex @[72 101 108])) "48656c" "seq->hex @array value")
+(assert-eq (type (seq->hex @[72 101 108])) :@string "seq->hex @array is mutable")
+(assert-err-kind (fn () (seq->hex [256])) :value-error "seq->hex array element out of range")
+(assert-err-kind (fn () (seq->hex ["x"])) :type-error "seq->hex array element not int")
+
+# ============================================================================
+# seq->hex — list input
+# ============================================================================
+
+(assert-eq (seq->hex '(72 101 108)) "48656c" "seq->hex list")
+(assert-eq (type (seq->hex '(72 101 108))) :string "seq->hex list is immutable")
+(assert-err-kind (fn () (seq->hex '(256))) :value-error "seq->hex list element out of range")
+(assert-err-kind (fn () (seq->hex '("x"))) :type-error "seq->hex list element not int")
+
+# ============================================================================
+# seq->hex — bytes->hex still works as alias
+# ============================================================================
+
+(assert-eq (bytes->hex (bytes 72 101 108)) "48656c" "bytes->hex alias still works")

@@ -108,37 +108,144 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bytes_mut(data))
 }
 
-/// bytes->hex: convert bytes or @bytes to lowercase hex string
-pub(crate) fn prim_bytes_to_hex(args: &[Value]) -> (SignalBits, Value) {
+/// Encode a byte slice as a lowercase hex string (2 chars per byte).
+fn bytes_to_hex_string(b: &[u8]) -> String {
+    b.iter().map(|byte| format!("{:02x}", byte)).collect()
+}
+
+/// Validate and collect byte values from an iterator of `Value`.
+///
+/// Returns `Ok(Vec<u8>)` on success, or `Err((SignalBits, Value))` on the
+/// first invalid element. `idx` is the position label used in error messages.
+fn collect_byte_values<I>(iter: I) -> Result<Vec<u8>, (SignalBits, Value)>
+where
+    I: IntoIterator<Item = Value>,
+{
+    let mut out = Vec::new();
+    for (i, v) in iter.into_iter().enumerate() {
+        match v.as_int() {
+            Some(n) if (0..=255).contains(&n) => out.push(n as u8),
+            Some(n) => {
+                return Err((
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        format!("seq->hex: byte at index {} out of range 0-255: {}", i, n),
+                    ),
+                ));
+            }
+            None => {
+                return Err((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "seq->hex: element at index {} must be integer, got {}",
+                            i,
+                            v.type_name()
+                        ),
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// seq->hex: convert bytes, @bytes, array, @array, list, or integer to a
+/// lowercase hex string.
+///
+/// Mutability rule: mutable input (@bytes, @array) → @string.
+/// Everything else (bytes, array, list, integer) → string.
+///
+/// Integer input: big-endian, minimal bytes, no leading zero bytes except
+/// that 0 itself produces "00".  Negative integers → value-error.
+pub(crate) fn prim_seq_to_hex(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("bytes->hex: expected 1 argument, got {}", args.len()),
+                format!("seq->hex: expected 1 argument, got {}", args.len()),
             ),
         );
     }
-    // Immutable bytes
+
+    // Immutable bytes → immutable string
     if let Some(b) = args[0].as_bytes() {
-        let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
-        return (SIG_OK, Value::string(hex.as_str()));
+        return (SIG_OK, Value::string(bytes_to_hex_string(b)));
     }
+
     // Mutable @bytes → mutable @string
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
-        let hex: String = borrowed
-            .iter()
-            .map(|byte| format!("{:02x}", byte))
-            .collect();
+        let hex = bytes_to_hex_string(&borrowed);
         return (SIG_OK, Value::string_mut(hex.into_bytes()));
     }
+
+    // Integer: big-endian minimal bytes, at least 1 byte
+    if let Some(n) = args[0].as_int() {
+        if n < 0 {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "value-error",
+                    format!("seq->hex: negative integers not supported, got {}", n),
+                ),
+            );
+        }
+        // Extract big-endian bytes and strip leading zeros, keeping at least 1 byte.
+        let be = (n as u64).to_be_bytes();
+        let start = be.iter().position(|&b| b != 0).unwrap_or(be.len() - 1);
+        return (SIG_OK, Value::string(bytes_to_hex_string(&be[start..])));
+    }
+
+    // Immutable array → immutable string
+    if let Some(elems) = args[0].as_array() {
+        return match collect_byte_values(elems.iter().copied()) {
+            Ok(bytes) => (SIG_OK, Value::string(bytes_to_hex_string(&bytes))),
+            Err(e) => e,
+        };
+    }
+
+    // Mutable @array → mutable @string
+    if let Some(arr_ref) = args[0].as_array_mut() {
+        let borrowed = arr_ref.borrow();
+        return match collect_byte_values(borrowed.iter().copied()) {
+            Ok(bytes) => {
+                let hex = bytes_to_hex_string(&bytes);
+                (SIG_OK, Value::string_mut(hex.into_bytes()))
+            }
+            Err(e) => e,
+        };
+    }
+
+    // List (always immutable in Elle) → immutable string
+    if args[0].is_empty_list() || args[0].is_cons() {
+        return match args[0].list_to_vec() {
+            Ok(elems) => match collect_byte_values(elems) {
+                Ok(bytes) => (SIG_OK, Value::string(bytes_to_hex_string(&bytes))),
+                Err(e) => e,
+            },
+            Err(_) => (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "seq->hex: expected proper list, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            ),
+        };
+    }
+
     (
         SIG_ERROR,
         error_val(
             "type-error",
             format!(
-                "bytes->hex: expected bytes or @bytes, got {}",
+                "seq->hex: expected bytes, array, list, or integer, got {}",
                 args[0].type_name()
             ),
         ),
@@ -358,15 +465,15 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "bytes->hex",
-        func: prim_bytes_to_hex,
+        name: "seq->hex",
+        func: prim_seq_to_hex,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Convert bytes or @bytes to a lowercase hex string.",
-        params: &["b"],
+        doc: "Convert bytes, @bytes, array, @array, list, or integer to a lowercase hex string. Mutable input (@bytes, @array) produces @string; all other input produces string. Integer input uses big-endian minimal-byte encoding (0 → \"00\"). Aliases: bytes->hex, bytes->hex-string.",
+        params: &["x"],
         category: "bytes",
-        example: "(bytes->hex (bytes 72 101 108)) ;=> \"48656c\"",
-        aliases: &["bytes->hex-string"],
+        example: "(seq->hex (bytes 72 101 108)) ;=> \"48656c\"\n(seq->hex [72 101 108]) ;=> \"48656c\"\n(seq->hex 255) ;=> \"ff\"",
+        aliases: &["bytes->hex", "bytes->hex-string"],
     },
     PrimitiveDef {
         name: "slice",

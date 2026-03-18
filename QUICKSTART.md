@@ -392,7 +392,10 @@ Note: `string-append` does not exist. Use `string/join`.
 (bytes "hello")              # string → bytes (UTF-8)
 (get (bytes 1 2 3) 0)        # => 1
 (length (bytes 1 2 3))       # => 3
-(bytes->hex (bytes 1 2 3))   # => "010203"
+(seq->hex (bytes 1 2 3))     # => "010203"  (canonical name)
+(bytes->hex (bytes 1 2 3))   # => "010203"  (alias for seq->hex)
+(seq->hex [1 2 3])           # => "010203"  (also works with arrays)
+(seq->hex 255)               # => "ff"      (and integers)
 (string (bytes 97 98 99))    # => "abc"
 ```
 
@@ -480,6 +483,9 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (integer "42")       (float "3.14")
 (string 42)          (string 'foo)   # => "foo"  (works for symbols too)
 (string :foo)        # => "foo"  (no colon)
+(number->string 42)  # => "42"  (decimal)
+(number->string 255 16)  # => "ff"   (hex, radix 2–36)
+(number->string 255 2)   # => "11111111"  (binary)
 ```
 
 ---
@@ -629,11 +635,12 @@ cargo build --release -p elle-crypto
 **Pattern:**
 ```lisp
 (def crypto (import "target/release/libelle_crypto.so"))
-(bytes->hex ((get crypto :sha256) "hello"))
+(seq->hex ((get crypto :sha256) "hello"))  # seq->hex is the canonical name
 
 # Or destructure:
 (def {:sha256 sha256 :hmac-sha256 hmac} (import "target/release/libelle_crypto.so"))
-(bytes->hex (sha256 "hello"))
+(seq->hex (sha256 "hello"))
+# (bytes->hex is an alias for seq->hex and still works)
 ```
 
 ### Available Plugins
@@ -644,8 +651,8 @@ cargo build --release -p elle-crypto
 (def crypto (import "target/release/libelle_crypto.so"))
 # Keys: :sha224 :sha256 :sha384 :sha512
 #       :hmac-sha224 :hmac-sha256 :hmac-sha384 :hmac-sha512
-(bytes->hex ((get crypto :sha256) "hello"))
-(bytes->hex ((get crypto :hmac-sha256) "key" "message"))
+(seq->hex ((get crypto :sha256) "hello"))  # seq->hex is canonical
+(seq->hex ((get crypto :hmac-sha256) "key" "message"))
 ```
 
 #### `elle-glob` — Filesystem glob patterns
