@@ -298,8 +298,20 @@ impl VM {
                     self.docs.keys().collect()
                 };
                 names.sort();
-                let values: Vec<Value> =
-                    names.iter().map(|n| Value::string(n.to_string())).collect();
+                let values: Vec<Value> = unsafe {
+                    let symbols_ptr = crate::context::get_symbol_table();
+                    names
+                        .iter()
+                        .map(|n| {
+                            if let Some(ptr) = symbols_ptr {
+                                let id = (*ptr).intern(n);
+                                Value::symbol(id.0)
+                            } else {
+                                Value::string(n.to_string())
+                            }
+                        })
+                        .collect()
+                };
                 (SIG_OK, crate::value::list(values))
             }
             "primitive-meta" => {
@@ -307,12 +319,28 @@ impl VM {
                     s
                 } else if let Some(s) = arg.as_keyword_name() {
                     s
+                } else if let Some(sym_id) = arg.as_symbol() {
+                    match crate::context::resolve_symbol_name(sym_id) {
+                        Some(s) => s,
+                        None => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "internal-error",
+                                    format!(
+                                        "primitive-meta: symbol ID {} not found in symbol table",
+                                        sym_id
+                                    ),
+                                ),
+                            );
+                        }
+                    }
                 } else {
                     return (
                         SIG_ERROR,
                         error_val(
                             "type-error",
-                            "primitive-meta: expected string or keyword".to_string(),
+                            "primitive-meta: expected string, keyword, or symbol".to_string(),
                         ),
                     );
                 };
