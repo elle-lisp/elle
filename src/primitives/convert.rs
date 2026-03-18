@@ -98,6 +98,121 @@ fn parse_float(s: &str) -> (SignalBits, Value) {
     }
 }
 
+/// Convert integer to string with optional radix (2–36).
+///
+/// 1 arg: `(number->string n)` — decimal string for int or float.
+/// 2 args: `(number->string n radix)` — convert integer `n` to string in the
+///   given base. Float with radix → type-error.
+pub(crate) fn prim_number_to_string(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("number->string: expected 1-2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    if args.len() == 1 {
+        // 1-arg: integer or float, decimal
+        if let Some(n) = args[0].as_int() {
+            return (SIG_OK, Value::string(n.to_string()));
+        }
+        if let Some(f) = args[0].as_float() {
+            return (SIG_OK, Value::string(f.to_string()));
+        }
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "number->string: expected number, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    }
+
+    // 2-arg: integer n + radix
+    // Float with radix is an error.
+    if args[0].as_float().is_some() && args[0].as_int().is_none() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                "number->string: radix conversion requires integer, got float".to_string(),
+            ),
+        );
+    }
+    let n = match args[0].as_int() {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "number->string: expected number, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+    let radix = match args[1].as_int() {
+        Some(r) => r,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "number->string: radix must be integer, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        }
+    };
+    if !(2..=36).contains(&radix) {
+        return (
+            SIG_ERROR,
+            error_val(
+                "error",
+                format!("number->string: radix must be 2-36, got {}", radix),
+            ),
+        );
+    }
+    (SIG_OK, Value::string(int_to_radix_string(n, radix as u32)))
+}
+
+/// Convert an i64 to a string in the given base (2–36), lowercase.
+/// Sign is preserved: negative values produce a leading '-'.
+fn int_to_radix_string(n: i64, radix: u32) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+    if n == 0 {
+        return "0".to_string();
+    }
+    let negative = n < 0;
+    // Use u64 to avoid overflow on i64::MIN
+    let mut value = if negative {
+        (n as i128).unsigned_abs() as u64
+    } else {
+        n as u64
+    };
+    let mut buf = Vec::new();
+    while value > 0 {
+        buf.push(DIGITS[(value % radix as u64) as usize]);
+        value /= radix as u64;
+    }
+    if negative {
+        buf.push(b'-');
+    }
+    buf.reverse();
+    String::from_utf8(buf).expect("digit chars are valid UTF-8")
+}
+
 /// Convert to string (variadic: 0 args → "", 1 arg → convert, N args → concatenate)
 pub(crate) fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
     match args.len() {
@@ -297,6 +412,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["values"],
         category: "conversion",
         example: "(string \"count: \" 42) #=> \"count: 42\"",
-        aliases: &["any->string", "number->string", "symbol->string"],
+        aliases: &["any->string", "symbol->string"],
+    },
+    PrimitiveDef {
+        name: "number->string",
+        func: prim_number_to_string,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Convert a number to string. With an optional radix (2–36), converts an integer to the given base (lowercase, no prefix).",
+        params: &["n", "radix?"],
+        category: "conversion",
+        example: "(number->string 42) #=> \"42\"\n(number->string 255 16) #=> \"ff\"\n(number->string -255 16) #=> \"-ff\"",
+        aliases: &[],
     },
 ];

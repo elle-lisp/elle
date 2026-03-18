@@ -67,6 +67,28 @@
 (assert-string-eq (any->string nil) "nil" "any->string(nil) == \"nil\"")
 
 # ============================================================================
+# number->string with radix
+# ============================================================================
+
+# Basic radix conversions
+(assert-string-eq (number->string 255 16) "ff" "hex 255")
+(assert-string-eq (number->string 255 2) "11111111" "binary 255")
+(assert-string-eq (number->string 255 8) "377" "octal 255")
+(assert-string-eq (number->string 10 10) "10" "decimal explicit")
+(assert-string-eq (number->string 35 36) "z" "base 36")
+(assert-string-eq (number->string -255 16) "-ff" "negative hex")
+(assert-string-eq (number->string 0 16) "0" "zero hex")
+
+# Backward compatibility: 1-arg still works
+(assert-string-eq (number->string 42) "42" "no radix still works")
+
+# Error cases
+(assert-err (fn () (number->string 3.14 16)) "float with radix errors")
+(assert-err (fn () (number->string 42 1)) "radix 1 errors")
+(assert-err (fn () (number->string 42 37)) "radix 37 errors")
+(assert-err (fn () (number->string "hello")) "non-number errors")
+
+# ============================================================================
 # string variadic (Issue #495)
 # ============================================================================
 

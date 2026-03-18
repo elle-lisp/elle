@@ -749,6 +749,46 @@ fn test_number_to_string() {
         }
         _ => panic!("Expected string"),
     }
+
+    // Radix: hex (base 16)
+    let result = call_primitive(&num_to_str, &[Value::int(255), Value::int(16)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "ff");
+
+    // Radix: binary (base 2)
+    let result = call_primitive(&num_to_str, &[Value::int(255), Value::int(2)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "11111111");
+
+    // Radix: octal (base 8)
+    let result = call_primitive(&num_to_str, &[Value::int(255), Value::int(8)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "377");
+
+    // Radix: base 36
+    let result = call_primitive(&num_to_str, &[Value::int(35), Value::int(36)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "z");
+
+    // Radix: negative value
+    let result = call_primitive(&num_to_str, &[Value::int(-255), Value::int(16)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "-ff");
+
+    // Radix: zero
+    let result = call_primitive(&num_to_str, &[Value::int(0), Value::int(16)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "0");
+
+    // Radix: explicit decimal
+    let result = call_primitive(&num_to_str, &[Value::int(10), Value::int(10)]).unwrap();
+    assert_eq!(result.with_string(|s| s.to_string()).unwrap(), "10");
+
+    // Error: float with radix
+    assert!(call_primitive(&num_to_str, &[Value::float(3.5), Value::int(16)]).is_err());
+
+    // Error: radix out of range (too low)
+    assert!(call_primitive(&num_to_str, &[Value::int(42), Value::int(1)]).is_err());
+
+    // Error: radix out of range (too high)
+    assert!(call_primitive(&num_to_str, &[Value::int(42), Value::int(37)]).is_err());
+
+    // Error: non-number first arg
+    assert!(call_primitive(&num_to_str, &[Value::string("hello")]).is_err());
 }
 
 #[test]
