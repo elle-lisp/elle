@@ -22,9 +22,9 @@ dev:  ## Build the Elle binary (debug, fast compile)
 	cargo build -p elle
 
 plugins:  ## Build all native plugins (.so)
-	@for p in glob regex sqlite crypto random selkie oxigraph; do \
-		cargo build --release -p elle-$$p; \
-	done
+	cargo build --release \
+		-p elle-glob -p elle-regex -p elle-sqlite -p elle-crypto \
+		-p elle-random -p elle-selkie -p elle-oxigraph
 
 # ── Docs ────────────────────────────────────────────────────────────
 
