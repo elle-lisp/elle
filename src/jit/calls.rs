@@ -147,8 +147,11 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
 
     if bits.contains(SIG_YIELD) {
         // Handles SIG_YIELD, SIG_YIELD|SIG_IO, SIG_YIELD|SIG_EXEC, etc.
-        // fiber.signal is already set by the primitive before returning.
-        // Return YIELD_SENTINEL so the JIT caller can side-exit.
+        // Primitives return (bits, value) as a Rust tuple — they do NOT call
+        // vm.fiber.signal = Some(...) themselves. Store the signal here so
+        // elle_jit_yield_through_call and the interpreter resume path can
+        // find it in fiber.signal.
+        vm.fiber.signal = Some((bits, value));
         return YIELD_SENTINEL;
     }
 
@@ -835,27 +838,32 @@ mod tests {
     }
 
     #[test]
-    fn bare_sig_yield_returns_yield_sentinel() {
+    fn bare_sig_yield_stores_signal_returns_yield_sentinel() {
+        // Primitives return (bits, value) as a Rust tuple — they do NOT pre-set
+        // fiber.signal. jit_handle_primitive_signal must store it.
         let mut vm = make_vm();
-        vm.fiber.signal = Some((SIG_YIELD, Value::int(1)));
         let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
         assert_eq!(result, YIELD_SENTINEL);
+        // Signal must be stored by the handler, not pre-set by the caller.
+        let (sig, val) = vm.fiber.signal.take().unwrap();
+        assert_eq!(sig, SIG_YIELD);
+        assert_eq!(val.as_int(), Some(1));
     }
 
     #[test]
-    fn composed_sig_yield_io_returns_yield_sentinel() {
+    fn composed_sig_yield_io_stores_signal_returns_yield_sentinel() {
         // SIG_YIELD | SIG_IO is returned by every I/O primitive.
         // This is the primary real-world trigger for the panic — any JIT-compiled
         // function calling an I/O primitive (port/read, socket/accept, etc.)
-        // would have panicked before this fix.
+        // would have panicked before this fix because fiber.signal was never set.
         let mut vm = make_vm();
         let bits = SIG_YIELD | SIG_IO;
-        vm.fiber.signal = Some((bits, Value::int(99)));
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
         assert_eq!(result, YIELD_SENTINEL);
-        // Signal must still be on the fiber for the scheduler to pick up.
-        let (sig, _) = vm.fiber.signal.take().unwrap();
+        // Signal must be stored by the handler so the scheduler can pick it up.
+        let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, bits);
+        assert_eq!(val.as_int(), Some(99));
     }
 
     #[test]
