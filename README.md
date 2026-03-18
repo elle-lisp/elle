@@ -248,7 +248,7 @@ Every collection type has an immutable variant and a mutable variant. Bare liter
 | struct | @struct | `{:a 1}` | `@{:a 1}` |
 | string | @string | `"hello"` | `@"hello"` |
 | bytes | @bytes | *(no literal)* | *(no literal)* |
-| set | @set | `|1 2 3|` | `@|1 2 3|` |
+| set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
 
 The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
 
@@ -422,8 +422,8 @@ Exactly two values are falsy. Everything else is truthy.
 | @array | `@[1 2 3]` |
 | struct | `{:a 1}` |
 | @struct | `@{:a 1}` |
-| set | `|1 2 3|` |
-| @set | `@|1 2 3|` |
+| set | `\|1 2 3\|` |
+| @set | `@\|1 2 3\|` |
 | bytes | `#bytes[01 02 03]` |
 | @bytes | `#@bytes[01 02 03]` |
 | closure | `<closure>` |
