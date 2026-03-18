@@ -597,7 +597,7 @@ tbody tr:nth-child(even) {
             (let* ((meta (vm/primitive-meta name))
                    (canonical (get meta :name)))
               ## Skip aliases: name passed in doesn't match canonical name
-              (if (not (= name canonical))
+              (if (not (= (string name) canonical))
                 groups
                 (let* ((cat (get meta :category))
                        (existing (get groups cat))
