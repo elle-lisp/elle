@@ -381,7 +381,7 @@ impl HeapObject {
             HeapObject::LBytesMut { .. } => "@bytes",
             HeapObject::LBox { .. } => "box",
             HeapObject::Float(_) => "float",
-            HeapObject::NativeFn(_) => "native-function",
+            HeapObject::NativeFn(_) => "native-fn",
             HeapObject::LibHandle(_) => "library-handle",
             HeapObject::ThreadHandle { .. } => "thread-handle",
             HeapObject::Fiber { .. } => "fiber",

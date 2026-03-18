@@ -1996,102 +1996,6 @@ fn test_doc_bare_symbol_macro() {
 }
 
 #[test]
-fn test_function_predicate() {
-    let (_vm, mut symbols, meta) = setup();
-    let fn_pred = get_primitive(&meta, &mut symbols, "function?");
-
-    // Native fn is a function
-    let native = get_primitive(&meta, &mut symbols, "+");
-    assert_eq!(
-        call_primitive(&fn_pred, &[native]).unwrap(),
-        Value::bool(true)
-    );
-
-    // Closure is a function
-    let closure = Value::closure(Closure {
-        template: std::rc::Rc::new(ClosureTemplate {
-            bytecode: std::rc::Rc::new(vec![0u8]),
-            arity: elle::value::Arity::Exact(1),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 1,
-            constants: std::rc::Rc::new(vec![]),
-            signal: elle::signals::Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
-            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-            jit_code: None,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-        }),
-        env: std::rc::Rc::new(vec![]),
-        squelch_mask: 0,
-    });
-    assert_eq!(
-        call_primitive(&fn_pred, &[closure]).unwrap(),
-        Value::bool(true)
-    );
-
-    // Number is not a function
-    assert_eq!(
-        call_primitive(&fn_pred, &[Value::int(42)]).unwrap(),
-        Value::bool(false)
-    );
-}
-
-#[test]
-fn test_primitive_predicate() {
-    let (_vm, mut symbols, meta) = setup();
-    let prim_pred = get_primitive(&meta, &mut symbols, "primitive?");
-
-    // Native fn is a primitive
-    let native = get_primitive(&meta, &mut symbols, "+");
-    assert_eq!(
-        call_primitive(&prim_pred, &[native]).unwrap(),
-        Value::bool(true)
-    );
-
-    // Closure is not a primitive
-    let closure = Value::closure(Closure {
-        template: std::rc::Rc::new(ClosureTemplate {
-            bytecode: std::rc::Rc::new(vec![0u8]),
-            arity: elle::value::Arity::Exact(1),
-            num_locals: 0,
-            num_captures: 0,
-            num_params: 1,
-            constants: std::rc::Rc::new(vec![]),
-            signal: elle::signals::Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
-            symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-            location_map: std::rc::Rc::new(elle::error::LocationMap::new()),
-            jit_code: None,
-            lir_function: None,
-            doc: None,
-            syntax: None,
-            vararg_kind: elle::hir::VarargKind::List,
-            name: None,
-        }),
-        env: std::rc::Rc::new(vec![]),
-        squelch_mask: 0,
-    });
-    assert_eq!(
-        call_primitive(&prim_pred, &[closure]).unwrap(),
-        Value::bool(false)
-    );
-
-    // Number is not a primitive
-    assert_eq!(
-        call_primitive(&prim_pred, &[Value::int(42)]).unwrap(),
-        Value::bool(false)
-    );
-}
-
-#[test]
 fn test_zero_predicate() {
     let (_vm, mut symbols, meta) = setup();
     let zero_pred = get_primitive(&meta, &mut symbols, "zero?");
@@ -2132,27 +2036,36 @@ fn test_zero_predicate() {
     );
 }
 
+fn run(input: &str) -> String {
+    eval_full(input)
+        .map(|v| format!("{}", v))
+        .unwrap_or_else(|e| panic!("eval failed: {}", e))
+}
+
 #[test]
-fn test_fn_alias() {
-    let (_vm, mut symbols, meta) = setup();
+fn test_fn_predicate() {
+    // fn? is true for both closures and native functions
+    assert_eq!(run("(fn? +)"), "true");
+    assert_eq!(run("(fn? (fn [x] x))"), "true");
+    assert_eq!(run("(fn? 42)"), "false");
+    assert_eq!(run("(fn? nil)"), "false");
+}
 
-    // fn? and function? should both resolve to native functions
-    let fn_pred = get_primitive(&meta, &mut symbols, "fn?");
-    let function_pred = get_primitive(&meta, &mut symbols, "function?");
+#[test]
+fn test_native_fn_predicate() {
+    assert_eq!(run("(native-fn? +)"), "true");
+    assert_eq!(run("(native-fn? (fn [x] x))"), "false");
+    assert_eq!(run("(native-fn? 42)"), "false");
+}
 
-    // Both should be native fns
-    assert!(fn_pred.as_native_fn().is_some());
-    assert!(function_pred.as_native_fn().is_some());
+#[test]
+fn test_native_fn_aliases() {
+    assert_eq!(run("(native? +)"), "true");
+    assert_eq!(run("(primitive? +)"), "true");
+    assert_eq!(run("(native? (fn [x] x))"), "false");
+}
 
-    // Both should give the same result
-    let native = get_primitive(&meta, &mut symbols, "+");
-    assert_eq!(
-        call_primitive(&fn_pred, &[native]).unwrap(),
-        call_primitive(&function_pred, &[native]).unwrap()
-    );
-
-    assert_eq!(
-        call_primitive(&fn_pred, &[Value::int(42)]).unwrap(),
-        call_primitive(&function_pred, &[Value::int(42)]).unwrap()
-    );
+#[test]
+fn test_type_of_native_fn() {
+    assert_eq!(run("(type-of +)"), ":native-fn");
 }
