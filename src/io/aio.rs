@@ -1516,6 +1516,243 @@ mod tests {
         handle.join().unwrap();
     }
 
+    #[test]
+    fn test_accept_via_uring() {
+        use std::os::unix::io::FromRawFd;
+
+        // Create a TCP listener via libc
+        let listener_fd = unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            assert!(fd >= 0, "socket() failed");
+
+            let opt: libc::c_int = 1;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                &opt as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0; // ephemeral port
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+
+            let ret = libc::bind(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+            assert_eq!(ret, 0, "bind() failed: {}", std::io::Error::last_os_error());
+
+            let ret = libc::listen(fd, 128);
+            assert_eq!(ret, 0, "listen() failed");
+
+            fd
+        };
+
+        // Get the bound port
+        let bound_port = unsafe {
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            libc::getsockname(
+                listener_fd,
+                &mut addr as *mut _ as *mut libc::sockaddr,
+                &mut len,
+            );
+            u16::from_be(addr.sin_port)
+        };
+
+        let listener_port = Value::external(
+            "port",
+            Port::new_tcp_listener(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                format!("127.0.0.1:{}", bound_port),
+            ),
+        );
+
+        let backend = AsyncBackend::new().unwrap();
+
+        // Submit Accept
+        let accept_req = IoRequest {
+            op: IoOp::Accept,
+            port: listener_port,
+            timeout: None,
+        };
+        let accept_id = backend.submit(&accept_req).unwrap();
+
+        // Connect from a background thread
+        let port_copy = bound_port;
+        let handle = std::thread::spawn(move || {
+            // Small delay to ensure accept is submitted
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            let _stream = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_copy)).unwrap();
+        });
+
+        // Wait for the accept completion
+        let completions = backend.wait(5000).unwrap();
+        assert_eq!(
+            completions.len(),
+            1,
+            "expected 1 completion, got {}",
+            completions.len()
+        );
+        assert_eq!(completions[0].id, accept_id);
+        assert!(
+            completions[0].result.is_ok(),
+            "accept failed: {:?}",
+            completions[0].result
+        );
+
+        // The result should be a port
+        let accepted = completions[0].result.as_ref().unwrap();
+        assert_eq!(
+            accepted.external_type_name(),
+            Some("port"),
+            "expected a port value"
+        );
+
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn test_connect_via_uring() {
+        // Create a TCP listener via std
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let bound_addr = listener.local_addr().unwrap();
+
+        // Accept from a background thread so we don't deadlock
+        let handle = std::thread::spawn(move || {
+            let _accepted = listener.accept().unwrap();
+            // Keep the accepted connection alive until the test is done
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        });
+
+        let backend = AsyncBackend::new().unwrap();
+
+        // Submit Connect
+        let connect_req = IoRequest {
+            op: IoOp::Connect {
+                addr: crate::io::request::ConnectAddr::Tcp {
+                    addr: "127.0.0.1".to_string(),
+                    port: bound_addr.port(),
+                },
+            },
+            port: Value::NIL,
+            timeout: None,
+        };
+        let connect_id = backend.submit(&connect_req).unwrap();
+
+        // Wait for the connect completion
+        let completions = backend.wait(5000).unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, connect_id);
+        assert!(
+            completions[0].result.is_ok(),
+            "connect failed: {:?}",
+            completions[0].result
+        );
+
+        let connected = completions[0].result.as_ref().unwrap();
+        assert_eq!(connected.external_type_name(), Some("port"));
+
+        handle.join().unwrap();
+    }
+
+    /// Accept + connect on the same io_uring ring — the scheduler scenario.
+    /// One fiber does tcp/accept, another does tcp/connect, both SQEs on
+    /// the same ring. Both completions must arrive.
+    #[test]
+    fn test_accept_and_connect_concurrent() {
+        use std::os::unix::io::FromRawFd;
+
+        // Create a non-blocking TCP listener via libc
+        let listener_fd = unsafe {
+            let fd = libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_NONBLOCK, 0);
+            assert!(fd >= 0);
+            let opt: libc::c_int = 1;
+            libc::setsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_REUSEADDR,
+                &opt as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            );
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            addr.sin_family = libc::AF_INET as libc::sa_family_t;
+            addr.sin_port = 0;
+            addr.sin_addr.s_addr = u32::from(std::net::Ipv4Addr::LOCALHOST).to_be();
+            libc::bind(
+                fd,
+                &addr as *const _ as *const libc::sockaddr,
+                std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
+            );
+            libc::listen(fd, 128);
+            fd
+        };
+
+        let bound_port = unsafe {
+            let mut addr: libc::sockaddr_in = std::mem::zeroed();
+            let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            libc::getsockname(
+                listener_fd,
+                &mut addr as *mut _ as *mut libc::sockaddr,
+                &mut len,
+            );
+            u16::from_be(addr.sin_port)
+        };
+
+        let listener_port = Value::external(
+            "port",
+            Port::new_tcp_listener(
+                unsafe { std::os::unix::io::OwnedFd::from_raw_fd(listener_fd) },
+                format!("127.0.0.1:{}", bound_port),
+            ),
+        );
+
+        let backend = AsyncBackend::new().unwrap();
+
+        let accept_id = backend
+            .submit(&IoRequest {
+                op: IoOp::Accept,
+                port: listener_port,
+                timeout: None,
+            })
+            .unwrap();
+
+        let connect_id = backend
+            .submit(&IoRequest {
+                op: IoOp::Connect {
+                    addr: crate::io::request::ConnectAddr::Tcp {
+                        addr: "127.0.0.1".to_string(),
+                        port: bound_port,
+                    },
+                },
+                port: Value::NIL,
+                timeout: None,
+            })
+            .unwrap();
+
+        // Collect completions — may arrive in 1 or 2 wait calls.
+        let mut all = Vec::new();
+        for _ in 0..5 {
+            let cs = backend.wait(2000).unwrap();
+            all.extend(cs);
+            if all.len() >= 2 {
+                break;
+            }
+        }
+
+        assert_eq!(all.len(), 2, "expected 2 completions, got {}", all.len());
+        for c in &all {
+            assert!(c.result.is_ok(), "id={} failed: {:?}", c.id, c.result);
+        }
+        let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
+        assert!(ids.contains(&accept_id), "missing accept");
+        assert!(ids.contains(&connect_id), "missing connect");
+    }
+
     fn open_rw_port(path: &str) -> Value {
         let file = std::fs::OpenOptions::new()
             .read(true)
