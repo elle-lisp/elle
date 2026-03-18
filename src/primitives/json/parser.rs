@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 pub struct JsonParser {
     input: Vec<char>,
     pos: usize,
+    use_keyword_keys: bool,
 }
 
 impl JsonParser {
@@ -12,6 +13,15 @@ impl JsonParser {
         JsonParser {
             input: input.chars().collect(),
             pos: 0,
+            use_keyword_keys: false,
+        }
+    }
+
+    pub fn new_with_opts(input: &str, use_keyword_keys: bool) -> Self {
+        JsonParser {
+            input: input.chars().collect(),
+            pos: 0,
+            use_keyword_keys,
         }
     }
 
@@ -362,7 +372,13 @@ impl JsonParser {
 
             let key_value = self.parse_string()?;
             let key = match key_value.with_string(|s| s.to_string()) {
-                Some(s) => TableKey::String(s),
+                Some(s) => {
+                    if self.use_keyword_keys {
+                        TableKey::Keyword(s)
+                    } else {
+                        TableKey::String(s)
+                    }
+                }
                 _ => unreachable!(),
             };
 

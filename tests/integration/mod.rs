@@ -90,6 +90,9 @@ mod sys_args {
 mod cond_match_args {
     include!("cond_match_args.rs");
 }
+mod meta {
+    include!("meta.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

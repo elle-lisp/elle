@@ -22,7 +22,8 @@ JSON parsing and serialization primitives.
 | `prim_json_parse(args)` | Parse JSON string → Elle value |
 | `prim_json_serialize(args)` | Serialize Elle value → compact JSON string |
 | `prim_json_serialize_pretty(args)` | Serialize Elle value → pretty-printed JSON string |
-| `JsonParser::new(input)` | Create parser for JSON string |
+| `JsonParser::new(input)` | Create parser for JSON string (string keys) |
+| `JsonParser::new_with_opts(input, use_keyword_keys)` | Create parser with options |
 | `JsonParser::parse()` | Parse JSON → Elle value |
 | `serialize_value(value)` | Serialize value → JSON string |
 | `serialize_value_pretty(value, indent)` | Serialize value → pretty JSON string |
@@ -32,9 +33,18 @@ JSON parsing and serialization primitives.
 
 | Name | Arity | Signal | Purpose |
 |------|-------|--------|---------|
-| `json/parse` | 1 | Silent | Parse JSON string to Elle value |
+| `json/parse` | 1–3 | Silent | Parse JSON string to Elle value; accepts `:keys :keyword` option |
 | `json/serialize` | 1 | Silent | Serialize Elle value to compact JSON |
 | `json/serialize-pretty` | 1 | Silent | Serialize Elle value to pretty JSON |
+
+### json/parse options
+
+`(json/parse json-string)` — parse with default string keys for JSON object fields.
+
+`(json/parse json-string :keys :keyword)` — parse JSON objects using keyword keys (`:field`) instead of string keys (`"field"`). The option applies recursively to nested objects. Arrays are unaffected.
+
+- 2 args is never valid and returns `arity-error`.
+- 3 args with an unrecognized key name or value returns `argument-error`.
 
 ## JSON ↔ Elle value mapping
 

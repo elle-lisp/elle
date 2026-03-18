@@ -422,29 +422,27 @@ fn main() {
 
     set_vm_context(&mut vm as *mut VM);
 
-    // Split at the first "--": everything before goes to Elle's parser,
-    // everything after becomes user_args for sys/args.
-    let (elle_args, user_args) = match args[1..].iter().position(|a| a == "--") {
-        Some(idx) => {
-            let (before, after) = args[1..].split_at(idx);
-            (before.to_vec(), after[1..].to_vec()) // skip the "--" itself
-        }
-        None => (args[1..].to_vec(), vec![]),
-    };
-
-    vm.user_args = user_args;
-
     let mut had_errors = false;
-    let mut files = Vec::new();
+    let mut files: Vec<&str> = Vec::new();
     let mut read_stdin = false;
 
-    for arg in &elle_args {
-        if arg == "-" {
+    // Find the first source arg: "-" for stdin, or any arg not starting with "-".
+    // Everything after it becomes user_args for sys/args.
+    // Args before it that start with "-" are silently ignored (unknown flags).
+    let all_args = &args[1..];
+    if let Some(idx) = all_args
+        .iter()
+        .position(|a| a == "-" || !a.starts_with('-'))
+    {
+        let source_arg = &all_args[idx];
+        vm.user_args = all_args[idx + 1..].to_vec();
+        if source_arg == "-" {
             read_stdin = true;
-        } else if !arg.starts_with('-') {
-            files.push(arg.as_str());
+        } else {
+            files.push(source_arg.as_str());
         }
     }
+    // If no source arg found: REPL mode, vm.user_args stays empty.
 
     if read_stdin {
         if let Err(e) = run_stdin(&mut vm, &mut symbols) {
@@ -452,13 +450,13 @@ fn main() {
             had_errors = true;
         }
     } else if !files.is_empty() {
-        for filename in files {
+        for filename in &files {
             if let Err(e) = run_file(filename, &mut vm, &mut symbols) {
                 eprintln!("Error: {}", e);
                 had_errors = true;
             }
         }
-    } else if args.len() == 1 && run_repl(&mut vm, &mut symbols) {
+    } else if run_repl(&mut vm, &mut symbols) {
         had_errors = true;
     }
 
@@ -468,7 +466,7 @@ fn main() {
         print_jit_stats(&vm);
     }
 
-    if args.len() == 1 {
+    if !read_stdin && files.is_empty() {
         println!();
     }
 

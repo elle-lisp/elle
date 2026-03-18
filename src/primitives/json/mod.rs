@@ -17,10 +17,24 @@ use crate::value::{error_val, Value};
 
 /// Parse a JSON string into Elle values
 pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
+    // 2 args is never valid (option key without value, or value without key)
+    if args.len() == 2 {
         return (
             SIG_ERROR,
-            error_val("arity-error", "json-parse: expected 1 argument".to_string()),
+            error_val(
+                "arity-error",
+                "json/parse: expected 1 or 3 arguments".to_string(),
+            ),
+        );
+    }
+
+    if args.is_empty() || args.len() > 3 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                "json/parse: expected 1 or 3 arguments".to_string(),
+            ),
         );
     }
 
@@ -31,12 +45,30 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                "json-parse: expected string argument".to_string(),
+                "json/parse: expected string argument".to_string(),
             ),
         );
     };
 
-    let mut parser = JsonParser::new(&json_str);
+    let use_keyword_keys = if args.len() == 3 {
+        let opt_key_ok = args[1].as_keyword_name().as_deref() == Some("keys");
+        let opt_val_ok = args[2].as_keyword_name().as_deref() == Some("keyword");
+        if opt_key_ok && opt_val_ok {
+            true
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "argument-error",
+                    "json/parse: expected :keys :keyword".to_string(),
+                ),
+            );
+        }
+    } else {
+        false
+    };
+
+    let mut parser = JsonParser::new_with_opts(&json_str, use_keyword_keys);
     match parser.parse() {
         Ok(v) => (SIG_OK, v),
         Err(e) => (SIG_ERROR, error_val("error", e)),
@@ -87,11 +119,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "json/parse",
         func: prim_json_parse,
         signal: Signal::silent(),
-        arity: Arity::Exact(1),
-        doc: "Parse a JSON string into Elle values",
-        params: &["json-string"],
+        arity: Arity::Range(1, 3),
+        doc: "Parse a JSON string into Elle values. Accepts optional :keys :keyword to use keyword keys in parsed structs instead of string keys.",
+        params: &["json-string", ":keys", ":keyword"],
         category: "json",
-        example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}")"#,
+        example: r#"(json/parse "{\"name\": \"Alice\", \"age\": 30}" :keys :keyword)"#,
         aliases: &["json-parse"],
     },
     PrimitiveDef {
@@ -602,5 +634,112 @@ mod tests {
         let result = serialize_value(&mstruct).unwrap();
         assert!(result.contains("\"a\""));
         assert!(result.contains("\"b\""));
+    }
+
+    // ── json/parse :keys :keyword ─────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_keyword_keys_simple() {
+        // (json/parse "{\"a\": 1}" :keys :keyword) → struct with :a keyword key = 1
+        let (bits, val) = prim_json_parse(&[
+            Value::string("{\"a\": 1}"),
+            Value::keyword("keys"),
+            Value::keyword("keyword"),
+        ]);
+        assert_eq!(bits, SIG_OK);
+        if let Some(t) = val.as_struct_mut() {
+            let s = t.borrow();
+            assert_eq!(
+                s.get(&crate::value::TableKey::Keyword("a".to_string())),
+                Some(&Value::int(1))
+            );
+        } else {
+            panic!("Expected @struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_keyword_keys_nested() {
+        // (json/parse "{\"a\": {\"b\": 2}}" :keys :keyword) → nested keyword keys
+        let (bits, val) = prim_json_parse(&[
+            Value::string("{\"a\": {\"b\": 2}}"),
+            Value::keyword("keys"),
+            Value::keyword("keyword"),
+        ]);
+        assert_eq!(bits, SIG_OK);
+        if let Some(t) = val.as_struct_mut() {
+            let s = t.borrow();
+            let inner = s
+                .get(&crate::value::TableKey::Keyword("a".to_string()))
+                .expect("expected :a key");
+            if let Some(inner_t) = inner.as_struct_mut() {
+                let inner_s = inner_t.borrow();
+                assert_eq!(
+                    inner_s.get(&crate::value::TableKey::Keyword("b".to_string())),
+                    Some(&Value::int(2))
+                );
+            } else {
+                panic!("Expected nested @struct");
+            }
+        } else {
+            panic!("Expected @struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_default_string_keys() {
+        // (json/parse "{\"a\": 1}") → struct with "a" string key = 1 (default, unchanged)
+        let (bits, val) = prim_json_parse(&[Value::string("{\"a\": 1}")]);
+        assert_eq!(bits, SIG_OK);
+        if let Some(t) = val.as_struct_mut() {
+            let s = t.borrow();
+            assert_eq!(
+                s.get(&crate::value::TableKey::String("a".to_string())),
+                Some(&Value::int(1))
+            );
+        } else {
+            panic!("Expected @struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_wrong_keys_option_value() {
+        // (json/parse "{}" :keys :wrong) → argument-error
+        let (bits, _) = prim_json_parse(&[
+            Value::string("{}"),
+            Value::keyword("keys"),
+            Value::keyword("wrong"),
+        ]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_parse_wrong_option_key() {
+        // (json/parse "{}" :wrong :keyword) → argument-error
+        let (bits, _) = prim_json_parse(&[
+            Value::string("{}"),
+            Value::keyword("wrong"),
+            Value::keyword("keyword"),
+        ]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_parse_two_args_arity_error() {
+        // 2 args is never valid
+        let (bits, _) = prim_json_parse(&[Value::string("{}"), Value::keyword("keys")]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_parse_array_keyword_keys_unaffected() {
+        // (json/parse "[]" :keys :keyword) → empty list (arrays unaffected)
+        let (bits, val) = prim_json_parse(&[
+            Value::string("[]"),
+            Value::keyword("keys"),
+            Value::keyword("keyword"),
+        ]);
+        assert_eq!(bits, SIG_OK);
+        assert_eq!(val, Value::EMPTY_LIST);
     }
 }
