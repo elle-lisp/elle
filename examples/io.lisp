@@ -66,7 +66,47 @@
 
 
 # ========================================
-# 3. File operations
+# 2b. file/stat and file/lstat
+# ========================================
+
+# file/stat on a regular file
+(def info (file/stat (tmp "hello.txt")))
+(assert-eq (get info :size) 25 "file/stat :size matches file-size")
+(assert-eq (get info :file-type) "file" "file/stat :file-type for regular file")
+(assert-true (get info :is-file) "file/stat :is-file for regular file")
+(assert-false (get info :is-dir) "file/stat :is-dir for regular file")
+(assert-false (get info :is-symlink) "file/stat :is-symlink for regular file")
+(assert-false (get info :readonly) "file/stat :readonly for writable file")
+(assert-true (float? (get info :modified)) "file/stat :modified is float")
+(assert-true (> (get info :modified) 0.0) "file/stat :modified is positive")
+(assert-true (float? (get info :accessed)) "file/stat :accessed is float")
+(assert-true (> (get info :accessed) 0.0) "file/stat :accessed is positive")
+# Unix-only fields (integers on Gentoo Linux)
+(assert-true (integer? (get info :uid)) "file/stat :uid is integer")
+(assert-true (integer? (get info :gid)) "file/stat :gid is integer")
+(assert-true (>= (get info :nlinks) 1) "file/stat :nlinks >= 1")
+(assert-true (> (get info :inode) 0) "file/stat :inode is positive")
+(assert-true (integer? (get info :permissions)) "file/stat :permissions is integer")
+(assert-true (integer? (get info :dev)) "file/stat :dev is integer")
+(assert-true (integer? (get info :rdev)) "file/stat :rdev is integer")
+(assert-true (>= (get info :blocks) 0) "file/stat :blocks >= 0")
+(assert-true (> (get info :blksize) 0) "file/stat :blksize is positive")
+
+# file/stat on a directory
+(def dir-info (file/stat tmp-dir))
+(assert-eq (get dir-info :file-type) "dir" "file/stat :file-type for directory")
+(assert-false (get dir-info :is-file) "file/stat :is-file for directory")
+(assert-true (get dir-info :is-dir) "file/stat :is-dir for directory")
+
+# file/lstat on a regular file (identical to file/stat for non-symlinks)
+(def linfo (file/lstat (tmp "hello.txt")))
+(assert-eq (get linfo :size) 25 "file/lstat :size matches for regular file")
+(assert-false (get linfo :is-symlink) "file/lstat :is-symlink false for regular file")
+(assert-eq (get linfo :file-type) "file" "file/lstat :file-type for regular file")
+
+
+# ========================================
+# 4. File operations
 # ========================================
 
 (copy-file (tmp "hello.txt") (tmp "copy.txt"))
@@ -80,7 +120,7 @@
 
 
 # ========================================
-# 4. Directory operations
+# 5. Directory operations
 # ========================================
 
 (def sub (tmp "sub"))
@@ -100,7 +140,7 @@
 
 
 # ========================================
-# 5. Path operations
+# 6. Path operations
 # ========================================
 
 (def p "/home/user/docs/report.pdf")
@@ -118,7 +158,7 @@
 
 
 # ========================================
-# 6. JSON: parsing scalars
+# 7. JSON: parsing scalars
 # ========================================
 
 (assert-eq (json-parse "null") nil "json-parse null")
@@ -130,7 +170,7 @@
 
 
 # ========================================
-# 7. JSON: serializing scalars
+# 8. JSON: serializing scalars
 # ========================================
 
 (assert-eq (json-serialize nil) "null" "json-serialize nil")
@@ -142,7 +182,7 @@
 
 
 # ========================================
-# 8. JSON: collections and nesting
+# 9. JSON: collections and nesting
 # ========================================
 
 (def arr (json-parse "[1, \"two\", true, null]"))
@@ -162,7 +202,7 @@
 
 
 # ========================================
-# 9. JSON: round-trip
+# 10. JSON: round-trip
 # ========================================
 
 # Serialize a list as a JSON array.
@@ -186,7 +226,7 @@
 
 
 # ========================================
-# 10. JSON: file I/O integration
+# 11. JSON: file I/O integration
 # ========================================
 
 # Write JSON to a file and read it back — the natural use case.
