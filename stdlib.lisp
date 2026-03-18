@@ -520,6 +520,46 @@
            (result (map (fn (pair) (first (rest pair))) sorted)))
       (from-list result coll)))))
 
+(def sort-with (fn (cmp coll)
+  (letrec
+    ((to-list (fn (c)
+       (cond
+         ((or (pair? c) (empty? c)) c)
+         ((array? c)
+          (letrec ((loop (fn (i acc)
+                           (if (>= i (length c))
+                             (reverse acc)
+                             (loop (+ i 1) (cons (get c i) acc))))))
+            (loop 0 ())))
+         (true (error {:error :type-error :message "sort-with: not a sequence"})))))
+     (from-list (fn (lst orig)
+       (cond
+         ((or (pair? orig) (empty? orig)) lst)
+         ((mutable? orig)
+          (let ((arr @[]))
+            (each x in lst (push arr x))
+            arr))
+         ((array? orig) (apply array lst)))))
+     (merge-lists (fn (a b)
+       (cond
+         ((empty? a) b)
+         ((empty? b) a)
+         ((<= (cmp (first a) (first b)) 0)
+          (cons (first a) (merge-lists (rest a) b)))
+         (true
+          (cons (first b) (merge-lists a (rest b)))))))
+     (halve (fn (lst)
+       (let ((mid (/ (length lst) 2)))
+         [(take mid lst) (drop mid lst)])))
+     (msort (fn (lst)
+       (if (or (empty? lst) (empty? (rest lst)))
+         lst
+         (let (([left right] (halve lst)))
+           (merge-lists (msort left) (msort right)))))))
+    (from-list (msort (to-list coll)) coll))))
+
+(def sort-by-cmp sort-with)
+
 ## ── Time utilities ──────────────────────────────────────────────────
 
 (def time/stopwatch (fn ()
@@ -1122,4 +1162,5 @@
      :stream/concat stream/concat :stream/zip stream/zip
      :stream/pipe stream/pipe
       :port/lines port/lines :port/chunks port/chunks :port/writer port/writer
-        :subprocess/system subprocess/system})
+        :subprocess/system subprocess/system
+        :sort-with sort-with :sort-by-cmp sort-by-cmp})

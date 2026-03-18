@@ -19,6 +19,30 @@
   (assert-eq (get result 1) 2 "sort: array sorted second")
   (assert-eq (get result 2) 3 "sort: array sorted third"))
 
+## ── sort: non-numeric types ─────────────────────────────────────────
+(assert-list-eq (sort (list "banana" "apple" "cherry"))
+                (list "apple" "banana" "cherry") "sort: strings")
+(assert-list-eq (sort (list :b :a :c))
+                (list :a :b :c) "sort: keywords")
+# Cross-type ordering: nil < bool < int < ... (Value::Ord rank order)
+(let ((result (sort [nil true 1])))
+  (assert-eq (get result 0) nil "sort: cross-type nil first")
+  (assert-eq (get result 1) true "sort: cross-type bool second")
+  (assert-eq (get result 2) 1 "sort: cross-type int third"))
+
+## ── compare ──────────────────────────────────────────────────────────
+(assert-eq (compare 1 2) -1 "compare: int less")
+(assert-eq (compare 2 2) 0 "compare: int equal")
+(assert-eq (compare 3 2) 1 "compare: int greater")
+(assert-eq (compare "apple" "banana") -1 "compare: string less")
+(assert-eq (compare "banana" "apple") 1 "compare: string greater")
+(assert-eq (compare :a :b) -1 "compare: keyword less")
+(assert-eq (compare nil nil) 0 "compare: nil equal")
+(assert-eq (compare nil false) -1 "compare: nil rank < bool rank")
+(assert-eq (compare false true) -1 "compare: false < true")
+# Use apply to bypass compile-time arity checking; the runtime arity-error is what we test
+(assert-err-kind (fn [] (apply compare [1])) :arity-error "compare: arity error on 1 arg")
+
 ## ── range ───────────────────────────────────────────────────────────
 (let ((r (range 5)))
   (assert-true (array? r) "range: returns array")
@@ -288,6 +312,42 @@
   (assert-eq (get result 2) -3 "sort-by: array third"))
 (let ((result (sort-by abs [3 1 2])))
   (assert-true (array? result) "sort-by: array returns array"))
+
+## ── sort-with ────────────────────────────────────────────────────────
+# Basic list sort using compare
+(assert-list-eq (sort-with compare (list 3 1 2))
+                (list 1 2 3) "sort-with: basic list ascending")
+# Descending list sort
+(assert-list-eq (sort-with (fn (a b) (compare b a)) (list 3 1 2))
+                (list 3 2 1) "sort-with: descending")
+# String sort
+(assert-list-eq (sort-with compare (list "banana" "apple" "cherry"))
+                (list "apple" "banana" "cherry") "sort-with: strings")
+# Empty list
+(assert-list-eq (sort-with compare ()) () "sort-with: empty")
+# Single element
+(assert-list-eq (sort-with compare (list 42)) (list 42) "sort-with: single")
+# Ascending with subtraction comparator
+(assert-list-eq (sort-with (fn (a b) (- a b)) (list 3 1 2))
+                (list 1 2 3) "sort-with: ascending subtraction")
+# Mutable array sorted returns new mutable array
+(let ((orig @[1 3 2])
+      (result (sort-with (fn (a b) (compare b a)) @[1 3 2])))
+  (assert-true (mutable? result) "sort-with: @array returns mutable")
+  (assert-eq (get result 0) 3 "sort-with: @array first")
+  (assert-eq (get result 1) 2 "sort-with: @array second")
+  (assert-eq (get result 2) 1 "sort-with: @array third"))
+# Immutable array returns new immutable array
+(let ((result (sort-with (fn (a b) (- a b)) [3 1 2])))
+  (assert-true (array? result) "sort-with: array returns array")
+  (assert-false (mutable? result) "sort-with: array returns immutable")
+  (assert-eq (get result 0) 1 "sort-with: array first"))
+# Stability: equal elements preserve insertion order
+(assert-list-eq (sort-with (fn (a b) 0) (list 3 1 2))
+                (list 3 1 2) "sort-with: all-equal preserves order")
+# sort-by-cmp alias works
+(assert-list-eq (sort-by-cmp compare (list 3 1 2))
+                (list 1 2 3) "sort-by-cmp: alias works")
 
 ## ── freeze / thaw: structs ───────────────────────────────────────────
 (let ((t @{:a 1 :b 2}))

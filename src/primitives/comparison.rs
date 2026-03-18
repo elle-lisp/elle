@@ -138,6 +138,32 @@ pub(crate) fn prim_ge(args: &[Value]) -> (SignalBits, Value) {
     chain_cmp(">=", args, |a, b| a >= b, |a, b| a >= b, |ord| ord.is_ge())
 }
 
+/// Three-way comparison using the total Value ordering.
+/// Returns -1 if a < b, 0 if a == b, 1 if a > b.
+/// Uses the same ordering as `sort` (Value::Ord).
+///
+/// Signal is errors() even though Value::Ord is currently total.
+/// This is intentional: if the type system ever introduces incomparable
+/// values, callers that assumed compare is pure would silently misbehave.
+/// Declaring errors() keeps the contract honest.
+pub(crate) fn prim_compare(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("compare: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let result: i64 = match args[0].cmp(&args[1]) {
+        Ordering::Less => -1,
+        Ordering::Equal => 0,
+        Ordering::Greater => 1,
+    };
+    (SIG_OK, Value::int(result))
+}
+
 /// Declarative primitive definitions for comparison functions.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -204,6 +230,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["a", "b"],
         category: "comparison",
         example: "(>= 3 2 2 1) #=> true\n(>= \"c\" \"b\" \"b\" \"a\") #=> true",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "compare",
+        func: prim_compare,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Three-way comparison. Returns -1 if a < b, 0 if a = b, 1 if a > b. Uses the same total ordering as sort. Useful for writing comparators: (sort-with (fn (a b) (compare b a)) coll) sorts descending.",
+        params: &["a", "b"],
+        category: "comparison",
+        example: "(compare 1 2) #=> -1\n(compare 2 2) #=> 0\n(compare 3 2) #=> 1\n(compare \"a\" \"b\") #=> -1",
         aliases: &[],
     },
 ];
