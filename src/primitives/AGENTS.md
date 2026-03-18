@@ -126,7 +126,7 @@ pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
 | `ffi.rs` | `resolve_type_desc`, `extract_pointer_addr` helpers; FFI tests |
 | `loading.rs` | `ffi/native`, `ffi/lookup`, `ffi/signature`, `ffi/callback`, `ffi/callback-free` |
 | `calling.rs` | `ffi/call` |
-| `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array` |
+| `memory.rs` | `ffi/size`, `ffi/align`, `ffi/malloc`, `ffi/free`, `ffi/read`, `ffi/write`, `ffi/string`, `ffi/struct`, `ffi/array`, `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int` |
 | `subprocess.rs` | `exit`, `halt`, `sys/args` (returns args after the source file in argv, empty if none), `sys/env`, `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid` |
 
 ## string/format primitive
