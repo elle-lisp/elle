@@ -641,6 +641,268 @@ fn test_execute_process_wait_exit_nonzero() {
     assert_ne!(val.as_int(), Some(0));
 }
 
+// --- seek/tell tests ---
+
+fn open_rw_port(path: &str) -> Value {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .unwrap();
+    let fd: std::os::unix::io::OwnedFd = file.into();
+    Value::external(
+        "port",
+        Port::new_file(fd, Direction::ReadWrite, Encoding::Text, path.to_string()),
+    )
+}
+
+#[test]
+fn test_seek_from_start_returns_new_offset() {
+    let path = write_temp_file("0123456789");
+    let port = open_rw_port(&path);
+    let backend = SyncBackend::new();
+
+    let req = IoRequest {
+        op: IoOp::Seek {
+            offset: 5,
+            whence: libc::SEEK_SET,
+        },
+        port,
+        timeout: None,
+    };
+    let (bits, val) = backend.execute(&req);
+    assert_eq!(bits, SIG_OK);
+    assert_eq!(val.as_int(), Some(5), "seek to 5 from start returns 5");
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_seek_from_end_returns_correct_offset() {
+    let path = write_temp_file("0123456789"); // 10 bytes
+    let port = open_rw_port(&path);
+    let backend = SyncBackend::new();
+
+    let req = IoRequest {
+        op: IoOp::Seek {
+            offset: -2,
+            whence: libc::SEEK_END,
+        },
+        port,
+        timeout: None,
+    };
+    let (bits, val) = backend.execute(&req);
+    assert_eq!(bits, SIG_OK);
+    assert_eq!(
+        val.as_int(),
+        Some(8),
+        "seek -2 from end of 10-byte file returns 8"
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_seek_clears_buffer_and_resets_status() {
+    let path = write_temp_file("hello\nworld\n");
+    let port = open_read_port(&path);
+    let backend = SyncBackend::new();
+
+    // Read one line to populate the buffer
+    let read_req = IoRequest {
+        op: IoOp::ReadLine,
+        port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&read_req);
+    assert_eq!(bits, SIG_OK);
+
+    // Now seek to start — must clear buffer
+    let seek_req = IoRequest {
+        op: IoOp::Seek {
+            offset: 0,
+            whence: libc::SEEK_SET,
+        },
+        port,
+        timeout: None,
+    };
+    let (bits, val) = backend.execute(&seek_req);
+    assert_eq!(bits, SIG_OK);
+    assert_eq!(val.as_int(), Some(0));
+
+    // After seek, read again — must start from byte 0
+    let read_req2 = IoRequest {
+        op: IoOp::ReadLine,
+        port,
+        timeout: None,
+    };
+    let (bits2, val2) = backend.execute(&read_req2);
+    assert_eq!(bits2, SIG_OK);
+    val2.with_string(|s| assert_eq!(s, "hello")).unwrap();
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_seek_resets_eof_status() {
+    let path = write_temp_file("hi");
+    let port = open_read_port(&path);
+    let backend = SyncBackend::new();
+
+    // Read all — hits EOF
+    let read_req = IoRequest {
+        op: IoOp::ReadAll,
+        port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&read_req);
+    assert_eq!(bits, SIG_OK);
+
+    // Seek to start — must reset FdStatus::Eof to FdStatus::Open
+    let seek_req = IoRequest {
+        op: IoOp::Seek {
+            offset: 0,
+            whence: libc::SEEK_SET,
+        },
+        port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&seek_req);
+    assert_eq!(bits, SIG_OK);
+
+    // Read again — must succeed, not immediately return NIL
+    let read_req2 = IoRequest {
+        op: IoOp::ReadAll,
+        port,
+        timeout: None,
+    };
+    let (bits2, val2) = backend.execute(&read_req2);
+    assert_eq!(bits2, SIG_OK);
+    val2.with_string(|s| assert_eq!(s, "hi")).unwrap();
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_tell_on_new_file_returns_zero() {
+    let path = write_temp_file("");
+    let port = open_rw_port(&path);
+    let backend = SyncBackend::new();
+
+    let req = IoRequest {
+        op: IoOp::Tell,
+        port,
+        timeout: None,
+    };
+    let (bits, val) = backend.execute(&req);
+    assert_eq!(bits, SIG_OK);
+    assert_eq!(
+        val.as_int(),
+        Some(0),
+        "tell on empty file at start returns 0"
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_tell_after_seek() {
+    let path = write_temp_file("0123456789");
+    let port = open_rw_port(&path);
+    let backend = SyncBackend::new();
+
+    // Seek to position 7
+    let seek_req = IoRequest {
+        op: IoOp::Seek {
+            offset: 7,
+            whence: libc::SEEK_SET,
+        },
+        port,
+        timeout: None,
+    };
+    backend.execute(&seek_req);
+
+    // Tell should return 7
+    let tell_req = IoRequest {
+        op: IoOp::Tell,
+        port,
+        timeout: None,
+    };
+    let (bits, val) = backend.execute(&tell_req);
+    assert_eq!(bits, SIG_OK);
+    assert_eq!(val.as_int(), Some(7));
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_tell_accounts_for_buffered_bytes() {
+    // When the backend has buffered bytes ahead of the logical position,
+    // tell must return kernel_offset - buffer_len, not the raw kernel offset.
+    let path = write_temp_file("hello\nworld\n");
+    let port = open_read_port(&path);
+    let backend = SyncBackend::new();
+
+    // Read one line — the backend may have read more than "hello\n" into buffer.
+    let read_req = IoRequest {
+        op: IoOp::ReadLine,
+        port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&read_req);
+    assert_eq!(bits, SIG_OK);
+
+    // Tell must return the logical position (end of "hello\n" = 6),
+    // NOT the kernel position (which may be at end of file after a large read).
+    let tell_req = IoRequest {
+        op: IoOp::Tell,
+        port,
+        timeout: None,
+    };
+    let (bits2, val2) = backend.execute(&tell_req);
+    assert_eq!(bits2, SIG_OK);
+    assert_eq!(
+        val2.as_int(),
+        Some(6),
+        "tell after reading first line returns 6"
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_seek_on_non_file_port_errors() {
+    let backend = SyncBackend::new();
+    let stdin_port = Value::external("port", Port::stdin());
+
+    let req = IoRequest {
+        op: IoOp::Seek {
+            offset: 0,
+            whence: libc::SEEK_SET,
+        },
+        port: stdin_port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&req);
+    assert_eq!(bits, SIG_ERROR, "seek on stdin must error");
+}
+
+#[test]
+fn test_tell_on_non_file_port_errors() {
+    let backend = SyncBackend::new();
+    let stdin_port = Value::external("port", Port::stdin());
+
+    let req = IoRequest {
+        op: IoOp::Tell,
+        port: stdin_port,
+        timeout: None,
+    };
+    let (bits, _) = backend.execute(&req);
+    assert_eq!(bits, SIG_ERROR, "tell on stdin must error");
+}
+
 #[test]
 fn test_execute_process_wait_idempotent() {
     // Second wait returns cached status, does not panic.

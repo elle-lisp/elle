@@ -150,11 +150,12 @@ impl SyncBackend {
                 IoOp::Write { data } => self.execute_write(port, data),
                 IoOp::Flush => self.execute_flush(port),
                 IoOp::Shutdown { how } => self.execute_shutdown(port, *how),
+                IoOp::Seek { offset, whence } => self.execute_seek(port, *offset, *whence),
+                IoOp::Tell => self.execute_tell(port),
                 IoOp::Accept => (
                     SIG_ERROR,
                     error_val("io-error", "accept: port is not a listener"),
                 ),
-                IoOp::Seek { .. } | IoOp::Tell => unreachable!(), // implemented in Chunk 2
                 IoOp::Connect { .. }
                 | IoOp::Sleep { .. }
                 | IoOp::Spawn(_)
@@ -376,6 +377,83 @@ impl SyncBackend {
         match Self::flush_port(port) {
             Ok(()) => (SIG_OK, Value::NIL),
             Err(e) => (SIG_ERROR, error_val("io-error", e.to_string())),
+        }
+    }
+
+    fn execute_seek(&self, port: &Port, offset: i64, whence: i32) -> (SignalBits, Value) {
+        if port.kind() != PortKind::File {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("port/seek: expected file port, got {:?}", port.kind()),
+                ),
+            );
+        }
+
+        let key = PortKey::from_port(port);
+        {
+            let mut inner = self.inner.borrow_mut();
+            if let Some(state) = inner.states.get_mut(&key) {
+                state.buffer.clear();
+                state.status = FdStatus::Open;
+            }
+        }
+
+        match port.with_fd(|fd| {
+            let raw = fd.as_raw_fd();
+            let ret = unsafe { libc::lseek(raw, offset, whence) };
+            if ret < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(ret as i64)
+            }
+        }) {
+            Some(Ok(new_offset)) => (SIG_OK, Value::int(new_offset)),
+            Some(Err(e)) => (SIG_ERROR, error_val("io-error", e.to_string())),
+            None => (
+                SIG_ERROR,
+                error_val("io-error", "port/seek: fd unavailable"),
+            ),
+        }
+    }
+
+    fn execute_tell(&self, port: &Port) -> (SignalBits, Value) {
+        if port.kind() != PortKind::File {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("port/tell: expected file port, got {:?}", port.kind()),
+                ),
+            );
+        }
+
+        let key = PortKey::from_port(port);
+        let buffer_len: i64 = {
+            let inner = self.inner.borrow();
+            inner
+                .states
+                .get(&key)
+                .map(|state| state.buffer.len() as i64)
+                .unwrap_or(0)
+        };
+
+        match port.with_fd(|fd| {
+            let raw = fd.as_raw_fd();
+            let ret = unsafe { libc::lseek(raw, 0, libc::SEEK_CUR) };
+            if ret < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(ret as i64)
+            }
+        }) {
+            Some(Ok(kernel_offset)) => (SIG_OK, Value::int(kernel_offset - buffer_len)),
+            Some(Err(e)) => (SIG_ERROR, error_val("io-error", e.to_string())),
+            None => (
+                SIG_ERROR,
+                error_val("io-error", "port/tell: fd unavailable"),
+            ),
         }
     }
 
