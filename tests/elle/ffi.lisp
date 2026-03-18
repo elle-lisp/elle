@@ -365,3 +365,90 @@
 (def libc (ffi/native nil))
 (ffi/defbind getpid libc "getpid" :int [])
 (assert-true (> (getpid) 0) "ffi/defbind empty immutable array")
+
+## ── Pointer arithmetic ──────────────────────────────────────────────
+
+# ptr/add basic: offset into a buffer and read/write at offset
+(def buf (ffi/malloc 64))
+(def p2 (ptr/add buf 16))
+(ffi/write p2 :i32 99)
+(assert-eq (ffi/read p2 :i32) 99 "ptr/add offset read write")
+(ffi/free buf)
+
+# ptr/add negative offset
+(def buf (ffi/malloc 64))
+(def p2 (ptr/add buf 32))
+(def p3 (ptr/add p2 -16))
+(ffi/write p3 :i32 77)
+(assert-eq (ffi/read (ptr/add buf 16) :i32) 77 "ptr/add negative offset")
+(ffi/free buf)
+
+# ptr/add returns raw pointer (not managed — cannot double-free)
+(def buf (ffi/malloc 64))
+(def p2 (ptr/add buf 8))
+(assert-true (pointer? p2) "ptr/add result is pointer")
+(ffi/free buf)
+
+# ptr/add error: null pointer
+(assert-err (fn () (ptr/add nil 8)) "ptr/add null error")
+
+# ptr/add error: freed pointer
+(assert-err (fn () (let ((p (ffi/malloc 8)))
+                     (ffi/free p)
+                     (ptr/add p 4)))
+            "ptr/add freed pointer error")
+
+# ptr/add error: wrong type
+(assert-err (fn () (ptr/add 42 8)) "ptr/add wrong type error")
+
+# ptr/add error: non-integer offset
+(assert-err (fn () (def p (ffi/malloc 8))
+                   (ptr/add p "hello"))
+            "ptr/add non-integer offset error")
+
+# ptr/diff basic
+(def buf (ffi/malloc 64))
+(def p2 (ptr/add buf 24))
+(assert-eq (ptr/diff p2 buf) 24 "ptr/diff positive")
+(assert-eq (ptr/diff buf p2) -24 "ptr/diff negative")
+(ffi/free buf)
+
+# ptr/to-int and ptr/from-int roundtrip
+(def buf (ffi/malloc 64))
+(def addr (ptr/to-int buf))
+(assert-true (integer? addr) "ptr/to-int returns integer")
+(assert-true (> addr 0) "ptr/to-int positive address")
+(def p2 (ptr/from-int addr))
+(assert-true (pointer? p2) "ptr/from-int returns pointer")
+(ffi/write p2 :i32 123)
+(assert-eq (ffi/read buf :i32) 123 "ptr/from-int roundtrip")
+(ffi/free buf)
+
+# ptr/from-int zero returns nil
+(assert-true (nil? (ptr/from-int 0)) "ptr/from-int zero is nil")
+
+# ptr/from-int error: negative
+(assert-err (fn () (ptr/from-int -1)) "ptr/from-int negative error")
+
+# ptr/from-int error: wrong type
+(assert-err (fn () (ptr/from-int "hello")) "ptr/from-int wrong type error")
+
+# ptr/to-int error: null pointer
+(assert-err (fn () (ptr/to-int nil)) "ptr/to-int null error")
+
+# ptr/to-int error: wrong type
+(assert-err (fn () (ptr/to-int 42)) "ptr/to-int wrong type error")
+
+# ptr/add with managed pointer input produces raw pointer usable with ffi/read
+(def buf (ffi/malloc 32))
+(ffi/write buf :i32 111)
+(def p2 (ptr/add buf 4))
+(ffi/write p2 :i32 222)
+(assert-eq (ffi/read buf :i32) 111 "ptr/add managed input field 0")
+(assert-eq (ffi/read p2 :i32) 222 "ptr/add managed input field 1")
+(ffi/free buf)
+
+# Alignment check via ptr/to-int
+(def buf (ffi/malloc 64))
+(assert-eq (mod (ptr/to-int buf) 8) 0 "malloc alignment check")
+(ffi/free buf)

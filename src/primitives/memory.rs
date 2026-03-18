@@ -581,6 +581,190 @@ pub(crate) fn prim_ffi_string(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+// ── Pointer arithmetic ──────────────────────────────────────────────
+
+/// `(ptr/add pointer offset)` — Offset a pointer by a byte count.
+///
+/// Returns a raw C pointer (not managed). The result is a view into an
+/// existing allocation; ownership remains with the original managed pointer.
+/// The offset may be negative to move backwards.
+pub fn prim_ptr_add(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ptr/add: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let addr = match extract_pointer_addr(&args[0], "ptr/add") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let offset = match args[1].as_int() {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "ptr/add: expected integer for offset, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    // Use checked_add on i64 to detect overflow. Two valid 47-bit addresses
+    // can produce a sum that overflows i64 when the offset is extreme.
+    let result = match (addr as i64).checked_add(offset) {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val("overflow-error", "ptr/add: address arithmetic overflow"),
+            )
+        }
+    };
+    if result < 0 {
+        return (
+            SIG_ERROR,
+            error_val("argument-error", "ptr/add: result address is negative"),
+        );
+    }
+    let result_u64 = result as u64;
+    // Value::pointer(0) returns NIL — treat null result as an error.
+    if result_u64 == 0 {
+        return (
+            SIG_ERROR,
+            error_val("argument-error", "ptr/add: result is null pointer"),
+        );
+    }
+    // Value::pointer asserts addr fits in 47 bits. Validate here so we
+    // return an error instead of panicking.
+    const MAX_PTR: u64 = (1u64 << 47) - 1;
+    if result_u64 > MAX_PTR {
+        return (
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                "ptr/add: result address exceeds pointer range",
+            ),
+        );
+    }
+    (SIG_OK, Value::pointer(result_u64 as usize))
+}
+
+/// `(ptr/diff pointer-a pointer-b)` — Compute signed byte distance between two pointers.
+///
+/// Returns `addr_a - addr_b` as a signed integer. Negative if `a < b`.
+/// Both inputs may be raw or managed pointers.
+pub fn prim_ptr_diff(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ptr/diff: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let addr_a = match extract_pointer_addr(&args[0], "ptr/diff") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    let addr_b = match extract_pointer_addr(&args[1], "ptr/diff") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    // Both addresses are at most 47-bit usize values. The difference of two
+    // 47-bit unsigned values always fits in i64 on a 64-bit platform
+    // (range: -(2^47-1) to 2^47-1). wrapping_sub is used for correctness
+    // and defense against future encoding changes.
+    let diff = (addr_a as i64).wrapping_sub(addr_b as i64);
+    (SIG_OK, Value::int(diff))
+}
+
+/// `(ptr/to-int pointer)` — Extract the raw address of a pointer as an integer.
+///
+/// The address is at most 47 bits (Elle's pointer range), so it always fits
+/// in a signed 48-bit integer (INT_MAX = 2^47-1 >= 2^47-1). The cast is safe.
+pub fn prim_ptr_to_int(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ptr/to-int: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let addr = match extract_pointer_addr(&args[0], "ptr/to-int") {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+    // addr <= (1u64 << 47) - 1 == i64::MAX >> 16, fits in INT_MAX
+    (SIG_OK, Value::int(addr as i64))
+}
+
+/// `(ptr/from-int integer)` — Construct a raw C pointer from an integer address.
+///
+/// Returns `nil` if the address is 0 (consistent with `Value::pointer(0) == NIL`).
+/// Validates that the address fits in 47 bits BEFORE calling `Value::pointer`,
+/// which contains an `assert!` (not `debug_assert!`) that would panic otherwise.
+pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ptr/from-int: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let n = match args[0].as_int() {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "ptr/from-int: expected integer, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    if n < 0 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                "ptr/from-int: address must be non-negative",
+            ),
+        );
+    }
+    let addr = n as u64;
+    // Must validate before calling Value::pointer — it asserts (not debug_asserts)
+    // that the address fits in 47 bits. Exceeding this would panic.
+    const MAX_PTR: u64 = (1u64 << 47) - 1;
+    if addr > MAX_PTR {
+        return (
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                "ptr/from-int: address exceeds pointer range",
+            ),
+        );
+    }
+    // Value::pointer(0) returns Value::NIL — a legitimate result for addr 0.
+    (SIG_OK, Value::pointer(addr as usize))
+}
+
 /// Declarative primitive definitions for FFI memory operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -680,6 +864,50 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["elem-type", "count"],
         category: "ffi",
         example: "(ffi/array :i32 10)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ptr/add",
+        func: prim_ptr_add,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Offset a pointer by a byte count. Returns a raw pointer. Offset may be negative.",
+        params: &["pointer", "offset"],
+        category: "ptr",
+        example: "(ptr/add buf 16)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ptr/diff",
+        func: prim_ptr_diff,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Compute the signed byte distance between two pointers (a - b).",
+        params: &["pointer-a", "pointer-b"],
+        category: "ptr",
+        example: "(ptr/diff p2 p1)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ptr/to-int",
+        func: prim_ptr_to_int,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Extract the raw address of a pointer as an integer.",
+        params: &["pointer"],
+        category: "ptr",
+        example: "(ptr/to-int buf)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ptr/from-int",
+        func: prim_ptr_from_int,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Construct a raw C pointer from an integer address. Returns nil if address is 0.",
+        params: &["integer"],
+        category: "ptr",
+        example: "(ptr/from-int addr)",
         aliases: &[],
     },
 ];
