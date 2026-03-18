@@ -246,15 +246,12 @@ pub(crate) fn prim_is_struct(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if value is a function (closure or primitive)
-pub(crate) fn prim_is_function(args: &[Value]) -> (SignalBits, Value) {
+/// Check if value is callable (closure or native function)
+pub(crate) fn prim_is_fn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("function?: expected 1 argument, got {}", args.len()),
-            ),
+            error_val("arity-error", "fn?: expected 1 argument"),
         );
     }
     (
@@ -263,15 +260,12 @@ pub(crate) fn prim_is_function(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if value is a built-in primitive function
-pub(crate) fn prim_is_primitive(args: &[Value]) -> (SignalBits, Value) {
+/// Check if value is a native (built-in) function
+pub(crate) fn prim_is_native_fn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
             SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("primitive?: expected 1 argument, got {}", args.len()),
-            ),
+            error_val("arity-error", "native-fn?: expected 1 argument"),
         );
     }
     (SIG_OK, Value::bool(args[0].is_native_fn()))
@@ -480,26 +474,26 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "function?",
-        func: prim_is_function,
-        signal: Signal::errors(),
+        name: "fn?",
+        func: prim_is_fn,
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
-        doc: "Check if value is a function (closure or primitive).",
-        params: &["value"],
-        category: "predicate",
-        example: "(function? +) #=> true\n(function? 42) #=> false",
-        aliases: &["fn?"],
+        doc: "Returns true if value is callable (closure or native function).",
+        params: &["x"],
+        category: "types",
+        example: "(fn? +) #=> true\n(fn? (fn [x] x)) #=> true\n(fn? 42) #=> false",
+        aliases: &[],
     },
     PrimitiveDef {
-        name: "primitive?",
-        func: prim_is_primitive,
-        signal: Signal::errors(),
+        name: "native-fn?",
+        func: prim_is_native_fn,
+        signal: Signal::silent(),
         arity: Arity::Exact(1),
-        doc: "Check if value is a built-in primitive function.",
-        params: &["value"],
-        category: "predicate",
-        example: "(primitive? +) #=> true\n(primitive? (fn (x) x)) #=> false",
-        aliases: &[],
+        doc: "Returns true if value is a native (built-in) function.",
+        params: &["x"],
+        category: "types",
+        example: "(native-fn? +) #=> true\n(native-fn? (fn [x] x)) #=> false",
+        aliases: &["native?", "primitive?"],
     },
     PrimitiveDef {
         name: "mutable?",
