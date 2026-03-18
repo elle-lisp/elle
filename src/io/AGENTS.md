@@ -39,9 +39,11 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 
 ### IoOp
 
-Enum of I/O operations (13 variants):
+Enum of I/O operations (15 variants):
 
 **Stream operations:** `ReadLine`, `Read { count }`, `ReadAll`, `Write { data }`, `Flush`
+
+**File position:** `Seek { offset: i64, whence: i32 }`, `Tell`
 
 **Network operations:** `Accept`, `Connect { addr }`, `SendTo { addr, port_num, data }`, `RecvFrom { count }`, `Shutdown { how }`
 
@@ -184,3 +186,4 @@ Both `SyncBackend` and `AsyncBackend` implement subprocess spawn and wait:
 12. **Encoding errors:** `Encoding::Text` read errors now return `SIG_ERROR` with kind `"encoding-error"` instead of silently replacing invalid UTF-8 with the replacement character.
 13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
+15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.

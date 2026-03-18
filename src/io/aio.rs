@@ -16,6 +16,8 @@ use crate::value::{error_val, Value};
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::io;
+use std::os::unix::io::AsRawFd;
 use std::time::Duration;
 
 /// Async I/O backend. Wrapped as ExternalObject "io-backend".
@@ -132,6 +134,12 @@ impl AsyncBackend {
         inner.next_id += 1;
 
         let port_key = PortKey::from_port(port);
+
+        // Seek and Tell: synchronous file-only ops — handle as immediate completions.
+        // Must come before stdin routing and buffer allocation.
+        if matches!(&request.op, IoOp::Seek { .. } | IoOp::Tell) {
+            return inner.handle_seek_tell(id, port, &port_key, &request.op);
+        }
 
         // For stdin, route to stdin thread
         if matches!(port_key, PortKey::Stdin) {
@@ -1063,7 +1071,9 @@ impl AsyncBackendInner {
             | IoOp::Sleep { .. }
             | IoOp::Spawn(_)
             | IoOp::ProcessWait
-            | IoOp::Open { .. } => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::Open { .. }
+            | IoOp::Seek { .. }
+            | IoOp::Tell => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)
@@ -1083,6 +1093,92 @@ impl AsyncBackendInner {
                 listener_kind: None,
             },
         );
+        Ok(id)
+    }
+
+    /// Handle Seek and Tell as immediate completions.
+    ///
+    /// Called from AsyncBackend::submit after port_key is determined and before
+    /// buffer allocation. Seek/Tell are synchronous (non-blocking lseek calls)
+    /// and never go to io_uring or the thread pool.
+    ///
+    /// # Buffer invariant
+    /// After Seek: the per-fd buffer is cleared and status reset to Open.
+    /// After Tell: buffer is read-only; the formula is kernel_offset - buffer.len().
+    fn handle_seek_tell(
+        &mut self,
+        id: u64,
+        port: &Port,
+        port_key: &PortKey,
+        op: &IoOp,
+    ) -> Result<u64, String> {
+        if port.kind() != PortKind::File {
+            let err_msg = match op {
+                IoOp::Seek { .. } => {
+                    format!("port/seek: expected file port, got {:?}", port.kind())
+                }
+                IoOp::Tell => format!("port/tell: expected file port, got {:?}", port.kind()),
+                _ => unreachable!(),
+            };
+            self.completions.push_back(Completion {
+                id,
+                result: Err(error_val("type-error", err_msg)),
+            });
+            return Ok(id);
+        }
+
+        let result = match op {
+            IoOp::Seek { offset, whence } => {
+                // Discard buffered bytes — kernel offset and logical position diverge otherwise.
+                if let Some(state) = self.fd_states.get_mut(port_key) {
+                    state.buffer.clear();
+                    state.status = crate::io::types::FdStatus::Open;
+                }
+                port.with_fd(|fd| {
+                    let raw = fd.as_raw_fd();
+                    let ret = unsafe { libc::lseek(raw, *offset, *whence) };
+                    if ret < 0 {
+                        Err(io::Error::last_os_error())
+                    } else {
+                        Ok(Value::int(ret as i64))
+                    }
+                })
+                .unwrap_or_else(|| {
+                    Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "port/seek: fd unavailable",
+                    ))
+                })
+            }
+            IoOp::Tell => {
+                let buffer_len: i64 = self
+                    .fd_states
+                    .get(port_key)
+                    .map(|state| state.buffer.len() as i64)
+                    .unwrap_or(0);
+                port.with_fd(|fd| {
+                    let raw = fd.as_raw_fd();
+                    let ret = unsafe { libc::lseek(raw, 0, libc::SEEK_CUR) };
+                    if ret < 0 {
+                        Err(io::Error::last_os_error())
+                    } else {
+                        Ok(Value::int(ret as i64 - buffer_len))
+                    }
+                })
+                .unwrap_or_else(|| {
+                    Err(io::Error::new(
+                        io::ErrorKind::BrokenPipe,
+                        "port/tell: fd unavailable",
+                    ))
+                })
+            }
+            _ => unreachable!(),
+        };
+
+        self.completions.push_back(Completion {
+            id,
+            result: result.map_err(|e| error_val("io-error", e.to_string())),
+        });
         Ok(id)
     }
 
@@ -1655,6 +1751,90 @@ mod tests {
         let ids: Vec<u64> = all.iter().map(|c| c.id).collect();
         assert!(ids.contains(&accept_id), "missing accept");
         assert!(ids.contains(&connect_id), "missing connect");
+    }
+
+    fn open_rw_port(path: &str) -> Value {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .unwrap();
+        let fd: std::os::unix::io::OwnedFd = file.into();
+        Value::external(
+            "port",
+            Port::new_file(fd, Direction::ReadWrite, Encoding::Text, path.to_string()),
+        )
+    }
+
+    #[test]
+    fn test_async_seek_returns_immediate_completion() {
+        let backend = AsyncBackend::new().unwrap();
+        let path = write_temp_file("hello world");
+        let port = open_rw_port(&path);
+
+        let req = IoRequest {
+            op: IoOp::Seek {
+                offset: 6,
+                whence: libc::SEEK_SET,
+            },
+            port,
+            timeout: None,
+        };
+        let id = backend.submit(&req).unwrap();
+
+        // Seek is immediate — no wait needed
+        let completions = backend.poll();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        assert!(completions[0].result.is_ok());
+        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(6));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_async_tell_returns_immediate_completion() {
+        let backend = AsyncBackend::new().unwrap();
+        let path = write_temp_file("hello");
+        let port = open_rw_port(&path);
+
+        let req = IoRequest {
+            op: IoOp::Tell,
+            port,
+            timeout: None,
+        };
+        let id = backend.submit(&req).unwrap();
+
+        let completions = backend.poll();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        assert!(completions[0].result.is_ok());
+        assert_eq!(completions[0].result.as_ref().unwrap().as_int(), Some(0));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_async_seek_non_file_port_errors() {
+        let backend = AsyncBackend::new().unwrap();
+        let stdin_port = Value::external("port", Port::stdin());
+
+        let req = IoRequest {
+            op: IoOp::Seek {
+                offset: 0,
+                whence: libc::SEEK_SET,
+            },
+            port: stdin_port,
+            timeout: None,
+        };
+        // stdin has PortKind::Stdin — seek must fail immediately
+        let id = backend.submit(&req).unwrap();
+        let completions = backend.poll();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, id);
+        assert!(completions[0].result.is_err());
     }
 
     #[test]

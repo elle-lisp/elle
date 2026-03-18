@@ -1,7 +1,7 @@
 //! Port primitives — lifecycle management for file descriptors.
 
 use crate::io::request::{IoOp, IoRequest};
-use crate::port::{Direction, Encoding, Port};
+use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
@@ -375,6 +375,168 @@ fn prim_port_path(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (port/seek port offset)
+/// (port/seek port offset :from :start|:current|:end)
+///
+/// Seek to `offset` in a file port. Discards the per-fd read buffer before
+/// seeking (prevents stale buffered data from diverging from the kernel
+/// position). Returns the new absolute byte offset as int.
+///
+/// The `:from` keyword controls the seek origin:
+///   :start   — SEEK_SET (default): absolute offset from file start
+///   :current — SEEK_CUR: relative to current position
+///   :end     — SEEK_END: relative to end of file (offset is usually negative)
+///
+/// Only valid on file ports. Returns :type-error on other port kinds.
+fn prim_port_seek(args: &[Value]) -> (SignalBits, Value) {
+    // Arity: exactly 2 or exactly 4 (port, offset, :from, :value).
+    // 0, 1, 3, or 5+ args are all errors.
+    if args.len() < 2 || args.len() > 4 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("port/seek: expected 2 or 4 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    if args.len() == 3 {
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "port/seek: :from keyword requires a value"),
+        );
+    }
+
+    let port = match extract_port(&args[0], "port/seek") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+
+    if port.kind() != PortKind::File {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("port/seek: expected file port, got {:?}", port.kind()),
+            ),
+        );
+    }
+
+    let offset = match args[1].as_int() {
+        Some(n) => n,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "port/seek: expected integer for offset, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+
+    // Parse optional :from keyword-value pair (args[2] and args[3]).
+    let whence = if args.len() == 4 {
+        match args[2].as_keyword_name().as_deref() {
+            Some("from") => {}
+            Some(other) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        format!("port/seek: unknown keyword :{}, expected :from", other),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "port/seek: expected keyword for third argument, got {}",
+                            args[2].type_name()
+                        ),
+                    ),
+                )
+            }
+        }
+        match args[3].as_keyword_name().as_deref() {
+            Some("start") => libc::SEEK_SET,
+            Some("current") => libc::SEEK_CUR,
+            Some("end") => libc::SEEK_END,
+            Some(other) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "value-error",
+                        format!(
+                        "port/seek: invalid :from value :{}, expected :start, :current, or :end",
+                        other
+                    ),
+                    ),
+                )
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "port/seek: expected keyword for :from value, got {}",
+                            args[3].type_name()
+                        ),
+                    ),
+                )
+            }
+        }
+    } else {
+        libc::SEEK_SET // default: seek from start
+    };
+
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::new(IoOp::Seek { offset, whence }, args[0]),
+    )
+}
+
+/// (port/tell port) → int
+///
+/// Return the current logical read position in a file port.
+/// Logical position = kernel file offset - buffered-but-unconsumed bytes.
+/// Only valid on file ports. Returns :type-error on other port kinds.
+fn prim_port_tell(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("port/tell: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let port = match extract_port(&args[0], "port/tell") {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+
+    if port.kind() != PortKind::File {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("port/tell: expected file port, got {:?}", port.kind()),
+            ),
+        );
+    }
+
+    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Tell, args[0]))
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/open",
@@ -491,6 +653,34 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["port"],
         category: "port",
         example: "(port/path (tcp/listen \"127.0.0.1\" 0))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "port/seek",
+        func: prim_port_seek,
+        signal: Signal {
+            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::Range(2, 4),
+        doc: "Seek to a byte offset in a file port. Returns new absolute position.\nSyntax: (port/seek port offset [:from :start|:current|:end])\nDefault :from is :start (SEEK_SET). Discards the read buffer on seek.",
+        params: &["port", "offset"],
+        category: "port",
+        example: "(port/seek p 0)\n(port/seek p 0 :from :start)\n(port/seek p -1 :from :end)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "port/tell",
+        func: prim_port_tell,
+        signal: Signal {
+            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::Exact(1),
+        doc: "Return current logical byte position in a file port.\nAccounts for per-fd read buffering: position = kernel_offset - buffer.len().",
+        params: &["port"],
+        category: "port",
+        example: "(port/tell p)",
         aliases: &[],
     },
 ];
@@ -889,5 +1079,235 @@ mod tests {
         result
             .with_string(|s| assert_eq!(s, &addr))
             .expect("expected string result");
+    }
+
+    // ── port/seek primitive ──────────────────────────────────────────────────
+
+    fn make_file_port() -> Value {
+        // Use a real temp file to test seek behavior more precisely.
+        let path = "/tmp/elle-test-primitive-seek-port";
+        std::fs::write(path, "hello").unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        let fd: std::os::unix::io::OwnedFd = file.into();
+        Value::external(
+            "port",
+            Port::new_file(fd, Direction::ReadWrite, Encoding::Text, path.to_string()),
+        )
+    }
+
+    #[test]
+    fn test_port_seek_yields_sig_io() {
+        let port = make_file_port();
+        let (bits, val) = prim_port_seek(&[port, Value::int(0)]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(val.external_type_name(), Some("io-request"));
+    }
+
+    #[test]
+    fn test_port_seek_iorequest_contains_seek_op() {
+        let port = make_file_port();
+        let (_, val) = prim_port_seek(&[port, Value::int(42)]);
+        let req = val.as_external::<IoRequest>().expect("must be IoRequest");
+        match &req.op {
+            IoOp::Seek { offset, whence } => {
+                assert_eq!(*offset, 42);
+                assert_eq!(*whence, libc::SEEK_SET, "default whence must be SEEK_SET");
+            }
+            _ => panic!("expected Seek op"),
+        }
+    }
+
+    #[test]
+    fn test_port_seek_default_whence_is_seek_set() {
+        let port = make_file_port();
+        let (_, val) = prim_port_seek(&[port, Value::int(0)]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Seek { whence, .. } => assert_eq!(*whence, libc::SEEK_SET),
+            _ => panic!("expected Seek"),
+        }
+    }
+
+    #[test]
+    fn test_port_seek_from_current() {
+        let port = make_file_port();
+        let (_, val) = prim_port_seek(&[
+            port,
+            Value::int(3),
+            Value::keyword("from"),
+            Value::keyword("current"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Seek { whence, .. } => assert_eq!(*whence, libc::SEEK_CUR),
+            _ => panic!("expected Seek"),
+        }
+    }
+
+    #[test]
+    fn test_port_seek_from_end() {
+        let port = make_file_port();
+        let (_, val) = prim_port_seek(&[
+            port,
+            Value::int(-1),
+            Value::keyword("from"),
+            Value::keyword("end"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Seek { whence, .. } => assert_eq!(*whence, libc::SEEK_END),
+            _ => panic!("expected Seek"),
+        }
+    }
+
+    #[test]
+    fn test_port_seek_from_start_explicit() {
+        let port = make_file_port();
+        let (_, val) = prim_port_seek(&[
+            port,
+            Value::int(0),
+            Value::keyword("from"),
+            Value::keyword("start"),
+        ]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        match &req.op {
+            IoOp::Seek { whence, .. } => assert_eq!(*whence, libc::SEEK_SET),
+            _ => panic!("expected Seek"),
+        }
+    }
+
+    #[test]
+    fn test_port_seek_zero_args_errors() {
+        let (bits, _) = prim_port_seek(&[]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_one_arg_errors() {
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[port]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_three_args_errors() {
+        // 3 args = incomplete keyword pair (port, offset, :from without value)
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[port, Value::int(0), Value::keyword("from")]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_five_args_errors() {
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[
+            port,
+            Value::int(0),
+            Value::keyword("from"),
+            Value::keyword("start"),
+            Value::int(99),
+        ]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_non_port_arg_errors() {
+        let (bits, _) = prim_port_seek(&[Value::int(42), Value::int(0)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_non_file_port_errors() {
+        let stdin = Value::external("port", Port::stdin());
+        let (bits, _) = prim_port_seek(&[stdin, Value::int(0)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_non_integer_offset_errors() {
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[port, Value::string("not-an-int")]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_bad_from_value_errors() {
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[
+            port,
+            Value::int(0),
+            Value::keyword("from"),
+            Value::keyword("bogus"),
+        ]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_non_keyword_from_value_errors() {
+        let port = make_file_port();
+        let (bits, _) =
+            prim_port_seek(&[port, Value::int(0), Value::keyword("from"), Value::int(42)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_seek_unknown_first_keyword_errors() {
+        // args[2] is a keyword but not :from
+        let port = make_file_port();
+        let (bits, _) = prim_port_seek(&[
+            port,
+            Value::int(0),
+            Value::keyword("bogus"),
+            Value::keyword("start"),
+        ]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    // ── port/tell primitive ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_port_tell_yields_sig_io() {
+        let port = make_file_port();
+        let (bits, val) = prim_port_tell(&[port]);
+        assert_eq!(bits, SIG_YIELD | SIG_IO);
+        assert_eq!(val.external_type_name(), Some("io-request"));
+    }
+
+    #[test]
+    fn test_port_tell_iorequest_contains_tell_op() {
+        let port = make_file_port();
+        let (_, val) = prim_port_tell(&[port]);
+        let req = val.as_external::<IoRequest>().unwrap();
+        assert!(matches!(req.op, IoOp::Tell));
+    }
+
+    #[test]
+    fn test_port_tell_zero_args_errors() {
+        let (bits, _) = prim_port_tell(&[]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_tell_two_args_errors() {
+        let port = make_file_port();
+        let (bits, _) = prim_port_tell(&[port, Value::int(0)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_tell_non_port_arg_errors() {
+        let (bits, _) = prim_port_tell(&[Value::int(42)]);
+        assert_eq!(bits, SIG_ERROR);
+    }
+
+    #[test]
+    fn test_port_tell_non_file_port_errors() {
+        let stdin = Value::external("port", Port::stdin());
+        let (bits, _) = prim_port_tell(&[stdin]);
+        assert_eq!(bits, SIG_ERROR);
     }
 }
