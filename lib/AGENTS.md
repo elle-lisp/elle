@@ -122,3 +122,82 @@ Error value is a struct: `{:error :http-error :message "..."}`
 ```bash
 ./target/debug/elle tests/elle/http.lisp
 ```
+
+---
+
+# lib/tls
+
+Agent guide for `lib/tls.lisp` — TLS client and server using the `elle-tls` plugin.
+
+## Purpose
+
+TLS 1.2 and 1.3 over TCP using Elle's existing stream and scheduler primitives.
+The plugin provides the state machine; Elle code handles all I/O via native TCP ports.
+
+## Data flow
+
+Client:
+```
+tls:connect host port → tcp/connect → tls/client-state → tls-handshake loop → tls-conn
+
+tls-handshake:
+  loop: tls/process(bytes) → send outgoing → check handshake-complete? → read more
+```
+
+Server:
+```
+tls:accept listener config → tcp/accept → tls/server-state → tls-handshake loop → tls-conn
+```
+
+Read:
+```
+tls:read conn n → check plaintext buffer → stream/read TCP → tls/process → tls/read-plaintext
+```
+
+Write:
+```
+tls:write conn data → tls/encrypt → stream/write TCP
+```
+
+Stream:
+```
+tls:lines conn → coro/new (loop: tls:read-line → yield)
+```
+
+## Exported functions
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `tls:connect` | `host port [opts]` | tls-conn | async |
+| `tls:accept` | `listener config` | tls-conn | async |
+| `tls:server-config` | `cert-path key-path` | tls-server-config | sync |
+| `tls:read` | `conn n` | bytes or nil | async |
+| `tls:read-line` | `conn` | string or nil | async |
+| `tls:read-all` | `conn` | bytes | async |
+| `tls:write` | `conn data` | int | async |
+| `tls:close` | `conn` | nil | async |
+| `tls:lines` | `conn` | coroutine | stream |
+| `tls:chunks` | `conn size` | coroutine | stream |
+| `tls:writer` | `conn` | coroutine | stream |
+
+## tls-conn shape
+
+```lisp
+{:tcp port      # TcpStream port — raw TCP connection
+ :tls tls-state # TlsState ExternalObject from elle-tls plugin}
+```
+
+## Invariants
+
+1. All functions require a scheduler context (`ev/run` or `ev/spawn`).
+2. `tls:close` always closes the TCP port, even if `close_notify` fails.
+3. After every `tls/process` call, outgoing data must be drained and sent.
+4. `tls:lines` and `tls:chunks` close the connection when exhausted.
+5. The `tls-conn` struct is transparent and inspectable; `:tcp` and `:tls` fields
+   are accessible directly.
+
+## Running tests
+
+```bash
+./target/debug/elle tests/elle/tls.lisp
+```
