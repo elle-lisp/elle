@@ -1,0 +1,407 @@
+//! Elle git plugin — git repository access via the `git2` crate.
+
+mod branches;
+mod commits;
+mod config;
+mod diff;
+mod helpers;
+mod remotes;
+mod repo;
+mod staging;
+mod tags;
+
+use elle::plugin::PluginContext;
+use elle::primitives::def::PrimitiveDef;
+use elle::signals::Signal;
+use elle::value::types::Arity;
+use elle::value::{TableKey, Value};
+use std::collections::BTreeMap;
+
+/// Plugin entry point. Called by Elle when loading the `.so`.
+///
+/// # Safety
+///
+/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
+/// `PluginContext` reference. Only safe when called from `load_plugin`.
+#[no_mangle]
+pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
+    ctx.init_keywords();
+    let mut fields = BTreeMap::new();
+    for def in PRIMITIVES {
+        ctx.register(def);
+        let short_name = def.name.strip_prefix("git/").unwrap_or(def.name);
+        fields.insert(
+            TableKey::Keyword(short_name.into()),
+            Value::native_fn(def.func),
+        );
+    }
+    Value::struct_from(fields)
+}
+
+// ---------------------------------------------------------------------------
+// Registration table
+// ---------------------------------------------------------------------------
+
+static PRIMITIVES: &[PrimitiveDef] = &[
+    // --- Repository lifecycle ---
+    PrimitiveDef {
+        name: "git/open",
+        func: repo::prim_git_open,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Open an existing git repository at path.",
+        params: &["path"],
+        category: "git",
+        example: r#"(git/open "/path/to/repo")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/init",
+        func: repo::prim_git_init,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Initialize a new git repository at path.",
+        params: &["path"],
+        category: "git",
+        example: r#"(git/init "/tmp/myrepo")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/clone",
+        func: repo::prim_git_clone,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Clone a repository from url to local path. Auth via SSH agent or system credential helpers.",
+        params: &["url", "path"],
+        category: "git",
+        example: r#"(git/clone "https://github.com/user/repo" "/tmp/repo")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/path",
+        func: repo::prim_git_path,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the path to the .git directory.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/path repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/workdir",
+        func: repo::prim_git_workdir,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the working directory path, or nil for bare repositories.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/workdir repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/bare?",
+        func: repo::prim_git_bare,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "True if the repository is bare.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/bare? repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/state",
+        func: repo::prim_git_state,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the repository state as a keyword: :clean, :merge, :revert, :rebase, etc.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/state repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/head",
+        func: repo::prim_git_head,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return HEAD info as {:name :oid :symbolic}. :name is nil when detached.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/head repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/resolve",
+        func: repo::prim_git_resolve,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Resolve a ref name, branch, tag, or OID prefix to a full OID hex string.",
+        params: &["repo", "ref"],
+        category: "git",
+        example: r#"(git/resolve repo "HEAD")"#,
+        aliases: &[],
+    },
+    // --- Branches ---
+    PrimitiveDef {
+        name: "git/branches",
+        func: branches::prim_git_branches,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "List branches. Optional filter: :local or :remote. Returns list of branch structs.",
+        params: &["repo", "[filter]"],
+        category: "git",
+        example: r#"(git/branches repo :local)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/branch-create",
+        func: branches::prim_git_branch_create,
+        signal: Signal::errors(),
+        arity: Arity::Range(2, 3),
+        doc: "Create a branch at target (default HEAD). Returns new commit OID.",
+        params: &["repo", "name", "[target]"],
+        category: "git",
+        example: r#"(git/branch-create repo "feature/x")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/branch-delete",
+        func: branches::prim_git_branch_delete,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Delete a local branch.",
+        params: &["repo", "name"],
+        category: "git",
+        example: r#"(git/branch-delete repo "feature/x")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/checkout",
+        func: branches::prim_git_checkout,
+        signal: Signal::errors(),
+        arity: Arity::Range(2, 3),
+        doc: "Checkout a ref (branch name, tag, or OID). Opts: {:force true}.",
+        params: &["repo", "ref", "[opts]"],
+        category: "git",
+        example: r#"(git/checkout repo "main")"#,
+        aliases: &[],
+    },
+    // --- Commits ---
+    PrimitiveDef {
+        name: "git/commit-info",
+        func: commits::prim_git_commit_info,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Read a commit by OID string. Returns commit struct.",
+        params: &["repo", "oid"],
+        category: "git",
+        example: r#"(git/commit-info repo "abc123")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/log",
+        func: commits::prim_git_log,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Walk commit history. Opts: {:from refname :limit n}. Default limit 50.",
+        params: &["repo", "[opts]"],
+        category: "git",
+        example: r#"(git/log repo {:limit 10})"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/commit",
+        func: commits::prim_git_commit,
+        signal: Signal::errors(),
+        arity: Arity::Range(2, 3),
+        doc: "Create a commit on HEAD from current index. Opts: {:author {:name :email} :committer {:name :email}}. Returns new OID.",
+        params: &["repo", "message", "[opts]"],
+        category: "git",
+        example: r#"(git/commit repo "initial commit")"#,
+        aliases: &[],
+    },
+    // --- Status and staging ---
+    PrimitiveDef {
+        name: "git/status",
+        func: staging::prim_git_status,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return file status list. Each entry: {:path :index :workdir} with keyword or nil values.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/status repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/add",
+        func: staging::prim_git_add,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Stage file(s). Pass a string for one file or an array for multiple.",
+        params: &["repo", "path-or-paths"],
+        category: "git",
+        example: r#"(git/add repo "src/foo.rs")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/remove",
+        func: staging::prim_git_remove,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Unstage file(s). Pass a string for one file or an array for multiple.",
+        params: &["repo", "path-or-paths"],
+        category: "git",
+        example: r#"(git/remove repo "src/foo.rs")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/add-all",
+        func: staging::prim_git_add_all,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Stage all modified, new, and deleted files (equivalent to git add -A).",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/add-all repo)"#,
+        aliases: &[],
+    },
+    // --- Diff ---
+    PrimitiveDef {
+        name: "git/diff",
+        func: diff::prim_git_diff,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Return diff as nested struct. Opts: {:cached true} for index-vs-HEAD.",
+        params: &["repo", "[opts]"],
+        category: "git",
+        example: r#"(git/diff repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/diff-patch",
+        func: diff::prim_git_diff_patch,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Return unified diff as text string. Opts: {:cached true} for index-vs-HEAD.",
+        params: &["repo", "[opts]"],
+        category: "git",
+        example: r#"(git/diff-patch repo)"#,
+        aliases: &[],
+    },
+    // --- File contents ---
+    PrimitiveDef {
+        name: "git/show",
+        func: diff::prim_git_show,
+        signal: Signal::errors(),
+        arity: Arity::Exact(3),
+        doc: "Read file contents at a ref. Returns string (UTF-8 only). Binary files are a git-error.",
+        params: &["repo", "ref", "path"],
+        category: "git",
+        example: r#"(git/show repo "HEAD" "README.md")"#,
+        aliases: &[],
+    },
+    // --- Tags ---
+    PrimitiveDef {
+        name: "git/tags",
+        func: tags::prim_git_tags,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "List all tag names as strings.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/tags repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/tag-create",
+        func: tags::prim_git_tag_create,
+        signal: Signal::errors(),
+        arity: Arity::Range(2, 4),
+        doc: "Create a tag. Lightweight if 2-3 args, annotated if 4 args (message). Returns tag OID.",
+        params: &["repo", "name", "[target]", "[message]"],
+        category: "git",
+        example: r#"(git/tag-create repo "v1.0")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/tag-delete",
+        func: tags::prim_git_tag_delete,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Delete a tag.",
+        params: &["repo", "name"],
+        category: "git",
+        example: r#"(git/tag-delete repo "v1.0")"#,
+        aliases: &[],
+    },
+    // --- Remotes ---
+    PrimitiveDef {
+        name: "git/remotes",
+        func: remotes::prim_git_remotes,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "List remote names as strings.",
+        params: &["repo"],
+        category: "git",
+        example: r#"(git/remotes repo)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/remote-info",
+        func: remotes::prim_git_remote_info,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Return remote info as {:name :url :push-url}.",
+        params: &["repo", "name"],
+        category: "git",
+        example: r#"(git/remote-info repo "origin")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/fetch",
+        func: remotes::prim_git_fetch,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Fetch from remote (all configured refspecs). Auth via SSH agent or system helpers.",
+        params: &["repo", "remote-name"],
+        category: "git",
+        example: r#"(git/fetch repo "origin")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/push",
+        func: remotes::prim_git_push,
+        signal: Signal::errors(),
+        arity: Arity::Range(2, 3),
+        doc: "Push to remote. Optional refspecs array. Default: push current branch. Detached HEAD is a git-error.",
+        params: &["repo", "remote-name", "[refspecs]"],
+        category: "git",
+        example: r#"(git/push repo "origin")"#,
+        aliases: &[],
+    },
+    // --- Config ---
+    PrimitiveDef {
+        name: "git/config-get",
+        func: config::prim_git_config_get,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Read a config value by key. Returns string or nil if not set.",
+        params: &["repo", "key"],
+        category: "git",
+        example: r#"(git/config-get repo "user.name")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "git/config-set",
+        func: config::prim_git_config_set,
+        signal: Signal::errors(),
+        arity: Arity::Exact(3),
+        doc: "Write a config value (string).",
+        params: &["repo", "key", "value"],
+        category: "git",
+        example: r#"(git/config-set repo "user.name" "Alice")"#,
+        aliases: &[],
+    },
+];
