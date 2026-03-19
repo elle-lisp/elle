@@ -109,11 +109,12 @@ impl CompilerState {
         };
 
         // Extract symbols from the file-level HIR
-        doc.symbol_index = extract_symbols_from_hir(&analysis.hir, &self.symbol_table);
+        doc.symbol_index =
+            extract_symbols_from_hir(&analysis.hir, &self.symbol_table, &analysis.arena);
 
         // Run HIR linter
         let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &self.symbol_table);
+        linter.lint(&analysis.hir, &self.symbol_table, &analysis.arena);
         doc.diagnostics.extend(linter.diagnostics().iter().cloned());
 
         true

@@ -14,7 +14,7 @@ impl<'a> Analyzer<'a> {
     fn resolve_primitive(&mut self, name: &str) -> Binding {
         self.lookup(name, &[]).unwrap_or_else(|| {
             let sym = self.symbols.intern(name);
-            Binding::new(sym, BindingScope::Local)
+            self.arena.alloc(sym, BindingScope::Local)
         })
     }
 
@@ -405,7 +405,7 @@ impl<'a> Analyzer<'a> {
                     // needs_lbox() knows the binding may be captured before
                     // its initializer runs (self-recursion, forward refs).
                     let binding = self.bind(name, scopes, BindingScope::Local);
-                    binding.mark_prebound();
+                    self.arena.get_mut(binding).is_prebound = true;
                 }
             }
 

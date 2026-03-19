@@ -1,5 +1,5 @@
 // Debug test for printing HIR structure
-use elle::hir::Analyzer;
+use elle::hir::{Analyzer, BindingArena};
 use elle::reader::read_syntax;
 use elle::symbol::SymbolTable;
 use elle::syntax::Expander;
@@ -34,7 +34,8 @@ fn test_print_hir_failing_case() {
         .expect("expand failed");
 
     // Analyze
-    let mut analyzer = Analyzer::new(&mut symbols);
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
     let analysis = analyzer.analyze(&expanded).expect("analyze failed");
 
     println!("=== HIR ===");

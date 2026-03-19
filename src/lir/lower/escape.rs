@@ -40,7 +40,7 @@ use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
 use crate::lir::intrinsics::IntrinsicOp;
 use crate::lir::types::BinOp;
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     /// Check if the result of a HIR expression is provably a NaN-boxed
     /// immediate (not a heap pointer to something allocated inside the scope).
     ///
@@ -199,7 +199,8 @@ impl Lowerer {
         };
 
         // Must be an immutable, non-mutated binding (same check as try_lower_intrinsic)
-        if !binding.is_immutable() || binding.is_mutated() {
+        let bi = self.arena.get(*binding);
+        if !bi.is_immutable || bi.is_mutated {
             return false;
         }
 
@@ -208,7 +209,7 @@ impl Lowerer {
             return false;
         }
 
-        let sym = binding.name();
+        let sym = bi.name;
 
         // Check intrinsics map (BinOp, CmpOp, UnaryOp with correct arity).
         // Special case: `-` with 1 arg is negation (UnaryOp::Neg), which

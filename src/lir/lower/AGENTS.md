@@ -36,9 +36,9 @@ Does NOT:
 HIR + spans
     │
     ▼
-Lowerer
+Lowerer (&BindingArena)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
-     ├─► emit MakeLBox for captured locals (binding.needs_lbox())
+    ├─► emit MakeLBox for captured locals (arena.get(b).needs_lbox())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     ├─► perform escape analysis for scope allocation
@@ -48,7 +48,7 @@ Lowerer
 LirFunction (basic blocks with SpannedInstr)
 ```
 
-The lowerer reads binding metadata directly from `Binding` objects (via `binding.needs_lbox()`, `binding.is_global()`, `binding.name()`, etc.) rather than looking up a separate bindings HashMap.
+The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`): `arena.get(b).needs_lbox()`, `arena.get(b).name`, etc. The arena reference is immutable during lowering, ensuring analysis-phase metadata cannot be modified.
 
 ## Source location tracking
 

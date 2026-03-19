@@ -4,7 +4,7 @@ use super::*;
 use crate::hir::{CaptureInfo, ParamBound};
 use crate::value::Arity;
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     /// Lower a lambda expression (creates closure with captures)
     #[allow(clippy::too_many_arguments)]
     pub(super) fn lower_lambda_expr(
@@ -30,7 +30,7 @@ impl Lowerer {
 
             // Check if this binding needs a cell (captured locals, mutated params)
             // We need to preserve the cell when capturing so mutations are shared
-            let binding_needs_lbox = cap.binding.needs_lbox();
+            let binding_needs_lbox = self.arena.get(cap.binding).needs_lbox();
 
             match cap.kind {
                 CaptureKind::Local => {
@@ -179,7 +179,7 @@ impl Lowerer {
         for (i, param) in params.iter().enumerate() {
             let upvalue_idx = self.num_captures + i as u16;
 
-            let needs_lbox = param.needs_lbox();
+            let needs_lbox = self.arena.get(*param).needs_lbox();
 
             if needs_lbox && i < 64 {
                 // Set the bit for this parameter

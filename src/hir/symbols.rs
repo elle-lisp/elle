@@ -12,22 +12,28 @@ use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
 use std::collections::HashSet;
 
 /// Extract symbol index from analyzed HIR
-pub fn extract_symbols_from_hir(hir: &Hir, symbols: &SymbolTable) -> SymbolIndex {
+pub fn extract_symbols_from_hir(
+    hir: &Hir,
+    symbols: &SymbolTable,
+    arena: &crate::hir::BindingArena,
+) -> SymbolIndex {
     let mut index = SymbolIndex::new();
-    let mut extractor = HirSymbolExtractor::new();
+    let mut extractor = HirSymbolExtractor::new(arena);
     extractor.walk(hir, &mut index, symbols);
     extractor.collect_available(symbols, &mut index);
     index
 }
 
-struct HirSymbolExtractor {
+struct HirSymbolExtractor<'a> {
     seen: HashSet<Binding>,
+    arena: &'a crate::hir::BindingArena,
 }
 
-impl HirSymbolExtractor {
-    fn new() -> Self {
+impl<'a> HirSymbolExtractor<'a> {
+    fn new(arena: &'a crate::hir::BindingArena) -> Self {
         Self {
             seen: HashSet::new(),
+            arena,
         }
     }
 
@@ -48,7 +54,7 @@ impl HirSymbolExtractor {
         }
         self.seen.insert(binding);
 
-        let sym = binding.name();
+        let sym = self.arena.get(binding).name;
         if let Some(name_str) = symbols.name(sym) {
             let loc = Self::span_to_loc(span);
             let def = SymbolDef::new(sym, name_str.to_string(), kind).with_location(loc.clone());
@@ -66,7 +72,7 @@ impl HirSymbolExtractor {
         let loc = Self::span_to_loc(span);
         index
             .symbol_usages
-            .entry(binding.name())
+            .entry(self.arena.get(binding).name)
             .or_default()
             .push(loc);
     }
@@ -102,7 +108,7 @@ impl HirSymbolExtractor {
                 };
                 self.record_definition(*binding, kind, &hir.span, index, symbols);
                 if let Some(doc_str) = doc_string {
-                    let sym = binding.name();
+                    let sym = self.arena.get(*binding).name;
                     if let Some(def) = index.definitions.get_mut(&sym) {
                         def.documentation = Some(doc_str);
                     }
@@ -151,7 +157,7 @@ impl HirSymbolExtractor {
                     } = &init.kind
                     {
                         if let Some(doc_str) = doc_val.with_string(|s| s.to_string()) {
-                            let sym = binding_id.name();
+                            let sym = self.arena.get(*binding_id).name;
                             if let Some(def) = index.definitions.get_mut(&sym) {
                                 def.documentation = Some(doc_str);
                             }
@@ -286,7 +292,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // Should have one definition
         assert!(!index.definitions.is_empty());
@@ -311,7 +317,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // Find the 'add-one' definition
         let add_one_def = index
@@ -334,7 +340,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // Should have definitions for a and b
         let has_a = index.definitions.values().any(|d| d.name == "a");
@@ -350,7 +356,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // Should have definitions for x and y parameters
         let has_x = index.definitions.values().any(|d| d.name == "x");
@@ -366,7 +372,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // Should have usages for x (used twice in the body)
         let x_sym = symbols.intern("x");
@@ -387,7 +393,7 @@ mod tests {
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
-        let index = extract_symbols_from_hir(&analysis.hir, &symbols);
+        let index = extract_symbols_from_hir(&analysis.hir, &symbols, &analysis.arena);
 
         // available_symbols should be sorted
         let names: Vec<_> = index.available_symbols.iter().map(|(n, _, _)| n).collect();
@@ -406,7 +412,7 @@ mod tests {
             "<test>",
         )
         .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
         let def = index
             .definitions
             .values()
@@ -425,7 +431,7 @@ mod tests {
             "<test>",
         )
         .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
         let def = index
             .definitions
             .values()
@@ -444,7 +450,7 @@ mod tests {
             "<test>",
         )
         .unwrap();
-        let index = extract_symbols_from_hir(&result.hir, &symbols);
+        let index = extract_symbols_from_hir(&result.hir, &symbols, &result.arena);
         let def = index
             .definitions
             .values()

@@ -25,4 +25,5 @@ pub struct CompileResult {
 #[derive(Debug)]
 pub struct AnalyzeResult {
     pub hir: crate::hir::Hir,
+    pub arena: crate::hir::BindingArena,
 }

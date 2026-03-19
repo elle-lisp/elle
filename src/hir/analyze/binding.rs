@@ -196,7 +196,7 @@ impl<'a> Analyzer<'a> {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
                 let b = self.bind(name, &[], BindingScope::Local);
-                b.mark_prebound();
+                self.arena.get_mut(b).is_prebound = true;
                 entries.push(LetrecEntry::Simple(b, &pair[1]));
             } else if Self::is_destructure_pattern(&pair[0]) {
                 // Destructure pattern — pre-bind leaf names for mutual visibility
@@ -206,7 +206,7 @@ impl<'a> Analyzer<'a> {
                 for (name, _name_scopes) in &names {
                     if *name != "_" {
                         let b = self.bind(name, &[], BindingScope::Local);
-                        b.mark_prebound();
+                        self.arena.get_mut(b).is_prebound = true;
                         leaf_bindings.insert(name.to_string(), b);
                     }
                 }
@@ -389,7 +389,7 @@ impl<'a> Analyzer<'a> {
             };
 
             if immutable {
-                binding.mark_immutable();
+                self.arena.get_mut(binding).is_immutable = true;
             }
 
             // Seed signal_env and arity_env for lambda forms so self-recursive calls
@@ -438,10 +438,10 @@ impl<'a> Analyzer<'a> {
             // Without this, an immutable captured local would be captured
             // by value (nil) before its initializer runs.
             let binding = self.bind(name, &[], BindingScope::Local);
-            binding.mark_prebound();
+            self.arena.get_mut(binding).is_prebound = true;
 
             if immutable {
-                binding.mark_immutable();
+                self.arena.get_mut(binding).is_immutable = true;
             }
 
             // Seed signal_env and arity_env for lambda forms so self-recursive calls
@@ -503,7 +503,7 @@ impl<'a> Analyzer<'a> {
         };
 
         // Check for immutable binding
-        if target.is_immutable() {
+        if self.arena.get(target).is_immutable {
             return Err(format!(
                 "{}: cannot assign immutable binding '{}'",
                 span, name
@@ -511,7 +511,7 @@ impl<'a> Analyzer<'a> {
         }
 
         // Mark as mutated
-        target.mark_mutated();
+        self.arena.get_mut(target).is_mutated = true;
 
         // Invalidate signal and arity tracking for this binding since it's being mutated
         // The binding's signal and arity are now uncertain

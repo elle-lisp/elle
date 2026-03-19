@@ -61,7 +61,7 @@ impl Linter {
 
         // Lint the analyzed file
         let mut hir_linter = HirLinter::new();
-        hir_linter.lint(&analysis.hir, &symbols);
+        hir_linter.lint(&analysis.hir, &symbols, &analysis.arena);
         self.diagnostics
             .extend(hir_linter.diagnostics().iter().cloned());
 

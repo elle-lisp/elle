@@ -350,7 +350,7 @@ impl<'a> Analyzer<'a> {
                 };
 
                 if immutable {
-                    binding.mark_immutable();
+                    self.arena.get_mut(binding).is_immutable = true;
                 }
                 Ok(HirPattern::Var(binding))
             }
