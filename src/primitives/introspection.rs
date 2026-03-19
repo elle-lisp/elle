@@ -151,11 +151,19 @@ pub(crate) fn prim_bytecode_size(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// (doc target) — look up documentation for a closure, primitive, special form, or macro
+/// (doc target) — look up documentation for a closure, primitive, or special form.
 ///
-/// If `target` is a closure, returns its docstring directly (or "No documentation found").
-/// If `target` is a string or keyword, sends a SIG_QUERY to the VM to look up
-/// builtin docs by name.
+/// Dispatch:
+/// - closure value → returns `closure.template.doc` (the leading string literal
+///   from the function body), or "No documentation found for 'name'" if absent.
+/// - string or keyword → sends SIG_QUERY "doc" to the VM, which looks up
+///   `vm.docs`. Only native primitives and special forms are in `vm.docs`;
+///   stdlib functions are NOT (their docstrings live in the closure value).
+///
+/// Usage: prefer `(doc name)` over `(doc "name")`. The analyzer rewrites
+/// `(doc name)` appropriately: closures are passed through as values; native
+/// primitives and special forms are rewritten to `(doc "name")` string lookup.
+/// Passing an explicit string `(doc "stdlib-fn")` will NOT find stdlib docs.
 pub(crate) fn prim_doc(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -390,10 +398,14 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_doc,
         signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
         arity: Arity::Exact(1),
-        doc: "Look up documentation for a closure (by value) or a builtin (by name string).",
+        doc: "Look up documentation for a value or builtin. \
+              Pass a closure (user-defined or stdlib) to extract its docstring. \
+              Pass a string or keyword to look up a native primitive or special form by name. \
+              Note: (doc name) works for closures and native primitives; \
+              (doc \"name\") only works for native primitives and special forms.",
         params: &["target"],
         category: "meta",
-        example: "(doc my-fn)",
+        example: "(doc inc)",
         aliases: &[],
     },
     PrimitiveDef {

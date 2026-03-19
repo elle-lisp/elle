@@ -118,7 +118,15 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 14. **`Eval` compiles and executes a datum at runtime.** `HirKind::Eval { expr: Box<Hir>, env: Box<Hir> }` is produced by the     analyzer for `(eval expr)` or `(eval expr env)`. The signal is always `Yields` (conservative — eval'd code can do anything). Not in tail position. The VM handler accesses the symbol table via thread-local context and caches the Expander on the VM for reuse.
 
-15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda` has a `doc: Option<Value>` field. The analyzer extracts the first string literal in a function body and stores it in `doc`. This field is threaded through LIR into `Closure.doc` and used by the `(doc name)` primitive and LSP hover.
+15. **Docstrings are extracted from leading string literals.** `HirKind::Lambda`
+    has a `doc: Option<Value>` field. The analyzer extracts the first string literal
+    in a function body (only when there are 2+ body expressions) and stores it in
+    `doc`. This field is threaded through LIR into `Closure.doc` and used by the
+    `(doc name)` primitive and LSP hover. The `(doc name)` form uses a rewrite
+    heuristic in `forms.rs`: if the symbol resolves to a closure (user-defined or
+    stdlib), it evaluates to the closure value so `prim_doc` can extract the
+    docstring. If it resolves to a NativeFn or Parameter, or is unresolved (special
+    form), it is rewritten to `(doc "name")` for `vm.docs` lookup.
 
 16. **Signal bounds are parsed from `silence` preambles.** After docstring extraction and before body analysis, the analyzer scans for `silence` forms in the lambda body preamble. `silence` is a total suppressor: `(silence)` declares the function is silent; `(silence param)` declares the parameter must be silent. Signal keywords are not accepted by `silence` — `(silence :kw ...)` and `(silence param :kw ...)` are compile errors. Multiple forms are allowed (one per parameter + one function-level). Parameter names must match declared parameters. For duplicate restrictions on the same parameter or function-level, the last one wins. The first non-declaration form ends the preamble. `squelch` is no longer a special form — it is a runtime primitive function.
 
