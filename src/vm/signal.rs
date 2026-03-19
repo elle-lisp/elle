@@ -265,9 +265,11 @@ impl VM {
                         error_val("type-error", "doc: expected string or keyword".to_string()),
                     );
                 };
-                // Look up builtin docs by name.
-                // TODO(chunk-8): user-defined closure docs are no longer
-                // accessible via globals; needs eval-scoped lookup.
+                // Look up builtin docs by name. Stdlib closures are handled
+                // upstream: the analyzer passes them through as closure values,
+                // and prim_doc extracts the docstring from closure.template.doc
+                // before the SIG_QUERY reaches here. This path is only reached
+                // for native primitives, special forms, and explicit string args.
                 if let Some(doc) = self.docs.get(&name) {
                     (SIG_OK, Value::string(doc.format()))
                 } else {
