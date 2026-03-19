@@ -15,6 +15,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 | [`random/`](random/) | Random number generation | `random/int`, `random/float`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/sample` |
 | [`regex/`](regex/) | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | [`selkie/`](selkie/) | Mermaid diagram renderer | `selkie/render`, `selkie/render-to-file`, `selkie/render-ascii` |
+| [`semver/`](semver/) | Semantic version parsing and comparison | `semver/parse`, `semver/valid?`, `semver/compare`, `semver/satisfies?`, `semver/increment` |
 | [`sqlite/`](sqlite/) | SQLite database | `db/open`, `db/query`, `db/exec` |
 | [`toml/`](toml/) | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | [`uuid/`](uuid/) | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |

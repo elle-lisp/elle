@@ -32,6 +32,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `random/` | Random number generation | `random/int`, `random/float`, `random/bool`, `random/bytes`, `random/shuffle`, `random/choice`, `random/seed`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/csprng-seed`, `random/sample` |
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | `selkie/` | Mermaid diagram renderer | `selkie/render`, `selkie/render-to-file`, `selkie/render-ascii` |
+| `semver/` | Semantic version parsing and comparison | `semver/parse`, `semver/valid?`, `semver/compare`, `semver/satisfies?`, `semver/increment` |
 | `sqlite/` | SQLite database | `db/open`, `db/query`, `db/exec` |
 | `toml/` | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
@@ -138,6 +139,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `random/` | Random number generation (migrated to `rand` 0.9; includes distributions and CSPRNG) |
 | `regex/` | Regular expression matching and replacement |
 | `selkie/` | Mermaid diagram rendering |
+| `semver/` | Semantic version parsing and comparison |
 | `sqlite/` | SQLite database access |
 <<<<<<< HEAD
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |

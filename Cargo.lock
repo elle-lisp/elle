@@ -674,6 +674,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "elle-semver"
+version = "1.0.0"
+dependencies = [
+ "elle",
+ "semver",
+]
+
+[[package]]
 name = "elle-sqlite"
 version = "1.0.0"
 dependencies = [
