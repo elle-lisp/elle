@@ -19,6 +19,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 | [`toml/`](toml/) | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | [`uuid/`](uuid/) | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | [`xml/`](xml/) | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
+| [`yaml/`](yaml/) | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
 
 ## Building Plugins
 

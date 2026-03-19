@@ -36,6 +36,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `toml/` | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
+| `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
 
 ## Building plugins
 
@@ -143,4 +144,8 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
 =======
 | `toml/` | TOML parsing and serialization |
+<<<<<<< HEAD
 >>>>>>> 32ae0250 (feat: add toml plugin)
+=======
+| `yaml/` | YAML parsing and serialization |
+>>>>>>> 8885dc00 (feat: add yaml plugin)
