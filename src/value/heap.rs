@@ -366,6 +366,51 @@ impl HeapObject {
         }
     }
 
+    /// Get the Value-level TAG_* constant for this heap object.
+    /// Used by the allocator to stamp the tag into the returned Value.
+    #[inline]
+    pub fn value_tag(&self) -> u64 {
+        use crate::value::repr::{
+            TAG_ARRAY, TAG_ARRAY_MUT, TAG_BINDING, TAG_BYTES, TAG_BYTES_MUT, TAG_CLOSURE, TAG_CONS,
+            TAG_EXTERNAL, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
+            TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING,
+            TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD,
+        };
+        match self {
+            HeapObject::LString { .. } => TAG_STRING,
+            HeapObject::LStringMut { .. } => TAG_STRING_MUT,
+            HeapObject::LArray { .. } => TAG_ARRAY,
+            HeapObject::LArrayMut { .. } => TAG_ARRAY_MUT,
+            HeapObject::LStruct { .. } => TAG_STRUCT,
+            HeapObject::LStructMut { .. } => TAG_STRUCT_MUT,
+            HeapObject::Cons(_) => TAG_CONS,
+            HeapObject::Closure { .. } => TAG_CLOSURE,
+            HeapObject::LBytes { .. } => TAG_BYTES,
+            HeapObject::LBytesMut { .. } => TAG_BYTES_MUT,
+            HeapObject::LSet { .. } => TAG_SET,
+            HeapObject::LSetMut { .. } => TAG_SET_MUT,
+            HeapObject::LBox { .. } => TAG_LBOX,
+            HeapObject::Fiber { .. } => TAG_FIBER,
+            HeapObject::Syntax { .. } => TAG_SYNTAX,
+            // Binding is a compile-time-only type. Allocated during HIR analysis;
+            // never seen by the VM at execution time.
+            HeapObject::Binding(_) => TAG_BINDING,
+            HeapObject::NativeFn(_) => TAG_NATIVE_FN,
+            HeapObject::FFISignature(_, _) => TAG_FFI_SIG,
+            HeapObject::FFIType(_) => TAG_FFI_TYPE,
+            HeapObject::LibHandle(_) => TAG_LIB_HANDLE,
+            HeapObject::ManagedPointer { .. } => TAG_MANAGED_PTR,
+            HeapObject::External { .. } => TAG_EXTERNAL,
+            HeapObject::Parameter { .. } => TAG_PARAMETER,
+            HeapObject::ThreadHandle { .. } => TAG_THREAD,
+            // Float: in the new representation ALL floats are immediate (TAG_FLOAT,
+            // payload = f64::to_bits()). HeapObject::Float must never be allocated.
+            HeapObject::Float(_) => {
+                panic!("HeapObject::Float must not be allocated — floats are now immediate")
+            }
+        }
+    }
+
     /// Get a human-readable type name.
     pub fn type_name(&self) -> &'static str {
         match self {

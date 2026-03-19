@@ -62,7 +62,11 @@ impl fmt::Display for Value {
 
         // Handle heap values
         if !self.is_heap() {
-            return write!(f, "<unknown:{:#x}>", self.to_bits());
+            return write!(
+                f,
+                "<unknown:tag={:#x},payload={:#x}>",
+                self.tag, self.payload
+            );
         }
 
         // Cons cell (list)
@@ -265,7 +269,7 @@ impl fmt::Display for Value {
         }
 
         // Default for unknown heap types
-        write!(f, "<heap:{:#x}>", self.to_bits() & 0x0000_FFFF_FFFF_FFFF)
+        write!(f, "<heap:{:#x}>", self.payload)
     }
 }
 
@@ -310,7 +314,11 @@ impl fmt::Debug for Value {
                 .unwrap_or(Ok(()));
         }
         if !self.is_heap() {
-            return write!(f, "<unknown:{:#x}>", self.to_bits());
+            return write!(
+                f,
+                "<unknown:tag={:#x},payload={:#x}>",
+                self.tag, self.payload
+            );
         }
         // Cons cell — use Debug recursively
         if self.as_cons().is_some() {

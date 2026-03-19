@@ -3,8 +3,10 @@
 use std::any::Any;
 
 use super::{
-    Value, PAYLOAD_MASK, PTRVAL_PAYLOAD_MASK, SYMBOL_ID_MASK, TAG_FALSE, TAG_NAN, TAG_NAN_MASK,
-    TAG_TRUE,
+    Value, TAG_ARRAY, TAG_ARRAY_MUT, TAG_BINDING, TAG_BYTES, TAG_BYTES_MUT, TAG_CLOSURE, TAG_CONS,
+    TAG_EXTERNAL, TAG_FALSE, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
+    TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING,
+    TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD, TAG_TRUE,
 };
 
 impl Value {
@@ -15,7 +17,7 @@ impl Value {
     /// Extract as boolean if this is a bool.
     #[inline]
     pub fn as_bool(&self) -> Option<bool> {
-        match self.0 {
+        match self.tag {
             TAG_TRUE => Some(true),
             TAG_FALSE => Some(false),
             _ => None,
@@ -26,15 +28,7 @@ impl Value {
     #[inline]
     pub fn as_int(&self) -> Option<i64> {
         if self.is_int() {
-            // Sign-extend from 48 bits
-            let raw = (self.0 & PAYLOAD_MASK) as i64;
-            // Check sign bit (bit 47)
-            if raw & (1 << 47) != 0 {
-                // Negative: extend sign bits
-                Some(raw | !PAYLOAD_MASK as i64)
-            } else {
-                Some(raw)
-            }
+            Some(self.payload as i64)
         } else {
             None
         }
@@ -43,15 +37,8 @@ impl Value {
     /// Extract as float if this is a float.
     #[inline]
     pub fn as_float(&self) -> Option<f64> {
-        if (self.0 & TAG_NAN_MASK) == TAG_NAN {
-            // Reconstruct NaN/Infinity from our special tag
-            // The payload contains the upper 16 bits of the float bits
-            // The lower 48 bits are always zero for NaN/Infinity
-            let upper_16 = self.0 & PAYLOAD_MASK;
-            let bits = upper_16 << 48;
-            Some(f64::from_bits(bits))
-        } else if self.is_float() {
-            Some(f64::from_bits(self.0))
+        if self.is_float() {
+            Some(f64::from_bits(self.payload))
         } else {
             None
         }
@@ -71,7 +58,7 @@ impl Value {
     #[inline]
     pub fn as_symbol(&self) -> Option<u32> {
         if self.is_symbol() {
-            Some((self.0 & SYMBOL_ID_MASK) as u32)
+            Some(self.payload as u32)
         } else {
             None
         }
@@ -81,18 +68,18 @@ impl Value {
     #[inline]
     pub fn as_pointer(&self) -> Option<usize> {
         if self.is_pointer() {
-            Some((self.0 & PTRVAL_PAYLOAD_MASK) as usize)
+            Some(self.payload as usize)
         } else {
             None
         }
     }
 
-    /// Extract the 47-bit keyword hash. Returns None if not a keyword.
+    /// Extract the keyword hash. Returns None if not a keyword.
     /// Fast path — no lock acquisition, no allocation.
     #[inline]
     pub fn keyword_hash(&self) -> Option<u64> {
         if self.is_keyword() {
-            Some(self.0 & PTRVAL_PAYLOAD_MASK)
+            Some(self.payload)
         } else {
             None
         }
@@ -104,8 +91,7 @@ impl Value {
     #[inline]
     pub fn as_keyword_name(&self) -> Option<String> {
         if self.is_keyword() {
-            let hash = self.0 & PTRVAL_PAYLOAD_MASK;
-            crate::value::keyword::keyword_name(hash)
+            crate::value::keyword::keyword_name(self.payload)
         } else {
             None
         }
@@ -115,7 +101,7 @@ impl Value {
     #[inline]
     pub fn as_heap_ptr(&self) -> Option<*const ()> {
         if self.is_heap() {
-            Some((self.0 & PAYLOAD_MASK) as *const ())
+            Some(self.payload as *const ())
         } else {
             None
         }
@@ -125,96 +111,148 @@ impl Value {
     // Heap Type Predicates
     // =========================================================================
 
-    /// Check if this is a string (SSO or heap).
+    /// Check if this is a string (immutable heap string).
     #[inline]
     pub fn is_string(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO
-            || self.heap_tag() == Some(HeapTag::LString)
+        self.tag == TAG_STRING
     }
 
     /// Check if this is a cons cell.
     #[inline]
     pub fn is_cons(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Cons)
+        self.tag == TAG_CONS
     }
 
-    /// Check if this is an array.
+    /// Check if this is a mutable @array.
     #[inline]
     pub fn is_array_mut(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LArrayMut)
+        self.tag == TAG_ARRAY_MUT
     }
 
-    /// Check if this is an @struct.
+    /// Check if this is a mutable @struct.
     #[inline]
     pub fn is_struct_mut(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LStructMut)
+        self.tag == TAG_STRUCT_MUT
     }
 
-    /// Check if this is a struct.
+    /// Check if this is an immutable struct.
     #[inline]
     pub fn is_struct(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LStruct)
+        self.tag == TAG_STRUCT
     }
 
     /// Check if this is a closure.
     #[inline]
     pub fn is_closure(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Closure)
+        self.tag == TAG_CLOSURE
     }
 
     /// Check if this is a box (LBox).
     #[inline]
     pub fn is_lbox(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LBox)
+        self.tag == TAG_LBOX
     }
 
     /// Check if this is a fiber.
     #[inline]
     pub fn is_fiber(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Fiber)
+        self.tag == TAG_FIBER
     }
 
     /// Check if this is an @string.
     #[inline]
     pub fn is_string_mut(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LStringMut)
+        self.tag == TAG_STRING_MUT
     }
 
     /// Check if this is a bytes value.
     #[inline]
     pub fn is_bytes(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LBytes)
+        self.tag == TAG_BYTES
     }
 
     /// Check if this is an @bytes value.
     #[inline]
     pub fn is_bytes_mut(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LBytesMut)
+        self.tag == TAG_BYTES_MUT
     }
 
     /// Check if this is a syntax object.
     #[inline]
     pub fn is_syntax(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Syntax)
+        self.tag == TAG_SYNTAX
     }
 
     /// Check if this is a native function.
     #[inline]
     pub fn is_native_fn(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::NativeFn)
+        self.tag == TAG_NATIVE_FN
+    }
+
+    /// Check if this is an immutable array.
+    #[inline]
+    pub fn is_array(&self) -> bool {
+        self.tag == TAG_ARRAY
+    }
+
+    /// Check if this is an immutable set.
+    #[inline]
+    pub fn is_set(&self) -> bool {
+        self.tag == TAG_SET
+    }
+
+    /// Check if this is a mutable set.
+    #[inline]
+    pub fn is_set_mut(&self) -> bool {
+        self.tag == TAG_SET_MUT
+    }
+
+    /// Check if this is a binding.
+    #[inline]
+    pub fn is_binding(&self) -> bool {
+        self.tag == TAG_BINDING
+    }
+
+    /// Check if this is a parameter.
+    #[inline]
+    pub fn is_parameter(&self) -> bool {
+        self.tag == TAG_PARAMETER
+    }
+
+    /// Check if this is a managed pointer.
+    #[inline]
+    pub fn is_managed_pointer(&self) -> bool {
+        self.tag == TAG_MANAGED_PTR
+    }
+
+    /// Check if this is an external object.
+    #[inline]
+    pub fn is_external(&self) -> bool {
+        self.tag == TAG_EXTERNAL
+    }
+
+    /// Check if this is a thread handle.
+    #[inline]
+    pub fn is_thread(&self) -> bool {
+        self.tag == TAG_THREAD
+    }
+
+    /// Check if this is a library handle.
+    #[inline]
+    pub fn is_lib_handle(&self) -> bool {
+        self.tag == TAG_LIB_HANDLE
+    }
+
+    /// Check if this is an FFI signature.
+    #[inline]
+    pub fn is_ffi_sig(&self) -> bool {
+        self.tag == TAG_FFI_SIG
+    }
+
+    /// Check if this is an FFI type descriptor.
+    #[inline]
+    pub fn is_ffi_type(&self) -> bool {
+        self.tag == TAG_FFI_TYPE
     }
 
     /// Check if this is a proper list (nil or cons ending in nil).
@@ -247,37 +285,22 @@ impl Value {
     // Heap Value Extractors
     // =========================================================================
 
-    /// Access string contents via closure. Works for both SSO and heap strings.
+    /// Access string contents via closure. Works for heap strings.
     /// Returns None if this is not a string.
     #[inline]
     pub fn with_string<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
-        if (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
-            let payload = self.0 & super::PAYLOAD_MASK;
-            let mut buf = [0u8; 6];
-            for (i, byte) in buf.iter_mut().enumerate() {
-                *byte = ((payload >> (i * 8)) & 0xFF) as u8;
-            }
-            // Find length: first zero byte, or 6 if all non-zero
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(6);
-            // SAFETY: Value::string() only creates SSO from valid UTF-8
-            let s = unsafe { std::str::from_utf8_unchecked(&buf[..len]) };
-            Some(f(s))
-        } else {
-            use crate::value::heap::{deref, HeapObject};
-            if !self.is_heap() {
-                return None;
-            }
-            match unsafe { deref(*self) } {
-                HeapObject::LString { s, .. } => Some(f(s)),
-                _ => None,
-            }
+        use crate::value::heap::{deref, HeapObject};
+        if !self.is_heap() {
+            return None;
+        }
+        match unsafe { deref(*self) } {
+            HeapObject::LString { s, .. } => Some(f(s)),
+            _ => None,
         }
     }
 
     /// Compare two string values lexicographically.
     /// Returns None if either value is not a string.
-    /// Note: `with_string` returns None for keywords and @strings,
-    /// so this only matches string-string pairs.
     pub fn compare_str(&self, other: &Value) -> Option<std::cmp::Ordering> {
         self.with_string(|sa| other.with_string(|sb| sa.cmp(sb)))
             .flatten()
@@ -296,7 +319,7 @@ impl Value {
     #[inline]
     pub fn as_cons(&self) -> Option<&crate::value::heap::Cons> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_cons() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -305,11 +328,11 @@ impl Value {
         }
     }
 
-    /// Extract as array if this is an array.
+    /// Extract as mutable array if this is one.
     #[inline]
     pub fn as_array_mut(&self) -> Option<&std::cell::RefCell<Vec<Value>>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_array_mut() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -325,7 +348,7 @@ impl Value {
     ) -> Option<&std::cell::RefCell<std::collections::BTreeMap<crate::value::heap::TableKey, Value>>>
     {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_struct_mut() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -340,7 +363,7 @@ impl Value {
         &self,
     ) -> Option<&std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_struct() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -353,7 +376,7 @@ impl Value {
     #[inline]
     pub fn as_closure(&self) -> Option<&std::rc::Rc<crate::value::heap::Closure>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_closure() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -366,7 +389,7 @@ impl Value {
     #[inline]
     pub fn as_lbox(&self) -> Option<&std::cell::RefCell<Value>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_lbox() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -379,7 +402,7 @@ impl Value {
     #[inline]
     pub fn is_local_lbox(&self) -> bool {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_lbox() {
             return false;
         }
         unsafe { matches!(deref(*self), HeapObject::LBox { is_local: true, .. }) }
@@ -389,7 +412,7 @@ impl Value {
     #[inline]
     pub fn as_native_fn(&self) -> Option<&crate::value::heap::NativeFn> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_native_fn() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -402,7 +425,7 @@ impl Value {
     #[inline]
     pub fn as_array(&self) -> Option<&[Value]> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_array() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -411,17 +434,11 @@ impl Value {
         }
     }
 
-    /// Check if this value is an array (immutable).
-    #[inline]
-    pub fn is_array(&self) -> bool {
-        self.as_array().is_some()
-    }
-
     /// Extract as set if this is a set.
     #[inline]
     pub fn as_set(&self) -> Option<&std::collections::BTreeSet<Value>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_set() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -430,18 +447,11 @@ impl Value {
         }
     }
 
-    /// Check if this value is a set.
-    #[inline]
-    pub fn is_set(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LSet)
-    }
-
     /// Extract as mutable set if this is a mutable set.
     #[inline]
     pub fn as_set_mut(&self) -> Option<&std::cell::RefCell<std::collections::BTreeSet<Value>>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_set_mut() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -450,18 +460,11 @@ impl Value {
         }
     }
 
-    /// Check if this value is a mutable set.
-    #[inline]
-    pub fn is_set_mut(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::LSetMut)
-    }
-
     /// Extract as @string if this is an @string.
     #[inline]
     pub fn as_string_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_string_mut() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -474,7 +477,7 @@ impl Value {
     #[inline]
     pub fn as_bytes(&self) -> Option<&[u8]> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_bytes() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -487,7 +490,7 @@ impl Value {
     #[inline]
     pub fn as_bytes_mut(&self) -> Option<&std::cell::RefCell<Vec<u8>>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_bytes_mut() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -500,7 +503,7 @@ impl Value {
     #[inline]
     pub fn as_thread_handle(&self) -> Option<&crate::value::heap::ThreadHandle> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_thread() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -513,7 +516,7 @@ impl Value {
     #[inline]
     pub fn as_fiber(&self) -> Option<&crate::value::fiber::FiberHandle> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_fiber() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -526,7 +529,7 @@ impl Value {
     #[inline]
     pub fn as_syntax(&self) -> Option<&std::rc::Rc<crate::syntax::Syntax>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_syntax() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -548,8 +551,6 @@ impl Value {
             "integer"
         } else if self.is_float() {
             "float"
-        } else if (self.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
-            "string"
         } else if self.is_symbol() {
             "symbol"
         } else if self.is_keyword() {
@@ -575,18 +576,11 @@ impl Value {
             || self.is_parameter()
     }
 
-    /// Check if this is a parameter.
-    #[inline]
-    pub fn is_parameter(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Parameter)
-    }
-
     /// Extract parameter (id, default) if this is a parameter.
     #[inline]
     pub fn as_parameter(&self) -> Option<(u32, Value)> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_parameter() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -595,18 +589,11 @@ impl Value {
         }
     }
 
-    /// Check if this is a binding.
-    #[inline]
-    pub fn is_binding(&self) -> bool {
-        use crate::value::heap::HeapTag;
-        self.heap_tag() == Some(HeapTag::Binding)
-    }
-
     /// Extract as FFI signature if this is an FFI signature.
     #[inline]
     pub fn as_ffi_signature(&self) -> Option<&crate::ffi::types::Signature> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_ffi_sig() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -619,7 +606,7 @@ impl Value {
     #[inline]
     pub fn as_ffi_type(&self) -> Option<&crate::ffi::types::TypeDesc> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_ffi_type() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -634,7 +621,7 @@ impl Value {
     /// The CIF is lazily prepared on first access and cached for reuse.
     pub fn get_or_prepare_cif(&self) -> Option<std::cell::Ref<'_, libffi::middle::Cif>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_ffi_sig() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -659,7 +646,7 @@ impl Value {
     #[inline]
     pub fn as_lib_handle(&self) -> Option<u32> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_lib_handle() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -672,7 +659,7 @@ impl Value {
     #[inline]
     pub fn as_managed_pointer(&self) -> Option<&std::cell::Cell<Option<usize>>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_managed_pointer() {
             return None;
         }
         match unsafe { deref(*self) } {
@@ -684,7 +671,7 @@ impl Value {
     /// Try to extract an external object's data as a specific Rust type.
     pub fn as_external<T: Any + 'static>(&self) -> Option<&T> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_external() {
             return None;
         }
         unsafe {
@@ -698,7 +685,7 @@ impl Value {
     /// Get the type name of an external object, if this value is one.
     pub fn external_type_name(&self) -> Option<&'static str> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_external() {
             return None;
         }
         unsafe {
@@ -713,7 +700,7 @@ impl Value {
     #[inline]
     pub fn as_binding(&self) -> Option<&std::cell::RefCell<crate::value::heap::BindingInner>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_heap() {
+        if !self.is_binding() {
             return None;
         }
         match unsafe { deref(*self) } {

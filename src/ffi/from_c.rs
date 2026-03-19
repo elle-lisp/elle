@@ -1,6 +1,21 @@
 //! C → Value unmarshalling: read_value_from_buffer.
 //!
 //! Converts C-typed data back into Elle Values.
+//!
+//! # u64 round-trip convention
+//!
+//! C's unsigned 64-bit types (`u64`, `ulong`, `size_t`) cannot be represented
+//! losslessly in Elle's signed integer type when values exceed `i64::MAX`.
+//! Rather than lose bits or introduce a separate u64 Value variant, we store
+//! the raw bit pattern: `Value::int(v as i64)`.
+//!
+//! This is lossless — all 64 bits are preserved. Callers that need the
+//! original unsigned value recover it with `value.as_int().unwrap() as u64`.
+//! The same reinterpretation happens in `to_c.rs` when writing the value back
+//! to C: `extract_int(value)? as u64` recovers the original bits.
+//!
+//! This convention works correctly because `Value::int` stores a full i64
+//! (no 48-bit truncation as in the old NaN-boxed representation).
 
 use crate::error::{LError, LResult};
 use crate::ffi::types::TypeDesc;
@@ -53,6 +68,9 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
         }
         TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
             let v = unsafe { *(ptr as *const u64) };
+            // Bit-reinterpret into i64: lossless for all u64 values.
+            // Recover the original u64 with `as_int().unwrap() as u64`.
+            // See module-level doc for the full round-trip convention.
             Ok(Value::int(v as i64))
         }
 

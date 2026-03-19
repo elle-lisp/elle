@@ -173,9 +173,10 @@ pub fn alloc(obj: HeapObject) -> Value {
 /// Allocate a heap object permanently (bypasses arena tracking).
 /// Used for objects that must outlive any mark/release scope (e.g., NativeFn).
 pub fn alloc_permanent(obj: HeapObject) -> Value {
+    let value_tag = obj.value_tag();
     let rc: Rc<HeapObject> = Rc::new(obj);
     let ptr = Rc::into_raw(rc) as *const ();
-    Value::from_heap_ptr(ptr)
+    Value::from_heap_ptr(ptr, value_tag)
 }
 
 /// Get a reference to a heap object from a Value.

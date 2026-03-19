@@ -32,10 +32,10 @@ fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
     )
 }
 
-fn compile_and_call(lir: &LirFunction, args: &[u64]) -> Result<Value, JitError> {
+fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
     let compiler = JitCompiler::new()?;
     let code = compiler.compile(lir, None)?;
-    // self_bits = 0 since we're not testing self-tail-calls in these basic tests
+    // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(
             std::ptr::null(),
@@ -43,9 +43,10 @@ fn compile_and_call(lir: &LirFunction, args: &[u64]) -> Result<Value, JitError> 
             args.len() as u32,
             std::ptr::null_mut(),
             0,
+            0,
         )
     };
-    Ok(unsafe { Value::from_bits(result) })
+    Ok(result.to_value())
 }
 
 // =============================================================================
@@ -66,7 +67,7 @@ fn test_jit_identity() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -218,8 +219,7 @@ fn test_jit_add() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(10).to_bits(), Value::int(32).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(10), Value::int(32)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -247,8 +247,7 @@ fn test_jit_sub() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(50).to_bits(), Value::int(8).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(50), Value::int(8)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -276,8 +275,7 @@ fn test_jit_mul() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(6).to_bits(), Value::int(7).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(6), Value::int(7)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -305,8 +303,7 @@ fn test_jit_div() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(84).to_bits(), Value::int(2).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(84), Value::int(2)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -334,8 +331,7 @@ fn test_jit_rem() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(47).to_bits(), Value::int(5).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(47), Value::int(5)]).unwrap();
     assert_eq!(result.as_int(), Some(2));
 }
 
@@ -361,7 +357,7 @@ fn test_jit_neg() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(-42));
 }
 
@@ -393,8 +389,7 @@ fn test_jit_lt_true() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(1).to_bits(), Value::int(2).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(1), Value::int(2)]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 }
 
@@ -421,8 +416,7 @@ fn test_jit_lt_false() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(2).to_bits(), Value::int(1).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(2), Value::int(1)]).unwrap();
     assert_eq!(result.as_bool(), Some(false));
 }
 
@@ -449,12 +443,10 @@ fn test_jit_eq() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(42).to_bits(), Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(42), Value::int(42)]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 
-    let result2 =
-        compile_and_call(&func, &[Value::int(42).to_bits(), Value::int(43).to_bits()]).unwrap();
+    let result2 = compile_and_call(&func, &[Value::int(42), Value::int(43)]).unwrap();
     assert_eq!(result2.as_bool(), Some(false));
 }
 
@@ -510,7 +502,7 @@ fn test_jit_branch_true() {
     func.entry = Label(0);
 
     // Test with true
-    let result = compile_and_call(&func, &[Value::TRUE.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::TRUE]).unwrap();
     assert_eq!(result.as_int(), Some(1));
 }
 
@@ -559,7 +551,7 @@ fn test_jit_branch_false() {
     func.entry = Label(0);
 
     // Test with false
-    let result = compile_and_call(&func, &[Value::FALSE.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::FALSE]).unwrap();
     assert_eq!(result.as_int(), Some(0));
 }
 
@@ -607,7 +599,7 @@ fn test_jit_branch_nil() {
     func.blocks.push(else_block);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::NIL.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::NIL]).unwrap();
     assert_eq!(result.as_int(), Some(0));
 }
 
@@ -655,7 +647,7 @@ fn test_jit_branch_integer_truthy() {
     func.blocks.push(else_block);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(1));
 }
 
@@ -828,11 +820,11 @@ fn test_jit_conditional_arithmetic() {
     func.entry = Label(0);
 
     // Test x = 0 -> 1
-    let result = compile_and_call(&func, &[Value::int(0).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(0)]).unwrap();
     assert_eq!(result.as_int(), Some(1));
 
     // Test x = 5 -> 10
-    let result2 = compile_and_call(&func, &[Value::int(5).to_bits()]).unwrap();
+    let result2 = compile_and_call(&func, &[Value::int(5)]).unwrap();
     assert_eq!(result2.as_int(), Some(10));
 }
 
@@ -871,15 +863,7 @@ fn test_jit_chained_arithmetic() {
     func.entry = Label(0);
 
     // (2 + 5) * 6 = 42
-    let result = compile_and_call(
-        &func,
-        &[
-            Value::int(2).to_bits(),
-            Value::int(5).to_bits(),
-            Value::int(6).to_bits(),
-        ],
-    )
-    .unwrap();
+    let result = compile_and_call(&func, &[Value::int(2), Value::int(5), Value::int(6)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -911,8 +895,7 @@ fn test_jit_bit_and() {
     func.entry = Label(0);
 
     // 0b1111 & 0b1010 = 0b1010 = 10
-    let result =
-        compile_and_call(&func, &[Value::int(15).to_bits(), Value::int(10).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(15), Value::int(10)]).unwrap();
     assert_eq!(result.as_int(), Some(10));
 }
 
@@ -940,8 +923,7 @@ fn test_jit_bit_or() {
     func.entry = Label(0);
 
     // 0b1100 | 0b0011 = 0b1111 = 15
-    let result =
-        compile_and_call(&func, &[Value::int(12).to_bits(), Value::int(3).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(12), Value::int(3)]).unwrap();
     assert_eq!(result.as_int(), Some(15));
 }
 
@@ -969,8 +951,7 @@ fn test_jit_shl() {
     func.entry = Label(0);
 
     // 1 << 4 = 16
-    let result =
-        compile_and_call(&func, &[Value::int(1).to_bits(), Value::int(4).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(1), Value::int(4)]).unwrap();
     assert_eq!(result.as_int(), Some(16));
 }
 
@@ -999,7 +980,7 @@ fn test_jit_not_true() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::TRUE.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::TRUE]).unwrap();
     assert_eq!(result.as_bool(), Some(false));
 }
 
@@ -1024,7 +1005,7 @@ fn test_jit_not_false() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::FALSE.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::FALSE]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 }
 
@@ -1049,7 +1030,7 @@ fn test_jit_not_nil() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::NIL.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::NIL]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 }
 
@@ -1103,11 +1084,7 @@ fn test_jit_float_add() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(
-        &func,
-        &[Value::float(1.5).to_bits(), Value::float(2.5).to_bits()],
-    )
-    .unwrap();
+    let result = compile_and_call(&func, &[Value::float(1.5), Value::float(2.5)]).unwrap();
     assert!((result.as_float().unwrap() - 4.0).abs() < 0.001);
 }
 
@@ -1138,8 +1115,7 @@ fn test_jit_cons() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(1).to_bits(), Value::int(2).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(1), Value::int(2)]).unwrap();
     assert!(result.is_cons());
     let cons = result.as_cons().unwrap();
     assert_eq!(cons.first.as_int(), Some(1));
@@ -1186,7 +1162,7 @@ fn test_jit_car_cdr() {
 
     // Create a cons cell (10 . 32)
     let pair = Value::cons(Value::int(10), Value::int(32));
-    let result = compile_and_call(&func, &[pair.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[pair]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -1213,11 +1189,11 @@ fn test_jit_is_pair() {
 
     // Test with a cons cell
     let pair = Value::cons(Value::int(1), Value::int(2));
-    let result = compile_and_call(&func, &[pair.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[pair]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 
     // Test with an integer
-    let result2 = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
+    let result2 = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert_eq!(result2.as_bool(), Some(false));
 }
 
@@ -1244,15 +1220,7 @@ fn test_jit_make_array() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(
-        &func,
-        &[
-            Value::int(1).to_bits(),
-            Value::int(2).to_bits(),
-            Value::int(3).to_bits(),
-        ],
-    )
-    .unwrap();
+    let result = compile_and_call(&func, &[Value::int(1), Value::int(2), Value::int(3)]).unwrap();
     assert!(result.is_array_mut());
     let vec = result.as_array_mut().unwrap();
     let borrowed = vec.borrow();
@@ -1287,7 +1255,7 @@ fn test_jit_make_lbox() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
     assert!(result.is_local_lbox());
     let cell = result.as_lbox().unwrap();
     assert_eq!(cell.borrow().as_int(), Some(42));
@@ -1315,7 +1283,7 @@ fn test_jit_load_lbox() {
     func.entry = Label(0);
 
     let cell = Value::local_lbox(Value::int(42));
-    let result = compile_and_call(&func, &[cell.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[cell]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -1349,7 +1317,7 @@ fn test_jit_store_lbox() {
     func.entry = Label(0);
 
     let cell = Value::local_lbox(Value::int(0));
-    let result = compile_and_call(&func, &[cell.to_bits(), Value::int(42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[cell, Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -1502,8 +1470,7 @@ fn test_jit_self_tail_call_fibonacci_iterative() {
 
 #[test]
 fn test_jit_int_add_wrapping() {
-    // Verify INT_MAX + 1 wraps (48-bit integer arithmetic)
-    use elle::value::repr::INT_MAX;
+    // Verify i64::MAX + 1 wraps (full 64-bit integer arithmetic)
 
     // fn(x) -> x + 1
     let mut func = LirFunction::new(Arity::Exact(1));
@@ -1533,16 +1500,14 @@ fn test_jit_int_add_wrapping() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(INT_MAX).to_bits()]).unwrap();
-    // INT_MAX + 1 should wrap to INT_MIN
-    use elle::value::repr::INT_MIN;
-    assert_eq!(result.as_int(), Some(INT_MIN));
+    let result = compile_and_call(&func, &[Value::int(i64::MAX)]).unwrap();
+    // i64::MAX + 1 should wrap to i64::MIN
+    assert_eq!(result.as_int(), Some(i64::MIN));
 }
 
 #[test]
 fn test_jit_int_sub_wrapping() {
-    // Verify INT_MIN - 1 wraps
-    use elle::value::repr::{INT_MAX, INT_MIN};
+    // Verify i64::MIN - 1 wraps
 
     // fn(x) -> x - 1
     let mut func = LirFunction::new(Arity::Exact(1));
@@ -1572,9 +1537,9 @@ fn test_jit_int_sub_wrapping() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(INT_MIN).to_bits()]).unwrap();
-    // INT_MIN - 1 should wrap to INT_MAX
-    assert_eq!(result.as_int(), Some(INT_MAX));
+    let result = compile_and_call(&func, &[Value::int(i64::MIN)]).unwrap();
+    // i64::MIN - 1 should wrap to i64::MAX
+    assert_eq!(result.as_int(), Some(i64::MAX));
 }
 
 #[test]
@@ -1602,8 +1567,7 @@ fn test_jit_div_by_zero_integer() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result =
-        compile_and_call(&func, &[Value::int(10).to_bits(), Value::int(0).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(10), Value::int(0)]).unwrap();
     // Runtime helper returns NIL on division by zero
     assert!(result.is_nil());
 }
@@ -1633,11 +1597,7 @@ fn test_jit_mixed_int_float_add() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(
-        &func,
-        &[Value::int(1).to_bits(), Value::float(2.0).to_bits()],
-    )
-    .unwrap();
+    let result = compile_and_call(&func, &[Value::int(1), Value::float(2.0)]).unwrap();
     assert!((result.as_float().unwrap() - 3.0).abs() < 0.001);
 }
 
@@ -1667,13 +1627,11 @@ fn test_jit_int_lt_negative() {
     func.entry = Label(0);
 
     // -5 < 3 should be true
-    let result =
-        compile_and_call(&func, &[Value::int(-5).to_bits(), Value::int(3).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(-5), Value::int(3)]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 
     // 3 < -5 should be false
-    let result2 =
-        compile_and_call(&func, &[Value::int(3).to_bits(), Value::int(-5).to_bits()]).unwrap();
+    let result2 = compile_and_call(&func, &[Value::int(3), Value::int(-5)]).unwrap();
     assert_eq!(result2.as_bool(), Some(false));
 }
 
@@ -1703,13 +1661,11 @@ fn test_jit_int_eq_negative() {
     func.entry = Label(0);
 
     // -1 == -1 should be true
-    let result =
-        compile_and_call(&func, &[Value::int(-1).to_bits(), Value::int(-1).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(-1), Value::int(-1)]).unwrap();
     assert_eq!(result.as_bool(), Some(true));
 
     // -1 == 1 should be false
-    let result2 =
-        compile_and_call(&func, &[Value::int(-1).to_bits(), Value::int(1).to_bits()]).unwrap();
+    let result2 = compile_and_call(&func, &[Value::int(-1), Value::int(1)]).unwrap();
     assert_eq!(result2.as_bool(), Some(false));
 }
 
@@ -1739,7 +1695,7 @@ fn test_jit_neg_negative() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(-42).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(-42)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
 
@@ -1765,7 +1721,7 @@ fn test_jit_bit_not_zero() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(0).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(0)]).unwrap();
     assert_eq!(result.as_int(), Some(-1));
 }
 
@@ -1791,7 +1747,7 @@ fn test_jit_not_integer_zero() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::int(0).to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::int(0)]).unwrap();
     assert_eq!(result, Value::FALSE);
 }
 
@@ -1817,7 +1773,7 @@ fn test_jit_not_empty_list() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let result = compile_and_call(&func, &[Value::EMPTY_LIST.to_bits()]).unwrap();
+    let result = compile_and_call(&func, &[Value::EMPTY_LIST]).unwrap();
     assert_eq!(result, Value::FALSE);
 }
 

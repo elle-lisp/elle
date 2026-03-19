@@ -88,6 +88,8 @@ impl MarshalledArg {
             }
             TypeDesc::U64 => {
                 let n = extract_int(value, "u64")?;
+                // Bit-reinterpret back to u64: completes the lossless round-trip
+                // with from_c.rs. See from_c.rs module-level doc for convention.
                 ArgStorage::U64(n as u64)
             }
             TypeDesc::Int => {
@@ -378,6 +380,8 @@ pub fn write_value_to_buffer(
         }
         TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
             let n = extract_int(value, desc_name_full(desc))?;
+            // Bit-reinterpret back to u64: completes the lossless round-trip
+            // with from_c.rs. See from_c.rs module-level doc for convention.
             unsafe { *(ptr as *mut u64) = n as u64 };
             Ok(Vec::new())
         }
