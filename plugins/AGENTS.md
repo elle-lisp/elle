@@ -33,6 +33,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | `selkie/` | Mermaid diagram renderer | `selkie/render`, `selkie/render-to-file`, `selkie/render-ascii` |
 | `sqlite/` | SQLite database | `db/open`, `db/query`, `db/exec` |
+| `toml/` | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 
@@ -137,5 +138,9 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `regex/` | Regular expression matching and replacement |
 | `selkie/` | Mermaid diagram rendering |
 | `sqlite/` | SQLite database access |
+<<<<<<< HEAD
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
+=======
+| `toml/` | TOML parsing and serialization |
+>>>>>>> 32ae0250 (feat: add toml plugin)
