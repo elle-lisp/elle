@@ -71,7 +71,7 @@ pub(crate) fn prim_json_parse(args: &[Value]) -> (SignalBits, Value) {
     let mut parser = JsonParser::new_with_opts(&json_str, use_keyword_keys);
     match parser.parse() {
         Ok(v) => (SIG_OK, v),
-        Err(e) => (SIG_ERROR, error_val("error", e)),
+        Err(e) => (SIG_ERROR, error_val("parse-error", e)),
     }
 }
 
@@ -89,7 +89,7 @@ pub(crate) fn prim_json_serialize(args: &[Value]) -> (SignalBits, Value) {
 
     let json_str = match serialize_value(&args[0]) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("error", e)),
+        Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
     };
     (SIG_OK, Value::string(json_str))
 }
@@ -108,7 +108,7 @@ pub(crate) fn prim_json_serialize_pretty(args: &[Value]) -> (SignalBits, Value) 
 
     let json_str = match serialize_value_pretty(&args[0], 0) {
         Ok(s) => s,
-        Err(e) => return (SIG_ERROR, error_val("error", e)),
+        Err(e) => return (SIG_ERROR, error_val("parse-error", e)),
     };
     (SIG_OK, Value::string(json_str))
 }

@@ -212,7 +212,7 @@ pub extern "C" fn elle_jit_call(
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
             if vm.fiber.call_depth > 1000 {
-                vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
+                vm.fiber.signal = Some((SIG_ERROR, error_val("stack-overflow", "Stack overflow")));
                 vm.fiber.call_depth -= 1;
                 return JitValue::nil();
             }
@@ -339,7 +339,7 @@ pub extern "C" fn elle_jit_call_depth_enter(vm: *mut ()) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.fiber.call_depth += 1;
     if vm.fiber.call_depth > 1000 {
-        vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
+        vm.fiber.signal = Some((SIG_ERROR, error_val("stack-overflow", "Stack overflow")));
         vm.fiber.call_depth -= 1;
         return JitValue::bool_val(true); // truthy — overflow
     }

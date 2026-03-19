@@ -98,7 +98,7 @@ pub(crate) fn prim_table(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "arity-error",
                 "@struct: requires an even number of arguments (key-value pairs)".to_string(),
             ),
         );

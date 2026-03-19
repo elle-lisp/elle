@@ -204,7 +204,7 @@ pub(crate) fn prim_fiber_propagate(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "internal-error",
                 "fiber/propagate: fiber must be errored or suspended with a signal",
             ),
         );
@@ -275,11 +275,14 @@ pub(crate) fn prim_fiber_cancel(args: &[Value]) -> (SignalBits, Value) {
         }
         FiberStatus::Dead => (
             SIG_ERROR,
-            error_val("error", "fiber/cancel: cannot cancel a completed fiber"),
+            error_val(
+                "state-error",
+                "fiber/cancel: cannot cancel a completed fiber",
+            ),
         ),
         FiberStatus::Error => (
             SIG_ERROR,
-            error_val("error", "fiber/cancel: fiber already errored"),
+            error_val("state-error", "fiber/cancel: fiber already errored"),
         ),
     }
 }
@@ -332,21 +335,21 @@ pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
         FiberStatus::New => (
             SIG_ERROR,
             error_val(
-                "error",
+                "state-error",
                 "fiber/abort: cannot abort a fiber that was never started",
             ),
         ),
         FiberStatus::Alive => (
             SIG_ERROR,
-            error_val("error", "fiber/abort: cannot abort a running fiber"),
+            error_val("state-error", "fiber/abort: cannot abort a running fiber"),
         ),
         FiberStatus::Dead => (
             SIG_ERROR,
-            error_val("error", "fiber/abort: cannot abort a completed fiber"),
+            error_val("state-error", "fiber/abort: cannot abort a completed fiber"),
         ),
         FiberStatus::Error => (
             SIG_ERROR,
-            error_val("error", "fiber/abort: fiber already errored"),
+            error_val("state-error", "fiber/abort: fiber already errored"),
         ),
     }
 }

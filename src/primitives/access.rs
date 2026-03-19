@@ -97,7 +97,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "encoding-error",
                         format!("get: @string contains invalid UTF-8: {}", e),
                     ),
                 )
@@ -132,7 +132,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("get: index {} out of bounds (length {})", index, b.len()),
                 ),
             );
@@ -162,7 +162,7 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!(
                         "get: index {} out of bounds (length {})",
                         index,
@@ -370,7 +370,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "encoding-error",
                         format!("put: @string contains invalid UTF-8: {}", e),
                     ),
                 )
@@ -381,7 +381,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!(
                         "put: index {} out of bounds (length {})",
                         index,
@@ -426,7 +426,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("put: byte value out of range 0-255: {}", n),
                     ),
                 )
@@ -449,7 +449,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("put: index {} out of bounds (length {})", index, len),
                 ),
             );
@@ -480,7 +480,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("put: index {} out of bounds (length {})", index, len),
                 ),
             );
@@ -510,7 +510,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!(
                         "put: index {} out of bounds (length {})",
                         index,
@@ -563,7 +563,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     return (
                         SIG_ERROR,
                         error_val(
-                            "error",
+                            "argument-error",
                             format!(
                                 "put: index {} out of bounds (length {})",
                                 index,

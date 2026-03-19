@@ -160,7 +160,10 @@ pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
                 }
             };
             if step == 0.0 {
-                return (SIG_ERROR, error_val("error", "range: step cannot be zero"));
+                return (
+                    SIG_ERROR,
+                    error_val("argument-error", "range: step cannot be zero"),
+                );
             }
             (start, end, step)
         }

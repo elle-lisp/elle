@@ -244,7 +244,7 @@
 (def [ok2? err2] (protect (fiber/resume f0)))
 (display "  resume errored fiber: ") (print err2)
 (assert-false ok2? "resume errored: signals an error")
-(assert-eq (get err2 :error) :error "resume errored: error kind is :error")
+(assert-eq (get err2 :error) :state-error "resume errored: error kind is :state-error")
 
 # The fiber is still in :error — nothing changed.
 (assert-eq (fiber/status f0) :error "fiber still :error after failed resume")

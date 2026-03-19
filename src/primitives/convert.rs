@@ -3,7 +3,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, error_val_extra, Value};
 
 /// Convert to integer. Accepts int, float, string, or keyword.
 pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
@@ -45,9 +45,10 @@ fn parse_int(s: &str) -> (SignalBits, Value) {
         Ok(n) => (SIG_OK, Value::int(n)),
         Err(_) => (
             SIG_ERROR,
-            error_val(
-                "error",
+            error_val_extra(
+                "parse-error",
                 format!("integer: cannot parse \"{}\" as integer", s),
+                &[("input", Value::string(s))],
             ),
         ),
     }
@@ -93,7 +94,11 @@ fn parse_float(s: &str) -> (SignalBits, Value) {
         Ok(f) => (SIG_OK, Value::float(f)),
         Err(_) => (
             SIG_ERROR,
-            error_val("error", format!("float: cannot parse \"{}\" as float", s)),
+            error_val_extra(
+                "parse-error",
+                format!("float: cannot parse \"{}\" as float", s),
+                &[("input", Value::string(s))],
+            ),
         ),
     }
 }
@@ -179,7 +184,7 @@ pub(crate) fn prim_number_to_string(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 format!("number->string: radix must be 2-36, got {}", radix),
             ),
         );
@@ -231,7 +236,7 @@ pub(crate) fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
                     return (
                         SIG_ERROR,
                         error_val(
-                            "error",
+                            "internal-error",
                             "to-string: internal conversion failure".to_string(),
                         ),
                     );
@@ -260,7 +265,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
             Ok(s) => (SIG_OK, Value::string(s)),
             Err(e) => (
                 SIG_ERROR,
-                error_val("error", format!("string: invalid UTF-8: {}", e)),
+                error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
             ),
         };
     }
@@ -272,7 +277,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
             Ok(_) => (SIG_OK, Value::string_mut(borrowed.clone())),
             Err(e) => (
                 SIG_ERROR,
-                error_val("error", format!("string: invalid UTF-8: {}", e)),
+                error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
             ),
         };
     }
@@ -299,7 +304,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
             None => (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "internal-error",
                     format!("to-string: symbol ID {} not found in symbol table", sym_id),
                 ),
             ),
@@ -339,7 +344,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "internal-error",
                         "to-string: failed to convert list item".to_string(),
                     ),
                 );
@@ -364,7 +369,7 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "internal-error",
                         "to-string: failed to convert array item".to_string(),
                     ),
                 );

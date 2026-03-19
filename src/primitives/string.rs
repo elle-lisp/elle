@@ -18,7 +18,7 @@ fn as_text(val: &Value, prim_name: &str) -> Result<(String, bool), (SignalBits, 
             Err(e) => Err((
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "encoding-error",
                     format!("{}: buffer contains invalid UTF-8: {}", prim_name, e),
                 ),
             )),
@@ -194,7 +194,7 @@ pub(crate) fn prim_string_split(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 "string-split: delimiter cannot be empty".to_string(),
             ),
         );
@@ -241,7 +241,7 @@ pub(crate) fn prim_string_replace(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 "string-replace: search string cannot be empty".to_string(),
             ),
         );
@@ -557,7 +557,7 @@ pub(crate) fn prim_buffer(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("@string: byte {} out of range 0-255: {}", i, n),
                     ),
                 )
