@@ -1,10 +1,9 @@
-// Unit tests for NaN-boxed Value representation.
+// Unit tests for tagged-union Value representation.
 //
 // These tests verify the fundamental invariants of the Value type:
 // roundtrip fidelity, type discrimination, truthiness, and equality.
 // Converted from property tests to deterministic unit tests with concrete cases.
 
-use elle::value::repr::{INT_MAX, INT_MIN};
 use elle::Value;
 
 // =========================================================================
@@ -13,14 +12,14 @@ use elle::Value;
 
 #[test]
 fn int_roundtrip_min() {
-    let v = Value::int(INT_MIN);
-    assert_eq!(v.as_int(), Some(INT_MIN));
+    let v = Value::int(i64::MIN);
+    assert_eq!(v.as_int(), Some(i64::MIN));
 }
 
 #[test]
 fn int_roundtrip_max() {
-    let v = Value::int(INT_MAX);
-    assert_eq!(v.as_int(), Some(INT_MAX));
+    let v = Value::int(i64::MAX);
+    assert_eq!(v.as_int(), Some(i64::MAX));
 }
 
 #[test]
@@ -203,7 +202,7 @@ fn bool_roundtrip_false() {
 
 #[test]
 fn exactly_one_type_for_int_min() {
-    let v = Value::int(INT_MIN);
+    let v = Value::int(i64::MIN);
     let count = v.is_nil() as u8
         + v.is_empty_list() as u8
         + v.is_bool() as u8
@@ -217,7 +216,7 @@ fn exactly_one_type_for_int_min() {
 
 #[test]
 fn exactly_one_type_for_int_max() {
-    let v = Value::int(INT_MAX);
+    let v = Value::int(i64::MAX);
     let count = v.is_nil() as u8
         + v.is_empty_list() as u8
         + v.is_bool() as u8
@@ -354,13 +353,13 @@ fn string_empty_is_truthy() {
 
 #[test]
 fn int_eq_reflexive_min() {
-    let v = Value::int(INT_MIN);
+    let v = Value::int(i64::MIN);
     assert_eq!(v, v);
 }
 
 #[test]
 fn int_eq_reflexive_max() {
-    let v = Value::int(INT_MAX);
+    let v = Value::int(i64::MAX);
     assert_eq!(v, v);
 }
 
@@ -425,7 +424,7 @@ fn int_neq_different_value_negative() {
 
 #[test]
 fn int_neq_different_value_large() {
-    assert_ne!(Value::int(INT_MIN), Value::int(INT_MAX));
+    assert_ne!(Value::int(i64::MIN), Value::int(i64::MAX));
 }
 
 #[test]
@@ -444,23 +443,30 @@ fn bool_eq_same_value_false() {
 
 #[test]
 fn int_not_eq_float_zero() {
+    // Integers and floats are distinct types; same numeric value means different Values.
     let int_val = Value::int(0);
     let float_val = Value::float(0.0);
-    assert_ne!(int_val.to_bits(), float_val.to_bits());
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
 }
 
 #[test]
 fn int_not_eq_float_positive() {
     let int_val = Value::int(1);
     let float_val = Value::float(1.0);
-    assert_ne!(int_val.to_bits(), float_val.to_bits());
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
 }
 
 #[test]
 fn int_not_eq_float_negative() {
     let int_val = Value::int(-1);
     let float_val = Value::float(-1.0);
-    assert_ne!(int_val.to_bits(), float_val.to_bits());
+    assert!(int_val.is_int() && !int_val.is_float());
+    assert!(float_val.is_float() && !float_val.is_int());
+    assert_ne!(int_val, float_val);
 }
 
 // =========================================================================
@@ -481,8 +487,8 @@ fn cons_roundtrip_simple() {
 
 #[test]
 fn cons_roundtrip_min_max() {
-    let car = Value::int(INT_MIN);
-    let cdr = Value::int(INT_MAX);
+    let car = Value::int(i64::MIN);
+    let cdr = Value::int(i64::MAX);
     let cons = Value::cons(car, cdr);
     assert!(cons.is_cons());
     assert!(cons.is_heap());

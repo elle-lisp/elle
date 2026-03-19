@@ -2,6 +2,15 @@
 //!
 //! This module contains `FunctionTranslator`, which translates individual
 //! LIR instructions and terminators to Cranelift IR.
+//!
+//! ## Variable layout
+//!
+//! Each LIR register `r` maps to TWO Cranelift variables:
+//!   - tag:     `Variable::from_u32(2 * r)`
+//!   - payload: `Variable::from_u32(2 * r + 1)`
+//!
+//! Arg variables and local variables use the same doubling scheme starting
+//! at their respective bases.
 
 use std::collections::HashMap;
 
@@ -13,13 +22,13 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::lir::{Label, LirInstr, Reg, Terminator};
-use crate::value::repr::TAG_NIL;
+use crate::value::repr::{TAG_FALSE, TAG_NIL, TAG_TRUE};
 use crate::value::SymbolId;
 
 use super::vtable::RuntimeHelpers;
 use super::JitError;
 
-/// Helper to create a Variable from a register/slot index
+/// Helper to create a Cranelift Variable from a slot index
 #[inline]
 fn var(n: u32) -> Variable {
     Variable::from_u32(n)
@@ -32,36 +41,29 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) lir: &'a crate::lir::LirFunction,
     pub(crate) env_ptr: Option<cranelift_codegen::ir::Value>,
     pub(crate) vm_ptr: Option<cranelift_codegen::ir::Value>,
-    /// NaN-boxed bits of the closure being executed (for self-tail-call detection)
-    pub(crate) self_bits: Option<cranelift_codegen::ir::Value>,
-    /// Base index for arg variables (= num_regs)
+    /// (tag, payload) Cranelift values for the closure being executed
+    /// (for self-tail-call detection)
+    pub(crate) self_tag_payload:
+        Option<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value)>,
+    /// Base index for arg variables (= num_regs), in LIR register space
     pub(crate) arg_var_base: u32,
     /// Base index for locally-defined variable Cranelift variables
-    /// These are variables for let-bindings inside the function body.
-    /// Layout: \[num_captures..., params..., locally_defined...\]
-    /// In the JIT, locally_defined vars use Cranelift variables starting at this base.
     pub(crate) local_var_base: u32,
     /// Loop header block for self-tail-call jumps
     pub(crate) loop_header: Option<cranelift_codegen::ir::Block>,
-    /// SCC peer functions: maps SymbolId -> Cranelift FuncId for direct calls.
-    /// When a Call/TailCall targets a global in this map, we emit a direct
-    /// Cranelift call instead of going through elle_jit_call.
+    /// SCC peer functions
     pub(crate) scc_peers: HashMap<SymbolId, FuncId>,
     /// Map from register to the SymbolId it was loaded from.
-    /// Used to detect when a Call/TailCall targets an SCC peer.
     pub(crate) global_load_map: HashMap<Reg, SymbolId>,
     /// SymbolId of the function being compiled (for self-call detection)
     pub(crate) self_sym: Option<SymbolId>,
     /// Counter for yield point indices
     pub(crate) yield_point_index: u32,
-    /// Counter for call site indices (for yield-through-call metadata)
+    /// Counter for call site indices
     pub(crate) call_site_index: u32,
     /// Shared stack slot for spilling locals + operands at yield/call sites.
-    /// Sized to the maximum spill requirement across all yield points and
-    /// call sites. `None` if the function has no spill points.
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
-    /// Closure template Values built during translation of MakeClosure instructions.
-    /// Kept alive here (and later in JitCode) so the `Rc<ClosureTemplate>` doesn't get freed.
+    /// Closure template Values built during MakeClosure translation.
     pub(crate) closure_constants: Vec<crate::value::Value>,
 }
 
@@ -77,7 +79,7 @@ impl<'a> FunctionTranslator<'a> {
             lir,
             env_ptr: None,
             vm_ptr: None,
-            self_bits: None,
+            self_tag_payload: None,
             arg_var_base: 0,
             local_var_base: 0,
             loop_header: None,
@@ -91,35 +93,50 @@ impl<'a> FunctionTranslator<'a> {
         }
     }
 
+    /// Convert LIR register index to the Cranelift variable index for its tag.
+    /// Variable layout: 2*r = tag, 2*r+1 = payload.
+    #[inline]
+    pub(crate) fn var_tag(&self, r: u32) -> u32 {
+        2 * r
+    }
+
+    /// Convert LIR register index to the Cranelift variable index for its payload.
+    #[inline]
+    pub(crate) fn var_payload(&self, r: u32) -> u32 {
+        2 * r + 1
+    }
+
     /// Initialize locally-defined variables.
-    /// Variables that need cells (captured or mutated) get LocalCell(NIL).
-    /// Variables that don't need cells get NIL directly, avoiding heap allocation.
     pub(crate) fn init_locally_defined_vars(
         &mut self,
         builder: &mut FunctionBuilder,
         num_locally_defined: u32,
     ) -> Result<(), JitError> {
-        use crate::value::Value;
-
-        let nil_bits = builder.ins().iconst(I64, Value::NIL.to_bits() as i64);
+        let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
+        let zero = builder.ins().iconst(I64, 0);
         let lbox_locals_mask = self.lir.lbox_locals_mask;
 
         for i in 0..num_locally_defined {
+            let base = self.local_var_base + i;
             if i < 64 && (lbox_locals_mask & (1 << i)) != 0 {
-                // This local needs a cell (captured or mutated)
-                let cell = self.call_helper_unary(builder, self.helpers.make_lbox, nil_bits)?;
-                builder.def_var(var(self.local_var_base + i), cell);
+                // This local needs a fresh cell on EVERY invocation.
+                // Call elle_jit_make_lbox(TAG_NIL, 0) at runtime to allocate
+                // a new LocalLBox(NIL) each time the function is entered.
+                let (cell_tag, cell_payload) =
+                    self.call_helper_value_unary(builder, self.helpers.make_lbox, nil_tag, zero)?;
+                builder.def_var(var(self.var_tag(base)), cell_tag);
+                builder.def_var(var(self.var_payload(base)), cell_payload);
             } else {
-                // No cell needed — store value directly
-                builder.def_var(var(self.local_var_base + i), nil_bits);
+                builder.def_var(var(self.var_tag(base)), nil_tag);
+                builder.def_var(var(self.var_payload(base)), zero);
             }
         }
 
         Ok(())
     }
 
-    /// Translate a single LIR instruction
-    /// Returns true if the instruction emitted a terminator (e.g., TailCall)
+    /// Translate a single LIR instruction.
+    /// Returns true if the instruction emitted a terminator (e.g., TailCall).
     pub(crate) fn translate_instr(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -128,262 +145,277 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<bool, JitError> {
         match instr {
             LirInstr::Const { dst, value } => {
-                let val = self.translate_const(builder, value);
-                builder.def_var(var(dst.0), val);
+                let (tag, payload) = self.translate_const(builder, value);
+                self.def_var_pair(builder, dst.0, tag, payload);
             }
 
             LirInstr::ValueConst { dst, value } => {
-                let bits = value.to_bits();
-                let val = builder.ins().iconst(I64, bits as i64);
-                builder.def_var(var(dst.0), val);
+                let tag = builder.ins().iconst(I64, value.tag as i64);
+                let payload = builder.ins().iconst(I64, value.payload as i64);
+                self.def_var_pair(builder, dst.0, tag, payload);
             }
 
             LirInstr::LoadLocal { dst, slot } => {
-                // In LIR, locals are just registers
-                let val = builder.use_var(var(*slot as u32));
-                builder.def_var(var(dst.0), val);
+                let base = *slot as u32;
+                let (tag, payload) = self.use_var_pair(builder, base);
+                self.def_var_pair(builder, dst.0, tag, payload);
             }
 
             LirInstr::StoreLocal { slot, src } => {
-                let val = builder.use_var(var(src.0));
-                builder.def_var(var(*slot as u32), val);
+                let base = *slot as u32;
+                let (tag, payload) = self.use_var_pair(builder, src.0);
+                self.def_var_pair(builder, base, tag, payload);
             }
 
             LirInstr::LoadCapture { dst, index } => {
-                // The LIR uses indices where:
-                // - [0, num_captures) are captures (from env)
-                // - [num_captures, num_captures + arity) are parameters (from args)
-                // - [num_captures + arity, ...) are locally-defined variables
                 let num_captures = self.lir.num_captures;
                 let arity = self.lir.num_params as u16;
                 if *index < num_captures {
                     // Load from closure environment (captures)
-                    // Must auto-unwrap LocalCell if present (matches interpreter's LoadUpvalue)
+                    // Each Value is 16 bytes: tag at offset i*16, payload at i*16+8
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCapture without env pointer".to_string())
                     })?;
-                    let offset = (*index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
-                    let raw = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    let val = self.call_helper_unary(builder, self.helpers.load_capture, raw)?;
-                    builder.def_var(var(dst.0), val);
+                    let tag_offset = (*index as i32) * 16;
+                    let payload_offset = (*index as i32) * 16 + 8;
+                    let raw_tag = builder
+                        .ins()
+                        .load(I64, MemFlags::trusted(), env_ptr, tag_offset);
+                    let raw_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), env_ptr, payload_offset);
+                    // Auto-unwrap LocalCell if present
+                    let (val_tag, val_payload) = self.call_helper_value_unary(
+                        builder,
+                        self.helpers.load_capture,
+                        raw_tag,
+                        raw_payload,
+                    )?;
+                    self.def_var_pair(builder, dst.0, val_tag, val_payload);
                 } else if *index < num_captures + arity {
-                    // Load from arg variables (NOT args pointer)
-                    // This allows self-tail-calls to update args and loop back
+                    // Load from arg variables
                     let param_index = *index - num_captures;
-                    let val = builder.use_var(var(self.arg_var_base + param_index as u32));
-                    builder.def_var(var(dst.0), val);
+                    let base = self.arg_var_base + param_index as u32;
+                    let (tag, payload) = self.use_var_pair(builder, base);
+                    self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
-                    // Locally-defined variable - use Cranelift variable
+                    // Locally-defined variable
                     let local_index = *index - num_captures - arity;
-                    let local_val = builder.use_var(var(self.local_var_base + local_index as u32));
+                    let base = self.local_var_base + local_index as u32;
+                    let (tag, payload) = self.use_var_pair(builder, base);
                     if (local_index as u32) < 64
                         && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
                     {
                         // cell-wrapped: auto-unwrap via load_lbox
-                        let result =
-                            self.call_helper_unary(builder, self.helpers.load_lbox, local_val)?;
-                        builder.def_var(var(dst.0), result);
+                        let (rt, rp) = self.call_helper_value_unary(
+                            builder,
+                            self.helpers.load_lbox,
+                            tag,
+                            payload,
+                        )?;
+                        self.def_var_pair(builder, dst.0, rt, rp);
                     } else {
-                        // Direct value: no cell indirection
-                        builder.def_var(var(dst.0), local_val);
+                        self.def_var_pair(builder, dst.0, tag, payload);
                     }
                 }
             }
 
             LirInstr::LoadCaptureRaw { dst, index } => {
-                // Same as LoadCapture but doesn't unwrap cells (for forwarding)
                 let num_captures = self.lir.num_captures;
                 let arity = self.lir.num_params as u16;
                 if *index < num_captures {
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("LoadCaptureRaw without env pointer".to_string())
                     })?;
-                    let offset = (*index as i32) * 8;
-                    let addr = builder.ins().iadd_imm(env_ptr, offset as i64);
-                    let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                    builder.def_var(var(dst.0), val);
+                    let tag_offset = (*index as i32) * 16;
+                    let payload_offset = (*index as i32) * 16 + 8;
+                    let raw_tag = builder
+                        .ins()
+                        .load(I64, MemFlags::trusted(), env_ptr, tag_offset);
+                    let raw_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), env_ptr, payload_offset);
+                    self.def_var_pair(builder, dst.0, raw_tag, raw_payload);
                 } else if *index < num_captures + arity {
-                    // Load from arg variables (NOT args pointer)
                     let param_index = *index - num_captures;
-                    let val = builder.use_var(var(self.arg_var_base + param_index as u32));
-                    builder.def_var(var(dst.0), val);
+                    let base = self.arg_var_base + param_index as u32;
+                    let (tag, payload) = self.use_var_pair(builder, base);
+                    self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
-                    // Locally-defined variable - use Cranelift variable directly
-                    // LoadCaptureRaw doesn't unwrap cells, so return the cell itself
                     let local_index = *index - num_captures - arity;
-                    let val = builder.use_var(var(self.local_var_base + local_index as u32));
-                    builder.def_var(var(dst.0), val);
+                    let base = self.local_var_base + local_index as u32;
+                    let (tag, payload) = self.use_var_pair(builder, base);
+                    self.def_var_pair(builder, dst.0, tag, payload);
                 }
             }
 
             LirInstr::BinOp { dst, op, lhs, rhs } => {
-                let lhs_val = builder.use_var(var(lhs.0));
-                let rhs_val = builder.use_var(var(rhs.0));
-                let result = self.call_binary_helper(builder, *op, lhs_val, rhs_val)?;
-                builder.def_var(var(dst.0), result);
+                let (lt, lp) = self.use_var_pair(builder, lhs.0);
+                let (rt, rp) = self.use_var_pair(builder, rhs.0);
+                let (rt2, rp2) = self.call_binary_helper(builder, *op, lt, lp, rt, rp)?;
+                self.def_var_pair(builder, dst.0, rt2, rp2);
             }
 
             LirInstr::UnaryOp { dst, op, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_unary_helper(builder, *op, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) = self.call_unary_helper(builder, *op, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::Compare { dst, op, lhs, rhs } => {
-                let lhs_val = builder.use_var(var(lhs.0));
-                let rhs_val = builder.use_var(var(rhs.0));
-                let result = self.call_compare_helper(builder, *op, lhs_val, rhs_val)?;
-                builder.def_var(var(dst.0), result);
+                let (lt, lp) = self.use_var_pair(builder, lhs.0);
+                let (rt, rp) = self.use_var_pair(builder, rhs.0);
+                let (crt, crp) = self.call_compare_helper(builder, *op, lt, lp, rt, rp)?;
+                self.def_var_pair(builder, dst.0, crt, crp);
             }
 
             LirInstr::IsNil { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_nil, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_nil, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::IsPair { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_pair, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_pair, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            // === Phase 3: Data structures ===
             LirInstr::Cons { dst, head, tail } => {
-                let head_val = builder.use_var(var(head.0));
-                let tail_val = builder.use_var(var(tail.0));
-                let result =
-                    self.call_helper_binary(builder, self.helpers.cons, head_val, tail_val)?;
-                builder.def_var(var(dst.0), result);
+                let (ht, hp) = self.use_var_pair(builder, head.0);
+                let (tt, tp) = self.use_var_pair(builder, tail.0);
+                let (rt, rp) =
+                    self.call_helper_value_binary(builder, self.helpers.cons, ht, hp, tt, tp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::Car { dst, pair } => {
-                let pair_val = builder.use_var(var(pair.0));
-                let result = self.call_helper_unary(builder, self.helpers.car, pair_val)?;
-                builder.def_var(var(dst.0), result);
+                let (pt, pp) = self.use_var_pair(builder, pair.0);
+                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.car, pt, pp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::Cdr { dst, pair } => {
-                let pair_val = builder.use_var(var(pair.0));
-                let result = self.call_helper_unary(builder, self.helpers.cdr, pair_val)?;
-                builder.def_var(var(dst.0), result);
+                let (pt, pp) = self.use_var_pair(builder, pair.0);
+                let (rt, rp) = self.call_helper_value_unary(builder, self.helpers.cdr, pt, pp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::MakeArrayMut { dst, elements } => {
-                // Allocate stack space for elements
                 if elements.is_empty() {
-                    // Empty array - pass null pointer and 0 count
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let count = builder.ins().iconst(I64, 0);
-                    let result =
-                        self.call_helper_binary(builder, self.helpers.make_array, null_ptr, count)?;
-                    builder.def_var(var(dst.0), result);
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.make_array, builder.func);
+                    let call = builder.ins().call(func_ref, &[null_ptr, count]);
+                    let rt = builder.inst_results(call)[0];
+                    let rp = builder.inst_results(call)[1];
+                    self.def_var_pair(builder, dst.0, rt, rp);
                 } else {
-                    // Create stack slot for elements
+                    // Each Value is 16 bytes on the stack
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                             cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (elements.len() * 8) as u32,
+                            (elements.len() * 16) as u32,
                             0,
                         ));
-                    // Store each element
                     for (i, elem_reg) in elements.iter().enumerate() {
-                        let elem_val = builder.use_var(var(elem_reg.0));
-                        builder.ins().stack_store(elem_val, slot, (i * 8) as i32);
+                        let (et, ep) = self.use_var_pair(builder, elem_reg.0);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(et, slot, tag_offset);
+                        builder.ins().stack_store(ep, slot, payload_offset);
                     }
                     let elements_addr = builder.ins().stack_addr(I64, slot, 0);
                     let count = builder.ins().iconst(I64, elements.len() as i64);
-                    let result = self.call_helper_binary(
-                        builder,
-                        self.helpers.make_array,
-                        elements_addr,
-                        count,
-                    )?;
-                    builder.def_var(var(dst.0), result);
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.make_array, builder.func);
+                    let call = builder.ins().call(func_ref, &[elements_addr, count]);
+                    let rt = builder.inst_results(call)[0];
+                    let rp = builder.inst_results(call)[1];
+                    self.def_var_pair(builder, dst.0, rt, rp);
                 }
             }
 
-            // === Phase 3: Cell operations ===
             LirInstr::MakeLBox { dst, value } => {
-                let val = builder.use_var(var(value.0));
-                let result = self.call_helper_unary(builder, self.helpers.make_lbox, val)?;
-                builder.def_var(var(dst.0), result);
+                let (vt, vp) = self.use_var_pair(builder, value.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.make_lbox, vt, vp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::LoadLBox { dst, cell } => {
-                let cell_val = builder.use_var(var(cell.0));
-                let result = self.call_helper_unary(builder, self.helpers.load_lbox, cell_val)?;
-                builder.def_var(var(dst.0), result);
+                let (ct, cp) = self.use_var_pair(builder, cell.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.load_lbox, ct, cp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::StoreLBox { cell, value } => {
-                let cell_val = builder.use_var(var(cell.0));
-                let val = builder.use_var(var(value.0));
-                let _result =
-                    self.call_helper_binary(builder, self.helpers.store_lbox, cell_val, val)?;
-                // Result is NIL, we don't need to store it
+                let (ct, cp) = self.use_var_pair(builder, cell.0);
+                let (vt, vp) = self.use_var_pair(builder, value.0);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
+                let _ = builder.inst_results(call);
             }
 
             LirInstr::StoreCapture { index, src } => {
                 let num_captures = self.lir.num_captures;
                 let arity = self.lir.num_params as u16;
-                let val = builder.use_var(var(src.0));
+                let (vt, vp) = self.use_var_pair(builder, src.0);
 
                 if *index < num_captures + arity {
-                    // Captures and parameters: use env pointer
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("StoreCapture without env pointer".to_string())
                     })?;
                     let idx_val = builder.ins().iconst(I64, *index as i64);
-                    let _result = self.call_helper_ternary(
-                        builder,
-                        self.helpers.store_capture,
-                        env_ptr,
-                        idx_val,
-                        val,
-                    )?;
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.store_capture, builder.func);
+                    let call = builder.ins().call(func_ref, &[env_ptr, idx_val, vt, vp]);
+                    let _ = builder.inst_results(call);
                 } else {
-                    // Locally-defined variable
                     let local_index = *index - num_captures - arity;
+                    let base = self.local_var_base + local_index as u32;
                     if (local_index as u32) < 64
                         && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
                     {
-                        // cell-wrapped: store into the cell
-                        let cell_val =
-                            builder.use_var(var(self.local_var_base + local_index as u32));
-                        let _result = self.call_helper_binary(
-                            builder,
-                            self.helpers.store_lbox,
-                            cell_val,
-                            val,
-                        )?;
+                        let (ct, cp) = self.use_var_pair(builder, base);
+                        let func_ref = self
+                            .module
+                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                        let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
+                        let _ = builder.inst_results(call);
                     } else {
-                        // Direct value: just update the Cranelift variable
-                        builder.def_var(var(self.local_var_base + local_index as u32), val);
+                        self.def_var_pair(builder, base, vt, vp);
                     }
                 }
             }
 
-            // === Phase 3: Function calls ===
             LirInstr::Call { dst, func, args } => {
-                let func_val = builder.use_var(var(func.0));
+                let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Call without vm pointer".to_string()))?;
 
-                // Check if this is a direct call to an SCC peer
                 let maybe_scc = self
                     .global_load_map
                     .get(func)
                     .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
                 if let Some((sym, peer_func_id)) = maybe_scc {
-                    // Track call depth (direct SCC calls bypass elle_jit_call)
-                    let overflow =
-                        self.call_helper_unary(builder, self.helpers.call_depth_enter, vm)?;
-                    // If overflow (non-zero return), bail out (signal already set)
-                    let zero = builder.ins().iconst(I64, 0);
-                    let is_overflow = builder.ins().icmp(IntCC::NotEqual, overflow, zero);
+                    // Call depth check
+                    let (overflow_tag, _) =
+                        self.call_helper_vm_only(builder, self.helpers.call_depth_enter, vm)?;
+                    let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
+                    let is_overflow = builder.ins().icmp(IntCC::Equal, overflow_tag, tag_true);
                     let overflow_block = builder.create_block();
                     let call_block = builder.create_block();
                     builder
@@ -392,24 +424,24 @@ impl<'a> FunctionTranslator<'a> {
 
                     builder.switch_to_block(overflow_block);
                     builder.seal_block(overflow_block);
-                    let nil = builder.ins().iconst(I64, TAG_NIL as i64);
-                    builder.ins().return_(&[nil]);
+                    let nil_t = builder.ins().iconst(I64, TAG_NIL as i64);
+                    let zero = builder.ins().iconst(I64, 0);
+                    builder.ins().return_(&[nil_t, zero]);
 
                     builder.switch_to_block(call_block);
                     builder.seal_block(call_block);
 
-                    // Direct call to SCC peer — skip elle_jit_call dispatch
-                    let result = self.emit_direct_scc_call(builder, peer_func_id, sym, args, vm)?;
-                    // Decrement call depth
-                    self.call_helper_unary(builder, self.helpers.call_depth_exit, vm)?;
-                    // Resolve pending tail call if the peer returned TAIL_CALL_SENTINEL
-                    let resolved = self.call_helper_binary(
-                        builder,
-                        self.helpers.resolve_tail_call,
-                        result,
-                        vm,
-                    )?;
-                    builder.def_var(var(dst.0), resolved);
+                    let (rt, rp) =
+                        self.emit_direct_scc_call(builder, peer_func_id, sym, args, vm)?;
+                    self.call_helper_vm_only(builder, self.helpers.call_depth_exit, vm)?;
+                    // Resolve pending tail call
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.resolve_tail_call, builder.func);
+                    let call = builder.ins().call(func_ref, &[rt, rp, vm]);
+                    let resolved_t = builder.inst_results(call)[0];
+                    let resolved_p = builder.inst_results(call)[1];
+                    self.def_var_pair(builder, dst.0, resolved_t, resolved_p);
                     self.emit_exception_check_after_call(builder)?;
                     if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
@@ -417,12 +449,10 @@ impl<'a> FunctionTranslator<'a> {
                         self.emit_yield_check_after_call(builder, idx)?;
                     }
                 } else if args.is_empty() {
-                    // No args - pass null pointer
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let nargs = builder.ins().iconst(I64, 0);
-                    let result = self.call_helper_call(builder, func_val, null_ptr, nargs, vm)?;
-                    builder.def_var(var(dst.0), result);
-                    // Check for exception after call - if set, bail out to interpreter
+                    let (rt, rp) = self.call_helper_call(builder, ft, fp, null_ptr, nargs, vm)?;
+                    self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
                     if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
@@ -430,23 +460,24 @@ impl<'a> FunctionTranslator<'a> {
                         self.emit_yield_check_after_call(builder, idx)?;
                     }
                 } else {
-                    // Create stack slot for args
+                    // Spill args to stack (16 bytes each)
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                             cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (args.len() * 8) as u32,
+                            (args.len() * 16) as u32,
                             0,
                         ));
-                    // Store each arg
                     for (i, arg_reg) in args.iter().enumerate() {
-                        let arg_val = builder.use_var(var(arg_reg.0));
-                        builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
+                        let (at, ap) = self.use_var_pair(builder, arg_reg.0);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(at, slot, tag_offset);
+                        builder.ins().stack_store(ap, slot, payload_offset);
                     }
                     let args_addr = builder.ins().stack_addr(I64, slot, 0);
                     let nargs = builder.ins().iconst(I64, args.len() as i64);
-                    let result = self.call_helper_call(builder, func_val, args_addr, nargs, vm)?;
-                    builder.def_var(var(dst.0), result);
-                    // Check for exception after call - if set, bail out to interpreter
+                    let (rt, rp) = self.call_helper_call(builder, ft, fp, args_addr, nargs, vm)?;
+                    self.def_var_pair(builder, dst.0, rt, rp);
                     self.emit_exception_check_after_call(builder)?;
                     if self.lir.signal.may_suspend() {
                         let idx = self.call_site_index;
@@ -457,44 +488,46 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::TailCall { func, args } => {
-                let func_val = builder.use_var(var(func.0));
+                let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCall without vm pointer".to_string())
                 })?;
 
-                // Check if this is a self-tail-call (func == self_bits)
-                // Only do this optimization if we have self_bits and loop_header
-                if let (Some(self_bits), Some(loop_header)) = (self.self_bits, self.loop_header) {
-                    // Check arity matches (self-call must have same number of args)
+                // Self-tail-call optimization
+                if let (Some((self_tag, self_payload)), Some(loop_header)) =
+                    (self.self_tag_payload, self.loop_header)
+                {
                     if args.len() == self.lir.num_params {
-                        let is_self = builder.ins().icmp(IntCC::Equal, func_val, self_bits);
+                        // Check if func == self (tag AND payload match)
+                        let tag_eq = builder.ins().icmp(IntCC::Equal, ft, self_tag);
+                        let pay_eq = builder.ins().icmp(IntCC::Equal, fp, self_payload);
+                        let is_self = builder.ins().band(tag_eq, pay_eq);
 
                         let self_call_block = builder.create_block();
                         let other_call_block = builder.create_block();
-
                         builder
                             .ins()
                             .brif(is_self, self_call_block, &[], other_call_block, &[]);
 
-                        // Self-call path: update arg variables and jump to loop header
+                        // Self-call path
                         builder.switch_to_block(self_call_block);
                         builder.seal_block(self_call_block);
 
-                        // Read all new arg values first (before updating any variables)
-                        // This handles cases like (f b a) where args are swapped
-                        let new_arg_vals: Vec<_> = args
+                        let new_arg_vals: Vec<(
+                            cranelift_codegen::ir::Value,
+                            cranelift_codegen::ir::Value,
+                        )> = args
                             .iter()
-                            .map(|arg_reg| builder.use_var(var(arg_reg.0)))
+                            .map(|arg_reg| self.use_var_pair(builder, arg_reg.0))
                             .collect();
 
-                        // Now update arg variables
-                        for (i, arg_val) in new_arg_vals.into_iter().enumerate() {
-                            builder.def_var(var(self.arg_var_base + i as u32), arg_val);
+                        for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
+                            let base = self.arg_var_base + i as u32;
+                            self.def_var_pair(builder, base, at, ap);
                         }
-
                         builder.ins().jump(loop_header, &[]);
 
-                        // Other-call path: check SCC peers, then fall back to trampoline
+                        // Other-call path
                         builder.switch_to_block(other_call_block);
                         builder.seal_block(other_call_block);
 
@@ -503,73 +536,33 @@ impl<'a> FunctionTranslator<'a> {
                             .get(func)
                             .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
                         if let Some((sym2, peer_func_id)) = maybe_scc2 {
-                            // Direct call to SCC peer + return
-                            let result =
+                            let (rt, rp) =
                                 self.emit_direct_scc_call(builder, peer_func_id, sym2, args, vm)?;
-                            builder.ins().return_(&[result]);
+                            builder.ins().return_(&[rt, rp]);
                         } else {
-                            let result = if args.is_empty() {
-                                let null_ptr = builder.ins().iconst(I64, 0);
-                                let nargs = builder.ins().iconst(I64, 0);
-                                self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
-                            } else {
-                                let slot = builder.create_sized_stack_slot(
-                                    cranelift_codegen::ir::StackSlotData::new(
-                                        cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                                        (args.len() * 8) as u32,
-                                        0,
-                                    ),
-                                );
-                                for (i, arg_reg) in args.iter().enumerate() {
-                                    let arg_val = builder.use_var(var(arg_reg.0));
-                                    builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
-                                }
-                                let args_addr = builder.ins().stack_addr(I64, slot, 0);
-                                let nargs = builder.ins().iconst(I64, args.len() as i64);
-                                self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
-                            };
-                            builder.ins().return_(&[result]);
+                            let (rt, rp) =
+                                self.emit_tail_call_with_args(builder, ft, fp, args, vm)?;
+                            builder.ins().return_(&[rt, rp]);
                         }
-                        return Ok(true); // Block is terminated
+                        return Ok(true);
                     }
                 }
 
-                // Fallback: no self-tail-call optimization (arity mismatch or no self_bits)
-                // Check SCC peers before falling back to trampoline
+                // Fallback: no self-tail-call optimization
                 let maybe_scc3 = self
                     .global_load_map
                     .get(func)
                     .and_then(|&sym| self.scc_peers.get(&sym).map(|&fid| (sym, fid)));
                 if let Some((sym3, peer_func_id)) = maybe_scc3 {
-                    let result =
+                    let (rt, rp) =
                         self.emit_direct_scc_call(builder, peer_func_id, sym3, args, vm)?;
-                    builder.ins().return_(&[result]);
+                    builder.ins().return_(&[rt, rp]);
                     return Ok(true);
                 }
 
-                let result = if args.is_empty() {
-                    let null_ptr = builder.ins().iconst(I64, 0);
-                    let nargs = builder.ins().iconst(I64, 0);
-                    self.call_helper_tail_call(builder, func_val, null_ptr, nargs, vm)?
-                } else {
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (args.len() * 8) as u32,
-                            0,
-                        ));
-                    for (i, arg_reg) in args.iter().enumerate() {
-                        let arg_val = builder.use_var(var(arg_reg.0));
-                        builder.ins().stack_store(arg_val, slot, (i * 8) as i32);
-                    }
-                    let args_addr = builder.ins().stack_addr(I64, slot, 0);
-                    let nargs = builder.ins().iconst(I64, args.len() as i64);
-                    self.call_helper_tail_call(builder, func_val, args_addr, nargs, vm)?
-                };
-                // Return the result (either the direct result for native/vm-aware,
-                // or TAIL_CALL_SENTINEL for closures)
-                builder.ins().return_(&[result]);
-                return Ok(true); // Block is terminated
+                let (rt, rp) = self.emit_tail_call_with_args(builder, ft, fp, args, vm)?;
+                builder.ins().return_(&[rt, rp]);
+                return Ok(true);
             }
 
             LirInstr::MakeClosure {
@@ -577,7 +570,6 @@ impl<'a> FunctionTranslator<'a> {
                 func,
                 captures,
             } => {
-                // Emit the inner LirFunction to bytecode at JIT-compile time
                 let mut emitter = crate::lir::Emitter::new();
                 let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
                 let mut nested_lir = func.as_ref().clone();
@@ -609,162 +601,179 @@ impl<'a> FunctionTranslator<'a> {
                     squelch_mask: 0,
                 };
                 let template_value = crate::value::Value::closure(template_closure);
-                let template_bits = template_value.to_bits();
 
-                // Keep the Value alive for the lifetime of the JIT code
                 self.closure_constants.push(template_value);
 
-                let template_iconst = builder.ins().iconst(I64, template_bits as i64);
+                let template_tag = builder.ins().iconst(I64, template_value.tag as i64);
+                let template_payload = builder.ins().iconst(I64, template_value.payload as i64);
 
-                // Spill captures to a stack slot (or pass null if no captures)
+                // Spill captures to a stack slot (16 bytes each)
                 let (captures_ptr, count_val) = if captures.is_empty() {
                     (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
                 } else {
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                             cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (captures.len() * 8) as u32,
+                            (captures.len() * 16) as u32,
                             0,
                         ));
                     for (i, cap_reg) in captures.iter().enumerate() {
-                        let cap_val = builder.use_var(var(cap_reg.0));
-                        builder.ins().stack_store(cap_val, slot, (i * 8) as i32);
+                        let (ct, cp) = self.use_var_pair(builder, cap_reg.0);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(ct, slot, tag_offset);
+                        builder.ins().stack_store(cp, slot, payload_offset);
                     }
                     let ptr = builder.ins().stack_addr(I64, slot, 0);
                     let cnt = builder.ins().iconst(I64, captures.len() as i64);
                     (ptr, cnt)
                 };
 
-                let result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.make_closure,
-                    template_iconst,
-                    captures_ptr,
-                    count_val,
-                )?;
-                builder.def_var(var(dst.0), result);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.make_closure, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[template_tag, template_payload, captures_ptr, count_val],
+                );
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::LoadResumeValue { dst } => {
-                // Resume goes through the interpreter. This block is
-                // unreachable in JIT code. Emit NIL as dead code.
-                let nil = builder.ins().iconst(I64, TAG_NIL as i64);
-                builder.def_var(var(dst.0), nil);
+                // Resume goes through the interpreter. Emit NIL as dead code.
+                let nil_t = builder.ins().iconst(I64, TAG_NIL as i64);
+                let zero = builder.ins().iconst(I64, 0);
+                self.def_var_pair(builder, dst.0, nil_t, zero);
             }
+
             LirInstr::CarDestructure { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CarDestructure without vm pointer".to_string())
                 })?;
-                let result =
-                    self.call_helper_binary(builder, self.helpers.car_destructure, src_val, vm)?;
+                let (rt, rp) =
+                    self.call_helper_value_vm(builder, self.helpers.car_destructure, st, sp, vm)?;
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::CdrDestructure { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CdrDestructure without vm pointer".to_string())
                 })?;
-                let result =
-                    self.call_helper_binary(builder, self.helpers.cdr_destructure, src_val, vm)?;
+                let (rt, rp) =
+                    self.call_helper_value_vm(builder, self.helpers.cdr_destructure, st, sp, vm)?;
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::ArrayMutRefDestructure { dst, src, index } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("ArrayMutRefDestructure without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.array_ref_destructure,
-                    src_val,
-                    idx_val,
-                    vm,
-                )?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.array_ref_destructure, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, idx_val, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::ArrayMutSliceFrom { dst, src, index } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("ArrayMutSliceFrom without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.array_slice_from,
-                    src_val,
-                    idx_val,
-                    vm,
-                )?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.array_slice_from, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, idx_val, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::IsArray { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_array, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_array, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::IsArrayMut { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_array_mut, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_array_mut, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::IsStruct { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_struct, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_struct, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::IsStructMut { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result =
-                    self.call_helper_unary(builder, self.helpers.is_struct_mut, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_struct_mut, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::ArrayMutLen { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.array_len, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.array_len, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::StructGetOrNil { dst, src, key } => {
-                let src_val = builder.use_var(var(src.0));
-                let key_val = self.translate_const(builder, key);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (kt, kp) = self.translate_const(builder, key);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StructGetOrNil without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.struct_get_or_nil,
-                    src_val,
-                    key_val,
-                    vm,
-                )?;
-                builder.def_var(var(dst.0), result);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.struct_get_or_nil, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, kt, kp, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::StructGetDestructure { dst, src, key } => {
-                let src_val = builder.use_var(var(src.0));
-                let key_val = self.translate_const(builder, key);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (kt, kp) = self.translate_const(builder, key);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StructGetDestructure without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
-                    builder,
-                    self.helpers.struct_get_destructure,
-                    src_val,
-                    key_val,
-                    vm,
-                )?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.struct_get_destructure, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, kt, kp, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::StructRest {
                 dst,
                 src,
                 exclude_keys,
             } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("StructRest without vm pointer".to_string())
                 })?;
@@ -775,97 +784,116 @@ impl<'a> FunctionTranslator<'a> {
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                             cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (count * 8) as u32,
+                            (count * 16) as u32,
                             0,
                         ));
                     for (i, key) in exclude_keys.iter().enumerate() {
-                        let key_val = self.translate_const(builder, key);
-                        builder.ins().stack_store(key_val, slot, (i * 8) as i32);
+                        let (kt, kp) = self.translate_const(builder, key);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(kt, slot, tag_offset);
+                        builder.ins().stack_store(kp, slot, payload_offset);
                     }
                     let ptr = builder.ins().stack_addr(I64, slot, 0);
                     let cnt = builder.ins().iconst(I64, count as i64);
                     (ptr, cnt)
                 };
-                let result = self.call_helper_quaternary(
-                    builder,
-                    self.helpers.struct_rest,
-                    src_val,
-                    exclude_ptr,
-                    count_val,
-                    vm,
-                )?;
-                builder.def_var(var(dst.0), result);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.struct_rest, builder.func);
+                let call = builder
+                    .ins()
+                    .call(func_ref, &[st, sp, exclude_ptr, count_val, vm]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::CarOrNil { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.car_or_nil, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.car_or_nil, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::CdrOrNil { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.cdr_or_nil, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.cdr_or_nil, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::ArrayMutRefOrNil { dst, src, index } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let idx_val = builder.ins().iconst(I64, *index as i64);
-                let result = self.call_helper_binary(
-                    builder,
-                    self.helpers.array_ref_or_nil,
-                    src_val,
-                    idx_val,
-                )?;
-                builder.def_var(var(dst.0), result);
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.array_ref_or_nil, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, idx_val]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
+
             LirInstr::ArrayMutExtend { dst, array, source } => {
-                let array_val = builder.use_var(var(array.0));
-                let source_val = builder.use_var(var(source.0));
+                let (at, ap) = self.use_var_pair(builder, array.0);
+                let (srt, srp) = self.use_var_pair(builder, source.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("ArrayMutExtend without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
+                let (rt, rp) = self.call_helper_value_binary_vm(
                     builder,
                     self.helpers.array_extend,
-                    array_val,
-                    source_val,
+                    at,
+                    ap,
+                    srt,
+                    srp,
                     vm,
                 )?;
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::ArrayMutPush { dst, array, value } => {
-                let array_val = builder.use_var(var(array.0));
-                let value_val = builder.use_var(var(value.0));
+                let (at, ap) = self.use_var_pair(builder, array.0);
+                let (vt, vp) = self.use_var_pair(builder, value.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("ArrayMutPush without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
+                let (rt, rp) = self.call_helper_value_binary_vm(
                     builder,
                     self.helpers.array_push,
-                    array_val,
-                    value_val,
+                    at,
+                    ap,
+                    vt,
+                    vp,
                     vm,
                 )?;
                 self.emit_exception_check_after_call(builder)?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::CallArrayMut { dst, func, args } => {
-                let func_val = builder.use_var(var(func.0));
-                let args_val = builder.use_var(var(args.0));
+                let (ft, fp) = self.use_var_pair(builder, func.0);
+                let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CallArrayMut without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
+                // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm)
+                let (rt, rp) = self.call_helper_value_binary_vm(
                     builder,
                     self.helpers.call_array,
-                    func_val,
-                    args_val,
+                    ft,
+                    fp,
+                    art,
+                    arp,
                     vm,
                 )?;
-                builder.def_var(var(dst.0), result);
+                self.def_var_pair(builder, dst.0, rt, rp);
                 self.emit_exception_check_after_call(builder)?;
                 if self.lir.signal.may_suspend() {
                     let idx = self.call_site_index;
@@ -873,100 +901,104 @@ impl<'a> FunctionTranslator<'a> {
                     self.emit_yield_check_after_call(builder, idx)?;
                 }
             }
+
             LirInstr::TailCallArrayMut { func, args } => {
-                let func_val = builder.use_var(var(func.0));
-                let args_val = builder.use_var(var(args.0));
+                let (ft, fp) = self.use_var_pair(builder, func.0);
+                let (art, arp) = self.use_var_pair(builder, args.0);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("TailCallArrayMut without vm pointer".to_string())
                 })?;
-                let result = self.call_helper_ternary(
+                let (rt, rp) = self.call_helper_value_binary_vm(
                     builder,
                     self.helpers.tail_call_array,
-                    func_val,
-                    args_val,
+                    ft,
+                    fp,
+                    art,
+                    arp,
                     vm,
                 )?;
-                builder.ins().return_(&[result]);
-                return Ok(true); // block is terminated
+                builder.ins().return_(&[rt, rp]);
+                return Ok(true);
             }
+
             LirInstr::RegionEnter | LirInstr::RegionExit => {
-                // No-op in JIT (allocation regions not yet active)
+                // No-op in JIT
             }
+
             LirInstr::PushParamFrame { pairs } => {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PushParamFrame without vm pointer".to_string())
                 })?;
                 let count = pairs.len();
                 if count == 0 {
-                    // Empty frame — call with null pointer and count 0
                     let null_ptr = builder.ins().iconst(I64, 0);
                     let count_val = builder.ins().iconst(I64, 0);
-                    self.call_helper_ternary(
-                        builder,
-                        self.helpers.push_param_frame,
-                        null_ptr,
-                        count_val,
-                        vm,
-                    )?;
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.push_param_frame, builder.func);
+                    let call = builder.ins().call(func_ref, &[null_ptr, count_val, vm]);
+                    let _ = builder.inst_results(call);
                 } else {
-                    // Spill pairs to a stack slot: [param0, val0, param1, val1, ...]
+                    // Spill pairs as Values (16 bytes each): [param0, val0, param1, val1, ...]
                     let slot =
                         builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                             cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (count * 2 * 8) as u32,
+                            (count * 2 * 16) as u32,
                             0,
                         ));
                     for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
-                        let param_val = builder.use_var(var(param_reg.0));
-                        let val_val = builder.use_var(var(val_reg.0));
-                        let offset_param = (i * 2 * 8) as i32;
-                        let offset_val = (i * 2 * 8 + 8) as i32;
-                        builder.ins().stack_store(param_val, slot, offset_param);
-                        builder.ins().stack_store(val_val, slot, offset_val);
+                        let (pt, pp) = self.use_var_pair(builder, param_reg.0);
+                        let (vt, vp) = self.use_var_pair(builder, val_reg.0);
+                        let base = i * 2 * 16;
+                        builder.ins().stack_store(pt, slot, base as i32);
+                        builder.ins().stack_store(pp, slot, (base + 8) as i32);
+                        builder.ins().stack_store(vt, slot, (base + 16) as i32);
+                        builder.ins().stack_store(vp, slot, (base + 24) as i32);
                     }
                     let pairs_ptr = builder.ins().stack_addr(I64, slot, 0);
                     let count_val = builder.ins().iconst(I64, count as i64);
-                    self.call_helper_ternary(
-                        builder,
-                        self.helpers.push_param_frame,
-                        pairs_ptr,
-                        count_val,
-                        vm,
-                    )?;
+                    let func_ref = self
+                        .module
+                        .declare_func_in_func(self.helpers.push_param_frame, builder.func);
+                    let call = builder.ins().call(func_ref, &[pairs_ptr, count_val, vm]);
+                    let _ = builder.inst_results(call);
                 }
                 self.emit_exception_check_after_call(builder)?;
             }
+
             LirInstr::PopParamFrame => {
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("PopParamFrame without vm pointer".to_string())
                 })?;
-                self.call_helper_unary(builder, self.helpers.pop_param_frame, vm)?;
+                self.call_helper_vm_only(builder, self.helpers.pop_param_frame, vm)?;
             }
+
             LirInstr::IsSet { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_set, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_set, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::IsSetMut { dst, src } => {
-                let src_val = builder.use_var(var(src.0));
-                let result = self.call_helper_unary(builder, self.helpers.is_set_mut, src_val)?;
-                builder.def_var(var(dst.0), result);
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let (rt, rp) =
+                    self.call_helper_value_unary(builder, self.helpers.is_set_mut, st, sp)?;
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
+
             LirInstr::CheckSignalBound { src, allowed_bits } => {
-                let src_val = builder.use_var(var(src.0));
+                let (st, sp) = self.use_var_pair(builder, src.0);
                 let allowed_val = builder.ins().iconst(I64, *allowed_bits as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CheckSignalBound without vm pointer".to_string())
                 })?;
-                self.call_helper_ternary(
-                    builder,
-                    self.helpers.check_signal_bound,
-                    src_val,
-                    allowed_val,
-                    vm,
-                )?;
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.check_signal_bound, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp, allowed_val, vm]);
+                let _ = builder.inst_results(call);
                 self.emit_exception_check_after_call(builder)?;
-                // No dst — side-effect only
             }
         }
         Ok(false)
@@ -981,8 +1013,8 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<(), JitError> {
         match term {
             Terminator::Return(reg) => {
-                let val = builder.use_var(var(reg.0));
-                builder.ins().return_(&[val]);
+                let (tag, payload) = self.use_var_pair(builder, reg.0);
+                builder.ins().return_(&[tag, payload]);
             }
 
             Terminator::Jump(label) => {
@@ -997,7 +1029,7 @@ impl<'a> FunctionTranslator<'a> {
                 then_label,
                 else_label,
             } => {
-                let cond_val = builder.use_var(var(cond.0));
+                let (cond_tag, _) = self.use_var_pair(builder, cond.0);
                 let then_block = block_map.get(then_label).ok_or_else(|| {
                     JitError::InvalidLir(format!("Unknown then target: {:?}", then_label))
                 })?;
@@ -1005,32 +1037,35 @@ impl<'a> FunctionTranslator<'a> {
                     JitError::InvalidLir(format!("Unknown else target: {:?}", else_label))
                 })?;
 
-                // Check truthiness: (value >> 48) != 0x7FF9
-                let shifted = builder.ins().ushr_imm(cond_val, 48);
-                let falsy_tag = builder.ins().iconst(I64, 0x7FF9_i64);
-                let is_truthy = builder.ins().icmp(IntCC::NotEqual, shifted, falsy_tag);
-
+                // Truthiness: tag != TAG_NIL (2) AND tag != TAG_FALSE (4)
+                // Equivalently: is_truthy if tag != NIL and tag != FALSE.
+                // Simple check: tag == TAG_FALSE || tag == TAG_NIL → falsy
+                let tag_nil = builder.ins().iconst(I64, TAG_NIL as i64);
+                let tag_false = builder.ins().iconst(I64, TAG_FALSE as i64);
+                let is_nil = builder.ins().icmp(IntCC::Equal, cond_tag, tag_nil);
+                let is_false = builder.ins().icmp(IntCC::Equal, cond_tag, tag_false);
+                let is_falsy = builder.ins().bor(is_nil, is_false);
+                // brif on is_falsy goes to else, otherwise then
                 builder
                     .ins()
-                    .brif(is_truthy, *then_block, &[], *else_block, &[]);
+                    .brif(is_falsy, *else_block, &[], *then_block, &[]);
             }
 
             Terminator::Yield {
                 value,
                 resume_label: _,
             } => {
-                let yielded_val = builder.use_var(var(value.0));
+                let (yt, yp) = self.use_var_pair(builder, value.0);
                 let vm = self
                     .vm_ptr
                     .ok_or_else(|| JitError::InvalidLir("Yield without vm pointer".to_string()))?;
-                let self_bits = self
-                    .self_bits
-                    .ok_or_else(|| JitError::InvalidLir("Yield without self_bits".to_string()))?;
+                let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
+                    JitError::InvalidLir("Yield without self_tag_payload".to_string())
+                })?;
 
                 let yield_index = self.yield_point_index;
                 self.yield_point_index += 1;
 
-                // Read the stack_regs for this yield point from the LIR
                 let stack_regs = self
                     .lir
                     .yield_points
@@ -1038,22 +1073,28 @@ impl<'a> FunctionTranslator<'a> {
                     .map(|yp| yp.stack_regs.as_slice())
                     .unwrap_or(&[]);
 
-                // Spill locals + operand stack to match interpreter layout:
-                // [param_0, ..., param_{arity-1}, local_0, ..., local_n, operand_0, ..., operand_m]
                 let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
-
                 let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
 
-                // Call elle_jit_yield(yielded, spilled_ptr, yield_index, vm, self_bits)
+                // Call elle_jit_yield(ytag, ypay, spilled_ptr, yield_index, vm, ctag, cpay)
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.jit_yield, builder.func);
                 let call = builder.ins().call(
                     func_ref,
-                    &[yielded_val, spilled_ptr, yield_idx_val, vm, self_bits],
+                    &[
+                        yt,
+                        yp,
+                        spilled_ptr,
+                        yield_idx_val,
+                        vm,
+                        self_tag,
+                        self_payload,
+                    ],
                 );
-                let result = builder.inst_results(call)[0];
-                builder.ins().return_(&[result]);
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                builder.ins().return_(&[rt, rp]);
             }
 
             Terminator::Unreachable => {
@@ -1065,12 +1106,10 @@ impl<'a> FunctionTranslator<'a> {
         Ok(())
     }
 
-    /// Allocate the shared spill slot sized to the maximum spill requirement
-    /// across all yield points and call sites. Called once during function setup.
+    /// Allocate the shared spill slot sized to the maximum spill requirement.
     pub(crate) fn allocate_shared_spill_slot(&mut self, builder: &mut FunctionBuilder) {
         let num_locals = self.lir.num_locals as usize;
 
-        // Compute max operand stack size across all yield points and call sites
         let max_yield_operands = self
             .lir
             .yield_points
@@ -1089,9 +1128,10 @@ impl<'a> FunctionTranslator<'a> {
         let max_total = num_locals + max_operands;
 
         if max_total > 0 {
+            // Each Value is 16 bytes
             let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
                 cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                (max_total * 8) as u32,
+                (max_total * 16) as u32,
                 0,
             ));
             self.shared_spill_slot = Some(slot);
@@ -1100,15 +1140,8 @@ impl<'a> FunctionTranslator<'a> {
 
     /// Spill local variables and operand stack registers to the shared stack slot.
     ///
-    /// The interpreter's stack layout at yield/call is:
-    /// `[param_0, ..., param_{arity-1}, local_0, ..., local_n, operand_0, ..., operand_m]`
-    ///
-    /// The JIT stores params in arg variables and locals in local variables
-    /// (Cranelift variables, i.e., CPU registers). This method spills them
-    /// all into a contiguous buffer matching the interpreter's layout.
-    ///
-    /// Returns a Cranelift value pointing to the spilled buffer, or a null
-    /// pointer constant if there's nothing to spill.
+    /// Returns a Cranelift value pointing to the spilled buffer (*const Value),
+    /// or a null pointer constant if there's nothing to spill.
     pub(crate) fn spill_locals_and_operands(
         &mut self,
         builder: &mut FunctionBuilder,
@@ -1127,29 +1160,72 @@ impl<'a> FunctionTranslator<'a> {
             .shared_spill_slot
             .expect("JIT bug: spill_locals_and_operands called but no shared spill slot allocated");
 
-        let mut offset: i32 = 0;
+        let mut slot_idx: i32 = 0;
 
         // 1. Spill parameters (from arg variables)
         for i in 0..arity as u32 {
-            let val = builder.use_var(var(self.arg_var_base + i));
-            builder.ins().stack_store(val, slot, offset * 8);
-            offset += 1;
+            let base = self.arg_var_base + i;
+            let (tag, payload) = self.use_var_pair(builder, base);
+            let tag_offset = slot_idx * 16;
+            let payload_offset = slot_idx * 16 + 8;
+            builder.ins().stack_store(tag, slot, tag_offset);
+            builder.ins().stack_store(payload, slot, payload_offset);
+            slot_idx += 1;
         }
 
         // 2. Spill locally-defined variables
         for i in 0..num_locally_defined as u32 {
-            let val = builder.use_var(var(self.local_var_base + i));
-            builder.ins().stack_store(val, slot, offset * 8);
-            offset += 1;
+            let base = self.local_var_base + i;
+            let (tag, payload) = self.use_var_pair(builder, base);
+            let tag_offset = slot_idx * 16;
+            let payload_offset = slot_idx * 16 + 8;
+            builder.ins().stack_store(tag, slot, tag_offset);
+            builder.ins().stack_store(payload, slot, payload_offset);
+            slot_idx += 1;
         }
 
         // 3. Spill operand stack registers
         for reg in stack_regs {
-            let val = builder.use_var(var(reg.0));
-            builder.ins().stack_store(val, slot, offset * 8);
-            offset += 1;
+            let (tag, payload) = self.use_var_pair(builder, reg.0);
+            let tag_offset = slot_idx * 16;
+            let payload_offset = slot_idx * 16 + 8;
+            builder.ins().stack_store(tag, slot, tag_offset);
+            builder.ins().stack_store(payload, slot, payload_offset);
+            slot_idx += 1;
         }
 
         Ok(builder.ins().stack_addr(I64, slot, 0))
+    }
+
+    /// Helper: emit a tail call with args spilled to stack.
+    fn emit_tail_call_with_args(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        ft: cranelift_codegen::ir::Value,
+        fp: cranelift_codegen::ir::Value,
+        args: &[Reg],
+        vm: cranelift_codegen::ir::Value,
+    ) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
+        if args.is_empty() {
+            let null_ptr = builder.ins().iconst(I64, 0);
+            let nargs = builder.ins().iconst(I64, 0);
+            self.call_helper_tail_call(builder, ft, fp, null_ptr, nargs, vm)
+        } else {
+            let slot = builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                (args.len() * 16) as u32,
+                0,
+            ));
+            for (i, arg_reg) in args.iter().enumerate() {
+                let (at, ap) = self.use_var_pair(builder, arg_reg.0);
+                let tag_offset = (i * 16) as i32;
+                let payload_offset = (i * 16 + 8) as i32;
+                builder.ins().stack_store(at, slot, tag_offset);
+                builder.ins().stack_store(ap, slot, payload_offset);
+            }
+            let args_addr = builder.ins().stack_addr(I64, slot, 0);
+            let nargs = builder.ins().iconst(I64, args.len() as i64);
+            self.call_helper_tail_call(builder, ft, fp, args_addr, nargs, vm)
+        }
     }
 }

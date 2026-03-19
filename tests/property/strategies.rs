@@ -3,7 +3,6 @@
 #![allow(dead_code)]
 
 use elle::ffi::types::{StructDesc, TypeDesc};
-use elle::value::repr::{INT_MAX, INT_MIN};
 use elle::Value;
 use proptest::prelude::*;
 
@@ -20,7 +19,7 @@ pub fn arb_immediate() -> impl Strategy<Value = Value> {
         1 => Just(Value::TRUE),
         1 => Just(Value::FALSE),
         // Integers (weighted high — large input space)
-        10 => (INT_MIN..=INT_MAX).prop_map(Value::int),
+        10 => (i64::MIN..=i64::MAX).prop_map(Value::int),
         // Floats (weighted high — large input space)
         10 => prop::num::f64::NORMAL.prop_map(Value::float),
         // Float edge cases
@@ -54,7 +53,7 @@ fn arb_value_depth(depth: u32) -> BoxedStrategy<Value> {
             2 => Just(Value::EMPTY_LIST),
             1 => Just(Value::TRUE),
             1 => Just(Value::FALSE),
-            10 => (INT_MIN..=INT_MAX).prop_map(Value::int),
+        10 => (i64::MIN..=i64::MAX).prop_map(Value::int),
             10 => prop::num::f64::NORMAL.prop_map(Value::float),
             1 => Just(Value::float(f64::INFINITY)),
             1 => Just(Value::float(f64::NEG_INFINITY)),
@@ -143,8 +142,8 @@ pub fn arb_value_for_type(desc: &TypeDesc) -> BoxedStrategy<Value> {
             .prop_map(Value::int)
             .boxed(),
         TypeDesc::U32 => (0i64..=u32::MAX as i64).prop_map(Value::int).boxed(),
-        TypeDesc::I64 => (INT_MIN..=INT_MAX).prop_map(Value::int).boxed(),
-        TypeDesc::U64 => (0i64..=INT_MAX).prop_map(Value::int).boxed(),
+        TypeDesc::I64 => (i64::MIN..=i64::MAX).prop_map(Value::int).boxed(),
+        TypeDesc::U64 => (0i64..=i64::MAX).prop_map(Value::int).boxed(),
         TypeDesc::Float => prop::num::f64::NORMAL.prop_map(Value::float).boxed(),
         TypeDesc::Double => prop::num::f64::NORMAL.prop_map(Value::float).boxed(),
         TypeDesc::Ptr => prop_oneof![

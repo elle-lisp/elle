@@ -56,12 +56,8 @@ fn test_external_key_roundtrip() {
     let ext = Value::external("test-type", 42u32);
     let key = TableKey::from_value(&ext).unwrap();
     let roundtripped = key.to_value();
-    // Must be the exact same Value (bit-identical pointer)
-    assert_eq!(
-        roundtripped.to_bits(),
-        ext.to_bits(),
-        "to_value must return the original Value"
-    );
+    // Must be the exact same Value (same tag and pointer payload)
+    assert_eq!(roundtripped, ext, "to_value must return the original Value");
 }
 
 #[test]

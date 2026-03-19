@@ -47,7 +47,9 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::Float(42.5));
+    // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
+    // Use another non-drop type instead.
+    heap.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
     heap.alloc(HeapObject::LBox {
         cell: std::cell::RefCell::new(Value::NIL),
         is_local: false,
@@ -68,7 +70,6 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     assert!(!needs_drop(HeapTag::NativeFn));
     assert!(!needs_drop(HeapTag::LibHandle));
     assert!(!needs_drop(HeapTag::ManagedPointer));
-    assert!(!needs_drop(HeapTag::Binding));
     assert!(!needs_drop(HeapTag::Parameter));
 
     assert!(needs_drop(HeapTag::LString));

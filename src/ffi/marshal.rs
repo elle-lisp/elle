@@ -400,6 +400,38 @@ mod tests {
     }
 
     #[test]
+    fn test_u64_roundtrip_large_value() {
+        // A u64 value above i64::MAX must survive write → read without truncation.
+        // This is the core invariant of the u64 bit-reinterpret convention.
+        let large: u64 = u64::MAX - 1; // 0xFFFFFFFFFFFFFFFE
+        let buf = AlignedBuffer::new(8, 8);
+
+        // Write: Elle int holding the bit pattern
+        let val = Value::int(large as i64);
+        write_value_to_buffer(buf.as_mut_ptr(), &val, &TypeDesc::U64).unwrap();
+
+        // Read: should recover the same bit pattern
+        let result = read_value_from_buffer(buf.as_mut_ptr(), &TypeDesc::U64).unwrap();
+        let recovered = result.as_int().unwrap() as u64;
+        assert_eq!(recovered, large);
+    }
+
+    #[test]
+    fn test_u64_roundtrip_boundary() {
+        // i64::MAX + 1 is the first value that would have been truncated by the old
+        // 48-bit NaN-boxed Value. Verify it survives the new 64-bit representation.
+        let boundary: u64 = i64::MAX as u64 + 1; // 0x8000000000000000
+        let buf = AlignedBuffer::new(8, 8);
+
+        let val = Value::int(boundary as i64);
+        write_value_to_buffer(buf.as_mut_ptr(), &val, &TypeDesc::U64).unwrap();
+
+        let result = read_value_from_buffer(buf.as_mut_ptr(), &TypeDesc::U64).unwrap();
+        let recovered = result.as_int().unwrap() as u64;
+        assert_eq!(recovered, boundary);
+    }
+
+    #[test]
     fn test_read_write_nested_struct_roundtrip() {
         let inner_sd = StructDesc {
             fields: vec![TypeDesc::I8, TypeDesc::I32],

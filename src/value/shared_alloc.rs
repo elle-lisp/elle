@@ -40,6 +40,7 @@ impl SharedAllocator {
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
+        let value_tag = obj.value_tag();
         let drop = needs_drop(obj.tag());
         let ptr = self.slab.alloc(obj);
         self.allocs.push(ptr);
@@ -47,7 +48,7 @@ impl SharedAllocator {
             self.dtors.push(ptr);
         }
         self.alloc_count += 1;
-        Value::from_heap_ptr(ptr as *const ())
+        Value::from_heap_ptr(ptr as *const (), value_tag)
     }
 
     /// Run destructors, return all slots to the slab free list, and reset.
@@ -221,7 +222,9 @@ mod tests {
         });
         assert_eq!(sa.len(), 2);
 
-        sa.alloc(HeapObject::Float(42.5));
+        // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
+        // Use another non-drop type instead.
+        sa.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
         assert_eq!(sa.len(), 3);
     }
 }

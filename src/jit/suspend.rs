@@ -1,7 +1,7 @@
 //! Yield side-exit helpers for JIT-compiled code
 
 use super::dispatch::YIELD_SENTINEL;
-use crate::value::fiber::{SIG_ERROR, SIG_HALT, SIG_YIELD};
+use crate::jit::value::JitValue;
 use crate::value::{BytecodeFrame, SuspendedFrame, Value};
 
 // =============================================================================
@@ -11,26 +11,42 @@ use crate::value::{BytecodeFrame, SuspendedFrame, Value};
 /// JIT yield side-exit: build a SuspendedFrame and set fiber.signal.
 ///
 /// Called from JIT code when a Yield terminator is reached.
-/// All parameters are u64 to match the Cranelift I64 calling convention.
+///
+/// Parameters:
+///   yielded_tag/yielded_payload: the value being yielded
+///   spilled_values: *const Value (16 bytes each), or null if nothing to spill
+///   yield_index: index into JitCode.yield_points
+///   vm: *mut () (raw VM pointer)
+///   closure_tag/closure_payload: the closure being executed (for self-tail-call detection)
+///
+/// Returns YIELD_SENTINEL.
 ///
 /// # Safety
-/// `spilled_values` must point to `num_spilled` contiguous u64 values
+/// `spilled_values` must point to `num_spilled` contiguous `Value`s
 /// (or be null when num_spilled is 0).
 #[no_mangle]
 pub extern "C" fn elle_jit_yield(
-    yielded_value: u64,
-    spilled_values: u64, // *const u64 as u64
+    yielded_tag: u64,
+    yielded_payload: u64,
+    spilled_values: *const Value,
     yield_index: u64,
     vm: u64, // *mut () as u64
-    closure_bits: u64,
-) -> u64 {
+    closure_tag: u64,
+    closure_payload: u64,
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let yielded = unsafe { Value::from_bits(yielded_value) };
-    let closure_val = unsafe { Value::from_bits(closure_bits) };
+    let yielded = Value {
+        tag: yielded_tag,
+        payload: yielded_payload,
+    };
+    let closure_val = Value {
+        tag: closure_tag,
+        payload: closure_payload,
+    };
 
     let closure = closure_val
         .as_closure()
-        .expect("VM bug: elle_jit_yield called with non-closure self_bits");
+        .expect("VM bug: elle_jit_yield called with non-closure self");
 
     // Look up yield point metadata from JitCode
     let bytecode_ptr = closure.template.bytecode.as_ptr();
@@ -45,13 +61,10 @@ pub extern "C" fn elle_jit_yield(
 
     // Build the stack from spilled values.
     // The JIT spills in interpreter layout: [locals..., operands...].
-    // The SuspendedFrame.stack must match what the interpreter would have
-    // captured via `self.fiber.stack.drain(..).collect()`.
-    let spilled_ptr = spilled_values as *const u64;
     let mut stack = Vec::with_capacity(total_spilled);
     for i in 0..total_spilled {
-        let bits = unsafe { *spilled_ptr.add(i) };
-        stack.push(unsafe { Value::from_bits(bits) });
+        let v = unsafe { *spilled_values.add(i) };
+        stack.push(v);
     }
 
     let frame = SuspendedFrame::Bytecode(BytecodeFrame {
@@ -66,7 +79,7 @@ pub extern "C" fn elle_jit_yield(
         push_resume_value: true,
     });
 
-    vm.fiber.signal = Some((SIG_YIELD, yielded));
+    vm.fiber.signal = Some((crate::value::fiber::SIG_YIELD, yielded));
     vm.fiber.suspended = Some(vec![frame]);
 
     YIELD_SENTINEL
@@ -78,24 +91,30 @@ pub extern "C" fn elle_jit_yield(
 /// signal check). Builds a caller SuspendedFrame and appends it to
 /// the existing suspended frame chain.
 ///
-/// All parameters are u64 to match the Cranelift I64 calling convention.
+/// Parameters:
+///   spilled_values: *const Value (16 bytes each)
+///   call_site_index: index into JitCode.call_sites
+///   vm: *mut () as u64
+///   closure_tag/closure_payload: the closure being executed
 ///
-/// Looks up call site metadata from `JitCode.call_sites` using
-/// `call_site_index`, analogous to how `elle_jit_yield` uses
-/// `YieldPointMeta`.
+/// Returns YIELD_SENTINEL.
 ///
 /// # Safety
-/// `spilled_values` must point to `num_spilled` contiguous u64 values
+/// `spilled_values` must point to `num_spilled` contiguous `Value`s
 /// (or be null when num_spilled is 0).
 #[no_mangle]
 pub extern "C" fn elle_jit_yield_through_call(
-    spilled_values: u64, // *const u64 as u64
+    spilled_values: *const Value,
     call_site_index: u64,
     vm: u64, // *mut () as u64
-    closure_bits: u64,
-) -> u64 {
+    closure_tag: u64,
+    closure_payload: u64,
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let closure_val = unsafe { Value::from_bits(closure_bits) };
+    let closure_val = Value {
+        tag: closure_tag,
+        payload: closure_payload,
+    };
 
     let closure = closure_val
         .as_closure()
@@ -109,12 +128,11 @@ pub extern "C" fn elle_jit_yield_through_call(
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
 
-    let spilled_ptr = spilled_values as *const u64;
     let n = call_meta.num_spilled as usize;
     let mut stack = Vec::with_capacity(n);
     for i in 0..n {
-        let bits = unsafe { *spilled_ptr.add(i) };
-        stack.push(unsafe { Value::from_bits(bits) });
+        let v = unsafe { *spilled_values.add(i) };
+        stack.push(v);
     }
 
     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
@@ -130,9 +148,6 @@ pub extern "C" fn elle_jit_yield_through_call(
     });
 
     // Append caller frame to the existing suspended chain.
-    // fiber.suspended may be None when the callee is a primitive — primitives
-    // only set fiber.signal, not fiber.suspended. Use unwrap_or_default() to
-    // start a new chain in that case, mirroring the interpreter path in call.rs.
     let mut frames = vm.fiber.suspended.take().unwrap_or_default();
     frames.push(caller_frame);
     vm.fiber.suspended = Some(frames);
@@ -141,18 +156,18 @@ pub extern "C" fn elle_jit_yield_through_call(
 }
 
 /// Check if any signal (error, halt, or yield) is pending on the VM.
-/// Returns TRUE bits if set, FALSE bits otherwise.
+/// Returns TRUE if set, FALSE otherwise.
 ///
 /// This extends `elle_jit_has_exception` to also detect SIG_YIELD.
 /// Used after Call instructions in yielding functions.
 #[no_mangle]
-pub extern "C" fn elle_jit_has_signal(vm: u64) -> u64 {
+pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
+    use crate::value::fiber::{SIG_ERROR, SIG_HALT, SIG_YIELD};
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    Value::bool(matches!(
+    JitValue::bool_val(matches!(
         vm.fiber.signal,
         Some((SIG_ERROR | SIG_HALT | SIG_YIELD, _))
     ))
-    .to_bits()
 }
 
 #[cfg(test)]
@@ -163,16 +178,6 @@ mod tests {
 
     // =========================================================================
     // JIT yield: SuspendedFrame layout invariant
-    //
-    // The JIT spills registers in interpreter stack order:
-    //   [param_0, ..., param_{n-1}, local_0, ..., local_m, operand_0, ..., operand_k]
-    //
-    // elle_jit_yield reads this buffer and builds a SuspendedFrame whose
-    // `stack` field must match what the interpreter's handle_yield would
-    // produce by draining its operand stack.
-    //
-    // These tests verify that coupling by calling elle_jit_yield with a
-    // known spilled buffer and checking the resulting SuspendedFrame.
     // =========================================================================
 
     /// Set up a VM + Closure + JitCode for yield tests.
@@ -219,7 +224,6 @@ mod tests {
             squelch_mask: 0,
         };
 
-        // bytecode_ptr must be captured before Value::closure moves the Closure
         let bytecode_ptr = template.bytecode.as_ptr();
         let closure_val = Value::closure(closure);
 
@@ -248,7 +252,7 @@ mod tests {
             num_locals: 3,  // params + locally-defined = 2 + 1
         };
 
-        let bytecode = vec![0xAA; 10]; // dummy bytecode
+        let bytecode = vec![0xAA; 10];
         let constants = vec![Value::int(999)];
         let env = vec![Value::int(777)];
 
@@ -260,33 +264,33 @@ mod tests {
         );
 
         // Spilled buffer: [param0, param1, local0, op0, op1, op2]
-        let spilled: Vec<u64> = vec![
-            Value::int(10).to_bits(), // param 0
-            Value::int(20).to_bits(), // param 1
-            Value::int(30).to_bits(), // local 0
-            Value::int(40).to_bits(), // operand 0
-            Value::int(50).to_bits(), // operand 1
-            Value::int(60).to_bits(), // operand 2
+        let spilled: Vec<Value> = vec![
+            Value::int(10),
+            Value::int(20),
+            Value::int(30),
+            Value::int(40),
+            Value::int(50),
+            Value::int(60),
         ];
 
         let yielded = Value::int(100);
 
         let result = elle_jit_yield(
-            yielded.to_bits(),
-            spilled.as_ptr() as u64,
-            0, // yield_index
+            yielded.tag,
+            yielded.payload,
+            spilled.as_ptr(),
+            0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         assert_eq!(result, YIELD_SENTINEL);
 
-        // Check signal
         let (sig, val) = vm.fiber.signal.unwrap();
         assert_eq!(sig, SIG_YIELD);
         assert_eq!(val.as_int(), Some(100));
 
-        // Check suspended frame
         let frames = vm.fiber.suspended.as_ref().unwrap();
         assert_eq!(frames.len(), 1);
         let frame = as_bytecode_frame(&frames[0]);
@@ -296,20 +300,17 @@ mod tests {
         assert_eq!(&*frame.constants, &constants);
         assert_eq!(&*frame.env, &env);
 
-        // Stack must contain all spilled values in order:
-        // [param0, param1, local0, op0, op1, op2]
         assert_eq!(frame.stack.len(), 6);
-        assert_eq!(frame.stack[0].as_int(), Some(10)); // param 0
-        assert_eq!(frame.stack[1].as_int(), Some(20)); // param 1
-        assert_eq!(frame.stack[2].as_int(), Some(30)); // local 0
-        assert_eq!(frame.stack[3].as_int(), Some(40)); // operand 0
-        assert_eq!(frame.stack[4].as_int(), Some(50)); // operand 1
-        assert_eq!(frame.stack[5].as_int(), Some(60)); // operand 2
+        assert_eq!(frame.stack[0].as_int(), Some(10));
+        assert_eq!(frame.stack[1].as_int(), Some(20));
+        assert_eq!(frame.stack[2].as_int(), Some(30));
+        assert_eq!(frame.stack[3].as_int(), Some(40));
+        assert_eq!(frame.stack[4].as_int(), Some(50));
+        assert_eq!(frame.stack[5].as_int(), Some(60));
     }
 
     #[test]
     fn test_jit_yield_zero_locals_zero_operands() {
-        // Edge case: nothing to spill
         let yield_meta = YieldPointMeta {
             resume_ip: 0,
             num_spilled: 0,
@@ -318,15 +319,17 @@ mod tests {
 
         let (mut vm, closure_val) = setup_yield_test(vec![], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<u64> = vec![];
+        let spilled: Vec<Value> = vec![];
         let yielded = Value::NIL;
 
         let result = elle_jit_yield(
-            yielded.to_bits(),
-            spilled.as_ptr() as u64,
+            yielded.tag,
+            yielded.payload,
+            spilled.as_ptr(),
             0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         assert_eq!(result, YIELD_SENTINEL);
@@ -339,7 +342,6 @@ mod tests {
 
     #[test]
     fn test_jit_yield_only_operands_no_locals() {
-        // 0 locals, 2 operands
         let yield_meta = YieldPointMeta {
             resume_ip: 10,
             num_spilled: 2,
@@ -348,14 +350,16 @@ mod tests {
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<u64> = vec![Value::int(1).to_bits(), Value::int(2).to_bits()];
+        let spilled: Vec<Value> = vec![Value::int(1), Value::int(2)];
 
         elle_jit_yield(
-            Value::int(0).to_bits(),
-            spilled.as_ptr() as u64,
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
             0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -366,7 +370,6 @@ mod tests {
 
     #[test]
     fn test_jit_yield_only_locals_no_operands() {
-        // 3 locals (params + locally-defined), 0 operands
         let yield_meta = YieldPointMeta {
             resume_ip: 5,
             num_spilled: 0,
@@ -375,18 +378,16 @@ mod tests {
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x02], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<u64> = vec![
-            Value::int(100).to_bits(),
-            Value::int(200).to_bits(),
-            Value::int(300).to_bits(),
-        ];
+        let spilled: Vec<Value> = vec![Value::int(100), Value::int(200), Value::int(300)];
 
         elle_jit_yield(
-            Value::int(0).to_bits(),
-            spilled.as_ptr() as u64,
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
             0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -398,7 +399,6 @@ mod tests {
 
     #[test]
     fn test_jit_yield_large_spill() {
-        // Stress test: 10 locals, 20 operands
         let yield_meta = YieldPointMeta {
             resume_ip: 99,
             num_spilled: 20,
@@ -407,17 +407,16 @@ mod tests {
 
         let (mut vm, closure_val) = setup_yield_test(vec![0xFF], vec![], vec![], vec![yield_meta]);
 
-        let mut spilled: Vec<u64> = Vec::with_capacity(30);
-        for i in 0..30 {
-            spilled.push(Value::int(i).to_bits());
-        }
+        let spilled: Vec<Value> = (0..30).map(Value::int).collect();
 
         elle_jit_yield(
-            Value::int(0).to_bits(),
-            spilled.as_ptr() as u64,
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
             0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -435,7 +434,6 @@ mod tests {
 
     #[test]
     fn test_jit_yield_multiple_yield_points() {
-        // Two yield points with different metadata
         let yield_points = vec![
             YieldPointMeta {
                 resume_ip: 10,
@@ -452,30 +450,30 @@ mod tests {
         let (mut vm, closure_val) =
             setup_yield_test(vec![0x01, 0x02], vec![], vec![], yield_points);
 
-        // Test yield point 1 (index 1): 1 local + 3 operands = 4 values
-        let spilled: Vec<u64> = vec![
-            Value::int(10).to_bits(), // local 0
-            Value::int(20).to_bits(), // operand 0
-            Value::int(30).to_bits(), // operand 1
-            Value::int(40).to_bits(), // operand 2
+        let spilled: Vec<Value> = vec![
+            Value::int(10),
+            Value::int(20),
+            Value::int(30),
+            Value::int(40),
         ];
 
         elle_jit_yield(
-            Value::int(0).to_bits(),
-            spilled.as_ptr() as u64,
-            1, // yield_index = 1
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
+            1,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.ip, 20); // resume_ip from yield point 1
+        assert_eq!(frame.ip, 20);
         assert_eq!(frame.stack.len(), 4);
     }
 
     #[test]
     fn test_jit_yield_preserves_value_types() {
-        // Verify non-integer value types survive the spill/restore cycle
         let yield_meta = YieldPointMeta {
             resume_ip: 0,
             num_spilled: 2,
@@ -484,19 +482,21 @@ mod tests {
 
         let (mut vm, closure_val) = setup_yield_test(vec![0x01], vec![], vec![], vec![yield_meta]);
 
-        let spilled: Vec<u64> = vec![
-            Value::NIL.to_bits(),        // local: nil
-            Value::bool(true).to_bits(), // local: bool
-            Value::float(1.5).to_bits(), // operand: float
-            Value::EMPTY_LIST.to_bits(), // operand: empty list
+        let spilled: Vec<Value> = vec![
+            Value::NIL,
+            Value::bool(true),
+            Value::float(1.5),
+            Value::EMPTY_LIST,
         ];
 
         elle_jit_yield(
-            Value::int(0).to_bits(),
-            spilled.as_ptr() as u64,
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
             0,
             &mut vm as *mut crate::vm::VM as *mut () as u64,
-            closure_val.to_bits(),
+            closure_val.tag,
+            closure_val.payload,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
