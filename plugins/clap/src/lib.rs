@@ -536,6 +536,14 @@ fn prim_clap_parse(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
+    // Prepend a dummy argv[0] (the program name). clap's try_get_matches_from
+    // treats the first element of the iterator as argv[0] (the program name),
+    // not as a flag or positional argument. The Elle API accepts argv without
+    // the program name (matching sys/args semantics), so we add it here.
+    let mut full_argv = Vec::with_capacity(argv_strings.len() + 1);
+    full_argv.push("elle-clap".to_string());
+    full_argv.extend(argv_strings);
+
     // Run the parser.
     // disable_help_flag / disable_version_flag are NOT set to true here —
     // clap generates help and version automatically. However, --help and
@@ -544,7 +552,7 @@ fn prim_clap_parse(args: &[Value]) -> (SignalBits, Value) {
     // try_get_matches_from which returns an error for --help/--version
     // instead of calling exit. The caller gets the formatted help text
     // in the error message.
-    let result = cmd.try_get_matches_from(argv_strings);
+    let result = cmd.try_get_matches_from(full_argv);
 
     let matches = match result {
         Ok(m) => m,
