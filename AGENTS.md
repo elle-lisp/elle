@@ -61,7 +61,7 @@ bytecode. Error messages include file:line:col information.
   `port/path`, `port/seek`, `port/tell`,
   `string/size-of`,
   `with-traits`, `traits`,
-  `sys/args` (returns args after the source file in argv, empty if none),
+  `sys/args` (returns args after the source file in argv as a list, empty list if none),
   `sys/env` (returns env as struct with string keys; optional single-var
   lookup),
   `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
