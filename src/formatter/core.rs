@@ -137,7 +137,6 @@ fn format_value(
             HeapObject::Float(_) => return "#<float>".to_string(),
             HeapObject::Fiber { .. } => return "#<fiber>".to_string(),
             HeapObject::Syntax { syntax: s, .. } => return format!("#<syntax:{}>", s),
-            HeapObject::Binding(_) => return "#<binding>".to_string(),
             HeapObject::FFISignature(_, _) => return "<ffi-signature>".to_string(),
             HeapObject::FFIType(_) => return "<ffi-type>".to_string(),
             HeapObject::LStringMut { .. } => return "@\"...\"".to_string(),

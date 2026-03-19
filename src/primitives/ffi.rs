@@ -539,11 +539,9 @@ mod tests {
         assert_eq!(alloc.0, SIG_OK);
         let buf = alloc.1;
 
-        // INT_MAX == MAX_PTR == (1i64 << 47) - 1. Any non-zero address plus
-        // INT_MAX exceeds MAX_PTR, triggering the range check. The i64
-        // checked_add overflow path is unreachable given current value encoding
-        // (both operands ≤ 2^47-1, sum ≤ 2^48-2, well within i64::MAX).
-        use crate::value::repr::INT_MAX;
+        // (1i64 << 47) - 1 == MAX_PTR. Any non-zero address plus this value
+        // exceeds MAX_PTR, triggering the range check.
+        const INT_MAX: i64 = (1i64 << 47) - 1;
         let result = prim_ptr_add(&[buf, Value::int(INT_MAX)]);
         assert_eq!(result.0, SIG_ERROR);
         // We expect argument-error (range exceeded), not overflow-error
@@ -643,11 +641,9 @@ mod tests {
 
     #[test]
     fn test_ptr_from_int_exceeds_47bit() {
-        // INT_MAX == (1i64 << 47) - 1 == MAX_PTR, so no representable Value::int
-        // can exceed the 47-bit pointer range. The guard in prim_ptr_from_int
-        // is a defensive invariant for future encoding changes. We verify the
-        // boundary value (INT_MAX) is accepted — it equals MAX_PTR exactly.
-        use crate::value::repr::INT_MAX;
+        // (1i64 << 47) - 1 == MAX_PTR. The guard in prim_ptr_from_int is a
+        // defensive invariant. We verify the boundary value is accepted.
+        const INT_MAX: i64 = (1i64 << 47) - 1;
         let result = prim_ptr_from_int(&[Value::int(INT_MAX)]);
         assert_eq!(result.0, SIG_OK);
         assert_eq!(result.1.as_pointer(), Some(INT_MAX as usize));

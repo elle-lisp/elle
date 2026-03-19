@@ -3,6 +3,14 @@
 //! For each binary or comparison op, the JIT emits a diamond-shaped CFG:
 //! tag check → fast path (native int op) / slow path (extern helper) → merge.
 //! This avoids the overhead of a function call for the common integer case.
+//!
+//! With the 16-byte tagged-union Value:
+//!   - TAG_INT = 0, so checking `tag == 0` is a single comparison
+//!   - payload is the raw i64 value — NO masking or sign-extension needed
+//!   - results: tag = 0 (TAG_INT), payload = result i64
+//!   - booleans: tag = TAG_TRUE (3) or TAG_FALSE (4), payload = 0
+//!
+//! Fast and slow paths both produce TWO Cranelift values: (tag, payload).
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
@@ -12,7 +20,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::lir::{BinOp, CmpOp, UnaryOp};
-use crate::value::repr::{PAYLOAD_MASK, TAG_FALSE, TAG_INT, TAG_INT_MASK, TAG_TRUE};
+use crate::value::repr::{TAG_FALSE, TAG_INT, TAG_TRUE};
 
 use super::JitError;
 
@@ -20,17 +28,22 @@ use super::JitError;
 ///
 /// Generates a diamond CFG: tag check → fast block / slow block → merge.
 /// For Div/Rem, an extra block checks for zero divisor.
+///
+/// All paths produce (tag_result, payload_result).
+/// The merge block has TWO phi parameters: (tag, payload).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_int_binop_fast_path(
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     op: BinOp,
-    lhs: cranelift_codegen::ir::Value,
-    rhs: cranelift_codegen::ir::Value,
+    lhs_tag: cranelift_codegen::ir::Value,
+    lhs_payload: cranelift_codegen::ir::Value,
+    rhs_tag: cranelift_codegen::ir::Value,
+    rhs_payload: cranelift_codegen::ir::Value,
     slow_path_func_id: FuncId,
-) -> Result<cranelift_codegen::ir::Value, JitError> {
+) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
     let is_div_rem = matches!(op, BinOp::Div | BinOp::Rem);
 
-    // Create blocks
     let int_check_block = if is_div_rem {
         Some(builder.create_block())
     } else {
@@ -40,16 +53,14 @@ pub(crate) fn emit_int_binop_fast_path(
     let slow_block = builder.create_block();
     let merge_block = builder.create_block();
 
-    // Add phi parameter to merge block
-    builder.append_block_param(merge_block, I64);
+    // Merge block has two phi params: (tag, payload)
+    builder.append_block_param(merge_block, I64); // tag
+    builder.append_block_param(merge_block, I64); // payload
 
-    // Emit tag check in current block
-    let tag_mask = builder.ins().iconst(I64, TAG_INT_MASK as i64);
-    let tag_int = builder.ins().iconst(I64, TAG_INT as i64);
-    let a_tag = builder.ins().band(lhs, tag_mask);
-    let b_tag = builder.ins().band(rhs, tag_mask);
-    let a_is_int = builder.ins().icmp(IntCC::Equal, a_tag, tag_int);
-    let b_is_int = builder.ins().icmp(IntCC::Equal, b_tag, tag_int);
+    // Tag check: both tags == TAG_INT (= 0)
+    let zero = builder.ins().iconst(I64, 0);
+    let a_is_int = builder.ins().icmp(IntCC::Equal, lhs_tag, zero);
+    let b_is_int = builder.ins().icmp(IntCC::Equal, rhs_tag, zero);
     let both_int = builder.ins().band(a_is_int, b_is_int);
 
     if is_div_rem {
@@ -58,13 +69,10 @@ pub(crate) fn emit_int_binop_fast_path(
             .ins()
             .brif(both_int, int_check, &[], slow_block, &[]);
 
-        // Int check block: verify divisor is non-zero
         builder.switch_to_block(int_check);
-        builder.seal_block(int_check); // one predecessor
-        let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-        let b_pay = builder.ins().band(rhs, payload_mask);
-        let zero = builder.ins().iconst(I64, 0);
-        let b_nonzero = builder.ins().icmp(IntCC::NotEqual, b_pay, zero);
+        builder.seal_block(int_check);
+        // Divisor is rhs_payload (raw i64) — check for zero
+        let b_nonzero = builder.ins().icmp(IntCC::NotEqual, rhs_payload, zero);
         builder
             .ins()
             .brif(b_nonzero, fast_block, &[], slow_block, &[]);
@@ -74,278 +82,265 @@ pub(crate) fn emit_int_binop_fast_path(
             .brif(both_int, fast_block, &[], slow_block, &[]);
     }
 
-    // Fast block
+    // Fast block: operate directly on payloads (already i64, no masking)
     builder.switch_to_block(fast_block);
-    builder.seal_block(fast_block); // one predecessor
+    builder.seal_block(fast_block);
 
-    let fast_result = match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul => {
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            let a_pay = builder.ins().band(lhs, payload_mask);
-            let b_pay = builder.ins().band(rhs, payload_mask);
-            let raw = match op {
-                BinOp::Add => builder.ins().iadd(a_pay, b_pay),
-                BinOp::Sub => builder.ins().isub(a_pay, b_pay),
-                BinOp::Mul => builder.ins().imul(a_pay, b_pay),
-                _ => unreachable!(),
-            };
-            let truncated = builder.ins().band(raw, payload_mask);
+    let (fast_tag, fast_payload) = match op {
+        BinOp::Add => {
+            let raw = builder.ins().iadd(lhs_payload, rhs_payload);
             let tag = builder.ins().iconst(I64, TAG_INT as i64);
-            builder.ins().bor(tag, truncated)
+            (tag, raw)
         }
-        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            let a_pay = builder.ins().band(lhs, payload_mask);
-            let b_pay = builder.ins().band(rhs, payload_mask);
-            let raw = match op {
-                BinOp::BitAnd => builder.ins().band(a_pay, b_pay),
-                BinOp::BitOr => builder.ins().bor(a_pay, b_pay),
-                BinOp::BitXor => builder.ins().bxor(a_pay, b_pay),
-                _ => unreachable!(),
-            };
+        BinOp::Sub => {
+            let raw = builder.ins().isub(lhs_payload, rhs_payload);
             let tag = builder.ins().iconst(I64, TAG_INT as i64);
-            builder.ins().bor(tag, raw)
+            (tag, raw)
+        }
+        BinOp::Mul => {
+            let raw = builder.ins().imul(lhs_payload, rhs_payload);
+            let tag = builder.ins().iconst(I64, TAG_INT as i64);
+            (tag, raw)
+        }
+        BinOp::BitAnd => {
+            let raw = builder.ins().band(lhs_payload, rhs_payload);
+            let tag = builder.ins().iconst(I64, TAG_INT as i64);
+            (tag, raw)
+        }
+        BinOp::BitOr => {
+            let raw = builder.ins().bor(lhs_payload, rhs_payload);
+            let tag = builder.ins().iconst(I64, TAG_INT as i64);
+            (tag, raw)
+        }
+        BinOp::BitXor => {
+            let raw = builder.ins().bxor(lhs_payload, rhs_payload);
+            let tag = builder.ins().iconst(I64, TAG_INT as i64);
+            (tag, raw)
         }
         BinOp::Shl => {
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            // Sign-extend value
-            let a_raw = builder.ins().band(lhs, payload_mask);
-            let sixteen = builder.ins().iconst(I64, 16);
-            let a_shifted = builder.ins().ishl(a_raw, sixteen);
-            let a_signed = builder.ins().sshr(a_shifted, sixteen);
-            // Shift amount
-            let b_pay = builder.ins().band(rhs, payload_mask);
-            let raw = builder.ins().ishl(a_signed, b_pay);
-            let truncated = builder.ins().band(raw, payload_mask);
+            let raw = builder.ins().ishl(lhs_payload, rhs_payload);
             let tag = builder.ins().iconst(I64, TAG_INT as i64);
-            builder.ins().bor(tag, truncated)
+            (tag, raw)
         }
         BinOp::Shr => {
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            // Sign-extend value
-            let a_raw = builder.ins().band(lhs, payload_mask);
-            let sixteen = builder.ins().iconst(I64, 16);
-            let a_shifted = builder.ins().ishl(a_raw, sixteen);
-            let a_signed = builder.ins().sshr(a_shifted, sixteen);
-            // Shift amount
-            let b_pay = builder.ins().band(rhs, payload_mask);
-            let raw = builder.ins().sshr(a_signed, b_pay);
-            let truncated = builder.ins().band(raw, payload_mask);
+            let raw = builder.ins().sshr(lhs_payload, rhs_payload);
             let tag = builder.ins().iconst(I64, TAG_INT as i64);
-            builder.ins().bor(tag, truncated)
+            (tag, raw)
         }
-        BinOp::Div | BinOp::Rem => {
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            // Sign-extend both for signed division
-            let a_raw = builder.ins().band(lhs, payload_mask);
-            let sixteen = builder.ins().iconst(I64, 16);
-            let a_shifted = builder.ins().ishl(a_raw, sixteen);
-            let a_signed = builder.ins().sshr(a_shifted, sixteen);
-            // Re-extract rhs payload (can't use value from different block)
-            let b_raw = builder.ins().band(rhs, payload_mask);
-            let b_shifted = builder.ins().ishl(b_raw, sixteen);
-            let b_signed = builder.ins().sshr(b_shifted, sixteen);
-            let raw = match op {
-                BinOp::Div => builder.ins().sdiv(a_signed, b_signed),
-                BinOp::Rem => builder.ins().srem(a_signed, b_signed),
-                _ => unreachable!(),
-            };
-            let truncated = builder.ins().band(raw, payload_mask);
+        BinOp::Div => {
+            let raw = builder.ins().sdiv(lhs_payload, rhs_payload);
             let tag = builder.ins().iconst(I64, TAG_INT as i64);
-            builder.ins().bor(tag, truncated)
+            (tag, raw)
+        }
+        BinOp::Rem => {
+            let raw = builder.ins().srem(lhs_payload, rhs_payload);
+            let tag = builder.ins().iconst(I64, TAG_INT as i64);
+            (tag, raw)
         }
     };
-    builder.ins().jump(merge_block, &[fast_result]);
+    builder.ins().jump(merge_block, &[fast_tag, fast_payload]);
 
-    // Slow block
+    // Slow block: call runtime helper
     builder.switch_to_block(slow_block);
-    // Seal slow_block: for div/rem it has two predecessors (tag check + zero check),
-    // for others it has one predecessor. Both are emitted by this point.
     builder.seal_block(slow_block);
 
     let func_ref = module.declare_func_in_func(slow_path_func_id, builder.func);
-    let call = builder.ins().call(func_ref, &[lhs, rhs]);
-    let slow_result = builder.inst_results(call)[0];
-    builder.ins().jump(merge_block, &[slow_result]);
+    let call = builder
+        .ins()
+        .call(func_ref, &[lhs_tag, lhs_payload, rhs_tag, rhs_payload]);
+    let slow_tag = builder.inst_results(call)[0];
+    let slow_payload = builder.inst_results(call)[1];
+    builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
 
     // Merge block
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
 
-    Ok(builder.block_params(merge_block)[0])
+    let result_tag = builder.block_params(merge_block)[0];
+    let result_payload = builder.block_params(merge_block)[1];
+    Ok((result_tag, result_payload))
 }
 
 /// Emit inline integer fast path for a comparison operation.
 ///
 /// Generates a diamond CFG: tag check → fast block / slow block → merge.
-/// Eq/Ne use bit equality; ordered comparisons sign-extend payloads.
+/// All paths produce (tag, payload) where tag is TAG_TRUE or TAG_FALSE, payload is 0.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_int_cmpop_fast_path(
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     op: CmpOp,
-    lhs: cranelift_codegen::ir::Value,
-    rhs: cranelift_codegen::ir::Value,
+    lhs_tag: cranelift_codegen::ir::Value,
+    lhs_payload: cranelift_codegen::ir::Value,
+    rhs_tag: cranelift_codegen::ir::Value,
+    rhs_payload: cranelift_codegen::ir::Value,
     slow_path_func_id: FuncId,
-) -> Result<cranelift_codegen::ir::Value, JitError> {
+) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
     let fast_block = builder.create_block();
     let slow_block = builder.create_block();
     let merge_block = builder.create_block();
 
-    // Add phi parameter to merge block
-    builder.append_block_param(merge_block, I64);
+    builder.append_block_param(merge_block, I64); // tag
+    builder.append_block_param(merge_block, I64); // payload
 
-    // Emit tag check in current block
-    let tag_mask = builder.ins().iconst(I64, TAG_INT_MASK as i64);
-    let tag_int = builder.ins().iconst(I64, TAG_INT as i64);
-    let a_tag = builder.ins().band(lhs, tag_mask);
-    let b_tag = builder.ins().band(rhs, tag_mask);
-    let a_is_int = builder.ins().icmp(IntCC::Equal, a_tag, tag_int);
-    let b_is_int = builder.ins().icmp(IntCC::Equal, b_tag, tag_int);
+    // Tag check: both tags == 0 (TAG_INT)
+    let zero = builder.ins().iconst(I64, 0);
+    let a_is_int = builder.ins().icmp(IntCC::Equal, lhs_tag, zero);
+    let b_is_int = builder.ins().icmp(IntCC::Equal, rhs_tag, zero);
     let both_int = builder.ins().band(a_is_int, b_is_int);
     builder
         .ins()
         .brif(both_int, fast_block, &[], slow_block, &[]);
 
-    // Fast block
+    // Fast block: compare payloads directly (already i64)
     builder.switch_to_block(fast_block);
     builder.seal_block(fast_block);
 
     let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
     let tag_false = builder.ins().iconst(I64, TAG_FALSE as i64);
+    let zero_payload = builder.ins().iconst(I64, 0);
 
-    let fast_result = match op {
-        CmpOp::Eq | CmpOp::Ne => {
-            // Bit equality is correct for integers (same TAG_INT prefix)
-            let cc = match op {
-                CmpOp::Eq => IntCC::Equal,
-                CmpOp::Ne => IntCC::NotEqual,
-                _ => unreachable!(),
-            };
-            let cmp = builder.ins().icmp(cc, lhs, rhs);
+    let fast_tag = match op {
+        CmpOp::Eq => {
+            // For integers, tag AND payload must match — since both are TAG_INT,
+            // we only need to compare payloads.
+            let cmp = builder.ins().icmp(IntCC::Equal, lhs_payload, rhs_payload);
             builder.ins().select(cmp, tag_true, tag_false)
         }
-        CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge => {
-            // Sign-extend both payloads for signed comparison
-            let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-            let a_raw = builder.ins().band(lhs, payload_mask);
-            let sixteen = builder.ins().iconst(I64, 16);
-            let a_shifted = builder.ins().ishl(a_raw, sixteen);
-            let a_signed = builder.ins().sshr(a_shifted, sixteen);
-            let b_raw = builder.ins().band(rhs, payload_mask);
-            let b_shifted = builder.ins().ishl(b_raw, sixteen);
-            let b_signed = builder.ins().sshr(b_shifted, sixteen);
-            let cc = match op {
-                CmpOp::Lt => IntCC::SignedLessThan,
-                CmpOp::Le => IntCC::SignedLessThanOrEqual,
-                CmpOp::Gt => IntCC::SignedGreaterThan,
-                CmpOp::Ge => IntCC::SignedGreaterThanOrEqual,
-                _ => unreachable!(),
-            };
-            let cmp = builder.ins().icmp(cc, a_signed, b_signed);
+        CmpOp::Ne => {
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::NotEqual, lhs_payload, rhs_payload);
+            builder.ins().select(cmp, tag_true, tag_false)
+        }
+        CmpOp::Lt => {
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedLessThan, lhs_payload, rhs_payload);
+            builder.ins().select(cmp, tag_true, tag_false)
+        }
+        CmpOp::Le => {
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedLessThanOrEqual, lhs_payload, rhs_payload);
+            builder.ins().select(cmp, tag_true, tag_false)
+        }
+        CmpOp::Gt => {
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThan, lhs_payload, rhs_payload);
+            builder.ins().select(cmp, tag_true, tag_false)
+        }
+        CmpOp::Ge => {
+            let cmp = builder
+                .ins()
+                .icmp(IntCC::SignedGreaterThanOrEqual, lhs_payload, rhs_payload);
             builder.ins().select(cmp, tag_true, tag_false)
         }
     };
-    builder.ins().jump(merge_block, &[fast_result]);
+    builder.ins().jump(merge_block, &[fast_tag, zero_payload]);
 
-    // Slow block
+    // Slow block: call runtime helper
     builder.switch_to_block(slow_block);
     builder.seal_block(slow_block);
 
     let func_ref = module.declare_func_in_func(slow_path_func_id, builder.func);
-    let call = builder.ins().call(func_ref, &[lhs, rhs]);
-    let slow_result = builder.inst_results(call)[0];
-    builder.ins().jump(merge_block, &[slow_result]);
+    let call = builder
+        .ins()
+        .call(func_ref, &[lhs_tag, lhs_payload, rhs_tag, rhs_payload]);
+    let slow_tag = builder.inst_results(call)[0];
+    let slow_payload = builder.inst_results(call)[1];
+    builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
 
-    // Merge block
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
 
-    Ok(builder.block_params(merge_block)[0])
+    let result_tag = builder.block_params(merge_block)[0];
+    let result_payload = builder.block_params(merge_block)[1];
+    Ok((result_tag, result_payload))
 }
 
 /// Emit inline fast path for a unary operation.
 ///
 /// - `Not`: Fully inlined — truthiness check works for all types, no slow path.
-/// - `Neg`: Diamond with single-operand tag check, sign-extend + negate.
-/// - `BitNot`: Diamond with single-operand tag check, XOR payload with PAYLOAD_MASK.
+/// - `Neg`: Diamond with single-operand tag check, negate payload.
+/// - `BitNot`: Diamond with single-operand tag check, bitwise NOT payload.
+///
+/// Returns (tag, payload).
 pub(crate) fn emit_unary_fast_path(
     module: &mut JITModule,
     builder: &mut FunctionBuilder,
     op: UnaryOp,
-    src: cranelift_codegen::ir::Value,
+    src_tag: cranelift_codegen::ir::Value,
+    src_payload: cranelift_codegen::ir::Value,
     slow_path_func_id: FuncId,
-) -> Result<cranelift_codegen::ir::Value, JitError> {
+) -> Result<(cranelift_codegen::ir::Value, cranelift_codegen::ir::Value), JitError> {
     match op {
         UnaryOp::Not => {
             // Fully inline — no diamond, no slow path.
-            // Truthiness: upper 16 bits == 0x7FF9 means falsy (nil or false).
-            let forty_eight = builder.ins().iconst(I64, 48);
-            let shifted = builder.ins().ushr(src, forty_eight);
-            let falsy_tag = builder.ins().iconst(I64, 0x7FF9);
-            let is_falsy = builder.ins().icmp(IntCC::Equal, shifted, falsy_tag);
+            // Truthiness: value is falsy iff tag == TAG_NIL (2) or tag == TAG_FALSE (4).
+            let tag_nil = builder
+                .ins()
+                .iconst(I64, crate::value::repr::TAG_NIL as i64);
+            let tag_false_v = builder.ins().iconst(I64, TAG_FALSE as i64);
+            let is_nil = builder.ins().icmp(IntCC::Equal, src_tag, tag_nil);
+            let is_false = builder.ins().icmp(IntCC::Equal, src_tag, tag_false_v);
+            let is_falsy = builder.ins().bor(is_nil, is_false);
+
             let tag_true = builder.ins().iconst(I64, TAG_TRUE as i64);
             let tag_false = builder.ins().iconst(I64, TAG_FALSE as i64);
-            let result = builder.ins().select(is_falsy, tag_true, tag_false);
-            Ok(result)
+            let zero_payload = builder.ins().iconst(I64, 0);
+            let result_tag = builder.ins().select(is_falsy, tag_true, tag_false);
+            Ok((result_tag, zero_payload))
         }
         UnaryOp::Neg | UnaryOp::BitNot => {
-            // Diamond: single-operand tag check → fast/slow → merge
             let fast_block = builder.create_block();
             let slow_block = builder.create_block();
             let merge_block = builder.create_block();
 
-            builder.append_block_param(merge_block, I64);
+            builder.append_block_param(merge_block, I64); // tag
+            builder.append_block_param(merge_block, I64); // payload
 
-            // Tag check
-            let tag_mask = builder.ins().iconst(I64, TAG_INT_MASK as i64);
-            let tag_int = builder.ins().iconst(I64, TAG_INT as i64);
-            let a_tag = builder.ins().band(src, tag_mask);
-            let is_int = builder.ins().icmp(IntCC::Equal, a_tag, tag_int);
+            // Tag check: src_tag == 0 (TAG_INT)
+            let zero = builder.ins().iconst(I64, 0);
+            let is_int = builder.ins().icmp(IntCC::Equal, src_tag, zero);
             builder.ins().brif(is_int, fast_block, &[], slow_block, &[]);
 
-            // Fast block
             builder.switch_to_block(fast_block);
-            builder.seal_block(fast_block); // one predecessor
+            builder.seal_block(fast_block);
 
-            let fast_result = match op {
+            let (fast_tag, fast_payload) = match op {
                 UnaryOp::Neg => {
-                    // Sign-extend payload, negate, truncate, re-tag
-                    let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-                    let raw = builder.ins().band(src, payload_mask);
-                    let sixteen = builder.ins().iconst(I64, 16);
-                    let shifted = builder.ins().ishl(raw, sixteen);
-                    let signed = builder.ins().sshr(shifted, sixteen);
-                    let negated = builder.ins().ineg(signed);
-                    let truncated = builder.ins().band(negated, payload_mask);
+                    // Negate the payload (raw i64) directly
+                    let negated = builder.ins().ineg(src_payload);
                     let tag = builder.ins().iconst(I64, TAG_INT as i64);
-                    builder.ins().bor(tag, truncated)
+                    (tag, negated)
                 }
                 UnaryOp::BitNot => {
-                    // XOR payload with PAYLOAD_MASK flips all 48 payload bits
-                    let payload_mask = builder.ins().iconst(I64, PAYLOAD_MASK as i64);
-                    let payload = builder.ins().band(src, payload_mask);
-                    let flipped = builder.ins().bxor(payload, payload_mask);
+                    // Bitwise NOT on the i64 payload
+                    let notted = builder.ins().bnot(src_payload);
                     let tag = builder.ins().iconst(I64, TAG_INT as i64);
-                    builder.ins().bor(tag, flipped)
+                    (tag, notted)
                 }
                 UnaryOp::Not => unreachable!(),
             };
-            builder.ins().jump(merge_block, &[fast_result]);
+            builder.ins().jump(merge_block, &[fast_tag, fast_payload]);
 
-            // Slow block
             builder.switch_to_block(slow_block);
-            builder.seal_block(slow_block); // one predecessor
+            builder.seal_block(slow_block);
 
             let func_ref = module.declare_func_in_func(slow_path_func_id, builder.func);
-            let call = builder.ins().call(func_ref, &[src]);
-            let slow_result = builder.inst_results(call)[0];
-            builder.ins().jump(merge_block, &[slow_result]);
+            let call = builder.ins().call(func_ref, &[src_tag, src_payload]);
+            let slow_tag = builder.inst_results(call)[0];
+            let slow_payload = builder.inst_results(call)[1];
+            builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
 
-            // Merge block
             builder.switch_to_block(merge_block);
             builder.seal_block(merge_block);
 
-            Ok(builder.block_params(merge_block)[0])
+            let result_tag = builder.block_params(merge_block)[0];
+            let result_payload = builder.block_params(merge_block)[1];
+            Ok((result_tag, result_payload))
         }
     }
 }

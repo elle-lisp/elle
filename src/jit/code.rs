@@ -5,6 +5,9 @@
 
 use std::sync::Arc;
 
+use crate::jit::value::JitValue;
+use crate::value::Value;
+
 /// Wrapper to make JITModule Send + Sync
 ///
 /// # Safety
@@ -48,7 +51,7 @@ pub struct JitCode {
     /// Closure template Values referenced by MakeClosure instructions.
     /// Kept alive to prevent `Rc<ClosureTemplate>` from being freed.
     #[allow(dead_code)]
-    pub(crate) closure_constants: Vec<crate::value::Value>,
+    pub(crate) closure_constants: Vec<Value>,
 }
 
 // Safety: The function pointer points to immutable code that doesn't
@@ -89,7 +92,7 @@ impl JitCode {
         module: cranelift_jit::JITModule,
         yield_points: Vec<super::dispatch::YieldPointMeta>,
         call_sites: Vec<super::dispatch::CallSiteMeta>,
-        closure_constants: Vec<crate::value::Value>,
+        closure_constants: Vec<Value>,
     ) -> Self {
         JitCode {
             fn_ptr,
@@ -112,19 +115,27 @@ impl JitCode {
     ///   elements as the function expects captures
     /// - `args` must point to a valid array of `Value` with at least `nargs` elements
     /// - `vm` must be a valid pointer to the VM struct
-    /// - `self_bits` is the NaN-boxed bits of the closure being executed (for self-tail-call detection)
+    /// - `self_tag`/`self_payload` are the tag and payload of the closure being
+    ///   executed (for self-tail-call detection)
     #[inline]
     pub unsafe fn call(
         &self,
-        env: *const u64,
-        args: *const u64,
+        env: *const Value,
+        args: *const Value,
         nargs: u32,
         vm: *mut (),
-        self_bits: u64,
-    ) -> u64 {
-        let f: unsafe extern "C" fn(*const u64, *const u64, u32, *mut (), u64) -> u64 =
-            std::mem::transmute(self.fn_ptr);
-        f(env, args, nargs, vm, self_bits)
+        self_tag: u64,
+        self_payload: u64,
+    ) -> JitValue {
+        let f: unsafe extern "C" fn(
+            *const Value,
+            *const Value,
+            u32,
+            *mut (),
+            u64,
+            u64,
+        ) -> JitValue = std::mem::transmute(self.fn_ptr);
+        f(env, args, nargs, vm, self_tag, self_payload)
     }
 }
 

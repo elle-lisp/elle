@@ -1,6 +1,6 @@
 //! Data structure and cell helpers for JIT-compiled code
 
-use crate::value::repr::TAG_NIL;
+use crate::jit::value::JitValue;
 use crate::value::Value;
 
 // =============================================================================
@@ -9,98 +9,123 @@ use crate::value::Value;
 
 /// Allocate a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_cons(car: u64, cdr: u64) -> u64 {
-    let car = unsafe { Value::from_bits(car) };
-    let cdr = unsafe { Value::from_bits(cdr) };
-    Value::cons(car, cdr).to_bits()
+pub extern "C" fn elle_jit_cons(
+    car_tag: u64,
+    car_payload: u64,
+    cdr_tag: u64,
+    cdr_payload: u64,
+) -> JitValue {
+    let car = Value {
+        tag: car_tag,
+        payload: car_payload,
+    };
+    let cdr = Value {
+        tag: cdr_tag,
+        payload: cdr_payload,
+    };
+    JitValue::from_value(Value::cons(car, cdr))
 }
 
 /// Extract car from a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_car(pair_bits: u64) -> u64 {
-    let pair = unsafe { Value::from_bits(pair_bits) };
+pub extern "C" fn elle_jit_car(pair_tag: u64, pair_payload: u64) -> JitValue {
+    let pair = Value {
+        tag: pair_tag,
+        payload: pair_payload,
+    };
     match pair.as_cons() {
-        Some(cons) => cons.first.to_bits(),
-        None => super::runtime::elle_jit_type_error_str("pair"),
+        Some(cons) => JitValue::from_value(cons.first),
+        None => {
+            eprintln!("JIT type error: expected pair");
+            JitValue::nil()
+        }
     }
 }
 
 /// Extract cdr from a cons cell
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr(pair_bits: u64) -> u64 {
-    let pair = unsafe { Value::from_bits(pair_bits) };
+pub extern "C" fn elle_jit_cdr(pair_tag: u64, pair_payload: u64) -> JitValue {
+    let pair = Value {
+        tag: pair_tag,
+        payload: pair_payload,
+    };
     match pair.as_cons() {
-        Some(cons) => cons.rest.to_bits(),
-        None => super::runtime::elle_jit_type_error_str("pair"),
+        Some(cons) => JitValue::from_value(cons.rest),
+        None => {
+            eprintln!("JIT type error: expected pair");
+            JitValue::nil()
+        }
     }
 }
 
 /// Allocate an array from a list of elements
+/// elements: *const Value (16 bytes each)
 #[no_mangle]
-pub extern "C" fn elle_jit_make_array(elements: *const u64, count: u32) -> u64 {
-    let mut vec = Vec::with_capacity(count as usize);
-    for i in 0..count as usize {
-        let bits = unsafe { *elements.add(i) };
-        vec.push(unsafe { Value::from_bits(bits) });
+pub extern "C" fn elle_jit_make_array(elements: *const Value, count: u64) -> JitValue {
+    let count = count as usize;
+    let mut vec = Vec::with_capacity(count);
+    for i in 0..count {
+        let v = unsafe { *elements.add(i) };
+        vec.push(v);
     }
-    Value::array_mut(vec).to_bits()
+    JitValue::from_value(Value::array_mut(vec))
 }
 
 /// Check if value is a pair (cons cell)
 #[no_mangle]
-pub extern "C" fn elle_jit_is_pair(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_cons()).to_bits()
+pub extern "C" fn elle_jit_is_pair(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_cons())
 }
 
 /// Check if value is an immutable array
 #[no_mangle]
-pub extern "C" fn elle_jit_is_array(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_array()).to_bits()
+pub extern "C" fn elle_jit_is_array(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_array())
 }
 
 /// Check if value is a mutable @array
 #[no_mangle]
-pub extern "C" fn elle_jit_is_array_mut(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_array_mut()).to_bits()
+pub extern "C" fn elle_jit_is_array_mut(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_array_mut())
 }
 
 /// Check if value is an immutable struct
 #[no_mangle]
-pub extern "C" fn elle_jit_is_struct(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_struct()).to_bits()
+pub extern "C" fn elle_jit_is_struct(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_struct())
 }
 
 /// Check if value is a mutable @struct
 #[no_mangle]
-pub extern "C" fn elle_jit_is_struct_mut(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_struct_mut()).to_bits()
+pub extern "C" fn elle_jit_is_struct_mut(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_struct_mut())
 }
 
 /// Check if value is an immutable set
 #[no_mangle]
-pub extern "C" fn elle_jit_is_set(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_set()).to_bits()
+pub extern "C" fn elle_jit_is_set(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_set())
 }
 
 /// Check if value is a mutable @set
 #[no_mangle]
-pub extern "C" fn elle_jit_is_set_mut(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
-    Value::bool(val.is_set_mut()).to_bits()
+pub extern "C" fn elle_jit_is_set_mut(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::bool_val(val.is_set_mut())
 }
 
 /// Car for destructuring: returns car if cons, signals error otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_car_destructure(a: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_car_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
+    let val = Value { tag, payload };
     match val.as_cons() {
-        Some(cons) => cons.first.to_bits(),
+        Some(cons) => JitValue::from_value(cons.first),
         None => {
             let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
             vm.fiber.signal = Some((
@@ -110,17 +135,17 @@ pub extern "C" fn elle_jit_car_destructure(a: u64, vm: *mut ()) -> u64 {
                     format!("destructuring: expected list, got {}", val.type_name()),
                 ),
             ));
-            crate::value::repr::TAG_NIL
+            JitValue::nil()
         }
     }
 }
 
 /// Cdr for destructuring: returns cdr if cons, signals error otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr_destructure(a: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_cdr_destructure(tag: u64, payload: u64, vm: *mut ()) -> JitValue {
+    let val = Value { tag, payload };
     match val.as_cons() {
-        Some(cons) => cons.rest.to_bits(),
+        Some(cons) => JitValue::from_value(cons.rest),
         None => {
             let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
             vm.fiber.signal = Some((
@@ -130,21 +155,26 @@ pub extern "C" fn elle_jit_cdr_destructure(a: u64, vm: *mut ()) -> u64 {
                     format!("destructuring: expected list, got {}", val.type_name()),
                 ),
             ));
-            crate::value::repr::TAG_NIL
+            JitValue::nil()
         }
     }
 }
 
 /// Array ref for destructuring: signals error if out of bounds or not an array.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_ref_destructure(a: u64, index: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_array_ref_destructure(
+    tag: u64,
+    payload: u64,
+    index: u64,
+    vm: *mut (),
+) -> JitValue {
+    let val = Value { tag, payload };
     let idx = index as usize;
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
     if let Some(arr) = val.as_array_mut() {
         let borrowed = arr.borrow();
         match borrowed.get(idx).copied() {
-            Some(v) => v.to_bits(),
+            Some(v) => JitValue::from_value(v),
             None => {
                 vm_ref.fiber.signal = Some((
                     crate::value::SIG_ERROR,
@@ -157,12 +187,12 @@ pub extern "C" fn elle_jit_array_ref_destructure(a: u64, index: u64, vm: *mut ()
                         ),
                     ),
                 ));
-                crate::value::repr::TAG_NIL
+                JitValue::nil()
             }
         }
     } else if let Some(elems) = val.as_array() {
         match elems.get(idx).copied() {
-            Some(v) => v.to_bits(),
+            Some(v) => JitValue::from_value(v),
             None => {
                 vm_ref.fiber.signal = Some((
                     crate::value::SIG_ERROR,
@@ -175,7 +205,7 @@ pub extern "C" fn elle_jit_array_ref_destructure(a: u64, index: u64, vm: *mut ()
                         ),
                     ),
                 ));
-                crate::value::repr::TAG_NIL
+                JitValue::nil()
             }
         }
     } else {
@@ -186,15 +216,20 @@ pub extern "C" fn elle_jit_array_ref_destructure(a: u64, index: u64, vm: *mut ()
                 format!("destructuring: expected array, got {}", val.type_name()),
             ),
         ));
-        crate::value::repr::TAG_NIL
+        JitValue::nil()
     }
 }
 
 /// Array slice from index: returns sub-array from index to end, preserving mutability.
 /// Signals error if not an array.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_slice_from(a: u64, index: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_array_slice_from(
+    tag: u64,
+    payload: u64,
+    index: u64,
+    vm: *mut (),
+) -> JitValue {
+    let val = Value { tag, payload };
     let idx = index as usize;
     if let Some(arr) = val.as_array_mut() {
         let borrowed = arr.borrow();
@@ -203,14 +238,14 @@ pub extern "C" fn elle_jit_array_slice_from(a: u64, index: u64, vm: *mut ()) -> 
         } else {
             vec![]
         };
-        Value::array_mut(slice).to_bits()
+        JitValue::from_value(Value::array_mut(slice))
     } else if let Some(elems) = val.as_array() {
         let slice = if idx < elems.len() {
             elems[idx..].to_vec()
         } else {
             vec![]
         };
-        Value::array(slice).to_bits()
+        JitValue::from_value(Value::array(slice))
     } else {
         let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
         vm_ref.fiber.signal = Some((
@@ -220,34 +255,34 @@ pub extern "C" fn elle_jit_array_slice_from(a: u64, index: u64, vm: *mut ()) -> 
                 format!("destructuring: expected array, got {}", val.type_name()),
             ),
         ));
-        crate::value::repr::TAG_NIL
+        JitValue::nil()
     }
 }
 
 /// Car with silent nil: returns car if cons, NIL otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_car_or_nil(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_car_or_nil(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
     match val.as_cons() {
-        Some(cons) => cons.first.to_bits(),
-        None => Value::NIL.to_bits(),
+        Some(cons) => JitValue::from_value(cons.first),
+        None => JitValue::nil(),
     }
 }
 
 /// Cdr with silent empty-list: returns cdr if cons, EMPTY_LIST otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_cdr_or_nil(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_cdr_or_nil(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
     match val.as_cons() {
-        Some(cons) => cons.rest.to_bits(),
-        None => Value::EMPTY_LIST.to_bits(),
+        Some(cons) => JitValue::from_value(cons.rest),
+        None => JitValue::empty_list(),
     }
 }
 
 /// Array length: returns length as int for array or @array, 0 otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_len(a: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_array_len(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
     let len = if let Some(arr) = val.as_array_mut() {
         arr.borrow().len() as i64
     } else if let Some(arr) = val.as_array() {
@@ -255,13 +290,13 @@ pub extern "C" fn elle_jit_array_len(a: u64) -> u64 {
     } else {
         0
     };
-    Value::int(len).to_bits()
+    JitValue::from_value(Value::int(len))
 }
 
 /// Array ref with silent nil: returns element at index, NIL if out of bounds or not array.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_ref_or_nil(a: u64, index: u64) -> u64 {
-    let val = unsafe { Value::from_bits(a) };
+pub extern "C" fn elle_jit_array_ref_or_nil(tag: u64, payload: u64, index: u64) -> JitValue {
+    let val = Value { tag, payload };
     let idx = index as usize;
     let result = if let Some(arr) = val.as_array_mut() {
         arr.borrow().get(idx).copied()
@@ -270,7 +305,7 @@ pub extern "C" fn elle_jit_array_ref_or_nil(a: u64, index: u64) -> u64 {
     } else {
         None
     };
-    result.unwrap_or(Value::NIL).to_bits()
+    JitValue::from_value(result.unwrap_or(Value::NIL))
 }
 
 // =============================================================================
@@ -279,19 +314,23 @@ pub extern "C" fn elle_jit_array_ref_or_nil(a: u64, index: u64) -> u64 {
 
 /// Create a LocalCell wrapping a value
 #[no_mangle]
-pub extern "C" fn elle_jit_make_lbox(value: u64) -> u64 {
-    let val = unsafe { Value::from_bits(value) };
-    Value::local_lbox(val).to_bits()
+pub extern "C" fn elle_jit_make_lbox(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
+    JitValue::from_value(Value::local_lbox(val))
 }
 
 /// Load value from a LocalCell
 #[no_mangle]
-pub extern "C" fn elle_jit_load_lbox(cell_bits: u64) -> u64 {
-    let cell = unsafe { Value::from_bits(cell_bits) };
+pub extern "C" fn elle_jit_load_lbox(cell_tag: u64, cell_payload: u64) -> JitValue {
+    let cell = Value {
+        tag: cell_tag,
+        payload: cell_payload,
+    };
     if let Some(cell_ref) = cell.as_lbox() {
-        cell_ref.borrow().to_bits()
+        JitValue::from_value(*cell_ref.borrow())
     } else {
-        super::runtime::elle_jit_type_error_str("cell")
+        eprintln!("JIT type error: expected cell");
+        JitValue::nil()
     }
 }
 
@@ -300,54 +339,71 @@ pub extern "C" fn elle_jit_load_lbox(cell_bits: u64) -> u64 {
 /// - LocalCell (compiler-created mutable capture): unwrap and return inner value
 /// - Everything else (plain value, user Cell, etc.): return as-is
 #[no_mangle]
-pub extern "C" fn elle_jit_load_capture(val_bits: u64) -> u64 {
-    let val = unsafe { Value::from_bits(val_bits) };
+pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
+    let val = Value { tag, payload };
     if val.is_local_lbox() {
         if let Some(cell_ref) = val.as_lbox() {
-            cell_ref.borrow().to_bits()
+            JitValue::from_value(*cell_ref.borrow())
         } else {
-            val_bits // shouldn't happen, but safe fallback
+            JitValue { tag, payload } // shouldn't happen, but safe fallback
         }
     } else {
-        val_bits
+        JitValue { tag, payload }
     }
 }
 
 /// Store value into a LocalCell
 #[no_mangle]
-pub extern "C" fn elle_jit_store_lbox(cell_bits: u64, value: u64) -> u64 {
-    let cell = unsafe { Value::from_bits(cell_bits) };
-    let val = unsafe { Value::from_bits(value) };
+pub extern "C" fn elle_jit_store_lbox(
+    cell_tag: u64,
+    cell_payload: u64,
+    val_tag: u64,
+    val_payload: u64,
+) -> JitValue {
+    let cell = Value {
+        tag: cell_tag,
+        payload: cell_payload,
+    };
+    let val = Value {
+        tag: val_tag,
+        payload: val_payload,
+    };
     if let Some(cell_ref) = cell.as_lbox() {
         *cell_ref.borrow_mut() = val;
-        TAG_NIL
     } else {
-        super::runtime::elle_jit_type_error_str("cell")
+        eprintln!("JIT type error: expected cell");
     }
+    JitValue::nil()
 }
 
-/// Store to a capture slot, handling cells automatically
+/// Store to a capture slot, handling cells automatically.
 /// If the slot contains a LocalCell, stores into the cell.
 /// Otherwise, stores directly to the slot.
+/// env_ptr: *mut Value (16 bytes each)
 #[no_mangle]
-pub extern "C" fn elle_jit_store_capture(env_ptr: *mut u64, index: u64, value: u64) -> u64 {
+pub extern "C" fn elle_jit_store_capture(
+    env_ptr: *mut Value,
+    index: u64,
+    val_tag: u64,
+    val_payload: u64,
+) -> JitValue {
     let idx = index as usize;
-    let slot_bits = unsafe { *env_ptr.add(idx) };
-    let slot = unsafe { Value::from_bits(slot_bits) };
+    let slot = unsafe { *env_ptr.add(idx) };
+    let new_val = Value {
+        tag: val_tag,
+        payload: val_payload,
+    };
 
     if slot.is_local_lbox() {
-        // Store into the cell
         if let Some(cell_ref) = slot.as_lbox() {
-            let new_val = unsafe { Value::from_bits(value) };
             *cell_ref.borrow_mut() = new_val;
         }
     } else {
-        // Direct store to the slot
         unsafe {
-            *env_ptr.add(idx) = value;
+            *env_ptr.add(idx) = new_val;
         }
     }
-    TAG_NIL
+    JitValue::nil()
 }
 
 #[cfg(test)]
@@ -356,15 +412,12 @@ mod tests {
 
     #[test]
     fn test_cons_car_cdr() {
-        let car = Value::int(1).to_bits();
-        let cdr = Value::int(2).to_bits();
-        let pair = elle_jit_cons(car, cdr);
+        let car = Value::int(1);
+        let cdr = Value::int(2);
+        let pair = elle_jit_cons(car.tag, car.payload, cdr.tag, cdr.payload).to_value();
 
-        let car_result = elle_jit_car(pair);
-        let cdr_result = elle_jit_cdr(pair);
-
-        let car_val = unsafe { Value::from_bits(car_result) };
-        let cdr_val = unsafe { Value::from_bits(cdr_result) };
+        let car_val = elle_jit_car(pair.tag, pair.payload).to_value();
+        let cdr_val = elle_jit_cdr(pair.tag, pair.payload).to_value();
 
         assert_eq!(car_val.as_int(), Some(1));
         assert_eq!(cdr_val.as_int(), Some(2));
@@ -372,26 +425,27 @@ mod tests {
 
     #[test]
     fn test_is_pair() {
-        let pair = elle_jit_cons(Value::int(1).to_bits(), Value::int(2).to_bits());
-        let is_pair = unsafe { Value::from_bits(elle_jit_is_pair(pair)) };
-        assert_eq!(is_pair.as_bool(), Some(true));
+        let car = Value::int(1);
+        let cdr = Value::int(2);
+        let pair = elle_jit_cons(car.tag, car.payload, cdr.tag, cdr.payload).to_value();
 
-        let not_pair = unsafe { Value::from_bits(elle_jit_is_pair(Value::int(42).to_bits())) };
-        assert_eq!(not_pair.as_bool(), Some(false));
+        assert_eq!(
+            elle_jit_is_pair(pair.tag, pair.payload),
+            JitValue::bool_val(true)
+        );
+        assert_eq!(
+            elle_jit_is_pair(Value::int(42).tag, Value::int(42).payload),
+            JitValue::bool_val(false)
+        );
     }
 
     #[test]
     fn test_make_array() {
-        let elements = [
-            Value::int(1).to_bits(),
-            Value::int(2).to_bits(),
-            Value::int(3).to_bits(),
-        ];
-        let vec_bits = elle_jit_make_array(elements.as_ptr(), 3);
-        let vec = unsafe { Value::from_bits(vec_bits) };
+        let elements = [Value::int(1), Value::int(2), Value::int(3)];
+        let vec_val = elle_jit_make_array(elements.as_ptr(), 3).to_value();
 
-        assert!(vec.is_array_mut());
-        let vec_ref = vec.as_array_mut().unwrap();
+        assert!(vec_val.is_array_mut());
+        let vec_ref = vec_val.as_array_mut().unwrap();
         let borrowed = vec_ref.borrow();
         assert_eq!(borrowed.len(), 3);
         assert_eq!(borrowed[0].as_int(), Some(1));
@@ -401,22 +455,17 @@ mod tests {
 
     #[test]
     fn test_cell_operations() {
-        // Make a cell
-        let cell_bits = elle_jit_make_lbox(Value::int(42).to_bits());
-        let cell = unsafe { Value::from_bits(cell_bits) };
+        let v = Value::int(42);
+        let cell = elle_jit_make_lbox(v.tag, v.payload).to_value();
         assert!(cell.is_local_lbox());
 
-        // Load from cell
-        let loaded = elle_jit_load_lbox(cell_bits);
-        let loaded_val = unsafe { Value::from_bits(loaded) };
-        assert_eq!(loaded_val.as_int(), Some(42));
+        let loaded = elle_jit_load_lbox(cell.tag, cell.payload).to_value();
+        assert_eq!(loaded.as_int(), Some(42));
 
-        // Store to cell
-        elle_jit_store_lbox(cell_bits, Value::int(100).to_bits());
+        let new_val = Value::int(100);
+        elle_jit_store_lbox(cell.tag, cell.payload, new_val.tag, new_val.payload);
 
-        // Load again
-        let loaded2 = elle_jit_load_lbox(cell_bits);
-        let loaded_val2 = unsafe { Value::from_bits(loaded2) };
-        assert_eq!(loaded_val2.as_int(), Some(100));
+        let loaded2 = elle_jit_load_lbox(cell.tag, cell.payload).to_value();
+        assert_eq!(loaded2.as_int(), Some(100));
     }
 }

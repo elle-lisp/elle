@@ -7,8 +7,8 @@
 //! function call dispatch in `calls.rs`.
 //! Re-exported here so `compiler.rs` / `vtable.rs` can reference them as `dispatch::*`.
 
+use crate::jit::value::JitValue;
 use crate::value::fiber::SIG_ERROR;
-use crate::value::repr::TAG_NIL;
 use crate::value::{error_val, Value};
 
 // Re-export split modules so compiler.rs / vtable.rs can still use dispatch::elle_jit_*
@@ -19,16 +19,28 @@ pub use super::suspend::*;
 // =============================================================================
 // Array and Collection Mutation Helpers
 // =============================================================================
-/// Push a value onto a mutable @array. Returns new @array or TAG_NIL on error.
+/// Push a value onto a mutable @array. Returns new @array or NIL on error.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_push(array: u64, value: u64, vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_array_push(
+    array_tag: u64,
+    array_payload: u64,
+    val_tag: u64,
+    val_payload: u64,
+    vm: *mut (),
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let array_val = unsafe { Value::from_bits(array) };
-    let value_val = unsafe { Value::from_bits(value) };
+    let array_val = Value {
+        tag: array_tag,
+        payload: array_payload,
+    };
+    let value_val = Value {
+        tag: val_tag,
+        payload: val_payload,
+    };
     if let Some(arr) = array_val.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.push(value_val);
-        Value::array_mut(vec).to_bits()
+        JitValue::from_value(Value::array_mut(vec))
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -40,16 +52,29 @@ pub extern "C" fn elle_jit_array_push(array: u64, value: u64, vm: *mut ()) -> u6
                 ),
             ),
         ));
-        TAG_NIL
+        JitValue::nil()
     }
 }
 
-/// Extend a mutable @array with elements from another array/list. Returns new @array or TAG_NIL on error.
+/// Extend a mutable @array with elements from another array/list.
+/// Returns new @array or NIL on error.
 #[no_mangle]
-pub extern "C" fn elle_jit_array_extend(array: u64, source: u64, vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_array_extend(
+    array_tag: u64,
+    array_payload: u64,
+    source_tag: u64,
+    source_payload: u64,
+    vm: *mut (),
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let array_val = unsafe { Value::from_bits(array) };
-    let source_val = unsafe { Value::from_bits(source) };
+    let array_val = Value {
+        tag: array_tag,
+        payload: array_payload,
+    };
+    let source_val = Value {
+        tag: source_tag,
+        payload: source_payload,
+    };
 
     let source_elems: Vec<Value> = if let Some(arr) = source_val.as_array_mut() {
         arr.borrow().to_vec()
@@ -66,7 +91,7 @@ pub extern "C" fn elle_jit_array_extend(array: u64, source: u64, vm: *mut ()) ->
                         "splice: list is not a proper list (dotted pair)",
                     ),
                 ));
-                return TAG_NIL;
+                return JitValue::nil();
             }
         }
     } else {
@@ -80,13 +105,13 @@ pub extern "C" fn elle_jit_array_extend(array: u64, source: u64, vm: *mut ()) ->
                 ),
             ),
         ));
-        return TAG_NIL;
+        return JitValue::nil();
     };
 
     if let Some(arr) = array_val.as_array_mut() {
         let mut vec = arr.borrow().to_vec();
         vec.extend(source_elems);
-        Value::array_mut(vec).to_bits()
+        JitValue::from_value(Value::array_mut(vec))
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -98,24 +123,27 @@ pub extern "C" fn elle_jit_array_extend(array: u64, source: u64, vm: *mut ()) ->
                 ),
             ),
         ));
-        TAG_NIL
+        JitValue::nil()
     }
 }
 
-/// Push a dynamic parameter frame. pairs_ptr points to alternating [param, value, param, value, ...]
-/// Returns TAG_NIL on success, TAG_NIL with signal set on error.
+/// Push a dynamic parameter frame.
+/// pairs_ptr: *const Value (16 bytes each), alternating [param, value, param, value, ...]
+/// Returns NIL on success or NIL with signal set on error.
 #[no_mangle]
-pub extern "C" fn elle_jit_push_param_frame(pairs_ptr: u64, count: u64, vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_push_param_frame(
+    pairs_ptr: *const Value,
+    count: u64,
+    vm: *mut (),
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let count = count as usize;
-    let pairs = unsafe { std::slice::from_raw_parts(pairs_ptr as *const u64, count * 2) };
+    let pairs = unsafe { std::slice::from_raw_parts(pairs_ptr, count * 2) };
 
     let mut frame = Vec::with_capacity(count);
     for i in 0..count {
-        let param_bits = pairs[i * 2];
-        let val_bits = pairs[i * 2 + 1];
-        let param = unsafe { Value::from_bits(param_bits) };
-        let val = unsafe { Value::from_bits(val_bits) };
+        let param = pairs[i * 2];
+        let val = pairs[i * 2 + 1];
         if let Some((id, _default)) = param.as_parameter() {
             frame.push((id, val));
         } else {
@@ -126,11 +154,11 @@ pub extern "C" fn elle_jit_push_param_frame(pairs_ptr: u64, count: u64, vm: *mut
                     format!("parameterize: {} is not a parameter", param.type_name()),
                 ),
             ));
-            return TAG_NIL;
+            return JitValue::nil();
         }
     }
     vm.fiber.param_frames.push(frame);
-    TAG_NIL
+    JitValue::nil()
 }
 
 // =============================================================================
@@ -139,31 +167,55 @@ pub extern "C" fn elle_jit_push_param_frame(pairs_ptr: u64, count: u64, vm: *mut
 
 /// Struct/table get with silent nil: returns value for key, NIL if missing or wrong type.
 #[no_mangle]
-pub extern "C" fn elle_jit_struct_get_or_nil(src: u64, key: u64, _vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(src) };
-    let key_val = unsafe { Value::from_bits(key) };
+pub extern "C" fn elle_jit_struct_get_or_nil(
+    src_tag: u64,
+    src_payload: u64,
+    key_tag: u64,
+    key_payload: u64,
+    _vm: *mut (),
+) -> JitValue {
+    let val = Value {
+        tag: src_tag,
+        payload: src_payload,
+    };
+    let key_val = Value {
+        tag: key_tag,
+        payload: key_payload,
+    };
     let key = match crate::value::heap::TableKey::from_value(&key_val) {
         Some(k) => k,
-        None => return TAG_NIL,
+        None => return JitValue::nil(),
     };
     if let Some(struct_map) = val.as_struct() {
         if let Some(v) = struct_map.get(&key) {
-            return v.to_bits();
+            return JitValue::from_value(*v);
         }
     }
     if let Some(table_ref) = val.as_struct_mut() {
         if let Some(v) = table_ref.borrow().get(&key) {
-            return v.to_bits();
+            return JitValue::from_value(*v);
         }
     }
-    TAG_NIL
+    JitValue::nil()
 }
 
-/// Struct/table get for destructuring: returns value for key, signals error if missing or wrong type.
+/// Struct/table get for destructuring: returns value for key, signals error if missing.
 #[no_mangle]
-pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(src) };
-    let key_val = unsafe { Value::from_bits(key) };
+pub extern "C" fn elle_jit_struct_get_destructure(
+    src_tag: u64,
+    src_payload: u64,
+    key_tag: u64,
+    key_payload: u64,
+    vm: *mut (),
+) -> JitValue {
+    let val = Value {
+        tag: src_tag,
+        payload: src_payload,
+    };
+    let key_val = Value {
+        tag: key_tag,
+        payload: key_payload,
+    };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let key = match crate::value::heap::TableKey::from_value(&key_val) {
         Some(k) => k,
@@ -172,12 +224,12 @@ pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut (
                 SIG_ERROR,
                 error_val("type-error", "destructuring: invalid key type"),
             ));
-            return TAG_NIL;
+            return JitValue::nil();
         }
     };
     if let Some(struct_map) = val.as_struct() {
         return match struct_map.get(&key) {
-            Some(v) => v.to_bits(),
+            Some(v) => JitValue::from_value(*v),
             None => {
                 vm_ref.fiber.signal = Some((
                     SIG_ERROR,
@@ -186,13 +238,13 @@ pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut (
                         format!("destructuring: key {} not found", key_val),
                     ),
                 ));
-                TAG_NIL
+                JitValue::nil()
             }
         };
     }
     if let Some(table_ref) = val.as_struct_mut() {
         return match table_ref.borrow().get(&key) {
-            Some(v) => v.to_bits(),
+            Some(v) => JitValue::from_value(*v),
             None => {
                 vm_ref.fiber.signal = Some((
                     SIG_ERROR,
@@ -201,7 +253,7 @@ pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut (
                         format!("destructuring: key {} not found", key_val),
                     ),
                 ));
-                TAG_NIL
+                JitValue::nil()
             }
         };
     }
@@ -212,25 +264,28 @@ pub extern "C" fn elle_jit_struct_get_destructure(src: u64, key: u64, vm: *mut (
             format!("destructuring: expected struct, got {}", val.type_name()),
         ),
     ));
-    TAG_NIL
+    JitValue::nil()
 }
 
 /// Struct rest: collect all keys from src NOT in exclude_keys into a new immutable struct.
-/// exclude_ptr points to an array of count u64 NaN-boxed keyword Values.
+/// exclude_ptr: *const Value (16 bytes each), pointing to `count` keyword Values.
 #[no_mangle]
 pub extern "C" fn elle_jit_struct_rest(
-    src: u64,
-    exclude_ptr: u64,
+    src_tag: u64,
+    src_payload: u64,
+    exclude_ptr: *const Value,
     count: u64,
     _vm: *mut (),
-) -> u64 {
-    let val = unsafe { Value::from_bits(src) };
+) -> JitValue {
+    let val = Value {
+        tag: src_tag,
+        payload: src_payload,
+    };
     let count = count as usize;
-    let exclude_bits = unsafe { std::slice::from_raw_parts(exclude_ptr as *const u64, count) };
+    let exclude_vals = unsafe { std::slice::from_raw_parts(exclude_ptr, count) };
 
     let mut exclude = std::collections::BTreeSet::new();
-    for &bits in exclude_bits {
-        let key_val = unsafe { Value::from_bits(bits) };
+    for &key_val in exclude_vals {
         if let Some(k) = crate::value::heap::TableKey::from_value(&key_val) {
             exclude.insert(k);
         }
@@ -250,14 +305,22 @@ pub extern "C" fn elle_jit_struct_rest(
             }
         }
     }
-    Value::struct_from(result).to_bits()
+    JitValue::from_value(Value::struct_from(result))
 }
 
 /// Check that a closure's signal bits are a subset of allowed_bits.
 /// Signals error if not. Non-closure values pass silently.
 #[no_mangle]
-pub extern "C" fn elle_jit_check_signal_bound(src: u64, allowed_bits: u64, vm: *mut ()) -> u64 {
-    let val = unsafe { Value::from_bits(src) };
+pub extern "C" fn elle_jit_check_signal_bound(
+    src_tag: u64,
+    src_payload: u64,
+    allowed_bits: u64,
+    vm: *mut (),
+) -> JitValue {
+    let val = Value {
+        tag: src_tag,
+        payload: src_payload,
+    };
     let allowed = allowed_bits as u32;
     if let Some(closure) = val.as_closure() {
         let signal_bits = closure.signal().bits.0;
@@ -280,18 +343,19 @@ pub extern "C" fn elle_jit_check_signal_bound(src: u64, allowed_bits: u64, vm: *
             ));
         }
     }
-    TAG_NIL
+    JitValue::nil()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jit::value::JitValue;
+    use crate::vm::VM;
 
     #[test]
     fn test_has_exception() {
         use crate::primitives::register_primitives;
         use crate::symbol::SymbolTable;
-        use crate::vm::VM;
 
         let mut symbols = SymbolTable::new();
         let mut vm = VM::new();
@@ -299,8 +363,7 @@ mod tests {
 
         // Initially no exception
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(false));
+        assert_eq!(result, JitValue::bool_val(false));
 
         // Set an error signal
         vm.fiber.signal = Some((
@@ -310,15 +373,13 @@ mod tests {
 
         // Now should return true
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(true));
+        assert_eq!(result, JitValue::bool_val(true));
 
         // Clear signal
         vm.fiber.signal = None;
 
         // Should return false again
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(false));
+        assert_eq!(result, JitValue::bool_val(false));
     }
 }

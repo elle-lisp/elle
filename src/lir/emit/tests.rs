@@ -136,7 +136,9 @@ fn test_yield_point_info_collected() {
 #[test]
 fn test_yield_sentinel_distinct() {
     use crate::jit::dispatch::{TAIL_CALL_SENTINEL, YIELD_SENTINEL};
-    use crate::value::repr::TAG_NIL;
+    use crate::jit::JitValue;
     assert_ne!(YIELD_SENTINEL, TAIL_CALL_SENTINEL);
-    assert_ne!(YIELD_SENTINEL, TAG_NIL);
+    // Both sentinels must be distinct from a nil JitValue.
+    assert_ne!(YIELD_SENTINEL, JitValue::nil());
+    assert_ne!(TAIL_CALL_SENTINEL, JitValue::nil());
 }

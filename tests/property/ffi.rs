@@ -10,7 +10,6 @@ use elle::primitives::memory::{
     prim_ffi_align, prim_ffi_free, prim_ffi_malloc, prim_ffi_read, prim_ffi_size, prim_ffi_write,
 };
 use elle::value::fiber::{SIG_ERROR, SIG_OK};
-use elle::value::repr::{INT_MAX, INT_MIN};
 use elle::Value;
 use proptest::prelude::*;
 
@@ -98,8 +97,8 @@ proptest! {
     // i8 out-of-range: rejected
     #[test]
     fn marshal_i8_out_of_range(n in prop_oneof![
-        (INT_MIN..=-129i64),
-        (128i64..=INT_MAX),
+        (i64::MIN..=-129i64),
+        (128i64..=i64::MAX),
     ]) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::I8).is_err());
@@ -115,8 +114,8 @@ proptest! {
     // u8 out-of-range: negative or >255
     #[test]
     fn marshal_u8_out_of_range(n in prop_oneof![
-        (INT_MIN..=-1i64),
-        (256i64..=INT_MAX),
+        (i64::MIN..=-1i64),
+        (256i64..=i64::MAX),
     ]) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::U8).is_err());
@@ -146,8 +145,8 @@ proptest! {
     // i32 out-of-range
     #[test]
     fn marshal_i32_out_of_range(n in prop_oneof![
-        (INT_MIN..=i32::MIN as i64 - 1),
-        (i32::MAX as i64 + 1..=INT_MAX),
+        (i64::MIN..=i32::MIN as i64 - 1),
+        (i32::MAX as i64 + 1..=i64::MAX),
     ]) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::I32).is_err());
@@ -162,7 +161,7 @@ proptest! {
 
     // i64 always in-range (Elle ints are i48 which fits in i64)
     #[test]
-    fn marshal_i64_always_ok(n in INT_MIN..=INT_MAX) {
+    fn marshal_i64_always_ok(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::I64).is_ok());
     }
@@ -177,7 +176,7 @@ proptest! {
 
     // Float marshalling: integers also accepted as floats
     #[test]
-    fn marshal_float_from_int(n in INT_MIN..=INT_MAX) {
+    fn marshal_float_from_int(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Float).is_ok());
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Double).is_ok());
@@ -185,7 +184,7 @@ proptest! {
 
     // Bool marshalling: any value accepted (truthiness-based)
     #[test]
-    fn marshal_bool_from_int(n in INT_MIN..=INT_MAX) {
+    fn marshal_bool_from_int(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Bool).is_ok());
     }
@@ -199,7 +198,7 @@ proptest! {
 
     // Pointer marshalling: non-pointer/non-nil rejected
     #[test]
-    fn marshal_ptr_from_int_rejected(n in INT_MIN..=INT_MAX) {
+    fn marshal_ptr_from_int_rejected(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Ptr).is_err());
     }
@@ -237,7 +236,7 @@ proptest! {
 
     // i64 write-read roundtrip
     #[test]
-    fn memory_roundtrip_i64(n in INT_MIN..=INT_MAX) {
+    fn memory_roundtrip_i64(n in i64::MIN..=i64::MAX) {
         let alloc = prim_ffi_malloc(&[Value::int(8)]);
         prop_assert_eq!(alloc.0, SIG_OK);
         let ptr = alloc.1;
@@ -386,7 +385,7 @@ proptest! {
 
     // Non-string values rejected for :string type
     #[test]
-    fn marshal_string_rejects_int(n in INT_MIN..=INT_MAX) {
+    fn marshal_string_rejects_int(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::Str).is_err());
     }

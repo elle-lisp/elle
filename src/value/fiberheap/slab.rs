@@ -221,19 +221,27 @@ mod tests {
     fn test_slab_pointer_stability() {
         let mut slab = RootSlab::new();
         // Allocate 300 objects (forcing chunk growth beyond 256).
+        // Use Cons cells with distinguishable integer payloads.
         let mut ptrs = vec![];
         for i in 0u32..300 {
-            // Use Float to carry a distinguishable value.
-            let ptr = slab.alloc(HeapObject::Float(i as f64));
-            ptrs.push((ptr, i as f64));
+            let ptr = slab.alloc(HeapObject::Cons(Cons::new(
+                Value::int(i as i64),
+                Value::NIL,
+            )));
+            ptrs.push((ptr, i as i64));
         }
         assert_eq!(slab.live_count(), 300);
         // Verify each pointer still holds its original value after chunk growth.
         for (ptr, expected) in &ptrs {
             let obj = unsafe { &**ptr };
             match obj {
-                HeapObject::Float(v) => {
-                    assert_eq!(*v, *expected, "pointer stability violated at {:p}", ptr)
+                HeapObject::Cons(c) => {
+                    assert_eq!(
+                        c.first.as_int().unwrap(),
+                        *expected,
+                        "pointer stability violated at {:p}",
+                        ptr
+                    )
                 }
                 _ => panic!("unexpected variant"),
             }

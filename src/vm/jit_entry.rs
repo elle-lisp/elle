@@ -6,7 +6,9 @@
 //! - Batch JIT compilation for call peers
 //! - Fallback to interpreter on compilation failure
 
-use crate::jit::{JitCode, JitCompiler, JitRejectionInfo, TAIL_CALL_SENTINEL, YIELD_SENTINEL};
+use crate::jit::{
+    JitCode, JitCompiler, JitRejectionInfo, JitValue, TAIL_CALL_SENTINEL, YIELD_SENTINEL,
+};
 use crate::value::{SignalBits, SymbolId, Value, SIG_ERROR, SIG_HALT, SIG_YIELD};
 use std::rc::Rc;
 
@@ -107,16 +109,11 @@ impl VM {
             .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
         {
             self.fiber.stack.push(Value::NIL);
-            return None; // Let the dispatch loop's signal check deal with it
+            return None;
         }
 
         // Check for yield sentinel (JIT function yielded directly)
-        if result.to_bits() == YIELD_SENTINEL {
-            // fiber.signal is set by jit_handle_primitive_signal (or elle_jit_yield
-            // for Yield terminators). Read the actual bits — do not hardcode SIG_YIELD,
-            // as the signal may be a composed value such as SIG_YIELD | SIG_IO.
-            // call_inner uses these bits to build the interpreter-level caller frame
-            // and propagate the correct signal to execute_scheduled.
+        if result == YIELD_SENTINEL {
             let sig = self
                 .fiber
                 .signal
@@ -127,7 +124,7 @@ impl VM {
         }
 
         // Check for pending tail call (JIT function did a TailCall)
-        if result.to_bits() == TAIL_CALL_SENTINEL {
+        if result == TAIL_CALL_SENTINEL {
             if let Some(tail) = self.pending_tail_call.take() {
                 let exec_result = self.execute_bytecode_saving_stack(
                     &tail.bytecode,
@@ -141,10 +138,6 @@ impl VM {
                     self.fiber.stack.push(val);
                     return None;
                 } else if eb.contains(SIG_YIELD) {
-                    // Yield propagated through the tail-called function.
-                    // fiber.signal and fiber.suspended are set.
-                    // Return Some(SIG_YIELD) so call_inner builds the
-                    // interpreter-level caller frame.
                     return Some(SIG_YIELD);
                 } else {
                     // SIG_ERROR — signal already set on fiber
@@ -154,7 +147,8 @@ impl VM {
             }
         }
 
-        self.fiber.stack.push(result);
+        // Normal result: reconstruct Value from JitValue
+        self.fiber.stack.push(result.to_value());
         None
     }
 
@@ -166,35 +160,29 @@ impl VM {
     ///
     /// `func_value` is the original Value representing the closure, used for
     /// self-tail-call detection in the JIT code.
-    ///
-    /// Uses zero-copy pointer casts for both env and args since Value is
-    /// `#[repr(transparent)]` over u64.
     fn call_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,
         args: &[Value],
         func_value: Value,
-    ) -> Value {
-        // Zero-copy: Value is #[repr(transparent)] over u64, so &[Value]
-        // has the same layout as &[u64]. Cast pointers directly.
+    ) -> JitValue {
         let env_ptr = if closure.env.is_empty() {
             std::ptr::null()
         } else {
-            closure.env.as_ptr() as *const u64
+            closure.env.as_ptr()
         };
 
-        let result_bits = unsafe {
+        unsafe {
             jit_code.call(
                 env_ptr,
-                args.as_ptr() as *const u64,
+                args.as_ptr(),
                 args.len() as u32,
                 self as *mut VM as *mut (),
-                func_value.to_bits(),
+                func_value.tag,
+                func_value.payload,
             )
-        };
-
-        unsafe { Value::from_bits(result_bits) }
+        }
     }
 
     /// Try batch JIT compilation for a hot function and its call peers.

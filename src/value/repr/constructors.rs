@@ -3,10 +3,7 @@
 use std::any::Any;
 use std::collections::BTreeSet;
 
-use super::{
-    Value, INT_MAX, INT_MIN, PAYLOAD_MASK, PTRVAL_CPOINTER_BIT, PTRVAL_PAYLOAD_MASK, QNAN,
-    QNAN_MASK, TAG_INT, TAG_NAN, TAG_POINTER, TAG_PTRVAL, TAG_TRUTHY, TRUTHY_SYMBOL_BIT,
-};
+use super::{Value, TAG_CPOINTER, TAG_FLOAT, TAG_INT, TAG_KEYWORD, TAG_SYMBOL};
 
 impl Value {
     // =========================================================================
@@ -14,55 +11,21 @@ impl Value {
     // =========================================================================
 
     /// Create an integer value.
-    ///
-    /// # Panics
-    /// Panics if the integer is outside the 48-bit signed range.
     #[inline]
     pub fn int(n: i64) -> Self {
-        debug_assert!(
-            (INT_MIN..=INT_MAX).contains(&n),
-            "Integer {} out of 48-bit range [{}, {}]",
-            n,
-            INT_MIN,
-            INT_MAX
-        );
-        // Store as sign-extended 48 bits
-        Value(TAG_INT | ((n as u64) & PAYLOAD_MASK))
-    }
-
-    /// Create a float value.
-    ///
-    /// NaN and Infinity values are stored with a special tag to avoid
-    /// colliding with the quiet NaN tagging scheme.
-    #[inline]
-    pub fn float(f: f64) -> Self {
-        let bits = f.to_bits();
-        // Check if it's a quiet NaN or Infinity (would collide with our tags)
-        if (bits & QNAN_MASK) == QNAN {
-            // Store NaN/Infinity with special tag in upper 16 bits
-            // For NaN/Infinity, the lower 48 bits are always zero, so we can
-            // store the upper 16 bits in the payload
-            let upper_16 = bits >> 48;
-            Value(TAG_NAN | upper_16)
-        } else {
-            Value(bits)
+        Value {
+            tag: TAG_INT,
+            payload: n as u64,
         }
     }
 
-    /// Create a symbol value from a SymbolId.
+    /// Create a float value.
     #[inline]
-    pub fn symbol(id: u32) -> Self {
-        Value(TAG_TRUTHY | TRUTHY_SYMBOL_BIT | (id as u64))
-    }
-
-    /// Create a keyword value from a name string.
-    /// The name is hashed (47-bit FNV-1a) and registered in the global keyword table.
-    /// Equality is O(1) bit comparison; name recovery via `as_keyword_name()`.
-    #[inline]
-    pub fn keyword(name: &str) -> Self {
-        let hash = crate::value::keyword::intern_keyword(name);
-        // hash is already masked to 47 bits by intern_keyword
-        Value(TAG_PTRVAL | hash)
+    pub fn float(f: f64) -> Self {
+        Value {
+            tag: TAG_FLOAT,
+            payload: f.to_bits(),
+        }
     }
 
     /// Create a boolean value.
@@ -75,6 +38,27 @@ impl Value {
         }
     }
 
+    /// Create a symbol value from a SymbolId.
+    #[inline]
+    pub fn symbol(id: u32) -> Self {
+        Value {
+            tag: TAG_SYMBOL,
+            payload: id as u64,
+        }
+    }
+
+    /// Create a keyword value from a name string.
+    /// The name is hashed and registered in the global keyword table.
+    /// Equality is O(1) hash comparison; name recovery via `as_keyword_name()`.
+    #[inline]
+    pub fn keyword(name: &str) -> Self {
+        let hash = crate::value::keyword::intern_keyword(name);
+        Value {
+            tag: TAG_KEYWORD,
+            payload: hash,
+        }
+    }
+
     /// Create a raw C pointer value.
     ///
     /// NULL pointers (address 0) are represented as `Value::NIL`.
@@ -84,12 +68,10 @@ impl Value {
         if addr == 0 {
             return Self::NIL;
         }
-        let addr_u64 = addr as u64;
-        assert!(
-            addr_u64 & !PTRVAL_PAYLOAD_MASK == 0,
-            "C pointer exceeds 47-bit address space"
-        );
-        Value(TAG_PTRVAL | PTRVAL_CPOINTER_BIT | (addr_u64 & PTRVAL_PAYLOAD_MASK))
+        Value {
+            tag: TAG_CPOINTER,
+            payload: addr as u64,
+        }
     }
 
     /// Create an empty list value.
@@ -98,44 +80,19 @@ impl Value {
         Self::EMPTY_LIST
     }
 
-    /// Create a heap pointer value.
-    ///
-    /// # Safety
-    /// The pointer must be valid and properly aligned. The caller is
-    /// responsible for ensuring the pointed-to memory remains valid.
-    #[inline]
-    pub fn from_heap_ptr(ptr: *const ()) -> Self {
-        let addr = ptr as u64;
-        debug_assert!(
-            addr & !PAYLOAD_MASK == 0,
-            "Heap pointer exceeds 48-bit address space"
-        );
-        Value(TAG_POINTER | addr)
-    }
-
     // =========================================================================
     // Heap Value Constructors
     // =========================================================================
 
-    /// Create a string value.
-    /// Strings ≤6 UTF-8 bytes (without NUL) are stored inline (SSO).
-    /// Strings >6 bytes or containing NUL are heap-interned.
+    /// Create a string value (heap-allocated).
     #[inline]
     pub fn string(s: impl Into<Box<str>>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
         let boxed: Box<str> = s.into();
-        let bytes = boxed.as_bytes();
-        if bytes.len() <= 6 && !bytes.contains(&0) {
-            // Pack into SSO: TAG_SSO | bytes in little-endian order
-            let mut bits: u64 = 0;
-            for (i, &b) in bytes.iter().enumerate() {
-                bits |= (b as u64) << (i * 8);
-            }
-            Value(super::TAG_SSO | bits)
-        } else {
-            use crate::value::intern::intern_string;
-            let ptr = intern_string(&boxed) as *const ();
-            Self::from_heap_ptr(ptr)
-        }
+        alloc(HeapObject::LString {
+            s: boxed,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a heap string without interning. Used by `SendValue::into_value()`
@@ -143,23 +100,12 @@ impl Value {
     /// a different thread.
     #[inline]
     pub fn string_no_intern(s: impl Into<Box<str>>) -> Self {
+        use crate::value::heap::{alloc, HeapObject};
         let boxed: Box<str> = s.into();
-        let bytes = boxed.as_bytes();
-        if bytes.len() <= 6 && !bytes.contains(&0) {
-            // SSO path — no interning, thread-safe
-            let mut bits: u64 = 0;
-            for (i, &b) in bytes.iter().enumerate() {
-                bits |= (b as u64) << (i * 8);
-            }
-            Value(super::TAG_SSO | bits)
-        } else {
-            // Heap alloc without interning
-            use crate::value::heap::{alloc, HeapObject};
-            alloc(HeapObject::LString {
-                s: boxed,
-                traits: Value::NIL,
-            })
-        }
+        alloc(HeapObject::LString {
+            s: boxed,
+            traits: Value::NIL,
+        })
     }
 
     /// Create a cons cell.
@@ -173,7 +119,7 @@ impl Value {
         }))
     }
 
-    /// Create an array.
+    /// Create a mutable @array.
     #[inline]
     pub fn array_mut(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
@@ -415,24 +361,6 @@ impl Value {
             default,
             traits: Value::NIL,
         })
-    }
-
-    /// Create a binding value (compile-time only).
-    #[inline]
-    pub fn binding(
-        name: crate::value::types::SymbolId,
-        scope: crate::value::heap::BindingScope,
-    ) -> Self {
-        use crate::value::heap::{alloc, BindingInner, HeapObject};
-        use std::cell::RefCell;
-        alloc(HeapObject::Binding(RefCell::new(BindingInner {
-            name,
-            scope,
-            is_mutated: false,
-            is_captured: false,
-            is_immutable: false,
-            is_prebound: false,
-        })))
     }
 
     /// Create an immutable set value.
