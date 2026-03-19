@@ -67,6 +67,10 @@ pub struct VM {
     /// in the argv passed to the elle binary. Empty if no `--` was given.
     /// Set by `main.rs` before the file-execution loop. Read by `sys/args`.
     pub user_args: Vec<String>,
+    /// The source argument: the script file path, `"-"` for stdin, or `""`
+    /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
+    /// Read by `sys/argv`. Empty string means REPL mode.
+    pub source_arg: String,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -128,6 +132,7 @@ impl VM {
             docs: HashMap::new(),
             eval_expander: None,
             user_args: Vec::new(),
+            source_arg: String::new(),
         }
     }
 

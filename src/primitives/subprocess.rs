@@ -95,6 +95,34 @@ pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(user_args))
 }
 
+/// Return the full argv as a list: script name followed by all user args.
+/// Element 0 is the script name (or "-" for stdin).
+/// Returns an empty list in REPL mode (when no source file was given).
+///
+/// (sys/argv) => ("-" "arg1" "arg2" ...)   ; stdin
+/// (sys/argv) => ("script.lisp" "arg1" ...) ; file
+/// (sys/argv) => ()                          ; REPL
+///
+/// Example invocation: elle - foo bar
+///   => sys/argv returns ("-" "foo" "bar")
+pub(crate) fn prim_sys_argv(_args: &[Value]) -> (SignalBits, Value) {
+    match crate::context::get_vm_context() {
+        Some(ptr) => {
+            let vm = unsafe { &*ptr };
+            if vm.source_arg.is_empty() {
+                return (SIG_OK, Value::EMPTY_LIST);
+            }
+            let mut all: Vec<Value> = Vec::with_capacity(1 + vm.user_args.len());
+            all.push(Value::string(vm.source_arg.as_str()));
+            for s in &vm.user_args {
+                all.push(Value::string(s.as_str()));
+            }
+            (SIG_OK, list(all))
+        }
+        None => (SIG_OK, Value::EMPTY_LIST),
+    }
+}
+
 /// Return the process environment as an immutable struct, or look up a single variable.
 /// Keys are strings (env var names as-is), values are strings.
 /// Non-UTF-8 keys or values are silently skipped.
@@ -674,6 +702,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
+        name: "sys/argv",
+        func: prim_sys_argv,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Return the full argv as a list: script name as element 0 followed by all user args. Element 0 is \"-\" for stdin or the script path for a file. Returns an empty list in REPL mode.",
+        params: &[],
+        category: "sys",
+        example: "(sys/argv)",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "sys/env",
         func: prim_sys_env,
         signal: Signal::silent(),
@@ -827,6 +866,71 @@ mod tests {
         assert_eq!(
             elems[1].with_string(|s| s.to_string()),
             Some("b".to_string())
+        );
+    }
+
+    // --- sys/argv ---
+
+    #[test]
+    fn test_sys_argv_no_vm_context_returns_empty() {
+        crate::context::clear_vm_context();
+        let (sig, val) = prim_sys_argv(&[]);
+        assert_eq!(sig, SIG_OK);
+        assert!(
+            val == Value::EMPTY_LIST,
+            "sys/argv without VM context should return empty list, got {:?}",
+            val
+        );
+    }
+
+    #[test]
+    fn test_sys_argv_reads_source_arg_and_user_args() {
+        let mut vm = crate::vm::VM::new();
+        vm.source_arg = "-".to_string();
+        vm.user_args = vec!["foo".to_string(), "bar".to_string()];
+        crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
+
+        let (sig, val) = prim_sys_argv(&[]);
+
+        crate::context::clear_vm_context();
+
+        assert_eq!(sig, SIG_OK);
+        assert!(val.is_list(), "sys/argv should return a list");
+        let elems = val.list_to_vec().expect("should be a proper list");
+        assert_eq!(elems.len(), 3, "expected 3 elements");
+        assert_eq!(
+            elems[0].with_string(|s| s.to_string()),
+            Some("-".to_string()),
+            "element 0 should be source_arg"
+        );
+        assert_eq!(
+            elems[1].with_string(|s| s.to_string()),
+            Some("foo".to_string())
+        );
+        assert_eq!(
+            elems[2].with_string(|s| s.to_string()),
+            Some("bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sys_argv_repl_mode_returns_empty() {
+        // In REPL mode source_arg is "", and user_args is empty.
+        // sys/argv should return ().
+        let mut vm = crate::vm::VM::new();
+        vm.source_arg = "".to_string();
+        vm.user_args = vec![];
+        crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
+
+        let (sig, val) = prim_sys_argv(&[]);
+
+        crate::context::clear_vm_context();
+
+        assert_eq!(sig, SIG_OK);
+        assert!(
+            val == Value::EMPTY_LIST,
+            "sys/argv in REPL mode should return empty list, got {:?}",
+            val
         );
     }
 

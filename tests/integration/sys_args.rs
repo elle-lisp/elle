@@ -131,3 +131,137 @@ fn test_sys_args_flags_after_source_passed_through() {
         stdout
     );
 }
+
+// --- sys/argv ---
+
+#[test]
+fn test_sys_argv_includes_script_name() {
+    // Run `elle - foo bar` with stdin `(display (sys/argv))`.
+    // sys/argv should include "-" as element 0, then "foo", "bar".
+    let elle_bin = get_elle_binary();
+
+    let mut child = Command::new(elle_bin)
+        .args(["-", "foo", "bar"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
+
+    {
+        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+        stdin
+            .write_all(b"(display (sys/argv))")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to wait on child");
+    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
+
+    assert!(
+        output.status.success(),
+        "elle exited with error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // display of a list prints elements without quotes: (- foo bar)
+    // so "-" displays as "-" as a bare hyphen in the output.
+    assert!(
+        stdout.contains('-'),
+        "expected '-' in sys/argv output, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("foo"),
+        "expected 'foo' in sys/argv output, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("bar"),
+        "expected 'bar' in sys/argv output, got: {:?}",
+        stdout
+    );
+}
+
+#[test]
+fn test_sys_argv_no_trailing_args() {
+    // Run `elle -` with stdin `(display (sys/argv))` and no trailing args.
+    // sys/argv should return ("-") — a one-element list containing just the script name.
+    let elle_bin = get_elle_binary();
+
+    let mut child = Command::new(elle_bin)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
+
+    {
+        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+        stdin
+            .write_all(b"(display (sys/argv))")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to wait on child");
+    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
+
+    assert!(
+        output.status.success(),
+        "elle exited with error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Should contain "-" as the only element; output should be a single-element list.
+    assert!(
+        stdout.contains('-'),
+        "expected '-' in sys/argv output, got: {:?}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("foo") && !stdout.contains("bar"),
+        "sys/argv with no trailing args should not contain user args, got: {:?}",
+        stdout
+    );
+}
+
+#[test]
+fn test_sys_argv_flags_after_source() {
+    // Run `elle - -v foo` with stdin `(display (sys/argv))`.
+    // Flags that appear after the source arg are passed through as user args.
+    // sys/argv should include "-", "-v", "foo".
+    let elle_bin = get_elle_binary();
+
+    let mut child = Command::new(elle_bin)
+        .args(["-", "-v", "foo"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|_| panic!("Failed to spawn elle at {}", elle_bin));
+
+    {
+        let stdin = child.stdin.as_mut().expect("Failed to open stdin");
+        stdin
+            .write_all(b"(display (sys/argv))")
+            .expect("Failed to write to stdin");
+    }
+
+    let output = child.wait_with_output().expect("Failed to wait on child");
+    let stdout = String::from_utf8(output.stdout).expect("stdout is not UTF-8");
+
+    assert!(
+        output.status.success(),
+        "elle exited with error, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("-v"),
+        "expected '-v' in sys/argv output, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("foo"),
+        "expected 'foo' in sys/argv output, got: {:?}",
+        stdout
+    );
+}

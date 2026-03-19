@@ -435,6 +435,7 @@ fn main() {
         .position(|a| a == "-" || !a.starts_with('-'))
     {
         let source_arg = &all_args[idx];
+        vm.source_arg = source_arg.clone();
         vm.user_args = all_args[idx + 1..].to_vec();
         if source_arg == "-" {
             read_stdin = true;
@@ -442,7 +443,7 @@ fn main() {
             files.push(source_arg.as_str());
         }
     }
-    // If no source arg found: REPL mode, vm.user_args stays empty.
+    // If no source arg found: REPL mode, vm.source_arg stays "" and vm.user_args stays empty.
 
     if read_stdin {
         if let Err(e) = run_stdin(&mut vm, &mut symbols) {
