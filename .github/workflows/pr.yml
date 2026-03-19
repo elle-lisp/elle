@@ -72,40 +72,65 @@ jobs:
       - name: Run examples and Elle script tests
         run: make smoke
 
+  build-plugins:
+    name: Build Plugin (${{ matrix.plugin }})
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin:
+          - base64
+          - compress
+          - crypto
+          - csv
+          - glob
+          - oxigraph
+          - random
+          - regex
+          - selkie
+          - semver
+          - sqlite
+          - syn
+          - toml
+          - uuid
+          - xml
+          - yaml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: plugin-${{ matrix.plugin }}
+      - name: Build plugin
+        run: cargo build --release -p elle-${{ matrix.plugin }}
+      - name: Upload plugin .so
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-${{ matrix.plugin }}
+          path: target/release/libelle_${{ matrix.plugin }}.so
+          retention-days: 1
+
   plugin-tests:
     name: Plugin Tests
-    needs: changes
+    needs: [changes, build-plugins]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      - name: Restore plugin .so cache
-        id: plugin-cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            target/release/libelle_glob.so
-            target/release/libelle_regex.so
-            target/release/libelle_sqlite.so
-            target/release/libelle_crypto.so
-            target/release/libelle_random.so
-            target/release/libelle_selkie.so
-            target/release/libelle_oxigraph.so
-          key: plugins-so-${{ runner.os }}-${{ hashFiles('plugins/**', 'src/**', 'Cargo.toml', 'Cargo.lock') }}
-
       - name: Install GNU parallel
         run: sudo apt-get install -y parallel
-
       - name: Build release binary
         run: cargo build --release -p elle
-
-      - name: Build plugins
-        if: steps.plugin-cache.outputs.cache-hit != 'true'
-        run: make plugins
-
+      - name: Download all plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-*
+          path: target/release/
+          merge-multiple: true
       - name: Run plugin tests
         run: make plugin-tests
 
@@ -128,7 +153,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, elle-tests, tests-combined, plugin-tests]
+    needs: [changes, qa, elle-tests, tests-combined, build-plugins, plugin-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -140,6 +165,9 @@ jobs:
         run: exit 1
       - name: Check combined tests
         if: needs.tests-combined.result == 'failure'
+        run: exit 1
+      - name: Check plugin builds
+        if: needs.build-plugins.result == 'failure'
         run: exit 1
       - name: Check plugin tests
         if: needs.plugin-tests.result == 'failure'

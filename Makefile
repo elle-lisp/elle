@@ -11,6 +11,9 @@ else
 endif
 TIMEOUT ?= 10s
 
+PLUGINS := base64 compress crypto csv glob oxigraph random regex selkie \
+    semver sqlite syn toml uuid xml yaml
+
 all: elle plugins docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
@@ -22,10 +25,10 @@ dev:  ## Build the Elle binary (debug, fast compile)
 	cargo build -p elle
 
 plugins:  ## Build all native plugins (.so)
-	cargo build --release \
-		-p elle-glob -p elle-regex -p elle-sqlite -p elle-crypto \
-		-p elle-random -p elle-selkie -p elle-oxigraph \
-		-p elle-uuid -p elle-xml -p elle-syn -p elle-msgpack
+	cargo build --release $(addprefix -p elle-,$(PLUGINS))
+
+plugin-%:  ## Build a single plugin by bare name (e.g., make plugin-crypto)
+	cargo build --release -p elle-$*
 
 # ── Docs ────────────────────────────────────────────────────────────
 

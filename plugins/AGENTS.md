@@ -141,13 +141,8 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `selkie/` | Mermaid diagram rendering |
 | `semver/` | Semantic version parsing and comparison |
 | `sqlite/` | SQLite database access |
-<<<<<<< HEAD
+| `syn/` | Rust syntax parsing via the `syn` crate |
+| `toml/` | TOML parsing and serialization |
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
-=======
-| `toml/` | TOML parsing and serialization |
-<<<<<<< HEAD
->>>>>>> 32ae0250 (feat: add toml plugin)
-=======
 | `yaml/` | YAML parsing and serialization |
->>>>>>> 8885dc00 (feat: add yaml plugin)
