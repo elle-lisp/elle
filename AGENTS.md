@@ -54,6 +54,10 @@ bytecode. Error messages include file:line:col information.
 - **`lint`** — Diagnostic types and lint rules
 - **`symbols`** — Symbol index types for IDE features
 - **`primitives`** — Built-in functions; includes:
+  `doc` (returns docstring from closure value, or queries `vm.docs` for
+  native primitives and special forms by name; `(doc name)` is preferred over
+  `(doc "name")` for stdlib functions — the explicit string form cannot find
+  stdlib docs because their docstrings live in the closure value, not `vm.docs`),
   `port/path`, `port/seek`, `port/tell`,
   `string/size-of`,
   `with-traits`, `traits`,
