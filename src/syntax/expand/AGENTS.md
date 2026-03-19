@@ -122,6 +122,9 @@ The standard prelude (`prelude.lisp`) defines:
 - `let*` — sequential let bindings (desugared to nested `let`)
 - `->` — thread-first macro
 - `->>` — thread-last macro
+- `as->` — thread with explicit binding name: `(as-> val x (f x) (g x))`
+- `some->` — nil-short-circuiting thread-first
+- `some->>` — nil-short-circuiting thread-last
 - `when` — conditional without else
 - `unless` — conditional with negated test
 - `try`/`catch` — error signal handling (sugar over fiber primitives)
