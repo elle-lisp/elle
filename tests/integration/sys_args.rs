@@ -15,7 +15,7 @@ fn get_elle_binary() -> &'static str {
 #[test]
 fn test_sys_args_no_trailing_args_returns_empty() {
     // Run `elle -` with stdin `(display (sys/args))` and no trailing args.
-    // sys/args should return [] — display of empty array is "[]".
+    // sys/args should return () — display of empty list is "()".
     let elle_bin = get_elle_binary();
 
     let mut child = Command::new(elle_bin)
@@ -43,8 +43,8 @@ fn test_sys_args_no_trailing_args_returns_empty() {
     );
     assert_eq!(
         stdout.trim(),
-        "[]",
-        "sys/args without trailing args should display as [], got: {:?}",
+        "()",
+        "sys/args without trailing args should display as (), got: {:?}",
         stdout
     );
 }
@@ -52,7 +52,7 @@ fn test_sys_args_no_trailing_args_returns_empty() {
 #[test]
 fn test_sys_args_trailing_args_returned() {
     // Run `elle - foo bar` with stdin `(display (sys/args))`.
-    // sys/args should return ["foo" "bar"].
+    // sys/args should return ("foo" "bar").
     let elle_bin = get_elle_binary();
 
     let mut child = Command::new(elle_bin)

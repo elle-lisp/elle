@@ -720,8 +720,8 @@ cargo build --release -p elle-crypto
 
 ```lisp
 # Args after the source file on the command line (includes the literal "--")
-# elle script.lisp -- foo bar baz  =>  ["--" "foo" "bar" "baz"]
-# elle script.lisp                 =>  []
+# elle script.lisp -- foo bar baz  =>  ("--" "foo" "bar" "baz")
+# elle script.lisp                 =>  ()
 (def args (sys/args))
 (def real-args (drop 1 args))   # skip the "--" separator
 

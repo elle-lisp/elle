@@ -5,7 +5,7 @@ use crate::signals::{Signal, SIG_EXEC};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, list, Value};
 
 /// Exit the process with an optional exit code
 ///
@@ -73,16 +73,16 @@ pub(crate) fn prim_halt(args: &[Value]) -> (SignalBits, Value) {
     (SIG_HALT, value)
 }
 
-/// Return user-provided command-line arguments as an array.
-/// Arguments are those passed after the first `--` separator in the
-/// process argv. Without `--`, returns an empty array.
+/// Return user-provided command-line arguments as a list.
+/// Arguments are those that follow the source file (or `-` for stdin)
+/// in the process argv. Returns an empty list if no args follow.
 ///
-/// (sys/args) => ["arg1" "arg2" ...]
+/// (sys/args) => ("arg1" "arg2" ...)
 ///
-/// Example invocation: elle script.lisp -- foo bar
-///   => sys/args returns ["foo" "bar"]
+/// Example invocation: elle script.lisp foo bar
+///   => sys/args returns ("foo" "bar")
 pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
-    let user_args = match crate::context::get_vm_context() {
+    let user_args: Vec<Value> = match crate::context::get_vm_context() {
         Some(ptr) => {
             let vm = unsafe { &*ptr };
             vm.user_args
@@ -92,7 +92,7 @@ pub(crate) fn prim_sys_args(_args: &[Value]) -> (SignalBits, Value) {
         }
         None => vec![],
     };
-    (SIG_OK, Value::array(user_args))
+    (SIG_OK, list(user_args))
 }
 
 /// Return the process environment as an immutable struct, or look up a single variable.
@@ -667,7 +667,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sys_args,
         signal: Signal::silent(),
         arity: Arity::Exact(0),
-        doc: "Return command-line arguments as an array (excluding interpreter and script path)",
+        doc: "Return command-line arguments as a list (excluding interpreter and script path)",
         params: &[],
         category: "sys",
         example: "(sys/args)",
@@ -793,21 +793,21 @@ mod tests {
     #[test]
     fn test_sys_args_no_vm_context_returns_empty() {
         // Without a VM context set (as in unit test environment), prim_sys_args
-        // falls back to an empty array.
+        // falls back to an empty list.
         // Note: other tests may set the VM context, so clear it first.
         crate::context::clear_vm_context();
         let (sig, val) = prim_sys_args(&[]);
         assert_eq!(sig, SIG_OK);
-        let arr = val.as_array().expect("sys/args should return an array");
         assert!(
-            arr.is_empty(),
-            "sys/args without -- should return empty array"
+            val == Value::EMPTY_LIST,
+            "sys/args without trailing args should return empty list, got {:?}",
+            val
         );
     }
 
     #[test]
     fn test_sys_args_reads_from_vm_context() {
-        // Set up a VM with user_args and verify prim_sys_args reads them.
+        // Set up a VM with user_args and verify prim_sys_args reads them as a list.
         let mut vm = crate::vm::VM::new();
         vm.user_args = vec!["a".to_string(), "b".to_string()];
         crate::context::set_vm_context(&mut vm as *mut crate::vm::VM);
@@ -817,10 +817,17 @@ mod tests {
         crate::context::clear_vm_context();
 
         assert_eq!(sig, SIG_OK);
-        let arr = val.as_array().expect("sys/args should return an array");
-        assert_eq!(arr.len(), 2, "expected 2 args");
-        assert_eq!(arr[0].with_string(|s| s.to_string()), Some("a".to_string()));
-        assert_eq!(arr[1].with_string(|s| s.to_string()), Some("b".to_string()));
+        assert!(val.is_list(), "sys/args should return a list");
+        let elems = val.list_to_vec().expect("should be a proper list");
+        assert_eq!(elems.len(), 2, "expected 2 args");
+        assert_eq!(
+            elems[0].with_string(|s| s.to_string()),
+            Some("a".to_string())
+        );
+        assert_eq!(
+            elems[1].with_string(|s| s.to_string()),
+            Some("b".to_string())
+        );
     }
 
     // --- sys/env ---
