@@ -1026,6 +1026,7 @@ static PRIMITIVES: &[PrimitiveDef] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcgen::generate_simple_self_signed;
 
     fn install_provider() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1169,6 +1170,185 @@ mod tests {
             status.as_keyword_name().as_deref(),
             Some("error"),
             "status must be :error when handshake not complete"
+        );
+    }
+
+    // Test 6: full in-process client↔server handshake via prim_* functions.
+    //
+    // Uses rcgen to generate a self-signed cert and key, writes them to temp
+    // files, then calls prim_tls_server_config → prim_tls_server_state and
+    // prim_tls_client_state to build both sides. Drives the handshake loop
+    // with prim_tls_process / prim_tls_get_outgoing, then exercises
+    // prim_tls_write_plaintext for application data transfer.
+    #[test]
+    fn test_full_primitives_handshake() {
+        install_provider();
+
+        // Generate a self-signed cert and key via rcgen, write to temp files.
+        let cert = generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let tmp = std::env::temp_dir();
+        let cert_path = tmp.join("elle-tls-chunk3-test.cert.pem");
+        let key_path = tmp.join("elle-tls-chunk3-test.key.pem");
+        std::fs::write(&cert_path, cert.cert.pem()).unwrap();
+        std::fs::write(&key_path, cert.key_pair.serialize_pem()).unwrap();
+
+        // Build server config and state via primitives.
+        let cfg_args = vec![
+            Value::string(cert_path.to_str().unwrap()),
+            Value::string(key_path.to_str().unwrap()),
+        ];
+        let (sig, server_config_val) = prim_tls_server_config(&cfg_args);
+        assert_eq!(sig, SIG_OK, "prim_tls_server_config failed");
+
+        let (sig, server_state_val) = prim_tls_server_state(&[server_config_val]);
+        assert_eq!(sig, SIG_OK, "prim_tls_server_state failed");
+
+        // Build client state with :no-verify (self-signed cert).
+        let mut opts_fields = BTreeMap::new();
+        opts_fields.insert(TableKey::Keyword("no-verify".into()), Value::bool(true));
+        let client_args = vec![Value::string("localhost"), Value::struct_from(opts_fields)];
+        let (sig, client_state_val) = prim_tls_client_state(&client_args);
+        assert_eq!(sig, SIG_OK, "prim_tls_client_state failed");
+
+        // Drive the state machine for one side: feed incoming bytes, return
+        // the outgoing bytes that need to be sent to the other side.
+        let prim_drive = |state_val: Value, incoming: &[u8]| -> (String, Vec<u8>) {
+            let incoming_val = Value::bytes(incoming.to_vec());
+            let (sig, kw) = prim_tls_process(&[state_val, incoming_val]);
+            assert_eq!(sig, SIG_OK, "prim_tls_process returned error");
+            let status = kw
+                .as_keyword_name()
+                .unwrap_or_else(|| "unknown".to_string());
+            let (_, out_val) = prim_tls_get_outgoing(&[state_val]);
+            let outgoing = out_val.as_bytes().map(|b| b.to_vec()).unwrap_or_default();
+            (status, outgoing)
+        };
+
+        // Bootstrap: feed client empty bytes to generate the ClientHello.
+        let (_, mut client_to_server) = prim_drive(client_state_val, &[]);
+        assert!(
+            !client_to_server.is_empty(),
+            "ClientHello must not be empty"
+        );
+
+        // Handshake loop: bounce bytes between client and server until both
+        // sides report handshake complete. Cap at 20 iterations.
+        let mut server_to_client: Vec<u8> = Vec::new();
+        for _i in 0..20 {
+            // Check if both sides are done.
+            let (_, c_done) = prim_tls_handshake_complete(&[client_state_val]);
+            let (_, s_done) = prim_tls_handshake_complete(&[server_state_val]);
+            if c_done.as_bool() == Some(true) && s_done.as_bool() == Some(true) {
+                break;
+            }
+
+            // Feed client → server.
+            if !client_to_server.is_empty() {
+                let (_, s_out) = prim_drive(server_state_val, &client_to_server);
+                server_to_client = s_out;
+                client_to_server = Vec::new();
+            }
+
+            // Feed server → client.
+            if !server_to_client.is_empty() {
+                let (_, c_out) = prim_drive(client_state_val, &server_to_client);
+                client_to_server = c_out;
+                server_to_client = Vec::new();
+            }
+        }
+
+        // Both sides must report handshake complete.
+        let (sig, c_complete) = prim_tls_handshake_complete(&[client_state_val]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(
+            c_complete.as_bool(),
+            Some(true),
+            "Client handshake must be complete"
+        );
+
+        let (sig, s_complete) = prim_tls_handshake_complete(&[server_state_val]);
+        assert_eq!(sig, SIG_OK);
+        assert_eq!(
+            s_complete.as_bool(),
+            Some(true),
+            "Server handshake must be complete"
+        );
+
+        // Application data: client → server.
+        // prim_tls_write_plaintext returns {:status :ok :outgoing bytes}.
+        let plaintext_to_server = b"hello from client";
+        let (sig, write_result) = prim_tls_write_plaintext(&[
+            client_state_val,
+            Value::bytes(plaintext_to_server.to_vec()),
+        ]);
+        assert_eq!(
+            sig, SIG_OK,
+            "prim_tls_write_plaintext (client→server) failed"
+        );
+        let write_fields = write_result
+            .as_struct()
+            .expect("write result must be a struct");
+        assert_eq!(
+            write_fields
+                .get(&TableKey::Keyword("status".into()))
+                .and_then(|v| v.as_keyword_name())
+                .as_deref(),
+            Some("ok"),
+            "write-plaintext status must be :ok after handshake"
+        );
+        let ciphertext_for_server = write_fields
+            .get(&TableKey::Keyword("outgoing".into()))
+            .expect("write result must have :outgoing")
+            .as_bytes()
+            .expect(":outgoing must be bytes")
+            .to_vec();
+        assert!(
+            !ciphertext_for_server.is_empty(),
+            "encrypted client→server payload must not be empty"
+        );
+
+        // Feed ciphertext to server; then drain the decrypted plaintext.
+        let _ = prim_drive(server_state_val, &ciphertext_for_server);
+        let (sig, server_pt_val) = prim_tls_get_plaintext(&[server_state_val]);
+        assert_eq!(sig, SIG_OK);
+        let server_plaintext = server_pt_val.as_bytes().expect("plaintext must be bytes");
+        assert_eq!(
+            server_plaintext, plaintext_to_server,
+            "Server must decrypt the exact plaintext sent by client"
+        );
+
+        // Application data: server → client.
+        let plaintext_to_client = b"hello from server";
+        let (sig, write_result) = prim_tls_write_plaintext(&[
+            server_state_val,
+            Value::bytes(plaintext_to_client.to_vec()),
+        ]);
+        assert_eq!(
+            sig, SIG_OK,
+            "prim_tls_write_plaintext (server→client) failed"
+        );
+        let write_fields = write_result
+            .as_struct()
+            .expect("write result must be a struct");
+        let ciphertext_for_client = write_fields
+            .get(&TableKey::Keyword("outgoing".into()))
+            .expect("write result must have :outgoing")
+            .as_bytes()
+            .expect(":outgoing must be bytes")
+            .to_vec();
+        assert!(
+            !ciphertext_for_client.is_empty(),
+            "encrypted server→client payload must not be empty"
+        );
+
+        // Feed ciphertext to client; then drain the decrypted plaintext.
+        let _ = prim_drive(client_state_val, &ciphertext_for_client);
+        let (sig, client_pt_val) = prim_tls_get_plaintext(&[client_state_val]);
+        assert_eq!(sig, SIG_OK);
+        let client_plaintext = client_pt_val.as_bytes().expect("plaintext must be bytes");
+        assert_eq!(
+            client_plaintext, plaintext_to_client,
+            "Client must decrypt the exact plaintext sent by server"
         );
     }
 }
