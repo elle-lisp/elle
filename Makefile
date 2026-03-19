@@ -25,7 +25,7 @@ plugins:  ## Build all native plugins (.so)
 	cargo build --release \
 		-p elle-glob -p elle-regex -p elle-sqlite -p elle-crypto \
 		-p elle-random -p elle-selkie -p elle-oxigraph \
-		-p elle-uuid -p elle-xml -p elle-syn
+		-p elle-uuid -p elle-xml -p elle-syn -p elle-msgpack
 
 # ── Docs ────────────────────────────────────────────────────────────
 
