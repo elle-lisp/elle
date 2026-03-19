@@ -659,6 +659,62 @@
 (assert-eq (->> 10 (- 3) (+ 5)) -2 "thread-last nested")
 
 # ============================================================================
+# Threading operator variants: as->, some->, some->>
+# ============================================================================
+
+# test_as_thread_zero_forms
+(assert-eq (as-> 42 x) 42 "as-> zero forms returns value")
+
+# test_as_thread_single_form
+(assert-eq (as-> 5 x (+ x 10)) 15 "as-> single form")
+
+# test_as_thread_simple
+(assert-eq (as-> 5 x (+ x 1) (* x 2)) 12 "as-> simple chain")
+
+# test_as_thread_mixed_position
+# x appears in different argument positions across steps
+(assert-eq (as-> 10 x (- x 3) (- 100 x)) 93 "as-> mixed argument position")
+
+# test_as_thread_complex_expr
+(assert-eq (as-> (list 1 2 3) v (length v) (* v v)) 9 "as-> complex expr")
+
+# test_some_thread_first_zero_forms
+(assert-eq (some-> 42) 42 "some-> zero forms returns value")
+
+# test_some_thread_first_nil_zero_forms
+(assert-eq (some-> nil) nil "some-> nil input zero forms")
+
+# test_some_thread_first_simple
+(assert-eq (some-> 5 (+ 1) (* 2)) 12 "some-> simple chain")
+
+# test_some_thread_first_nil_input
+(assert-eq (some-> nil (+ 1)) nil "some-> short-circuits on nil input")
+
+# test_some_thread_first_nil_midchain
+(def some-test-fn (fn (x) nil))
+(assert-eq (some-> 5 some-test-fn (+ 1)) nil "some-> short-circuits mid-chain")
+
+# test_some_thread_first_false_passes_through
+# false is falsy but not nil; some-> must not short-circuit on false
+(assert-eq (some-> false not) true "some-> false is not nil, passes through")
+
+# test_some_thread_last_zero_forms
+(assert-eq (some->> 42) 42 "some->> zero forms returns value")
+
+# test_some_thread_last_simple
+(assert-eq (some->> 5 (+ 1) (* 2)) 12 "some->> simple chain")
+
+# test_some_thread_last_nil_input
+(assert-eq (some->> nil (+ 1)) nil "some->> short-circuits on nil input")
+
+# test_some_thread_last_nil_midchain
+(assert-eq (some->> 5 some-test-fn (+ 1)) nil "some->> short-circuits mid-chain")
+
+# test_some_thread_last_position
+# (->> 2 (- 10) (* 3)) => (* 3 (- 10 2)) => (* 3 8) => 24
+(assert-eq (some->> 2 (- 10) (* 3)) 24 "some->> inserts value as last argument")
+
+# ============================================================================
 # Closure with local define and param arithmetic
 # ============================================================================
 
