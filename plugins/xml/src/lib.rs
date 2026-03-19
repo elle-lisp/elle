@@ -286,7 +286,7 @@ fn get_struct_field(val: &Value, field: &str) -> Result<Value, String> {
     match s.get(&TableKey::Keyword(field.into())) {
         Some(v) => {
             if v.as_struct().is_some() || v.as_struct_mut().is_some() {
-                Ok(v.clone())
+                Ok(*v)
             } else {
                 Err(format!(
                     "xml/emit: field '{}' must be a struct, got {}",
@@ -439,7 +439,7 @@ fn prim_xml_next_event(args: &[Value]) -> (SignalBits, Value) {
             let mut buf = state.buf.borrow_mut();
             buf.clear();
             let mut reader = state.reader.borrow_mut();
-            match reader.read_event_into(&mut *buf) {
+            match reader.read_event_into(&mut buf) {
                 Err(e) => OwnedEvent::Error(format!("xml/next-event: {}", e)),
                 Ok(Event::Start(ref e)) => {
                     let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
