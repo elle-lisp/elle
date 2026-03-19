@@ -93,9 +93,9 @@ bytecode. Error messages include file:line:col information.
   closures were rejected
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
-   available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
-   `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP), `elle-uuid`
-   (UUID generation), `elle-xml` (XML parsing/serialization)
+    available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
+    `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP), `elle-uuid`
+    (UUID generation), `elle-xml` (XML parsing/serialization), `elle-syn` (Rust syntax parsing via syn crate)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
