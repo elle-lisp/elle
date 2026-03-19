@@ -48,7 +48,7 @@ fn resolve_keyword_slice(
             (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "signal-error",
                     format!("{}: unknown signal keyword :{}", context, name),
                 ),
             )
@@ -72,7 +72,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
             None => Err((
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "signal-error",
                     format!("{}: unknown signal keyword :{}", context, name),
                 ),
             )),
@@ -101,7 +101,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
                 (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "signal-error",
                         format!("{}: unknown signal keyword :{}", context, name),
                     ),
                 )
@@ -145,7 +145,7 @@ fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (Signal
                 (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "signal-error",
                         format!("{}: unknown signal keyword :{}", context, name),
                     ),
                 )
@@ -246,13 +246,16 @@ pub(crate) fn prim_fiber_resume(args: &[Value]) -> (SignalBits, Value) {
             fiber.signal = Some((SIG_OK, resume_value));
             None
         }
-        FiberStatus::Alive => Some(error_val("error", "fiber/resume: fiber is already running")),
+        FiberStatus::Alive => Some(error_val(
+            "state-error",
+            "fiber/resume: fiber is already running",
+        )),
         FiberStatus::Dead => Some(error_val(
-            "error",
+            "state-error",
             "fiber/resume: cannot resume completed fiber",
         )),
         FiberStatus::Error => Some(error_val(
-            "error",
+            "state-error",
             "fiber/resume: cannot resume errored fiber",
         )),
     });
