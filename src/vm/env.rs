@@ -195,7 +195,7 @@ impl VM {
         if !args.len().is_multiple_of(2) {
             set_error(
                 fiber,
-                "error",
+                "argument-error",
                 format!("odd number of keyword arguments ({} args)", args.len()),
             );
             return None;
@@ -208,7 +208,7 @@ impl VM {
                 _ => {
                     set_error(
                         fiber,
-                        "error",
+                        "argument-error",
                         format!(
                             "keyword argument key must be a keyword, got {}",
                             args[i].type_name()
@@ -223,7 +223,7 @@ impl VM {
                 if !valid.iter().any(|v| v == &key) {
                     set_error(
                         fiber,
-                        "error",
+                        "argument-error",
                         format!(
                             "unknown named parameter :{}, valid parameters are: {}",
                             key,
@@ -242,7 +242,7 @@ impl VM {
             if map.contains_key(&table_key) {
                 set_error(
                     fiber,
-                    "error",
+                    "argument-error",
                     format!("duplicate keyword argument :{}", key),
                 );
                 return None;
