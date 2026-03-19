@@ -24,6 +24,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | Plugin | Purpose | Primitives |
 |--------|---------|-----------|
 | `base64/` | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
+| `clap/` | CLI argument parsing | `clap/parse` |
 | `compress/` | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
 | `csv/` | CSV parsing and serialization | `csv/parse`, `csv/parse-rows`, `csv/write`, `csv/write-rows` |
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
