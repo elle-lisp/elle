@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "plugins/regex", "plugins/crypto", "plugins/sqlite", "plugins/random", "plugins/selkie", "plugins/glob", "plugins/oxigraph", "plugins/base64", "plugins/compress", "plugins/csv", "plugins/toml", "plugins/yaml", "plugins/semver", "plugins/uuid", "plugins/xml"]
+members = [".", "plugins/regex", "plugins/crypto", "plugins/sqlite", "plugins/random", "plugins/selkie", "plugins/glob", "plugins/oxigraph", "plugins/base64", "plugins/compress", "plugins/csv", "plugins/toml", "plugins/yaml", "plugins/semver", "plugins/uuid", "plugins/xml", "plugins/syn"]
 resolver = "2"
 
 [package]
