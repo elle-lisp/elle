@@ -161,6 +161,173 @@
           (error result))
         {:tcp tcp-port :tls tls})))
 
+  ## ── Private: additional plugin primitives ──────────────────────────────
+  ## Extracted here so data-transfer functions close over them without
+  ## reaching into `plugin` at each call site.
+  (def read-plaintext-fn   (get plugin :read-plaintext))
+  (def get-plaintext-fn    (get plugin :get-plaintext))
+  (def write-plaintext-fn  (get plugin :write-plaintext))
+  (def plaintext-indexof-fn (get plugin :plaintext-indexof))
+
+  ## ── Public: data transfer ─────────────────────────────────────────────────
+
+  (defn tls/read [conn n]
+    "Read up to n bytes of decrypted plaintext from a TLS connection.
+     Returns bytes, or nil on EOF (connection closed by peer).
+     Must be called inside a scheduler context."
+    (let [[tls conn:tls]
+          [port conn:tcp]]
+      # Single loop: break immediately if plaintext is already buffered,
+      # otherwise read from the network until we get data or EOF.
+      (forever
+        # Check buffered plaintext first — avoid a network round-trip if data is ready.
+        (let [[buffered (read-plaintext-fn tls n)]]
+          (when (> (length buffered) 0)
+            (break buffered)))
+        # Plaintext buffer empty — read from network.
+        (let [[data (stream/read port 16384)]]  # async
+          (when (nil? data) (break nil))         # EOF
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
+          # TLS 1.3 post-handshake messages (NewSessionTicket, KeyUpdate) must
+          # be sent or the connection stalls.
+          (let [[out (get-outgoing-fn tls)]]
+            (when (> (length out) 0)
+              (stream/write port out)))))))
+
+  (defn tls/read-line [conn]
+    "Read a line (through \\n, byte 10) from a TLS connection.
+     Returns a string including the newline, or nil on EOF.
+     Uses tls/plaintext-indexof to scan without draining, then
+     tls/read-plaintext to drain exactly the right number of bytes.
+     Must be called inside a scheduler context."
+    (let [[tls conn:tls]
+          [port conn:tcp]
+          [chunks @[]]]     # accumulated string fragments before the newline
+      (forever
+        # Scan for newline in the buffered plaintext — do NOT drain yet.
+        (let [[idx (plaintext-indexof-fn tls 10)]]   # 10 = \n
+          (when (not (nil? idx))
+            # Found a newline at position idx.
+            # Drain exactly (idx + 1) bytes — up to and including the newline.
+            (let [[line-bytes (read-plaintext-fn tls (+ idx 1))]]
+              (push chunks (string line-bytes))
+              # Remainder (bytes after the newline) stays in the plaintext buffer
+              # for the next tls/read-line call.
+              (break (apply concat chunks)))))
+        # No newline in buffer yet — read more from network.
+        (let [[data (stream/read port 16384)]]
+          (when (nil? data)
+            # EOF. Return whatever we have accumulated, or nil if nothing.
+            (let [[remaining (get-plaintext-fn tls)]]
+              (when (> (length remaining) 0)
+                (push chunks (string remaining)))
+              (break (if (> (length chunks) 0)
+                       (apply concat chunks)
+                       nil))))
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
+          (let [[out (get-outgoing-fn tls)]]
+            (when (> (length out) 0)
+              (stream/write port out)))))))   # async
+
+  (defn tls/read-all [conn]
+    "Read all remaining decrypted bytes until EOF. Returns bytes.
+     Returns empty bytes if connection is already at EOF.
+     Must be called inside a scheduler context."
+    (let [[tls conn:tls]
+          [port conn:tcp]
+          [chunks @[]]]
+      (forever
+        (let [[data (stream/read port 16384)]]
+          (when (nil? data)
+            # EOF. Drain any remaining plaintext and return accumulated data.
+            (let [[remaining (get-plaintext-fn tls)]]
+              (when (> (length remaining) 0)
+                (push chunks remaining)))
+            (break (if (> (length chunks) 0)
+                     (apply concat (freeze chunks))
+                     (bytes))))
+          (process-fn tls data)
+          # INVARIANT: Send outgoing after every tls/process.
+          (let [[out (get-outgoing-fn tls)]]
+            (when (> (length out) 0)
+              (stream/write port out)))         # async
+          # Accumulate any newly decrypted plaintext.
+          (let [[pt (get-plaintext-fn tls)]]
+            (when (> (length pt) 0)
+              (push chunks pt)))))))
+
+  (defn tls/write [conn data]
+    "Encrypt data and send over TLS. data may be bytes or string.
+     Returns the number of plaintext bytes written.
+     Must be called inside a scheduler context."
+    (let* [[tls conn:tls]
+           [port conn:tcp]
+           [plaintext (if (string? data) (bytes data) data)]
+           [result (write-plaintext-fn tls plaintext)]]
+      (when (= result:status :error)
+        (error {:error :tls-error :message result:message}))
+      (let [[out result:outgoing]]
+        (when (> (length out) 0)
+          (stream/write port out)))             # async
+      (length plaintext)))
+
+  (defn tls/close [conn]
+    "Close a TLS connection. Closes the TCP port.
+     Returns nil."
+    (port/close conn:tcp)
+    nil)
+
+  ## ── Public: stream constructors ───────────────────────────────────────────
+  ##
+  ## These return coroutines — Elle's universal stream type.
+  ## All stream/map, stream/filter, stream/collect, stream/take, etc. work
+  ## on these because they operate on coroutines via coro/resume, coro/done?,
+  ## coro/value — not on ports.
+
+  (defn tls/lines [conn]
+    "Return a coroutine that yields lines from a TLS connection one at a time.
+     Closes the connection when the stream is exhausted.
+     Compose with stream/map, stream/filter, stream/take, stream/collect, etc.
+     Must be called inside a scheduler context."
+    (coro/new (fn []
+      (forever
+        (let [[line (tls/read-line conn)]]
+          (if (nil? line)
+            (begin (tls/close conn) (break))
+            (yield line)))))))
+
+  (defn tls/chunks [conn size]
+    "Return a coroutine that yields byte chunks of `size` from a TLS connection.
+     Final chunk may be smaller. Closes the connection when exhausted.
+     Must be called inside a scheduler context."
+    (coro/new (fn []
+      (forever
+        (let [[chunk (tls/read conn size)]]
+          (if (nil? chunk)
+            (begin (tls/close conn) (break))
+            (yield chunk)))))))
+
+  (defn tls/writer [conn]
+    "Return a write-stream coroutine. Resume with bytes/string to write.
+     Resume with nil to close the connection.
+     Must be called inside a scheduler context."
+    (coro/new (fn []
+      (forever
+        (let [[val (yield nil)]]
+          (if (nil? val)
+            (begin (tls/close conn) (break))
+            (tls/write conn val)))))))
+
   ## ── Export struct ──────────────────────────────────────────────────────
-  {:connect tls/connect
-   :accept  tls/accept})
+  {:connect     tls/connect
+   :accept      tls/accept
+   :read        tls/read
+   :read-line   tls/read-line
+   :read-all    tls/read-all
+   :write       tls/write
+   :close       tls/close
+   :lines       tls/lines
+   :chunks      tls/chunks
+   :writer      tls/writer})
