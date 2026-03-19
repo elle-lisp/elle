@@ -23,15 +23,21 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 
 | Plugin | Purpose | Primitives |
 |--------|---------|-----------|
+| `base64/` | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
+| `compress/` | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
+| `csv/` | CSV parsing and serialization | `csv/parse`, `csv/parse-rows`, `csv/write`, `csv/write-rows` |
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
 | `glob/` | Filesystem globbing | `glob/match`, `glob/glob` |
 | `oxigraph/` | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
 | `random/` | Random number generation | `random/int`, `random/float`, `random/bool`, `random/bytes`, `random/shuffle`, `random/choice`, `random/seed`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/csprng-seed`, `random/sample` |
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
-| `selkie/` | HTTP client | `http/get`, `http/post`, `http/request` |
+| `selkie/` | Mermaid diagram renderer | `selkie/render`, `selkie/render-to-file`, `selkie/render-ascii` |
+| `semver/` | Semantic version parsing and comparison | `semver/parse`, `semver/valid?`, `semver/compare`, `semver/satisfies?`, `semver/increment` |
 | `sqlite/` | SQLite database | `db/open`, `db/query`, `db/exec` |
+| `toml/` | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
+| `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
 
 ## Building plugins
 
@@ -124,12 +130,24 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 
 | File | Purpose |
 |------|---------|
+| `base64/` | Base64 encoding and decoding |
+| `compress/` | Gzip, deflate, and zstd compression and decompression |
+| `csv/` | CSV parsing and serialization |
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
 | `oxigraph/` | RDF quad store with SPARQL query and update |
 | `random/` | Random number generation (migrated to `rand` 0.9; includes distributions and CSPRNG) |
 | `regex/` | Regular expression matching and replacement |
-| `selkie/` | HTTP client library |
+| `selkie/` | Mermaid diagram rendering |
+| `semver/` | Semantic version parsing and comparison |
 | `sqlite/` | SQLite database access |
+<<<<<<< HEAD
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
+=======
+| `toml/` | TOML parsing and serialization |
+<<<<<<< HEAD
+>>>>>>> 32ae0250 (feat: add toml plugin)
+=======
+| `yaml/` | YAML parsing and serialization |
+>>>>>>> 8885dc00 (feat: add yaml plugin)

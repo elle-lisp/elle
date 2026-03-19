@@ -6,14 +6,21 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 
 | Plugin | Purpose | Key Primitives |
 |--------|---------|-----------------|
+| [`base64/`](base64/) | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
+| [`compress/`](compress/) | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
+| [`csv/`](csv/) | CSV parsing and serialization | `csv/parse`, `csv/parse-rows`, `csv/write`, `csv/write-rows` |
 | [`crypto/`](crypto/) | Cryptographic hashing | `sha256`, `hmac-sha256`, `sha512`, etc. |
 | [`glob/`](glob/) | Filesystem pattern matching | `glob/match`, `glob/glob` |
+| [`oxigraph/`](oxigraph/) | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
 | [`random/`](random/) | Random number generation | `random/int`, `random/float`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/sample` |
 | [`regex/`](regex/) | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
-| [`selkie/`](selkie/) | HTTP client | `http/get`, `http/post`, `http/request` |
+| [`selkie/`](selkie/) | Mermaid diagram renderer | `selkie/render`, `selkie/render-to-file`, `selkie/render-ascii` |
+| [`semver/`](semver/) | Semantic version parsing and comparison | `semver/parse`, `semver/valid?`, `semver/compare`, `semver/satisfies?`, `semver/increment` |
 | [`sqlite/`](sqlite/) | SQLite database | `db/open`, `db/query`, `db/exec` |
+| [`toml/`](toml/) | TOML parsing and serialization | `toml/parse`, `toml/encode` |
 | [`uuid/`](uuid/) | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | [`xml/`](xml/) | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
+| [`yaml/`](yaml/) | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
 
 ## Building Plugins
 
