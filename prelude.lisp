@@ -43,6 +43,46 @@
                        `(,form ,val))))
       `(->> ,threaded ,;rest-forms))))
 
+## as-> - thread with named binding
+## (as-> val var (f var) (g var)) => binds val to var, threads through forms
+(defmacro as-> (val var & forms)
+  (if (empty? forms)
+    val
+    (if (empty? (rest forms))
+      `(let ((,var ,val)) ,(first forms))
+      `(let ((,var ,val))
+         (as-> ,(first forms) ,var ,;(rest forms))))))
+
+## some-> - thread-first, short-circuiting on nil
+## (some-> val (f a) (g b)) => like -> but stops if any step returns nil
+(defmacro some-> (val & forms)
+  (if (empty? forms)
+    val
+    (let* ((g (gensym))
+           (form (first forms))
+           (rest-forms (rest forms))
+           (threaded (if (pair? form)
+                       `(,(first form) ,g ,;(rest form))
+                       `(,form ,g))))
+      `(let ((,g ,val))
+         (if (nil? ,g) nil
+           (some-> ,threaded ,;rest-forms))))))
+
+## some->> - thread-last, short-circuiting on nil
+## (some->> val (f a) (g b)) => like ->> but stops if any step returns nil
+(defmacro some->> (val & forms)
+  (if (empty? forms)
+    val
+    (let* ((g (gensym))
+           (form (first forms))
+           (rest-forms (rest forms))
+           (threaded (if (pair? form)
+                       `(,;form ,g)
+                       `(,form ,g))))
+      `(let ((,g ,val))
+         (if (nil? ,g) nil
+           (some->> ,threaded ,;rest-forms))))))
+
 ## when - execute body if test is truthy, return nil otherwise
 (defmacro when (test & body)
   `(if ,test (begin ,;body) nil))
