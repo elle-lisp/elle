@@ -233,16 +233,18 @@ fn prim_increment(args: &[Value]) -> (SignalBits, Value) {
     };
     let part = match args[1].as_keyword_name() {
         Some(k) => k,
-        None => return (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
                     "semver/increment: part must be a keyword (:major, :minor, or :patch), got {}",
                     args[1].type_name()
                 ),
-            ),
-        ),
+                ),
+            )
+        }
     };
     match part.as_str() {
         "major" => {
