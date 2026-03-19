@@ -96,7 +96,7 @@ bytecode. Error messages include file:line:col information.
     available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
     `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP), `elle-uuid`
     (UUID generation), `elle-xml` (XML parsing/serialization), `elle-syn` (Rust syntax parsing via syn crate),
-    `elle-git` (Git repository operations)
+    `elle-git` (Git repository operations), `elle-msgpack` (MessagePack binary serialization)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
