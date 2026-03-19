@@ -110,8 +110,8 @@
       (git/branch-delete repo "feature")
       (assert (= 1 (length (git/branches repo :local))) "back to one branch")
 
-      # Checkout HEAD (effectively a no-op here)
-      (git/checkout repo "HEAD")
+      # Checkout the current branch (no-op, exercises the code path)
+      (git/checkout repo (:name (first (git/branches repo :local))))
 
       # -------------------------------------------------------------------------
       # Chunk 8: Tags

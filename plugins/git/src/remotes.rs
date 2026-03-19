@@ -84,31 +84,40 @@ pub fn prim_git_push(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let refspecs: Vec<String> = if args.len() >= 3 {
-        match args[2].as_array() {
-            Some(arr) => {
-                let mut specs = Vec::new();
-                for item in arr.iter() {
-                    match item.with_string(|s| s.to_string()) {
-                        Some(s) => specs.push(s),
-                        None => {
-                            return (
-                                SIG_ERROR,
-                                error_val(
-                                    "type-error",
-                                    format!("{}: refspecs must be strings", name),
-                                ),
-                            )
-                        }
+        if let Some(arr) = args[2].as_array() {
+            let mut specs = Vec::new();
+            for item in arr.iter() {
+                match item.with_string(|s| s.to_string()) {
+                    Some(s) => specs.push(s),
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val("type-error", format!("{}: refspecs must be strings", name)),
+                        )
                     }
                 }
-                specs
             }
-            None => {
-                return (
-                    SIG_ERROR,
-                    error_val("type-error", format!("{}: refspecs must be an array", name)),
-                )
+            specs
+        } else if let Some(arr) = args[2].as_array_mut() {
+            let arr = arr.borrow();
+            let mut specs = Vec::new();
+            for item in arr.iter() {
+                match item.with_string(|s| s.to_string()) {
+                    Some(s) => specs.push(s),
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val("type-error", format!("{}: refspecs must be strings", name)),
+                        )
+                    }
+                }
             }
+            specs
+        } else {
+            return (
+                SIG_ERROR,
+                error_val("type-error", format!("{}: refspecs must be an array", name)),
+            );
         }
     } else {
         // Default: push current branch
