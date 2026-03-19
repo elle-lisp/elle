@@ -1,0 +1,12 @@
+[package]
+name = "elle-yaml"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+serde_yml = "0.0.12"
+serde = "1"
