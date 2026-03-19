@@ -2,7 +2,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, error_val_extra, Value};
 
 /// Import a module file
 pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
@@ -36,7 +36,10 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("error", "import: VM context not initialized".to_string()),
+                error_val(
+                    "internal-error",
+                    "import: VM context not initialized".to_string(),
+                ),
             );
         }
     };
@@ -48,9 +51,10 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         if vm.is_module_loading(&path) {
             return (
                 SIG_ERROR,
-                error_val(
-                    "error",
+                error_val_extra(
+                    "io-error",
                     format!("import: circular dependency detected for '{}'", path),
+                    &[("path", Value::string(path.as_str()))],
                 ),
             );
         }
@@ -65,7 +69,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "internal-error",
                         "import: symbol table context not initialized".to_string(),
                     ),
                 );
@@ -78,7 +82,14 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         if path.ends_with(".so") {
             return match crate::plugin::load_plugin(&path, vm, symbols) {
                 Ok(value) => (SIG_OK, value),
-                Err(e) => (SIG_ERROR, error_val("error", format!("import: {}", e))),
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val_extra(
+                        "io-error",
+                        format!("import: {}", e),
+                        &[("path", Value::string(path.as_str()))],
+                    ),
+                ),
             };
         }
 
@@ -88,7 +99,11 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => {
                 return (
                     SIG_ERROR,
-                    error_val("error", format!("import: failed to read '{}': {}", path, e)),
+                    error_val_extra(
+                        "io-error",
+                        format!("import: failed to read '{}': {}", path, e),
+                        &[("path", Value::string(path.as_str()))],
+                    ),
                 );
             }
         };
@@ -98,9 +113,10 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => {
                 return (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "eval-error",
                         format!("import: compilation error in {}: {}", path, e),
+                        &[("path", Value::string(path.as_str()))],
                     ),
                 );
             }
@@ -139,17 +155,19 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                 let msg = vm.format_error_with_location(err_value);
                 (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "eval-error",
                         format!("import: runtime error in {}: {}", path, msg),
+                        &[("path", Value::string(path.as_str()))],
                     ),
                 )
             }
             bits => (
                 SIG_ERROR,
-                error_val(
-                    "error",
+                error_val_extra(
+                    "eval-error",
                     format!("import: unexpected signal {} in {}", bits, path),
+                    &[("path", Value::string(path.as_str()))],
                 ),
             ),
         }

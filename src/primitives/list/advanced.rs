@@ -585,7 +585,10 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
         Some(v) => (SIG_OK, v),
         None => (
             SIG_ERROR,
-            error_val("error", "last: cannot get last of empty list".to_string()),
+            error_val(
+                "argument-error",
+                "last: cannot get last of empty list".to_string(),
+            ),
         ),
     }
 }
@@ -615,7 +618,7 @@ pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 "butlast: cannot get butlast of empty list".to_string(),
             ),
         );
@@ -641,7 +644,7 @@ pub(crate) fn prim_take(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("take: count must be non-negative, got {}", n),
                 ),
             );
@@ -683,7 +686,7 @@ pub(crate) fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("drop: count must be non-negative, got {}", n),
                 ),
             );

@@ -219,7 +219,7 @@ impl VM {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "SIG_QUERY: expected cons cell".to_string()),
+                    error_val("type-error", "SIG_QUERY: expected cons cell".to_string()),
                 );
             }
         };
@@ -233,7 +233,7 @@ impl VM {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "type-error",
                     "SIG_QUERY: operation must be a keyword or string".to_string(),
                 ),
             );
@@ -486,7 +486,7 @@ impl VM {
                         None => (
                             SIG_ERROR,
                             error_val(
-                                "error",
+                                "state-error",
                                 "arena/stats: fiber is currently executing".to_string(),
                             ),
                         ),
@@ -529,7 +529,7 @@ impl VM {
             _ => (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("SIG_QUERY: unknown operation: {}", op_name),
                 ),
             ),

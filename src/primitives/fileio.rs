@@ -3,7 +3,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, TableKey, Value};
+use crate::value::{error_val, error_val_extra, TableKey, Value};
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -24,7 +24,11 @@ pub(crate) fn prim_slurp(args: &[Value]) -> (SignalBits, Value) {
                 Ok(content) => (SIG_OK, Value::string(content)),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val("error", format!("slurp: failed to read '{}': {}", path, e)),
+                    error_val_extra(
+                        "io-error",
+                        format!("slurp: failed to read '{}': {}", path, e),
+                        &[("path", Value::string(path))],
+                    ),
                 ),
             })
             .unwrap()
@@ -79,7 +83,11 @@ pub(crate) fn prim_spit(args: &[Value]) -> (SignalBits, Value) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
-            error_val("error", format!("spit: failed to write '{}': {}", path, e)),
+            error_val_extra(
+                "io-error",
+                format!("spit: failed to write '{}': {}", path, e),
+                &[("path", Value::string(path.as_str()))],
+            ),
         ),
     }
 }
@@ -128,9 +136,10 @@ pub(crate) fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => {
             return (
                 SIG_ERROR,
-                error_val(
-                    "error",
+                error_val_extra(
+                    "io-error",
                     format!("append-file: failed to open '{}': {}", path, e),
+                    &[("path", Value::string(path.as_str()))],
                 ),
             )
         }
@@ -140,9 +149,10 @@ pub(crate) fn prim_append_file(args: &[Value]) -> (SignalBits, Value) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
-            error_val(
-                "error",
+            error_val_extra(
+                "io-error",
                 format!("append-file: failed to write '{}': {}", path, e),
+                &[("path", Value::string(path.as_str()))],
             ),
         ),
     }
@@ -165,9 +175,10 @@ pub(crate) fn prim_delete_file(args: &[Value]) -> (SignalBits, Value) {
                 Ok(_) => (SIG_OK, Value::TRUE),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("delete-file: failed to delete '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })
@@ -200,9 +211,10 @@ pub(crate) fn prim_delete_directory(args: &[Value]) -> (SignalBits, Value) {
                 Ok(_) => (SIG_OK, Value::TRUE),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("delete-directory: failed to delete '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })
@@ -238,9 +250,10 @@ pub(crate) fn prim_create_directory(args: &[Value]) -> (SignalBits, Value) {
                 Ok(_) => (SIG_OK, Value::TRUE),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("create-directory: failed to create '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })
@@ -279,9 +292,10 @@ pub(crate) fn prim_create_directory_all(args: &[Value]) -> (SignalBits, Value) {
                 Ok(_) => (SIG_OK, Value::TRUE),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("create-directory-all: failed to create '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })
@@ -340,9 +354,10 @@ pub(crate) fn prim_rename_file(args: &[Value]) -> (SignalBits, Value) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
-            error_val(
-                "error",
+            error_val_extra(
+                "io-error",
                 format!("rename-file: failed to rename '{}': {}", old_path, e),
+                &[("path", Value::string(old_path.as_str()))],
             ),
         ),
     }
@@ -388,9 +403,10 @@ pub(crate) fn prim_copy_file(args: &[Value]) -> (SignalBits, Value) {
         Ok(_) => (SIG_OK, Value::TRUE),
         Err(e) => (
             SIG_ERROR,
-            error_val(
-                "error",
+            error_val_extra(
+                "io-error",
                 format!("copy-file: failed to copy '{}': {}", src, e),
+                &[("path", Value::string(src.as_str()))],
             ),
         ),
     }
@@ -413,9 +429,10 @@ pub(crate) fn prim_file_size(args: &[Value]) -> (SignalBits, Value) {
                 Ok(metadata) => (SIG_OK, Value::int(metadata.len() as i64)),
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("file-size: failed to get size of '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })
@@ -599,9 +616,10 @@ pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
                     Err(e) => {
                         return (
                             SIG_ERROR,
-                            error_val(
-                                "error",
+                            error_val_extra(
+                                "io-error",
                                 format!("list-directory: error reading '{}': {}", path, e),
+                                &[("path", Value::string(path.as_str()))],
                             ),
                         );
                     }
@@ -611,9 +629,10 @@ pub(crate) fn prim_list_directory(args: &[Value]) -> (SignalBits, Value) {
         }
         Err(e) => (
             SIG_ERROR,
-            error_val(
-                "error",
+            error_val_extra(
+                "io-error",
                 format!("list-directory: failed to read '{}': {}", path, e),
+                &[("path", Value::string(path.as_str()))],
             ),
         ),
     }
@@ -642,9 +661,10 @@ pub(crate) fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
                 }
                 Err(e) => (
                     SIG_ERROR,
-                    error_val(
-                        "error",
+                    error_val_extra(
+                        "io-error",
                         format!("read-lines: failed to read '{}': {}", path, e),
+                        &[("path", Value::string(path))],
                     ),
                 ),
             })

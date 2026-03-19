@@ -47,7 +47,7 @@ pub(crate) fn prim_gensym(args: &[Value]) -> (SignalBits, Value) {
         } else {
             (
                 SIG_ERROR,
-                error_val("error", "gensym: symbol table not available"),
+                error_val("internal-error", "gensym: symbol table not available"),
             )
         }
     }
@@ -468,7 +468,7 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "signal-error",
                         format!(
                             "squelch: signal :{} not registered (unknown signal keyword)",
                             kw

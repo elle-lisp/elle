@@ -36,7 +36,10 @@ pub(crate) fn prim_array_new(args: &[Value]) -> (SignalBits, Value) {
             if i < 0 {
                 return (
                     SIG_ERROR,
-                    error_val("error", "array/new: size must be non-negative".to_string()),
+                    error_val(
+                        "argument-error",
+                        "array/new: size must be non-negative".to_string(),
+                    ),
                 );
             }
             i as usize
@@ -103,7 +106,7 @@ pub(crate) fn prim_push(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("push: byte value out of range 0-255: {}", n),
                     ),
                 )
@@ -160,7 +163,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
                 drop(vec);
                 return (
                     SIG_ERROR,
-                    error_val("error", "pop: empty array".to_string()),
+                    error_val("argument-error", "pop: empty array".to_string()),
                 );
             }
         }
@@ -172,7 +175,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
             drop(buf);
             return (
                 SIG_ERROR,
-                error_val("error", "pop: empty @string".to_string()),
+                error_val("argument-error", "pop: empty @string".to_string()),
             );
         }
         let s = match std::str::from_utf8(&buf) {
@@ -207,7 +210,7 @@ pub(crate) fn prim_pop(args: &[Value]) -> (SignalBits, Value) {
                 drop(blob);
                 return (
                     SIG_ERROR,
-                    error_val("error", "pop: empty @bytes".to_string()),
+                    error_val("argument-error", "pop: empty @bytes".to_string()),
                 );
             }
         }
@@ -242,7 +245,10 @@ pub(crate) fn prim_popn(args: &[Value]) -> (SignalBits, Value) {
             if i < 0 {
                 return (
                     SIG_ERROR,
-                    error_val("error", "popn: count must be non-negative".to_string()),
+                    error_val(
+                        "argument-error",
+                        "popn: count must be non-negative".to_string(),
+                    ),
                 );
             }
             i as usize
@@ -305,7 +311,10 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
             if i < 0 {
                 return (
                     SIG_ERROR,
-                    error_val("error", "insert: index must be non-negative".to_string()),
+                    error_val(
+                        "argument-error",
+                        "insert: index must be non-negative".to_string(),
+                    ),
                 );
             }
             i as usize
@@ -339,7 +348,7 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("insert: byte value out of range 0-255: {}", n),
                     ),
                 )
@@ -396,7 +405,10 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
             if i < 0 {
                 return (
                     SIG_ERROR,
-                    error_val("error", "remove: index must be non-negative".to_string()),
+                    error_val(
+                        "argument-error",
+                        "remove: index must be non-negative".to_string(),
+                    ),
                 );
             }
             i as usize
@@ -418,7 +430,10 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
                 if i < 0 {
                     return (
                         SIG_ERROR,
-                        error_val("error", "remove: count must be non-negative".to_string()),
+                        error_val(
+                            "argument-error",
+                            "remove: count must be non-negative".to_string(),
+                        ),
                     );
                 }
                 i as usize

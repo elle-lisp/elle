@@ -214,7 +214,7 @@ fn prim_chan_clone(args: &[Value]) -> (SignalBits, Value) {
         }
         None => (
             SIG_ERROR,
-            error_val("error", "chan/clone: sender is closed"),
+            error_val("state-error", "chan/clone: sender is closed"),
         ),
     }
 }
@@ -339,7 +339,7 @@ fn prim_chan_select(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "state-error",
                         format!("chan/select: receiver at index {} is closed", i),
                     ),
                 );

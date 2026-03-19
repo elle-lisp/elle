@@ -108,13 +108,13 @@ pub(crate) fn prim_spawn(args: &[Value]) -> (SignalBits, Value) {
     if let Some(closure) = args[0].as_closure() {
         match spawn_closure_impl(closure) {
             Ok(val) => (SIG_OK, val),
-            Err(e) => (SIG_ERROR, error_val("error", e)),
+            Err(e) => (SIG_ERROR, error_val("thread-error", e)),
         }
     } else if args[0].as_native_fn().is_some() {
         (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 "spawn: native functions cannot be spawned. Use closures instead.".to_string(),
             ),
         )
@@ -157,7 +157,7 @@ pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
                     // Result is ready - convert from SendValue back to Value
                     return match result {
                         Ok(bundle) => (SIG_OK, bundle.clone().into_value()),
-                        Err(e) => (SIG_ERROR, error_val("error", e.clone())),
+                        Err(e) => (SIG_ERROR, error_val("thread-error", e.clone())),
                     };
                 }
             }
@@ -166,7 +166,10 @@ pub(crate) fn prim_join(args: &[Value]) -> (SignalBits, Value) {
             if attempts >= MAX_ATTEMPTS {
                 return (
                     SIG_ERROR,
-                    error_val("error", "join: thread did not complete in time".to_string()),
+                    error_val(
+                        "thread-error",
+                        "join: thread did not complete in time".to_string(),
+                    ),
                 );
             }
 

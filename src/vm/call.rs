@@ -179,7 +179,7 @@ impl VM {
         if let Some(closure) = func.as_closure() {
             self.fiber.call_depth += 1;
             if self.fiber.call_depth > 1000 {
-                set_error(&mut self.fiber, "error", "Stack overflow");
+                set_error(&mut self.fiber, "stack-overflow", "Stack overflow");
                 return Some(SIG_ERROR);
             }
 

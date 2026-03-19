@@ -54,7 +54,7 @@ pub(crate) fn prim_clock_cpu(args: &[Value]) -> (SignalBits, Value) {
     if ret != 0 {
         return (
             SIG_ERROR,
-            error_val("error", "clock/cpu: clock_gettime failed".to_string()),
+            error_val("io-error", "clock/cpu: clock_gettime failed".to_string()),
         );
     }
     let secs = ts.tv_sec as f64 + ts.tv_nsec as f64 / 1_000_000_000.0;
@@ -79,7 +79,7 @@ pub(crate) fn prim_clock_realtime(args: &[Value]) -> (SignalBits, Value) {
         Err(_) => (
             SIG_ERROR,
             error_val(
-                "error",
+                "io-error",
                 "clock/realtime: system clock is before Unix epoch".to_string(),
             ),
         ),
@@ -104,7 +104,7 @@ pub(crate) fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     "time/sleep: duration must be non-negative".to_string(),
                 ),
             );
@@ -116,7 +116,7 @@ pub(crate) fn prim_sleep(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     "time/sleep: duration must be a finite non-negative number".to_string(),
                 ),
             );
@@ -155,7 +155,7 @@ pub(crate) fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
         if n < 0 {
             return (
                 SIG_ERROR,
-                error_val("error", "ev/sleep: duration must be non-negative"),
+                error_val("argument-error", "ev/sleep: duration must be non-negative"),
             );
         }
         Duration::from_secs(n as u64)
@@ -164,7 +164,7 @@ pub(crate) fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     "ev/sleep: duration must be a finite non-negative number",
                 ),
             );

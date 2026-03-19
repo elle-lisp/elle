@@ -29,7 +29,7 @@ pub use heap::{Cons, HeapObject, HeapTag};
 pub use heap::{ArenaGuard, ArenaMark};
 
 // Export error value construction
-pub use error::{error_val, format_error};
+pub use error::{error_val, error_val_extra, format_error};
 
 // Export SendValue and SendBundle for thread-safe value transmission
 pub use send::SendBundle;

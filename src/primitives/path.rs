@@ -6,7 +6,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, error_val_extra, Value};
 
 /// Call `f` with the string content of `val`, or return a type error
 /// tagged with `prim_name`.
@@ -139,7 +139,11 @@ fn prim_path_absolute(args: &[Value]) -> (SignalBits, Value) {
             Ok(abs) => (SIG_OK, Value::string(abs)),
             Err(e) => (
                 SIG_ERROR,
-                error_val("error", format!("path/absolute: {}", e)),
+                error_val_extra(
+                    "io-error",
+                    format!("path/absolute: {}", e),
+                    &[("path", Value::string(s))],
+                ),
             ),
         }
     })
@@ -153,7 +157,11 @@ fn prim_path_canonicalize(args: &[Value]) -> (SignalBits, Value) {
             Ok(c) => (SIG_OK, Value::string(c)),
             Err(e) => (
                 SIG_ERROR,
-                error_val("error", format!("path/canonicalize: {}", e)),
+                error_val_extra(
+                    "io-error",
+                    format!("path/canonicalize: {}", e),
+                    &[("path", Value::string(s))],
+                ),
             ),
         },
     )
@@ -219,7 +227,7 @@ fn prim_path_is_relative(args: &[Value]) -> (SignalBits, Value) {
 fn prim_path_cwd(_args: &[Value]) -> (SignalBits, Value) {
     match crate::path::cwd() {
         Ok(c) => (SIG_OK, Value::string(c)),
-        Err(e) => (SIG_ERROR, error_val("error", format!("path/cwd: {}", e))),
+        Err(e) => (SIG_ERROR, error_val("io-error", format!("path/cwd: {}", e))),
     }
 }
 

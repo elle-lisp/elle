@@ -48,3 +48,8 @@ fn jit() {
 fn file_stat() {
     run_elle_script("file_stat");
 }
+
+#[test]
+fn errors() {
+    run_elle_script("errors");
+}
