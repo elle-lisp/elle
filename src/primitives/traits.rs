@@ -72,8 +72,8 @@ pub(crate) fn prim_with_traits(args: &[Value]) -> (SignalBits, Value) {
 /// LBox), the data is shared (same RefCell Rc). Mutations to the original are
 /// visible through the traited copy.
 ///
-/// For infrastructure types (Float, NativeFn, LibHandle, Binding,
-/// FFISignature, FFIType), returns Err.
+/// For infrastructure types (Float, NativeFn, LibHandle, FFISignature,
+/// FFIType), returns Err.
 ///
 /// # Safety
 /// `value` must be a valid heap pointer.
@@ -162,7 +162,6 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
         HeapObject::Float(_)
         | HeapObject::NativeFn(_)
         | HeapObject::LibHandle(_)
-        | HeapObject::Binding(_)
         | HeapObject::FFISignature(_, _)
         | HeapObject::FFIType(_) => Err(format!(
             "with-traits: cannot attach traits to infrastructure type {}",

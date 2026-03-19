@@ -141,7 +141,7 @@ unsafe impl Sync for SendBundle {}
 
 /// Per-call serialization context for `SendBundle::from_value`.
 struct SerContext {
-    /// Maps `value.to_bits()` (NaN-boxed heap pointer identity) → intern table index.
+    /// Maps `value.payload` (heap pointer address) → intern table index.
     /// Inserted BEFORE recursing into a closure's fields, so back-references find it.
     visited: HashMap<u64, usize>,
     /// Intern table being built.
@@ -272,8 +272,8 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             closure: closure_rc,
             traits: _,
         } => {
-            // Use value.to_bits() as identity key — same heap pointer = same bits.
-            let key = value.to_bits();
+            // Use value.payload as identity key — for heap values, payload IS the pointer.
+            let key = value.payload;
 
             // Already visited → return Ref to existing intern entry.
             if let Some(&idx) = ctx.visited.get(&key) {
@@ -363,9 +363,6 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
 
         // Unsafe: syntax objects (contain Rc)
         HeapObject::Syntax { .. } => Err("Cannot send syntax object".to_string()),
-
-        // Unsafe: bindings (compile-time only)
-        HeapObject::Binding(_) => Err("Cannot send binding".to_string()),
 
         // Unsafe: FFI signatures (contain non-Send types like Cif)
         HeapObject::FFISignature(_, _) => Err("Cannot send FFI signature".to_string()),

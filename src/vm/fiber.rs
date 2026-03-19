@@ -18,6 +18,7 @@
 //!
 //! SIG_TERMINAL signals are uncatchable — they pass through mask checks.
 
+use crate::jit::JitValue;
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
 use crate::value::{
@@ -627,25 +628,23 @@ impl VM {
 
     // ── JIT-context fiber signal handlers ────────────────────────────
     //
-    // These mirror the interpreter-level handlers above but return u64
-    // (value bits, TAG_NIL for error, YIELD_SENTINEL for yield) instead
-    // of pushing to fiber.stack. Called from jit/dispatch.rs when a
+    // These mirror the interpreter-level handlers above but return `JitValue`
+    // instead of pushing to fiber.stack. Called from jit/dispatch.rs when a
     // primitive returns SIG_RESUME/SIG_PROPAGATE/SIG_ABORT in JIT context.
 
     /// Handle SIG_RESUME from a fiber primitive in JIT context.
     ///
-    /// Runs the child fiber synchronously and returns the result as u64.
-    /// On error: sets fiber.signal, returns TAG_NIL.
+    /// Runs the child fiber synchronously and returns the result as `JitValue`.
+    /// On error: sets fiber.signal, returns `JitValue::nil()`.
     /// On yield propagation: sets fiber.signal, returns YIELD_SENTINEL.
-    pub(crate) fn handle_fiber_resume_signal_jit(&mut self, fiber_value: Value) -> u64 {
+    pub(crate) fn handle_fiber_resume_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
-        use crate::value::repr::TAG_NIL;
 
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
                 set_error(&mut self.fiber, "error", "SIG_RESUME with non-fiber value");
-                return TAG_NIL;
+                return JitValue::nil();
             }
         };
 
@@ -662,7 +661,7 @@ impl VM {
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
-            result_value.to_bits()
+            JitValue::from_value(result_value)
         } else {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -674,11 +673,11 @@ impl VM {
                     "error",
                     "fiber/resume: cannot propagate signal (no parent fiber to catch it)",
                 );
-                TAG_NIL
+                JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
                 if result_bits.contains(SIG_ERROR) {
-                    TAG_NIL
+                    JitValue::nil()
                 } else {
                     // Uncaught non-error signal (yield, etc.) — side-exit
                     YIELD_SENTINEL
@@ -688,9 +687,8 @@ impl VM {
     }
 
     /// Handle SIG_PROPAGATE from fiber/propagate in JIT context.
-    pub(crate) fn handle_fiber_propagate_signal_jit(&mut self, fiber_value: Value) -> u64 {
+    pub(crate) fn handle_fiber_propagate_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
-        use crate::value::repr::TAG_NIL;
 
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
@@ -700,7 +698,7 @@ impl VM {
                     "error",
                     "SIG_PROPAGATE with non-fiber value",
                 );
-                return TAG_NIL;
+                return JitValue::nil();
             }
         };
 
@@ -713,29 +711,28 @@ impl VM {
         self.fiber.signal = Some((child_bits, child_value));
 
         if child_bits.contains(SIG_ERROR) {
-            TAG_NIL
+            JitValue::nil()
         } else if self.current_fiber_handle.is_none() {
             set_error(
                 &mut self.fiber,
                 "error",
                 "fiber/propagate: cannot propagate signal (no parent fiber to catch it)",
             );
-            TAG_NIL
+            JitValue::nil()
         } else {
             YIELD_SENTINEL
         }
     }
 
     /// Handle SIG_ABORT from fiber/abort in JIT context.
-    pub(crate) fn handle_fiber_abort_signal_jit(&mut self, fiber_value: Value) -> u64 {
+    pub(crate) fn handle_fiber_abort_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
-        use crate::value::repr::TAG_NIL;
 
         let handle = match fiber_value.as_fiber() {
             Some(h) => h.clone(),
             None => {
                 set_error(&mut self.fiber, "error", "SIG_ABORT with non-fiber value");
-                return TAG_NIL;
+                return JitValue::nil();
             }
         };
 
@@ -748,7 +745,7 @@ impl VM {
         if caught {
             self.fiber.child = None;
             self.fiber.child_value = None;
-            result_value.to_bits()
+            JitValue::from_value(result_value)
         } else {
             if result_bits.contains(SIG_ERROR) {
                 handle.with_mut(|f| f.status = FiberStatus::Error);
@@ -759,11 +756,11 @@ impl VM {
                     "error",
                     "fiber/abort: cannot propagate signal (no parent fiber to catch it)",
                 );
-                TAG_NIL
+                JitValue::nil()
             } else {
                 self.fiber.signal = Some((result_bits, result_value));
                 if result_bits.contains(SIG_ERROR) {
-                    TAG_NIL
+                    JitValue::nil()
                 } else {
                     YIELD_SENTINEL
                 }

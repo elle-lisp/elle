@@ -1,10 +1,10 @@
-//! Tests for NaN-boxed Value representation.
+//! Tests for the 16-byte tagged-union Value representation.
 
 use super::*;
 
 #[test]
 fn test_size() {
-    assert_eq!(std::mem::size_of::<Value>(), 8);
+    assert_eq!(std::mem::size_of::<Value>(), 16);
 }
 
 #[test]
@@ -26,14 +26,14 @@ fn test_undefined() {
     assert!(!v.is_int());
     assert!(!v.is_float());
     assert!(!v.is_empty_list());
-    // Note: is_truthy() now debug_asserts that UNDEFINED never reaches it.
+    // Note: is_truthy() debug_asserts that UNDEFINED never reaches it.
     // UNDEFINED should never appear in user-visible evaluation.
 
     // Verify UNDEFINED is distinct from all other special constants
-    assert_ne!(Value::UNDEFINED.to_bits(), Value::NIL.to_bits());
-    assert_ne!(Value::UNDEFINED.to_bits(), Value::TRUE.to_bits());
-    assert_ne!(Value::UNDEFINED.to_bits(), Value::FALSE.to_bits());
-    assert_ne!(Value::UNDEFINED.to_bits(), Value::EMPTY_LIST.to_bits());
+    assert_ne!(Value::UNDEFINED, Value::NIL);
+    assert_ne!(Value::UNDEFINED, Value::TRUE);
+    assert_ne!(Value::UNDEFINED, Value::FALSE);
+    assert_ne!(Value::UNDEFINED, Value::EMPTY_LIST);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_bool() {
 
 #[test]
 fn test_int_roundtrip() {
-    for &n in &[0i64, 1, -1, 100, -100, INT_MAX, INT_MIN] {
+    for &n in &[0i64, 1, -1, 100, -100, i64::MAX, i64::MIN] {
         let v = Value::int(n);
         assert!(v.is_int());
         assert!(!v.is_float());
@@ -74,10 +74,27 @@ fn test_float_roundtrip() {
 }
 
 #[test]
+fn test_float_nan_roundtrip() {
+    let nan = f64::NAN;
+    let v = Value::float(nan);
+    assert!(v.is_float());
+    assert!(!v.is_int());
+    // NaN != NaN by IEEE, but we can verify the bits are preserved
+    assert_eq!(v.as_float().map(|f| f.to_bits()), Some(nan.to_bits()));
+}
+
+#[test]
 fn test_symbol() {
     let v = Value::symbol(42);
     assert!(v.is_symbol());
     assert_eq!(v.as_symbol(), Some(42));
+}
+
+#[test]
+fn test_symbol_max_id() {
+    let v = Value::symbol(u32::MAX);
+    assert!(v.is_symbol());
+    assert_eq!(v.as_symbol(), Some(u32::MAX));
 }
 
 #[test]
@@ -97,38 +114,23 @@ fn test_bool_constructor() {
 fn test_string_constructor() {
     let v = Value::string("hello");
     assert!(v.is_string());
+    assert!(v.is_heap());
     assert_eq!(v.with_string(|s| s.to_string()), Some("hello".to_string()));
 }
 
 #[test]
-fn test_sso_short_string() {
-    let v = Value::string("hi");
-    assert!(v.is_string());
-    assert!(!v.is_heap()); // SSO, not heap
-    assert_eq!(v.with_string(|s| s.to_string()), Some("hi".to_string()));
-}
-
-#[test]
-fn test_sso_empty_string() {
+fn test_empty_string() {
     let v = Value::string("");
     assert!(v.is_string());
-    assert!(!v.is_heap());
+    assert!(v.is_heap());
     assert_eq!(v.with_string(|s| s.to_string()), Some(String::new()));
 }
 
 #[test]
-fn test_sso_six_byte_string() {
-    let v = Value::string("abcdef");
-    assert!(v.is_string());
-    assert!(!v.is_heap());
-    assert_eq!(v.with_string(|s| s.to_string()), Some("abcdef".to_string()));
-}
-
-#[test]
-fn test_heap_seven_byte_string() {
+fn test_long_string() {
     let v = Value::string("abcdefg");
     assert!(v.is_string());
-    assert!(v.is_heap()); // Too long for SSO
+    assert!(v.is_heap());
     assert_eq!(
         v.with_string(|s| s.to_string()),
         Some("abcdefg".to_string())
@@ -136,18 +138,11 @@ fn test_heap_seven_byte_string() {
 }
 
 #[test]
-fn test_sso_equality() {
-    let a = Value::string("hi");
-    let b = Value::string("hi");
-    assert_eq!(a, b);
-    assert_eq!(a.to_bits(), b.to_bits()); // Same bit pattern
-}
-
-#[test]
-fn test_sso_nul_byte_falls_back_to_heap() {
+fn test_string_with_nul() {
     let v = Value::string("a\0b");
     assert!(v.is_string());
-    assert!(v.is_heap()); // Contains NUL, falls back to heap
+    assert!(v.is_heap());
+    assert_eq!(v.with_string(|s| s.to_string()), Some("a\0b".to_string()));
 }
 
 #[test]
@@ -267,7 +262,7 @@ fn test_truthiness_semantics() {
     // Empty string is truthy
     assert!(Value::string("").is_truthy(), "empty string is truthy");
 
-    // Empty list is truthy (it's nil, but we test the list form)
+    // Empty list is truthy
     assert!(Value::EMPTY_LIST.is_truthy(), "empty list is truthy");
 
     // Empty array is truthy
@@ -313,17 +308,18 @@ fn test_pointer() {
     assert!(!null.is_pointer());
     assert_eq!(null.as_pointer(), None);
 
-    // Non-null pointer
-    let ptr = Value::pointer(0x7F4A_2B3C_0000);
+    // Non-null pointer (full 64-bit address space supported)
+    let addr: usize = 0x7F4A_2B3C_0000;
+    let ptr = Value::pointer(addr);
     assert!(ptr.is_pointer());
     assert!(!ptr.is_nil());
     assert!(!ptr.is_heap());
     assert!(!ptr.is_int());
-    assert_eq!(ptr.as_pointer(), Some(0x7F4A_2B3C_0000));
+    assert_eq!(ptr.as_pointer(), Some(addr));
     assert_eq!(ptr.type_name(), "ptr");
 
     // Pointer equality
-    let ptr2 = Value::pointer(0x7F4A_2B3C_0000);
+    let ptr2 = Value::pointer(addr);
     assert_eq!(ptr, ptr2);
 
     // Different pointers are not equal
@@ -451,4 +447,68 @@ fn test_ffi_type_array() {
     let v = Value::ffi_type(desc.clone());
     assert_eq!(v.as_ffi_type(), Some(&desc));
     assert_eq!(v.type_name(), "ffi-type");
+}
+
+#[test]
+fn test_tag_constants_distinct() {
+    // All tag constants must be distinct
+    let tags = [
+        super::TAG_INT,
+        super::TAG_FLOAT,
+        super::TAG_NIL,
+        super::TAG_TRUE,
+        super::TAG_FALSE,
+        super::TAG_EMPTY_LIST,
+        super::TAG_SYMBOL,
+        super::TAG_KEYWORD,
+        super::TAG_UNDEFINED,
+        super::TAG_CPOINTER,
+        super::TAG_STRING,
+        super::TAG_STRING_MUT,
+        super::TAG_ARRAY,
+        super::TAG_ARRAY_MUT,
+        super::TAG_STRUCT,
+        super::TAG_STRUCT_MUT,
+        super::TAG_CONS,
+        super::TAG_CLOSURE,
+        super::TAG_BYTES,
+        super::TAG_BYTES_MUT,
+        super::TAG_SET,
+        super::TAG_SET_MUT,
+        super::TAG_LBOX,
+        super::TAG_FIBER,
+        super::TAG_SYNTAX,
+        super::TAG_NATIVE_FN,
+        super::TAG_FFI_SIG,
+        super::TAG_FFI_TYPE,
+        super::TAG_LIB_HANDLE,
+        super::TAG_MANAGED_PTR,
+        super::TAG_EXTERNAL,
+        super::TAG_PARAMETER,
+        super::TAG_THREAD,
+    ];
+    let mut seen = std::collections::HashSet::new();
+    for &tag in &tags {
+        assert!(seen.insert(tag), "Duplicate tag value: {}", tag);
+    }
+}
+
+#[test]
+fn test_heap_start_boundary() {
+    // All immediate types have tag < TAG_HEAP_START
+    const { assert!(super::TAG_INT < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_FLOAT < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_NIL < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_TRUE < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_FALSE < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_EMPTY_LIST < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_SYMBOL < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_KEYWORD < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_UNDEFINED < super::TAG_HEAP_START) };
+    const { assert!(super::TAG_CPOINTER < super::TAG_HEAP_START) };
+
+    // All heap types have tag >= TAG_HEAP_START
+    const { assert!(super::TAG_STRING >= super::TAG_HEAP_START) };
+    const { assert!(super::TAG_CONS >= super::TAG_HEAP_START) };
+    const { assert!(super::TAG_CLOSURE >= super::TAG_HEAP_START) };
 }

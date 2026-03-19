@@ -1,4 +1,4 @@
-//! Trait implementations for Value (PartialEq, Eq, Hash).
+//! Trait implementations for Value (PartialEq, Eq, Hash, Ord).
 //!
 //! The `traits` field on heap variants is NOT compared by PartialEq, NOT
 //! hashed by Hash, and NOT compared by Ord. Trait identity is a separate
@@ -12,21 +12,23 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         use crate::value::heap::{deref, HeapObject};
 
-        // For immediate values, compare bits directly.
-        //
-        // Keywords store a 47-bit FNV-1a hash in the payload (via TAG_PTRVAL).
-        // Same name → same hash → same bits. This is correct within a single
-        // DSO and across DSO boundaries (all DSOs share the global keyword table).
+        // For immediate values, compare tag+payload directly.
+        // Same tag and same payload means the same value.
         if !self.is_heap() && !other.is_heap() {
-            return self.0 == other.0;
+            return self.tag == other.tag && self.payload == other.payload;
         }
 
-        // If one is heap and the other isn't, they're not equal
+        // If one is heap and the other isn't, they're not equal.
         if self.is_heap() != other.is_heap() {
             return false;
         }
 
-        // Both are heap values - dereference and compare contents
+        // Both are heap values — different tags mean different types, never equal.
+        if self.tag != other.tag {
+            return false;
+        }
+
+        // Both are heap values of the same tag — dereference and compare contents.
         unsafe {
             let self_obj = deref(*self);
             let other_obj = deref(*other);
@@ -78,9 +80,6 @@ impl PartialEq for Value {
                     *c1.borrow() == *c2.borrow()
                 }
 
-                // Float comparison — bitwise, not IEEE, so NaN == NaN (same bits)
-                (HeapObject::Float(f1), HeapObject::Float(f2)) => f1.to_bits() == f2.to_bits(),
-
                 // NativeFn comparison (compare by reference)
                 (HeapObject::NativeFn(_), HeapObject::NativeFn(_)) => {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
@@ -102,11 +101,6 @@ impl PartialEq for Value {
                 // Syntax comparison (by reference — same Rc)
                 (HeapObject::Syntax { syntax: s1, .. }, HeapObject::Syntax { syntax: s2, .. }) => {
                     std::rc::Rc::ptr_eq(s1, s2)
-                }
-
-                // Binding comparison (by reference — same heap allocation)
-                (HeapObject::Binding(_), HeapObject::Binding(_)) => {
-                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
                 // FFI signature comparison (structural equality, skip CIF cache)
@@ -149,7 +143,8 @@ impl PartialEq for Value {
                     *s1.borrow() == *s2.borrow()
                 }
 
-                // Different types are not equal
+                // Different types are not equal (same tag but mismatched variants — shouldn't
+                // happen given tag-guarded dispatch above, but safe fallback).
                 _ => false,
             }
         }
@@ -157,12 +152,11 @@ impl PartialEq for Value {
 }
 
 // NOTE: PartialEq is reflexive for all Value variants:
-// - Immediate values: compared by raw bits (always reflexive)
+// - Immediate values: compared by tag+payload (always reflexive)
 // - Heap structural types: compared by contents (reflexive by induction)
 // - Heap identity types: compared by pointer (always reflexive)
-// - HeapObject::Float: compared by f64::to_bits() (always reflexive)
 //
-// The f64::to_bits() comparison means NaN == NaN (same bit pattern),
+// Float NaN == NaN (same bit pattern) since payload is f64::to_bits(),
 // which violates IEEE 754 but satisfies Eq's reflexivity requirement.
 // This is intentional — set membership requires reflexivity.
 impl Eq for Value {}
@@ -172,14 +166,10 @@ impl Hash for Value {
         use crate::value::heap::{deref, HeapObject};
 
         if !self.is_heap() {
-            // Immediate values: raw bits encode the type tag + payload.
-            // Same bits ↔ same value, and PartialEq agrees.
-            //
-            // SSO strings: same content → same bits → same hash.
-            // Keywords: same name → same 47-bit FNV-1a hash → same bits → same hash.
-            // Inline floats: same float bits → same Value bits.
-            // TAG_NAN floats: NaN/Infinity encoded deterministically.
-            self.0.hash(state);
+            // Immediate values: tag + payload encode the type and value.
+            // Same tag+payload ↔ same value, and PartialEq agrees.
+            self.tag.hash(state);
+            self.payload.hash(state);
             return;
         }
 
@@ -223,14 +213,13 @@ impl Hash for Value {
                 HeapObject::LBox { cell: rc, .. } => rc.borrow().hash(state),
 
                 // Structural-but-special heap types
-                HeapObject::Float(f) => f.to_bits().hash(state),
                 HeapObject::LibHandle(id) => id.hash(state),
                 HeapObject::FFISignature(sig, _) => sig.hash(state),
                 HeapObject::FFIType(desc) => desc.hash(state),
 
-                // Reference-identity types: hash by raw Value bits (encodes pointer).
+                // Reference-identity types: hash by payload (encodes pointer).
                 // This matches PartialEq which uses pointer identity for these.
-                _ => self.0.hash(state),
+                _ => self.payload.hash(state),
             }
         }
     }
@@ -246,8 +235,8 @@ impl Ord for Value {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         use std::cmp::Ordering;
 
-        // Fast path: identical bits → Equal
-        if self.0 == other.0 {
+        // Fast path: identical values → Equal
+        if self.tag == other.tag && self.payload == other.payload {
             return Ordering::Equal;
         }
 
@@ -275,8 +264,7 @@ fn type_rank(v: &Value) -> u8 {
         1
     } else if v.is_int() {
         2
-    } else if v.is_float() && !v.is_heap() {
-        // Inline float (regular IEEE bits) or TAG_NAN encoded
+    } else if v.is_float() {
         3
     } else if v.is_symbol() {
         4
@@ -286,13 +274,9 @@ fn type_rank(v: &Value) -> u8 {
         6
     } else if v.is_empty_list() {
         7
-    } else if (v.0 & super::TAG_SSO_MASK) == super::TAG_SSO {
-        // SSO string — same rank as heap string
-        8
     } else if v.is_heap() {
         match unsafe { deref(*v).tag() } {
-            HeapTag::LString => 8, // same rank as SSO
-            HeapTag::Float => 3,   // same rank as inline float
+            HeapTag::LString => 8,
             HeapTag::Cons => 9,
             HeapTag::LArray => 10,
             HeapTag::LArrayMut => 11,
@@ -308,7 +292,6 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::ThreadHandle => 21,
             HeapTag::Fiber => 22,
             HeapTag::Syntax => 23,
-            HeapTag::Binding => 24,
             HeapTag::FFISignature => 25,
             HeapTag::FFIType => 26,
             HeapTag::ManagedPointer => 27,
@@ -316,6 +299,8 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::Parameter => 29,
             HeapTag::LSet => 30,
             HeapTag::LSetMut => 31,
+            // Float as heap object is a legacy variant; treat same rank as float.
+            HeapTag::Float => 3,
         }
     } else {
         // Unknown — should not happen
@@ -345,7 +330,7 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
             a_int.cmp(&b_int)
         }
 
-        // Float (inline + heap) — f64::total_cmp
+        // Float — f64::total_cmp
         3 => {
             let a_f = a.as_float().unwrap();
             let b_f = b.as_float().unwrap();
@@ -366,13 +351,13 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
             a_name.cmp(&b_name)
         }
 
-        // C pointer — by address bits
-        6 => a.0.cmp(&b.0),
+        // C pointer — by address (payload)
+        6 => a.payload.cmp(&b.payload),
 
         // Empty list — singleton
         7 => Ordering::Equal,
 
-        // String (SSO + heap) — lexicographic by content
+        // String (heap) — lexicographic by content
         8 => a.compare_str(b).unwrap_or(Ordering::Equal),
 
         // Heap types (ranks 9–31) — deref and compare
@@ -450,8 +435,8 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
             b1.iter().cmp(b2.iter())
         }
 
-        // All reference-identity types — by raw pointer bits
-        _ => a.0.cmp(&b.0),
+        // All reference-identity types — by raw pointer (payload)
+        _ => a.payload.cmp(&b.payload),
     }
 }
 // Debug is implemented in display.rs alongside Display, since both

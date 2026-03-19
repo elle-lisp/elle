@@ -88,6 +88,9 @@ pub unsafe fn ffi_call(
         }
         TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
             let r: u64 = cif.call(code_ptr, &ffi_args);
+            // Bit-reinterpret into i64: lossless for all u64 values.
+            // Recover the original u64 with `as_int().unwrap() as u64`.
+            // See from_c.rs module-level doc for the full round-trip convention.
             Ok(Value::int(r as i64))
         }
         TypeDesc::Float => {

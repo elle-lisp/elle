@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 
 use crate::syntax::Syntax;
 use crate::value::fiber::FiberHandle;
-use crate::value::types::SymbolId;
 use crate::value::Value;
 
 // Re-export types for convenience
@@ -102,7 +101,6 @@ pub enum HeapTag {
     LibHandle = 12,
     ThreadHandle = 14,
     Fiber = 16,
-    Binding = 17,
     FFISignature = 18,
     FFIType = 19,
     ManagedPointer = 20,
@@ -122,8 +120,8 @@ pub enum HeapTag {
 /// via pointer.
 ///
 /// 19 user-facing variants carry a `traits: Value` field (initialized to
-/// `Value::NIL`). The 6 infrastructure variants (Float, NativeFn, LibHandle,
-/// Binding, FFISignature, FFIType) do not carry traits.
+/// `Value::NIL`). The 5 infrastructure variants (Float, NativeFn, LibHandle,
+/// FFISignature, FFIType) do not carry traits.
 pub enum HeapObject {
     /// Immutable string
     LString { s: Box<str>, traits: Value },
@@ -203,11 +201,6 @@ pub enum HeapObject {
     /// for first-class syntax objects in hygienic macros.
     Syntax { syntax: Rc<Syntax>, traits: Value },
 
-    /// Compile-time binding metadata. Mutable during analysis (the analyzer
-    /// discovers captures and mutations after creating the binding), read-only
-    /// during lowering. Never appears at runtime — the VM never sees this type.
-    Binding(RefCell<BindingInner>),
-
     /// Reified FFI function signature with optional cached CIF.
     /// The CIF is lazily prepared on first use and reused thereafter.
     FFISignature(
@@ -249,35 +242,6 @@ pub enum HeapObject {
         data: RefCell<BTreeSet<Value>>,
         traits: Value,
     },
-}
-
-/// Internal binding metadata, heap-allocated behind the Value pointer.
-#[derive(Debug)]
-pub struct BindingInner {
-    /// Original symbol name (for error messages and global lookup)
-    pub name: SymbolId,
-    /// Where this binding lives
-    pub scope: BindingScope,
-    /// Whether this binding has been mutated via set!
-    pub is_mutated: bool,
-    /// Whether this binding is captured by a nested closure
-    pub is_captured: bool,
-    /// Whether this binding is immutable (def)
-    pub is_immutable: bool,
-    /// Whether this binding was pre-created before its initializer runs
-    /// (begin pass 1, letrec pass 1). Pre-bound immutable locals still
-    /// need cells because they may be captured before initialization
-    /// (self-recursion, forward references).
-    pub is_prebound: bool,
-}
-
-/// Where a binding lives at runtime
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BindingScope {
-    /// Lambda parameter
-    Parameter,
-    /// Local variable (let-bound, define inside function)
-    Local,
 }
 
 /// Thread handle for concurrent execution.
@@ -355,7 +319,6 @@ impl HeapObject {
             HeapObject::ThreadHandle { .. } => HeapTag::ThreadHandle,
             HeapObject::Fiber { .. } => HeapTag::Fiber,
             HeapObject::Syntax { .. } => HeapTag::Syntax,
-            HeapObject::Binding(_) => HeapTag::Binding,
             HeapObject::FFISignature(_, _) => HeapTag::FFISignature,
             HeapObject::FFIType(_) => HeapTag::FFIType,
             HeapObject::ManagedPointer { .. } => HeapTag::ManagedPointer,
@@ -363,6 +326,48 @@ impl HeapObject {
             HeapObject::Parameter { .. } => HeapTag::Parameter,
             HeapObject::LSet { .. } => HeapTag::LSet,
             HeapObject::LSetMut { .. } => HeapTag::LSetMut,
+        }
+    }
+
+    /// Get the Value-level TAG_* constant for this heap object.
+    /// Used by the allocator to stamp the tag into the returned Value.
+    #[inline]
+    pub fn value_tag(&self) -> u64 {
+        use crate::value::repr::{
+            TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CLOSURE, TAG_CONS,
+            TAG_EXTERNAL, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
+            TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING,
+            TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD,
+        };
+        match self {
+            HeapObject::LString { .. } => TAG_STRING,
+            HeapObject::LStringMut { .. } => TAG_STRING_MUT,
+            HeapObject::LArray { .. } => TAG_ARRAY,
+            HeapObject::LArrayMut { .. } => TAG_ARRAY_MUT,
+            HeapObject::LStruct { .. } => TAG_STRUCT,
+            HeapObject::LStructMut { .. } => TAG_STRUCT_MUT,
+            HeapObject::Cons(_) => TAG_CONS,
+            HeapObject::Closure { .. } => TAG_CLOSURE,
+            HeapObject::LBytes { .. } => TAG_BYTES,
+            HeapObject::LBytesMut { .. } => TAG_BYTES_MUT,
+            HeapObject::LSet { .. } => TAG_SET,
+            HeapObject::LSetMut { .. } => TAG_SET_MUT,
+            HeapObject::LBox { .. } => TAG_LBOX,
+            HeapObject::Fiber { .. } => TAG_FIBER,
+            HeapObject::Syntax { .. } => TAG_SYNTAX,
+            HeapObject::NativeFn(_) => TAG_NATIVE_FN,
+            HeapObject::FFISignature(_, _) => TAG_FFI_SIG,
+            HeapObject::FFIType(_) => TAG_FFI_TYPE,
+            HeapObject::LibHandle(_) => TAG_LIB_HANDLE,
+            HeapObject::ManagedPointer { .. } => TAG_MANAGED_PTR,
+            HeapObject::External { .. } => TAG_EXTERNAL,
+            HeapObject::Parameter { .. } => TAG_PARAMETER,
+            HeapObject::ThreadHandle { .. } => TAG_THREAD,
+            // Float: in the new representation ALL floats are immediate (TAG_FLOAT,
+            // payload = f64::to_bits()). HeapObject::Float must never be allocated.
+            HeapObject::Float(_) => {
+                panic!("HeapObject::Float must not be allocated — floats are now immediate")
+            }
         }
     }
 
@@ -386,7 +391,6 @@ impl HeapObject {
             HeapObject::ThreadHandle { .. } => "thread-handle",
             HeapObject::Fiber { .. } => "fiber",
             HeapObject::Syntax { .. } => "syntax",
-            HeapObject::Binding(_) => "binding",
             HeapObject::FFISignature(_, _) => "ffi-signature",
             HeapObject::FFIType(_) => "ffi-type",
             HeapObject::ManagedPointer { .. } => "ptr",
@@ -464,7 +468,6 @@ impl std::fmt::Debug for HeapObject {
                 None => write!(f, "<fiber:taken>"),
             },
             HeapObject::Syntax { syntax, .. } => write!(f, "#<syntax:{}>", syntax),
-            HeapObject::Binding(_) => write!(f, "#<binding>"),
             HeapObject::FFISignature(_, _) => write!(f, "<ffi-signature>"),
             HeapObject::FFIType(desc) => write!(f, "<ffi-type:{:?}>", desc),
             HeapObject::ManagedPointer { addr, .. } => match addr.get() {

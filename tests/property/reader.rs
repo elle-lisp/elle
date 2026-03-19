@@ -6,7 +6,6 @@
 
 use elle::reader::read_syntax;
 use elle::syntax::{Syntax, SyntaxKind};
-use elle::value::repr::{INT_MAX, INT_MIN};
 use proptest::prelude::*;
 
 /// Compare two Syntax trees structurally, ignoring spans and scopes.
@@ -77,7 +76,7 @@ fn arb_source_depth(depth: u32) -> BoxedStrategy<String> {
     if depth == 0 {
         prop_oneof![
             // Integers
-            10 => (INT_MIN..=INT_MAX).prop_map(|n| format!("{}", n)),
+            10 => (i64::MIN..=i64::MAX).prop_map(|n| format!("{}", n)),
             // Booleans
             2 => prop::bool::ANY.prop_map(|b| if b { "true".to_string() } else { "false".to_string() }),
             // nil
@@ -138,7 +137,7 @@ proptest! {
     // =========================================================================
 
     #[test]
-    fn integer_roundtrip(n in INT_MIN..=INT_MAX) {
+    fn integer_roundtrip(n in i64::MIN..=i64::MAX) {
         let source = format!("{}", n);
         let parsed = read_syntax(&source, "<test>").unwrap();
         let displayed = format!("{}", parsed);

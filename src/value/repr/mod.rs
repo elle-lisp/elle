@@ -1,21 +1,14 @@
-//! NaN-boxing representation
+//! 16-byte tagged-union Value representation.
 //!
-//! IEEE 754 double-precision: 1 sign + 11 exponent + 52 mantissa = 64 bits
-//!
-//! A quiet NaN has: exponent = all 1s (0x7FF), mantissa bit 51 = 1
-//! This gives us the quiet NaN prefix: 0x7FF8 in the upper 16 bits
-//!
-//! Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
-//!
-//! Floats:    Any f64 that is NOT a quiet NaN (upper 13 bits != 0x7FF8+)
-//! Int:       0x7FF8_XXXX_XXXX_XXXX where X = 48-bit signed integer (sign-extended)
-//! Falsy:     0x7FF9 — Nil = 0x7FF9_0000_0000_0000, False = 0x7FF9_0000_0000_0001
-//! EmptyList: 0x7FFA_0000_0000_0000 (no payload)
-//! Pointer:   0x7FFB_XXXX_XXXX_XXXX where X = 48-bit heap pointer
-//! Truthy:    0x7FFC — bit 47=0: singletons (True=0, Undefined=1), bit 47=1: symbol (32-bit ID)
-//! NaN/Inf:   0x7FFD_XXXX_XXXX_XXXX where X = 64-bit float bits (NaN or Infinity)
-//! PtrVal:    0x7FFE — bit 47=0: keyword (47-bit hash), bit 47=1: cpointer (47-bit ptr)
-//! SSO:       0x7FFF (reserved for short string optimization)
+//! Every value is exactly 16 bytes:
+//!   tag:     u64 — type discriminant (TAG_* constants below)
+//!   payload: u64 — type-specific data:
+//!                  integers: i64 reinterpreted as u64
+//!                  floats:   f64::to_bits()
+//!                  symbols:  u32 symbol ID
+//!                  keywords: u64 hash from intern_keyword
+//!                  cpointer: usize address
+//!                  heap:     *const () pointer to HeapObject
 
 mod accessors;
 mod constructors;
@@ -28,140 +21,127 @@ mod tests;
 // Tag Constants
 // =============================================================================
 
-/// Quiet NaN base - all tagged values have this prefix in upper 13 bits
-pub(crate) const QNAN: u64 = 0x7FF8_0000_0000_0000;
+pub const TAG_INT: u64 = 0;
+pub const TAG_FLOAT: u64 = 1;
+pub const TAG_NIL: u64 = 2;
+pub const TAG_TRUE: u64 = 3;
+pub const TAG_FALSE: u64 = 4;
+pub const TAG_EMPTY_LIST: u64 = 5;
+pub const TAG_SYMBOL: u64 = 6;
+pub const TAG_KEYWORD: u64 = 7;
+pub const TAG_UNDEFINED: u64 = 8;
+pub const TAG_CPOINTER: u64 = 9;
 
-/// Mask to check for quiet NaN (upper 13 bits)
-pub(crate) const QNAN_MASK: u64 = 0xFFF8_0000_0000_0000;
-
-/// Integer tag - uses QNAN exactly (0x7FF8), payload is 48-bit signed int
-pub const TAG_INT: u64 = 0x7FF8_0000_0000_0000;
-pub(crate) const TAG_INT_MASK: u64 = 0xFFFF_0000_0000_0000;
-
-/// Falsy tag - upper 16 bits = 0x7FF9
-/// Nil = TAG_FALSY | 0, False = TAG_FALSY | 1
-pub const TAG_FALSY: u64 = 0x7FF9_0000_0000_0000;
-#[allow(dead_code)] // used by SSO section
-pub(crate) const TAG_FALSY_MASK: u64 = 0xFFFF_0000_0000_0000;
-pub const TAG_NIL: u64 = 0x7FF9_0000_0000_0000;
-pub const TAG_FALSE: u64 = 0x7FF9_0000_0000_0001;
-
-/// Empty list tag - upper 16 bits = 0x7FFA
-pub const TAG_EMPTY_LIST: u64 = 0x7FFA_0000_0000_0000;
-#[allow(dead_code)] // reserved for future use
-pub(crate) const TAG_EMPTY_LIST_MASK: u64 = 0xFFFF_0000_0000_0000;
-
-/// Heap pointer tag - upper 16 bits = 0x7FFB
-pub const TAG_POINTER: u64 = 0x7FFB_0000_0000_0000;
-pub(crate) const TAG_POINTER_MASK: u64 = 0xFFFF_0000_0000_0000;
-
-/// Truthy + symbol tag - upper 16 bits = 0x7FFC
-/// Bit 47 = 0: singleton (payload 0=true, 1=undefined)
-/// Bit 47 = 1: symbol (bits 0-31 = symbol ID)
-pub const TAG_TRUTHY: u64 = 0x7FFC_0000_0000_0000;
-pub(crate) const TAG_TRUTHY_MASK: u64 = 0xFFFF_0000_0000_0000;
-pub const TAG_TRUE: u64 = 0x7FFC_0000_0000_0000;
-pub const TAG_UNDEFINED: u64 = 0x7FFC_0000_0000_0001;
-pub(crate) const TRUTHY_SYMBOL_BIT: u64 = 1u64 << 47; // bit 47 = symbol sub-tag
-pub(crate) const SYMBOL_ID_MASK: u64 = 0xFFFF_FFFF; // bits 0-31
-
-/// NaN/Infinity tag - upper 16 bits = 0x7FFD
-pub const TAG_NAN: u64 = 0x7FFD_0000_0000_0000;
-pub(crate) const TAG_NAN_MASK: u64 = 0xFFFF_0000_0000_0000;
-
-/// Pointer values tag - upper 16 bits = 0x7FFE
-/// Bit 47 = 0: keyword (bits 0-46 = 47-bit FNV-1a hash of name)
-/// Bit 47 = 1: cpointer (bits 0-46 = raw C pointer address)
-pub const TAG_PTRVAL: u64 = 0x7FFE_0000_0000_0000;
-pub(crate) const TAG_PTRVAL_MASK: u64 = 0xFFFF_0000_0000_0000;
-pub(crate) const PTRVAL_CPOINTER_BIT: u64 = 1u64 << 47; // bit 47 = cpointer sub-tag
-pub(crate) const PTRVAL_PAYLOAD_MASK: u64 = (1u64 << 47) - 1; // bits 0-46
-
-/// SSO (Short String Optimization) tag - upper 16 bits = 0x7FFF
-/// Payload: up to 6 UTF-8 bytes packed into bits 0-47, zero-padded
-pub const TAG_SSO: u64 = 0x7FFF_0000_0000_0000;
-#[allow(dead_code)] // used by SSO section
-pub(crate) const TAG_SSO_MASK: u64 = 0xFFFF_0000_0000_0000;
-
-/// Mask for 48-bit payload extraction
-pub(crate) const PAYLOAD_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
-
-/// Maximum 48-bit signed integer (2^47 - 1)
-pub const INT_MAX: i64 = 0x7FFF_FFFF_FFFF;
-
-/// Minimum 48-bit signed integer (-2^47)
-pub const INT_MIN: i64 = -0x8000_0000_0000;
+// Heap types (tag >= TAG_HEAP_START means is_heap() is true)
+pub const TAG_HEAP_START: u64 = 10;
+pub const TAG_STRING: u64 = 10;
+pub const TAG_STRING_MUT: u64 = 11;
+pub const TAG_ARRAY: u64 = 12;
+pub const TAG_ARRAY_MUT: u64 = 13;
+pub const TAG_STRUCT: u64 = 14;
+pub const TAG_STRUCT_MUT: u64 = 15;
+pub const TAG_CONS: u64 = 16;
+pub const TAG_CLOSURE: u64 = 17;
+pub const TAG_BYTES: u64 = 18;
+pub const TAG_BYTES_MUT: u64 = 19;
+pub const TAG_SET: u64 = 20;
+pub const TAG_SET_MUT: u64 = 21;
+pub const TAG_LBOX: u64 = 22;
+pub const TAG_FIBER: u64 = 23;
+pub const TAG_SYNTAX: u64 = 24;
+pub const TAG_NATIVE_FN: u64 = 26;
+pub const TAG_FFI_SIG: u64 = 27;
+pub const TAG_FFI_TYPE: u64 = 28;
+pub const TAG_LIB_HANDLE: u64 = 29;
+pub const TAG_MANAGED_PTR: u64 = 30;
+pub const TAG_EXTERNAL: u64 = 31;
+pub const TAG_PARAMETER: u64 = 32;
+pub const TAG_THREAD: u64 = 33;
 
 // =============================================================================
 // Value Struct
 // =============================================================================
 
-/// Core value type using NaN-boxing.
+/// Core value type using a 16-byte tagged union.
 ///
-/// This is exactly 8 bytes and implements Copy.
+/// This is exactly 16 bytes and implements Copy.
 ///
-/// # repr(transparent) invariant
-/// JIT dispatch (`jit/dispatch.rs`, `vm/call.rs`) casts between `*const Value`
-/// and `*const u64` without copying. Changing this repr breaks those casts.
+/// `tag` is one of the TAG_* constants above.
+/// `payload` interpretation depends on `tag` — see module-level docs.
 #[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct Value(pub(crate) u64);
+#[repr(C)]
+pub struct Value {
+    pub(crate) tag: u64,
+    pub(crate) payload: u64,
+}
 
 // Compile-time size assertion
-const _: () = assert!(std::mem::size_of::<Value>() == 8);
+const _: () = assert!(std::mem::size_of::<Value>() == 16);
 
 impl Value {
     // =========================================================================
     // Constants
     // =========================================================================
 
-    pub const NIL: Value = Value(TAG_NIL);
-    pub const TRUE: Value = Value(TAG_TRUE);
-    pub const FALSE: Value = Value(TAG_FALSE);
-    pub const EMPTY_LIST: Value = Value(TAG_EMPTY_LIST);
-    pub const UNDEFINED: Value = Value(TAG_UNDEFINED);
+    pub const NIL: Value = Value {
+        tag: TAG_NIL,
+        payload: 0,
+    };
+    pub const TRUE: Value = Value {
+        tag: TAG_TRUE,
+        payload: 0,
+    };
+    pub const FALSE: Value = Value {
+        tag: TAG_FALSE,
+        payload: 0,
+    };
+    pub const EMPTY_LIST: Value = Value {
+        tag: TAG_EMPTY_LIST,
+        payload: 0,
+    };
+    pub const UNDEFINED: Value = Value {
+        tag: TAG_UNDEFINED,
+        payload: 0,
+    };
 
     // =========================================================================
-    // Type Predicates
+    // Type Predicates (non-heap immediates)
     // =========================================================================
 
     /// Check if this is the nil value.
     #[inline]
     pub fn is_nil(&self) -> bool {
-        self.0 == TAG_NIL
+        self.tag == TAG_NIL
     }
 
     /// Check if this is an empty list.
     #[inline]
     pub fn is_empty_list(&self) -> bool {
-        self.0 == TAG_EMPTY_LIST
+        self.tag == TAG_EMPTY_LIST
     }
 
     /// Check if this is the undefined sentinel value.
     #[inline]
     pub fn is_undefined(&self) -> bool {
-        self.0 == TAG_UNDEFINED
+        self.tag == TAG_UNDEFINED
     }
 
     /// Check if this is a boolean (true or false).
     #[inline]
     pub fn is_bool(&self) -> bool {
-        self.0 == TAG_TRUE || self.0 == TAG_FALSE
+        self.tag == TAG_TRUE || self.tag == TAG_FALSE
     }
 
     /// Check if this is an integer.
     #[inline]
     pub fn is_int(&self) -> bool {
-        (self.0 & TAG_INT_MASK) == TAG_INT
+        self.tag == TAG_INT
     }
 
-    /// Check if this is a float (not a tagged value).
-    /// This includes NaN and Infinity values.
+    /// Check if this is a float.
     #[inline]
     pub fn is_float(&self) -> bool {
-        // Float if NOT in the quiet NaN range, OR if it's our special NaN tag
-        let tag = self.0 & QNAN_MASK;
-        tag != QNAN || (self.0 & TAG_NAN_MASK) == TAG_NAN
+        self.tag == TAG_FLOAT
     }
 
     /// Check if this is a number (int or float).
@@ -173,25 +153,25 @@ impl Value {
     /// Check if this is a symbol.
     #[inline]
     pub fn is_symbol(&self) -> bool {
-        (self.0 & TAG_TRUTHY_MASK) == TAG_TRUTHY && (self.0 & TRUTHY_SYMBOL_BIT) != 0
+        self.tag == TAG_SYMBOL
     }
 
     /// Check if this is a keyword.
     #[inline]
     pub fn is_keyword(&self) -> bool {
-        (self.0 & TAG_PTRVAL_MASK) == TAG_PTRVAL && (self.0 & PTRVAL_CPOINTER_BIT) == 0
+        self.tag == TAG_KEYWORD
     }
 
     /// Check if this is a raw C pointer.
     #[inline]
     pub fn is_pointer(&self) -> bool {
-        (self.0 & TAG_PTRVAL_MASK) == TAG_PTRVAL && (self.0 & PTRVAL_CPOINTER_BIT) != 0
+        self.tag == TAG_CPOINTER
     }
 
     /// Check if this is a heap pointer.
     #[inline]
     pub fn is_heap(&self) -> bool {
-        (self.0 & TAG_POINTER_MASK) == TAG_POINTER
+        self.tag >= TAG_HEAP_START
     }
 
     /// Check if this value is truthy (everything except nil and false).
@@ -202,22 +182,21 @@ impl Value {
             !self.is_undefined(),
             "UNDEFINED leaked into truthiness check"
         );
-        (self.0 >> 48) != 0x7FF9
+        self.tag != TAG_NIL && self.tag != TAG_FALSE
     }
 
-    /// Get the raw bits (for debugging/serialization).
-    #[inline]
-    pub fn to_bits(&self) -> u64 {
-        self.0
-    }
-
-    /// Create from raw bits (for deserialization).
+    /// Create a heap pointer value from a raw pointer and an explicit tag.
     ///
     /// # Safety
-    /// The bits must represent a valid Value encoding.
+    /// The pointer must be valid, properly aligned, and point to a HeapObject
+    /// of the type indicated by `tag`. The caller is responsible for ensuring
+    /// the pointed-to memory remains valid.
     #[inline]
-    pub unsafe fn from_bits(bits: u64) -> Self {
-        Value(bits)
+    pub fn from_heap_ptr(ptr: *const (), tag: u64) -> Self {
+        Value {
+            tag,
+            payload: ptr as u64,
+        }
     }
 }
 

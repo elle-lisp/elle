@@ -5,26 +5,25 @@
 //! yield/call-site metadata types, and the environment-building utility used
 //! by the interpreter fallback paths.
 
+use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::value::fiber::{
     SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
     SIG_YIELD,
 };
-use crate::value::repr::TAG_NIL;
 use crate::value::{error_val, Value};
 
 // =============================================================================
 // Sentinels and Metadata Types
 // =============================================================================
 
-/// Sentinel value indicating a pending tail call.
-/// Using a specific bit pattern that can't be a valid Value.
-/// The VM checks for this after call_jit returns.
-pub const TAIL_CALL_SENTINEL: u64 = 0xDEAD_BEEF_DEAD_BEEFu64;
+/// Sentinel `JitValue` indicating a pending tail call.
+/// Uses a tag value that cannot be a valid Value tag (> TAG_THREAD = 33).
+pub const TAIL_CALL_SENTINEL: JitValue = TAIL_CALL_SENTINEL_JV;
 
-/// Sentinel value indicating a JIT function yielded (side-exited).
+/// Sentinel `JitValue` indicating a JIT function yielded (side-exited).
 /// The caller checks for this after a JIT call and propagates the yield.
 /// fiber.signal and fiber.suspended are already set by the JIT yield helper.
-pub const YIELD_SENTINEL: u64 = 0xDEAD_CAFE_DEAD_CAFEu64;
+pub const YIELD_SENTINEL: JitValue = YIELD_SENTINEL_JV;
 
 /// Metadata for a single yield point in JIT-compiled code.
 /// Stored in `JitCode.yield_points`, indexed by yield point index.
@@ -65,107 +64,63 @@ pub(crate) struct CallSiteMeta {
 
 /// Handle signal bits from a primitive call in JIT context.
 ///
-/// Mirrors `VM::handle_primitive_signal`: exact-match for VM-internal signals
-/// (which are produced by specific primitives with known bit patterns) and
-/// `contains()` for user-facing signals (which can be composed, e.g.
-/// `SIG_ERROR | SIG_IO` from an I/O primitive that errors, or
-/// `SIG_YIELD | SIG_IO` from an I/O primitive that suspends).
-///
-/// VM-internal signals (SIG_RESUME, SIG_PROPAGATE, SIG_ABORT) are dispatched
-/// to the VM's fiber handlers, which run the child fiber synchronously and
-/// return a result.
-///
-/// SIG_ERROR (and any composed error signal) stores the exception on the fiber
-/// for the JIT caller to check. SIG_QUERY is dispatched to the VM's query
-/// handler. SIG_YIELD (bare or composed, e.g. SIG_YIELD|SIG_IO) returns
-/// YIELD_SENTINEL — fiber.signal is already set by the primitive. Any
-/// remaining signal (user-defined, SIG_DEBUG, SIG_FUEL, etc.) is treated as
-/// a suspension: fiber.signal is set and YIELD_SENTINEL is returned.
-fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> u64 {
+/// Returns a `JitValue` for the result.
+fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: Value) -> JitValue {
     if bits.is_ok() {
-        return value.to_bits();
+        return JitValue::from_value(value);
     }
 
     // --- VM-internal signals (exact match — never composed) ---
 
     if bits == SIG_RESUME {
-        // Fiber primitive (fiber/resume, coro/resume) returned SIG_RESUME.
-        // Dispatch to the VM's fiber handler which runs the child fiber
-        // synchronously and returns value bits, TAG_NIL (error), or
-        // YIELD_SENTINEL (yield propagation).
         return vm.handle_fiber_resume_signal_jit(value);
     }
 
     if bits == SIG_PROPAGATE {
-        // fiber/propagate: propagate the child fiber's signal.
         return vm.handle_fiber_propagate_signal_jit(value);
     }
 
     if bits == SIG_ABORT && value.as_fiber().is_some() {
-        // fiber/abort: inject error into suspended fiber (abort).
-        // SIG_ABORT == SIG_ERROR | SIG_TERMINAL; check exact bits before
-        // the contains(SIG_ERROR) arm below to avoid misrouting.
         return vm.handle_fiber_abort_signal_jit(value);
     }
 
     if bits == SIG_QUERY {
-        // arena/allocs needs mutable VM access to call the thunk —
-        // handle before dispatch_query (which takes &self).
         if let Some(cons) = value.as_cons() {
             if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                 let thunk = cons.rest;
                 return match vm.handle_arena_allocs(thunk) {
-                    Ok(val) => val.to_bits(),
-                    Err(_bits) => TAG_NIL,
+                    Ok(val) => JitValue::from_value(val),
+                    Err(_bits) => JitValue::nil(),
                 };
             }
         }
-        // Dispatch VM state query and return the result.
         let (sig, result) = vm.dispatch_query(value);
         if sig == SIG_ERROR {
             vm.fiber.signal = Some((SIG_ERROR, result));
-            return TAG_NIL;
+            return JitValue::nil();
         } else {
-            return result.to_bits();
+            return JitValue::from_value(result);
         }
     }
 
     // --- User-facing signals (contains — handles composed bits) ---
 
     if bits.contains(SIG_ERROR) {
-        // Handles SIG_ERROR, SIG_ERROR|SIG_IO, SIG_ERROR|SIG_TERMINAL, etc.
-        // fiber.signal is set here; the JIT caller checks for exception after
-        // return (elle_jit_has_exception).
         vm.fiber.signal = Some((bits, value));
-        return TAG_NIL;
+        return JitValue::nil();
     }
 
     if bits.contains(SIG_HALT) {
         vm.fiber.signal = Some((bits, value));
-        return TAG_NIL;
+        return JitValue::nil();
     }
 
     if bits.contains(SIG_YIELD) {
-        // Handles SIG_YIELD, SIG_YIELD|SIG_IO, SIG_YIELD|SIG_EXEC, etc.
-        // Primitives return (bits, value) as a Rust tuple — they do NOT call
-        // vm.fiber.signal = Some(...) themselves. Store the signal here so
-        // elle_jit_yield_through_call and the interpreter resume path can
-        // find it in fiber.signal.
         vm.fiber.signal = Some((bits, value));
         return YIELD_SENTINEL;
     }
 
-    // Any remaining signal: user-defined (bits 16+), SIG_DEBUG, SIG_FUEL, or
-    // any other suspension signal not covered above. Mirror the VM's catch-all:
-    // store the signal on the fiber and return YIELD_SENTINEL. The JIT caller's
-    // yield check (elle_jit_has_signal) detects the pending signal and
-    // propagates it.
-    //
-    // NOTE: SIG_FUEL is emitted by the VM dispatch loop's check_fuel! macro,
-    // not by primitives, so it should not appear here in practice. User-defined
-    // signals (bits 16+) from primitives would require explicit registration
-    // and emission, which no current primitive does. SIG_DEBUG has no current
-    // emitter. All are handled gracefully rather than panicking.
+    // Any remaining signal: user-defined, SIG_DEBUG, SIG_FUEL, etc.
     vm.fiber.signal = Some((bits, value));
     YIELD_SENTINEL
 }
@@ -175,11 +130,11 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
 // =============================================================================
 
 /// Check if a terminal signal is pending on the VM (error or halt).
-/// Returns TRUE bits if one is set, FALSE bits otherwise.
+/// Returns TRUE if one is set, FALSE otherwise.
 #[no_mangle]
-pub extern "C" fn elle_jit_has_exception(vm: u64) -> u64 {
+pub extern "C" fn elle_jit_has_exception(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    Value::bool(matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _)))).to_bits()
+    JitValue::bool_val(matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))))
 }
 
 // =============================================================================
@@ -188,15 +143,14 @@ pub extern "C" fn elle_jit_has_exception(vm: u64) -> u64 {
 
 /// Reinterpret a JIT args pointer as a `&[Value]` slice.
 ///
-/// Safe because `Value` is `#[repr(transparent)]` over `u64`, so `*const u64`
-/// and `*const Value` have identical layout. Handles the null-pointer case
-/// when `nargs` is 0 (JIT may pass null for zero-arg calls).
+/// The JIT passes a `*const Value` (16 bytes each). Handles the null-pointer
+/// case when `nargs` is 0.
 #[inline]
-pub(crate) fn args_ptr_to_value_slice(args_ptr: *const u64, nargs: u32) -> &'static [Value] {
+pub(crate) fn args_ptr_to_value_slice(args_ptr: *const Value, nargs: u32) -> &'static [Value] {
     if nargs == 0 {
         &[]
     } else {
-        unsafe { std::slice::from_raw_parts(args_ptr as *const Value, nargs as usize) }
+        unsafe { std::slice::from_raw_parts(args_ptr, nargs as usize) }
     }
 }
 
@@ -206,17 +160,25 @@ pub(crate) fn args_ptr_to_value_slice(args_ptr: *const u64, nargs: u32) -> &'sta
 /// JIT-compiled code in the cache, calls it directly (JIT-to-JIT)
 /// without building an interpreter environment — zero heap allocations
 /// on the fast path.
+///
+/// Parameters: func_tag/func_payload (the callee Value), args_ptr (*const Value),
+/// nargs, vm.
+/// Returns a `JitValue` for the result.
 #[no_mangle]
 pub extern "C" fn elle_jit_call(
-    func_bits: u64,
-    args_ptr: *const u64,
+    func_tag: u64,
+    func_payload: u64,
+    args_ptr: *const Value,
     nargs: u32,
     vm: *mut (),
-) -> u64 {
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let func = unsafe { Value::from_bits(func_bits) };
+    let func = Value {
+        tag: func_tag,
+        payload: func_payload,
+    };
 
-    // Dispatch to native function — zero-copy args via repr(transparent)
+    // Dispatch to native function — zero-copy args via *const Value
     if let Some(f) = func.as_native_fn() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
         let (bits, value) = f(args_slice);
@@ -233,16 +195,16 @@ pub extern "C" fn elle_jit_call(
                     format!("parameter call: expected 0 arguments, got {}", nargs),
                 ),
             ));
-            return TAG_NIL;
+            return JitValue::nil();
         }
-        return vm.resolve_parameter(id, default).to_bits();
+        let result = vm.resolve_parameter(id, default);
+        return JitValue::from_value(result);
     }
 
     // Dispatch to closure
     if let Some(closure) = func.as_closure() {
-        // Check arity using nargs directly — no Vec needed
         if !vm.check_arity(&closure.template.arity, nargs as usize) {
-            return TAG_NIL;
+            return JitValue::nil();
         }
 
         // JIT-to-JIT fast path: check if callee has JIT code
@@ -252,25 +214,23 @@ pub extern "C" fn elle_jit_call(
             if vm.fiber.call_depth > 1000 {
                 vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
                 vm.fiber.call_depth -= 1;
-                return TAG_NIL;
+                return JitValue::nil();
             }
 
-            // Zero-copy env pointer: Value is #[repr(transparent)] over u64,
-            // so closure.env's &[Value] can be reinterpreted as *const u64.
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
             } else {
-                closure.env.as_ptr() as *const u64
+                closure.env.as_ptr()
             };
 
-            // Args pass through directly — already *const u64 from JIT caller
-            let result_bits = unsafe {
+            let result = unsafe {
                 jit_code.call(
                     env_ptr,
                     args_ptr,
                     nargs,
                     vm as *mut crate::vm::VM as *mut (),
-                    func_bits,
+                    func_tag,
+                    func_payload,
                 )
             };
 
@@ -278,7 +238,7 @@ pub extern "C" fn elle_jit_call(
 
             // Check for exception (error or halt)
             if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
-                return TAG_NIL;
+                return JitValue::nil();
             }
 
             // Check for yield from callee
@@ -287,31 +247,29 @@ pub extern "C" fn elle_jit_call(
             }
 
             // Handle tail call sentinel
-            if result_bits == TAIL_CALL_SENTINEL {
+            if result == TAIL_CALL_SENTINEL {
                 if let Some(tail) = vm.pending_tail_call.take() {
-                    let result = vm.execute_bytecode_saving_stack(
+                    let exec_result = vm.execute_bytecode_saving_stack(
                         &tail.bytecode,
                         &tail.constants,
                         &tail.env,
                         &tail.location_map,
                     );
-                    return exec_result_to_jit_bits(vm, result.bits);
+                    return exec_result_to_jit_value(vm, exec_result.bits);
                 }
             }
 
-            // Check for YIELD_SENTINEL from callee (defensive — signal check
-            // above should catch this first, but the callee might have returned
-            // YIELD_SENTINEL without setting fiber.signal in a bug scenario)
-            if result_bits == YIELD_SENTINEL {
+            // Defensive: if callee returned YIELD_SENTINEL without setting signal
+            if result == YIELD_SENTINEL {
                 return YIELD_SENTINEL;
             }
 
-            return result_bits;
+            return result;
         }
 
         // Interpreter fallback — reconstruct args Vec for env building
         let args: Vec<Value> = (0..nargs as usize)
-            .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
+            .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
         let new_env = build_closure_env_for_jit(closure, &args);
@@ -325,13 +283,13 @@ pub extern "C" fn elle_jit_call(
         );
         vm.fiber.call_depth -= 1;
 
-        exec_result_to_jit_bits(vm, result.bits)
+        exec_result_to_jit_value(vm, result.bits)
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
             error_val("type-error", format!("Cannot call {:?}", func)),
         ));
-        TAG_NIL
+        JitValue::nil()
     }
 }
 
@@ -341,21 +299,29 @@ pub extern "C" fn elle_jit_call(
 /// tail-called something outside the SCC), the caller must resolve it.
 /// This helper checks for the sentinel and executes the pending tail call.
 ///
-/// Returns the final result value, or TAG_NIL if an error occurred.
+/// Returns the final `JitValue`, or `JitValue::nil()` if an error occurred.
 #[no_mangle]
-pub extern "C" fn elle_jit_resolve_tail_call(result: u64, vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_resolve_tail_call(
+    result_tag: u64,
+    result_payload: u64,
+    vm: *mut (),
+) -> JitValue {
+    let result = JitValue {
+        tag: result_tag,
+        payload: result_payload,
+    };
     if result != TAIL_CALL_SENTINEL {
         return result;
     }
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     if let Some(tail) = vm.pending_tail_call.take() {
-        let result = vm.execute_bytecode_saving_stack(
+        let exec_result = vm.execute_bytecode_saving_stack(
             &tail.bytecode,
             &tail.constants,
             &tail.env,
             &tail.location_map,
         );
-        exec_result_to_jit_bits(vm, result.bits)
+        exec_result_to_jit_value(vm, exec_result.bits)
     } else {
         panic!(
             "VM bug: TAIL_CALL_SENTINEL returned but no pending_tail_call set. \
@@ -366,46 +332,53 @@ pub extern "C" fn elle_jit_resolve_tail_call(result: u64, vm: *mut ()) -> u64 {
 
 /// Increment call depth and check for stack overflow.
 ///
-/// Used by direct SCC calls (which bypass `elle_jit_call` and its built-in
-/// depth tracking). Returns 0 (falsy) on success, or non-zero (truthy) if
-/// the call depth exceeds 1000 (after setting the error signal on the fiber).
+/// Returns FALSE on success, or TRUE if the call depth exceeds 1000
+/// (after setting the error signal on the fiber).
 #[no_mangle]
-pub extern "C" fn elle_jit_call_depth_enter(vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_call_depth_enter(vm: *mut ()) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.fiber.call_depth += 1;
     if vm.fiber.call_depth > 1000 {
         vm.fiber.signal = Some((SIG_ERROR, error_val("error", "Stack overflow")));
         vm.fiber.call_depth -= 1;
-        return 1; // truthy — overflow
+        return JitValue::bool_val(true); // truthy — overflow
     }
-    0 // falsy — ok
+    JitValue::bool_val(false) // falsy — ok
 }
 
 /// Decrement call depth after a direct SCC call returns.
 ///
-/// Pairs with `elle_jit_call_depth_enter`. Always returns TAG_NIL (ignored
-/// by callers — this is a void-like helper).
+/// Pairs with `elle_jit_call_depth_enter`. Always returns NIL (ignored).
 #[no_mangle]
-pub extern "C" fn elle_jit_call_depth_exit(vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_call_depth_exit(vm: *mut ()) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.fiber.call_depth -= 1;
-    TAG_NIL
+    JitValue::nil()
 }
 
 /// Pop one dynamic parameter frame from the fiber.
-/// Pairs with PushParamFrame. Returns TAG_NIL (ignored by caller).
+/// Pairs with PushParamFrame. Returns NIL (ignored by caller).
 #[no_mangle]
-pub extern "C" fn elle_jit_pop_param_frame(vm: *mut ()) -> u64 {
+pub extern "C" fn elle_jit_pop_param_frame(vm: *mut ()) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     vm.fiber.param_frames.pop();
-    TAG_NIL
+    JitValue::nil()
 }
 
 /// Call a function with arguments from an array value.
 /// Unpacks the array and delegates to elle_jit_call.
 #[no_mangle]
-pub extern "C" fn elle_jit_call_array(func: u64, args_array: u64, vm: *mut ()) -> u64 {
-    let args_val = unsafe { Value::from_bits(args_array) };
+pub extern "C" fn elle_jit_call_array(
+    func_tag: u64,
+    func_payload: u64,
+    args_array_tag: u64,
+    args_array_payload: u64,
+    vm: *mut (),
+) -> JitValue {
+    let args_val = Value {
+        tag: args_array_tag,
+        payload: args_array_payload,
+    };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
 
     let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
@@ -423,22 +396,31 @@ pub extern "C" fn elle_jit_call_array(func: u64, args_array: u64, vm: *mut ()) -
                 ),
             ),
         ));
-        return TAG_NIL;
+        return JitValue::nil();
     };
 
     let nargs = args.len() as u32;
     if args.is_empty() {
-        elle_jit_call(func, std::ptr::null(), nargs, vm)
+        elle_jit_call(func_tag, func_payload, std::ptr::null(), nargs, vm)
     } else {
-        elle_jit_call(func, args.as_ptr() as *const u64, nargs, vm)
+        elle_jit_call(func_tag, func_payload, args.as_ptr(), nargs, vm)
     }
 }
 
 /// Tail-call a function with arguments from an array value.
 /// Unpacks the array and delegates to elle_jit_tail_call.
 #[no_mangle]
-pub extern "C" fn elle_jit_tail_call_array(func: u64, args_array: u64, vm: *mut ()) -> u64 {
-    let args_val = unsafe { Value::from_bits(args_array) };
+pub extern "C" fn elle_jit_tail_call_array(
+    func_tag: u64,
+    func_payload: u64,
+    args_array_tag: u64,
+    args_array_payload: u64,
+    vm: *mut (),
+) -> JitValue {
+    let args_val = Value {
+        tag: args_array_tag,
+        payload: args_array_payload,
+    };
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
 
     let args: Vec<Value> = if let Some(arr) = args_val.as_array_mut() {
@@ -456,24 +438,32 @@ pub extern "C" fn elle_jit_tail_call_array(func: u64, args_array: u64, vm: *mut 
                 ),
             ),
         ));
-        return TAG_NIL;
+        return JitValue::nil();
     };
 
     let nargs = args.len() as u32;
     if args.is_empty() {
-        elle_jit_tail_call(func, std::ptr::null(), nargs, vm)
+        elle_jit_tail_call(func_tag, func_payload, std::ptr::null(), nargs, vm)
     } else {
-        elle_jit_tail_call(func, args.as_ptr() as *const u64, nargs, vm)
+        elle_jit_tail_call(func_tag, func_payload, args.as_ptr(), nargs, vm)
     }
 }
 
 /// Create a closure from a template Value and captured environment.
-/// template_bits: NaN-boxed Value of a zero-env Closure (the template)
-/// captures_ptr: pointer to array of count u64 NaN-boxed Values
+/// template_tag/template_payload: the closure template Value
+/// captures_ptr: pointer to array of `count` Values (16 bytes each)
 /// count: number of captured values
 #[no_mangle]
-pub extern "C" fn elle_jit_make_closure(template_bits: u64, captures_ptr: u64, count: u64) -> u64 {
-    let template_val = unsafe { Value::from_bits(template_bits) };
+pub extern "C" fn elle_jit_make_closure(
+    template_tag: u64,
+    template_payload: u64,
+    captures_ptr: *const Value,
+    count: u64,
+) -> JitValue {
+    let template_val = Value {
+        tag: template_tag,
+        payload: template_payload,
+    };
     let count = count as usize;
 
     let closure_template = template_val
@@ -485,67 +475,59 @@ pub extern "C" fn elle_jit_make_closure(template_bits: u64, captures_ptr: u64, c
     let env: Vec<Value> = if count == 0 {
         vec![]
     } else {
-        let slice = unsafe { std::slice::from_raw_parts(captures_ptr as *const u64, count) };
-        slice
-            .iter()
-            .map(|&bits| unsafe { Value::from_bits(bits) })
-            .collect()
+        let slice = unsafe { std::slice::from_raw_parts(captures_ptr, count) };
+        slice.to_vec()
     };
 
-    Value::closure(crate::value::Closure {
+    let result = Value::closure(crate::value::Closure {
         template: closure_template,
         env: std::rc::Rc::new(env),
         squelch_mask: 0,
-    })
-    .to_bits()
+    });
+    JitValue::from_value(result)
 }
 
 // =============================================================================
 // Internal Helpers
 // =============================================================================
 
-/// Convert an ExecResult from execute_bytecode_saving_stack to a JIT return value.
+/// Convert an ExecResult from execute_bytecode_saving_stack to a `JitValue`.
 /// Handles SIG_OK, SIG_HALT (both return the value), SIG_YIELD (returns
-/// YIELD_SENTINEL), and errors (signal already set, returns TAG_NIL).
-fn exec_result_to_jit_bits(vm: &mut crate::vm::VM, bits: SignalBits) -> u64 {
+/// YIELD_SENTINEL), and errors (signal already set, returns JitValue::nil()).
+fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
     match bits {
         SIG_OK | SIG_HALT => {
             let (_, val) = vm.fiber.signal.take().unwrap();
-            val.to_bits()
+            JitValue::from_value(val)
         }
         SIG_YIELD => YIELD_SENTINEL,
         _ => {
             // SIG_ERROR — signal already set on fiber
-            TAG_NIL
+            JitValue::nil()
         }
     }
 }
 
 /// Handle a non-self tail call from JIT code.
 ///
-/// If the target closure has JIT code in the cache, calls it directly —
-/// avoiding the round-trip through the interpreter. This is critical for
-/// mutual recursion (e.g., `solve-helper` tail-calling `try-cols-helper`):
-/// without this, every cross-function tail call drops from JIT to the
-/// interpreter dispatch loop.
-///
-/// If the callee returns TAIL_CALL_SENTINEL (its own non-self tail call),
-/// we propagate it to our caller for resolution — the pending_tail_call
-/// env is in interpreter format and can't be used for another JIT call.
-///
+/// If the target closure has JIT code in the cache, calls it directly.
 /// Falls back to TAIL_CALL_SENTINEL (interpreter trampoline) only when
 /// the target has no JIT code.
 #[no_mangle]
 pub extern "C" fn elle_jit_tail_call(
-    func_bits: u64,
-    args_ptr: *const u64,
+    func_tag: u64,
+    func_payload: u64,
+    args_ptr: *const Value,
     nargs: u32,
     vm: *mut (),
-) -> u64 {
+) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
-    let func = unsafe { Value::from_bits(func_bits) };
+    let func = Value {
+        tag: func_tag,
+        payload: func_payload,
+    };
 
-    // Handle native functions — zero-copy args via repr(transparent)
+    // Handle native functions
     if let Some(f) = func.as_native_fn() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
         let (bits, value) = f(args_slice);
@@ -562,15 +544,16 @@ pub extern "C" fn elle_jit_tail_call(
                     format!("parameter call: expected 0 arguments, got {}", nargs),
                 ),
             ));
-            return TAG_NIL;
+            return JitValue::nil();
         }
-        return vm.resolve_parameter(id, default).to_bits();
+        let result = vm.resolve_parameter(id, default);
+        return JitValue::from_value(result);
     }
 
     // Handle closures
     if let Some(closure) = func.as_closure() {
         if !vm.check_arity(&closure.template.arity, nargs as usize) {
-            return TAG_NIL;
+            return JitValue::nil();
         }
 
         // JIT fast path: if the target has JIT code, call it directly
@@ -579,22 +562,23 @@ pub extern "C" fn elle_jit_tail_call(
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
             } else {
-                closure.env.as_ptr() as *const u64
+                closure.env.as_ptr()
             };
 
-            let result_bits = unsafe {
+            let result = unsafe {
                 jit_code.call(
                     env_ptr,
                     args_ptr,
                     nargs,
                     vm as *mut crate::vm::VM as *mut (),
-                    func_bits,
+                    func_tag,
+                    func_payload,
                 )
             };
 
             // Check for exception
             if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
-                return TAG_NIL;
+                return JitValue::nil();
             }
 
             // Check for yield from callee
@@ -602,17 +586,17 @@ pub extern "C" fn elle_jit_tail_call(
                 return YIELD_SENTINEL;
             }
 
-            if result_bits == YIELD_SENTINEL {
+            if result == YIELD_SENTINEL {
                 return YIELD_SENTINEL;
             }
 
             // Propagate result (including TAIL_CALL_SENTINEL) to caller
-            return result_bits;
+            return result;
         }
 
         // Interpreter fallback — build env, return TAIL_CALL_SENTINEL
         let args: Vec<Value> = (0..nargs as usize)
-            .map(|i| unsafe { Value::from_bits(*args_ptr.add(i)) })
+            .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
 
         let new_env = build_closure_env_for_jit(closure, &args);
@@ -631,7 +615,7 @@ pub extern "C" fn elle_jit_tail_call(
         SIG_ERROR,
         error_val("type-error", format!("Cannot call {:?}", func)),
     ));
-    TAG_NIL
+    JitValue::nil()
 }
 
 // =============================================================================
@@ -677,11 +661,8 @@ pub(crate) fn build_closure_env_for_jit(
             }
         }
         crate::value::Arity::AtLeast(_) => {
-            // Total fixed slots = num_params - 1 (rest slot is last param)
             let fixed_slots = closure.template.num_params - 1;
 
-            // Determine how many positional args to consume for fixed slots.
-            // For &keys/&named, keyword args should not fill optional slots.
             let collects_keywords = matches!(
                 closure.template.vararg_kind,
                 crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_)
@@ -700,20 +681,13 @@ pub(crate) fn build_closure_env_for_jit(
                 args.len().min(fixed_slots)
             };
 
-            // Push args for fixed slots (required + optional)
             for (i, arg) in args[..provided_fixed].iter().enumerate() {
                 push_param(&mut new_env, closure, i, *arg);
             }
-            // Fill missing optional slots with nil
             for i in provided_fixed..fixed_slots {
                 push_param(&mut new_env, closure, i, Value::NIL);
             }
 
-            // Collect remaining args into rest slot.
-            // Note: Struct/StrictStruct vararg kinds require fiber access for
-            // error reporting, which is unavailable in the JIT dispatch context.
-            // Only List collection is supported here. Struct varargs are rare
-            // in JIT-eligible code (they require keyword argument parsing).
             let rest_args = if args.len() > provided_fixed {
                 &args[provided_fixed..]
             } else {
@@ -723,18 +697,15 @@ pub(crate) fn build_closure_env_for_jit(
             push_param(&mut new_env, closure, fixed_slots, collected);
         }
         crate::value::Arity::Range(_, max) => {
-            // All slots are fixed (no rest param)
             for (i, arg) in args.iter().enumerate() {
                 push_param(&mut new_env, closure, i, *arg);
             }
-            // Fill missing optional slots with nil
             for i in args.len()..max {
                 push_param(&mut new_env, closure, i, Value::NIL);
             }
         }
     }
 
-    // Calculate number of locally-defined variables
     let num_params = match closure.template.arity {
         crate::value::Arity::Exact(n) => n,
         crate::value::Arity::AtLeast(n) => n,
@@ -742,9 +713,6 @@ pub(crate) fn build_closure_env_for_jit(
     };
     let num_locally_defined = closure.template.num_locals.saturating_sub(num_params);
 
-    // Add slots for locally-defined variables.
-    // cell-wrapped locals get LocalCell(NIL); non-cell locals get bare NIL.
-    // Beyond index 63, conservatively use LocalCell.
     for i in 0..num_locally_defined {
         if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
             new_env.push(Value::local_lbox(Value::NIL));
@@ -777,8 +745,7 @@ mod tests {
 
         // Initially no exception
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(false));
+        assert_eq!(result, JitValue::bool_val(false));
 
         // Set an error signal
         vm.fiber.signal = Some((
@@ -788,29 +755,23 @@ mod tests {
 
         // Now should return true
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(true));
+        assert_eq!(result, JitValue::bool_val(true));
 
         // Clear signal
         vm.fiber.signal = None;
 
         // Should return false again
         let result = elle_jit_has_exception(&mut vm as *mut VM as *mut () as u64);
-        let val = unsafe { Value::from_bits(result) };
-        assert_eq!(val.as_bool(), Some(false));
+        assert_eq!(result, JitValue::bool_val(false));
     }
 
     // -- jit_handle_primitive_signal: composed signal coverage --
-    //
-    // These tests exercise the cases previously unreachable through the
-    // old exact-match dispatch, which would have panicked on any composed
-    // or non-listed signal bit pattern.
 
     #[test]
     fn sig_ok_returns_value() {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_OK, Value::int(42));
-        assert_eq!(unsafe { Value::from_bits(result) }, Value::int(42));
+        assert_eq!(result, JitValue::from_value(Value::int(42)));
         assert!(vm.fiber.signal.is_none());
     }
 
@@ -819,19 +780,17 @@ mod tests {
         let mut vm = make_vm();
         let err = Value::string("boom");
         let result = jit_handle_primitive_signal(&mut vm, SIG_ERROR, err);
-        assert_eq!(result, TAG_NIL);
+        assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_ERROR);
     }
 
     #[test]
     fn composed_sig_error_io_stores_signal_returns_nil() {
-        // SIG_ERROR | SIG_IO is returned by I/O primitives that fail.
-        // This previously hit the panic arm.
         let mut vm = make_vm();
         let bits = SIG_ERROR | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("io-error"));
-        assert_eq!(result, TAG_NIL);
+        assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_IO));
@@ -839,12 +798,9 @@ mod tests {
 
     #[test]
     fn bare_sig_yield_stores_signal_returns_yield_sentinel() {
-        // Primitives return (bits, value) as a Rust tuple — they do NOT pre-set
-        // fiber.signal. jit_handle_primitive_signal must store it.
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_YIELD, Value::int(1));
         assert_eq!(result, YIELD_SENTINEL);
-        // Signal must be stored by the handler, not pre-set by the caller.
         let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_YIELD);
         assert_eq!(val.as_int(), Some(1));
@@ -852,15 +808,10 @@ mod tests {
 
     #[test]
     fn composed_sig_yield_io_stores_signal_returns_yield_sentinel() {
-        // SIG_YIELD | SIG_IO is returned by every I/O primitive.
-        // This is the primary real-world trigger for the panic — any JIT-compiled
-        // function calling an I/O primitive (port/read, socket/accept, etc.)
-        // would have panicked before this fix because fiber.signal was never set.
         let mut vm = make_vm();
         let bits = SIG_YIELD | SIG_IO;
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::int(99));
         assert_eq!(result, YIELD_SENTINEL);
-        // Signal must be stored by the handler so the scheduler can pick it up.
         let (sig, val) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, bits);
         assert_eq!(val.as_int(), Some(99));
@@ -870,14 +821,13 @@ mod tests {
     fn sig_halt_stores_signal_returns_nil() {
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, SIG_HALT, Value::int(0));
-        assert_eq!(result, TAG_NIL);
+        assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert_eq!(sig, SIG_HALT);
     }
 
     #[test]
     fn sig_debug_treated_as_suspension() {
-        // SIG_DEBUG has no current primitive emitter but must not panic.
         let mut vm = make_vm();
         vm.fiber.signal = Some((SIG_DEBUG, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, SIG_DEBUG, Value::NIL);
@@ -888,7 +838,6 @@ mod tests {
 
     #[test]
     fn user_defined_signal_treated_as_suspension() {
-        // A user-defined signal (bits 16+) must not panic.
         let user_bit = SignalBits::new(1 << 16);
         let mut vm = make_vm();
         vm.fiber.signal = Some((user_bit, Value::NIL));
@@ -900,14 +849,11 @@ mod tests {
 
     #[test]
     fn sig_error_terminal_stored_as_error_not_panic() {
-        // SIG_ABORT == SIG_ERROR | SIG_TERMINAL but without a fiber value,
-        // the SIG_ABORT exact-match guard fails (value.as_fiber() is None).
-        // It must fall through to the contains(SIG_ERROR) arm, not panic.
         use crate::value::fiber::SIG_TERMINAL;
         let bits = SIG_ERROR | SIG_TERMINAL;
         let mut vm = make_vm();
         let result = jit_handle_primitive_signal(&mut vm, bits, Value::string("terminal"));
-        assert_eq!(result, TAG_NIL);
+        assert_eq!(result, JitValue::nil());
         let (sig, _) = vm.fiber.signal.take().unwrap();
         assert!(sig.contains(SIG_ERROR));
         assert!(sig.contains(SIG_TERMINAL));

@@ -195,6 +195,9 @@ impl FiberHeap {
             return unsafe { &mut *self.shared_alloc }.alloc(obj);
         }
 
+        // Capture the Value-level tag before obj is moved.
+        let value_tag = obj.value_tag();
+
         // Custom allocator: try Rust trait object before slab.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
             let size = std::mem::size_of::<HeapObject>();
@@ -214,7 +217,7 @@ impl FiberHeap {
                 if self.alloc_count > self.peak_alloc_count {
                     self.peak_alloc_count = self.alloc_count;
                 }
-                return Value::from_heap_ptr(typed as *const ());
+                return Value::from_heap_ptr(typed as *const (), value_tag);
             }
             // Fall through to slab on null return
         }
@@ -240,7 +243,7 @@ impl FiberHeap {
                 if self.alloc_count > self.peak_alloc_count {
                     self.peak_alloc_count = self.alloc_count;
                 }
-                Value::from_heap_ptr(ptr as *const ())
+                Value::from_heap_ptr(ptr as *const (), value_tag)
             }
             ActiveAlloc::Bump(bump_ptr) => {
                 // `bumpalo::Bump::alloc` takes `&self` (interior mutability).
@@ -254,7 +257,7 @@ impl FiberHeap {
                 if self.alloc_count > self.peak_alloc_count {
                     self.peak_alloc_count = self.alloc_count;
                 }
-                Value::from_heap_ptr(raw as *const ())
+                Value::from_heap_ptr(raw as *const (), value_tag)
             }
         }
     }
@@ -615,7 +618,6 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
         HeapTag::NativeFn => false,
         HeapTag::LibHandle => false,
         HeapTag::ManagedPointer => false,
-        HeapTag::Binding => false,
         // Inner heap allocations (Box<str>, Vec, Rc, BTreeMap, Arc, Cif, etc.)
         HeapTag::LString => true,
         HeapTag::LArrayMut => true,

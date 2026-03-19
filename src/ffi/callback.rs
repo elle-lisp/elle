@@ -188,6 +188,8 @@ unsafe fn write_return_value(result: &mut c_void, value: &Value, ret: &TypeDesc)
             *(ptr as *mut i64) = n;
         }
         TypeDesc::U64 | TypeDesc::ULong | TypeDesc::Size => {
+            // Bit-reinterpret back to u64: completes the lossless round-trip
+            // with from_c.rs. See from_c.rs module-level doc for convention.
             let n = value.as_int().unwrap_or(0) as u64;
             *(ptr as *mut u64) = n;
         }

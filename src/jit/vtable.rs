@@ -4,6 +4,19 @@
 //! declares the corresponding `FuncId`s in the JITModule. The result is
 //! `RuntimeHelpers`, a plain struct of `FuncId` fields that `JitCompiler`
 //! and `FunctionTranslator` use to emit calls to runtime helpers.
+//!
+//! ## Calling convention for Values
+//!
+//! Values are passed and returned as TWO `I64` Cranelift arguments: (tag, payload).
+//! A "Value parameter" = two consecutive I64 params.
+//! A "Value return" = two consecutive I64 return values.
+//!
+//! Helper arity table (counting Value params as 2 each):
+//!   value_unary: (tag, payload) -> (tag, payload)           = 2 params, 2 returns
+//!   value_binary: (atag, apay, btag, bpay) -> (tag, payload) = 4 params, 2 returns
+//!   value_unary_vm: (tag, payload, vm) -> (tag, payload)     = 3 params, 2 returns
+//!   value_binary_vm: (atag, apay, btag, bpay, vm) -> (tag, payload) = 5 params, 2 returns
+//!   call: (ftag, fpay, args_ptr, nargs, vm) -> (tag, payload) = 5 params, 2 returns
 
 use cranelift_codegen::ir::types::I64;
 use cranelift_codegen::ir::{AbiParam, Signature};
@@ -89,9 +102,6 @@ pub(crate) struct RuntimeHelpers {
 }
 
 /// Register all `elle_jit_*` symbols with the JITBuilder.
-///
-/// Must be called before `JITModule::new` so that the linker resolves each
-/// symbol to the corresponding Rust function.
 pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     // Arithmetic and comparison (runtime.rs)
     builder.symbol("elle_jit_add", runtime::elle_jit_add as *const u8);
@@ -119,7 +129,7 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         runtime::elle_jit_is_truthy as *const u8,
     );
 
-    // Data structure, lbox, call, and yield helpers (dispatch.rs re-exports data.rs + suspend.rs)
+    // Data structure, lbox, call, and yield helpers
     builder.symbol("elle_jit_cons", dispatch::elle_jit_cons as *const u8);
     builder.symbol("elle_jit_car", dispatch::elle_jit_car as *const u8);
     builder.symbol("elle_jit_cdr", dispatch::elle_jit_cdr as *const u8);
@@ -279,61 +289,24 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
 ///
-/// The module must have been created after `register_symbols` so that each
-/// imported function name resolves to the correct symbol.
+/// All helpers take/return Values as (tag: I64, payload: I64) pairs.
+/// vm pointers are plain I64. array/count args are plain I64.
 pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, JitError> {
-    // Binary function signature: (i64, i64) -> i64
-    let mut binary_sig = module.make_signature();
-    binary_sig.params.push(AbiParam::new(I64));
-    binary_sig.params.push(AbiParam::new(I64));
-    binary_sig.returns.push(AbiParam::new(I64));
-
-    // Unary function signature: (i64) -> i64
-    let mut unary_sig = module.make_signature();
-    unary_sig.params.push(AbiParam::new(I64));
-    unary_sig.returns.push(AbiParam::new(I64));
-
-    // Ternary function signature: (i64, i64, i64) -> i64
-    let mut ternary_sig = module.make_signature();
-    ternary_sig.params.push(AbiParam::new(I64));
-    ternary_sig.params.push(AbiParam::new(I64));
-    ternary_sig.params.push(AbiParam::new(I64));
-    ternary_sig.returns.push(AbiParam::new(I64));
-
-    // Make array signature: (ptr, count) -> i64
-    let mut make_array_sig = module.make_signature();
-    make_array_sig.params.push(AbiParam::new(I64)); // elements ptr
-    make_array_sig.params.push(AbiParam::new(I64)); // count (as i64)
-    make_array_sig.returns.push(AbiParam::new(I64));
-
-    // Call signature: (func, args_ptr, nargs, vm) -> i64
-    let mut call_sig = module.make_signature();
-    call_sig.params.push(AbiParam::new(I64)); // func
-    call_sig.params.push(AbiParam::new(I64)); // args_ptr
-    call_sig.params.push(AbiParam::new(I64)); // nargs (as i64)
-    call_sig.params.push(AbiParam::new(I64)); // vm
-    call_sig.returns.push(AbiParam::new(I64));
-
-    // Quaternary function signature: (i64, i64, i64, i64) -> i64
-    let mut quaternary_sig = module.make_signature();
-    for _ in 0..4 {
-        quaternary_sig.params.push(AbiParam::new(I64));
+    // Helper: make a signature
+    fn make_sig(
+        module: &JITModule,
+        params: &[cranelift_codegen::ir::Type],
+        returns: &[cranelift_codegen::ir::Type],
+    ) -> Signature {
+        let mut sig = module.make_signature();
+        for &p in params {
+            sig.params.push(AbiParam::new(p));
+        }
+        for &r in returns {
+            sig.returns.push(AbiParam::new(r));
+        }
+        sig
     }
-    quaternary_sig.returns.push(AbiParam::new(I64));
-
-    // elle_jit_yield: 5 params (yielded, spilled_ptr, yield_index, vm, closure_bits)
-    let mut yield_sig = module.make_signature();
-    for _ in 0..5 {
-        yield_sig.params.push(AbiParam::new(I64));
-    }
-    yield_sig.returns.push(AbiParam::new(I64));
-
-    // elle_jit_yield_through_call: 4 params (spilled_ptr, call_site_index, vm, closure_bits)
-    let mut ytc_sig = module.make_signature();
-    for _ in 0..4 {
-        ytc_sig.params.push(AbiParam::new(I64));
-    }
-    ytc_sig.returns.push(AbiParam::new(I64));
 
     let declare =
         |module: &mut JITModule, name: &str, sig: &Signature| -> Result<FuncId, JitError> {
@@ -342,71 +315,125 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
                 .map_err(|e| JitError::CompilationFailed(e.to_string()))
         };
 
+    // Value unary: (tag, payload) -> (tag, payload)
+    let value_unary = make_sig(module, &[I64, I64], &[I64, I64]);
+    // Value binary: (atag, apay, btag, bpay) -> (tag, payload)
+    let value_binary = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // Value unary + vm: (tag, payload, vm) -> (tag, payload)
+    let value_unary_vm = make_sig(module, &[I64, I64, I64], &[I64, I64]);
+    // Value binary + vm: (atag, apay, btag, bpay, vm) -> (tag, payload)
+    let value_binary_vm = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // Value ternary + vm: (t1,p1, t2,p2, t3,p3, vm) -> (tag, payload) -- not needed currently
+    // vm only (pointer param): (vm) -> (tag, payload)
+    let vm_only = make_sig(module, &[I64], &[I64, I64]);
+    // make_array: (elements_ptr, count) -> (tag, payload)  -- ptr is I64, count is I64
+    let make_array_sig = make_sig(module, &[I64, I64], &[I64, I64]);
+    // call: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
+    let call_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // resolve_tail_call: (result_tag, result_payload, vm) -> (tag, payload)
+    let resolve_tc_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
+    // store_capture: (env_ptr, index, val_tag, val_payload) -> (tag, payload)
+    let store_capture_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // store_lbox: (cell_tag, cell_payload, val_tag, val_payload) -> (tag, payload)
+    let store_lbox_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // array_ref_or_nil: (tag, payload, index) -> (tag, payload)
+    let array_ref_or_nil_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
+    // array_ref_destructure: (tag, payload, index, vm) -> (tag, payload)
+    let array_ref_destr_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // array_slice_from: (tag, payload, index, vm) -> (tag, payload)
+    let array_slice_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // struct_get_or_nil: (stag, spay, ktag, kpay, vm) -> (tag, payload)
+    let struct_get_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // struct_rest: (stag, spay, exclude_ptr, count, vm) -> (tag, payload)
+    let struct_rest_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // check_signal_bound: (tag, payload, allowed_bits, vm) -> (tag, payload)
+    let signal_bound_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // push_param_frame: (pairs_ptr, count, vm) -> (tag, payload)
+    let push_param_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
+    // make_closure: (template_tag, template_payload, captures_ptr, count) -> (tag, payload)
+    let make_closure_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // call_array: (func_tag, func_payload, arr_tag, arr_payload, vm) -> (tag, payload)
+    let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // cons: (car_tag, car_pay, cdr_tag, cdr_pay) -> (tag, payload)
+    let cons_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // jit_yield: (ytag, ypay, spilled_ptr, yield_idx, vm, ctag, cpay) -> (tag, payload)
+    let yield_sig = make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[I64, I64]);
+    // jit_yield_through_call: (spilled_ptr, call_site_idx, vm, ctag, cpay) -> (tag, payload)
+    let ytc_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+
     Ok(RuntimeHelpers {
-        add: declare(module, "elle_jit_add", &binary_sig)?,
-        sub: declare(module, "elle_jit_sub", &binary_sig)?,
-        mul: declare(module, "elle_jit_mul", &binary_sig)?,
-        div: declare(module, "elle_jit_div", &binary_sig)?,
-        rem: declare(module, "elle_jit_rem", &binary_sig)?,
-        bit_and: declare(module, "elle_jit_bit_and", &binary_sig)?,
-        bit_or: declare(module, "elle_jit_bit_or", &binary_sig)?,
-        bit_xor: declare(module, "elle_jit_bit_xor", &binary_sig)?,
-        shl: declare(module, "elle_jit_shl", &binary_sig)?,
-        shr: declare(module, "elle_jit_shr", &binary_sig)?,
-        neg: declare(module, "elle_jit_neg", &unary_sig)?,
-        not: declare(module, "elle_jit_not", &unary_sig)?,
-        bit_not: declare(module, "elle_jit_bit_not", &unary_sig)?,
-        eq: declare(module, "elle_jit_eq", &binary_sig)?,
-        ne: declare(module, "elle_jit_ne", &binary_sig)?,
-        lt: declare(module, "elle_jit_lt", &binary_sig)?,
-        le: declare(module, "elle_jit_le", &binary_sig)?,
-        gt: declare(module, "elle_jit_gt", &binary_sig)?,
-        ge: declare(module, "elle_jit_ge", &binary_sig)?,
-        cons: declare(module, "elle_jit_cons", &binary_sig)?,
-        car: declare(module, "elle_jit_car", &unary_sig)?,
-        cdr: declare(module, "elle_jit_cdr", &unary_sig)?,
+        add: declare(module, "elle_jit_add", &value_binary)?,
+        sub: declare(module, "elle_jit_sub", &value_binary)?,
+        mul: declare(module, "elle_jit_mul", &value_binary)?,
+        div: declare(module, "elle_jit_div", &value_binary)?,
+        rem: declare(module, "elle_jit_rem", &value_binary)?,
+        bit_and: declare(module, "elle_jit_bit_and", &value_binary)?,
+        bit_or: declare(module, "elle_jit_bit_or", &value_binary)?,
+        bit_xor: declare(module, "elle_jit_bit_xor", &value_binary)?,
+        shl: declare(module, "elle_jit_shl", &value_binary)?,
+        shr: declare(module, "elle_jit_shr", &value_binary)?,
+        neg: declare(module, "elle_jit_neg", &value_unary)?,
+        not: declare(module, "elle_jit_not", &value_unary)?,
+        bit_not: declare(module, "elle_jit_bit_not", &value_unary)?,
+        eq: declare(module, "elle_jit_eq", &value_binary)?,
+        ne: declare(module, "elle_jit_ne", &value_binary)?,
+        lt: declare(module, "elle_jit_lt", &value_binary)?,
+        le: declare(module, "elle_jit_le", &value_binary)?,
+        gt: declare(module, "elle_jit_gt", &value_binary)?,
+        ge: declare(module, "elle_jit_ge", &value_binary)?,
+        cons: declare(module, "elle_jit_cons", &cons_sig)?,
+        car: declare(module, "elle_jit_car", &value_unary)?,
+        cdr: declare(module, "elle_jit_cdr", &value_unary)?,
         make_array: declare(module, "elle_jit_make_array", &make_array_sig)?,
-        is_nil: declare(module, "elle_jit_is_nil", &unary_sig)?,
-        is_pair: declare(module, "elle_jit_is_pair", &unary_sig)?,
-        is_array: declare(module, "elle_jit_is_array", &unary_sig)?,
-        is_array_mut: declare(module, "elle_jit_is_array_mut", &unary_sig)?,
-        is_struct: declare(module, "elle_jit_is_struct", &unary_sig)?,
-        is_struct_mut: declare(module, "elle_jit_is_struct_mut", &unary_sig)?,
-        is_set: declare(module, "elle_jit_is_set", &unary_sig)?,
-        is_set_mut: declare(module, "elle_jit_is_set_mut", &unary_sig)?,
-        car_or_nil: declare(module, "elle_jit_car_or_nil", &unary_sig)?,
-        cdr_or_nil: declare(module, "elle_jit_cdr_or_nil", &unary_sig)?,
-        array_len: declare(module, "elle_jit_array_len", &unary_sig)?,
-        array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &binary_sig)?,
-        car_destructure: declare(module, "elle_jit_car_destructure", &binary_sig)?,
-        cdr_destructure: declare(module, "elle_jit_cdr_destructure", &binary_sig)?,
-        array_ref_destructure: declare(module, "elle_jit_array_ref_destructure", &ternary_sig)?,
-        array_slice_from: declare(module, "elle_jit_array_slice_from", &ternary_sig)?,
-        struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &ternary_sig)?,
-        struct_get_destructure: declare(module, "elle_jit_struct_get_destructure", &ternary_sig)?,
-        struct_rest: declare(module, "elle_jit_struct_rest", &quaternary_sig)?,
-        check_signal_bound: declare(module, "elle_jit_check_signal_bound", &ternary_sig)?,
-        array_push: declare(module, "elle_jit_array_push", &ternary_sig)?,
-        array_extend: declare(module, "elle_jit_array_extend", &ternary_sig)?,
-        push_param_frame: declare(module, "elle_jit_push_param_frame", &ternary_sig)?,
-        is_truthy: declare(module, "elle_jit_is_truthy", &unary_sig)?,
-        make_lbox: declare(module, "elle_jit_make_lbox", &unary_sig)?,
-        load_lbox: declare(module, "elle_jit_load_lbox", &unary_sig)?,
-        load_capture: declare(module, "elle_jit_load_capture", &unary_sig)?,
-        store_lbox: declare(module, "elle_jit_store_lbox", &binary_sig)?,
-        store_capture: declare(module, "elle_jit_store_capture", &ternary_sig)?,
+        is_nil: declare(module, "elle_jit_is_nil", &value_unary)?,
+        is_pair: declare(module, "elle_jit_is_pair", &value_unary)?,
+        is_array: declare(module, "elle_jit_is_array", &value_unary)?,
+        is_array_mut: declare(module, "elle_jit_is_array_mut", &value_unary)?,
+        is_struct: declare(module, "elle_jit_is_struct", &value_unary)?,
+        is_struct_mut: declare(module, "elle_jit_is_struct_mut", &value_unary)?,
+        is_set: declare(module, "elle_jit_is_set", &value_unary)?,
+        is_set_mut: declare(module, "elle_jit_is_set_mut", &value_unary)?,
+        car_or_nil: declare(module, "elle_jit_car_or_nil", &value_unary)?,
+        cdr_or_nil: declare(module, "elle_jit_cdr_or_nil", &value_unary)?,
+        array_len: declare(module, "elle_jit_array_len", &value_unary)?,
+        array_ref_or_nil: declare(module, "elle_jit_array_ref_or_nil", &array_ref_or_nil_sig)?,
+        car_destructure: declare(module, "elle_jit_car_destructure", &value_unary_vm)?,
+        cdr_destructure: declare(module, "elle_jit_cdr_destructure", &value_unary_vm)?,
+        array_ref_destructure: declare(
+            module,
+            "elle_jit_array_ref_destructure",
+            &array_ref_destr_sig,
+        )?,
+        array_slice_from: declare(module, "elle_jit_array_slice_from", &array_slice_sig)?,
+        struct_get_or_nil: declare(module, "elle_jit_struct_get_or_nil", &struct_get_sig)?,
+        struct_get_destructure: declare(
+            module,
+            "elle_jit_struct_get_destructure",
+            &struct_get_sig,
+        )?,
+        struct_rest: declare(module, "elle_jit_struct_rest", &struct_rest_sig)?,
+        check_signal_bound: declare(module, "elle_jit_check_signal_bound", &signal_bound_sig)?,
+        array_push: declare(module, "elle_jit_array_push", &value_binary_vm)?,
+        array_extend: declare(module, "elle_jit_array_extend", &value_binary_vm)?,
+        push_param_frame: declare(module, "elle_jit_push_param_frame", &push_param_sig)?,
+        is_truthy: declare(module, "elle_jit_is_truthy", &value_unary)?,
+        make_lbox: declare(module, "elle_jit_make_lbox", &value_unary)?,
+        load_lbox: declare(module, "elle_jit_load_lbox", &value_unary)?,
+        load_capture: declare(module, "elle_jit_load_capture", &value_unary)?,
+        store_lbox: declare(module, "elle_jit_store_lbox", &store_lbox_sig)?,
+        store_capture: declare(module, "elle_jit_store_capture", &store_capture_sig)?,
         call: declare(module, "elle_jit_call", &call_sig)?,
         tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,
-        has_exception: declare(module, "elle_jit_has_exception", &unary_sig)?,
-        resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &binary_sig)?,
-        call_depth_enter: declare(module, "elle_jit_call_depth_enter", &unary_sig)?,
-        call_depth_exit: declare(module, "elle_jit_call_depth_exit", &unary_sig)?,
-        pop_param_frame: declare(module, "elle_jit_pop_param_frame", &unary_sig)?,
-        call_array: declare(module, "elle_jit_call_array", &ternary_sig)?,
-        tail_call_array: declare(module, "elle_jit_tail_call_array", &ternary_sig)?,
-        make_closure: declare(module, "elle_jit_make_closure", &ternary_sig)?,
+        has_exception: declare(module, "elle_jit_has_exception", &vm_only)?,
+        resolve_tail_call: declare(module, "elle_jit_resolve_tail_call", &resolve_tc_sig)?,
+        call_depth_enter: declare(module, "elle_jit_call_depth_enter", &vm_only)?,
+        call_depth_exit: declare(module, "elle_jit_call_depth_exit", &vm_only)?,
+        pop_param_frame: declare(module, "elle_jit_pop_param_frame", &vm_only)?,
+        call_array: declare(module, "elle_jit_call_array", &call_array_sig)?,
+        tail_call_array: declare(module, "elle_jit_tail_call_array", &call_array_sig)?,
+        make_closure: declare(module, "elle_jit_make_closure", &make_closure_sig)?,
         jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
         jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
-        has_signal: declare(module, "elle_jit_has_signal", &unary_sig)?,
+        has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
     })
 }

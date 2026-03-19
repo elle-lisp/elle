@@ -80,16 +80,19 @@ impl JitCompiler {
     }
 
     /// Build the standard JIT function signature.
-    /// fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM, self_bits: u64) -> Value
+    /// fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM,
+    ///    self_tag: u64, self_payload: u64) -> JitValue  (two I64s in rax:rdx)
     fn make_jit_signature(&self) -> Signature {
         let mut sig = self.module.make_signature();
         sig.call_conv = CallConv::SystemV;
-        sig.params.push(AbiParam::new(I64)); // env pointer
-        sig.params.push(AbiParam::new(I64)); // args pointer
+        sig.params.push(AbiParam::new(I64)); // env pointer (*const Value)
+        sig.params.push(AbiParam::new(I64)); // args pointer (*const Value)
         sig.params.push(AbiParam::new(I64)); // nargs
         sig.params.push(AbiParam::new(I64)); // vm pointer
-        sig.params.push(AbiParam::new(I64)); // self_bits
-        sig.returns.push(AbiParam::new(I64)); // return value
+        sig.params.push(AbiParam::new(I64)); // self_tag
+        sig.params.push(AbiParam::new(I64)); // self_payload
+        sig.returns.push(AbiParam::new(I64)); // result tag
+        sig.returns.push(AbiParam::new(I64)); // result payload
         sig
     }
 
@@ -323,25 +326,10 @@ impl JitCompiler {
 
     /// Translate LIR function to Cranelift IR
     ///
-    /// For self-tail-call optimization, we use this block structure:
-    /// ```text
-    /// entry_block:
-    ///     // Extract function params (env, args, nargs, vm, self_bits)
-    ///     // Load initial args into arg variables
-    ///     // Jump to loop_header
-    ///
-    /// loop_header:
-    ///     // Merge point for self-tail-calls
-    ///     // Jump to first LIR block
-    ///
-    /// lir_block_0 (first LIR block):
-    ///     // ... instructions ...
-    ///     // TailCall: if self-call, update arg vars, jump to loop_header
-    ///     //           if not self-call, call elle_jit_tail_call, return
-    /// ```
-    ///
-    /// When `scc_peers` is provided, calls to functions in the peer map are
-    /// emitted as direct Cranelift calls instead of going through `elle_jit_call`.
+    /// Each LIR register maps to TWO Cranelift variables: (tag, payload).
+    /// The entry block extracts 6 parameters:
+    ///   env_ptr, args_ptr, nargs, vm_ptr, self_tag, self_payload
+    /// and loads arg Values (16 bytes each) into the doubled arg variables.
     fn translate_function(
         &mut self,
         lir: &LirFunction,
@@ -355,28 +343,24 @@ impl JitCompiler {
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
 
-        // Set self_sym for self-call detection in emit_direct_scc_call
         translator.self_sym = self_sym;
 
-        // Set up SCC peer map for direct calls between mutually recursive functions
         if let Some(peers) = scc_peers {
             translator.scc_peers = peers.clone();
-            // SCC peer detection relies on the scc_peers map passed in from
-            // the batch compilation caller.
         }
 
-        // Declare variables for all registers, local slots, arg variables, and locally-defined variables
-        // - Registers: 0..num_regs (used by LIR instructions)
-        // - Local slots: 0..num_locals (used by LoadLocal/StoreLocal)
-        // - Arg variables: num_regs..num_regs+arity (used for self-tail-call)
-        // - Locally-defined variables: num_regs+arity..num_regs+arity+num_locally_defined
-        //   (used for let-bindings inside the function body)
-        // All use the same Cranelift variable namespace, so declare enough for all
+        // Variable layout: each LIR register index `r` maps to TWO Cranelift variables:
+        //   tag     at Cranelift var index 2*r
+        //   payload at Cranelift var index 2*r+1
+        //
+        // The "logical" variable space covers:
+        //   [0,       num_regs)             - LIR work registers
+        //   [num_regs, num_regs+num_locals)  - locals (args + locally-defined)
+        // The max logical index is max(num_regs, local_var_base + num_locally_defined).
+        // Each logical slot needs 2 Cranelift variables.
         let arg_var_base = lir.num_regs;
         let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
             && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
-        // For variadic functions, all params including the rest slot are "arg variables".
-        // For non-variadic, arity_params == num_params so this is a no-op.
         let arity_params = if is_list_variadic {
             lir.num_params as u16
         } else {
@@ -384,17 +368,18 @@ impl JitCompiler {
         };
         let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
         let local_var_base = arg_var_base + arity_params as u32;
-        let max_var = std::cmp::max(
+        let max_logical = std::cmp::max(
             std::cmp::max(lir.num_regs, lir.num_locals as u32),
             local_var_base + num_locally_defined,
         );
-        for i in 0..max_var {
+        // Declare 2 * max_logical Cranelift variables (tag + payload per slot)
+        for i in 0..(2 * max_logical) {
             builder.declare_var(var(i), I64);
         }
         translator.arg_var_base = arg_var_base;
         translator.local_var_base = local_var_base;
 
-        // Create blocks: entry, loop_header, and LIR blocks
+        // Create blocks
         let entry_block = builder.create_block();
         let loop_header = builder.create_block();
 
@@ -404,127 +389,151 @@ impl JitCompiler {
             block_map.insert(bb.label, cl_block);
         }
 
-        // Entry block: extract params, load initial args into variables
+        // Entry block: extract 6 function parameters
         builder.append_block_params_for_function_params(entry_block);
         builder.switch_to_block(entry_block);
-        builder.seal_block(entry_block); // No predecessors
+        builder.seal_block(entry_block);
 
         let env_ptr = builder.block_params(entry_block)[0];
         let args_ptr = builder.block_params(entry_block)[1];
         let nargs = builder.block_params(entry_block)[2];
         let vm_ptr = builder.block_params(entry_block)[3];
-        let self_bits = builder.block_params(entry_block)[4];
+        let self_tag = builder.block_params(entry_block)[4];
+        let self_payload = builder.block_params(entry_block)[5];
 
         translator.env_ptr = Some(env_ptr);
         translator.vm_ptr = Some(vm_ptr);
-        translator.self_bits = Some(self_bits);
+        translator.self_tag_payload = Some((self_tag, self_payload));
 
         if is_list_variadic {
             // --- Variadic entry: load fixed params, then build cons list for rest ---
             let fixed = lir.arity.fixed_params();
 
-            // Load fixed params from args pointer
+            // Load fixed params from args pointer (16 bytes per Value)
             for i in 0..fixed as u32 {
-                let offset = (i as i32) * 8;
-                let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                builder.def_var(var(arg_var_base + i), val);
+                let tag_offset = (i as i32) * 16;
+                let payload_offset = (i as i32) * 16 + 8;
+                let arg_tag = builder
+                    .ins()
+                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                let arg_payload =
+                    builder
+                        .ins()
+                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                let base = arg_var_base + i;
+                translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
             }
 
-            // Build cons list from remaining args (reverse iteration).
-            // Equivalent to interpreter's args_to_list():
-            //   let mut list = EMPTY_LIST;
-            //   for i in (fixed..nargs).rev() { list = cons(args[i], list); }
+            // Build cons list from remaining args (reverse iteration)
             let rest_var_idx = arg_var_base + fixed as u32;
 
-            let empty_list_bits = builder
+            let empty_tag = builder
                 .ins()
-                .iconst(I64, crate::value::Value::EMPTY_LIST.to_bits() as i64);
+                .iconst(I64, crate::value::Value::EMPTY_LIST.tag as i64);
+            let empty_pay = builder.ins().iconst(I64, 0);
             let one = builder.ins().iconst(I64, 1);
             let initial_i = builder.ins().isub(nargs, one);
             let fixed_val = builder.ins().iconst(I64, fixed as i64);
 
-            // Block structure:
-            //   loop_head(i, acc): if i >= fixed -> loop_body(i, acc) else -> loop_exit(acc)
-            //   loop_body(i, acc): new_acc = cons(args[i], acc); jump loop_head(i-1, new_acc)
-            //   loop_exit(acc): rest_var = acc
+            // Block structure (accumulator carries tag+payload as phi params):
+            // loop_head(i, acc_tag, acc_payload): ...
             let cons_loop_head = builder.create_block();
             let cons_loop_body = builder.create_block();
             let cons_loop_exit = builder.create_block();
 
             builder
                 .ins()
-                .jump(cons_loop_head, &[initial_i, empty_list_bits]);
+                .jump(cons_loop_head, &[initial_i, empty_tag, empty_pay]);
 
-            // loop_head(i, acc)
+            // loop_head(i, acc_tag, acc_payload)
             builder.switch_to_block(cons_loop_head);
             builder.append_block_param(cons_loop_head, I64); // i
-            builder.append_block_param(cons_loop_head, I64); // acc
+            builder.append_block_param(cons_loop_head, I64); // acc_tag
+            builder.append_block_param(cons_loop_head, I64); // acc_payload
             let i_param = builder.block_params(cons_loop_head)[0];
-            let acc_param = builder.block_params(cons_loop_head)[1];
+            let acc_tag_param = builder.block_params(cons_loop_head)[1];
+            let acc_pay_param = builder.block_params(cons_loop_head)[2];
             let cmp = builder
                 .ins()
                 .icmp(IntCC::SignedGreaterThanOrEqual, i_param, fixed_val);
             builder.ins().brif(
                 cmp,
                 cons_loop_body,
-                &[i_param, acc_param],
+                &[i_param, acc_tag_param, acc_pay_param],
                 cons_loop_exit,
-                &[acc_param],
+                &[acc_tag_param, acc_pay_param],
             );
 
-            // loop_body(i, acc)
+            // loop_body(i, acc_tag, acc_payload)
             builder.switch_to_block(cons_loop_body);
             builder.append_block_param(cons_loop_body, I64); // i
-            builder.append_block_param(cons_loop_body, I64); // acc
-            builder.seal_block(cons_loop_body); // single predecessor: loop_head
+            builder.append_block_param(cons_loop_body, I64); // acc_tag
+            builder.append_block_param(cons_loop_body, I64); // acc_payload
+            builder.seal_block(cons_loop_body);
             let i_body = builder.block_params(cons_loop_body)[0];
-            let acc_body = builder.block_params(cons_loop_body)[1];
-            let offset = builder.ins().imul_imm(i_body, 8);
-            let addr = builder.ins().iadd(args_ptr, offset);
-            let arg_val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
+            let acc_tag_body = builder.block_params(cons_loop_body)[1];
+            let acc_pay_body = builder.block_params(cons_loop_body)[2];
+            // Load args[i] at byte offset i*16 (tag) and i*16+8 (payload)
+            let byte_offset = builder.ins().imul_imm(i_body, 16);
+            let tag_addr = builder.ins().iadd(args_ptr, byte_offset);
+            let arg_tag = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 0);
+            let arg_payload = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 8);
+            // cons(args[i], acc) -> new_acc
             let cons_ref = translator
                 .module
                 .declare_func_in_func(translator.helpers.cons, builder.func);
-            let call_inst = builder.ins().call(cons_ref, &[arg_val, acc_body]);
-            let new_acc = builder.inst_results(call_inst)[0];
+            let call_inst = builder.ins().call(
+                cons_ref,
+                &[arg_tag, arg_payload, acc_tag_body, acc_pay_body],
+            );
+            let new_acc_tag = builder.inst_results(call_inst)[0];
+            let new_acc_pay = builder.inst_results(call_inst)[1];
             let new_i = builder.ins().isub(i_body, one);
-            builder.ins().jump(cons_loop_head, &[new_i, new_acc]);
+            builder
+                .ins()
+                .jump(cons_loop_head, &[new_i, new_acc_tag, new_acc_pay]);
 
-            // loop_exit(acc)
+            // loop_exit(acc_tag, acc_payload)
             builder.switch_to_block(cons_loop_exit);
-            builder.append_block_param(cons_loop_exit, I64); // acc
-            builder.seal_block(cons_loop_exit); // single predecessor: loop_head
-            let rest_val = builder.block_params(cons_loop_exit)[0];
+            builder.append_block_param(cons_loop_exit, I64); // acc_tag
+            builder.append_block_param(cons_loop_exit, I64); // acc_payload
+            builder.seal_block(cons_loop_exit);
+            let rest_tag = builder.block_params(cons_loop_exit)[0];
+            let rest_payload = builder.block_params(cons_loop_exit)[1];
 
-            // Handle lbox_params_mask: if the rest param needs a cell, wrap it
+            // Handle lbox_params_mask for the rest param
             let rest_param_index = fixed;
             if rest_param_index < 64 && (lir.lbox_params_mask & (1 << rest_param_index)) != 0 {
-                let cell = translator.call_helper_unary(
+                let (cell_t, cell_p) = translator.call_helper_value_unary(
                     &mut builder,
                     translator.helpers.make_lbox,
-                    rest_val,
+                    rest_tag,
+                    rest_payload,
                 )?;
-                builder.def_var(var(rest_var_idx), cell);
+                translator.def_var_pair(&mut builder, rest_var_idx, cell_t, cell_p);
             } else {
-                builder.def_var(var(rest_var_idx), rest_val);
+                translator.def_var_pair(&mut builder, rest_var_idx, rest_tag, rest_payload);
             }
 
-            // NOTE: cons_loop_head is NOT sealed here — it has a back-edge from
-            // cons_loop_body. It will be sealed by builder.seal_all_blocks() at
-            // the end of translate_function().
+            // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
-            // --- Non-variadic entry: load all args directly ---
+            // --- Non-variadic entry: load all args directly (16 bytes each) ---
             for i in 0..arity_params as u32 {
-                let offset = (i as i32) * 8;
-                let addr = builder.ins().iadd_imm(args_ptr, offset as i64);
-                let val = builder.ins().load(I64, MemFlags::trusted(), addr, 0);
-                builder.def_var(var(arg_var_base + i), val);
+                let tag_offset = (i as i32) * 16;
+                let payload_offset = (i as i32) * 16 + 8;
+                let arg_tag = builder
+                    .ins()
+                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                let arg_payload =
+                    builder
+                        .ins()
+                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                let base = arg_var_base + i;
+                translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
             }
         }
 
-        // Initialize locally-defined variables to LocalCell(NIL)
-        // These are let-bindings inside the function body
+        // Initialize locally-defined variables
         if num_locally_defined > 0 {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
@@ -537,12 +546,10 @@ impl JitCompiler {
         builder.ins().jump(loop_header, &[]);
 
         // Loop header: merge point for self-tail-calls
-        // DON'T seal yet — self-tail-calls will add back-edges
         builder.switch_to_block(loop_header);
         let first_lir_block = block_map[&lir.entry];
         builder.ins().jump(first_lir_block, &[]);
 
-        // Store loop_header for TailCall to jump to
         translator.loop_header = Some(loop_header);
 
         // Translate LIR blocks
@@ -550,17 +557,14 @@ impl JitCompiler {
             let cl_block = block_map[&bb.label];
             builder.switch_to_block(cl_block);
 
-            // Translate instructions
             let mut block_terminated = false;
             for spanned in &bb.instructions {
                 if translator.translate_instr(&mut builder, &spanned.instr, &block_map)? {
-                    // Instruction emitted a terminator (e.g., TailCall)
                     block_terminated = true;
                     break;
                 }
             }
 
-            // Translate terminator (unless already terminated by an instruction)
             if !block_terminated {
                 translator.translate_terminator(
                     &mut builder,
@@ -570,12 +574,7 @@ impl JitCompiler {
             }
         }
 
-        // Seal all blocks at once — LIR can have back-edges (e.g. while loops)
-        // so we cannot seal LIR blocks eagerly during translation.
-        // Blocks created and sealed inside translate_instr/translate_terminator
-        // (exception, yield, fastpath blocks) are skipped since already sealed.
         builder.seal_all_blocks();
-
         builder.finalize();
         Ok(translator.closure_constants)
     }
@@ -670,12 +669,19 @@ mod tests {
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let code = compiler.compile(&lir, None).expect("Failed to compile");
 
-        // Call the compiled function
-        // self_bits = 0 since we're not testing self-tail-calls here
-        let args = [crate::value::Value::int(42).to_bits()];
-        let result =
-            unsafe { code.call(std::ptr::null(), args.as_ptr(), 1, std::ptr::null_mut(), 0) };
-        let value = unsafe { crate::value::Value::from_bits(result) };
+        // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call)
+        let args = [crate::value::Value::int(42)];
+        let value = unsafe {
+            code.call(
+                std::ptr::null(),
+                args.as_ptr(),
+                1,
+                std::ptr::null_mut(),
+                0,
+                0,
+            )
+        }
+        .to_value();
         assert_eq!(value.as_int(), Some(42));
     }
 
@@ -685,15 +691,19 @@ mod tests {
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let code = compiler.compile(&lir, None).expect("Failed to compile");
 
-        // Call the compiled function
-        // self_bits = 0 since we're not testing self-tail-calls here
-        let args = [
-            crate::value::Value::int(10).to_bits(),
-            crate::value::Value::int(32).to_bits(),
-        ];
-        let result =
-            unsafe { code.call(std::ptr::null(), args.as_ptr(), 2, std::ptr::null_mut(), 0) };
-        let value = unsafe { crate::value::Value::from_bits(result) };
+        // Call the compiled function with self_tag=0, self_payload=0
+        let args = [crate::value::Value::int(10), crate::value::Value::int(32)];
+        let value = unsafe {
+            code.call(
+                std::ptr::null(),
+                args.as_ptr(),
+                2,
+                std::ptr::null_mut(),
+                0,
+                0,
+            )
+        }
+        .to_value();
         assert_eq!(value.as_int(), Some(42));
     }
 
@@ -735,10 +745,18 @@ mod tests {
         let (sym, code) = &results[0];
         assert_eq!(*sym, SymbolId(0));
 
-        let args = [crate::value::Value::int(42).to_bits()];
-        let result =
-            unsafe { code.call(std::ptr::null(), args.as_ptr(), 1, std::ptr::null_mut(), 0) };
-        let value = unsafe { crate::value::Value::from_bits(result) };
+        let args = [crate::value::Value::int(42)];
+        let value = unsafe {
+            code.call(
+                std::ptr::null(),
+                args.as_ptr(),
+                1,
+                std::ptr::null_mut(),
+                0,
+                0,
+            )
+        }
+        .to_value();
         assert_eq!(value.as_int(), Some(42));
     }
 
