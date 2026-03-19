@@ -6,6 +6,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 
 | Plugin | Purpose | Key Primitives |
 |--------|---------|-----------------|
+| [`base64/`](base64/) | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
 | [`crypto/`](crypto/) | Cryptographic hashing | `sha256`, `hmac-sha256`, `sha512`, etc. |
 | [`glob/`](glob/) | Filesystem pattern matching | `glob/match`, `glob/glob` |
 | [`oxigraph/`](oxigraph/) | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
