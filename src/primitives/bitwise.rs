@@ -17,7 +17,7 @@ fn coerce_to_int(val: &Value, name: &str) -> Result<i64, (SignalBits, Value)> {
             return Err((
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "type-error",
                     format!("{}: cannot convert non-finite float to integer", name),
                 ),
             ));
@@ -168,7 +168,10 @@ pub(crate) fn prim_bit_shift_left(args: &[Value]) -> (SignalBits, Value) {
     if shift < 0 {
         return (
             SIG_ERROR,
-            error_val("error", "bit/shift-left: shift amount must be non-negative"),
+            error_val(
+                "argument-error",
+                "bit/shift-left: shift amount must be non-negative",
+            ),
         );
     }
 
@@ -214,7 +217,7 @@ pub(crate) fn prim_bit_shift_right(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "argument-error",
                 "bit/shift-right: shift amount must be non-negative",
             ),
         );

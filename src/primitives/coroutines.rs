@@ -219,15 +219,15 @@ pub(crate) fn prim_coroutine_resume(args: &[Value]) -> (SignalBits, Value) {
             None
         }
         FiberStatus::Alive => Some(error_val(
-            "error",
+            "state-error",
             "coro/resume: coroutine is already running",
         )),
         FiberStatus::Dead => Some(error_val(
-            "error",
+            "state-error",
             "coro/resume: cannot resume completed coroutine",
         )),
         FiberStatus::Error => Some(error_val(
-            "error",
+            "state-error",
             "coro/resume: cannot resume errored coroutine",
         )),
     });

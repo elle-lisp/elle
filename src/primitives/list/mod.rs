@@ -244,7 +244,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "encoding-error",
                     format!("length: @string contains invalid UTF-8: {}", e),
                 ),
             ),
@@ -265,7 +265,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get array".to_string()),
+                    error_val("internal-error", "length: failed to get array".to_string()),
                 )
             }
         };
@@ -276,7 +276,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get table".to_string()),
+                    error_val("internal-error", "length: failed to get table".to_string()),
                 )
             }
         };
@@ -287,7 +287,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get struct".to_string()),
+                    error_val("internal-error", "length: failed to get struct".to_string()),
                 )
             }
         };
@@ -300,7 +300,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "internal-error",
                     format!("length: unable to resolve symbol name for id {:?}", sid),
                 ),
             )
@@ -313,7 +313,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get set".to_string()),
+                    error_val("internal-error", "length: failed to get set".to_string()),
                 )
             }
         };
@@ -324,7 +324,10 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "length: failed to get mutable set".to_string()),
+                    error_val(
+                        "internal-error",
+                        "length: failed to get mutable set".to_string(),
+                    ),
                 )
             }
         };
@@ -390,7 +393,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get array".to_string()),
+                    error_val("internal-error", "empty?: failed to get array".to_string()),
                 )
             }
         };
@@ -405,7 +408,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get array".to_string()),
+                    error_val("internal-error", "empty?: failed to get array".to_string()),
                 )
             }
         };
@@ -416,7 +419,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get table".to_string()),
+                    error_val("internal-error", "empty?: failed to get table".to_string()),
                 )
             }
         };
@@ -427,7 +430,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get struct".to_string()),
+                    error_val("internal-error", "empty?: failed to get struct".to_string()),
                 )
             }
         };
@@ -438,7 +441,7 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get set".to_string()),
+                    error_val("internal-error", "empty?: failed to get set".to_string()),
                 )
             }
         };
@@ -449,7 +452,10 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
             None => {
                 return (
                     SIG_ERROR,
-                    error_val("error", "empty?: failed to get mutable set".to_string()),
+                    error_val(
+                        "internal-error",
+                        "empty?: failed to get mutable set".to_string(),
+                    ),
                 )
             }
         };

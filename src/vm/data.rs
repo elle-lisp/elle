@@ -156,7 +156,7 @@ pub(crate) fn handle_array_ref(vm: &mut VM) {
             vm.fiber.signal = Some((
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!(
                         "array-ref: index {} out of bounds (length {})",
                         idx_val,

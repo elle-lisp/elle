@@ -35,7 +35,7 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("bytes: byte {} out of range 0-255: {}", i, n),
                     ),
                 )
@@ -85,7 +85,7 @@ pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("@bytes: byte {} out of range 0-255: {}", i, n),
                     ),
                 )
@@ -273,7 +273,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             return (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "argument-error",
                     format!("slice: start must be non-negative, got {}", i),
                 ),
             )
@@ -299,7 +299,7 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("slice: end must be non-negative, got {}", i),
                     ),
                 )

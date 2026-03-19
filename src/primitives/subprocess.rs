@@ -22,7 +22,7 @@ pub(crate) fn prim_exit(args: &[Value]) -> (SignalBits, Value) {
                 return (
                     SIG_ERROR,
                     error_val(
-                        "error",
+                        "argument-error",
                         format!("exit: code must be between 0 and 255, got {}", n),
                     ),
                 );

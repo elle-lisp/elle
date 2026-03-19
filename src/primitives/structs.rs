@@ -61,7 +61,7 @@ pub(crate) fn prim_struct(args: &[Value]) -> (SignalBits, Value) {
         return (
             SIG_ERROR,
             error_val(
-                "error",
+                "arity-error",
                 "struct: requires an even number of arguments (key-value pairs)".to_string(),
             ),
         );
@@ -127,7 +127,7 @@ pub(crate) fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
             Err(e) => (
                 SIG_ERROR,
                 error_val(
-                    "error",
+                    "encoding-error",
                     format!("freeze: @string contains invalid UTF-8: {}", e),
                 ),
             ),

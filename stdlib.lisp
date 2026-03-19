@@ -1078,7 +1078,7 @@
   (let [[timeout-ms (or (first args) 0)]
         [shutdown-fn (*shutdown*)]]
     (when (nil? shutdown-fn)
-      (error {:error :error :message "ev/shutdown: not inside an event loop"}))
+      (error {:error :state-error :message "ev/shutdown: not inside an event loop"}))
     (shutdown-fn timeout-ms)))
 
 (defn ev/run (& thunks)
