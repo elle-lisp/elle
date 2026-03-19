@@ -25,6 +25,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 |--------|---------|-----------|
 | `base64/` | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
 | `compress/` | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
+| `csv/` | CSV parsing and serialization | `csv/parse`, `csv/parse-rows`, `csv/write`, `csv/write-rows` |
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
 | `glob/` | Filesystem globbing | `glob/match`, `glob/glob` |
 | `oxigraph/` | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
@@ -128,6 +129,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 |------|---------|
 | `base64/` | Base64 encoding and decoding |
 | `compress/` | Gzip, deflate, and zstd compression and decompression |
+| `csv/` | CSV parsing and serialization |
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
 | `oxigraph/` | RDF quad store with SPARQL query and update |
