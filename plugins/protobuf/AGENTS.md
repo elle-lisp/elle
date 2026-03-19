@@ -157,4 +157,3 @@ cargo build --release -p elle-protobuf
 | `src/schema.rs` | Schema loading: `protobuf/schema`, `protobuf/schema-bytes`, shared helpers |
 | `src/convert.rs` | Value conversion: `protobuf/encode`, `protobuf/decode`, `elle_to_pb`, `pb_to_elle` |
 | `src/inspect.rs` | Introspection: `protobuf/messages`, `protobuf/fields`, `protobuf/enums` |
-| `spike/` | Pre-implementation spike verifying `protobuf-parse` ↔ `prost-reflect` bridge |
