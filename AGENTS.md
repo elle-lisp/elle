@@ -62,6 +62,9 @@ bytecode. Error messages include file:line:col information.
   `string/size-of`,
   `with-traits`, `traits`,
   `sys/args` (returns args after the source file in argv as a list, empty list if none),
+  `sys/argv` (returns the full argv as a list: script name as element 0 followed by all
+  user args; element 0 is `"-"` for stdin, the file path for a script, or empty string
+  in REPL mode — in REPL mode the list is empty),
   `sys/env` (returns env as struct with string keys; optional single-var
   lookup),
   `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
