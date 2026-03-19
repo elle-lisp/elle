@@ -1,4 +1,4 @@
-.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests clean help
+.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git clean help
 
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
@@ -60,6 +60,10 @@ plugin-tests:  ## Run plugin tests
 	@printf '%s\n' tests/elle/plugins/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}'
+
+test-git:  ## Run git plugin integration tests (requires git, no network)
+	cargo build -p elle-git
+	$(ELLE) tests/git.elle
 
 test: smoke  ## Rust unit tests + clippy + fmt after smoke
 	cargo fmt --check
