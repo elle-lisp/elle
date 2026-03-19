@@ -92,7 +92,7 @@ elle                          # REPL
 ```lisp
 nil                  # absence of value (falsy)
 true  false          # booleans (not #t/#f)
-42                   # integer (48-bit signed)
+42                   # integer (64-bit signed)
 3.14                 # float
 0xFF  0o755  0b1010  # hex, octal, binary
 1_000_000            # underscores ok
@@ -566,6 +566,9 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 (port/read p n)          # read n bytes
 (port/write p bytes)
 (port/close p)
+(port/seek p offset)     # seek to byte offset (default: from start)
+(port/seek p off :from :end)  # seek from end
+(port/tell p)            # current byte position
 (port/lines p)           # stream of lines
 (port/chunks p n)        # stream of byte chunks
 (port/writer p)          # writable stream
@@ -604,6 +607,46 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 (stream/into-array stream)    # => array
 (stream/pipe src dst)
 ```
+
+### Async I/O and the Event Loop
+
+`stream/write` and `stream/flush` are **async** — they yield and require a
+fiber context. For network servers and any code doing concurrent I/O, use
+`ev/run` to start the event loop and `ev/spawn` to create fibers:
+
+```lisp
+# TCP server — accept connections, handle each in its own fiber
+(ev/run (fn []
+  (def listener (tcp/listen "0.0.0.0" 8080))
+  (forever
+    (def conn (tcp/accept listener))  # yields until client connects
+    (ev/spawn (fn []                  # handle in its own fiber
+      (defer (port/close conn)
+        (handle-connection conn)))))))
+```
+
+Key primitives:
+
+```lisp
+(ev/run thunk...)           # start event loop, spawn each thunk, pump until done
+(ev/spawn thunk)            # schedule a new fiber (inside ev/run)
+(ev/sleep seconds)          # yield for N seconds
+
+(tcp/listen addr port)      # bind and listen, returns listener
+(tcp/accept listener)       # yields until connection, returns port
+(tcp/connect host port)     # yields until connected, returns port
+
+(stream/write port data)    # async write (yields) — use inside ev/run
+(stream/flush port)         # async flush (yields) — use inside ev/run
+(stream/read port n)        # async read N bytes (yields)
+(stream/read-line port)     # async read until \n (yields), nil on EOF
+```
+
+**Important:** `stream/write` and `stream/flush` signal `:yield`. Outside an
+event loop they work for small amounts of I/O but will fail with "yield outside
+coroutine context" in tight loops. For synchronous stdout, use `display` or
+`print` (signal: silent). For synchronous stderr in non-async code, use FFI
+`write(2, ...)`.
 
 ---
 
@@ -746,33 +789,43 @@ elle greet.lisp -- Alice   # => Hello, Alice!
 
 ## Introspection and Help
 
+Elle's API has three layers:
+
+1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `stream/write`, etc.)
+2. **stdlib.lisp** — standard library closures and macros (`map`, `filter`, `fold`, etc.)
+3. **prelude.lisp** — higher-level abstractions (`ev/run`, `ev/spawn`, `each`, `match`, etc.)
+
+`vm/list-primitives` and `vm/primitive-meta` only cover layer 1 — they do NOT
+list stdlib or prelude functions. If you don't find something in the primitive
+list, **check stdlib.lisp and prelude.lisp in the project root** — they are
+the source of truth for the full API.
+
+`doc` works across all three layers:
+
 ```lisp
-# Inline docs for a primitive (prints to stdout)
+# doc works on primitives
 (doc +)
 # (+ xs)
 #   Sum all arguments. Returns 0 for no arguments.
 #   arity: 0+
 #   example: (+ 1 2 3) #=> 6
 
-# doc works on primitives; stdlib closures don't surface docs this way
-(doc map)   # => "No documentation found for 'map'"
+# doc also works on prelude functions
+(doc ev/run)    # => "Run thunks concurrently with async I/O. ..."
+(doc ev/spawn)  # => "Spawn a closure in a new fiber ..."
+(doc each)      # => "(each (name list) body...) ..."
 
-# List all primitive names (returns a list of symbols)
+# vm/list-primitives lists ONLY native VM primitives, not stdlib/prelude
 (vm/list-primitives)
 
-# Metadata struct for a primitive — accepts string, keyword, or symbol
+# vm/primitive-meta returns metadata for a primitive
 (vm/primitive-meta "+")
-(vm/primitive-meta :+)
-(vm/primitive-meta 'vm/list-primitives)
 # => {:name "+" :doc "..." :arity "0+" :params ("xs") :signal "silent+errors"
 #     :aliases () :category "arithmetic" :example "..."}
 
-# Iterate all primitives:
-(each name in (vm/list-primitives)
-  (print (get (vm/primitive-meta name) :doc)))
-
-# help prints a summary of available commands (REPL)
-(help)
+# To discover stdlib/prelude functions, read the source files:
+#   stdlib.lisp   — map, filter, fold, append, reverse, etc.
+#   prelude.lisp  — ev/run, ev/spawn, each, match, cond, etc.
 ```
 
 ---
