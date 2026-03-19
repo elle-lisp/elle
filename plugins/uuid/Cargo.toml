@@ -1,0 +1,11 @@
+[package]
+name = "elle-uuid"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+uuid = { version = "1.21", features = ["v4", "v5"] }
