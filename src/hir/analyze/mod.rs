@@ -24,11 +24,11 @@ mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};
 use super::expr::{BlockId, Hir, HirKind};
+use crate::hir::arena::{BindingArena, BindingScope};
 use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::{ScopeId, Span, Syntax};
-use crate::value::heap::BindingScope;
 use crate::value::types::Arity;
 use crate::value::{SymbolId, Value};
 use std::collections::{HashMap, HashSet};
@@ -111,6 +111,7 @@ impl Scope {
 /// Analyzer that converts Syntax to HIR
 pub struct Analyzer<'a> {
     symbols: &'a mut SymbolTable,
+    arena: &'a mut BindingArena,
     scopes: Vec<Scope>,
     /// Captures for the current function being analyzed
     current_captures: Vec<CaptureInfo>,
@@ -161,27 +162,30 @@ pub struct Analyzer<'a> {
 
 impl<'a> Analyzer<'a> {
     /// Create a new analyzer without primitive signals or arities
-    pub fn new(symbols: &'a mut SymbolTable) -> Self {
-        Self::new_with_primitives(symbols, HashMap::new(), HashMap::new())
+    pub fn new(symbols: &'a mut SymbolTable, arena: &'a mut BindingArena) -> Self {
+        Self::new_with_primitives(symbols, arena, HashMap::new(), HashMap::new())
     }
 
     /// Create a new analyzer with primitive signals for interprocedural tracking
     /// (convenience wrapper that passes empty arities)
     pub fn new_with_primitive_signals(
         symbols: &'a mut SymbolTable,
+        arena: &'a mut BindingArena,
         primitive_signals: HashMap<SymbolId, Signal>,
     ) -> Self {
-        Self::new_with_primitives(symbols, primitive_signals, HashMap::new())
+        Self::new_with_primitives(symbols, arena, primitive_signals, HashMap::new())
     }
 
     /// Create a new analyzer with primitive signals and arities
     pub fn new_with_primitives(
         symbols: &'a mut SymbolTable,
+        arena: &'a mut BindingArena,
         primitive_signals: HashMap<SymbolId, Signal>,
         _primitive_arities: HashMap<SymbolId, Arity>,
     ) -> Self {
         let mut analyzer = Analyzer {
             symbols,
+            arena,
             scopes: Vec::new(),
             current_captures: Vec::new(),
             parent_captures: Vec::new(),
@@ -224,7 +228,7 @@ impl<'a> Analyzer<'a> {
     pub fn bind_primitives(&mut self, meta: &PrimitiveMeta) {
         for (&sym_id, &signal) in &meta.signals {
             let binding = self.bind_by_sym(sym_id, BindingScope::Local);
-            binding.mark_immutable();
+            self.arena.get_mut(binding).is_immutable = true;
             self.signal_env.insert(binding, signal);
             if let Some(&arity) = meta.arities.get(&sym_id) {
                 self.arity_env.insert(binding, arity);
@@ -258,7 +262,7 @@ impl<'a> Analyzer<'a> {
         for (name, value) in env {
             let sym = self.symbols.intern(name);
             let binding = self.bind_by_sym(sym, BindingScope::Local);
-            binding.mark_immutable();
+            self.arena.get_mut(binding).is_immutable = true;
             self.primitive_values.insert(binding, *value);
         }
     }
@@ -281,7 +285,7 @@ impl<'a> Analyzer<'a> {
 
     fn bind(&mut self, name: &str, scopes: &[ScopeId], scope: BindingScope) -> Binding {
         let sym = self.symbols.intern(name);
-        let binding = Binding::new(sym, scope);
+        let binding = self.arena.alloc(sym, scope);
 
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame
@@ -313,7 +317,7 @@ impl<'a> Analyzer<'a> {
                     scopes: scopes.to_vec(),
                     binding,
                 });
-            if matches!(binding.scope(), BindingScope::Local) {
+            if matches!(self.arena.get(binding).scope, BindingScope::Local) {
                 scope_frame.next_local += 1;
             }
         }
@@ -329,7 +333,7 @@ impl<'a> Analyzer<'a> {
             .name(sym)
             .map(|s| s.to_string())
             .unwrap_or_else(|| format!("sym#{}", sym.0));
-        let binding = Binding::new(sym, scope);
+        let binding = self.arena.alloc(sym, scope);
 
         if let Some(scope_frame) = self.scopes.last_mut() {
             scope_frame
@@ -384,7 +388,7 @@ impl<'a> Analyzer<'a> {
                 }
 
                 // Mark as captured
-                binding.mark_captured();
+                self.arena.get_mut(binding).is_captured = true;
 
                 // Determine capture kind
                 let capture_kind = CaptureKind::Local;
@@ -403,12 +407,12 @@ impl<'a> Analyzer<'a> {
         // If not found in scopes, check if it's in parent captures (for nested lambdas)
         if !self.parent_captures.is_empty() {
             for (capture_index, parent_cap) in self.parent_captures.iter().enumerate() {
-                if parent_cap.binding.name().0 == self.symbols.intern(name).0 {
+                if self.arena.get(parent_cap.binding).name.0 == self.symbols.intern(name).0 {
                     // Found in parent captures - create a transitive capture
                     let binding = parent_cap.binding;
 
                     // Mark as captured
-                    binding.mark_captured();
+                    self.arena.get_mut(binding).is_captured = true;
 
                     // Create a Capture kind that references the parent's capture index
                     let capture_kind = CaptureKind::Capture {
@@ -493,7 +497,8 @@ mod tests {
     #[test]
     fn test_analyze_literal() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
         let syntax = make_int(42);
         let result = analyzer.analyze(&syntax).unwrap();
@@ -507,7 +512,8 @@ mod tests {
     #[test]
     fn test_analyze_if() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
         let syntax = make_list(vec![
             make_symbol("if"),
@@ -523,7 +529,8 @@ mod tests {
     #[test]
     fn test_analyze_let() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
         let syntax = make_list(vec![
             make_symbol("let"),
@@ -538,7 +545,8 @@ mod tests {
     #[test]
     fn test_analyze_lambda() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
         let syntax = make_list(vec![
             make_symbol("fn"),
@@ -553,7 +561,8 @@ mod tests {
     #[test]
     fn test_analyze_call() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         // Pre-bind "+" so it resolves during analysis
         analyzer.bind("+", &[], BindingScope::Local);
 
@@ -565,32 +574,36 @@ mod tests {
 
     #[test]
     fn test_binding_info() {
+        use crate::hir::arena::{BindingArena, BindingScope};
         let sym = SymbolId(1);
-        let binding = Binding::new(sym, BindingScope::Local);
-        assert!(!binding.is_mutated());
-        assert!(!binding.is_captured());
-        assert!(!binding.needs_lbox());
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(sym, BindingScope::Local);
+        assert!(!arena.get(binding).is_mutated);
+        assert!(!arena.get(binding).is_captured);
+        assert!(!arena.get(binding).needs_lbox());
 
-        binding.mark_mutated();
-        assert!(binding.is_mutated());
-        assert!(!binding.needs_lbox());
+        arena.get_mut(binding).is_mutated = true;
+        assert!(arena.get(binding).is_mutated);
+        assert!(!arena.get(binding).needs_lbox());
 
-        binding.mark_captured();
-        assert!(binding.is_captured());
-        assert!(binding.needs_lbox());
+        arena.get_mut(binding).is_captured = true;
+        assert!(arena.get(binding).is_captured);
+        assert!(arena.get(binding).needs_lbox());
     }
 
     #[test]
     fn test_immutable_captured_local_no_cell() {
         // An immutable local (let-bound) that is captured should NOT need a cell.
         // Immutable captures are captured by value directly.
-        let binding = Binding::new(SymbolId(2), BindingScope::Local);
-        binding.mark_immutable();
-        binding.mark_captured();
-        assert!(binding.is_immutable());
-        assert!(binding.is_captured());
-        assert!(!binding.is_prebound());
-        assert!(!binding.needs_lbox());
+        use crate::hir::arena::{BindingArena, BindingScope};
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(SymbolId(2), BindingScope::Local);
+        arena.get_mut(binding).is_immutable = true;
+        arena.get_mut(binding).is_captured = true;
+        assert!(arena.get(binding).is_immutable);
+        assert!(arena.get(binding).is_captured);
+        assert!(!arena.get(binding).is_prebound);
+        assert!(!arena.get(binding).needs_lbox());
     }
 
     #[test]
@@ -598,32 +611,38 @@ mod tests {
         // An immutable local that is prebound (def in begin, letrec) AND
         // captured DOES need a cell — the capture may happen before the
         // binding is initialized (self-recursion, forward references).
-        let binding = Binding::new(SymbolId(2), BindingScope::Local);
-        binding.mark_prebound();
-        binding.mark_immutable();
-        binding.mark_captured();
-        assert!(binding.is_immutable());
-        assert!(binding.is_captured());
-        assert!(binding.is_prebound());
-        assert!(binding.needs_lbox());
+        use crate::hir::arena::{BindingArena, BindingScope};
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(SymbolId(2), BindingScope::Local);
+        arena.get_mut(binding).is_prebound = true;
+        arena.get_mut(binding).is_immutable = true;
+        arena.get_mut(binding).is_captured = true;
+        assert!(arena.get(binding).is_immutable);
+        assert!(arena.get(binding).is_captured);
+        assert!(arena.get(binding).is_prebound);
+        assert!(arena.get(binding).needs_lbox());
     }
 
     #[test]
     fn test_mutable_captured_local_needs_lbox() {
         // A mutable local (var) that is captured DOES need a cell.
-        let binding = Binding::new(SymbolId(3), BindingScope::Local);
-        binding.mark_captured();
-        assert!(!binding.is_immutable());
-        assert!(binding.is_captured());
-        assert!(binding.needs_lbox());
+        use crate::hir::arena::{BindingArena, BindingScope};
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(SymbolId(3), BindingScope::Local);
+        arena.get_mut(binding).is_captured = true;
+        assert!(!arena.get(binding).is_immutable);
+        assert!(arena.get(binding).is_captured);
+        assert!(arena.get(binding).needs_lbox());
     }
 
     #[test]
     fn test_immutable_uncaptured_local_no_cell() {
         // An immutable local that is NOT captured should not need a cell.
-        let binding = Binding::new(SymbolId(4), BindingScope::Local);
-        binding.mark_immutable();
-        assert!(!binding.needs_lbox());
+        use crate::hir::arena::{BindingArena, BindingScope};
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(SymbolId(4), BindingScope::Local);
+        arena.get_mut(binding).is_immutable = true;
+        assert!(!arena.get(binding).needs_lbox());
     }
 
     #[test]
@@ -631,11 +650,13 @@ mod tests {
         // Edge case: a binding marked immutable but also mutated and captured.
         // Immutable wins — no cell needed. (In practice, the analyzer would
         // reject set on an immutable binding, so this shouldn't happen.)
-        let binding = Binding::new(SymbolId(5), BindingScope::Local);
-        binding.mark_immutable();
-        binding.mark_mutated();
-        binding.mark_captured();
-        assert!(!binding.needs_lbox());
+        use crate::hir::arena::{BindingArena, BindingScope};
+        let mut arena = BindingArena::new();
+        let binding = arena.alloc(SymbolId(5), BindingScope::Local);
+        arena.get_mut(binding).is_immutable = true;
+        arena.get_mut(binding).is_mutated = true;
+        arena.get_mut(binding).is_captured = true;
+        assert!(!arena.get(binding).needs_lbox());
     }
 
     // === Scope-aware binding resolution tests ===
@@ -679,7 +700,8 @@ mod tests {
     fn test_bind_and_lookup_with_empty_scopes() {
         // Pre-expansion code: empty scopes work identically to before
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         let binding = analyzer.bind("x", &[], BindingScope::Local);
         assert_eq!(analyzer.lookup("x", &[]), Some(binding));
@@ -689,7 +711,8 @@ mod tests {
     fn test_lookup_scope_filtering() {
         // Binding with scope {S1} is invisible to reference with empty scopes
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
         // Reference with empty scopes cannot see binding with {S1}
@@ -700,7 +723,8 @@ mod tests {
     fn test_lookup_scope_subset_match() {
         // Binding with scope {S1} is visible to reference with {S1}
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         let binding = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
         assert_eq!(analyzer.lookup("tmp", &[ScopeId(1)]), Some(binding));
@@ -711,7 +735,8 @@ mod tests {
         // Two bindings for "tmp": one with {} and one with {S1}
         // Reference with {S1} should see the {S1} binding (more specific)
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         let _outer = analyzer.bind("tmp", &[], BindingScope::Local);
         let inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
@@ -723,7 +748,8 @@ mod tests {
         // Two bindings for "tmp": one with {} and one with {S1}
         // Reference with {} should see only the {} binding
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         let outer = analyzer.bind("tmp", &[], BindingScope::Local);
         let _inner = analyzer.bind("tmp", &[ScopeId(1)], BindingScope::Local);
@@ -733,7 +759,8 @@ mod tests {
     #[test]
     fn test_lookup_in_current_scope_with_scopes() {
         let mut symbols = SymbolTable::new();
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.push_scope(false);
         let binding = analyzer.bind("x", &[ScopeId(1)], BindingScope::Local);
         // Visible with matching scopes

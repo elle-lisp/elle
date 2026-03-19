@@ -215,7 +215,7 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hir::Analyzer;
+    use crate::hir::{Analyzer, BindingArena};
     use crate::primitives::register_primitives;
     use crate::reader::read_syntax;
     use crate::symbol::SymbolTable;
@@ -240,7 +240,8 @@ mod tests {
         let expanded = expander
             .expand(syntax, &mut symbols, &mut vm)
             .expect("expand failed");
-        let mut analyzer = Analyzer::new(&mut symbols);
+        let mut arena = BindingArena::new();
+        let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
         analyzer.bind_primitives(&meta);
         let mut analysis = analyzer.analyze(&expanded).expect("analyze failed");
         mark_tail_calls(&mut analysis.hir);

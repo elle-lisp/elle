@@ -133,13 +133,11 @@ types are in `src/` — neither is in a separate crate.
 
 ### Binding objects
 
-`HeapObject::Binding(RefCell<BindingInner>)` stores compile-time binding
-metadata. Created by `Value::binding(name, scope)`, accessed by
-`Value::as_binding()`. Never appears at runtime — the VM never sees this type.
-The `BindingInner` is mutable during analysis (the analyzer discovers captures
-and mutations after creating the binding) and read-only during lowering.
-
-`BindingScope` enum: `Parameter`, `Local`, `Global`. Defined in `heap.rs`.
+**Removed.** Compile-time binding metadata is now stored in
+`hir::arena::BindingArena`. `Binding` is a `u32` index, not a heap object.
+`HeapObject::Binding` still exists in this crate for backward compatibility
+(to be removed in a follow-up Value migration PR), but it is no longer used
+by the compilation pipeline.
 
 ### Set types
 
@@ -161,7 +159,7 @@ after insertion).
 Predicates: `is_set()` and `is_set_mut()` for type checking.
 
 Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
-`Value::closure(c)`, `Value::binding(name, scope)`, `Value::set(btree_set)`,
+`Value::closure(c)`, `Value::set(btree_set)`,
 `Value::set_mut(btree_set)`. Don't construct enum variants directly.
 
 ## Trait table field

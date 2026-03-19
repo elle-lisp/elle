@@ -1,103 +1,22 @@
-//! Binding types for HIR
+//! Binding handle for the HIR phase.
 //!
-//! A `Binding` is a NaN-boxed Value pointing to a HeapObject::Binding on the
-//! heap. Identity is bit-pattern equality (same heap pointer = same binding).
-//! Binding is Copy (8 bytes). The underlying BindingInner is mutable via
-//! RefCell during analysis; the lowerer only reads.
+//! A `Binding` is a `u32` index into a `BindingArena`. It is 4 bytes, Copy,
+//! and has no heap allocation. Identity is integer equality.
 //!
-//! Binding must only be constructed via `Binding::new()`.
-//!
-//! Each `Binding::new()` leaks an `Rc<HeapObject>` (via `Rc::into_raw` in
-//! `alloc()`). This is the same pattern used for all NaN-boxed heap values.
-//! The leak is bounded by the number of binding sites per compilation unit.
+//! Binding metadata is stored in `BindingArena` (in `arena.rs`). All reads
+//! and mutations go through the arena: `arena.get(b).field` to read,
+//! `arena.get_mut(b).field = value` to mutate.
 
-use crate::value::heap::{BindingInner, BindingScope};
-use crate::value::{SymbolId, Value};
 use std::fmt;
-use std::hash::{Hash, Hasher};
 
-/// A binding handle wrapping a NaN-boxed Value.
-#[derive(Clone, Copy)]
-pub struct Binding(Value);
-
-impl Binding {
-    /// Create a new binding
-    pub fn new(name: SymbolId, scope: BindingScope) -> Self {
-        Binding(Value::binding(name, scope))
-    }
-
-    /// Get the inner RefCell for direct access
-    fn inner(&self) -> &std::cell::RefCell<BindingInner> {
-        self.0.as_binding().expect("Binding holds a binding Value")
-    }
-
-    // Read accessors
-    pub fn name(&self) -> SymbolId {
-        self.inner().borrow().name
-    }
-    pub fn scope(&self) -> BindingScope {
-        self.inner().borrow().scope
-    }
-    pub fn is_mutated(&self) -> bool {
-        self.inner().borrow().is_mutated
-    }
-    pub fn is_captured(&self) -> bool {
-        self.inner().borrow().is_captured
-    }
-    pub fn is_immutable(&self) -> bool {
-        self.inner().borrow().is_immutable
-    }
-
-    /// A binding needs a cell if captured (for locals) or mutated (for params).
-    ///
-    /// Immutable locals skip cell wrapping — they are captured by value.
-    /// Exception: pre-bound immutable locals (from begin pass 1 or letrec
-    /// pass 1) still need cells because they may be captured before their
-    /// initializer runs (self-recursion, forward references).
-    pub fn needs_lbox(&self) -> bool {
-        let inner = self.inner().borrow();
-        match inner.scope {
-            BindingScope::Local => inner.is_captured && (!inner.is_immutable || inner.is_prebound),
-            BindingScope::Parameter => inner.is_mutated,
-        }
-    }
-
-    // Mutation (used by analyzer during analysis only)
-    pub fn mark_mutated(&self) {
-        self.inner().borrow_mut().is_mutated = true;
-    }
-    pub fn mark_captured(&self) {
-        self.inner().borrow_mut().is_captured = true;
-    }
-    pub fn mark_immutable(&self) {
-        self.inner().borrow_mut().is_immutable = true;
-    }
-    pub fn mark_prebound(&self) {
-        self.inner().borrow_mut().is_prebound = true;
-    }
-    pub fn is_prebound(&self) -> bool {
-        self.inner().borrow().is_prebound
-    }
-}
-
-impl PartialEq for Binding {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-
-impl Eq for Binding {}
-
-impl Hash for Binding {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
-    }
-}
+/// A compile-time binding handle. Index into a `BindingArena`.
+/// 4 bytes, Copy, no heap allocation.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Binding(pub(crate) u32);
 
 impl fmt::Debug for Binding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let inner = self.inner().borrow();
-        write!(f, "Binding({:?}, {:?})", inner.name, inner.scope)
+        write!(f, "Binding({})", self.0)
     }
 }
 

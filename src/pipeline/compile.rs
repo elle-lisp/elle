@@ -3,7 +3,7 @@
 use super::cache;
 use super::CompileResult;
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::{Analyzer, FileForm};
+use crate::hir::{Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
@@ -34,11 +34,17 @@ pub fn compile(
     let expanded = expander.expand(syntax, symbols, macro_vm)?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
-    let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
     analyzer.bind_primitives(&meta);
     let mut analysis = analyzer.analyze(&expanded)?;
     let prim_values = analyzer.primitive_values().clone();
+    drop(analyzer);
 
     // Phase 3.5: Mark tail calls
     mark_tail_calls(&mut analysis.hir);
@@ -47,7 +53,7 @@ pub fn compile(
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let symbol_names = symbols.all_names();
-    let mut lowerer = Lowerer::new()
+    let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)
@@ -130,11 +136,17 @@ pub fn compile_file(
     };
 
     // Analyze
-    let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
+    drop(analyzer);
 
     // Mark tail calls
     mark_tail_calls(&mut hir);
@@ -143,7 +155,7 @@ pub fn compile_file(
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
     let symbol_names = symbols.all_names();
-    let mut lowerer = Lowerer::new()
+    let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)

@@ -3,7 +3,7 @@
 use super::*;
 use crate::hir::PatternKey;
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     pub(super) fn lower_let(
         &mut self,
         bindings: &[(Binding, Hir)],
@@ -26,7 +26,7 @@ impl Lowerer {
             }
 
             // Check if this binding needs to be wrapped in a cell
-            let needs_lbox = binding.needs_lbox();
+            let needs_lbox = self.arena.get(*binding).needs_lbox();
 
             if self.in_lambda {
                 // Inside a lambda, use closure environment via StoreCapture.
@@ -86,7 +86,7 @@ impl Lowerer {
             }
 
             // Check if this binding needs to be wrapped in a cell
-            let needs_lbox = binding.needs_lbox();
+            let needs_lbox = self.arena.get(*binding).needs_lbox();
 
             if self.in_lambda {
                 // Inside a lambda, the VM's Call handler already creates
@@ -116,7 +116,7 @@ impl Lowerer {
             let slot = self.binding_to_slot[binding];
 
             // Check if this binding needs cell update
-            let needs_lbox = binding.needs_lbox();
+            let needs_lbox = self.arena.get(*binding).needs_lbox();
 
             if self.in_lambda {
                 // Inside a lambda, StoreCapture handles cell update
@@ -165,7 +165,7 @@ impl Lowerer {
         }
 
         // Check if this binding needs to be wrapped in a cell
-        let needs_lbox = binding.needs_lbox();
+        let needs_lbox = self.arena.get(binding).needs_lbox();
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
@@ -221,7 +221,7 @@ impl Lowerer {
         let value_reg = self.lower_expr(value)?;
 
         // Check if this binding needs cell update
-        let needs_lbox = target.needs_lbox();
+        let needs_lbox = self.arena.get(*target).needs_lbox();
 
         // Check if this is an upvalue (capture or parameter) or a local
         let is_upvalue = self.upvalue_bindings.contains(target);
@@ -654,7 +654,7 @@ impl Lowerer {
                 src: value_reg,
             });
         } else {
-            let needs_lbox = binding.needs_lbox();
+            let needs_lbox = self.arena.get(binding).needs_lbox();
             if needs_lbox {
                 // cell was already created in Begin pre-pass
                 let cell_reg = self.fresh_reg();

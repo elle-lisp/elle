@@ -7,7 +7,7 @@
 
 use crate::error::{LError, LResult};
 use crate::hir::tailcall::mark_tail_calls;
-use crate::hir::Analyzer;
+use crate::hir::{Analyzer, BindingArena};
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::cached_primitive_meta;
 use crate::symbol::SymbolTable;
@@ -112,13 +112,19 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
 
     // Analyze
     let meta = cached_primitive_meta(symbols);
-    let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
     analyzer.bind_primitives(&meta);
     let mut analysis = analyzer
         .analyze(&expanded)
         .map_err(|e| LError::generic(format!("eval: analysis failed: {}", e)))?;
     let prim_values = analyzer.primitive_values().clone();
+    drop(analyzer);
 
     // Mark tail calls
     mark_tail_calls(&mut analysis.hir);
@@ -126,7 +132,7 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
     // Lower
     let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
     let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
-    let mut lowerer = Lowerer::new()
+    let mut lowerer = Lowerer::new(&arena)
         .with_intrinsics(intrinsics)
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)

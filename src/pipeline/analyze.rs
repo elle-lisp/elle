@@ -3,7 +3,7 @@
 use super::cache;
 use super::compile::classify_form;
 use super::AnalyzeResult;
-use crate::hir::Analyzer;
+use crate::hir::{Analyzer, BindingArena};
 use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all};
 use crate::symbol::SymbolTable;
@@ -23,11 +23,20 @@ pub fn analyze(
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
 
     let expanded = expander.expand(syntax, symbols, vm)?;
-    let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
-    Ok(AnalyzeResult { hir: analysis.hir })
+    drop(analyzer);
+    Ok(AnalyzeResult {
+        hir: analysis.hir,
+        arena,
+    })
 }
 
 /// Analyze a file as a single synthetic letrec (no bytecode).
@@ -66,10 +75,16 @@ pub fn analyze_file(
     };
 
     // Analyze
-    let mut analyzer =
-        Analyzer::new_with_primitives(symbols, meta.signals.clone(), meta.arities.clone());
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
     analyzer.bind_primitives(&meta);
     let hir = analyzer.analyze_file_letrec(forms, span)?;
+    drop(analyzer);
 
-    Ok(AnalyzeResult { hir })
+    Ok(AnalyzeResult { hir, arena })
 }

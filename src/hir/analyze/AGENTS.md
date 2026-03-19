@@ -39,17 +39,17 @@ Does NOT:
 Syntax (expanded, with scope sets)
     │
     ▼
-Analyzer
-    ├─► resolve variables → Binding (heap-allocated, shared by reference)
-    ├─► track mutations → binding.mark_mutated()
-    ├─► track captures → binding.mark_captured() + CaptureInfo
+Analyzer (&mut BindingArena)
+    ├─► resolve variables → Binding (u32 index into BindingArena)
+    ├─► track mutations → arena.get_mut(b).is_mutated = true
+    ├─► track captures → arena.get_mut(b).is_captured = true + CaptureInfo
     ├─► infer signals → Signal (Silent, Yields, Polymorphic)
     ├─► validate scope rules (hygienic resolution)
     ├─► validate control flow (break targeting)
     └─► extract docstrings → Option<Value>
     │
     ▼
-HIR (bindings are inline — no separate HashMap)
+HIR (binding indices are inline — metadata lives in BindingArena)
 ```
 
 ## Interprocedural signal tracking
@@ -92,7 +92,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 1. **Every variable reference is a `Binding`.** No symbols in HIR. If you see a symbol at this stage, analysis failed.
 
-2. **`Binding` identity is bit-pattern equality.** Two references to the same binding site share the same NaN-boxed pointer. `Binding` implements `Hash`/`Eq` via `Value::to_bits()`.
+2. **`Binding` identity is integer equality.** Two references to the same binding site have the same `u32` index. `Binding` implements `Hash`/`Eq` via the derived `u32` comparison.
 
 3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
 
@@ -106,7 +106,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 8. **`Define` and `LocalDefine` are unified.** There is a single `HirKind::Define { binding, value }`. The lowerer checks `binding.is_global()` to decide between global and local define semantics.
 
-9. **Binding metadata is mutable during analysis, read-only after.** The analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`. The lowerer only reads via `needs_lbox()`, `is_global()`, `name()`, etc.
+9. **Binding metadata is mutable during analysis, read-only after.** The analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc. The lowerer only reads via `arena.get(b).needs_lbox()`, `arena.get(b).name`, etc. The type system enforces this: the analyzer holds `&mut BindingArena`, the lowerer holds `&BindingArena`.
 
 10. **`Destructure` decomposes values into pattern bindings.** `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is produced by the analyzer for `def`, `var`, `let`, and `fn` parameter destructuring. The pattern's leaf `Var` bindings are created in the current scope. `let*` is desugared to nested `let` in the expander, so the analyzer never sees `let*`.
 
@@ -137,8 +137,8 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 ## Common pitfalls
 
-- **Forgetting to mark captures**: If a binding is referenced in a nested lambda, call `binding.mark_captured()` during analysis
-- **Forgetting to mark mutations**: If a binding is assigned via `set!`, call `binding.mark_mutated()`
+- **Forgetting to mark captures**: If a binding is referenced in a nested lambda, set `arena.get_mut(b).is_captured = true` during analysis
+- **Forgetting to mark mutations**: If a binding is assigned via `set!`, set `arena.get_mut(b).is_mutated = true`
 - **Conflating nil and empty list**: Use `HirKind::EmptyList` for `()`, not `HirKind::Nil`
 - **Not propagating signals**: When combining sub-expressions, use `signal.combine()` to merge signals upward
 - **Breaking scope hygiene**: When creating synthetic bindings, use the correct scope set from the original Syntax node

@@ -109,7 +109,7 @@ impl<'a> Analyzer<'a> {
                     let gensym_name = format!("__signal_{}", gensym_counter);
                     gensym_counter += 1;
                     let binding = self.bind(&gensym_name, &[], BindingScope::Local);
-                    binding.mark_prebound();
+                    self.arena.get_mut(binding).is_prebound = true;
                     entries.push(PreBound::Simple {
                         binding,
                         value_syntax: keyword_syntax,
@@ -120,7 +120,7 @@ impl<'a> Analyzer<'a> {
                     let gensym_name = format!("__file_expr_{}", gensym_counter);
                     gensym_counter += 1;
                     let binding = self.bind(&gensym_name, &[], BindingScope::Local);
-                    binding.mark_prebound();
+                    self.arena.get_mut(binding).is_prebound = true;
                     entries.push(PreBound::Simple {
                         binding,
                         value_syntax: expr_syntax,
@@ -298,16 +298,16 @@ impl<'a> Analyzer<'a> {
             // Duplicate name: create binding but don't register in scope yet.
             // Pass 2 will register it via register_binding for sequential shadowing.
             let sym = self.symbols.intern(name);
-            let b = Binding::new(sym, BindingScope::Local);
+            let b = self.arena.alloc(sym, BindingScope::Local);
             (b, Some((name.to_string(), name_syntax.scopes.clone())))
         } else {
             let b = self.bind(name, name_syntax.scopes.as_slice(), BindingScope::Local);
             (b, None)
         };
 
-        binding.mark_prebound();
+        self.arena.get_mut(binding).is_prebound = true;
         if immutable {
-            binding.mark_immutable();
+            self.arena.get_mut(binding).is_immutable = true;
         }
 
         // Seed signal_env and arity_env for lambda forms so self-recursive
@@ -354,15 +354,15 @@ impl<'a> Analyzer<'a> {
                 // Duplicate: create binding without scope registration.
                 // register_binding in Pass 2 handles slot allocation.
                 let sym = self.symbols.intern(name);
-                let b = Binding::new(sym, BindingScope::Local);
+                let b = self.arena.alloc(sym, BindingScope::Local);
                 deferred_leaves.push((name.to_string(), name_scopes.to_vec(), b));
                 b
             } else {
                 self.bind(name, name_scopes, BindingScope::Local)
             };
-            b.mark_prebound();
+            self.arena.get_mut(b).is_prebound = true;
             if immutable {
-                b.mark_immutable();
+                self.arena.get_mut(b).is_immutable = true;
             }
             leaf_bindings.insert(name.to_string(), b);
         }

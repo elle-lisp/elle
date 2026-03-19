@@ -6,7 +6,7 @@
 use super::*;
 use crate::hir::PatternKey;
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     /// Load a value by following an access path from the scrutinee.
     ///
     /// Recursively navigates the access path, emitting the appropriate

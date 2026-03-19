@@ -148,7 +148,7 @@ impl<'a> Analyzer<'a> {
     fn callee_name(&self, callee: &Hir) -> String {
         match &callee.kind {
             HirKind::Var(binding) => {
-                if let Some(name) = self.symbols.name(binding.name()) {
+                if let Some(name) = self.symbols.name(self.arena.get(*binding).name) {
                     return name.to_string();
                 }
                 "<unknown>".to_string()
@@ -161,7 +161,7 @@ impl<'a> Analyzer<'a> {
     /// Check if the callee is the `emit` primitive.
     fn is_emit(&self, func: &Hir) -> bool {
         if let HirKind::Var(binding) = &func.kind {
-            self.symbols.name(binding.name()) == Some("emit")
+            self.symbols.name(self.arena.get(*binding).name) == Some("emit")
         } else {
             false
         }
@@ -178,7 +178,7 @@ impl<'a> Analyzer<'a> {
                     *signal
                 } else {
                     self.primitive_signals
-                        .get(&binding.name())
+                        .get(&self.arena.get(*binding).name)
                         .cloned()
                         .unwrap_or(Signal::yields())
                 }
@@ -198,7 +198,7 @@ impl<'a> Analyzer<'a> {
     ) {
         // Case 1: Direct call to a parameter
         if let HirKind::Var(binding) = &func.kind {
-            if matches!(binding.scope(), BindingScope::Parameter)
+            if matches!(self.arena.get(*binding).scope, BindingScope::Parameter)
                 && self.current_lambda_params.contains(binding)
             {
                 self.current_signal_sources.param_calls.insert(*binding);
@@ -212,7 +212,7 @@ impl<'a> Analyzer<'a> {
             for param_idx in raw_signal.propagated_params() {
                 if param_idx < args.len() {
                     if let HirKind::Var(arg_binding) = &args[param_idx].kind {
-                        if matches!(arg_binding.scope(), BindingScope::Parameter)
+                        if matches!(self.arena.get(*arg_binding).scope, BindingScope::Parameter)
                             && self.current_lambda_params.contains(arg_binding)
                         {
                             // The polymorphic signal depends on a parameter
@@ -265,7 +265,11 @@ impl<'a> Analyzer<'a> {
                 .signal_env
                 .get(binding)
                 .cloned()
-                .or_else(|| self.primitive_signals.get(&binding.name()).cloned())
+                .or_else(|| {
+                    self.primitive_signals
+                        .get(&self.arena.get(*binding).name)
+                        .cloned()
+                })
                 .unwrap_or(Signal::yields()),
             // Unknown argument signal - conservatively Yields for soundness
             _ => Signal::yields(),

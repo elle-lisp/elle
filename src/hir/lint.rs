@@ -3,6 +3,7 @@
 //! Walks HIR trees and produces diagnostics. Uses the same rules as the
 //! legacy Expr-based linter but operates on the new pipeline's HIR.
 
+use crate::hir::arena::BindingArena;
 use crate::hir::expr::{Hir, HirKind};
 use crate::hir::pattern::is_exhaustive_match;
 use crate::lint::diagnostics::{Diagnostic, Severity};
@@ -23,8 +24,8 @@ impl HirLinter {
     }
 
     /// Lint a single HIR expression
-    pub fn lint(&mut self, hir: &Hir, symbols: &SymbolTable) {
-        self.check(hir, symbols);
+    pub fn lint(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
+        self.check(hir, symbols, arena);
     }
 
     /// Get all diagnostics
@@ -59,7 +60,7 @@ impl HirLinter {
         ))
     }
 
-    fn check(&mut self, hir: &Hir, symbols: &SymbolTable) {
+    fn check(&mut self, hir: &Hir, symbols: &SymbolTable, arena: &BindingArena) {
         let loc = Self::span_to_loc(&hir.span);
 
         match &hir.kind {
@@ -75,9 +76,9 @@ impl HirLinter {
 
             HirKind::Let { bindings, body } => {
                 for (_, init) in bindings {
-                    self.check(init, symbols);
+                    self.check(init, symbols, arena);
                 }
-                self.check(body, symbols);
+                self.check(body, symbols, arena);
             }
 
             HirKind::Letrec { bindings, body } => {
@@ -87,7 +88,7 @@ impl HirLinter {
                     // (identified by their initializer being a quoted NativeFn).
                     let is_primitive = matches!(&init.kind, HirKind::Quote(v) if v.is_native_fn());
                     if !is_primitive {
-                        if let Some(sym_name) = symbols.name(binding.name()) {
+                        if let Some(sym_name) = symbols.name(arena.get(*binding).name) {
                             if !sym_name.starts_with("__") {
                                 let binding_loc = Self::span_to_loc(&init.span);
                                 rules::check_naming_convention(
@@ -98,13 +99,13 @@ impl HirLinter {
                             }
                         }
                     }
-                    self.check(init, symbols);
+                    self.check(init, symbols, arena);
                 }
-                self.check(body, symbols);
+                self.check(body, symbols, arena);
             }
 
             HirKind::Lambda { body, .. } => {
-                self.check(body, symbols);
+                self.check(body, symbols, arena);
             }
 
             HirKind::If {
@@ -112,9 +113,9 @@ impl HirLinter {
                 then_branch,
                 else_branch,
             } => {
-                self.check(cond, symbols);
-                self.check(then_branch, symbols);
-                self.check(else_branch, symbols);
+                self.check(cond, symbols, arena);
+                self.check(then_branch, symbols, arena);
+                self.check(else_branch, symbols, arena);
             }
 
             HirKind::Cond {
@@ -122,41 +123,41 @@ impl HirLinter {
                 else_branch,
             } => {
                 for (cond, body) in clauses {
-                    self.check(cond, symbols);
-                    self.check(body, symbols);
+                    self.check(cond, symbols, arena);
+                    self.check(body, symbols, arena);
                 }
                 if let Some(else_body) = else_branch {
-                    self.check(else_body, symbols);
+                    self.check(else_body, symbols, arena);
                 }
             }
 
             HirKind::Begin(exprs) => {
                 for e in exprs {
-                    self.check(e, symbols);
+                    self.check(e, symbols, arena);
                 }
             }
 
             HirKind::Block { body, .. } => {
                 for e in body {
-                    self.check(e, symbols);
+                    self.check(e, symbols, arena);
                 }
             }
 
             HirKind::Break { value, .. } => {
-                self.check(value, symbols);
+                self.check(value, symbols, arena);
             }
 
             HirKind::Call { func, args, .. } => {
-                self.check(func, symbols);
+                self.check(func, symbols, arena);
                 for arg in args {
-                    self.check(&arg.expr, symbols);
+                    self.check(&arg.expr, symbols, arena);
                 }
                 // Check arity if calling a known primitive (skip if any spliced args)
                 let has_splice = args.iter().any(|a| a.spliced);
                 if !has_splice {
                     if let HirKind::Var(binding) = &func.kind {
                         rules::check_call_arity(
-                            binding.name(),
+                            arena.get(*binding).name,
                             args.len(),
                             &loc,
                             symbols,
@@ -167,33 +168,33 @@ impl HirLinter {
             }
 
             HirKind::Assign { value, .. } => {
-                self.check(value, symbols);
+                self.check(value, symbols, arena);
             }
 
             HirKind::Define { binding, value } => {
                 // Check naming convention
-                if let Some(sym_name) = symbols.name(binding.name()) {
+                if let Some(sym_name) = symbols.name(arena.get(*binding).name) {
                     rules::check_naming_convention(sym_name, &loc, &mut self.diagnostics);
                 }
-                self.check(value, symbols);
+                self.check(value, symbols, arena);
             }
 
             HirKind::Destructure { value, .. } => {
-                self.check(value, symbols);
+                self.check(value, symbols, arena);
             }
 
             HirKind::While { cond, body } => {
-                self.check(cond, symbols);
-                self.check(body, symbols);
+                self.check(cond, symbols, arena);
+                self.check(body, symbols, arena);
             }
 
             HirKind::Match { value, arms } => {
-                self.check(value, symbols);
+                self.check(value, symbols, arena);
                 for (_, guard, body) in arms {
                     if let Some(g) = guard {
-                        self.check(g, symbols);
+                        self.check(g, symbols, arena);
                     }
-                    self.check(body, symbols);
+                    self.check(body, symbols, arena);
                 }
 
                 // Check for non-exhaustive match
@@ -209,25 +210,25 @@ impl HirLinter {
             }
 
             HirKind::Yield(expr) => {
-                self.check(expr, symbols);
+                self.check(expr, symbols, arena);
             }
 
             HirKind::Eval { expr, env } => {
-                self.check(expr, symbols);
-                self.check(env, symbols);
+                self.check(expr, symbols, arena);
+                self.check(env, symbols, arena);
             }
 
             HirKind::Parameterize { bindings, body } => {
                 for (param, value) in bindings {
-                    self.check(param, symbols);
-                    self.check(value, symbols);
+                    self.check(param, symbols, arena);
+                    self.check(value, symbols, arena);
                 }
-                self.check(body, symbols);
+                self.check(body, symbols, arena);
             }
 
             HirKind::And(exprs) | HirKind::Or(exprs) => {
                 for e in exprs {
-                    self.check(e, symbols);
+                    self.check(e, symbols, arena);
                 }
             }
 
@@ -272,7 +273,7 @@ mod tests {
         let analysis = result.unwrap();
 
         let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols);
+        linter.lint(&analysis.hir, &symbols, &analysis.arena);
 
         assert!(linter.has_warnings());
         assert!(linter
@@ -289,7 +290,7 @@ mod tests {
         let analysis = result.unwrap();
 
         let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols);
+        linter.lint(&analysis.hir, &symbols, &analysis.arena);
 
         // Should have no naming warnings
         assert!(!linter
@@ -325,7 +326,7 @@ mod tests {
         let analysis = result.unwrap();
 
         let mut linter = HirLinter::new();
-        linter.lint(&analysis.hir, &symbols);
+        linter.lint(&analysis.hir, &symbols, &analysis.arena);
 
         // Let bindings don't trigger naming convention checks (only define does)
         // This is consistent with the legacy linter behavior

@@ -81,7 +81,7 @@ impl<'a> Analyzer<'a> {
         form_name: &str,
     ) -> Result<Binding, String> {
         for param in &self.current_lambda_params {
-            if self.symbols.name(param.name()) == Some(name) {
+            if self.symbols.name(self.arena.get(*param).name) == Some(name) {
                 return Ok(*param);
             }
         }
@@ -435,7 +435,7 @@ impl<'a> Analyzer<'a> {
             patterns.push(self.analyze_pattern_reuse(alt)?);
         }
 
-        validate_or_pattern_bindings(&patterns, span)?;
+        validate_or_pattern_bindings(&patterns, span, self.arena)?;
 
         Ok(HirPattern::Or(patterns))
     }
