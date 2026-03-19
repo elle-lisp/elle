@@ -8,10 +8,12 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 |--------|---------|-----------------|
 | [`crypto/`](crypto/) | Cryptographic hashing | `sha256`, `hmac-sha256`, `sha512`, etc. |
 | [`glob/`](glob/) | Filesystem pattern matching | `glob/match`, `glob/glob` |
-| [`random/`](random/) | Random number generation | `random/int`, `random/float`, `random/shuffle` |
+| [`random/`](random/) | Random number generation | `random/int`, `random/float`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/sample` |
 | [`regex/`](regex/) | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | [`selkie/`](selkie/) | HTTP client | `http/get`, `http/post`, `http/request` |
 | [`sqlite/`](sqlite/) | SQLite database | `db/open`, `db/query`, `db/exec` |
+| [`uuid/`](uuid/) | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
+| [`xml/`](xml/) | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 
 ## Building Plugins
 

@@ -24,7 +24,8 @@ dev:  ## Build the Elle binary (debug, fast compile)
 plugins:  ## Build all native plugins (.so)
 	cargo build --release \
 		-p elle-glob -p elle-regex -p elle-sqlite -p elle-crypto \
-		-p elle-random -p elle-selkie -p elle-oxigraph
+		-p elle-random -p elle-selkie -p elle-oxigraph \
+		-p elle-uuid -p elle-xml
 
 # ── Docs ────────────────────────────────────────────────────────────
 

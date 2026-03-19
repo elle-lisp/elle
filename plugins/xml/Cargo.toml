@@ -1,5 +1,5 @@
 [package]
-name = "elle-random"
+name = "elle-xml"
 version = "1.0.0"
 edition = "2021"
 
@@ -8,5 +8,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 elle = { path = "../.." }
-rand = "0.9"
-rand_chacha = "0.9"
+quick-xml = "0.37"
