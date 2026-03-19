@@ -319,19 +319,24 @@ impl<'a> Analyzer<'a> {
                             return Ok(Hir::silent(HirKind::Keyword(keyword.to_string()), span));
                         }
 
-                        // (doc <symbol>) — if the symbol resolves to a
-                        // user-defined binding (closure with docstring),
-                        // evaluate it normally so prim_doc receives the
-                        // closure value. Otherwise (special forms like `if`,
-                        // primitives like `cons`), rewrite to a string so
-                        // the VM can look up builtin docs by name.
+                        // (doc <symbol>) — if the symbol resolves to a closure
+                        // (user-defined or stdlib), evaluate it normally so
+                        // prim_doc receives the closure value and extracts its
+                        // docstring from closure.template.doc.
+                        // Otherwise (NativeFn, Parameter, or unresolved symbol
+                        // such as a special form like `if`), rewrite to a
+                        // string so the VM can look up builtin docs by name
+                        // in vm.docs.
                         "doc" if items.len() == 2 => {
                             if let SyntaxKind::Symbol(sym_name) = &items[1].kind {
-                                let is_user_binding = self
+                                let has_closure_value = self
                                     .lookup(sym_name, &items[1].scopes)
-                                    .map(|b| !self.primitive_values.contains_key(&b))
+                                    .map(|b| match self.primitive_values.get(&b) {
+                                        None => true,                        // user binding — evaluate normally
+                                        Some(v) => v.as_closure().is_some(), // stdlib closure — evaluate normally
+                                    })
                                     .unwrap_or(false);
-                                if !is_user_binding {
+                                if !has_closure_value {
                                     let mut rewritten = items.to_vec();
                                     rewritten[1] = Syntax {
                                         kind: SyntaxKind::String(sym_name.clone()),

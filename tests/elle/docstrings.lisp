@@ -63,3 +63,15 @@
 (def empty-doc-fn (fn () "" 42))
 (assert-eq (doc empty-doc-fn) ""
   "Empty docstring should be preserved")
+
+# === Stdlib docstrings ===
+
+# Stdlib function WITH a docstring: inc is defined via defn with "Return x + 1."
+(assert-eq (doc inc) "Return x + 1."
+  "stdlib function with docstring should return it via closure path")
+
+# Stdlib function WITHOUT a docstring: map is defined with bare def/fn, no leading string.
+# prim_doc returns the "No documentation found for 'map'" fallback.
+(let ((result (doc map)))
+  (assert-true (string/contains? result "No documentation found")
+    "stdlib function without docstring should return fallback message"))
