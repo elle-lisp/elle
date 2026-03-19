@@ -4,6 +4,21 @@
 ## Usage:      (http:get "http://example.com/")
 
 # ============================================================================
+# DNS integration
+# ============================================================================
+
+(def dns ((import-file "lib/dns.lisp")))
+
+(defn resolve-host [host]
+  "Resolve host to an IP address string via DNS.
+   Returns the first A record address, or host itself if resolution fails
+   (allows numeric IPs and hostnames to pass through unchanged)."
+  (let [[[ok? records] (protect (dns:resolve host))]]
+    (if (and ok? (not (empty? records)))
+      (get (first records) :addr)
+      host)))
+
+# ============================================================================
 # URL parsing
 # ============================================================================
 
@@ -198,7 +213,7 @@
          [request-path (if (nil? url-parsed:query)
                            url-parsed:path
                            (string/format "{}?{}" url-parsed:path url-parsed:query))]
-         [conn (tcp/connect url-parsed:host url-parsed:port)]]
+         [conn (tcp/connect (resolve-host url-parsed:host) url-parsed:port)]]
     (defer (port/close conn)
       (send-request conn method request-path
                     url-parsed:host headers body false))))
@@ -215,7 +230,7 @@
   "Open a keep-alive connection to a URL's host:port.
    Returns {:conn :host :path-prefix} for use with http:send."
   (let* [[url-parsed (parse-url url)]
-         [conn (tcp/connect url-parsed:host url-parsed:port)]]
+         [conn (tcp/connect (resolve-host url-parsed:host) url-parsed:port)]]
     {:conn conn :host url-parsed:host}))
 
 (defn http-send [session method path &named body headers]
