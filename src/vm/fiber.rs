@@ -666,7 +666,7 @@ impl VM {
                     "internal-error",
                     "SIG_RESUME with non-fiber value",
                 );
-                return TAG_NIL;
+                return JitValue::nil();
             }
         };
 
@@ -759,7 +759,7 @@ impl VM {
                     "internal-error",
                     "SIG_ABORT with non-fiber value",
                 );
-                return TAG_NIL;
+                return JitValue::nil();
             }
         };
 
