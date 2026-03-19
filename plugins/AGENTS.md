@@ -26,10 +26,12 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
 | `glob/` | Filesystem globbing | `glob/match`, `glob/glob` |
 | `oxigraph/` | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
-| `random/` | Random number generation | `random/int`, `random/float`, `random/shuffle` |
+| `random/` | Random number generation | `random/int`, `random/float`, `random/bool`, `random/bytes`, `random/shuffle`, `random/choice`, `random/seed`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/csprng-seed`, `random/sample` |
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
 | `selkie/` | HTTP client | `http/get`, `http/post`, `http/request` |
 | `sqlite/` | SQLite database | `db/open`, `db/query`, `db/exec` |
+| `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
+| `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 
 ## Building plugins
 
@@ -125,7 +127,9 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
 | `oxigraph/` | RDF quad store with SPARQL query and update |
-| `random/` | Random number generation |
+| `random/` | Random number generation (migrated to `rand` 0.9; includes distributions and CSPRNG) |
 | `regex/` | Regular expression matching and replacement |
 | `selkie/` | HTTP client library |
 | `sqlite/` | SQLite database access |
+| `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
+| `xml/` | XML parsing and serialization (DOM and streaming APIs) |
