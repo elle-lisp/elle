@@ -8,4 +8,4 @@ crate-type = ["cdylib"]
 
 [dependencies]
 elle = { path = "../.." }
-clap = "4"
+clap = { version = "4", features = ["string"] }
