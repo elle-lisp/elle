@@ -1,6 +1,7 @@
 //! Pattern matching in HIR
 
 use super::binding::Binding;
+use crate::hir::arena::BindingArena;
 use crate::value::SymbolId;
 
 /// HIR pattern for match expressions
@@ -181,50 +182,54 @@ impl HirPattern {
     }
 
     /// Return the set of SymbolIds bound by this pattern.
-    pub fn binding_names(&self) -> std::collections::BTreeSet<SymbolId> {
+    pub fn binding_names(&self, arena: &BindingArena) -> std::collections::BTreeSet<SymbolId> {
         let mut names = std::collections::BTreeSet::new();
-        self.collect_binding_names(&mut names);
+        self.collect_binding_names(&mut names, arena);
         names
     }
 
-    fn collect_binding_names(&self, out: &mut std::collections::BTreeSet<SymbolId>) {
+    fn collect_binding_names(
+        &self,
+        out: &mut std::collections::BTreeSet<SymbolId>,
+        arena: &BindingArena,
+    ) {
         match self {
             HirPattern::Var(binding) => {
-                out.insert(binding.name());
+                out.insert(arena.get(*binding).name);
             }
             HirPattern::Cons { head, tail } => {
-                head.collect_binding_names(out);
-                tail.collect_binding_names(out);
+                head.collect_binding_names(out, arena);
+                tail.collect_binding_names(out, arena);
             }
             HirPattern::List { elements, rest }
             | HirPattern::Tuple { elements, rest }
             | HirPattern::Array { elements, rest } => {
                 for p in elements {
-                    p.collect_binding_names(out);
+                    p.collect_binding_names(out, arena);
                 }
                 if let Some(r) = rest {
-                    r.collect_binding_names(out);
+                    r.collect_binding_names(out, arena);
                 }
             }
             HirPattern::Struct { entries, rest } | HirPattern::Table { entries, rest } => {
                 for (_, pattern) in entries {
-                    pattern.collect_binding_names(out);
+                    pattern.collect_binding_names(out, arena);
                 }
                 if let Some(r) = rest {
-                    r.collect_binding_names(out);
+                    r.collect_binding_names(out, arena);
                 }
             }
             HirPattern::NamedStruct { entries } => {
                 for (_, pattern) in entries {
-                    pattern.collect_binding_names(out);
+                    pattern.collect_binding_names(out, arena);
                 }
             }
             HirPattern::Set { binding } | HirPattern::SetMut { binding } => {
-                binding.collect_binding_names(out);
+                binding.collect_binding_names(out, arena);
             }
             HirPattern::Or(alts) => {
                 if let Some(first) = alts.first() {
-                    first.collect_binding_names(out);
+                    first.collect_binding_names(out, arena);
                 }
             }
             HirPattern::Wildcard | HirPattern::Nil | HirPattern::Literal(_) => {}
@@ -296,13 +301,14 @@ fn collect_bool_coverage(pat: &HirPattern, has_true: &mut bool, has_false: &mut 
 pub(crate) fn validate_or_pattern_bindings(
     alternatives: &[HirPattern],
     span: &crate::syntax::Span,
+    arena: &BindingArena,
 ) -> Result<(), String> {
     if alternatives.len() < 2 {
         return Ok(());
     }
-    let reference_names = alternatives[0].binding_names();
+    let reference_names = alternatives[0].binding_names(arena);
     for (i, alt) in alternatives.iter().enumerate().skip(1) {
-        let alt_names = alt.binding_names();
+        let alt_names = alt.binding_names(arena);
         if alt_names != reference_names {
             return Err(format!(
                 "{}: or-pattern alternative {} binds different variables than alternative 1",

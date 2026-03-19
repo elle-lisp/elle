@@ -6,7 +6,7 @@ bindings, inferred signals, and computed captures.
 ## Responsibility
 
 Transform expanded Syntax into a representation suitable for lowering.
-- Resolve all variable references to `Binding` (NaN-boxed heap objects)
+- Resolve all variable references to `Binding` (arena indices)
 - Compute closure captures
 - Infer signals
 - Validate scope rules
@@ -22,15 +22,17 @@ Does NOT:
 |------|---------|
 | `Hir` | Expression node with kind, span, signal |
 | `HirKind` | Expression variants (literals, control flow, etc.) |
-| `Binding` | NaN-boxed Value wrapping `HeapObject::Binding(RefCell<BindingInner>)` — Copy, identity by bit-pattern |
-| `BindingScope` | `Parameter`, `Local`, or `Global` (in `value::heap`) |
+| `Binding` | `u32` index into `BindingArena` — 4 bytes, Copy, identity by integer equality |
+| `BindingArena` | Owns all `BindingInner` values for a compilation unit; `&mut` in analysis, `&` in lowering |
+| `BindingInner` | Binding metadata: name, scope, mutation/capture/immutability flags |
+| `BindingScope` | `Parameter` or `Local` (in `hir::arena`) |
 | `CaptureInfo` | What a closure captures and how |
-| `CaptureKind` | `Local`, `Capture` (transitive), or `Global` |
+| `CaptureKind` | `Local` or `Capture` (transitive) |
 | `BlockId` | Unique identifier for a block, used by `break` to target the correct block |
-| `Analyzer` | Transforms Syntax → HIR |
-| `AnalysisResult` | HIR (no separate bindings map — metadata is inline in Binding) |
+| `Analyzer` | Transforms Syntax → HIR; takes `&mut BindingArena` |
+| `AnalysisResult` | HIR produced by the analyzer |
 | `HirLinter` | HIR-based linter producing Diagnostics (no constructor args) |
-| `extract_symbols_from_hir` | Builds SymbolIndex from HIR (2 args: hir, symbols) |
+| `extract_symbols_from_hir` | Builds SymbolIndex from HIR (3 args: hir, symbols, arena) |
 
 ### Analyzer methods
 
@@ -46,19 +48,22 @@ Does NOT:
 Syntax (expanded)
     │
     ▼
-Analyzer
-    ├─► resolve variables → Binding (heap-allocated, shared by reference)
-    ├─► track mutations → binding.mark_mutated()
-    ├─► track captures → binding.mark_captured() + CaptureInfo
+Analyzer (&mut BindingArena)
+    ├─► resolve variables → Binding (u32 index into BindingArena)
+    ├─► track mutations → arena.get_mut(b).is_mutated = true
+    ├─► track captures → arena.get_mut(b).is_captured = true + CaptureInfo
     └─► infer signals → Signal
     │
     ▼
-HIR (bindings are inline — no separate HashMap)
+HIR (binding indices are inline — metadata lives in BindingArena)
+    │
+    ▼
+Lowerer (&BindingArena) — read-only access to binding metadata
 ```
 
 ## Dependents
 
-- `lir/lower/` - consumes HIR, reads `binding.needs_lbox()` / `binding.is_global()` directly
+- `lir/lower/` - consumes HIR, reads `arena.get(b).needs_lbox()` via `&BindingArena`
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
 - `lint/cli.rs` - uses `HirLinter` for static analysis
 - `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
@@ -68,9 +73,9 @@ HIR (bindings are inline — no separate HashMap)
 1. **Every variable reference is a `Binding`.** No symbols in HIR. If you
    see a symbol at this stage, analysis failed.
 
-2. **`Binding` identity is bit-pattern equality.** Two references to the same
-   binding site share the same NaN-boxed pointer. `Binding` implements
-   `Hash`/`Eq` via `Value::to_bits()`.
+2. **`Binding` identity is integer equality.** Two references to the same
+   binding site have the same `u32` index. `Binding` implements `Hash`/`Eq`
+   via the derived `u32` comparison.
 
 3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if
    captured AND mutable. A parameter needs an lbox if mutated. Globals never need
@@ -98,8 +103,10 @@ HIR (bindings are inline — no separate HashMap)
    `binding.is_global()` to decide between global and local define semantics.
 
 9. **Binding metadata is mutable during analysis, read-only after.** The
-   analyzer calls `mark_mutated()`, `mark_captured()`, `mark_immutable()`.
-   The lowerer only reads via `needs_lbox()`, `is_global()`, `name()`, etc.
+   analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc.
+   The lowerer only reads via `arena.get(b).needs_lbox()`, `arena.get(b).name`,
+   etc. The type system enforces this: the analyzer holds `&mut BindingArena`,
+   the lowerer holds `&BindingArena`.
 
 10. **`Destructure` decomposes values into pattern bindings.** 
     `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is
@@ -192,11 +199,11 @@ HIR (bindings are inline — no separate HashMap)
      the last form was a bare expression). This replaces the old model of
      independent top-level forms connected by mutable globals.
 
- 21. **Primitives are pre-bound as immutable Global bindings.** `bind_primitives`
+ 21. **Primitives are pre-bound as immutable Local bindings.** `bind_primitives`
      wraps the file's letrec in an outer scope containing all registered
-     primitives. Primitives are `BindingScope::Global` with `mark_immutable()`
-     set. File-level `def` bindings shadow primitives. The lowerer emits
-     upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
+     primitives. Primitives are `BindingScope::Local` with `is_immutable = true`
+     set via the arena. File-level `def` bindings shadow primitives. The lowerer
+     emits upvalue loads for both — compile-time checks (e.g., `(set + 42)` is
      an error) use the `Binding` identity.
 
 ## Files
@@ -212,7 +219,8 @@ HIR (bindings are inline — no separate HashMap)
 | `analyze/special.rs` | ~210 | Special forms: `match`, `yield` |
 | `analyze/call.rs` | ~200 | Call analysis and signal tracking |
 | `expr.rs` | ~180 | `Hir`, `HirKind` |
-| `binding.rs` | ~110 | `Binding(Value)` newtype, `CaptureInfo`, `CaptureKind` |
+| `binding.rs` | ~40 | `Binding(u32)` index type, `CaptureInfo`, `CaptureKind` |
+| `arena.rs` | ~150 | `BindingArena`, `BindingInner`, `BindingScope` |
 | `pattern.rs` | ~100 | Pattern matching types |
 | `tailcall.rs` | ~462 | Post-analysis pass marking tail calls |
 | `lint.rs` | ~150 | HIR-based linter (walks HirKind, produces Diagnostics) |

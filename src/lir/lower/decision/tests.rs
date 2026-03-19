@@ -279,12 +279,12 @@ fn test_empty_list_pattern() {
 fn test_list_pattern_as_cons_chain() {
     // (match x ((a b) ...) (_ ...))
     // A 2-element list pattern should decompose as Cons at the top level.
-    use crate::hir::Binding;
-    use crate::value::heap::BindingScope;
+    use crate::hir::arena::{BindingArena, BindingScope};
     use crate::value::SymbolId;
 
-    let binding_a = Binding::new(SymbolId(0), BindingScope::Local);
-    let binding_b = Binding::new(SymbolId(1), BindingScope::Local);
+    let mut arena = BindingArena::new();
+    let binding_a = arena.alloc(SymbolId(0), BindingScope::Local);
+    let binding_b = arena.alloc(SymbolId(1), BindingScope::Local);
 
     let matrix = PatternMatrix {
         rows: vec![
@@ -594,11 +594,11 @@ fn test_or_pattern_in_matrix() {
 #[test]
 fn test_var_binding_collected() {
     // A variable pattern should produce a binding in the Leaf.
-    use crate::hir::Binding;
-    use crate::value::heap::BindingScope;
+    use crate::hir::arena::{BindingArena, BindingScope};
     use crate::value::SymbolId;
 
-    let binding = Binding::new(SymbolId(42), BindingScope::Local);
+    let mut arena = BindingArena::new();
+    let binding = arena.alloc(SymbolId(42), BindingScope::Local);
     let matrix = PatternMatrix {
         rows: vec![PatternRow::new(vec![HirPattern::Var(binding)], None, 0)],
     };

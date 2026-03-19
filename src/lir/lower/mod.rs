@@ -11,6 +11,7 @@ mod pattern;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
+use crate::hir::arena::BindingArena;
 use crate::hir::{Binding, BlockId, Hir, HirKind, HirPattern};
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
@@ -107,7 +108,8 @@ struct BlockLowerContext {
 }
 
 /// Lowers HIR to LIR
-pub struct Lowerer {
+pub struct Lowerer<'a> {
+    arena: &'a BindingArena,
     /// Current function being built
     current_func: LirFunction,
     /// Current block being built
@@ -152,9 +154,10 @@ pub struct Lowerer {
     symbol_names: HashMap<u32, String>,
 }
 
-impl Lowerer {
-    pub fn new() -> Self {
+impl<'a> Lowerer<'a> {
+    pub fn new(arena: &'a BindingArena) -> Self {
         Lowerer {
+            arena,
             current_func: LirFunction::new(Arity::Exact(0)),
             current_block: BasicBlock::new(Label(0)),
             next_reg: 0,
@@ -253,7 +256,7 @@ impl Lowerer {
             // the rest parameter slot for variadic functions, matching the environment layout.
             let num_params = self.current_func.num_params as u16;
             let local_index = self.current_func.num_locals - num_params;
-            if binding.needs_lbox() && local_index < 64 {
+            if self.arena.get(binding).needs_lbox() && local_index < 64 {
                 self.current_func.lbox_locals_mask |= 1 << local_index;
             }
             self.num_captures + self.current_func.num_locals
@@ -363,7 +366,7 @@ impl Lowerer {
     fn can_scope_allocate_let(&mut self, bindings: &[(Binding, Hir)], body: &Hir) -> bool {
         self.scope_stats.scopes_analyzed += 1;
         // Condition 1: no captures
-        if bindings.iter().any(|(b, _)| b.is_captured()) {
+        if bindings.iter().any(|(b, _)| self.arena.get(*b).is_captured) {
             self.scope_stats.rejected_captured += 1;
             return false;
         }
@@ -472,12 +475,6 @@ impl Lowerer {
     }
 }
 
-impl Default for Lowerer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,7 +486,8 @@ mod tests {
 
     #[test]
     fn test_lower_int() {
-        let mut lowerer = Lowerer::new();
+        let arena = crate::hir::BindingArena::new();
+        let mut lowerer = Lowerer::new(&arena);
         let hir = Hir::silent(HirKind::Int(42), make_span());
         let func = lowerer.lower(&hir).unwrap();
         assert!(!func.blocks.is_empty());
@@ -497,7 +495,8 @@ mod tests {
 
     #[test]
     fn test_lower_if() {
-        let mut lowerer = Lowerer::new();
+        let arena = crate::hir::BindingArena::new();
+        let mut lowerer = Lowerer::new(&arena);
         let hir = Hir::silent(
             HirKind::If {
                 cond: Box::new(Hir::silent(HirKind::Bool(true), make_span())),
@@ -518,7 +517,8 @@ mod tests {
 
     #[test]
     fn test_lower_begin() {
-        let mut lowerer = Lowerer::new();
+        let arena = crate::hir::BindingArena::new();
+        let mut lowerer = Lowerer::new(&arena);
         let hir = Hir::silent(
             HirKind::Begin(vec![
                 Hir::silent(HirKind::Int(1), make_span()),

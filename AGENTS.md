@@ -171,8 +171,9 @@ For CI structure and failure triage: [`docs/debugging.md`](docs/debugging.md).
 These must remain true. Violating them breaks the system:
 
 1. **Bindings are resolved at analysis time.** HIR contains `Binding`
-   (NaN-boxed Value pointing to heap `BindingInner`), not symbols. If you see
-   symbol lookup at runtime, something is wrong.
+   (a `u32` index into a `BindingArena`), not symbols. Binding metadata lives
+   in the arena owned by the compilation pipeline. If you see symbol lookup at
+   runtime, something is wrong.
 
 2. **Closures capture by value into their environment.** Immutable captured
    locals are captured directly. Mutable captured locals and mutated parameters

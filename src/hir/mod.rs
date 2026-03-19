@@ -10,6 +10,7 @@
 //! ```
 
 mod analyze;
+pub mod arena;
 pub mod binding;
 mod expr;
 pub mod lint;
@@ -18,6 +19,7 @@ pub mod symbols;
 pub mod tailcall;
 
 pub use analyze::{AnalysisResult, Analyzer, FileForm};
+pub use arena::{BindingArena, BindingInner, BindingScope};
 pub use binding::{Binding, CaptureInfo, CaptureKind};
 pub use expr::{BlockId, CallArg, Hir, HirKind, ParamBound, VarargKind};
 pub use lint::HirLinter;

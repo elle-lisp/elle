@@ -3,7 +3,7 @@
 use super::*;
 use crate::hir::{CallArg, HirPattern};
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     pub(super) fn lower_call(
         &mut self,
         func: &Hir,
@@ -144,11 +144,12 @@ impl Lowerer {
         };
 
         // Must be an immutable binding that hasn't been mutated
-        if !binding.is_immutable() || binding.is_mutated() {
+        let bi = self.arena.get(*binding);
+        if !bi.is_immutable || bi.is_mutated {
             return Ok(None);
         }
 
-        let sym = binding.name();
+        let sym = bi.name;
 
         // Special case: `-` with 1 arg is negation
         if args.len() == 1 {

@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     /// Lower a HIR expression to LIR
     pub(super) fn lower_expr(&mut self, hir: &Hir) -> Result<Reg, String> {
         // Set the current span for all instructions emitted while lowering this HIR node
@@ -98,7 +98,7 @@ impl Lowerer {
 
         if let Some(&slot) = self.binding_to_slot.get(binding) {
             // Check if this binding needs cell unwrapping
-            let needs_lbox = binding.needs_lbox();
+            let needs_lbox = self.arena.get(*binding).needs_lbox();
 
             // Check if this is an upvalue (capture or parameter) or a local
             let is_upvalue = self.upvalue_bindings.contains(binding);
@@ -131,7 +131,7 @@ impl Lowerer {
             // Binding not found in immutable_values or binding_to_slot.
             // This happens when the analyzer's resolve_primitive fallback
             // creates a dangling binding for an undefined variable.
-            let sym_id = binding.name();
+            let sym_id = self.arena.get(*binding).name;
             let name = self
                 .symbol_names
                 .get(&sym_id.0)
@@ -217,7 +217,7 @@ impl Lowerer {
                     }
 
                     // Check if this binding needs a cell
-                    let needs_lbox = binding.needs_lbox();
+                    let needs_lbox = self.arena.get(binding).needs_lbox();
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables

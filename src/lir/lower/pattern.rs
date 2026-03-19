@@ -4,7 +4,7 @@ use super::decision::{Constructor, DecisionTree};
 use super::*;
 use crate::hir::{HirPattern, PatternKey, PatternLiteral};
 
-impl Lowerer {
+impl<'a> Lowerer<'a> {
     // ── Decision tree lowering ─────────────────────────────────────
 
     /// Lower a compiled decision tree to LIR instructions.
