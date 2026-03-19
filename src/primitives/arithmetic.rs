@@ -28,7 +28,7 @@ pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     for arg in &args[1..] {
         match arithmetic::add_values(&result, arg) {
             Ok(val) => result = val,
-            Err(e) => return (SIG_ERROR, error_val("error", e)),
+            Err(e) => return (SIG_ERROR, error_val("type-error", e)),
         }
     }
     (SIG_OK, result)
@@ -46,7 +46,7 @@ pub(crate) fn prim_sub(args: &[Value]) -> (SignalBits, Value) {
     if args.len() == 1 {
         return match arithmetic::negate_value(&args[0]) {
             Ok(val) => (SIG_OK, val),
-            Err(e) => (SIG_ERROR, error_val("error", e)),
+            Err(e) => (SIG_ERROR, error_val("type-error", e)),
         };
     }
 
@@ -54,7 +54,7 @@ pub(crate) fn prim_sub(args: &[Value]) -> (SignalBits, Value) {
     for arg in &args[1..] {
         match arithmetic::sub_values(&result, arg) {
             Ok(val) => result = val,
-            Err(e) => return (SIG_ERROR, error_val("error", e)),
+            Err(e) => return (SIG_ERROR, error_val("type-error", e)),
         }
     }
     (SIG_OK, result)
@@ -83,7 +83,7 @@ pub(crate) fn prim_mul(args: &[Value]) -> (SignalBits, Value) {
     for arg in &args[1..] {
         match arithmetic::mul_values(&result, arg) {
             Ok(val) => result = val,
-            Err(e) => return (SIG_ERROR, error_val("error", e)),
+            Err(e) => return (SIG_ERROR, error_val("type-error", e)),
         }
     }
     (SIG_OK, result)
@@ -103,7 +103,7 @@ pub(crate) fn prim_mod(args: &[Value]) -> (SignalBits, Value) {
     }
     match arithmetic::mod_values(&args[0], &args[1]) {
         Ok(val) => (SIG_OK, val),
-        Err(e) => (SIG_ERROR, error_val("error", e)),
+        Err(e) => (SIG_ERROR, error_val("type-error", e)),
     }
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn prim_rem(args: &[Value]) -> (SignalBits, Value) {
     }
     match arithmetic::remainder_values(&args[0], &args[1]) {
         Ok(val) => (SIG_OK, val),
-        Err(e) => (SIG_ERROR, error_val("error", e)),
+        Err(e) => (SIG_ERROR, error_val("type-error", e)),
     }
 }
 
@@ -137,7 +137,7 @@ pub(crate) fn prim_abs(args: &[Value]) -> (SignalBits, Value) {
     }
     match arithmetic::abs_value(&args[0]) {
         Ok(val) => (SIG_OK, val),
-        Err(e) => (SIG_ERROR, error_val("error", e)),
+        Err(e) => (SIG_ERROR, error_val("type-error", e)),
     }
 }
 
