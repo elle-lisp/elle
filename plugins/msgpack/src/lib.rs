@@ -18,7 +18,7 @@ const ELLE_INT_MIN: i64 = -(1i64 << 47);
 const ELLE_INT_MAX: i64 = (1i64 << 47) - 1;
 
 fn checked_int(n: i64, prim_name: &str) -> Result<Value, String> {
-    if n < ELLE_INT_MIN || n > ELLE_INT_MAX {
+    if !(ELLE_INT_MIN..=ELLE_INT_MAX).contains(&n) {
         return Err(format!(
             "msgpack/{}: integer {} out of Elle 48-bit range [{}, {}]",
             prim_name, n, ELLE_INT_MIN, ELLE_INT_MAX
@@ -454,37 +454,35 @@ fn decode_map_key(rd: &mut &[u8], mode: Mode, prim_name: &str) -> Result<TableKe
 
     // In tagged mode, intercept ext markers: ext(1) means keyword key
     if mode == Mode::Tagged {
-        match marker {
-            m @ (Marker::FixExt1
-            | Marker::FixExt2
-            | Marker::FixExt4
-            | Marker::FixExt8
-            | Marker::FixExt16
-            | Marker::Ext8
-            | Marker::Ext16
-            | Marker::Ext32) => {
-                let (typeid, size) = read_ext_type_and_size(rd, m, prim_name)?;
-                if typeid == EXT_KEYWORD {
-                    let mut payload = vec![0u8; size as usize];
-                    rd.read_exact_buf(&mut payload)
-                        .map_err(|e| format!("msgpack/{}: {}", prim_name, e))?;
-                    let name_val = decode_value(&mut payload.as_slice(), mode)?;
-                    if let Some(s) = name_val.with_string(|s| s.to_string()) {
-                        return Ok(TableKey::Keyword(s));
-                    } else {
-                        return Err(format!(
-                            "msgpack/{}: ext(1) keyword payload must be a string",
-                            prim_name
-                        ));
-                    }
+        if let m @ (Marker::FixExt1
+        | Marker::FixExt2
+        | Marker::FixExt4
+        | Marker::FixExt8
+        | Marker::FixExt16
+        | Marker::Ext8
+        | Marker::Ext16
+        | Marker::Ext32) = marker
+        {
+            let (typeid, size) = read_ext_type_and_size(rd, m, prim_name)?;
+            if typeid == EXT_KEYWORD {
+                let mut payload = vec![0u8; size as usize];
+                rd.read_exact_buf(&mut payload)
+                    .map_err(|e| format!("msgpack/{}: {}", prim_name, e))?;
+                let name_val = decode_value(&mut payload.as_slice(), mode)?;
+                if let Some(s) = name_val.with_string(|s| s.to_string()) {
+                    return Ok(TableKey::Keyword(s));
                 } else {
                     return Err(format!(
-                        "msgpack/{}: unsupported map key type: ext({})",
-                        prim_name, typeid
+                        "msgpack/{}: ext(1) keyword payload must be a string",
+                        prim_name
                     ));
                 }
+            } else {
+                return Err(format!(
+                    "msgpack/{}: unsupported map key type: ext({})",
+                    prim_name, typeid
+                ));
             }
-            _ => {}
         }
     }
 
