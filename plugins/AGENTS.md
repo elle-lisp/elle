@@ -39,6 +39,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 | `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
+| `protobuf/` | Protocol Buffers encode/decode/introspect | `protobuf/schema`, `protobuf/schema-bytes`, `protobuf/encode`, `protobuf/decode`, `protobuf/messages`, `protobuf/fields`, `protobuf/enums` |
 
 ## Building plugins
 
@@ -147,3 +148,4 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
 | `yaml/` | YAML parsing and serialization |
+| `protobuf/` | Protocol Buffers encoding, decoding, and introspection |
