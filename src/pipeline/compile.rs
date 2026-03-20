@@ -109,7 +109,13 @@ pub fn compile_file(
 ) -> Result<CompileResult, String> {
     intern_primitive_names(symbols);
 
-    let syntaxes = read_syntax_all(source, source_name)?;
+    let mut syntaxes = read_syntax_all(source, source_name)?;
+
+    // Phase 0: Epoch migration — rewrite old-epoch syntax before expansion
+    let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    if let Some(epoch) = source_epoch {
+        crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+    }
 
     let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
     // SAFETY: The cached VM is thread-local and pipeline functions are not
