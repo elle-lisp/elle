@@ -128,6 +128,10 @@ pub(crate) enum IoOp {
     /// Returns bytes on success, error on failure.
     #[allow(dead_code)]
     Task(TaskFn),
+    /// Resolve a hostname to IP addresses via getaddrinfo(3).
+    /// Portless — always dispatched to the thread pool.
+    /// Returns an array of IP address strings.
+    Resolve { hostname: String },
 }
 
 /// Address for connect operations.

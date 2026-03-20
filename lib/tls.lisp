@@ -49,20 +49,9 @@
 
 (defn resolve-host [host]
   "Resolve hostname to an IP address string for use with tcp/connect.
-   Delegates to getent(1) via 'getent ahosts' to get IPv4 first. Returns
-   the IP string, or host unchanged if resolution fails (allows pre-resolved IPs).
-   IPv4 addresses are preferred over IPv6 because the io_uring TCP connect
-   path formats addresses as 'ip:port', which only works for IPv4. IPv6 would
-   need bracket notation '[ip]:port' which is not yet implemented."
-  (let [[result (subprocess/system "getent" ["ahosts" host])]]
-    (if (not (= result:exit 0))
-      host  # Resolution failed — pass host through (may be an IP already)
-      (let [[out (string/trim result:stdout)]]
-        (if (empty? out)
-          host
-          # getent ahosts output: "<ip>   STREAM <canonical>" (one per line)
-          # Extract the IP from the first line (first whitespace-delimited field).
-          (first-word (first-line out)))))))
+   Uses sys/resolve (getaddrinfo) for system-correct resolution that
+   consults /etc/hosts and nsswitch.conf. Returns the first IP address."
+  (first (sys/resolve host)))
 
 ## ── The entry-point thunk ───────────────────────────────────────────────────
 ##

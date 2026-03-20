@@ -147,7 +147,9 @@ pub(super) fn process_raw_completion(
             let fd = connect_fd.expect("Connect completion without connect_fd");
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             let peer_addr = match addr {
-                ConnectAddr::Tcp { addr: host, port } => format!("{}:{}", host, port),
+                ConnectAddr::Tcp { addr: host, port } => {
+                    crate::io::sockaddr::format_host_port(host, *port)
+                }
                 ConnectAddr::Unix { path } => path.clone(),
             };
             let new_port = match addr {
@@ -171,6 +173,30 @@ pub(super) fn process_raw_completion(
                     id,
                     result: Ok(Value::bytes(data)),
                 }
+            }
+        }
+        PendingOp::Resolve { .. } => {
+            if result_code < 0 {
+                let msg = if data.is_empty() {
+                    "getaddrinfo: resolution failed".to_string()
+                } else {
+                    String::from_utf8_lossy(&data).to_string()
+                };
+                return Completion {
+                    id,
+                    result: Err(error_val("dns-error", msg)),
+                };
+            }
+            // data contains newline-separated IP address strings.
+            let ips_str = String::from_utf8_lossy(&data);
+            let ips: Vec<Value> = ips_str
+                .lines()
+                .filter(|s| !s.is_empty())
+                .map(Value::string)
+                .collect();
+            Completion {
+                id,
+                result: Ok(Value::array(ips)),
             }
         }
         PendingOp::Port {
@@ -292,6 +318,11 @@ pub(super) fn process_raw_completion(
                 IoOp::Task(_) => {
                     // Task ops use PendingOp::Task, not PendingOp::Port — cannot reach here.
                     unreachable!("Task should use PendingOp::Task variant")
+                }
+                IoOp::Resolve { .. } => {
+                    // Resolve is portless and dispatched to the thread pool — never
+                    // produces a PendingOp::Port entry.
+                    unreachable!("Resolve is portless; cannot reach PendingOp::Port")
                 }
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload

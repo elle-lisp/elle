@@ -57,6 +57,8 @@ pub(crate) enum PendingOp {
     },
     /// Background task — arbitrary closure running on thread pool.
     Task { buffer_handle: BufferHandle },
+    /// DNS resolution via getaddrinfo(3). Portless.
+    Resolve { buffer_handle: BufferHandle },
 }
 
 impl PendingOp {
@@ -68,6 +70,7 @@ impl PendingOp {
             PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
             PendingOp::Open { buffer_handle, .. } => *buffer_handle,
             PendingOp::Task { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
         }
     }
 }
