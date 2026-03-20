@@ -10,6 +10,44 @@ use std::cell::RefCell;
 use std::process::Child;
 use std::time::Duration;
 
+/// Boxed closure type for `IoOp::Task`.
+pub type TaskClosure = Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>;
+
+/// A take-once closure for `IoOp::Task`.
+///
+/// Wraps a `FnOnce` in `RefCell<Option<...>>` so it can be moved out of a
+/// shared `&IoRequest` reference. The closure runs on a background thread
+/// (async backend) or inline (sync backend) and returns `(i32, Vec<u8>)`:
+/// non-negative result_code = success (data returned as bytes),
+/// negative result_code = error (data is UTF-8 error message).
+pub struct TaskFn {
+    inner: RefCell<Option<TaskClosure>>,
+}
+
+impl TaskFn {
+    pub fn new(f: TaskClosure) -> Self {
+        TaskFn {
+            inner: RefCell::new(Some(f)),
+        }
+    }
+
+    /// Take the closure out. Returns `None` if already taken.
+    pub(crate) fn take(&self) -> Option<TaskClosure> {
+        self.inner.borrow_mut().take()
+    }
+}
+
+impl std::fmt::Debug for TaskFn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let taken = self.inner.borrow().is_none();
+        if taken {
+            write!(f, "TaskFn(<taken>)")
+        } else {
+            write!(f, "TaskFn(..)")
+        }
+    }
+}
+
 /// How to configure a subprocess stdio stream.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum StdioDisposition {
@@ -86,6 +124,10 @@ pub(crate) enum IoOp {
         direction: Direction,
         encoding: Encoding,
     },
+    /// Run an arbitrary closure on a background thread.
+    /// Returns bytes on success, error on failure.
+    #[allow(dead_code)]
+    Task(TaskFn),
 }
 
 /// Address for connect operations.
@@ -138,6 +180,19 @@ impl IoRequest {
                 timeout: None,
             },
         )
+    }
+
+    /// Create a Task IoRequest — runs a closure on a background thread.
+    ///
+    /// The closure returns `(i32, Vec<u8>)`:
+    /// - Non-negative result_code: success, data returned as `Value::bytes`
+    /// - Negative result_code: error, data is UTF-8 error message
+    ///
+    /// Async backend: closure runs on the thread pool, fiber yields until done.
+    /// Sync backend: closure runs inline (blocking).
+    #[allow(clippy::new_ret_no_self, dead_code)]
+    pub fn task(f: impl FnOnce() -> (i32, Vec<u8>) + Send + 'static) -> Value {
+        Self::portless(IoOp::Task(TaskFn::new(Box::new(f))))
     }
 }
 

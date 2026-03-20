@@ -51,6 +51,8 @@ pub(super) enum PoolOp {
         flags: i32,
         mode: u32,
     },
+    /// Run an arbitrary closure. Returns (result_code, data).
+    Task(Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>),
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -324,6 +326,7 @@ impl ThreadPoolBackend {
                         (fd, Vec::new())
                     }
                 }
+                PoolOp::Task(closure) => closure(),
             };
             let _ = sender.send(PoolCompletion {
                 id,

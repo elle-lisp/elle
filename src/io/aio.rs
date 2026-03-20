@@ -7,6 +7,7 @@ use crate::io::pending::PendingOp;
 use crate::io::pool::BufferPool;
 use crate::io::request::{
     ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, StdioDisposition,
+    TaskFn,
 };
 use crate::io::threadpool::{PoolCompletion, PoolOp, StdinOpKind, StdinThread, ThreadPoolBackend};
 use crate::io::types::{FdState, PortKey};
@@ -118,6 +119,11 @@ impl AsyncBackend {
         } = request.op
         {
             return self.submit_open(path, flags, mode, direction, encoding, request.timeout);
+        }
+
+        // Task: run closure on thread pool.
+        if let IoOp::Task(ref task_fn) = request.op {
+            return self.submit_task(task_fn);
         }
 
         let port = request
@@ -706,6 +712,44 @@ impl AsyncBackend {
         Ok(id)
     }
 
+    fn submit_task(&self, task_fn: &TaskFn) -> Result<u64, String> {
+        let closure = task_fn
+            .take()
+            .ok_or_else(|| "io/submit: task closure already consumed".to_string())?;
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ..
+        } = *inner;
+
+        // Tasks always go to the thread pool (no io_uring equivalent).
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(_) => {
+                // Even on io_uring platforms, tasks run on the network pool
+                // to avoid starving fd I/O ops on the main pool.
+                network_pool.submit(id, PoolOp::Task(closure))?;
+            }
+            PlatformBackend::ThreadPool(ref mut pool) => {
+                pool.submit(id, PoolOp::Task(closure))?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::Task {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
     fn submit_process_wait(&self, handle_val: &Value) -> Result<u64, String> {
         let handle = handle_val
             .as_external::<ProcessHandle>()
@@ -1073,7 +1117,8 @@ impl AsyncBackendInner {
             | IoOp::ProcessWait
             | IoOp::Open { .. }
             | IoOp::Seek { .. }
-            | IoOp::Tell => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::Tell
+            | IoOp::Task(_) => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)

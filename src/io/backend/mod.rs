@@ -83,6 +83,26 @@ impl SyncBackend {
             return self.execute_process_wait(&request.port);
         }
 
+        // Task: run closure inline (blocking). Sync backend is single-fiber.
+        if let IoOp::Task(ref task_fn) = request.op {
+            let closure = match task_fn.take() {
+                Some(f) => f,
+                None => {
+                    return (
+                        SIG_ERROR,
+                        error_val("task-error", "task closure already consumed"),
+                    )
+                }
+            };
+            let (result_code, data) = closure();
+            if result_code < 0 {
+                let msg = String::from_utf8_lossy(&data).to_string();
+                return (SIG_ERROR, error_val("task-error", msg));
+            } else {
+                return (SIG_OK, Value::bytes(data));
+            }
+        }
+
         // Open is portless — it creates a new port rather than operating on one.
         // Sync backend: blocking openat() is fine — single-fiber, no concurrent work to
         // protect. The timeout from IoRequest is intentionally ignored here.
@@ -160,7 +180,8 @@ impl SyncBackend {
                 | IoOp::Sleep { .. }
                 | IoOp::Spawn(_)
                 | IoOp::ProcessWait
-                | IoOp::Open { .. } => unreachable!(), // handled above
+                | IoOp::Open { .. }
+                | IoOp::Task(_) => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
