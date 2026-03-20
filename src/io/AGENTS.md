@@ -13,7 +13,7 @@ to a backend for execution.
 |--------|----------------|
 | `types.rs` | Shared types: `PortKey`, `FdState`, `FdStatus` — used by both backends |
 | `pool.rs` | `BufferPool`, `BufferHandle` — pinned buffer management for async I/O |
-| `pending.rs` | `PendingOp` enum — in-flight async operation tracking (4 variants) |
+| `pending.rs` | `PendingOp` enum — in-flight async operation tracking (5 variants) |
 | `aio.rs` | `AsyncBackend` — async I/O with io_uring (Linux) or thread-pool fallback |
 | `request.rs` | `IoRequest` and `IoOp` types — typed I/O request descriptors |
 | `completion.rs` | `process_raw_completion` — converts raw CQE/thread results to `Completion` |
@@ -39,7 +39,7 @@ Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBa
 
 ### IoOp
 
-Enum of I/O operations (15 variants):
+Enum of I/O operations (16 variants):
 
 **Stream operations:** `ReadLine`, `Read { count }`, `ReadAll`, `Write { data }`, `Flush`
 
@@ -50,6 +50,8 @@ Enum of I/O operations (15 variants):
 **Timer:** `Sleep { duration }`
 
 **Subprocess operations:** `Spawn { program, args, env, cwd, stdin, stdout, stderr }`, `ProcessWait`
+
+**Background task:** `Task(TaskFn)` — run an arbitrary closure on a background thread. `TaskFn` wraps a `FnOnce() -> (i32, Vec<u8>) + Send` in `RefCell<Option<...>>` for take-once semantics. Non-negative result_code = success (data returned as `Value::bytes`), negative = error (data is UTF-8 error message). `IoRequest::task()` is the convenience constructor.
 
 ### PortKind
 
@@ -74,18 +76,19 @@ Methods:
 
 ### PendingOp
 
-Enum tracking in-flight async operations (4 variants):
+Enum tracking in-flight async operations (5 variants):
 
 - `Port { op, port_key, port, buffer_handle, listener_kind }` — operation on an existing port (stream I/O, accept, datagram, shutdown). `listener_kind` is `Some(PortKind)` for Accept only.
 - `Connect { addr, buffer_handle, connect_fd }` — creates a new port on completion. `connect_fd` starts as `Some(fd)` for io_uring (pre-created socket) or `None` for thread pool (set on completion).
 - `Sleep { buffer_handle }` — portless timer.
 - `ProcessWait { buffer_handle, handle_val, siginfo }` — waiting for subprocess exit via IORING_OP_WAITID. `siginfo` is a heap-allocated `siginfo_t` filled by the kernel; released in completion processing.
+- `Task { buffer_handle }` — background task running on thread pool.
 
 ### PoolOp / PoolCompletion
 
 Typed thread-pool submission and completion:
 
-- `PoolOp` — enum with 10 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses). Replaces the old `(fd, op_kind: u8, data: Vec<u8>, size: usize)` untyped submission.
+- `PoolOp` — enum with 11 variants matching the operations. Each variant carries exactly the data that operation needs (fd, buffers, addresses, or closures). Replaces the old `(fd, op_kind: u8, data: Vec<u8>, size: usize)` untyped submission.
 - `PoolCompletion { id, result_code, data }` — typed completion struct. Replaces the old `(u64, i32, Vec<u8>)` tuple.
 
 ### ConnectAddr
@@ -187,3 +190,4 @@ Both `SyncBackend` and `AsyncBackend` implement subprocess spawn and wait:
 13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
+16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). On io_uring platforms, tasks are routed to the network pool to avoid starving fd I/O ops on the main pool. The sync backend runs the closure inline (blocking). The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.

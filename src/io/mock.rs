@@ -121,6 +121,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::Open { .. } => "open",
             IoOp::Seek { .. } => "seek",
             IoOp::Tell => "tell",
+            IoOp::Task(_) => "task",
         };
         inner.log.push(op_name.to_string());
 
@@ -197,6 +198,7 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::Seek { .. } | IoOp::Tell => {
                     Err(error_val("io-error", "mock: seek/tell not supported"))
                 }
+                IoOp::Task(_) => Err(error_val("io-error", "mock: task not supported")),
             }
         };
 

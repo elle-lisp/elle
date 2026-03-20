@@ -159,6 +159,20 @@ pub(super) fn process_raw_completion(
                 result: Ok(Value::external("port", new_port)),
             }
         }
+        PendingOp::Task { .. } => {
+            if result_code < 0 {
+                let msg = String::from_utf8_lossy(&data).to_string();
+                Completion {
+                    id,
+                    result: Err(error_val("task-error", msg)),
+                }
+            } else {
+                Completion {
+                    id,
+                    result: Ok(Value::bytes(data)),
+                }
+            }
+        }
         PendingOp::Port {
             op,
             port_key,
@@ -274,6 +288,10 @@ pub(super) fn process_raw_completion(
                     unreachable!(
                         "Seek/Tell are handled as immediate completions before PendingOp insertion"
                     )
+                }
+                IoOp::Task(_) => {
+                    // Task ops use PendingOp::Task, not PendingOp::Port — cannot reach here.
+                    unreachable!("Task should use PendingOp::Task variant")
                 }
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload

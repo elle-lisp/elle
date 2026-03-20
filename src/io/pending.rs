@@ -55,6 +55,8 @@ pub(crate) enum PendingOp {
         encoding: Encoding,
         buffer_handle: BufferHandle,
     },
+    /// Background task — arbitrary closure running on thread pool.
+    Task { buffer_handle: BufferHandle },
 }
 
 impl PendingOp {
@@ -65,6 +67,7 @@ impl PendingOp {
             PendingOp::Sleep { buffer_handle, .. } => *buffer_handle,
             PendingOp::ProcessWait { buffer_handle, .. } => *buffer_handle,
             PendingOp::Open { buffer_handle, .. } => *buffer_handle,
+            PendingOp::Task { buffer_handle, .. } => *buffer_handle,
         }
     }
 }
