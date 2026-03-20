@@ -7,6 +7,7 @@ use std::collections::HashMap;
 /// A rewrite rule that examines a token and optionally produces an edit.
 pub(crate) trait RewriteRule {
     /// Human-readable rule name.
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 
     /// Examine a token and optionally produce a source edit.
@@ -14,14 +15,13 @@ pub(crate) trait RewriteRule {
 }
 
 /// Rename symbols by exact match. Data-driven from a HashMap.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct RenameSymbol {
+    #[allow(dead_code)]
     rule_name: String,
     renames: HashMap<String, String>,
 }
 
 impl RenameSymbol {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(name: impl Into<String>, renames: HashMap<String, String>) -> Self {
         RenameSymbol {
             rule_name: name.into(),
