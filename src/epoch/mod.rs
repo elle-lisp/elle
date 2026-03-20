@@ -1,7 +1,7 @@
 //! Epoch-based migration system.
 //!
 //! Each breaking change to Elle increments the epoch counter and adds
-//! migration rules. Source files can declare their epoch with `(elle N)`
+//! migration rules. Source files can declare their epoch with `(elle/epoch N)`
 //! as the first form. The compiler transparently rewrites old-epoch
 //! syntax before macro expansion.
 //!
@@ -12,7 +12,7 @@
 //! (def x 10)
 //! ```
 //!
-//! The `(elle N)` form must be the first top-level form. It is consumed
+//! The `(elle/epoch N)` form must be the first top-level form. It is consumed
 //! by the compiler and does not appear in the expanded syntax. Files
 //! without an epoch declaration are assumed to target [`CURRENT_EPOCH`].
 //!
@@ -34,7 +34,7 @@ use crate::syntax::{Syntax, SyntaxKind};
 
 /// Extract the epoch declaration from parsed forms, if present.
 ///
-/// Looks for `(elle N)` as the first form. If found, removes it from
+/// Looks for `(elle/epoch N)` as the first form. If found, removes it from
 /// the list and returns the epoch number. If absent, returns `None`
 /// (the file targets the current epoch).
 pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
@@ -43,7 +43,7 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
     }
 
     if let SyntaxKind::List(items) = &forms[0].kind {
-        if items.len() == 2 && items[0].is_symbol("elle") {
+        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
             if let SyntaxKind::Int(n) = items[1].kind {
                 if n < 0 {
                     return Err(format!(
@@ -71,15 +71,15 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
 pub struct EpochInfo {
     /// The declared epoch number.
     pub epoch: u64,
-    /// Byte offset of `(elle N)` in the source (start).
+    /// Byte offset of `(elle/epoch N)` in the source (start).
     pub byte_start: usize,
-    /// Byte offset of `(elle N)` in the source (end, exclusive).
+    /// Byte offset of `(elle/epoch N)` in the source (end, exclusive).
     pub byte_end: usize,
 }
 
 /// Detect the epoch declaration from raw source text.
 ///
-/// Parses just enough to find `(elle N)` at the start. Returns `None`
+/// Parses just enough to find `(elle/epoch N)` at the start. Returns `None`
 /// if no epoch declaration is present. Used by the CLI rewriter to
 /// build per-file rules without modifying the syntax tree.
 pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String> {
@@ -89,7 +89,7 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
     }
 
     if let SyntaxKind::List(items) = &syntaxes[0].kind {
-        if items.len() == 2 && items[0].is_symbol("elle") {
+        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
             if let SyntaxKind::Int(n) = items[1].kind {
                 if n < 0 {
                     return Err(format!("invalid epoch: {} (must be non-negative)", n));
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_extract_epoch_present() {
         let mut forms = vec![
-            list(vec![sym("elle"), int(0)]),
+            list(vec![sym("elle/epoch"), int(0)]),
             list(vec![sym("def"), sym("x"), int(10)]),
         ];
 
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_extract_epoch_negative() {
-        let mut forms = vec![list(vec![sym("elle"), int(-1)])];
+        let mut forms = vec![list(vec![sym("elle/epoch"), int(-1)])];
         let result = extract_epoch(&mut forms);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("must be non-negative"));
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_extract_epoch_future() {
-        let mut forms = vec![list(vec![sym("elle"), int(CURRENT_EPOCH as i64 + 1)])];
+        let mut forms = vec![list(vec![sym("elle/epoch"), int(CURRENT_EPOCH as i64 + 1)])];
         let result = extract_epoch(&mut forms);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("only supports up to"));
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_extract_epoch_wrong_arity() {
-        let mut forms = vec![list(vec![sym("elle")])];
+        let mut forms = vec![list(vec![sym("elle/epoch")])];
         let epoch = extract_epoch(&mut forms).unwrap();
         assert_eq!(epoch, None); // not recognized, left alone
     }

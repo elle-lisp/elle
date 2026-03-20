@@ -66,7 +66,7 @@ plugin-tests:  ## Run plugin tests
 
 test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build -p elle-git
-	$(ELLE) tests/git.elle
+	$(ELLE) tests/git.lisp
 
 test: smoke  ## Rust unit tests + clippy + fmt after smoke
 	cargo fmt --check

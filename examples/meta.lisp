@@ -1,3 +1,4 @@
+(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Meta-programming — macros, quasiquote, hygiene, and introspection
@@ -12,7 +13,6 @@
 #   datum->syntax          — hygiene escape hatch (anaphoric macros)
 #   syntax->datum          — stripping scope information
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -23,8 +23,8 @@
 (defmacro double (expr)
   `(* ,expr 2))
 
-(assert-eq (double 21) 42 "double(21) equals 42")
-(assert-eq (double 10) 20 "double(10) equals 20")
+(assert (= (double 21) 42) "double(21) equals 42")
+(assert (= (double 10) 20) "double(10) equals 20")
 (display "  (double 21) => ") (print (double 21))
 
 
@@ -35,7 +35,7 @@
 # not evaluated first. The expansion is (* (+ 1 2) 2), which
 # evaluates to 6.
 
-(assert-eq (double (+ 1 2)) 6 "double((+ 1 2)) expands to (* (+ 1 2) 2)")
+(assert (= (double (+ 1 2)) 6) "double((+ 1 2)) expands to (* (+ 1 2) 2)")
 (display "  (double (+ 1 2)) => ") (print (double (+ 1 2)))
 
 
@@ -47,8 +47,8 @@
 (defmacro abs-value (expr)
   `(if (< ,expr 0) (- ,expr) ,expr))
 
-(assert-eq (abs-value -42) 42 "abs-value(-42) equals 42")
-(assert-eq (abs-value 42) 42 "abs-value(42) equals 42")
+(assert (= (abs-value -42) 42) "abs-value(-42) equals 42")
+(assert (= (abs-value 42) 42) "abs-value(42) equals 42")
 (display "  (abs-value -42) => ") (print (abs-value -42))
 
 
@@ -62,8 +62,8 @@
 (var add-10 (make-adder 10))
 (var add-20 (make-adder 20))
 
-(assert-eq (add-10 5) 15 "make-adder(10) generates working function")
-(assert-eq (add-20 5) 25 "make-adder(20) generates working function")
+(assert (= (add-10 5) 15) "make-adder(10) generates working function")
+(assert (= (add-20 5) 25) "make-adder(20) generates working function")
 (display "  (add-10 5) => ") (print (add-10 5))
 (display "  (add-20 5) => ") (print (add-20 5))
 
@@ -80,8 +80,8 @@
 (defmacro quad (x)
   `(square (square ,x)))
 
-(assert-eq (square 5) 25 "square(5) equals 25")
-(assert-eq (quad 2) 16 "quad(2) = square(square(2)) = 16")
+(assert (= (square 5) 25) "square(5) equals 25")
+(assert (= (quad 2) 16) "quad(2) = square(square(2)) = 16")
 (display "  (quad 2) => ") (print (quad 2))
 
 
@@ -91,11 +91,11 @@
 # macro? checks whether a name is a defined macro.
 # expand-macro expands a quoted macro call one step.
 
-(assert-true (macro? double) "double is a macro")
-(assert-false (macro? +) "+ is not a macro")
+(assert (macro? double) "double is a macro")
+(assert (not (macro? +)) "+ is not a macro")
 
 (var expanded (expand-macro '(double 5)))
-(assert-list-eq expanded (list '* 5 2) "expand-macro shows expansion")
+(assert (= expanded (list '* 5 2)) "expand-macro shows expansion")
 (display "  (expand-macro '(double 5)) => ") (print expanded)
 
 
@@ -107,13 +107,13 @@
 
 (var sym1 (gensym))
 (var sym2 (gensym))
-(assert-false (identical? sym1 sym2) "gensym symbols are unique")
+(assert (not (identical? sym1 sym2)) "gensym symbols are unique")
 (display "  gensym => ") (print sym1)
 
 # With prefix for readability
 (var tmp1 (gensym "tmp"))
 (var tmp2 (gensym "tmp"))
-(assert-false (identical? tmp1 tmp2) "prefixed gensym symbols are unique")
+(assert (not (identical? tmp1 tmp2)) "prefixed gensym symbols are unique")
 (display "  (gensym \"tmp\") => ") (print tmp1)
 
 
@@ -125,12 +125,12 @@
 
 (var x 42)
 (var result `(the answer is ,x))
-(assert-eq (length result) 4 "quasiquote builds a 4-element list")
-(assert-eq (last result) 42 "unquoted value is spliced in")
+(assert (= (length result) 4) "quasiquote builds a 4-element list")
+(assert (= (last result) 42) "unquoted value is spliced in")
 (display "  `(the answer is ,x) => ") (print result)
 
 # Quasiquote without unquote is like quote
-(assert-list-eq `(a b c) (list 'a 'b 'c) "quasiquote without unquote is like quote")
+(assert (= `(a b c) (list 'a 'b 'c)) "quasiquote without unquote is like quote")
 
 
 # ========================================
@@ -145,9 +145,9 @@
 
 (let ([tmp 100] [x 1] [y 2])
   (my-swap x y)
-  (assert-eq tmp 100 "swap: caller's tmp is not captured")
-  (assert-eq x 2 "swap: x is now 2")
-  (assert-eq y 1 "swap: y is now 1"))
+  (assert (= tmp 100) "swap: caller's tmp is not captured")
+  (assert (= x 2) "swap: x is now 2")
+  (assert (= y 1) "swap: y is now 1"))
 
 (display "  swap hygiene: caller's tmp preserved after swap") (print "")
 
@@ -164,8 +164,7 @@
 (defmacro add-two (x)
   `(let ((tmp ,x)) (+ tmp 2)))
 
-(assert-eq (+ (add-one 10) (add-two 20)) 33
-  "nested macros with same-named tmp don't interfere")
+(assert (= (+ (add-one 10) (add-two 20)) 33) "nested macros with same-named tmp don't interfere")
 (display "  (+ (add-one 10) (add-two 20)) => ") (print (+ (add-one 10) (add-two 20)))
 
 
@@ -179,12 +178,12 @@
   (let ([g (gensym "tmp")])
     `(let ((,g ,val)) ,body)))
 
-(with-temp 42 (assert-true true "gensym macro expanded without error"))
+(with-temp 42 (assert true "gensym macro expanded without error"))
 
 # Two expansions get different gensyms, so they don't collide.
 (with-temp 1
   (with-temp 2
-    (assert-true true "nested gensym macros don't collide")))
+    (assert true "nested gensym macros don't collide")))
 
 
 # ========================================
@@ -199,14 +198,11 @@
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))
 
-(assert-eq (aif 42 it 0) 42
-  "aif: `it` is bound to the test value")
+(assert (= (aif 42 it 0) 42) "aif: `it` is bound to the test value")
 
-(assert-eq (aif false 42 0) 0
-  "aif: false test takes else branch")
+(assert (= (aif false 42 0) 0) "aif: false test takes else branch")
 
-(assert-eq (aif (+ 1 2) (+ it 10) 0) 13
-  "aif: `it` works with compound test expressions")
+(assert (= (aif (+ 1 2) (+ it 10) 0) 13) "aif: `it` works with compound test expressions")
 
 (display "  (aif (+ 1 2) (+ it 10) 0) => ") (print (aif (+ 1 2) (+ it 10) 0))
 
@@ -218,8 +214,7 @@
 # the let binding is closer in scope.
 
 (let ([it 999])
-  (assert-eq (aif 42 it 0) 42
-    "aif: macro's `it` shadows outer `it` inside then-branch"))
+  (assert (= (aif 42 it 0) 42) "aif: macro's `it` shadows outer `it` inside then-branch"))
 
 
 # ========================================
@@ -229,8 +224,7 @@
 # stripping all scope information. Useful for inspecting macro
 # arguments as data.
 
-(assert-eq (syntax->datum 42) 42
-  "syntax->datum: plain values pass through unchanged")
+(assert (= (syntax->datum 42) 42) "syntax->datum: plain values pass through unchanged")
 (display "  (syntax->datum 42) => ") (print (syntax->datum 42))
 
 

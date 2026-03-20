@@ -1,3 +1,4 @@
+(elle/epoch 1)
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs
@@ -9,7 +10,6 @@
 ## - List display (no `. ()` terminator)
 ## - or expression return value corruption in recursive calls
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Bug 1: StoreCapture stack mismatch (let bindings inside lambdas)
@@ -18,13 +18,13 @@
 # let binding inside lambda preserves value
 (begin
   (def f (fn (x) (let ((y x)) y)))
-  (assert-eq (f 42) 42 "let binding preserves positive value")
-  (assert-eq (f -7) -7 "let binding preserves negative value"))
+  (assert (= (f 42) 42) "let binding preserves positive value")
+  (assert (= (f -7) -7) "let binding preserves negative value"))
 
 # let binding with arithmetic
 (begin
   (def f (fn (a b) (let ((x a) (y b)) (+ x y))))
-  (assert-eq (f 10 -3) 7 "let binding with arithmetic"))
+  (assert (= (f 10 -3) 7) "let binding with arithmetic"))
 
 # recursive function with let inside
 (begin
@@ -33,7 +33,7 @@
         (list)
         (let ((y x))
           (cons y (f (- x 1)))))))
-  (assert-eq (length (f 5)) 5 "recursive function with let inside"))
+  (assert (= (length (f 5)) 5) "recursive function with let inside"))
 
 # append inside let inside lambda
 (begin
@@ -42,14 +42,14 @@
         (list)
         (let ((y x))
           (append (list y) (f (- x 1)))))))
-  (assert-eq (length (f 5)) 5 "append inside let inside lambda"))
+  (assert (= (length (f 5)) 5) "append inside let inside lambda"))
 
 # multiple let bindings
 (begin
   (def f (fn (a b c)
     (let ((x a) (y b) (z c))
       (+ x (+ y z)))))
-  (assert-eq (f 1 2 3) 6 "multiple let bindings"))
+  (assert (= (f 1 2 3) 6) "multiple let bindings"))
 
 # nested let bindings
 (begin
@@ -57,14 +57,14 @@
     (let ((x a))
       (let ((y b))
         (+ x y)))))
-  (assert-eq (f 10 20) 30 "nested let bindings"))
+  (assert (= (f 10 20) 30) "nested let bindings"))
 
 # let with computation
 (begin
   (def f (fn (x)
     (let ((y (* x 2)) (z (+ x 1)))
       (+ y z))))
-  (assert-eq (f 5) 16 "let with computation (y=10, z=6, result=16)"))
+  (assert (= (f 5) 16) "let with computation (y=10, z=6, result=16)"))
 
 # ============================================================================
 # Bug 2: defn shorthand equivalence
@@ -73,12 +73,12 @@
 # defn ≡ def+fn
 (begin
   (defn f (x) (+ x 1))
-  (assert-eq (f 41) 42 "defn shorthand"))
+  (assert (= (f 41) 42) "defn shorthand"))
 
 # defn multi-param
 (begin
   (defn add (a b) (+ a b))
-  (assert-eq (add 10 -3) 7 "defn multi-param"))
+  (assert (= (add 10 -3) 7) "defn multi-param"))
 
 # defn recursive (factorial)
 (begin
@@ -86,14 +86,14 @@
     (if (= n 0)
         1
         (* n (fact (- n 1)))))
-  (assert-eq (fact 10) 3628800 "defn recursive factorial"))
+  (assert (= (fact 10) 3628800) "defn recursive factorial"))
 
 # defn with let body
 (begin
   (defn double (x)
     (let ((y x))
       (+ y y)))
-  (assert-eq (double 21) 42 "defn with let body"))
+  (assert (= (double 21) 42) "defn with let body"))
 
 # ============================================================================
 # Bug 3: List display (no `. ()` terminator)
@@ -102,27 +102,27 @@
 # list display no dot terminator
 (begin
   (var list-str (string (list 1 2 3)))
-  (assert-false (string/contains? list-str ". ()") "list display no dot terminator"))
+  (assert (not (string/contains? list-str ". ()")) "list display no dot terminator"))
 
 # cons chain display
 (begin
   (var cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
-  (assert-false (string/contains? cons-str ". ()") "cons chain display"))
+  (assert (not (string/contains? cons-str ". ()")) "cons chain display"))
 
 # list length matches
 (begin
-  (assert-eq (length (list 1 2 3 4 5)) 5 "list length 5")
-  (assert-eq (length (list)) 0 "empty list length"))
+  (assert (= (length (list 1 2 3 4 5)) 5) "list length 5")
+  (assert (= (length (list)) 0) "empty list length"))
 
 # nested list display
 (begin
   (var nested-str (string (list (list 1) (list 2))))
-  (assert-false (string/contains? nested-str ". ()") "nested list display"))
+  (assert (not (string/contains? nested-str ". ()")) "nested list display"))
 
 # append result display
 (begin
   (var append-str (string (append (list 1 2) (list 3 4))))
-  (assert-false (string/contains? append-str ". ()") "append result display"))
+  (assert (not (string/contains? append-str ". ()")) "append result display"))
 
 # ============================================================================
 # Bug 4: or expression corrupts return value in recursive calls
@@ -144,7 +144,7 @@
           (if (check n seen)
               (append (list n) (foo (- n 1) (cons n seen)))
               (foo (- n 1) seen)))))
-  (assert-eq (length (foo 5 (list 0))) 3 "or in recursive predicate (n=5,4,3 safe)"))
+  (assert (= (length (foo 5 (list 0))) 3) "or in recursive predicate (n=5,4,3 safe)"))
 
 # ============================================================================
 # Combined: shorthand + let + list display
@@ -158,7 +158,7 @@
         (let ((y x))
           (cons y (make-list (- x 1))))))
   (var result-str (string (make-list 5)))
-  (assert-false (string/contains? result-str ". ()") "defn + let + list display"))
+  (assert (not (string/contains? result-str ". ()")) "defn + let + list display"))
 
 # defn + recursive + list display
 (begin
@@ -167,7 +167,7 @@
         (list)
         (let ((rest-list (build (- n 1))))
           (cons n rest-list))))
-  (assert-eq (length (build 10)) 10 "defn + recursive + list display"))
+  (assert (= (length (build 10)) 10) "defn + recursive + list display"))
 
 # ============================================================================
 # Bug 5: Fiber locals corrupted after yield through nested call (tail-call-to-native)
@@ -190,8 +190,7 @@
         (let ((p (port/open "/tmp/elle_bugfix5_test" :write)))
           (do-write p "hello")
           (push result p))))
-    (assert-eq (type (get result 0)) :port
-      "fiber locals not corrupted after yield through nested tail-call-to-native")))
+    (assert (= (type (get result 0)) :port) "fiber locals not corrupted after yield through nested tail-call-to-native")))
 
 # ============================================================================
 # Bug 6: LoadLocal out-of-bounds after fiber/resume propagates SIG_IO
@@ -223,8 +222,7 @@
         (let ((port (port/open "/tmp/elle_bugfix6_test" :write)))
           (defer (port/close port)
             (put result 0 (inner-with-many-locals port "hello"))))))
-    (assert-eq (get result 0) 136
-      "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)")))
+    (assert (= (get result 0) 136) "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)")))
 
 # ============================================================================
 # Bug 7: defer + I/O inside ev/spawn uses FiberResume chain correctly
@@ -256,10 +254,8 @@
                   (put client-got 0 resp)
                   (port/close c)))))
           (port/close listener)
-          (assert-eq (get server-got 0) "ping"
-            "server received data from client (Bug 7)")
-          (assert-eq (get client-got 0) "pong"
-            "client received response from server (Bug 7)")))))) 
+          (assert (= (get server-got 0) "ping") "server received data from client (Bug 7)")
+          (assert (= (get client-got 0) "pong") "client received response from server (Bug 7)")))))) 
 
 # ============================================================================
 # Bug 612: cond/match corrupt previously-evaluated arguments in variadic calls
@@ -279,33 +275,25 @@
 # ============================================================================
 
 # cond as non-first arg to native variadic call
-(assert-eq (path/join "a" (cond (true "b"))) "a/b"
-  "cond as second arg to path/join")
+(assert (= (path/join "a" (cond (true "b"))) "a/b") "cond as second arg to path/join")
 
 # match as non-first arg to native variadic call
-(assert-eq (path/join "a" (match 1 (1 "b") (_ "c"))) "a/b"
-  "match as second arg to path/join")
+(assert (= (path/join "a" (match 1 (1 "b") (_ "c"))) "a/b") "match as second arg to path/join")
 
 # cond in second position of three-arg list
-(assert-list-eq (list 1 (cond (true 2)) 3) (list 1 2 3)
-  "cond as second arg in list")
+(assert (= (list 1 (cond (true 2)) 3) (list 1 2 3)) "cond as second arg in list")
 
 # cond in third position of three-arg list
-(assert-list-eq (list 1 2 (cond (true 3))) (list 1 2 3)
-  "cond as third arg in list")
+(assert (= (list 1 2 (cond (true 3))) (list 1 2 3)) "cond as third arg in list")
 
 # match in second position of three-arg list
-(assert-list-eq (list 1 (match 1 (1 2) (_ 0)) 3) (list 1 2 3)
-  "match as second arg in list")
+(assert (= (list 1 (match 1 (1 2) (_ 0)) 3) (list 1 2 3)) "match as second arg in list")
 
 # match in third position (wildcard arm)
-(assert-list-eq (list 1 2 (match 5 (1 "nope") (_ 3))) (list 1 2 3)
-  "match wildcard as third arg in list")
+(assert (= (list 1 2 (match 5 (1 "nope") (_ 3))) (list 1 2 3)) "match wildcard as third arg in list")
 
 # cond with multiple clauses, non-first arg
-(assert-eq (path/join "a" (cond (false "x") (true "b"))) "a/b"
-  "cond with two clauses as second arg to path/join")
+(assert (= (path/join "a" (cond (false "x") (true "b"))) "a/b") "cond with two clauses as second arg to path/join")
 
 # cond as first arg still works (was never broken)
-(assert-eq (path/join (cond (true "a")) "b") "a/b"
-  "cond as first arg to path/join (regression guard)")
+(assert (= (path/join (cond (true "a")) "b") "a/b") "cond as first arg to path/join (regression guard)")

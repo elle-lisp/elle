@@ -1,10 +1,10 @@
+(elle/epoch 1)
 ## JIT Yield Tests
 ##
 ## Tests that verify yield propagates correctly through JIT-compiled
 ## call chains. The JIT side-exits to the interpreter on yield; resume
 ## goes through the interpreter.
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # JIT yield through call
@@ -30,8 +30,8 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 42 "JIT yield through call: first")
-  (assert-eq v2 99 "JIT yield through call: second"))
+  (assert (= v1 42) "JIT yield through call: first")
+  (assert (= v2 99) "JIT yield through call: second"))
 
 # ============================================================================
 # JIT yield with resume value
@@ -53,7 +53,7 @@
 
   (def c (make-coroutine run))
   (coro/resume c)
-  (assert-eq (coro/resume c 5) 15 "JIT yield with resume value"))
+  (assert (= (coro/resume c 5) 15) "JIT yield with resume value"))
 
 # ============================================================================
 # JIT yield through multiple yields
@@ -76,10 +76,10 @@
     (assign warmup-i (+ warmup-i 1)))
 
   (def c (make-coroutine run))
-  (assert-eq (coro/resume c) 1 "JIT multiple yields: first")
-  (assert-eq (coro/resume c) 2 "JIT multiple yields: second")
-  (assert-eq (coro/resume c) 3 "JIT multiple yields: third")
-  (assert-eq (coro/resume c) 4 "JIT multiple yields: fourth"))
+  (assert (= (coro/resume c) 1) "JIT multiple yields: first")
+  (assert (= (coro/resume c) 2) "JIT multiple yields: second")
+  (assert (= (coro/resume c) 3) "JIT multiple yields: third")
+  (assert (= (coro/resume c) 4) "JIT multiple yields: fourth"))
 
 # ============================================================================
 # JIT yield stack preservation
@@ -102,8 +102,8 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 10 "JIT stack preservation: first")
-  (assert-eq v2 21 "JIT stack preservation: 1+20=21"))
+  (assert (= v1 10) "JIT stack preservation: first")
+  (assert (= v2 21) "JIT stack preservation: 1+20=21"))
 
 # ============================================================================
 # JIT yield through nested calls
@@ -127,8 +127,8 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 42 "JIT nested calls: first")
-  (assert-eq v2 99 "JIT nested calls: second"))
+  (assert (= v1 42) "JIT nested calls: first")
+  (assert (= v2 99) "JIT nested calls: second"))
 
 # ============================================================================
 # JIT yield with captures
@@ -152,8 +152,8 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 10 "JIT with captures: first")
-  (assert-eq v2 11 "JIT with captures: second"))
+  (assert (= v1 10) "JIT with captures: first")
+  (assert (= v2 11) "JIT with captures: second"))
 
 # ============================================================================
 # JIT yield locals survive yield/resume
@@ -179,8 +179,8 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 1 "JIT locals survive: first")
-  (assert-eq v2 12 "JIT locals survive: 10+2=12"))
+  (assert (= v1 1) "JIT locals survive: first")
+  (assert (= v2 12) "JIT locals survive: 10+2=12"))
 
 # ============================================================================
 # JIT yield multiple locals survive
@@ -208,5 +208,5 @@
   (def c (make-coroutine run))
   (def v1 (coro/resume c))
   (def v2 (coro/resume c))
-  (assert-eq v1 100 "JIT multiple locals: first")
-  (assert-eq v2 206 "JIT multiple locals: 1+2+3+200=206"))
+  (assert (= v1 100) "JIT multiple locals: first")
+  (assert (= v2 206) "JIT multiple locals: 1+2+3+200=206"))

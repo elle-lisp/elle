@@ -288,13 +288,16 @@ fn test_import_file_does_not_corrupt_captured_bindings() {
     // defined before the import. The bug: import-file returned `true` (a
     // boolean sentinel) for already-loaded modules instead of the module's
     // cached return value. Calling `(true)` then failed with "Cannot call true".
+    // Use a simple module that returns a struct with a function.
+    // The test verifies that a second import-file call doesn't corrupt
+    // closures that captured bindings from the first import.
     let result = eval_file_source_with_stdlib(
         r#"
-        (def {:assert-eq assert-eq} ((import-file "./examples/assertions.lisp")))
-        (defn check [] (assert-eq 1 1 "captured binding still works"))
-        (def _unused ((import-file "./examples/assertions.lisp")))
+        (def {:inc inc} ((import-file "./tests/modules/counter.lisp")))
+        (defn check [] (assert (integer? (inc)) "captured binding still works"))
+        (def _unused ((import-file "./tests/modules/counter.lisp")))
         (check)
-        (assert-eq 2 2 "direct call after second import")
+        (assert (integer? (inc)) "direct call after second import")
         true
     "#,
     );

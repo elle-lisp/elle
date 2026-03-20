@@ -37,8 +37,8 @@ In addition to the `tests/` directory:
   regression tests for the surface language.
 
 - **`tests/elle/`**: Elle test scripts that verify language behavior by running
-  Elle code directly. Each `.lisp` file is a self-contained test that imports
-  `examples/assertions.lisp` and exits non-zero on failure. Run via the
+  Elle code directly. Each `.lisp` file is a self-contained test that uses
+  the built-in `(assert)` primitive and exits non-zero on failure. Run via the
   `integration::elle_scripts` harness. See `docs/testing.md` for the decision
   tree on what goes here vs in Rust tests.
 

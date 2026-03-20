@@ -275,10 +275,11 @@ later.
 
 ## Where to start
 
-1. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
-2. Read an example in `examples/` to understand the surface syntax.
-3. Read `value.rs` to understand runtime representation.
-4. Read a failing test to understand what's expected.
+1. Read [`QUICKSTART.md`](QUICKSTART.md) — complete language reference for writing Elle code.
+2. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
+3. Read an example in `examples/` to understand the surface syntax.
+4. Read `value.rs` to understand runtime representation.
+5. Read a failing test to understand what's expected.
 
 When in doubt, run the tests.
 
