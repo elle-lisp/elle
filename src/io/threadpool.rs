@@ -53,6 +53,11 @@ pub(super) enum PoolOp {
     },
     /// Run an arbitrary closure. Returns (result_code, data).
     Task(Box<dyn FnOnce() -> (i32, Vec<u8>) + Send>),
+    /// Resolve a hostname via getaddrinfo(3). Returns IP addresses as
+    /// newline-separated strings in `data`, result_code 0 on success.
+    Resolve {
+        hostname: String,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -218,7 +223,7 @@ impl ThreadPoolBackend {
                     port,
                     data,
                 } => {
-                    let addr_str = format!("{}:{}", addr, port);
+                    let addr_str = crate::io::sockaddr::format_host_port(&addr, port);
                     match addr_str.parse::<std::net::SocketAddr>() {
                         Ok(dest) => {
                             let (sa_bytes, sa_len) = crate::io::sockaddr::build_inet(&dest);
@@ -327,6 +332,21 @@ impl ThreadPoolBackend {
                     }
                 }
                 PoolOp::Task(closure) => closure(),
+                PoolOp::Resolve { hostname } => {
+                    use std::net::ToSocketAddrs;
+                    // getaddrinfo needs a "host:port" string; port 0 gets all addresses.
+                    match (hostname.as_str(), 0u16).to_socket_addrs() {
+                        Ok(addrs) => {
+                            let ips: Vec<String> = addrs.map(|a| a.ip().to_string()).collect();
+                            if ips.is_empty() {
+                                (-1, b"getaddrinfo: no addresses found".to_vec())
+                            } else {
+                                (0, ips.join("\n").into_bytes())
+                            }
+                        }
+                        Err(e) => (-1, format!("getaddrinfo: {}", e).into_bytes()),
+                    }
+                }
             };
             let _ = sender.send(PoolCompletion {
                 id,

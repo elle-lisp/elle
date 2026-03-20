@@ -223,7 +223,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 ## Types
 
-Every Elle value is a NaN-boxed 64-bit word. Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
+Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
 
 ### Immediate types
 
@@ -504,8 +504,6 @@ Exactly two values are falsy. Everything else is truthy.
   - **Zero-copy inter-fiber sharing:** Yielding fibers route allocations to a shared arena; parents read directly from shared memory. No deep copy, no serialization.
   - **Escape-analysis-driven scope reclamation:** Compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it frees allocations at scope exit.
 
-- **NaN-boxed values: 8 bytes per value.** Integers, floats, booleans, nil, symbols, keywords, and short strings (≤6 bytes) fit inline. Everything else is a pointer into a heap.
-
 - **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Memory is reclaimed at scope exit or fiber death, without pausing the world.
 
 ## JIT
@@ -577,7 +575,7 @@ Exactly two values are falsy. Everything else is truthy.
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **21 plugins ship with Elle:**
+- **23 plugins ship with Elle:**
 
   | Plugin | Description |
   |--------|-------------|
@@ -598,7 +596,9 @@ Exactly two values are falsy. Everything else is truthy.
   | `semver` | Semantic version parsing and comparison |
   | `sqlite` | SQLite database |
   | `syn` | Rust source code parsing |
+  | `tls` | TLS client and server via rustls |
   | `toml` | TOML parsing and generation |
+  | `tree-sitter` | Multi-language parsing and structural queries |
   | `uuid` | UUID generation |
   | `xml` | XML parsing and generation |
   | `yaml` | YAML parsing and generation |

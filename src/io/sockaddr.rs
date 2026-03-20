@@ -82,6 +82,17 @@ pub(crate) fn build_unix(path: &str) -> Result<(libc::sockaddr_un, libc::socklen
     }
 }
 
+/// Format a host and port as a string suitable for `TcpStream::connect`
+/// and `SocketAddr::parse`. IPv6 addresses are wrapped in brackets.
+pub(crate) fn format_host_port(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        // IPv6 — needs brackets
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    }
+}
+
 // ── Formatting ─────────────────────────────────────────────────────
 
 /// Format a `sockaddr_storage` as `"ip:port"`, `"[ipv6]:port"`, or unix path.
@@ -274,5 +285,20 @@ mod tests {
         let (ip, port) = parse(&storage, len);
         assert_eq!(ip, "10.0.0.1");
         assert_eq!(port, 3000);
+    }
+
+    #[test]
+    fn test_format_host_port_v4() {
+        assert_eq!(format_host_port("127.0.0.1", 80), "127.0.0.1:80");
+    }
+
+    #[test]
+    fn test_format_host_port_v6() {
+        assert_eq!(format_host_port("::1", 443), "[::1]:443");
+    }
+
+    #[test]
+    fn test_format_host_port_hostname() {
+        assert_eq!(format_host_port("example.com", 8080), "example.com:8080");
     }
 }

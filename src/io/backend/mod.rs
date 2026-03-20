@@ -117,6 +117,22 @@ impl SyncBackend {
             return self.execute_open(path, flags, mode, direction, encoding);
         }
 
+        // Resolve is portless — blocking getaddrinfo is fine in the sync backend.
+        if let IoOp::Resolve { ref hostname } = request.op {
+            use std::net::ToSocketAddrs;
+            return match (hostname.as_str(), 0u16).to_socket_addrs() {
+                Ok(addrs) => {
+                    let ips: Vec<Value> =
+                        addrs.map(|a| Value::string(a.ip().to_string())).collect();
+                    (SIG_OK, Value::array(ips))
+                }
+                Err(e) => (
+                    SIG_ERROR,
+                    error_val("dns-error", format!("resolve {}: {}", hostname, e)),
+                ),
+            };
+        }
+
         // All remaining ops require a valid port.
         let port = match request.port.as_external::<Port>() {
             Some(p) => p,
@@ -181,7 +197,8 @@ impl SyncBackend {
                 | IoOp::Spawn(_)
                 | IoOp::ProcessWait
                 | IoOp::Open { .. }
-                | IoOp::Task(_) => unreachable!(), // handled above
+                | IoOp::Task(_)
+                | IoOp::Resolve { .. } => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),

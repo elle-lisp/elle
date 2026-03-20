@@ -403,6 +403,18 @@ fn prim_udp_recv_from(args: &[Value]) -> (SignalBits, Value) {
 // PRIMITIVES table
 // ---------------------------------------------------------------------------
 
+/// (sys/resolve hostname) → array of IP address strings
+fn prim_sys_resolve(args: &[Value]) -> (SignalBits, Value) {
+    let hostname = match extract_string(&args[0], "hostname", "sys/resolve") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::portless(IoOp::Resolve { hostname }),
+    )
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     // TCP
     PrimitiveDef {
@@ -496,6 +508,21 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["socket", "count"],
         category: "udp",
         example: "(udp/recv-from sock 1024)",
+        aliases: &[],
+    },
+    // DNS resolution
+    PrimitiveDef {
+        name: "sys/resolve",
+        func: prim_sys_resolve,
+        arity: Arity::Exact(1),
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",
+        params: &["hostname"],
+        category: "sys",
+        example: "(sys/resolve \"localhost\")",
         aliases: &[],
     },
 ];

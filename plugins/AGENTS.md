@@ -36,6 +36,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `semver/` | Semantic version parsing and comparison | `semver/parse`, `semver/valid?`, `semver/compare`, `semver/satisfies?`, `semver/increment` |
 | `sqlite/` | SQLite database | `db/open`, `db/query`, `db/exec` |
 | `toml/` | TOML parsing and serialization | `toml/parse`, `toml/encode` |
+| `tls/` | TLS client and server | `tls/client-state`, `tls/server-config`, `tls/server-state`, `tls/process`, `tls/encrypt`, `tls/get-outgoing`, `tls/get-plaintext`, `tls/read-plaintext`, `tls/plaintext-indexof`, `tls/handshake-complete?`, `tls/close-notify` |
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 | `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
@@ -144,6 +145,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `semver/` | Semantic version parsing and comparison |
 | `sqlite/` | SQLite database access |
 | `syn/` | Rust syntax parsing via the `syn` crate |
+| `tls/` | TLS client and server via rustls |
 | `toml/` | TOML parsing and serialization |
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |

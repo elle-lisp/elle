@@ -686,7 +686,9 @@ cargo build --release -p elle-crypto
 # (bytes->hex is an alias for seq->hex and still works)
 ```
 
-### Available Plugins
+### Selected Plugins
+
+Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-crypto` — SHA-2 hashing and HMAC
 
@@ -747,6 +749,30 @@ cargo build --release -p elle-crypto
 # Keys: :render :render-to-file
 ((get selkie :render) "graph TD\n  A --> B")
 ((get selkie :render-to-file) "graph TD\n  A --> B" "out.svg")
+```
+
+#### `elle-tls` — TLS client and server via rustls
+
+```lisp
+(import "target/release/libelle_tls.so")
+(def tls ((import-file "lib/tls.lisp")))
+# Client: tls:connect, tls:read, tls:write, tls:read-all, tls:close
+# Server: tls:server-config, tls:accept
+(ev/run
+  (fn []
+    (let ((conn (tls:connect "example.com" 443)))
+      (defer (tls:close conn)
+        (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+        (print (string (tls:read-all conn)))))))
+```
+
+#### `elle-tree-sitter` — Multi-language parsing and structural queries
+
+```lisp
+(def ts (import "target/release/libelle_tree_sitter.so"))
+# Keys: :parse :query :root :children :text :kind :node-at :walk
+(def tree ((get ts :parse) :rust "fn main() { 42 }"))
+(def matches ((get ts :query) tree "(integer_literal) @num"))
 ```
 
 ### Plugin Gotchas
