@@ -29,33 +29,92 @@ pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn require_arity(name: &str, args: &[Value], expected: usize) -> Result<(), (SignalBits, Value)> {
+    if args.len() != expected {
+        Err((
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "{}: expected {} argument{}, got {}",
+                    name,
+                    expected,
+                    if expected == 1 { "" } else { "s" },
+                    args.len()
+                ),
+            ),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn require_regex<'a>(name: &str, v: &'a Value) -> Result<&'a Regex, (SignalBits, Value)> {
+    v.as_external::<Regex>().ok_or_else(|| {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("{}: expected regex, got {}", name, v.type_name()),
+            ),
+        )
+    })
+}
+
+fn require_string(name: &str, v: &Value) -> Result<String, (SignalBits, Value)> {
+    v.with_string(|s| s.to_string()).ok_or_else(|| {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("{}: expected string, got {}", name, v.type_name()),
+            ),
+        )
+    })
+}
+
+fn match_struct(m: regex::Match<'_>) -> Value {
+    let mut fields = BTreeMap::new();
+    fields.insert(TableKey::Keyword("match".into()), Value::string(m.as_str()));
+    fields.insert(
+        TableKey::Keyword("start".into()),
+        Value::int(m.start() as i64),
+    );
+    fields.insert(TableKey::Keyword("end".into()), Value::int(m.end() as i64));
+    Value::struct_from(fields)
+}
+
+fn captures_struct(re: &Regex, caps: &regex::Captures<'_>) -> Value {
+    let mut fields = BTreeMap::new();
+    for (i, m) in caps.iter().enumerate() {
+        if let Some(m) = m {
+            let key = TableKey::Keyword(format!("{}", i));
+            fields.insert(key, Value::string(m.as_str()));
+        }
+    }
+    for name in re.capture_names().flatten() {
+        if let Some(m) = caps.name(name) {
+            let key = TableKey::Keyword(name.to_string());
+            fields.insert(key, Value::string(m.as_str()));
+        }
+    }
+    Value::struct_from(fields)
+}
+
+// ---------------------------------------------------------------------------
 // Primitives
 // ---------------------------------------------------------------------------
 
 fn prim_regex_compile(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("regex/compile: expected 1 argument, got {}", args.len()),
-            ),
-        );
+    if let Err(e) = require_arity("regex/compile", args, 1) {
+        return e;
     }
-    let pattern = match args[0].with_string(|s| s.to_string()) {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "regex/compile: expected string, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let pattern = match require_string("regex/compile", &args[0]) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     match Regex::new(&pattern) {
         Ok(re) => (SIG_OK, Value::external("regex", re)),
@@ -67,208 +126,149 @@ fn prim_regex_compile(args: &[Value]) -> (SignalBits, Value) {
 }
 
 fn prim_regex_match(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("regex/match?: expected 2 arguments, got {}", args.len()),
-            ),
-        );
+    if let Err(e) = require_arity("regex/match?", args, 2) {
+        return e;
     }
-    let re = match args[0].as_external::<Regex>() {
-        Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("regex/match?: expected regex, got {}", args[0].type_name()),
-                ),
-            );
-        }
+    let re = match require_regex("regex/match?", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
     };
-    let text = match args[1].with_string(|s| s.to_string()) {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("regex/match?: expected string, got {}", args[1].type_name()),
-                ),
-            );
-        }
+    let text = match require_string("regex/match?", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     (SIG_OK, Value::bool(re.is_match(&text)))
 }
 
 fn prim_regex_find(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("regex/find: expected 2 arguments, got {}", args.len()),
-            ),
-        );
+    if let Err(e) = require_arity("regex/find", args, 2) {
+        return e;
     }
-    let re = match args[0].as_external::<Regex>() {
-        Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("regex/find: expected regex, got {}", args[0].type_name()),
-                ),
-            );
-        }
+    let re = match require_regex("regex/find", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
     };
-    let text = match args[1].with_string(|s| s.to_string()) {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("regex/find: expected string, got {}", args[1].type_name()),
-                ),
-            );
-        }
+    let text = match require_string("regex/find", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     match re.find(&text) {
-        Some(m) => {
-            let mut fields = BTreeMap::new();
-            fields.insert(TableKey::Keyword("match".into()), Value::string(m.as_str()));
-            fields.insert(
-                TableKey::Keyword("start".into()),
-                Value::int(m.start() as i64),
-            );
-            fields.insert(TableKey::Keyword("end".into()), Value::int(m.end() as i64));
-            (SIG_OK, Value::struct_from(fields))
-        }
+        Some(m) => (SIG_OK, match_struct(m)),
         None => (SIG_OK, Value::NIL),
     }
 }
 
 fn prim_regex_find_all(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("regex/find-all: expected 2 arguments, got {}", args.len()),
-            ),
-        );
+    if let Err(e) = require_arity("regex/find-all", args, 2) {
+        return e;
     }
-    let re = match args[0].as_external::<Regex>() {
-        Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "regex/find-all: expected regex, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let re = match require_regex("regex/find-all", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
     };
-    let text = match args[1].with_string(|s| s.to_string()) {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "regex/find-all: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
+    let text = match require_string("regex/find-all", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
-    let matches: Vec<Value> = re
-        .find_iter(&text)
-        .map(|m| {
-            let mut fields = BTreeMap::new();
-            fields.insert(TableKey::Keyword("match".into()), Value::string(m.as_str()));
-            fields.insert(
-                TableKey::Keyword("start".into()),
-                Value::int(m.start() as i64),
-            );
-            fields.insert(TableKey::Keyword("end".into()), Value::int(m.end() as i64));
-            Value::struct_from(fields)
-        })
-        .collect();
+    let matches: Vec<Value> = re.find_iter(&text).map(match_struct).collect();
     (SIG_OK, elle::list(matches))
 }
 
 fn prim_regex_captures(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("regex/captures: expected 2 arguments, got {}", args.len()),
-            ),
-        );
+    if let Err(e) = require_arity("regex/captures", args, 2) {
+        return e;
     }
-    let re = match args[0].as_external::<Regex>() {
-        Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "regex/captures: expected regex, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            );
-        }
+    let re = match require_regex("regex/captures", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
     };
-    let text = match args[1].with_string(|s| s.to_string()) {
-        Some(s) => s,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "regex/captures: expected string, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
+    let text = match require_string("regex/captures", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     match re.captures(&text) {
-        Some(caps) => {
-            let mut fields = BTreeMap::new();
-            // Numbered captures
-            for (i, m) in caps.iter().enumerate() {
-                if let Some(m) = m {
-                    let key = TableKey::Keyword(format!("{}", i));
-                    fields.insert(key, Value::string(m.as_str()));
-                }
-            }
-            // Named captures
-            for name in re.capture_names().flatten() {
-                if let Some(m) = caps.name(name) {
-                    let key = TableKey::Keyword(name.to_string());
-                    fields.insert(key, Value::string(m.as_str()));
-                }
-            }
-            (SIG_OK, Value::struct_from(fields))
-        }
+        Some(caps) => (SIG_OK, captures_struct(re, &caps)),
         None => (SIG_OK, Value::NIL),
     }
+}
+
+fn prim_regex_captures_all(args: &[Value]) -> (SignalBits, Value) {
+    if let Err(e) = require_arity("regex/captures-all", args, 2) {
+        return e;
+    }
+    let re = match require_regex("regex/captures-all", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let text = match require_string("regex/captures-all", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let results: Vec<Value> = re
+        .captures_iter(&text)
+        .map(|caps| captures_struct(re, &caps))
+        .collect();
+    (SIG_OK, elle::list(results))
+}
+
+fn prim_regex_replace(args: &[Value]) -> (SignalBits, Value) {
+    if let Err(e) = require_arity("regex/replace", args, 3) {
+        return e;
+    }
+    let re = match require_regex("regex/replace", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let text = match require_string("regex/replace", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let replacement = match require_string("regex/replace", &args[2]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    (
+        SIG_OK,
+        Value::string(re.replace(&text, replacement.as_str())),
+    )
+}
+
+fn prim_regex_replace_all(args: &[Value]) -> (SignalBits, Value) {
+    if let Err(e) = require_arity("regex/replace-all", args, 3) {
+        return e;
+    }
+    let re = match require_regex("regex/replace-all", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let text = match require_string("regex/replace-all", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let replacement = match require_string("regex/replace-all", &args[2]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    (
+        SIG_OK,
+        Value::string(re.replace_all(&text, replacement.as_str())),
+    )
+}
+
+fn prim_regex_split(args: &[Value]) -> (SignalBits, Value) {
+    if let Err(e) = require_arity("regex/split", args, 2) {
+        return e;
+    }
+    let re = match require_regex("regex/split", &args[0]) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    let text = match require_string("regex/split", &args[1]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let parts: Vec<Value> = re.split(&text).map(Value::string).collect();
+    (SIG_OK, elle::list(parts))
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +329,50 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         params: &["regex", "text"],
         category: "regex",
         example: r#"(regex/captures (regex/compile "(?P<year>\\d{4})-(?P<month>\\d{2})") "2024-01-15")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "regex/captures-all",
+        func: prim_regex_captures_all,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Capture groups from all matches. Returns a list of capture structs.",
+        params: &["regex", "text"],
+        category: "regex",
+        example: r#"(regex/captures-all (regex/compile "(\\d+)-(\\w+)") "1-a 2-b 3-c")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "regex/replace",
+        func: prim_regex_replace,
+        signal: Signal::errors(),
+        arity: Arity::Exact(3),
+        doc: "Replace the first match in text. Supports $1, $name backreferences in replacement.",
+        params: &["regex", "text", "replacement"],
+        category: "regex",
+        example: r#"(regex/replace (regex/compile "\\d+") "a1b2" "N")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "regex/replace-all",
+        func: prim_regex_replace_all,
+        signal: Signal::errors(),
+        arity: Arity::Exact(3),
+        doc: "Replace all matches in text. Supports $1, $name backreferences in replacement.",
+        params: &["regex", "text", "replacement"],
+        category: "regex",
+        example: r#"(regex/replace-all (regex/compile "\\d+") "a1b2" "N")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "regex/split",
+        func: prim_regex_split,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Split a string by regex pattern. Returns a list of strings.",
+        params: &["regex", "text"],
+        category: "regex",
+        example: r#"(regex/split (regex/compile "[,;\\s]+") "a,b; c  d")"#,
         aliases: &[],
     },
 ];

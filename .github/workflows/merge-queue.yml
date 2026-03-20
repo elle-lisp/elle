@@ -12,23 +12,6 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  examples:
-    name: Examples
-    runs-on: ubuntu-latest
-    env:
-      PROPTEST_CASES: 1
-      RUST_TEST_THREADS: 2
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install GNU parallel
-        run: sudo apt-get install -y parallel
-      - name: Build release binary
-        run: cargo build --release
-      - name: Run examples and Elle script tests
-        run: make smoke
-
   build-plugins:
     name: Build Plugin (${{ matrix.plugin }})
     runs-on: ubuntu-latest
@@ -37,18 +20,25 @@ jobs:
       matrix:
         plugin:
           - base64
+          - clap
           - compress
           - crypto
           - csv
+          - git
           - glob
+          - jiff
+          - msgpack
           - oxigraph
+          - protobuf
           - random
           - regex
           - selkie
           - semver
           - sqlite
           - syn
+          - tls
           - toml
+          - tree-sitter
           - uuid
           - xml
           - yaml
@@ -67,10 +57,21 @@ jobs:
           path: target/release/libelle_${{ matrix.plugin }}.so
           retention-days: 1
 
-  plugin-tests:
-    name: Plugin Tests
+  check-plugin-list:
+    name: Plugin List Sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PLUGINS matches Cargo.toml
+        run: make check-plugin-list
+
+  tests:
+    name: Elle & Plugin Tests
     needs: build-plugins
     runs-on: ubuntu-latest
+    env:
+      PROPTEST_CASES: 1
+      RUST_TEST_THREADS: 2
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -85,23 +86,25 @@ jobs:
           pattern: plugin-*
           path: target/release/
           merge-multiple: true
+      - name: Run examples and Elle script tests
+        run: make smoke
       - name: Run plugin tests
         run: make plugin-tests
 
   all-checks:
     name: All Checks Passed
-    needs: [examples, build-plugins, plugin-tests]
+    needs: [build-plugins, check-plugin-list, tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check examples
-        if: needs.examples.result == 'failure'
-        run: exit 1
       - name: Check plugin builds
         if: needs.build-plugins.result == 'failure'
         run: exit 1
-      - name: Check plugin tests
-        if: needs.plugin-tests.result == 'failure'
+      - name: Check plugin list
+        if: needs.check-plugin-list.result == 'failure'
+        run: exit 1
+      - name: Check tests
+        if: needs.tests.result == 'failure'
         run: exit 1
       - name: Success
         run: echo "All checks passed"

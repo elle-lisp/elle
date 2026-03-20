@@ -36,3 +36,7 @@ Produces `target/debug/libelle_regex.so` (or `target/release/libelle_regex.so`).
 | `regex/find` | regex, text | `{:match :start :end}` or nil |
 | `regex/find-all` | regex, text | list of match structs |
 | `regex/captures` | regex, text | struct with numbered/named groups, or nil |
+| `regex/captures-all` | regex, text | list of capture structs for all matches |
+| `regex/replace` | regex, text, replacement | string with first match replaced |
+| `regex/replace-all` | regex, text, replacement | string with all matches replaced |
+| `regex/split` | regex, text | list of strings split by pattern |
