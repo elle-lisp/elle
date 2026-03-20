@@ -19,6 +19,7 @@ members = [
     "plugins/sqlite",
     "plugins/syn",
     "plugins/toml",
+    "plugins/tree-sitter",
     "plugins/uuid",
     "plugins/xml",
     "plugins/yaml",
