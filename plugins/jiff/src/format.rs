@@ -1,7 +1,9 @@
 //! Formatting: temporal/string, temporal/format.
 //! Epoch conversions: timestamp/->epoch, timestamp/->epoch-millis, etc.
 
-use crate::{jiff_err, jiff_val, require_int, require_jiff, require_string, require_variant, JiffValue};
+use crate::{
+    jiff_err, jiff_val, require_int, require_jiff, require_string, require_variant, JiffValue,
+};
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -70,7 +72,10 @@ fn prim_ts_epoch(args: &[Value]) -> (SignalBits, Value) {
         Ok(ts) => ts,
         Err(e) => return e,
     };
-    (SIG_OK, Value::float(ts.as_second() as f64 + ts.subsec_nanosecond() as f64 / 1e9))
+    (
+        SIG_OK,
+        Value::float(ts.as_second() as f64 + ts.subsec_nanosecond() as f64 / 1e9),
+    )
 }
 
 fn prim_ts_epoch_millis(args: &[Value]) -> (SignalBits, Value) {

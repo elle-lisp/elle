@@ -1,7 +1,10 @@
 //! Arithmetic: add/sub for all temporal types, since/until, span ops.
 //! Comparison: temporal/compare, temporal/before?, temporal/after?, temporal/equal?
 
-use crate::{as_jiff, jiff_err, jiff_val, require_int, require_jiff, require_keyword, require_variant, JiffValue};
+use crate::{
+    as_jiff, jiff_err, jiff_val, require_int, require_jiff, require_keyword, require_variant,
+    JiffValue,
+};
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -14,7 +17,10 @@ use jiff::Unit;
 // ---------------------------------------------------------------------------
 
 /// Extract a Span or SignedDuration for arithmetic.
-fn require_span_like<'a>(v: &'a Value, fn_name: &str) -> Result<&'a JiffValue, (SignalBits, Value)> {
+fn require_span_like<'a>(
+    v: &'a Value,
+    fn_name: &str,
+) -> Result<&'a JiffValue, (SignalBits, Value)> {
     match as_jiff(v) {
         Some(jv @ JiffValue::Span(_)) | Some(jv @ JiffValue::SignedDuration(_)) => Ok(jv),
         Some(other) => Err((
@@ -92,10 +98,34 @@ arith_prim!(prim_date_add, "date/add", Date, "date", checked_add);
 arith_prim!(prim_date_sub, "date/sub", Date, "date", checked_sub);
 arith_prim!(prim_time_add, "time/add", Time, "time", checked_add);
 arith_prim!(prim_time_sub, "time/sub", Time, "time", checked_sub);
-arith_prim!(prim_datetime_add, "datetime/add", DateTime, "datetime", checked_add);
-arith_prim!(prim_datetime_sub, "datetime/sub", DateTime, "datetime", checked_sub);
-arith_prim!(prim_timestamp_add, "timestamp/add", Timestamp, "timestamp", checked_add);
-arith_prim!(prim_timestamp_sub, "timestamp/sub", Timestamp, "timestamp", checked_sub);
+arith_prim!(
+    prim_datetime_add,
+    "datetime/add",
+    DateTime,
+    "datetime",
+    checked_add
+);
+arith_prim!(
+    prim_datetime_sub,
+    "datetime/sub",
+    DateTime,
+    "datetime",
+    checked_sub
+);
+arith_prim!(
+    prim_timestamp_add,
+    "timestamp/add",
+    Timestamp,
+    "timestamp",
+    checked_add
+);
+arith_prim!(
+    prim_timestamp_sub,
+    "timestamp/sub",
+    Timestamp,
+    "timestamp",
+    checked_sub
+);
 
 // Zoned is boxed, needs special handling
 fn prim_zoned_add(args: &[Value]) -> (SignalBits, Value) {
@@ -163,7 +193,15 @@ fn prim_timestamp_since(args: &[Value]) -> (SignalBits, Value) {
         };
         let unit = match parse_unit(&unit_kw) {
             Some(u) => u,
-            None => return (SIG_ERROR, error_val("jiff-error", format!("timestamp/since: unknown unit {:?}", unit_kw))),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "jiff-error",
+                        format!("timestamp/since: unknown unit {:?}", unit_kw),
+                    ),
+                )
+            }
         };
         match a.since((unit, b)) {
             Ok(s) => (SIG_OK, jiff_val(JiffValue::Span(s))),
@@ -192,7 +230,15 @@ fn prim_timestamp_until(args: &[Value]) -> (SignalBits, Value) {
         };
         let unit = match parse_unit(&unit_kw) {
             Some(u) => u,
-            None => return (SIG_ERROR, error_val("jiff-error", format!("timestamp/until: unknown unit {:?}", unit_kw))),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "jiff-error",
+                        format!("timestamp/until: unknown unit {:?}", unit_kw),
+                    ),
+                )
+            }
         };
         match a.until((unit, b)) {
             Ok(s) => (SIG_OK, jiff_val(JiffValue::Span(s))),
@@ -221,7 +267,15 @@ fn prim_zoned_until(args: &[Value]) -> (SignalBits, Value) {
         };
         let unit = match parse_unit(&unit_kw) {
             Some(u) => u,
-            None => return (SIG_ERROR, error_val("jiff-error", format!("zoned/until: unknown unit {:?}", unit_kw))),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "jiff-error",
+                        format!("zoned/until: unknown unit {:?}", unit_kw),
+                    ),
+                )
+            }
         };
         match a.as_ref().until((unit, b.as_ref())) {
             Ok(s) => (SIG_OK, jiff_val(JiffValue::Span(s))),
@@ -299,7 +353,10 @@ fn prim_span_total(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("jiff-error", format!("span-total: unknown unit {:?}", unit_kw)),
+                error_val(
+                    "jiff-error",
+                    format!("span-total: unknown unit {:?}", unit_kw),
+                ),
             )
         }
     };
@@ -314,33 +371,59 @@ fn prim_span_total(args: &[Value]) -> (SignalBits, Value) {
 // ---------------------------------------------------------------------------
 
 fn prim_sd_add(args: &[Value]) -> (SignalBits, Value) {
-    let a = match require_variant!(&args[0], SignedDuration, "signed-duration/add", "signed-duration") {
+    let a = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/add",
+        "signed-duration"
+    ) {
         Ok(d) => *d,
         Err(e) => return e,
     };
-    let b = match require_variant!(&args[1], SignedDuration, "signed-duration/add", "signed-duration") {
+    let b = match require_variant!(
+        &args[1],
+        SignedDuration,
+        "signed-duration/add",
+        "signed-duration"
+    ) {
         Ok(d) => *d,
         Err(e) => return e,
     };
     match a.checked_add(b) {
         Some(r) => (SIG_OK, jiff_val(JiffValue::SignedDuration(r))),
-        None => (SIG_ERROR, error_val("jiff-error", "signed-duration/add: overflow")),
+        None => (
+            SIG_ERROR,
+            error_val("jiff-error", "signed-duration/add: overflow"),
+        ),
     }
 }
 
 fn prim_sd_negate(args: &[Value]) -> (SignalBits, Value) {
-    let d = match require_variant!(&args[0], SignedDuration, "signed-duration/negate", "signed-duration") {
+    let d = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/negate",
+        "signed-duration"
+    ) {
         Ok(d) => *d,
         Err(e) => return e,
     };
     match d.checked_neg() {
         Some(r) => (SIG_OK, jiff_val(JiffValue::SignedDuration(r))),
-        None => (SIG_ERROR, error_val("jiff-error", "signed-duration/negate: overflow")),
+        None => (
+            SIG_ERROR,
+            error_val("jiff-error", "signed-duration/negate: overflow"),
+        ),
     }
 }
 
 fn prim_sd_abs(args: &[Value]) -> (SignalBits, Value) {
-    let d = match require_variant!(&args[0], SignedDuration, "signed-duration/abs", "signed-duration") {
+    let d = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/abs",
+        "signed-duration"
+    ) {
         Ok(d) => *d,
         Err(e) => return e,
     };

@@ -32,10 +32,7 @@ fn prim_datetime_p(args: &[Value]) -> (SignalBits, Value) {
 fn prim_timestamp_p(args: &[Value]) -> (SignalBits, Value) {
     (
         SIG_OK,
-        Value::bool(matches!(
-            as_jiff(&args[0]),
-            Some(JiffValue::Timestamp(_))
-        )),
+        Value::bool(matches!(as_jiff(&args[0]), Some(JiffValue::Timestamp(_)))),
     )
 }
 

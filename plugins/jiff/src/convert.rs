@@ -1,7 +1,10 @@
 //! Type conversions: between temporal types, zoned/in-tz, span->signed-duration.
 //! Rounding: temporal/round.
 
-use crate::{as_jiff, jiff_err, jiff_val, require_jiff, require_string, require_variant, struct_get_kw, JiffValue};
+use crate::{
+    as_jiff, jiff_err, jiff_val, require_jiff, require_string, require_variant, struct_get_kw,
+    JiffValue,
+};
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -22,14 +25,20 @@ fn prim_to_date(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("date/->date: expected date, datetime, or zoned, got {}", other.type_name()),
+                format!(
+                    "date/->date: expected date, datetime, or zoned, got {}",
+                    other.type_name()
+                ),
             ),
         ),
         None => (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("date/->date: expected temporal value, got {}", args[0].type_name()),
+                format!(
+                    "date/->date: expected temporal value, got {}",
+                    args[0].type_name()
+                ),
             ),
         ),
     }
@@ -45,14 +54,20 @@ fn prim_to_time(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("time/->time: expected time, datetime, or zoned, got {}", other.type_name()),
+                format!(
+                    "time/->time: expected time, datetime, or zoned, got {}",
+                    other.type_name()
+                ),
             ),
         ),
         None => (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("time/->time: expected temporal value, got {}", args[0].type_name()),
+                format!(
+                    "time/->time: expected temporal value, got {}",
+                    args[0].type_name()
+                ),
             ),
         ),
     }
@@ -74,21 +89,30 @@ fn prim_to_datetime(args: &[Value]) -> (SignalBits, Value) {
     match as_jiff(&args[0]) {
         Some(JiffValue::DateTime(dt)) => (SIG_OK, jiff_val(JiffValue::DateTime(*dt))),
         Some(JiffValue::Zoned(z)) => (SIG_OK, jiff_val(JiffValue::DateTime(z.datetime()))),
-        Some(JiffValue::Date(d)) => {
-            (SIG_OK, jiff_val(JiffValue::DateTime(d.to_datetime(jiff::civil::Time::midnight()))))
-        }
+        Some(JiffValue::Date(d)) => (
+            SIG_OK,
+            jiff_val(JiffValue::DateTime(
+                d.to_datetime(jiff::civil::Time::midnight()),
+            )),
+        ),
         Some(other) => (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("datetime/->datetime: expected datetime, zoned, or date, got {}", other.type_name()),
+                format!(
+                    "datetime/->datetime: expected datetime, zoned, or date, got {}",
+                    other.type_name()
+                ),
             ),
         ),
         None => (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("datetime/->datetime: expected temporal value, got {}", args[0].type_name()),
+                format!(
+                    "datetime/->datetime: expected temporal value, got {}",
+                    args[0].type_name()
+                ),
             ),
         ),
     }
@@ -103,14 +127,20 @@ fn prim_to_timestamp(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("timestamp/->timestamp: expected timestamp or zoned, got {}", other.type_name()),
+                format!(
+                    "timestamp/->timestamp: expected timestamp or zoned, got {}",
+                    other.type_name()
+                ),
             ),
         ),
         None => (
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("timestamp/->timestamp: expected temporal value, got {}", args[0].type_name()),
+                format!(
+                    "timestamp/->timestamp: expected temporal value, got {}",
+                    args[0].type_name()
+                ),
             ),
         ),
     }
@@ -182,7 +212,10 @@ fn prim_temporal_round(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("jiff-error", "temporal/round: opts must contain :unit keyword"),
+                error_val(
+                    "jiff-error",
+                    "temporal/round: opts must contain :unit keyword",
+                ),
             )
         }
     };
@@ -200,7 +233,10 @@ fn prim_temporal_round(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("jiff-error", format!("temporal/round: unknown unit {:?}", unit_name)),
+                error_val(
+                    "jiff-error",
+                    format!("temporal/round: unknown unit {:?}", unit_name),
+                ),
             )
         }
     };

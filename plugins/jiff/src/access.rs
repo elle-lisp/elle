@@ -305,7 +305,11 @@ time_accessor!(prim_time_second, "time/second", second);
 time_accessor!(prim_time_millisecond, "time/millisecond", millisecond);
 time_accessor!(prim_time_microsecond, "time/microsecond", microsecond);
 time_accessor!(prim_time_nanosecond, "time/nanosecond", nanosecond);
-time_accessor!(prim_time_subsec_nanosecond, "time/subsec-nanosecond", subsec_nanosecond);
+time_accessor!(
+    prim_time_subsec_nanosecond,
+    "time/subsec-nanosecond",
+    subsec_nanosecond
+);
 
 // ---------------------------------------------------------------------------
 // Zoned-specific accessors
@@ -316,7 +320,10 @@ fn prim_zoned_tz_name(args: &[Value]) -> (SignalBits, Value) {
         Ok(z) => z,
         Err(e) => return e,
     };
-    (SIG_OK, Value::string(z.time_zone().iana_name().unwrap_or("unknown")))
+    (
+        SIG_OK,
+        Value::string(z.time_zone().iana_name().unwrap_or("unknown")),
+    )
 }
 
 fn prim_zoned_utc_offset(args: &[Value]) -> (SignalBits, Value) {
@@ -332,7 +339,12 @@ fn prim_zoned_utc_offset(args: &[Value]) -> (SignalBits, Value) {
 // ---------------------------------------------------------------------------
 
 fn prim_sd_secs(args: &[Value]) -> (SignalBits, Value) {
-    let d = match require_variant!(&args[0], SignedDuration, "signed-duration/secs", "signed-duration") {
+    let d = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/secs",
+        "signed-duration"
+    ) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -340,7 +352,12 @@ fn prim_sd_secs(args: &[Value]) -> (SignalBits, Value) {
 }
 
 fn prim_sd_nanos(args: &[Value]) -> (SignalBits, Value) {
-    let d = match require_variant!(&args[0], SignedDuration, "signed-duration/nanos", "signed-duration") {
+    let d = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/nanos",
+        "signed-duration"
+    ) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -348,7 +365,12 @@ fn prim_sd_nanos(args: &[Value]) -> (SignalBits, Value) {
 }
 
 fn prim_sd_zero(args: &[Value]) -> (SignalBits, Value) {
-    let d = match require_variant!(&args[0], SignedDuration, "signed-duration/zero?", "signed-duration") {
+    let d = match require_variant!(
+        &args[0],
+        SignedDuration,
+        "signed-duration/zero?",
+        "signed-duration"
+    ) {
         Ok(d) => d,
         Err(e) => return e,
     };
@@ -382,10 +404,7 @@ fn prim_span_get(args: &[Value]) -> (SignalBits, Value) {
         other => {
             return (
                 SIG_ERROR,
-                error_val(
-                    "jiff-error",
-                    format!("span/get: unknown unit {:?}", other),
-                ),
+                error_val("jiff-error", format!("span/get: unknown unit {:?}", other)),
             )
         }
     };
@@ -409,16 +428,46 @@ fn prim_span_to_struct(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
     let mut fields = BTreeMap::new();
-    fields.insert(TableKey::Keyword("years".into()), Value::int(s.get_years() as i64));
-    fields.insert(TableKey::Keyword("months".into()), Value::int(s.get_months() as i64));
-    fields.insert(TableKey::Keyword("weeks".into()), Value::int(s.get_weeks() as i64));
-    fields.insert(TableKey::Keyword("days".into()), Value::int(s.get_days() as i64));
-    fields.insert(TableKey::Keyword("hours".into()), Value::int(s.get_hours() as i64));
-    fields.insert(TableKey::Keyword("minutes".into()), Value::int(s.get_minutes() as i64));
-    fields.insert(TableKey::Keyword("seconds".into()), Value::int(s.get_seconds() as i64));
-    fields.insert(TableKey::Keyword("milliseconds".into()), Value::int(s.get_milliseconds() as i64));
-    fields.insert(TableKey::Keyword("microseconds".into()), Value::int(s.get_microseconds() as i64));
-    fields.insert(TableKey::Keyword("nanoseconds".into()), Value::int(s.get_nanoseconds() as i64));
+    fields.insert(
+        TableKey::Keyword("years".into()),
+        Value::int(s.get_years() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("months".into()),
+        Value::int(s.get_months() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("weeks".into()),
+        Value::int(s.get_weeks() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("days".into()),
+        Value::int(s.get_days() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("hours".into()),
+        Value::int(s.get_hours() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("minutes".into()),
+        Value::int(s.get_minutes() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("seconds".into()),
+        Value::int(s.get_seconds() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("milliseconds".into()),
+        Value::int(s.get_milliseconds() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("microseconds".into()),
+        Value::int(s.get_microseconds() as i64),
+    );
+    fields.insert(
+        TableKey::Keyword("nanoseconds".into()),
+        Value::int(s.get_nanoseconds() as i64),
+    );
     (SIG_OK, Value::struct_from(fields))
 }
 

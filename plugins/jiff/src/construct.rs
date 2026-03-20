@@ -1,6 +1,8 @@
 //! Constructors: now, timestamp, date, time, datetime, zoned, span, signed-duration.
 
-use crate::{jiff_err, jiff_val, require_int, require_jiff, require_string, struct_get_int, JiffValue};
+use crate::{
+    jiff_err, jiff_val, require_int, require_jiff, require_string, struct_get_int, JiffValue,
+};
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -17,7 +19,10 @@ fn prim_now(_args: &[Value]) -> (SignalBits, Value) {
 /// (timestamp) → timestamp (current UTC instant)
 fn prim_timestamp(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
-        return (SIG_OK, jiff_val(JiffValue::Timestamp(jiff::Timestamp::now())));
+        return (
+            SIG_OK,
+            jiff_val(JiffValue::Timestamp(jiff::Timestamp::now())),
+        );
     }
     // (timestamp epoch-secs epoch-nanos) — from components
     let secs = match require_int(&args[0], "timestamp") {

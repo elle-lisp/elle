@@ -72,7 +72,11 @@ pub fn require_jiff<'a>(v: &'a Value, fn_name: &str) -> Result<&'a JiffValue, (S
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("{}: expected temporal value, got {}", fn_name, v.type_name()),
+                format!(
+                    "{}: expected temporal value, got {}",
+                    fn_name,
+                    v.type_name()
+                ),
             ),
         )
     })
@@ -153,17 +157,15 @@ pub fn require_float(v: &Value, fn_name: &str) -> Result<f64, (SignalBits, Value
 
 /// Extract a keyword name or return a type error.
 pub fn require_keyword(v: &Value, fn_name: &str) -> Result<String, (SignalBits, Value)> {
-    v.as_keyword_name()
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!("{}: expected keyword, got {}", fn_name, v.type_name()),
-                ),
-            )
-        })
+    v.as_keyword_name().map(|s| s.to_string()).ok_or_else(|| {
+        (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("{}: expected keyword, got {}", fn_name, v.type_name()),
+            ),
+        )
+    })
 }
 
 /// Wrap a jiff error as an elle error value.
@@ -191,14 +193,30 @@ pub fn struct_get_int(v: &Value, key: &str) -> Option<i64> {
 
 fn all_primitives() -> Vec<&'static PrimitiveDef> {
     let mut all: Vec<&'static PrimitiveDef> = Vec::new();
-    for p in construct::PRIMITIVES { all.push(p); }
-    for p in predicate::PRIMITIVES { all.push(p); }
-    for p in access::PRIMITIVES { all.push(p); }
-    for p in parse::PRIMITIVES { all.push(p); }
-    for p in format::PRIMITIVES { all.push(p); }
-    for p in arith::PRIMITIVES { all.push(p); }
-    for p in calendar::PRIMITIVES { all.push(p); }
-    for p in convert::PRIMITIVES { all.push(p); }
+    for p in construct::PRIMITIVES {
+        all.push(p);
+    }
+    for p in predicate::PRIMITIVES {
+        all.push(p);
+    }
+    for p in access::PRIMITIVES {
+        all.push(p);
+    }
+    for p in parse::PRIMITIVES {
+        all.push(p);
+    }
+    for p in format::PRIMITIVES {
+        all.push(p);
+    }
+    for p in arith::PRIMITIVES {
+        all.push(p);
+    }
+    for p in calendar::PRIMITIVES {
+        all.push(p);
+    }
+    for p in convert::PRIMITIVES {
+        all.push(p);
+    }
     all
 }
 

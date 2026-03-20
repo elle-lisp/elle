@@ -1,6 +1,9 @@
 //! Calendar helpers, timezone ops, and series generation.
 
-use crate::{as_jiff, jiff_err, jiff_val, require_int, require_keyword, require_jiff, require_string, require_variant, JiffValue};
+use crate::{
+    as_jiff, jiff_err, jiff_val, require_int, require_jiff, require_keyword, require_string,
+    require_variant, JiffValue,
+};
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -20,14 +23,22 @@ fn extract_date(v: &Value, fn_name: &str) -> Result<jiff::civil::Date, (SignalBi
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("{}: expected date, datetime, or zoned, got {}", fn_name, other.type_name()),
+                format!(
+                    "{}: expected date, datetime, or zoned, got {}",
+                    fn_name,
+                    other.type_name()
+                ),
             ),
         )),
         None => Err((
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("{}: expected date, datetime, or zoned, got {}", fn_name, v.type_name()),
+                format!(
+                    "{}: expected date, datetime, or zoned, got {}",
+                    fn_name,
+                    v.type_name()
+                ),
             ),
         )),
     }
@@ -98,7 +109,10 @@ fn prim_date_next_weekday(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("jiff-error", format!("date/next-weekday: unknown weekday {:?}", kw)),
+                error_val(
+                    "jiff-error",
+                    format!("date/next-weekday: unknown weekday {:?}", kw),
+                ),
             )
         }
     };
@@ -122,7 +136,10 @@ fn prim_date_prev_weekday(args: &[Value]) -> (SignalBits, Value) {
         None => {
             return (
                 SIG_ERROR,
-                error_val("jiff-error", format!("date/prev-weekday: unknown weekday {:?}", kw)),
+                error_val(
+                    "jiff-error",
+                    format!("date/prev-weekday: unknown weekday {:?}", kw),
+                ),
             )
         }
     };
@@ -157,7 +174,10 @@ fn prim_tz_system(_args: &[Value]) -> (SignalBits, Value) {
         Some(name) => (SIG_OK, Value::string(name)),
         None => (
             SIG_ERROR,
-            error_val("jiff-error", "tz-system: could not determine system timezone"),
+            error_val(
+                "jiff-error",
+                "tz-system: could not determine system timezone",
+            ),
         ),
     }
 }
@@ -205,13 +225,19 @@ fn prim_temporal_series(args: &[Value]) -> (SignalBits, Value) {
                 JiffValue::Time(t) => t.checked_add(step).map(JiffValue::Time),
                 JiffValue::DateTime(dt) => dt.checked_add(step).map(JiffValue::DateTime),
                 JiffValue::Timestamp(ts) => ts.checked_add(step).map(JiffValue::Timestamp),
-                JiffValue::Zoned(z) => z.as_ref().checked_add(step).map(|z| JiffValue::Zoned(Box::new(z))),
+                JiffValue::Zoned(z) => z
+                    .as_ref()
+                    .checked_add(step)
+                    .map(|z| JiffValue::Zoned(Box::new(z))),
                 _ => {
                     return (
                         SIG_ERROR,
                         error_val(
                             "type-error",
-                            format!("temporal/series: cannot iterate over {}", current.type_name()),
+                            format!(
+                                "temporal/series: cannot iterate over {}",
+                                current.type_name()
+                            ),
                         ),
                     )
                 }
