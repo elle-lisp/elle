@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
-/// and add a corresponding entry to [`MIGRATIONS`].
+/// and add a corresponding entry to `MIGRATIONS`.
 pub const CURRENT_EPOCH: u64 = 0;
 
 /// A set of changes introduced at a given epoch.
