@@ -254,8 +254,12 @@
                   (put client-got 0 resp)
                   (port/close c)))))
           (port/close listener)
-          (assert (= (get server-got 0) "ping") "server received data from client (Bug 7)")
-          (assert (= (get client-got 0) "pong") "client received response from server (Bug 7)")))))) 
+                    # TCP ports use binary encoding; stream/read returns bytes.
+          # Convert to string for assertion.
+          (assert (= (string (get server-got 0)) "ping")
+            "server received data from client (Bug 7)")
+          (assert (= (string (get client-got 0)) "pong")
+            "client received response from server (Bug 7)"))))) )
 
 # ============================================================================
 # Bug 612: cond/match corrupt previously-evaluated arguments in variadic calls

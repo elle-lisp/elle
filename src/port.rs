@@ -133,7 +133,11 @@ impl Port {
             fd: RefCell::new(Some(fd)),
             kind: PortKind::TcpStream,
             direction: Direction::ReadWrite,
-            encoding: Encoding::Text,
+            // Binary encoding: TCP is a byte stream. stream/read returns bytes,
+            // enabling binary protocols (TLS, msgpack, custom wire formats).
+            // stream/write accepts both bytes and strings.
+            // stream/read-line always returns a string regardless of encoding.
+            encoding: Encoding::Binary,
             closed: Cell::new(false),
             path: Some(peer_addr),
             timeout: Cell::new(None),
@@ -424,7 +428,7 @@ mod tests {
         let p = Port::new_tcp_stream(devnull_fd(), "127.0.0.1:8080".into());
         assert_eq!(p.kind(), PortKind::TcpStream);
         assert_eq!(p.direction(), Direction::ReadWrite);
-        assert_eq!(p.encoding(), Encoding::Text);
+        assert_eq!(p.encoding(), Encoding::Binary);
     }
 
     #[test]

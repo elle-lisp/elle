@@ -136,7 +136,7 @@
   "Read request/response body based on Content-Length header.
    Returns body string, or nil if Content-Length is absent."
   (let [[cl headers:content-length]]
-    (and cl (stream/read port (integer cl)))))
+    (and cl (string (stream/read port (integer cl))))))
 
 # ============================================================================
 # Reason phrases

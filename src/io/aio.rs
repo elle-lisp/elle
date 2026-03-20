@@ -109,6 +109,11 @@ impl AsyncBackend {
             return self.submit_process_wait(&request.port);
         }
 
+        // Resolve is portless — always goes to the thread pool.
+        if let IoOp::Resolve { ref hostname } = request.op {
+            return self.submit_resolve(hostname);
+        }
+
         // Open is portless — creates a new port rather than operating on one.
         if let IoOp::Open {
             ref path,
@@ -481,21 +486,37 @@ impl AsyncBackend {
         let uring_fd = match platform {
             #[cfg(target_os = "linux")]
             PlatformBackend::Uring(ring) => {
-                let fd = crate::io::uring::submit_uring_connect(
+                match crate::io::uring::submit_uring_connect(
                     ring,
                     id,
                     addr,
                     timeout,
                     buffer_pool,
                     buf_handle,
-                )?;
-                Some(fd)
+                ) {
+                    Ok(fd) => Some(fd),
+                    Err(_) => {
+                        // io_uring connect requires a parsed IP address.
+                        // If parsing failed (hostname), fall back to thread pool
+                        // which uses TcpStream::connect (calls getaddrinfo internally).
+                        let pool_op = match addr {
+                            ConnectAddr::Tcp { addr: host, port } => PoolOp::ConnectTcp {
+                                addr: crate::io::sockaddr::format_host_port(host, *port),
+                            },
+                            ConnectAddr::Unix { path } => {
+                                PoolOp::ConnectUnix { path: path.clone() }
+                            }
+                        };
+                        network_pool.submit(id, pool_op)?;
+                        None
+                    }
+                }
             }
             PlatformBackend::ThreadPool(_) => {
                 let _ = buffer_pool;
                 let pool_op = match addr {
                     ConnectAddr::Tcp { addr: host, port } => PoolOp::ConnectTcp {
-                        addr: format!("{}:{}", host, port),
+                        addr: crate::io::sockaddr::format_host_port(host, *port),
                     },
                     ConnectAddr::Unix { path } => PoolOp::ConnectUnix { path: path.clone() },
                 };
@@ -549,6 +570,27 @@ impl AsyncBackend {
         pending.insert(
             id,
             PendingOp::Sleep {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Submit a DNS resolution. Always dispatched to the thread pool.
+    fn submit_resolve(&self, hostname: &str) -> Result<u64, String> {
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+        inner.network_pool.submit(
+            id,
+            PoolOp::Resolve {
+                hostname: hostname.to_string(),
+            },
+        )?;
+        inner.pending.insert(
+            id,
+            PendingOp::Resolve {
                 buffer_handle: buf_handle,
             },
         );
@@ -896,14 +938,58 @@ impl AsyncBackend {
             match platform {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
-                    crate::io::uring::wait_uring(
-                        ring,
-                        timeout,
-                        pending,
-                        buffer_pool,
-                        fd_states,
-                        completions,
-                    )?;
+                    if network_pool.has_in_flight() {
+                        // Network pool has in-flight ops (Resolve, hostname Connect
+                        // fallback). Poll uring non-blocking, then wait on network
+                        // pool with the caller's timeout so we don't miss completions
+                        // from either source.
+                        crate::io::uring::wait_uring(
+                            ring,
+                            Some(0), // poll only
+                            pending,
+                            buffer_pool,
+                            fd_states,
+                            completions,
+                        )?;
+                        let raw = network_pool.wait(Some(timeout.unwrap_or(100).min(100)))?;
+                        for crate::io::threadpool::PoolCompletion {
+                            id: cid,
+                            result_code,
+                            data,
+                        } in raw
+                        {
+                            if let Some(mut pending_op) = pending.remove(&cid) {
+                                if let PendingOp::Connect {
+                                    ref mut connect_fd, ..
+                                } = pending_op
+                                {
+                                    if result_code > 0 {
+                                        *connect_fd = Some(result_code);
+                                    }
+                                }
+                                let bh = pending_op.buffer_handle();
+                                let c = completion::process_raw_completion(
+                                    cid,
+                                    result_code,
+                                    data,
+                                    &pending_op,
+                                    fd_states,
+                                    buffer_pool,
+                                    bh,
+                                );
+                                completions.push_back(c);
+                            }
+                        }
+                    } else {
+                        crate::io::uring::wait_uring(
+                            ring,
+                            timeout,
+                            pending,
+                            buffer_pool,
+                            fd_states,
+                            completions,
+                        )?;
+                    }
                 }
                 PlatformBackend::ThreadPool(pool) => {
                     // If platform pool has in-flight ops, wait on it.
@@ -1118,7 +1204,10 @@ impl AsyncBackendInner {
             | IoOp::Open { .. }
             | IoOp::Seek { .. }
             | IoOp::Tell
-            | IoOp::Task(_) => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::Task(_)
+            | IoOp::Resolve { .. } => {
+                return Err("io/submit: unsupported operation on stdin".into())
+            }
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)

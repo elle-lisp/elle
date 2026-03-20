@@ -65,7 +65,7 @@ impl SyncBackend {
                 addr: host,
                 port: port_num,
             } => {
-                let addr_str = format!("{}:{}", host, port_num);
+                let addr_str = crate::io::sockaddr::format_host_port(host, *port_num);
                 match std::net::TcpStream::connect(&addr_str) {
                     Ok(stream) => {
                         let peer = stream
@@ -151,7 +151,7 @@ impl SyncBackend {
             format!("{}", data).into_bytes()
         };
 
-        let addr_str = format!("{}:{}", addr, port_num);
+        let addr_str = crate::io::sockaddr::format_host_port(addr, port_num);
         let dest: std::net::SocketAddr = match addr_str.parse() {
             Ok(a) => a,
             Err(_) => {
