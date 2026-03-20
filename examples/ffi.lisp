@@ -1,3 +1,4 @@
+(elle/epoch 1)
 #!/usr/bin/env elle
 
 # FFI — calling C from Elle
@@ -11,7 +12,6 @@
 #   Variadic calls    — snprintf via ffi/call with varargs
 #   Callbacks         — qsort with Elle comparison function
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # Load the current process (includes libc/libm)
@@ -25,15 +25,15 @@
 
 (display "  abs(-42) = ")
 (print (abs -42))
-(assert-eq (abs -42) 42 "abs(-42) should be 42")
+(assert (= (abs -42) 42) "abs(-42) should be 42")
 
 (display "  sqrt(2)  = ")
 (print (sqrt 2.0))
-(assert-eq (sqrt 2.0) 1.4142135623730951 "sqrt(2.0)")
+(assert (= (sqrt 2.0) 1.4142135623730951) "sqrt(2.0)")
 
 (display "  strlen   = ")
 (print (strlen "hello world"))
-(assert-eq (strlen "hello world") 11 "strlen of 'hello world'")
+(assert (= (strlen "hello world") 11) "strlen of 'hello world'")
 
 
 # Memory management
@@ -42,7 +42,7 @@
 (def read-back (ffi/read buf :double))
 (display "  read back: ")
 (print read-back)
-(assert-eq read-back 3.14159 "ffi/write then ffi/read :double")
+(assert (= read-back 3.14159) "ffi/write then ffi/read :double")
 (ffi/free buf)
 
 
@@ -53,7 +53,7 @@
 (def point-val (ffi/read p point-type))
 (display "  struct:    ")
 (print point-val)
-(assert-eq point-val @[1.5 2.5] "ffi/struct read-back")
+(assert (= point-val @[1.5 2.5]) "ffi/struct read-back")
 (ffi/free p)
 
 
@@ -65,7 +65,7 @@
 (def formatted (ffi/string out))
 (display "  snprintf:  ")
 (print formatted)
-(assert-string-eq formatted "the answer is 42" "snprintf formatting")
+(assert (= formatted "the answer is 42") "snprintf formatting")
 (ffi/free out)
 
 
@@ -84,7 +84,7 @@
 (def sorted (ffi/read arr (ffi/array :i32 5)))
 (display "  sorted:    ")
 (print sorted)
-(assert-eq sorted @[1 2 3 4 5] "qsort should sort ascending")
+(assert (= sorted @[1 2 3 4 5]) "qsort should sort ascending")
 
 (ffi/callback-free cmp)
 (ffi/free arr)

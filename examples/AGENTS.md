@@ -7,14 +7,19 @@ one with a 10-second timeout. A failure here means the full compilation
 pipeline (reader → expander → analyzer → lowerer → emitter → VM) produced
 wrong results or panicked.
 
+Read [`QUICKSTART.md`](../QUICKSTART.md) for the complete language reference.
+
 ## Style rules
 
 Follow these when writing or editing examples:
 
-- Import assertions at the top using the closure import pattern, destructuring
-  only the names the file uses. Never define assertions inline.
+- Start every file with `(elle/epoch N)` where N is the current epoch (check
+  `CURRENT_EPOCH` in `src/epoch/rules.rs`).
+- Use `(assert expr msg)` for all assertions. No assertion library imports.
   ```lisp
-  (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "./examples/assertions.lisp")))
+  (elle/epoch 1)
+  (assert (= actual expected) "description")
+  (assert (not (nil? val)) "value exists")
   ```
 - `defn` with `[bracket params]` and a docstring as the first body form.
 - Literal syntax: `@[...]` @arrays, `[...]` arrays, `{...}` structs,
@@ -39,13 +44,19 @@ complete file inventory with themes and coverage.
 
 ## Assertions
 
-`assertions.lisp` provides: `assert-eq`, `assert-true`, `assert-false`,
-`assert-list-eq`, `assert-not-nil`, `assert-string-eq`. All print
-expected-vs-actual on failure and `(exit 1)`.
+Use the built-in `(assert expr msg)` primitive directly:
 
-`assert-eq` uses `=` (numeric-aware equality) for all comparisons. For list
-comparison use `assert-list-eq` (element-wise, handles length mismatch).
-For strict identity checks (no numeric coercion), use `identical?`.
+```lisp
+(assert (= (+ 1 2) 3) "addition works")
+(assert (not ok?) "expected error")
+```
+
+For testing that an expression signals an error, use `protect`:
+
+```lisp
+(def [ok? _] (protect (/ 1 0)))
+(assert (not ok?) "division by zero errors")
+```
 
 ## Gotchas
 

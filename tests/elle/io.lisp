@@ -1,75 +1,57 @@
+(elle/epoch 1)
 # I/O — stream primitives, sync scheduler, ev/spawn, async backend
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # === Type predicates ===
 
-(assert-false (io-request? 42) "io-request? on int")
-(assert-false (io-request? "hello") "io-request? on string")
-(assert-true (io-backend? (io/backend :sync)) "io-backend? on sync backend")
-(assert-false (io-backend? 42) "io-backend? on int")
+(assert (not (io-request? 42)) "io-request? on int")
+(assert (not (io-request? "hello")) "io-request? on string")
+(assert (io-backend? (io/backend :sync)) "io-backend? on sync backend")
+(assert (not (io-backend? 42)) "io-backend? on int")
 
 # === Scheduler parameter ===
 
-(assert-true (parameter? *scheduler*) "*scheduler* is a parameter")
-(assert-eq (*scheduler*) sync-scheduler "*scheduler* default is sync-scheduler")
+(assert (parameter? *scheduler*) "*scheduler* is a parameter")
+(assert (= (*scheduler*) sync-scheduler) "*scheduler* default is sync-scheduler")
 
 # === sync-scheduler with pure fiber ===
 
-(assert-eq
-  (sync-scheduler (fiber/new (fn [] (+ 1 2)) (bit/or 1 512)))
-  3
-  "sync-scheduler runs pure fiber")
+(assert (= (sync-scheduler (fiber/new (fn [] (+ 1 2)) (bit/or 1 512))) 3) "sync-scheduler runs pure fiber")
 
 # === sync-scheduler with I/O ===
 
 (spit "/tmp/elle-test-io-lisp" "hello from io test")
-(assert-eq
-  (sync-scheduler
+(assert (= (sync-scheduler
     (fiber/new
       (fn [] (stream/read-all (port/open "/tmp/elle-test-io-lisp" :read)))
-      (bit/or 1 512)))
-  "hello from io test"
-  "sync-scheduler dispatches stream/read-all")
+      (bit/or 1 512))) "hello from io test") "sync-scheduler dispatches stream/read-all")
 
 # === ev/spawn pure ===
 
-(assert-eq (ev/spawn (fn [] 42)) 42 "ev/spawn pure closure")
+(assert (= (ev/spawn (fn [] 42)) 42) "ev/spawn pure closure")
 
 # === ev/spawn with I/O ===
 
 (spit "/tmp/elle-test-ev-spawn-lisp" "spawn content")
-(assert-eq
-  (ev/spawn (fn []
-    (stream/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read))))
-  "spawn content"
-  "ev/spawn with stream/read-all")
+(assert (= (ev/spawn (fn []
+    (stream/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))) "spawn content") "ev/spawn with stream/read-all")
 
 # === Error propagation ===
 
-(assert-err
-  (fn () (sync-scheduler (fiber/new (fn [] (error :boom)) (bit/or 1 512))))
-  "sync-scheduler propagates errors")
+(let (([ok? _] (protect ((fn () (sync-scheduler (fiber/new (fn [] (error :boom)) (bit/or 1 512)))))))) (assert (not ok?) "sync-scheduler propagates errors"))
 
-(assert-err
-  (fn () (ev/spawn (fn [] (error :kaboom))))
-  "ev/spawn propagates errors")
+(let (([ok? _] (protect ((fn () (ev/spawn (fn [] (error :kaboom)))))))) (assert (not ok?) "ev/spawn propagates errors"))
 
 # === stream/read-line ===
 
 (spit "/tmp/elle-test-readline-lisp" "line1\nline2\nline3")
-(assert-eq
-  (ev/spawn (fn []
+(assert (= (ev/spawn (fn []
     (let ((p (port/open "/tmp/elle-test-readline-lisp" :read)))
-      (stream/read-line p))))
-  "line1"
-  "stream/read-line reads first line")
+      (stream/read-line p)))) "line1") "stream/read-line reads first line")
 
 # === io/backend errors ===
 
-(assert-err
-  (fn () (io/backend :invalid))
-  "io/backend :invalid errors")
+(let (([ok? _] (protect ((fn () (io/backend :invalid)))))) (assert (not ok?) "io/backend :invalid errors"))
 
 # === io/execute roundtrip ===
 
@@ -78,45 +60,33 @@
        (port (port/open "/tmp/elle-test-io-exec-lisp" :read))
        (f (fiber/new (fn [] (stream/read-all port)) 512)))
   (fiber/resume f)
-  (assert-eq
-    (io/execute backend (fiber/value f))
-    "hello from elle"
-    "io/execute roundtrip reads file"))
+  (assert (= (io/execute backend (fiber/value f)) "hello from elle") "io/execute roundtrip reads file"))
 
 # === sync-scheduler I/O dispatch ===
 
 (spit "/tmp/elle-test-sched-io-lisp" "scheduler test")
-(assert-eq
-  (sync-scheduler
+(assert (= (sync-scheduler
     (fiber/new
       (fn [] (stream/read-all (port/open "/tmp/elle-test-sched-io-lisp" :read)))
-      (bit/or 1 512)))
-  "scheduler test"
-  "sync-scheduler dispatches I/O")
+      (bit/or 1 512))) "scheduler test") "sync-scheduler dispatches I/O")
 
 # === Pure code unchanged with scheduler ===
 
-(assert-eq (+ 1 2 3) 6 "pure code works with scheduler")
+(assert (= (+ 1 2 3) 6) "pure code works with scheduler")
 
 # === stream I/O via ev/spawn ===
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(assert-eq
-  (ev/spawn (fn []
-    (stream/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read))))
-  "top level"
-  "stream I/O via ev/spawn")
+(assert (= (ev/spawn (fn []
+    (stream/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))) "top level") "stream I/O via ev/spawn")
 
 # === stdlib functions work with scheduler ===
 
-(assert-eq
-  (map (fn [x] (* x x)) (list 1 2 3))
-  (list 1 4 9)
-  "stdlib map works with scheduler")
+(assert (= (map (fn [x] (* x x)) (list 1 2 3)) (list 1 4 9)) "stdlib map works with scheduler")
 
 # === Async backend ===
 
-(assert-true (io-backend? (io/backend :async)) "io-backend? on async backend")
+(assert (io-backend? (io/backend :async)) "io-backend? on async backend")
 
 # === io/submit returns int ===
 
@@ -125,21 +95,15 @@
        (port (port/open "/tmp/elle-test-submit-lisp" :read))
        (f (fiber/new (fn [] (stream/read-all port)) 512)))
   (fiber/resume f)
-  (assert-true
-    (int? (io/submit backend (fiber/value f)))
-    "io/submit returns int"))
+  (assert (int? (io/submit backend (fiber/value f))) "io/submit returns int"))
 
 # === io/reap returns tuple ===
 
-(assert-true
-  (array? (io/reap (io/backend :async)))
-  "io/reap returns tuple")
+(assert (array? (io/reap (io/backend :async))) "io/reap returns tuple")
 
 # === io/wait returns tuple ===
 
-(assert-true
-  (array? (io/wait (io/backend :async) 0))
-  "io/wait returns tuple")
+(assert (array? (io/wait (io/backend :async) 0)) "io/wait returns tuple")
 
 # === io/submit on sync backend errors ===
 
@@ -147,13 +111,11 @@
 # inside protect's fiber (protect uses mask=1 which doesn't handle SIG_IO).
 (spit "/tmp/elle-test-submit-sync-lisp" "test")
 (let ((submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)))
-  (assert-err
-    (fn ()
+  (let (([ok? _] (protect ((fn ()
       (let* ((backend (io/backend :sync))
              (f (fiber/new (fn [] (stream/read-all submit-sync-port)) 512)))
         (fiber/resume f)
-        (io/submit backend (fiber/value f))))
-    "io/submit on sync backend errors"))
+        (io/submit backend (fiber/value f)))))))) (assert (not ok?) "io/submit on sync backend errors")))
 
 # === io/submit + io/wait roundtrip ===
 
@@ -164,7 +126,7 @@
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
-      (assert-eq (length completions) 1 "io/wait returns 1 completion"))))
+      (assert (= (length completions) 1) "io/wait returns 1 completion"))))
 
 # === Completion struct has :id ===
 
@@ -175,7 +137,7 @@
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
-      (assert-eq id (get (get completions 0) :id) "completion :id matches submission id"))))
+      (assert (= id (get (get completions 0) :id)) "completion :id matches submission id"))))
 
 # === Completion struct has :error nil ===
 
@@ -186,15 +148,15 @@
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
-      (assert-true (nil? (get (get completions 0) :error)) "completion :error is nil on success"))))
+      (assert (nil? (get (get completions 0) :error)) "completion :error is nil on success"))))
 
 # === make-async-scheduler ===
 
-(assert-true (pair? (make-async-scheduler)) "make-async-scheduler returns pair")
+(assert (pair? (make-async-scheduler)) "make-async-scheduler returns pair")
 
 # === ev/run pure thunk ===
 
-(assert-true (nil? (ev/run (fn [] 42))) "ev/run pure thunk returns nil")
+(assert (nil? (ev/run (fn [] 42))) "ev/run pure thunk returns nil")
 
 # === ev/run I/O thunk ===
 
@@ -203,7 +165,7 @@
   (ev/run
     (fn []
       (push result (stream/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))))
-  (assert-eq (get result 0) "async scheduler" "ev/run I/O thunk reads file"))
+  (assert (= (get result 0) "async scheduler") "ev/run I/O thunk reads file"))
 
 # === ev/run multiple thunks ===
 
@@ -215,13 +177,11 @@
       (push results (stream/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read))))
     (fn []
       (push results (stream/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))
-  (assert-eq (length results) 2 "ev/run runs multiple thunks"))
+  (assert (= (length results) 2) "ev/run runs multiple thunks"))
 
 # === ev/run error propagation ===
 
-(assert-err
-  (fn () (ev/run (fn [] (error :async-boom))))
-  "ev/run propagates errors")
+(let (([ok? _] (protect ((fn () (ev/run (fn [] (error :async-boom)))))))) (assert (not ok?) "ev/run propagates errors"))
 
 # === ev/run write thunk ===
 
@@ -230,7 +190,7 @@
     (let ((p (port/open "/tmp/elle-test-ev-write-lisp" :write)))
       (stream/write p "async write test")
       (stream/flush p))))
-(assert-eq (slurp "/tmp/elle-test-ev-write-lisp") "async write test" "ev/run write thunk")
+(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test") "ev/run write thunk")
 
 # ============================================================================
 # ev/sleep tests
@@ -242,8 +202,8 @@
   (ev/run (fn []
     (push result (ev/sleep 0))
     (push result :done)))
-  (assert-eq (get result 0) nil "ev/sleep returns nil")
-  (assert-eq (get result 1) :done "code after ev/sleep runs"))
+  (assert (= (get result 0) nil) "ev/sleep returns nil")
+  (assert (= (get result 1) :done) "code after ev/sleep runs"))
 
 # === ev/sleep with nonzero duration ===
 
@@ -251,7 +211,7 @@
   (ev/run (fn []
     (ev/sleep 0.05)
     (push result :woke)))
-  (assert-eq (get result 0) :woke "ev/sleep 50ms completes"))
+  (assert (= (get result 0) :woke) "ev/sleep 50ms completes"))
 
 # === concurrent sleeps run in parallel ===
 
@@ -261,8 +221,7 @@
     (fn [] (ev/sleep 0.1))
     (fn [] (ev/sleep 0.1)))
   (let ((elapsed (- (clock/monotonic) t0)))
-    (assert-true (< elapsed 0.5)
-      "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
+    (assert (< elapsed 0.5) "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
 
 # === ev/sleep interleaved with I/O ===
 
@@ -274,9 +233,9 @@
       (push result :slept))
     (fn []
       (push result (stream/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read)))))
-  (assert-eq (length result) 2 "ev/sleep + I/O: both fibers complete")
-  (assert-true (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
-  (assert-true (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
+  (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")
+  (assert (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
+  (assert (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
 
 # === ev/sleep ordering — shorter sleep finishes first ===
 
@@ -288,34 +247,24 @@
     (fn []
       (ev/sleep 0.01)
       (push result :fast)))
-  (assert-eq (get result 0) :fast "shorter sleep finishes first")
-  (assert-eq (get result 1) :slow "longer sleep finishes second"))
+  (assert (= (get result 0) :fast) "shorter sleep finishes first")
+  (assert (= (get result 1) :slow) "longer sleep finishes second"))
 
 # === ev/sleep error: negative duration ===
 
-(assert-err
-  (fn () (ev/run (fn [] (ev/sleep -1))))
-  "ev/sleep rejects negative int")
+(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep -1)))))))) (assert (not ok?) "ev/sleep rejects negative int"))
 
-(assert-err
-  (fn () (ev/run (fn [] (ev/sleep -0.5))))
-  "ev/sleep rejects negative float")
+(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep -0.5)))))))) (assert (not ok?) "ev/sleep rejects negative float"))
 
 # === ev/sleep error: non-numeric ===
 
-(assert-err
-  (fn () (ev/run (fn [] (ev/sleep "hello"))))
-  "ev/sleep rejects non-numeric")
+(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep "hello")))))))) (assert (not ok?) "ev/sleep rejects non-numeric"))
 
 # === ev/sleep error: wrong arity ===
 
-(assert-err
-  (fn () (eval '(ev/sleep)))
-  "ev/sleep rejects zero args")
+(let (([ok? _] (protect ((fn () (eval '(ev/sleep))))))) (assert (not ok?) "ev/sleep rejects zero args"))
 
-(assert-err
-  (fn () (eval '(ev/sleep 1 2)))
-  "ev/sleep rejects two args")
+(let (([ok? _] (protect ((fn () (eval '(ev/sleep 1 2))))))) (assert (not ok?) "ev/sleep rejects two args"))
 
 # ============================================================================
 # Error tests (from integration/io.rs)

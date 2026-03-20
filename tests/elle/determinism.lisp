@@ -1,52 +1,52 @@
+(elle/epoch 1)
 # Determinism tests
 #
 # Migrated from tests/property/determinism.rs
 # The compiler is either deterministic or it isn't — varying input
 # values doesn't help detect nondeterminism. One example per form suffices.
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Arithmetic
 # ============================================================================
 
 # test_arithmetic_determinism
-(assert-eq (+ 37 -82) -45 "arithmetic: (+ 37 -82) == -45")
+(assert (= (+ 37 -82) -45) "arithmetic: (+ 37 -82) == -45")
 
 # ============================================================================
 # Let binding
 # ============================================================================
 
 # test_let_determinism
-(assert-eq (let ((x 42) (y -17)) (+ x y)) 25 "let: (let ((x 42) (y -17)) (+ x y)) == 25")
+(assert (= (let ((x 42) (y -17)) (+ x y)) 25) "let: (let ((x 42) (y -17)) (+ x y)) == 25")
 
 # ============================================================================
 # Lambda
 # ============================================================================
 
 # test_lambda_determinism
-(assert-eq ((fn (x) (* x 2)) 21) 42 "lambda: ((fn (x) (* x 2)) 21) == 42")
+(assert (= ((fn (x) (* x 2)) 21) 42) "lambda: ((fn (x) (* x 2)) 21) == 42")
 
 # ============================================================================
 # Multi-form
 # ============================================================================
 
 # test_multi_form_determinism
-(assert-eq (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) 5 "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
+(assert (= (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) 5) "multi_form: (begin (def det-x 13) (def det-y -8) (+ det-x det-y)) == 5")
 
 # ============================================================================
 # Closure
 # ============================================================================
 
 # test_closure_determinism
-(assert-eq (let ((captured 10)) ((fn (x) (+ x captured)) 32)) 42 "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
+(assert (= (let ((captured 10)) ((fn (x) (+ x captured)) 32)) 42) "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
 
 # ============================================================================
 # Conditional
 # ============================================================================
 
 # test_conditional_determinism
-(assert-eq (if (< -5 10) -5 10) -5 "conditional: (if (< -5 10) -5 10) == -5")
+(assert (= (if (< -5 10) -5 10) -5) "conditional: (if (< -5 10) -5 10) == -5")
 
 # ============================================================================
 # Recursive function
@@ -59,11 +59,11 @@
       1
       (* n (factorial (- n 1)))))
 
-(assert-eq (factorial 7) 5040 "recursive: factorial of 7 == 5040")
+(assert (= (factorial 7) 5040) "recursive: factorial of 7 == 5040")
 
 # ============================================================================
 # String operation
 # ============================================================================
 
 # test_string_op_determinism
-(assert-eq (length "hello") 5 "string_op: (length \"hello\") == 5")
+(assert (= (length "hello") 5) "string_op: (length \"hello\") == 5")

@@ -1,67 +1,67 @@
+(elle/epoch 1)
 # Tests for named blocks with break
 #
 # Note: block expressions containing break must be bound to a var before
 # passing to assert-eq, due to the closure-return bug (same as match).
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Anonymous blocks
 # ============================================================================
 
-(assert-eq (block 1 2 3) 3 "block returns last")
-(assert-eq (block) nil "block empty returns nil")
-(assert-eq (block 42) 42 "block single value")
+(assert (= (block 1 2 3) 3) "block returns last")
+(assert (= (block) nil) "block empty returns nil")
+(assert (= (block 42) 42) "block single value")
 
 # ============================================================================
 # Named blocks
 # ============================================================================
 
-(assert-eq (block :done 1 2 3) 3 "named block returns last")
-(assert-eq (block :done) nil "named block empty body")
+(assert (= (block :done 1 2 3) 3) "named block returns last")
+(assert (= (block :done) nil) "named block empty body")
 
 # ============================================================================
 # Break from anonymous block
 # ============================================================================
 
 (let ([result (block (break 42) 99)])
-  (assert-eq result 42 "break anonymous with value"))
+  (assert (= result 42) "break anonymous with value"))
 
 (let ([result (block (break) 99)])
-  (assert-eq result nil "break anonymous nil"))
+  (assert (= result nil) "break anonymous nil"))
 
 # ============================================================================
 # Break from named block
 # ============================================================================
 
 (let ([result (block :done (break :done 42) 99)])
-  (assert-eq result 42 "break named with value"))
+  (assert (= result 42) "break named with value"))
 
 (let ([result (block :done (break :done) 99)])
-  (assert-eq result nil "break named nil"))
+  (assert (= result nil) "break named nil"))
 
 # ============================================================================
 # Nested blocks
 # ============================================================================
 
 (let ([result (block :outer (block :inner (break :outer 42) 1) 2)])
-  (assert-eq result 42 "break outer from inner"))
+  (assert (= result 42) "break outer from inner"))
 
 (let ([result (block :outer (block :inner (break :inner 10) 1) 2)])
-  (assert-eq result 2 "break inner continues outer"))
+  (assert (= result 2) "break inner continues outer"))
 
 (let ([result (+ 1 (block :inner (break :inner 10) 99))])
-  (assert-eq result 11 "break inner value used by outer"))
+  (assert (= result 11) "break inner value used by outer"))
 
 # ============================================================================
 # Break in control flow
 # ============================================================================
 
 (let ([result (block :done (if true (break :done 42) 0) 99)])
-  (assert-eq result 42 "break in if true"))
+  (assert (= result 42) "break in if true"))
 
 (let ([result (block :done (if false (break :done 42) 0) 99)])
-  (assert-eq result 99 "break in if false"))
+  (assert (= result 99) "break in if false"))
 
 (begin
   (var i 0)
@@ -71,42 +71,39 @@
         (begin
           (if (= i 5) (break :done i) nil)
           (assign i (+ i 1)))))])
-    (assert-eq result 5 "break in loop")))
+    (assert (= result 5) "break in loop")))
 
 # ============================================================================
 # Scope isolation
 # ============================================================================
 
-(assert-eq
-  ((fn ()
+(assert (= ((fn ()
      (var x 1)
      (block (var x 2) x)
-     x))
-  1
-  "block creates scope")
+     x)) 1) "block creates scope")
 
 # ============================================================================
 # Multiple breaks
 # ============================================================================
 
 (let ([result (block :done (break :done 1) (break :done 2) 3)])
-  (assert-eq result 1 "first break wins"))
+  (assert (= result 1) "first break wins"))
 
 (let ([result (block :done (if true (break :done 10) (break :done 20)) 99)])
-  (assert-eq result 10 "conditional breaks true"))
+  (assert (= result 10) "conditional breaks true"))
 
 (let ([result (block :done (if false (break :done 10) (break :done 20)) 99)])
-  (assert-eq result 20 "conditional breaks false"))
+  (assert (= result 20) "conditional breaks false"))
 
 # ============================================================================
 # Break with expressions
 # ============================================================================
 
 (let ([result (block :done (break :done (+ 20 22)) 99)])
-  (assert-eq result 42 "break with computed value"))
+  (assert (= result 42) "break with computed value"))
 
 (let ([result (block :done (let ((x 42)) (break :done x)) 99)])
-  (assert-eq result 42 "break with let value"))
+  (assert (= result 42) "break with let value"))
 
 # ============================================================================
 # Break in while loops
@@ -119,7 +116,7 @@
       (begin
         (if (= i 5) (break :while i) nil)
         (assign i (+ i 1))))])
-    (assert-eq result 5 "break in while")))
+    (assert (= result 5) "break in while")))
 
 (begin
   (var i 0)
@@ -127,12 +124,12 @@
     (begin
       (if (= i 3) (break nil) nil)
       (assign i (+ i 1))))
-  (assert-eq i 3 "break in while unnamed"))
+  (assert (= i 3) "break in while unnamed"))
 
 (begin
   (var i 0)
   (let ([result (while (< i 3) (assign i (+ i 1)))])
-    (assert-eq result nil "while without break")))
+    (assert (= result nil) "while without break")))
 
 # ============================================================================
 # Break with value in while
@@ -145,7 +142,7 @@
       (begin
         (assign i (+ i 1))
         (if (= i 3) (break 42) nil)))])
-    (assert-eq result 42 "break in while with value")))
+    (assert (= result 42) "break in while with value")))
 
 (begin
   (var total 0)
@@ -159,23 +156,20 @@
           (assign total (+ total 1))
           (assign inner (+ inner 1))))
       (assign outer (+ outer 1))))
-  (assert-eq total 6 "break in nested while inner"))
+  (assert (= total 6) "break in nested while inner"))
 
 # ============================================================================
 # Compile-time error tests (from integration/blocks.rs)
 # ============================================================================
 
 # break_outside_block_error
-(assert-err (fn () (eval '(break 42)))
-  "break outside block is compile error")
+(let (([ok? _] (protect ((fn () (eval '(break 42))))))) (assert (not ok?) "break outside block is compile error"))
 
 # break_unknown_name_error
-(assert-err (fn () (eval '(block :a (break :b 42))))
-  "break with unknown block name is compile error")
+(let (([ok? _] (protect ((fn () (eval '(block :a (break :b 42)))))))) (assert (not ok?) "break with unknown block name is compile error"))
 
 # break_across_fn_boundary_error
-(assert-err (fn () (eval '(block :done ((fn () (break :done 42))))))
-  "break across function boundary is compile error")
+(let (([ok? _] (protect ((fn () (eval '(block :done ((fn () (break :done 42)))))))))) (assert (not ok?) "break across function boundary is compile error"))
 
 (begin
   (var sum 0)
@@ -185,7 +179,7 @@
       (let ([inner-result (while true (break 10))])
         (assign sum (+ sum inner-result)))
       (assign i (+ i 1))))
-  (assert-eq sum 30 "break in nested while with value"))
+  (assert (= sum 30) "break in nested while with value"))
 
 # ============================================================================
 # Break in each
@@ -197,20 +191,20 @@
     (begin
       (assign last x)
       (if (= x 3) (break) nil)))
-  (assert-eq last 3 "break in each list"))
+  (assert (= last 3) "break in each list"))
 
 (let ([result
   (each x '(10 20 30 40)
     (if (= x 30) (break :while :found) nil))])
-  (assert-eq result :found "break in each with value"))
+  (assert (= result :found) "break in each with value"))
 
 (let ([result (each x '(1 2 3) x)])
-  (assert-eq result nil "each without break"))
+  (assert (= result nil) "each without break"))
 
 (let ([result
   (each x @[100 200 300 400]
     (if (= x 300) (break x) nil))])
-  (assert-eq result 300 "break in each array"))
+  (assert (= result 300) "break in each array"))
 
 (begin
   (var count 0)
@@ -219,20 +213,17 @@
       (begin
         (assign count (+ count 1))
         (if (= ch "l") (break count) nil)))])
-    (assert-eq result 3 "break in each string")))
+    (assert (= result 3) "break in each string")))
 
 # ============================================================================
 # Compile-time error tests (from integration/blocks.rs)
 # ============================================================================
 
 # break_outside_block_error
-(assert-err (fn () (eval '(break 42)))
-  "break outside block is compile error")
+(let (([ok? _] (protect ((fn () (eval '(break 42))))))) (assert (not ok?) "break outside block is compile error"))
 
 # break_unknown_name_error
-(assert-err (fn () (eval '(block :a (break :b 42))))
-  "break with unknown block name is compile error")
+(let (([ok? _] (protect ((fn () (eval '(block :a (break :b 42)))))))) (assert (not ok?) "break with unknown block name is compile error"))
 
 # break_across_fn_boundary_error
-(assert-err (fn () (eval '(block :done ((fn () (break :done 42))))))
-  "break across function boundary is compile error")
+(let (([ok? _] (protect ((fn () (eval '(block :done ((fn () (break :done 42)))))))))) (assert (not ok?) "break across function boundary is compile error"))

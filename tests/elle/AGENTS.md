@@ -5,9 +5,10 @@ Elle script tests: behavioral tests in Elle that verify language semantics.
 ## Responsibility
 
 Test language behavior by running Elle code directly. Each `.lisp` file in this directory is a self-contained test that:
-1. Imports `examples/assertions.lisp` for assertion helpers
-2. Runs assertions to verify behavior
-3. Exits with code 0 on success, 1 on failure
+1. Uses the built-in `(assert)` primitive for all assertions
+2. Exits with code 0 on success, 1 on failure
+
+Read [`QUICKSTART.md`](../../QUICKSTART.md) for the complete language reference.
 
 Does NOT:
 - Test Rust APIs (that's unit tests)
@@ -19,27 +20,18 @@ Does NOT:
 Each Elle script follows this pattern:
 
 ```janet
-#!/usr/bin/env elle
+(elle/epoch 1)
 ## Test description
 
-(import "examples/assertions.lisp")
-
-## Test cases
-(assert-eq (+ 1 2) 3)
-(assert-true (> 5 3))
-(assert-false (< 5 3))
-
-## Exit with code 0 on success
+(assert (= (+ 1 2) 3) "addition")
+(assert (> 5 3) "greater than")
+(assert (not (< 5 3)) "not less than")
 ```
 
-The `examples/assertions.lisp` library provides:
-- `assert-eq` — Assert equality
-- `assert-true` — Assert truthy
-- `assert-false` — Assert falsy
-- `assert-error` — Assert error is signaled
-- `assert-contains` — Assert string contains substring
-
-All assertions call `(exit 1)` on failure, causing the script to exit with code 1.
+Start every file with `(elle N)` where N is the current epoch (check
+`CURRENT_EPOCH` in `src/epoch/rules.rs`). Use `(assert expr msg)` for all
+assertions. It signals a `:failed-assertion` error on failure, which causes
+the script to exit with code 1.
 
 ## Test organization
 
@@ -105,27 +97,11 @@ If the script exits with code 0, the test passes. If it exits with code 1, the t
    ```
 3. Write the script:
    ```janet
-   #!/usr/bin/env elle
+   (elle/epoch 1)
    ## My feature test
 
-   (import "examples/assertions.lisp")
-
-   (assert-eq (my-feature 42) 42)
+   (assert (= (my-feature 42) 42) "my-feature identity")
    ```
-
-## Assertion helpers
-
-From `examples/assertions.lisp`:
-
-| Helper | Usage | Notes |
-|--------|-------|-------|
-| `assert-eq` | `(assert-eq actual expected)` | Equality check |
-| `assert-true` | `(assert-true expr)` | Truthy check |
-| `assert-false` | `(assert-false expr)` | Falsy check |
-| `assert-error` | `(assert-error (expr))` | Error check (expr must be quoted) |
-| `assert-contains` | `(assert-contains string substring)` | Substring check |
-
-All assertions print a message on failure and call `(exit 1)`.
 
 ## Files
 
@@ -136,7 +112,7 @@ All assertions print a message on failure and call `(exit 1)`.
 
 ## Invariants
 
-1. **Scripts are self-contained.** Each script imports `examples/assertions.lisp` and runs independently.
+1. **Scripts are self-contained.** Each script uses `(assert)` directly and runs independently.
 
 2. **Scripts exit with code 0 on success, 1 on failure.** The test harness checks the exit code.
 
@@ -155,8 +131,7 @@ All assertions print a message on failure and call `(exit 1)`.
 
 ## Common pitfalls
 
-- **Using print instead of assertions**: Use `assert-eq`, `assert-true`, etc. instead of `(print ...)` for clear failure messages.
-- **Not importing assertions.lisp**: Every script must import `examples/assertions.lisp` to use assertion helpers.
+- **Using print instead of assertions**: Use `(assert expr msg)` instead of `(print ...)` for clear failure messages.
 - **Forgetting to register the test**: New scripts must be added to `tests/integration/elle_scripts.rs` with a test function.
 - **Testing implementation details**: Test language semantics, not internal behavior (e.g., don't test bytecode structure).
 - **Non-deterministic tests**: Don't use `time::now()` or other non-deterministic functions (except in dedicated time tests).

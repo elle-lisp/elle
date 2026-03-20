@@ -1,3 +1,4 @@
+(elle/epoch 1)
 # Network I/O tests — TCP, UDP, and Unix domain sockets
 #
 # Tests that don't require concurrent peers (pure validation).
@@ -8,34 +9,28 @@
 #   - test_tcp_graceful_shutdown
 #   - test_stream_write_via_scheduled
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # === TCP/listen ===
 
-(assert-true (port? (tcp/listen "127.0.0.1" 0))
-  "tcp/listen returns a port")
+(assert (port? (tcp/listen "127.0.0.1" 0)) "tcp/listen returns a port")
 
-(assert-err (fn () (tcp/listen "127.0.0.1" 99999))
-  "tcp/listen with invalid port (99999) signals error")
+(let (([ok? _] (protect ((fn () (tcp/listen "127.0.0.1" 99999)))))) (assert (not ok?) "tcp/listen with invalid port (99999) signals error"))
 
-(assert-err (fn () (tcp/listen 42 0))
-  "tcp/listen with non-string addr signals error")
+(let (([ok? _] (protect ((fn () (tcp/listen 42 0)))))) (assert (not ok?) "tcp/listen with non-string addr signals error"))
 
 # === TCP/accept ===
 
-(assert-err (fn () (tcp/accept 42))
-  "tcp/accept with non-port arg signals error")
+(let (([ok? _] (protect ((fn () (tcp/accept 42)))))) (assert (not ok?) "tcp/accept with non-port arg signals error"))
 
 # === UDP/bind ===
 
-(assert-true (port? (udp/bind "0.0.0.0" 0))
-  "udp/bind returns a port")
+(assert (port? (udp/bind "0.0.0.0" 0)) "udp/bind returns a port")
 
 # === Unix/listen ===
 
 # Create a listener, verify it's a port, then clean up
 (let ((p (unix/listen "/tmp/elle-test-net-unix-listen.sock")))
-  (assert-true (port? p) "unix/listen returns a port")
+  (assert (port? p) "unix/listen returns a port")
   (port/close p))
 
 # === port/set-options ===
@@ -47,5 +42,4 @@
 
 # === TCP/shutdown ===
 
-(assert-err (fn () (tcp/shutdown 42 :foo))
-  "tcp/shutdown with bad keyword signals error")
+(let (([ok? _] (protect ((fn () (tcp/shutdown 42 :foo)))))) (assert (not ok?) "tcp/shutdown with bad keyword signals error"))

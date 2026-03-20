@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 0;
+pub const CURRENT_EPOCH: u64 = 1;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -18,7 +18,7 @@ pub struct Migration {
     /// Human-readable summary for changelogs and error messages.
     pub summary: &'static str,
     /// The individual rules in this migration.
-    pub rules: Vec<MigrationRule>,
+    pub rules: &'static [MigrationRule],
 }
 
 /// A single mechanical transformation.
@@ -35,21 +35,74 @@ pub enum MigrationRule {
         symbol: &'static str,
         message: &'static str,
     },
+    /// Replace a call form structurally. Matches `(symbol arg1 ... argN)`
+    /// by head symbol and arity, then rewrites using a template with
+    /// positional placeholders `$1`, `$2`, etc.
+    Replace {
+        symbol: &'static str,
+        arity: usize,
+        template: &'static str,
+    },
 }
 
 /// All registered migrations, ordered by epoch.
 ///
 /// When bumping [`CURRENT_EPOCH`], add a new entry here describing
 /// the breaking changes. Renames are applied mechanically; removals
-/// produce compile errors that tell the user what to do instead.
+/// produce compile errors that tell the user what to do instead;
+/// replacements rewrite call forms structurally using templates.
 static MIGRATIONS: &[Migration] = &[
-    // Migration {
-    //     epoch: 1,
-    //     summary: "rename map to transform",
-    //     rules: vec![
-    //         MigrationRule::Rename { old: "map", new: "transform" },
-    //     ],
-    // },
+    Migration {
+        epoch: 1,
+        summary: "consolidate assertion helpers into (assert ...)",
+        rules: &[
+            MigrationRule::Replace {
+                symbol: "assert-true",
+                arity: 2,
+                template: "(assert $1 $2)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-false",
+                arity: 2,
+                template: "(assert (not $1) $2)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-eq",
+                arity: 3,
+                template: "(assert (= $1 $2) $3)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-equal",
+                arity: 3,
+                template: "(assert (= $1 $2) $3)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-string-eq",
+                arity: 3,
+                template: "(assert (= $1 $2) $3)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-list-eq",
+                arity: 3,
+                template: "(assert (= $1 $2) $3)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-not-nil",
+                arity: 2,
+                template: "(assert (not (nil? $1)) $2)",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-err",
+                arity: 2,
+                template: "(let (([ok? _] (protect ($1)))) (assert (not ok?) $2))",
+            },
+            MigrationRule::Replace {
+                symbol: "assert-err-kind",
+                arity: 3,
+                template: "(let (([ok? err] (protect ($1)))) (assert (not ok?) $3) (assert (= (get err :error) $2) $3))",
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -67,10 +120,10 @@ pub fn collapsed_renames(from: u64, to: u64) -> HashMap<&'static str, &'static s
     let mut table: HashMap<&'static str, &'static str> = HashMap::new();
 
     for migration in migrations_in_range(from, to) {
-        for rule in &migration.rules {
+        for rule in migration.rules {
             if let MigrationRule::Rename { old, new } = rule {
                 // If something already maps to `old`, chase the chain.
-                let original = table.iter().find(|(_, v)| **v == *old).map(|(k, _)| *k);
+                let original = table.iter().find(|(_, v)| *v == old).map(|(k, _)| *k);
 
                 if let Some(original) = original {
                     table.insert(original, new);
@@ -84,11 +137,29 @@ pub fn collapsed_renames(from: u64, to: u64) -> HashMap<&'static str, &'static s
     table
 }
 
+/// Collect all replace rules in a range as (symbol, arity, template) tuples.
+pub fn replace_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize, &'static str)> {
+    let mut result = Vec::new();
+    for migration in migrations_in_range(from, to) {
+        for rule in migration.rules {
+            if let MigrationRule::Replace {
+                symbol,
+                arity,
+                template,
+            } = rule
+            {
+                result.push((*symbol, *arity, *template));
+            }
+        }
+    }
+    result
+}
+
 /// Collect all removals in a range as (symbol, message) pairs.
 pub fn removals_in_range(from: u64, to: u64) -> HashMap<&'static str, &'static str> {
     let mut result = HashMap::new();
     for migration in migrations_in_range(from, to) {
-        for rule in &migration.rules {
+        for rule in migration.rules {
             if let MigrationRule::Remove { symbol, message } = rule {
                 result.insert(*symbol, *message);
             }
@@ -111,6 +182,20 @@ mod tests {
     fn test_no_migrations_beyond_current() {
         let renames = collapsed_renames(0, CURRENT_EPOCH);
         assert!(renames.is_empty());
+    }
+
+    #[test]
+    fn test_replace_rules_empty_range() {
+        let replaces = replace_rules_in_range(0, 0);
+        assert!(replaces.is_empty());
+    }
+
+    #[test]
+    fn test_replace_rules_epoch_1() {
+        let replaces = replace_rules_in_range(0, CURRENT_EPOCH);
+        assert_eq!(replaces.len(), 9);
+        // First rule should be assert-true
+        assert_eq!(replaces[0].0, "assert-true");
     }
 
     #[test]
