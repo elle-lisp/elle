@@ -256,9 +256,9 @@
           (port/close listener)
                     # TCP ports use binary encoding; stream/read returns bytes.
           # Convert to string for assertion.
-          (assert-eq (string (get server-got 0)) "ping"
+          (assert (= (string (get server-got 0)) "ping")
             "server received data from client (Bug 7)")
-          (assert-eq (string (get client-got 0)) "pong"
+          (assert (= (string (get client-got 0)) "pong")
             "client received response from server (Bug 7)"))))) )
 
 # ============================================================================

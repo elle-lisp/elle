@@ -101,7 +101,8 @@ bytecode. Error messages include file:line:col information.
     (UUID generation), `elle-xml` (XML parsing/serialization), `elle-syn` (Rust syntax parsing via syn crate),
     `elle-git` (Git repository operations), `elle-msgpack` (MessagePack binary serialization),
     `elle-protobuf` (Protocol Buffers encode/decode/introspect),
-    `elle-tls` (TLS client and server via rustls)
+    `elle-tls` (TLS client and server via rustls),
+    `elle-tree-sitter` (multi-language parsing and structural queries)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
