@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## Compress plugin integration tests
 ## Tests the compress plugin (.so loaded via import-file)

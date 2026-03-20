@@ -1,3 +1,4 @@
+(elle/epoch 1)
 ## DNS client tests
 ##
 ## Tests the wire-format codec and pure helpers from lib/dns.lisp.

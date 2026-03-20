@@ -1,3 +1,4 @@
+(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Concurrency — parallel computation with spawn and join

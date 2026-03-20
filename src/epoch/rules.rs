@@ -138,10 +138,7 @@ pub fn collapsed_renames(from: u64, to: u64) -> HashMap<&'static str, &'static s
 }
 
 /// Collect all replace rules in a range as (symbol, arity, template) tuples.
-pub fn replace_rules_in_range(
-    from: u64,
-    to: u64,
-) -> Vec<(&'static str, usize, &'static str)> {
+pub fn replace_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize, &'static str)> {
     let mut result = Vec::new();
     for migration in migrations_in_range(from, to) {
         for rule in migration.rules {

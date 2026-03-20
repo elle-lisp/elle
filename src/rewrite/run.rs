@@ -172,7 +172,7 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         edits.extend(replace_edits);
     }
 
-    // Add edit to strip the (elle N) tag
+    // Add edit to strip the (elle/epoch N) tag
     if let Some(info) = &epoch_info {
         // Extend past trailing whitespace/newline so we don't leave a blank line
         let remove_end = source[info.byte_end..]
@@ -325,13 +325,14 @@ fn try_match_replace<'a>(
 /// Skip past one balanced form starting at `pos`. Returns the index after the form.
 fn skip_one_form(tokens: &[(Token<'_>, usize, usize)], pos: usize) -> usize {
     match &tokens[pos].0 {
-        Token::LeftParen | Token::LeftBracket | Token::LeftBrace => {
-            skip_balanced_form(tokens, pos)
-        }
+        Token::LeftParen | Token::LeftBracket | Token::LeftBrace => skip_balanced_form(tokens, pos),
         // |...| set literal — scan to matching |
         Token::Pipe => skip_pipe_form(tokens, pos),
         // Prefix tokens: skip the prefix then the following form
-        Token::Quote | Token::Quasiquote | Token::Unquote | Token::UnquoteSplicing
+        Token::Quote
+        | Token::Quasiquote
+        | Token::Unquote
+        | Token::UnquoteSplicing
         | Token::Splice => skip_one_form(tokens, pos + 1),
         // @[...], @{...} — prefix then balanced form
         Token::ListSugar => skip_one_form(tokens, pos + 1),
@@ -382,7 +383,7 @@ fn print_help() {
         "(epoch {}). Applies symbol renames and structural replacements,",
         CURRENT_EPOCH
     );
-    println!("strips the (elle N) tag, and reports removed forms that need");
+    println!("strips the (elle/epoch N) tag, and reports removed forms that need");
     println!("manual attention.");
     println!();
     println!("Usage: elle rewrite [OPTIONS] <file...>");

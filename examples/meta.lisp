@@ -1,3 +1,4 @@
+(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Meta-programming — macros, quasiquote, hygiene, and introspection

@@ -13,8 +13,11 @@ Read [`QUICKSTART.md`](../QUICKSTART.md) for the complete language reference.
 
 Follow these when writing or editing examples:
 
+- Start every file with `(elle/epoch N)` where N is the current epoch (check
+  `CURRENT_EPOCH` in `src/epoch/rules.rs`).
 - Use `(assert expr msg)` for all assertions. No assertion library imports.
   ```lisp
+  (elle/epoch 1)
   (assert (= actual expected) "description")
   (assert (not (nil? val)) "value exists")
   ```

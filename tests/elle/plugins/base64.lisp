@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## Base64 plugin integration tests
 ## Tests the base64 plugin (.so loaded via import-file)

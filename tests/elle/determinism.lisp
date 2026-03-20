@@ -1,3 +1,4 @@
+(elle/epoch 1)
 # Determinism tests
 #
 # Migrated from tests/property/determinism.rs

@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## Glob plugin integration tests
 ## Tests the glob plugin (.so loaded via import-file)

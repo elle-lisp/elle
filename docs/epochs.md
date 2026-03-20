@@ -7,7 +7,7 @@ the compiler will transparently rewrite old-epoch syntax before compilation.
 
 ## Declaring an epoch
 
-Place `(elle N)` as the first form in a source file:
+Place `(elle/epoch N)` as the first form in a source file:
 
 ```lisp
 (elle 0)
@@ -15,7 +15,7 @@ Place `(elle N)` as the first form in a source file:
 (display x)
 ```
 
-The `(elle N)` declaration tells the compiler which epoch the file was written
+The `(elle/epoch N)` declaration tells the compiler which epoch the file was written
 for. It is consumed during compilation and does not appear in the running
 program. Files without an epoch declaration target the current epoch.
 
@@ -27,7 +27,7 @@ The epoch migration pass runs after parsing and before macro expansion:
 Source → Reader → [Epoch Migration] → Expander → HIR → LIR → Bytecode
 ```
 
-If a file declares `(elle N)` where N is older than the current epoch, the
+If a file declares `(elle/epoch N)` where N is older than the current epoch, the
 compiler applies all migration rules from epoch N+1 through the current epoch
 to the parsed syntax tree. This is transparent — old-epoch code compiles and
 runs exactly as if it had been written using current-epoch syntax.
@@ -88,7 +88,7 @@ by `elle rewrite` (see below).
 `elle rewrite` is a source-to-source migration tool that updates files in
 place. It applies the same rules as the compiler but modifies the source text
 directly (preserving comments, whitespace, and formatting) and strips the
-`(elle N)` tag when done.
+`(elle/epoch N)` tag when done.
 
 ```
 elle rewrite [OPTIONS] <file...>
@@ -112,7 +112,7 @@ elle rewrite tests/*.lisp
 elle rewrite --check tests/*.lisp
 ```
 
-After rewriting, the file targets the current epoch and the `(elle N)` tag is
+After rewriting, the file targets the current epoch and the `(elle/epoch N)` tag is
 removed.
 
 ## Adding a new migration

@@ -605,7 +605,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 ## Epochs
 
-- **Breaking changes are versioned.** Each source file can declare an epoch — `(elle N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
+- **Breaking changes are versioned.** Each source file can declare an epoch — `(elle/epoch N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
 
 - **Three migration rule types.** `Rename` swaps symbols mechanically. `Replace` restructures call forms using templates with positional placeholders. `Remove` flags deleted forms with a compile error and guidance message.
 

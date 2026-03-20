@@ -1,3 +1,4 @@
+(elle/epoch 1)
 # tests/elle/errors.lisp
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.

@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## clap plugin integration tests
 ## Tests clap/parse via the plugin .so loaded at runtime.

@@ -1,3 +1,4 @@
+(elle/epoch 1)
 # Network I/O tests — TCP, UDP, and Unix domain sockets
 #
 # Tests that don't require concurrent peers (pure validation).

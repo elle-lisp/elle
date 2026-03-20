@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## Semver plugin integration tests
 ## Tests the semver plugin (.so loaded via import-file)

@@ -1,3 +1,4 @@
+(elle/epoch 1)
 
 ## Regex plugin integration tests
 ## Tests the regex plugin (.so loaded via import-file)

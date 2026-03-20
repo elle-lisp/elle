@@ -20,7 +20,7 @@ Does NOT:
 Each Elle script follows this pattern:
 
 ```janet
-#!/usr/bin/env elle
+(elle/epoch 1)
 ## Test description
 
 (assert (= (+ 1 2) 3) "addition")
@@ -28,8 +28,10 @@ Each Elle script follows this pattern:
 (assert (not (< 5 3)) "not less than")
 ```
 
-Use `(assert expr msg)` for all assertions. It signals a `:failed-assertion` error
-on failure, which causes the script to exit with code 1.
+Start every file with `(elle N)` where N is the current epoch (check
+`CURRENT_EPOCH` in `src/epoch/rules.rs`). Use `(assert expr msg)` for all
+assertions. It signals a `:failed-assertion` error on failure, which causes
+the script to exit with code 1.
 
 ## Test organization
 
@@ -95,7 +97,7 @@ If the script exits with code 0, the test passes. If it exits with code 1, the t
    ```
 3. Write the script:
    ```janet
-   #!/usr/bin/env elle
+   (elle/epoch 1)
    ## My feature test
 
    (assert (= (my-feature 42) 42) "my-feature identity")

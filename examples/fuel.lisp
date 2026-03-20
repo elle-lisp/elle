@@ -1,3 +1,4 @@
+(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Fiber fuel — instruction budgets for cooperative scheduling

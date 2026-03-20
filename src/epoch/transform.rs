@@ -44,9 +44,7 @@ fn rewrite_node(
     // to satisfy the borrow checker.
     if let SyntaxKind::List(items) = &syntax.kind {
         if let Some(head_sym) = items.first().and_then(|s| s.as_symbol()) {
-            if let Some(&(_, arity, template)) =
-                replaces.iter().find(|(s, _, _)| *s == head_sym)
-            {
+            if let Some(&(_, arity, template)) = replaces.iter().find(|(s, _, _)| *s == head_sym) {
                 if items.len() - 1 == arity {
                     let args: Vec<Syntax> = items[1..].to_vec();
                     let span = syntax.span.clone();
@@ -114,11 +112,7 @@ fn rewrite_node(
 }
 
 /// Parse a template string and substitute `$N` placeholders with argument nodes.
-fn instantiate_template(
-    template: &str,
-    args: &[Syntax],
-    span: &Span,
-) -> Result<Syntax, String> {
+fn instantiate_template(template: &str, args: &[Syntax], span: &Span) -> Result<Syntax, String> {
     // Build the instantiated source by replacing $N with Display output
     // of each argument. Iterate in reverse so $10 is replaced before $1.
     let mut source = template.to_string();
