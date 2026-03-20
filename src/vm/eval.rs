@@ -154,7 +154,14 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
 
     let result = vm.execute_bytecode_saving_stack(&bc_rc, &consts_rc, &empty_env, &location_map_rc);
 
-    match result.bits {
+    let mut bits = result.bits;
+
+    // Handle SIG_SWITCH (fiber/resume trampoline) iteratively.
+    while bits == crate::value::SIG_SWITCH {
+        bits = vm.handle_sig_switch();
+    }
+
+    match bits {
         SIG_OK => {
             let (_, value) = vm.fiber.signal.take().unwrap_or((SIG_OK, Value::NIL));
             Ok(value)
@@ -165,7 +172,7 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
         }
         _ => Err(LError::generic(format!(
             "eval: unexpected signal: {}",
-            result.bits
+            bits
         ))),
     }
 }

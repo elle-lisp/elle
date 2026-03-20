@@ -5,7 +5,7 @@ use crate::reader::SourceLoc;
 use crate::value::fiber::CallFrame;
 use crate::value::{
     BytecodeFrame, Closure, Fiber, FiberHandle, SignalBits, SuspendedFrame, Value, SIG_ERROR,
-    SIG_FUEL, SIG_HALT, SIG_OK,
+    SIG_FUEL, SIG_HALT, SIG_OK, SIG_SWITCH,
 };
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -19,6 +19,15 @@ pub(crate) struct TailCallInfo {
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
     pub squelch_mask: u32,
+}
+
+/// Pending fiber resume for the trampoline.
+///
+/// Set by `handle_fiber_resume_signal` when it wants to switch fibers
+/// without recursing. Consumed by the trampoline in `do_fiber_resume`.
+pub(crate) struct PendingFiberResume {
+    pub handle: FiberHandle,
+    pub fiber_value: Value,
 }
 
 pub struct VM {
@@ -44,6 +53,7 @@ pub struct VM {
     pub tail_call_env_cache: Vec<Value>,
     pub env_cache: Vec<Value>,
     pub(crate) pending_tail_call: Option<TailCallInfo>,
+    pub(crate) pending_fiber_resume: Option<PendingFiberResume>,
     /// Source location of the instruction that produced the current error.
     /// Resolved by the dispatch loop using the current closure's LocationMap.
     /// Reset to None at each translation boundary entry.
@@ -126,6 +136,7 @@ impl VM {
             tail_call_env_cache: Vec::with_capacity(256),
             env_cache: Vec::with_capacity(256),
             pending_tail_call: None,
+            pending_fiber_resume: None,
             error_loc: None,
             jit_cache: FxHashMap::default(),
             jit_rejections: FxHashMap::default(),
@@ -154,6 +165,7 @@ impl VM {
         self.current_fiber_handle = None;
         self.current_fiber_value = None;
         self.pending_tail_call = None;
+        self.pending_fiber_resume = None;
         self.error_loc = None;
         self.closure_call_counts.clear();
         self.jit_rejections.clear();
@@ -419,60 +431,27 @@ impl VM {
                     handle,
                     fiber_value,
                 } => {
-                    // Deliver `current_value` to the suspended sub-fiber.
-                    // Inject it as the sub-fiber's signal value so that
-                    // `do_fiber_resume` picks it up as the resume_value for
-                    // `do_fiber_subsequent_resume`, which pushes it onto the
-                    // I/O frame's stack (the return value of the I/O call).
+                    // Trampoline: instead of calling do_fiber_resume (which
+                    // would recurse on the Rust stack), set pending_fiber_resume
+                    // and return SIG_SWITCH. The trampoline in do_fiber_resume
+                    // will handle the fiber transition iteratively.
                     handle.with_mut(|f| {
                         f.signal = Some((SIG_OK, current_value));
                     });
 
-                    let handle = handle.clone();
-                    let fiber_value = *fiber_value;
-                    let (result_bits, result_value) = self.do_fiber_resume(&handle, fiber_value);
-                    let mask = handle.with(|f| f.mask);
+                    self.pending_fiber_resume = Some(PendingFiberResume {
+                        handle: handle.clone(),
+                        fiber_value: *fiber_value,
+                    });
 
-                    if result_bits.is_ok()
-                        || (mask.covers(result_bits)
-                            && !result_bits.contains(crate::value::SIG_TERMINAL))
-                    {
-                        // Sub-fiber completed or its signal was caught by mask.
-                        // Clear child chain; result flows to next frame.
-                        self.fiber.child = None;
-                        self.fiber.child_value = None;
-                        current_value = result_value;
-                    } else {
-                        // Sub-fiber suspended again (e.g. another I/O yield).
-                        // Propagate: save the sub-fiber as a FiberResume frame
-                        // again, then append remaining outer frames.
-                        use crate::value::fiber::FiberStatus;
-                        if result_bits.contains(crate::value::SIG_HALT) {
-                            handle.with_mut(|f| f.status = FiberStatus::Dead);
-                        }
-                        if result_bits.contains(crate::value::SIG_ERROR) {
-                            handle.with_mut(|f| f.status = FiberStatus::Error);
-                        }
-                        self.fiber.signal = Some((result_bits, result_value));
-
-                        // Re-save the FiberResume frame for the next resume.
-                        // The sub-fiber's suspension context is stored in f.suspended.
-                        if !result_bits.contains(SIG_HALT) {
-                            let resume_frame = SuspendedFrame::FiberResume {
-                                handle: handle.clone(),
-                                fiber_value,
-                            };
-                            let mut new_frames = vec![resume_frame];
-                            // Append remaining outer frames after this one
-                            for f in frames[i + 1..].iter() {
-                                new_frames.push(f.clone());
-                            }
-                            self.fiber.suspended = Some(new_frames);
-                        }
-
-                        self.fiber.stack = saved_stack;
-                        return result_bits;
+                    // Save remaining outer frames for later resumption.
+                    if i + 1 < frames.len() {
+                        self.fiber.suspended = Some(frames[i + 1..].to_vec());
                     }
+
+                    self.fiber.signal = Some((SIG_SWITCH, Value::NIL));
+                    self.fiber.stack = saved_stack;
+                    return SIG_SWITCH;
                 }
 
                 SuspendedFrame::Bytecode(frame) => {
@@ -499,16 +478,25 @@ impl VM {
 
                     if exec.bits.is_ok() {
                         let (_, v) = self.fiber.signal.take().unwrap();
+                        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                            eprintln!(
+                                "[resume_suspended] frame {} OK: val_type={} total_frames={}",
+                                i,
+                                v.type_name(),
+                                frames.len(),
+                            );
+                        }
                         current_value = v;
                     } else {
-                        // Non-OK signal (yield, error, user-defined).
-                        // Save context for potential future resume if not already
-                        // set (yield instruction sets it; fiber/signal does not).
-                        // SIG_HALT is non-resumable — no suspended frame needed.
-                        //
-                        // Use the active bytecode/constants/env from ExecResult,
-                        // not the original frame — a tail call may have switched
-                        // to a different function's bytecode before the signal.
+                        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                            let susp_len =
+                                self.fiber.suspended.as_ref().map(|v| v.len()).unwrap_or(0);
+                            let remaining = frames.len() - i - 1;
+                            eprintln!(
+                                "[resume_suspended] frame {} non-OK: bits=0x{:x} susp_frames={} remaining={}",
+                                i, exec.bits.0, susp_len, remaining,
+                            );
+                        }
                         if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
                             self.fiber.suspended =
                                 Some(vec![SuspendedFrame::Bytecode(BytecodeFrame {
@@ -516,15 +504,8 @@ impl VM {
                                     constants: exec.constants,
                                     env: exec.env,
                                     ip: exec.ip,
-                                    // Use the captured inner stack so that on resume the
-                                    // instruction at exec.ip sees the same operand stack
-                                    // it had when it paused (essential for SIG_FUEL).
                                     stack: exec.stack,
                                     location_map: exec.location_map,
-                                    // SIG_FUEL: re-execute the paused instruction from
-                                    // scratch — args are on the stack, nothing to push.
-                                    // All other signals: the instruction at exec.ip
-                                    // expects a value on the stack (e.g. Return pops it).
                                     push_resume_value: !exec.bits.contains(SIG_FUEL),
                                 })]);
                         }

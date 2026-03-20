@@ -58,7 +58,7 @@
 //!    same parameter frames. It is not isolated.
 
 use crate::error::LocationMap;
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT};
+use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};
 use std::rc::Rc;
 
 use super::core::VM;
@@ -129,6 +129,7 @@ impl VM {
                 if accumulated_squelch_mask != 0
                     && !bits.contains(SIG_ERROR)
                     && !bits.contains(SIG_HALT)
+                    && bits != SIG_SWITCH
                     && bits.0 & accumulated_squelch_mask != 0
                 {
                     let squelched = bits.0 & accumulated_squelch_mask;
@@ -232,6 +233,7 @@ impl VM {
                 if accumulated_squelch_mask != 0
                     && !bits.contains(SIG_ERROR)
                     && !bits.contains(SIG_HALT)
+                    && bits != SIG_SWITCH
                     && bits.0 & accumulated_squelch_mask != 0
                 {
                     let squelched = bits.0 & accumulated_squelch_mask;
