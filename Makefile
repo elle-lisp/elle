@@ -91,22 +91,16 @@ test-git:  ## Run git plugin integration tests (requires git, no network)
 	$(ELLE) tests/git.lisp
 
 check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
-	@workspace=$$(grep -oP 'plugins/\K[^"]+' Cargo.toml | sort); \
-	makefile=$$(echo '$(PLUGINS)' | tr ' ' '\n' | sort); \
-	missing=$$(comm -23 <(echo "$$workspace") <(echo "$$makefile")); \
-	extra=$$(comm -13 <(echo "$$workspace") <(echo "$$makefile")); \
-	ok=true; \
-	if [ -n "$$missing" ]; then \
-		echo "ERROR: plugins in Cargo.toml but not in Makefile PLUGINS:"; \
-		echo "$$missing" | sed 's/^/  /'; \
-		ok=false; \
-	fi; \
-	if [ -n "$$extra" ]; then \
-		echo "ERROR: plugins in Makefile PLUGINS but not in Cargo.toml:"; \
-		echo "$$extra" | sed 's/^/  /'; \
-		ok=false; \
-	fi; \
-	$$ok && echo "✓ PLUGINS list matches Cargo.toml workspace members"
+	@ws=$$(sed -n 's/.*"plugins\/\([^"]*\)".*/\1/p' Cargo.toml | sort); \
+	mk=$$(echo '$(PLUGINS)' | tr ' ' '\n' | sort); \
+	if [ "$$ws" = "$$mk" ]; then \
+		echo "✓ PLUGINS list matches Cargo.toml workspace members"; \
+	else \
+		echo "ERROR: Makefile PLUGINS and Cargo.toml workspace members differ"; \
+		echo "  Cargo.toml:"; echo "$$ws" | sed 's/^/    /'; \
+		echo "  Makefile:";   echo "$$mk" | sed 's/^/    /'; \
+		exit 1; \
+	fi
 
 test: smoke  ## Rust unit tests + clippy + fmt after smoke
 	cargo fmt --check
