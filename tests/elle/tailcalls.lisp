@@ -8,7 +8,6 @@
 # - Fiber tail position tests
 # - Coroutine tail position tests
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ============================================================================
 # Basic tail recursion (existing patterns)
@@ -22,8 +21,8 @@
       acc
       (sum-to (- n 1) (+ acc n))))
 
-(assert-eq (sum-to 10 0) 55 "sum-to 10")
-(assert-eq (sum-to 100 0) 5050 "sum-to 100")
+(assert (= (sum-to 10 0) 55) "sum-to 10")
+(assert (= (sum-to 100 0) 5050) "sum-to 100")
 
 # Simple countdown to 0
 # This is a basic tail-recursive pattern
@@ -33,8 +32,8 @@
       0
       (countdown (- n 1))))
 
-(assert-eq (countdown 5) 0 "countdown 5")
-(assert-eq (countdown 10) 0 "countdown 10")
+(assert (= (countdown 5) 0) "countdown 5")
+(assert (= (countdown 10) 0) "countdown 10")
 
 # ============================================================================
 # Block body tail calls (new for #333)
@@ -47,7 +46,7 @@
   (block :sum
     (sum-to n 0)))
 
-(assert-eq (sum-via-block 10) 55 "block with tail call in body")
+(assert (= (sum-via-block 10) 55) "block with tail call in body")
 
 # Nested blocks with tail calls
 # Both blocks are in tail position, inner call should be tail
@@ -57,7 +56,7 @@
     (block :inner
       (sum-to n 0))))
 
-(assert-eq (nested-blocks 10) 55 "nested blocks with tail call")
+(assert (= (nested-blocks 10) 55) "nested blocks with tail call")
 
 # Block with break and tail call in body
 # The last expression (call) should be tail
@@ -68,8 +67,8 @@
         (break :b -1)
         (sum-to n 0))))
 
-(assert-eq (block-with-break 10) 55 "block with break, positive n")
-(assert-eq (block-with-break -5) -1 "block with break, negative n")
+(assert (= (block-with-break 10) 55) "block with break, positive n")
+(assert (= (block-with-break -5) -1) "block with break, negative n")
 
 # ============================================================================
 # Break value tail calls (new for #333)
@@ -84,8 +83,8 @@
         (break :b (sum-to (- n) 0))
         (sum-to n 0))))
 
-(assert-eq (break-with-call 10) 55 "break with call, positive n")
-(assert-eq (break-with-call -10) 55 "break with call, negative n")
+(assert (= (break-with-call 10) 55) "break with call, positive n")
+(assert (= (break-with-call -10) 55) "break with call, negative n")
 
 # Nested breaks with tail calls
 # Both the break value and the final expression should be tail
@@ -97,8 +96,8 @@
           (break :outer (sum-to (- n) 0))
           (sum-to n 0)))))
 
-(assert-eq (nested-breaks 10) 55 "nested breaks, positive n")
-(assert-eq (nested-breaks -10) 55 "nested breaks, negative n")
+(assert (= (nested-breaks 10) 55) "nested breaks, positive n")
+(assert (= (nested-breaks -10) 55) "nested breaks, negative n")
 
 # ============================================================================
 # Deep recursion tests (prove TCO works)
@@ -113,7 +112,7 @@
       (countdown-large (- n 1))))
 
 # This would overflow without TCO
-(assert-eq (countdown-large 100000) :done "countdown 100,000 (TCO required)")
+(assert (= (countdown-large 100000) :done) "countdown 100,000 (TCO required)")
 
 # Sum to 10,000 (would overflow without TCO)
 # Accumulator-based recursion at large scale
@@ -124,7 +123,7 @@
       (sum-large (- n 1) (+ acc n))))
 
 # This would overflow without TCO
-(assert-eq (sum-large 10000 0) 50005000 "sum to 10,000 (TCO required)")
+(assert (= (sum-large 10000 0) 50005000) "sum to 10,000 (TCO required)")
 
 # Fibonacci iterative with tail recursion
 # Compute fib(n) using tail recursion with accumulators
@@ -138,15 +137,15 @@
   "Fibonacci using tail-recursive helper"
   (fib-iter n 0 1))
 
-(assert-eq (fib 0) 0 "fib(0)")
-(assert-eq (fib 1) 1 "fib(1)")
-(assert-eq (fib 5) 5 "fib(5)")
-(assert-eq (fib 10) 55 "fib(10)")
-(assert-eq (fib 20) 6765 "fib(20)")
+(assert (= (fib 0) 0) "fib(0)")
+(assert (= (fib 1) 1) "fib(1)")
+(assert (= (fib 5) 5) "fib(5)")
+(assert (= (fib 10) 55) "fib(10)")
+(assert (= (fib 20) 6765) "fib(20)")
 
 # Large fibonacci (would overflow without TCO)
 # fib(50) = 12586269025 (within i64 range)
-(assert-eq (fib 50) 12586269025 "fib(50) (TCO required)")
+(assert (= (fib 50) 12586269025) "fib(50) (TCO required)")
 
 # ============================================================================
 # Fiber tail position tests
@@ -160,7 +159,7 @@
     (let ([f (fiber/new (fn () (sum-to n 0)) 1)])
       (fiber/resume f nil))))
 
-(assert-eq (fiber-tail-test 10) 55 "fiber/resume in tail position")
+(assert (= (fiber-tail-test 10) 55) "fiber/resume in tail position")
 
 # fiber/cancel in tail position
 # When a fiber/cancel is the last expression, it should be tail
@@ -170,7 +169,7 @@
     (let ([f (fiber/new (fn () (sum-to n 0)) 1)])
       (fiber/cancel f))))
 
-(assert-eq (fiber-cancel-tail-test 10) nil "fiber/cancel in tail position")
+(assert (= (fiber-cancel-tail-test 10) nil) "fiber/cancel in tail position")
 
 # ============================================================================
 # Coroutine tail position tests
@@ -184,7 +183,7 @@
     (let ([co (coro/new (fn () (yield (sum-to n 0))))])
       (coro/resume co))))
 
-(assert-eq (coro-yield-tail-test 10) 55 "yield in tail position")
+(assert (= (coro-yield-tail-test 10) 55) "yield in tail position")
 
 # Multiple yields with tail calls
 # Each yield should be tail when in tail position
@@ -197,9 +196,9 @@
 
 (begin
   (let ([co (coro-multi-yield 5)])
-    (assert-eq (coro/resume co) 15 "first yield in coro")
-    (assert-eq (coro/resume co) 21 "second yield in coro")
-    (assert-eq (coro/resume co) 28 "final value in coro")))
+    (assert (= (coro/resume co) 15) "first yield in coro")
+    (assert (= (coro/resume co) 21) "second yield in coro")
+    (assert (= (coro/resume co) 28) "final value in coro")))
 
 # ============================================================================
 # Complex tail call patterns
@@ -218,14 +217,14 @@
       false
       (is-even (- n 1))))
 
-(assert-eq (is-even 0) true "is-even 0")
-(assert-eq (is-even 4) true "is-even 4")
-(assert-eq (is-odd 0) false "is-odd 0")
-(assert-eq (is-odd 5) true "is-odd 5")
+(assert (= (is-even 0) true) "is-even 0")
+(assert (= (is-even 4) true) "is-even 4")
+(assert (= (is-odd 0) false) "is-odd 0")
+(assert (= (is-odd 5) true) "is-odd 5")
 
 # Mutual recursion with large n (proves TCO)
-(assert-eq (is-even 10000) true "is-even 10,000 (TCO required)")
-(assert-eq (is-odd 10001) true "is-odd 10,001 (TCO required)")
+(assert (= (is-even 10000) true) "is-even 10,000 (TCO required)")
+(assert (= (is-odd 10001) true) "is-odd 10,001 (TCO required)")
 
 # Tail call in conditional branches
 (defn conditional-tail [n]
@@ -234,8 +233,8 @@
       (countdown-large (- n))
       (countdown-large n)))
 
-(assert-eq (conditional-tail 100) :done "conditional tail call positive")
-(assert-eq (conditional-tail -100) :done "conditional tail call negative")
+(assert (= (conditional-tail 100) :done) "conditional tail call positive")
+(assert (= (conditional-tail -100) :done) "conditional tail call negative")
 
 # Tail call in loop body (via while)
 (begin
@@ -245,4 +244,4 @@
     (begin
       (assign result (+ result i))
       (assign i (+ i 1))))
-  (assert-eq result 45 "accumulation in while loop"))
+  (assert (= result 45) "accumulation in while loop"))

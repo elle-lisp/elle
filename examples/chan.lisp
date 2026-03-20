@@ -10,7 +10,6 @@
 #   chan/select           — multiplexed wait on multiple receivers
 #   Keyword messages      — sending :ok, :empty etc. as values (no ambiguity)
 
-(def {:assert-eq assert-eq} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -25,9 +24,9 @@
        (recv-result (chan/recv r)))
   (display "  send result: ") (print send-result)
   (display "  recv result: ") (print recv-result)
-  (assert-eq (get send-result 0) :ok "unbounded send returns :ok")
-  (assert-eq (get recv-result 0) :ok "recv status is :ok")
-  (assert-eq (get recv-result 1) 42 "recv message is 42"))
+  (assert (= (get send-result 0) :ok) "unbounded send returns :ok")
+  (assert (= (get recv-result 0) :ok) "recv status is :ok")
+  (assert (= (get recv-result 1) 42) "recv message is 42"))
 
 
 # ========================================
@@ -39,8 +38,8 @@
        (second (chan/send s "world")))
   (display "  bounded(1) first send: ") (print first)
   (display "  bounded(1) second send: ") (print second)
-  (assert-eq (get first 0) :ok "first send fits")
-  (assert-eq (get second 0) :full "second send is full"))
+  (assert (= (get first 0) :ok) "first send fits")
+  (assert (= (get second 0) :full) "second send is full"))
 
 
 # ========================================
@@ -50,12 +49,12 @@
 (let (([s r] (chan)))
   (let ((empty-result (chan/recv r)))
     (display "  recv from empty: ") (print empty-result)
-    (assert-eq (get empty-result 0) :empty "empty channel returns :empty"))
+    (assert (= (get empty-result 0) :empty) "empty channel returns :empty"))
 
   (chan/close s)
   (let ((disc-result (chan/recv r)))
     (display "  recv after close: ") (print disc-result)
-    (assert-eq (get disc-result 0) :disconnected "closed sender means :disconnected")))
+    (assert (= (get disc-result 0) :disconnected) "closed sender means :disconnected")))
 
 
 # ========================================
@@ -74,10 +73,10 @@
     (display "  sent :empty, got: ") (print r1)
     (display "  sent :ok, got: ") (print r2)
     (display "  sent :disconnected, got: ") (print r3)
-    (assert-eq (get r1 0) :ok "status is :ok")
-    (assert-eq (get r1 1) :empty "message is :empty (not confused with status)")
-    (assert-eq (get r2 1) :ok "message is :ok (not confused with status)")
-    (assert-eq (get r3 1) :disconnected "message is :disconnected (not confused with status)")))
+    (assert (= (get r1 0) :ok) "status is :ok")
+    (assert (= (get r1 1) :empty) "message is :empty (not confused with status)")
+    (assert (= (get r2 1) :ok) "message is :ok (not confused with status)")
+    (assert (= (get r3 1) :disconnected) "message is :disconnected (not confused with status)")))
 
 
 # ========================================
@@ -92,8 +91,8 @@
          (r2 (chan/recv r)))
     (display "  original sender: ") (print (get r1 1))
     (display "  cloned sender: ") (print (get r2 1))
-    (assert-eq (get r1 1) "from-original" "original sender message")
-    (assert-eq (get r2 1) "from-clone" "cloned sender message")))
+    (assert (= (get r1 1) "from-original") "original sender message")
+    (assert (= (get r2 1) "from-clone") "cloned sender message")))
 
 
 # ========================================
@@ -107,14 +106,14 @@
   (let ((result (chan/select @[r1 r2] 1000)))
     (display "  select picked index ") (display (get result 0))
     (display " with message: ") (print (get result 1))
-    (assert-eq (get result 0) 1 "select returns index of ready receiver")
-    (assert-eq (get result 1) "second-wins" "select returns the message")))
+    (assert (= (get result 0) 1) "select returns index of ready receiver")
+    (assert (= (get result 1) "second-wins") "select returns the message")))
 
 # Timeout when nothing is ready.
 (let (([s r] (chan)))
   (let ((result (chan/select @[r] 10)))
     (display "  select timeout: ") (print result)
-    (assert-eq (get result 0) :timeout "select times out on empty channel")))
+    (assert (= (get result 0) :timeout) "select times out on empty channel")))
 
 
 (print "")

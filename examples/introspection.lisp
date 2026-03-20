@@ -10,7 +10,6 @@
 #   Debug utilities    — debug-print, trace
 #   Micro-benchmarking — timing loops with clock/monotonic
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -20,18 +19,18 @@
 # Three clocks, three purposes: wall time, epoch time, CPU time.
 (var mono1 (clock/monotonic))
 (var mono2 (clock/monotonic))
-(assert-true (number? mono1) "clock/monotonic returns a number")
-(assert-true (>= mono2 mono1) "clock/monotonic is non-decreasing")
+(assert (number? mono1) "clock/monotonic returns a number")
+(assert (>= mono2 mono1) "clock/monotonic is non-decreasing")
 (display "  monotonic: ") (print mono1)
 
 (var epoch (clock/realtime))
-(assert-true (number? epoch) "clock/realtime returns a number")
-(assert-true (> epoch 1700000000.0) "clock/realtime is a plausible epoch")
+(assert (number? epoch) "clock/realtime returns a number")
+(assert (> epoch 1700000000.0) "clock/realtime is a plausible epoch")
 (display "  realtime (epoch): ") (print epoch)
 
 (var cpu (clock/cpu))
-(assert-true (number? cpu) "clock/cpu returns a number")
-(assert-true (>= cpu 0.0) "clock/cpu is non-negative")
+(assert (number? cpu) "clock/cpu returns a number")
+(assert (>= cpu 0.0) "clock/cpu is non-negative")
 (display "  cpu time: ") (print cpu)
 
 
@@ -41,20 +40,20 @@
 
 # time/elapsed wraps a thunk, returns (result elapsed-seconds).
 (var elapsed-result (time/elapsed (fn [] (+ 21 21))))
-(assert-true (list? elapsed-result) "time/elapsed returns a list")
-(assert-eq (first elapsed-result) 42 "time/elapsed preserves return value")
+(assert (list? elapsed-result) "time/elapsed returns a list")
+(assert (= (first elapsed-result) 42) "time/elapsed preserves return value")
 (var elapsed-secs (first (rest elapsed-result)))
-(assert-true (number? elapsed-secs) "elapsed time is a number")
-(assert-true (>= elapsed-secs 0.0) "elapsed time is non-negative")
+(assert (number? elapsed-secs) "elapsed time is a number")
+(assert (>= elapsed-secs 0.0) "elapsed time is non-negative")
 (display "  (+ 21 21) took ") (display elapsed-secs) (print " seconds")
 
 # time/stopwatch is a coroutine that yields elapsed seconds on each resume.
 (var sw (time/stopwatch))
-(assert-true (coro? sw) "time/stopwatch returns a coroutine")
+(assert (coro? sw) "time/stopwatch returns a coroutine")
 (var t-first (coro/resume sw))
 (var t-second (coro/resume sw))
-(assert-true (number? t-first) "stopwatch sample is a number")
-(assert-true (>= t-second t-first) "stopwatch samples are non-decreasing")
+(assert (number? t-first) "stopwatch sample is a number")
+(assert (>= t-second t-first) "stopwatch samples are non-decreasing")
 (display "  stopwatch: ") (display t-first) (display " → ") (print t-second)
 
 
@@ -78,53 +77,52 @@
 (var add5 (make-adder 5))
 
 # closure? — true for user-defined functions, false for primitives and non-fns
-(assert-true (closure? add) "defn produces a closure")
-(assert-true (closure? identity-fn) "identity-fn is a closure")
-(assert-true (closure? add5) "returned lambda is a closure")
-(assert-false (closure? +) "+ is a primitive, not a closure")
-(assert-false (closure? 42) "42 is not a closure")
+(assert (closure? add) "defn produces a closure")
+(assert (closure? identity-fn) "identity-fn is a closure")
+(assert (closure? add5) "returned lambda is a closure")
+(assert (not (closure? +)) "+ is a primitive, not a closure")
+(assert (not (closure? 42)) "42 is not a closure")
 (display "  closure?: add=") (display (closure? add))
 (display " +=") (print (closure? +))
 
 # silent? — true for closures that do not suspend (no yield/debug/polymorphic)
-(assert-true (silent? add) "add is silent")
-(assert-true (silent? identity-fn) "identity-fn is silent")
+(assert (silent? add) "add is silent")
+(assert (silent? identity-fn) "identity-fn is silent")
 (display "  silent?: add=") (print (silent? add))
 
 # arity — number of parameters (nil for non-closures)
-(assert-eq (arity add) 2 "add has arity 2")
-(assert-eq (arity identity-fn) 1 "identity-fn has arity 1")
-(assert-eq (arity add5) 1 "add5 has arity 1")
-(assert-eq (arity 42) nil "non-closure arity is nil")
+(assert (= (arity add) 2) "add has arity 2")
+(assert (= (arity identity-fn) 1) "identity-fn has arity 1")
+(assert (= (arity add5) 1) "add5 has arity 1")
+(assert (= (arity 42) nil) "non-closure arity is nil")
 (display "  arity: add=") (display (arity add))
 (display " identity=") (display (arity identity-fn))
 (display " add5=") (print (arity add5))
 
 # captures — number of captured variables
-(assert-eq (captures add) 0 "add captures nothing")
-(assert-eq (captures add5) 1 "add5 captures one variable")
+(assert (= (captures add) 0) "add captures nothing")
+(assert (= (captures add5) 1) "add5 captures one variable")
 (display "  captures: add=") (display (captures add))
 (display " add5=") (print (captures add5))
 
 # bytecode-size — bytecode length in bytes
-(assert-true (> (bytecode-size add) 0) "add has bytecode")
-(assert-eq (bytecode-size 42) nil "non-closure bytecode-size is nil")
+(assert (> (bytecode-size add) 0) "add has bytecode")
+(assert (= (bytecode-size 42) nil) "non-closure bytecode-size is nil")
 (display "  bytecode-size: add=") (print (bytecode-size add))
 
 # disbit — bytecode disassembly (returns array of strings)
 (var disasm (disbit add))
-(assert-true (> (length disasm) 0) "disbit returns non-empty result")
-(assert-true (string? (get disasm 0)) "disbit elements are strings")
+(assert (> (length disasm) 0) "disbit returns non-empty result")
+(assert (string? (get disasm 0)) "disbit elements are strings")
 (display "  disbit add (") (display (length disasm)) (print " instructions):")
 (each line in disasm
   (display "    ") (print line))
 
 # disjit — Cranelift IR (nil if LIR not stored for this function)
 (var jit (disjit add))
-(assert-true (or (nil? jit)
+(assert (or (nil? jit)
                  (and (> (length jit) 0)
-                      (string? (get jit 0))))
-             "disjit returns nil or array of strings")
+                      (string? (get jit 0)))) "disjit returns nil or array of strings")
 (display "  disjit add: ") (print (if (nil? jit) "nil (no LIR)" "available"))
 
 
@@ -140,7 +138,7 @@
 
 # trace wraps an expression, prints debug info to stderr, returns the value.
 (var traced (trace "add" (add 3 4)))
-(assert-eq traced 7 "trace preserves return value")
+(assert (= traced 7) "trace preserves return value")
 (display "  trace: (add 3 4) = ") (print traced)
 
 
@@ -164,13 +162,13 @@
 (var iters 500)
 
 (var ns-mono (bench "clock/monotonic" iters (fn [] (clock/monotonic))))
-(assert-true (>= ns-mono 0.0) "monotonic bench is non-negative")
+(assert (>= ns-mono 0.0) "monotonic bench is non-negative")
 
 (var ns-add (bench "add(1, 2)      " iters (fn [] (add 1 2))))
-(assert-true (>= ns-add 0.0) "add bench is non-negative")
+(assert (>= ns-add 0.0) "add bench is non-negative")
 
 (var ns-elapsed (bench "time/elapsed   " iters (fn [] (time/elapsed (fn [] 42)))))
-(assert-true (>= ns-elapsed 0.0) "elapsed bench is non-negative")
+(assert (>= ns-elapsed 0.0) "elapsed bench is non-negative")
 
 
 (print "")

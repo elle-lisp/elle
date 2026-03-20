@@ -14,7 +14,6 @@
 #   yield*                  — delegation to a sub-coroutine
 #   forever + var/set       — infinite generators with mutable state
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -24,18 +23,18 @@
 # coro/new wraps a zero-arg function into a coroutine.
 # coro/resume steps it forward; yield suspends and returns a value.
 (def co (coro/new (fn [] (yield 42))))
-(assert-true (coro? co) "coro/new returns a coroutine")
-(assert-eq (coro/status co) :new "initial status is :new")
+(assert (coro? co) "coro/new returns a coroutine")
+(assert (= (coro/status co) :new) "initial status is :new")
 
 (def v (coro/resume co))
 (display "  first resume: ") (print v)
-(assert-eq v 42 "first resume returns yielded value")
-(assert-eq (coro/status co) :paused "status after yield is :paused")
-(assert-false (coro/done? co) "not done while suspended")
+(assert (= v 42) "first resume returns yielded value")
+(assert (= (coro/status co) :paused) "status after yield is :paused")
+(assert (not (coro/done? co)) "not done while suspended")
 
 (coro/resume co)
-(assert-eq (coro/status co) :dead "status after body completes is :dead")
-(assert-true (coro/done? co) "done after completion")
+(assert (= (coro/status co) :dead) "status after body completes is :dead")
+(assert (coro/done? co) "done after completion")
 
 
 # ========================================
@@ -47,14 +46,14 @@
 
 (coro/resume co2)
 (display "  after 1st yield, value: ") (print (coro/value co2))
-(assert-eq (coro/value co2) 10 "value after first yield")
+(assert (= (coro/value co2) 10) "value after first yield")
 
 (coro/resume co2)
-(assert-eq (coro/value co2) 20 "value after second yield")
+(assert (= (coro/value co2) 20) "value after second yield")
 
 (coro/resume co2)
-(assert-eq (coro/value co2) 30 "value after third yield")
-(assert-eq (coro/status co2) :paused "still paused after final yield")
+(assert (= (coro/value co2) 30) "value after third yield")
+(assert (= (coro/status co2) :paused) "still paused after final yield")
 
 
 # ========================================
@@ -67,9 +66,9 @@
   (yield (* 4 5))
   (yield (if true 100 200)))))
 
-(assert-eq (coro/resume co3) 6 "yield sum")
-(assert-eq (coro/resume co3) 20 "yield product")
-(assert-eq (coro/resume co3) 100 "yield conditional")
+(assert (= (coro/resume co3) 6) "yield sum")
+(assert (= (coro/resume co3) 20) "yield product")
+(assert (= (coro/resume co3) 100) "yield conditional")
 (display "  (+ 1 2 3)=") (display 6)
   (display "  (* 4 5)=") (display 20)
   (display "  (if true 100 200)=") (print 100)
@@ -108,17 +107,17 @@
 
 # Verify the sequence
 (def fib2 (make-fib))
-(assert-eq (coro/resume fib2) 0 "fib(0)")
-(assert-eq (coro/resume fib2) 1 "fib(1)")
-(assert-eq (coro/resume fib2) 1 "fib(2)")
-(assert-eq (coro/resume fib2) 2 "fib(3)")
-(assert-eq (coro/resume fib2) 3 "fib(4)")
-(assert-eq (coro/resume fib2) 5 "fib(5)")
-(assert-eq (coro/resume fib2) 8 "fib(6)")
-(assert-eq (coro/resume fib2) 13 "fib(7)")
-(assert-eq (coro/resume fib2) 21 "fib(8)")
-(assert-eq (coro/resume fib2) 34 "fib(9)")
-(assert-false (coro/done? fib2) "infinite generator never done")
+(assert (= (coro/resume fib2) 0) "fib(0)")
+(assert (= (coro/resume fib2) 1) "fib(1)")
+(assert (= (coro/resume fib2) 1) "fib(2)")
+(assert (= (coro/resume fib2) 2) "fib(3)")
+(assert (= (coro/resume fib2) 3) "fib(4)")
+(assert (= (coro/resume fib2) 5) "fib(5)")
+(assert (= (coro/resume fib2) 8) "fib(6)")
+(assert (= (coro/resume fib2) 13) "fib(7)")
+(assert (= (coro/resume fib2) 21) "fib(8)")
+(assert (= (coro/resume fib2) 34) "fib(9)")
+(assert (not (coro/done? fib2)) "infinite generator never done")
 
 
 # ========================================
@@ -137,10 +136,10 @@
 (def from-10 (make-counter 10))
 (def from-99 (make-counter 99))
 
-(assert-eq (coro/resume from-10) 10 "counter from 10")
-(assert-eq (coro/resume from-99) 99 "counter from 99")
-(assert-eq (coro/resume from-10) 11 "counter from 10, step 2")
-(assert-eq (coro/resume from-99) 100 "counter from 99, step 2")
+(assert (= (coro/resume from-10) 10) "counter from 10")
+(assert (= (coro/resume from-99) 99) "counter from 99")
+(assert (= (coro/resume from-10) 11) "counter from 10, step 2")
+(assert (= (coro/resume from-99) 100) "counter from 99, step 2")
 (display "  from-10: 10, 11  from-99: 99, 100") (print "")
 
 
@@ -161,8 +160,8 @@
 (print (coro/resume evens))
 # 1 2 3 4 5 6
 
-(assert-eq (coro/status odds) :paused "odds still paused")
-(assert-eq (coro/status evens) :paused "evens still paused")
+(assert (= (coro/status odds) :paused) "odds still paused")
+(assert (= (coro/status evens) :paused) "evens still paused")
 
 
 # ========================================
@@ -176,9 +175,9 @@
   (yield (coro/resume inner))
   (yield 300))))
 
-(assert-eq (coro/resume outer) 100 "nested: inner first")
-(assert-eq (coro/resume outer) 200 "nested: inner second")
-(assert-eq (coro/resume outer) 300 "nested: outer continues")
+(assert (= (coro/resume outer) 100) "nested: inner first")
+(assert (= (coro/resume outer) 200) "nested: inner second")
+(assert (= (coro/resume outer) 300) "nested: outer continues")
 (display "  nested: 100 200 300") (print "")
 
 
@@ -186,11 +185,11 @@
 # 8. coro? type predicate
 # ========================================
 
-(assert-true (coro? (coro/new (fn [] (yield 1)))) "coroutine is coro?")
-(assert-false (coro? 42) "int is not coro?")
-(assert-false (coro? (fn [] 1)) "function is not coro?")
-(assert-false (coro? nil) "nil is not coro?")
-(assert-false (coro? '()) "empty list is not coro?")
+(assert (coro? (coro/new (fn [] (yield 1)))) "coroutine is coro?")
+(assert (not (coro? 42)) "int is not coro?")
+(assert (not (coro? (fn [] 1))) "function is not coro?")
+(assert (not (coro? nil)) "nil is not coro?")
+(assert (not (coro? '())) "empty list is not coro?")
 
 
 # ========================================
@@ -208,14 +207,14 @@
 (print (coro/resume main))
 # 10 20 30
 
-(assert-eq (coro/status main) :paused "main paused after final yield")
+(assert (= (coro/status main) :paused) "main paused after final yield")
 
 # Verify values came through correctly
 (def sub2 (coro/new (fn [] (yield :a) (yield :b))))
 (def main2 (coro/new (fn [] (yield* sub2) (yield :c))))
-(assert-eq (coro/resume main2) :a "delegated first")
-(assert-eq (coro/resume main2) :b "delegated second")
-(assert-eq (coro/resume main2) :c "own yield after delegation")
+(assert (= (coro/resume main2) :a) "delegated first")
+(assert (= (coro/resume main2) :b) "delegated second")
+(assert (= (coro/resume main2) :c) "own yield after delegation")
 
 
 (print "")

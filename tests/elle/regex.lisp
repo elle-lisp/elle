@@ -1,4 +1,3 @@
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 ## Regex plugin integration tests
 ## Tests the regex plugin (.so loaded via import-file)
@@ -24,79 +23,57 @@
 
 # ── regex/compile ──────────────────────────────────────────────────
 
-(assert-true
-  (not (nil? (compile-fn "\\d+")))
-  "regex/compile valid pattern")
+(assert (not (nil? (compile-fn "\\d+"))) "regex/compile valid pattern")
 
-(assert-err (fn () (compile-fn "[invalid"))
-  "regex/compile invalid pattern")
+(let (([ok? _] (protect ((fn () (compile-fn "[invalid")))))) (assert (not ok?) "regex/compile invalid pattern"))
 
-(assert-err (fn () (compile-fn 42))
-  "regex/compile wrong type")
+(let (([ok? _] (protect ((fn () (compile-fn 42)))))) (assert (not ok?) "regex/compile wrong type"))
 
-(assert-err (fn () (compile-fn))
-  "regex/compile wrong arity: no args")
+(let (([ok? _] (protect ((fn () (compile-fn)))))) (assert (not ok?) "regex/compile wrong arity: no args"))
 
-(assert-err (fn () (compile-fn "a" "b"))
-  "regex/compile wrong arity: two args")
+(let (([ok? _] (protect ((fn () (compile-fn "a" "b")))))) (assert (not ok?) "regex/compile wrong arity: two args"))
 
 # ── regex/match? ───────────────────────────────────────────────────
 
-(assert-true (match-fn (compile-fn "\\d+") "abc123")
-  "regex/match? true")
+(assert (match-fn (compile-fn "\\d+") "abc123") "regex/match? true")
 
-(assert-false (match-fn (compile-fn "\\d+") "abc")
-  "regex/match? false")
+(assert (not (match-fn (compile-fn "\\d+") "abc")) "regex/match? false")
 
-(assert-err (fn () (match-fn "not-a-regex" "abc"))
-  "regex/match? wrong type")
+(let (([ok? _] (protect ((fn () (match-fn "not-a-regex" "abc")))))) (assert (not ok?) "regex/match? wrong type"))
 
 # ── regex/find ─────────────────────────────────────────────────────
 
-(assert-eq (get (find-fn (compile-fn "\\d+") "abc123def") :match)
-  "123"
-  "regex/find match value")
+(assert (= (get (find-fn (compile-fn "\\d+") "abc123def") :match) "123") "regex/find match value")
 
 (let ((m (find-fn (compile-fn "\\d+") "abc123def")))
-  (assert-eq (get m :start) 3 "regex/find start")
-  (assert-eq (get m :end) 6 "regex/find end"))
+  (assert (= (get m :start) 3) "regex/find start")
+  (assert (= (get m :end) 6) "regex/find end"))
 
-(assert-eq (find-fn (compile-fn "\\d+") "abc")
-  nil
-  "regex/find no match returns nil")
+(assert (= (find-fn (compile-fn "\\d+") "abc") nil) "regex/find no match returns nil")
 
-(assert-err (fn () (find-fn (compile-fn "x")))
-  "regex/find wrong arity")
+(let (([ok? _] (protect ((fn () (find-fn (compile-fn "x"))))))) (assert (not ok?) "regex/find wrong arity"))
 
 # ── regex/find-all ─────────────────────────────────────────────────
 
-(assert-eq (length (find-all-fn (compile-fn "\\d+") "a1b22c333"))
-  3
-  "regex/find-all multiple matches count")
+(assert (= (length (find-all-fn (compile-fn "\\d+") "a1b22c333")) 3) "regex/find-all multiple matches count")
 
-(assert-eq (get (first (find-all-fn (compile-fn "\\d+") "a1b22c333")) :match)
-  "1"
-  "regex/find-all first match value")
+(assert (= (get (first (find-all-fn (compile-fn "\\d+") "a1b22c333")) :match) "1") "regex/find-all first match value")
 
-(assert-true (empty? (find-all-fn (compile-fn "\\d+") "abc"))
-  "regex/find-all no matches")
+(assert (empty? (find-all-fn (compile-fn "\\d+") "abc")) "regex/find-all no matches")
 
 # ── regex/captures ─────────────────────────────────────────────────
 
 (let ((c (captures-fn (compile-fn "(\\d+)-(\\w+)") "42-hello")))
-  (assert-eq (get c :0) "42-hello" "regex/captures group 0: full match")
-  (assert-eq (get c :1) "42" "regex/captures group 1")
-  (assert-eq (get c :2) "hello" "regex/captures group 2"))
+  (assert (= (get c :0) "42-hello") "regex/captures group 0: full match")
+  (assert (= (get c :1) "42") "regex/captures group 1")
+  (assert (= (get c :2) "hello") "regex/captures group 2"))
 
 (let ((c (captures-fn
             (compile-fn "(?P<year>\\d{4})-(?P<month>\\d{2})")
             "2024-01-15")))
-  (assert-eq (get c :year) "2024" "regex/captures named: year")
-  (assert-eq (get c :month) "01" "regex/captures named: month"))
+  (assert (= (get c :year) "2024") "regex/captures named: year")
+  (assert (= (get c :month) "01") "regex/captures named: month"))
 
-(assert-eq (captures-fn (compile-fn "\\d+") "abc")
-  nil
-  "regex/captures no match returns nil")
+(assert (= (captures-fn (compile-fn "\\d+") "abc") nil) "regex/captures no match returns nil")
 
-(assert-err (fn () (captures-fn (compile-fn "x")))
-  "regex/captures wrong arity")
+(let (([ok? _] (protect ((fn () (captures-fn (compile-fn "x"))))))) (assert (not ok?) "regex/captures wrong arity"))

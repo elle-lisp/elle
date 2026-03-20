@@ -1,4 +1,3 @@
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 ## Glob plugin integration tests
 ## Tests the glob plugin (.so loaded via import-file)
@@ -21,28 +20,28 @@
 
 ## ── glob/glob ──────────────────────────────────────────────────
 
-(assert-true (array? (glob-fn "Cargo.toml")) "glob/glob returns array")
+(assert (array? (glob-fn "Cargo.toml")) "glob/glob returns array")
 
 (let [(r1 (glob-fn "Cargo.toml"))]
-  (assert-eq (length r1) 1 "glob/glob finds cargo toml length")
-  (assert-eq (get r1 0) "Cargo.toml" "glob/glob finds cargo toml value"))
+  (assert (= (length r1) 1) "glob/glob finds cargo toml length")
+  (assert (= (get r1 0) "Cargo.toml") "glob/glob finds cargo toml value"))
 
-(assert-true (> (length (glob-fn "plugins/*/Cargo.toml")) 0) "glob/glob wildcard")
+(assert (> (length (glob-fn "plugins/*/Cargo.toml")) 0) "glob/glob wildcard")
 
-(assert-eq (length (glob-fn "nonexistent_*.xyz")) 0 "glob/glob no matches")
+(assert (= (length (glob-fn "nonexistent_*.xyz")) 0) "glob/glob no matches")
 
-(assert-err (fn () (glob-fn "[invalid")) "glob/glob invalid pattern")
-(assert-err (fn () (glob-fn 42)) "glob/glob wrong type")
+(let (([ok? _] (protect ((fn () (glob-fn "[invalid")))))) (assert (not ok?) "glob/glob invalid pattern"))
+(let (([ok? _] (protect ((fn () (glob-fn 42)))))) (assert (not ok?) "glob/glob wrong type"))
 
 ## ── glob/match? ────────────────────────────────────────────────
 
-(assert-true (match-fn "*.rs" "main.rs") "glob/match true")
-(assert-false (match-fn "*.rs" "main.py") "glob/match false")
-(assert-err (fn () (match-fn "[invalid" "test")) "glob/match invalid pattern")
-(assert-err (fn () (match-fn 42 "test")) "glob/match wrong type")
+(assert (match-fn "*.rs" "main.rs") "glob/match true")
+(assert (not (match-fn "*.rs" "main.py")) "glob/match false")
+(let (([ok? _] (protect ((fn () (match-fn "[invalid" "test")))))) (assert (not ok?) "glob/match invalid pattern"))
+(let (([ok? _] (protect ((fn () (match-fn 42 "test")))))) (assert (not ok?) "glob/match wrong type"))
 
 ## ── glob/match-path? ───────────────────────────────────────────
 
-(assert-true (match-path-fn "src/*.rs" "src/main.rs") "glob/match-path true")
-(assert-false (match-path-fn "*.py" "src/main.rs") "glob/match-path false")
-(assert-err (fn () (match-path-fn "[invalid" "test")) "glob/match-path invalid pattern")
+(assert (match-path-fn "src/*.rs" "src/main.rs") "glob/match-path true")
+(assert (not (match-path-fn "*.py" "src/main.rs")) "glob/match-path false")
+(let (([ok? _] (protect ((fn () (match-path-fn "[invalid" "test")))))) (assert (not ok?) "glob/match-path invalid pattern"))

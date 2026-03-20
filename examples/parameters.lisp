@@ -15,7 +15,6 @@
 #   Nested parameterize — shadowing and revert
 #   Fiber inheritance   — child fibers inherit parent's parameter bindings
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -25,21 +24,21 @@
 # parameter creates a parameter with a default value.
 # Calling the parameter (with no args) reads its current value.
 (def output-port (parameter "stdout"))
-(assert-eq (output-port) "stdout" "parameter: read default")
+(assert (= (output-port) "stdout") "parameter: read default")
 (display "  (output-port) = ") (print (output-port))
 
 # parameter? tests if a value is a parameter
-(assert-true (parameter? output-port) "parameter?: true for parameter")
-(assert-false (parameter? "stdout") "parameter?: false for string")
-(assert-false (parameter? 42) "parameter?: false for number")
+(assert (parameter? output-port) "parameter?: true for parameter")
+(assert (not (parameter? "stdout")) "parameter?: false for string")
+(assert (not (parameter? 42)) "parameter?: false for number")
 (display "  (parameter? output-port) = ") (print (parameter? output-port))
 
 # Parameters can hold any value
 (def current-user (parameter nil))
-(assert-true (nil? (current-user)) "parameter: nil default")
+(assert (nil? (current-user)) "parameter: nil default")
 
 (def max-retries (parameter 3))
-(assert-eq (max-retries) 3 "parameter: int default")
+(assert (= (max-retries) 3) "parameter: int default")
 
 
 # ========================================
@@ -54,12 +53,12 @@
 
 # Inside parameterize, p reads the new value
 (parameterize ((p 20))
-  (assert-eq (p) 20 "parameterize: override active"))
+  (assert (= (p) 20) "parameterize: override active"))
 (display "  Inside parameterize: (p) = 20")
 (newline)
 
 # Outside parameterize, p reverts to the default
-(assert-eq (p) 10 "parameterize: reverts after")
+(assert (= (p) 10) "parameterize: reverts after")
 (display "  After parameterize: (p) = ") (print (p))
 
 
@@ -73,16 +72,16 @@
 (def level (parameter 1))
 
 (parameterize ((level 2))
-  (assert-eq (level) 2 "nested: outer override")
+  (assert (= (level) 2) "nested: outer override")
   
   (parameterize ((level 3))
-    (assert-eq (level) 3 "nested: inner shadows outer"))
+    (assert (= (level) 3) "nested: inner shadows outer"))
   
   # After inner parameterize, outer override is visible again
-  (assert-eq (level) 2 "nested: outer visible after inner"))
+  (assert (= (level) 2) "nested: outer visible after inner"))
 
 # After all parameterize, default is visible
-(assert-eq (level) 1 "nested: default after all")
+(assert (= (level) 1) "nested: default after all")
 (display "  Nested parameterize: level reverts correctly")
 (newline)
 
@@ -96,12 +95,12 @@
 (def y (parameter 10))
 
 (parameterize ((x 2) (y 20))
-  (assert-eq (x) 2 "multi: x overridden")
-  (assert-eq (y) 20 "multi: y overridden")
-  (assert-eq (+ (x) (y)) 22 "multi: both used in expression"))
+  (assert (= (x) 2) "multi: x overridden")
+  (assert (= (y) 20) "multi: y overridden")
+  (assert (= (+ (x) (y)) 22) "multi: both used in expression"))
 
-(assert-eq (x) 1 "multi: x reverted")
-(assert-eq (y) 10 "multi: y reverted")
+(assert (= (x) 1) "multi: x reverted")
+(assert (= (y) 10) "multi: y reverted")
 (display "  Multiple parameters: both override and revert correctly")
 (newline)
 
@@ -120,8 +119,8 @@
   (print msg)
   (+ 1 2)))
 
-(assert-eq result 3 "parameterize: body returns last expr")
-(assert-eq (config) "default" "parameterize: reverted after multi-expr body")
+(assert (= result 3) "parameterize: body returns last expr")
+(assert (= (config) "default") "parameterize: reverted after multi-expr body")
 
 
 # ========================================
@@ -139,17 +138,14 @@
     (string/join (list "[" port "] " msg) "")))
 
 # Default output port
-(assert-eq (write-line "hello") "[stdout] hello"
-  "io-port: default output")
+(assert (= (write-line "hello") "[stdout] hello") "io-port: default output")
 
 # Override output port
 (parameterize ((current-output "stderr"))
-  (assert-eq (write-line "error") "[stderr] error"
-    "io-port: overridden output"))
+  (assert (= (write-line "error") "[stderr] error") "io-port: overridden output"))
 
 # Reverted to default
-(assert-eq (write-line "done") "[stdout] done"
-  "io-port: reverted output")
+(assert (= (write-line "done") "[stdout] done") "io-port: reverted output")
 
 (display "  I/O port simulation: ")
 (print (write-line "success"))
@@ -170,7 +166,7 @@
   (let ((f (fiber/new (fn [] (shared-param)) 1)))
     (fiber/resume f nil)
     (let ((child-value (fiber/value f)))
-      (assert-eq child-value 200 "fiber: inherits parent parameterize"))))
+      (assert (= child-value 200) "fiber: inherits parent parameterize"))))
 
 (display "  Fiber inheritance: child sees parent's parameter override")
 (newline)
@@ -179,7 +175,7 @@
 (let ((f (fiber/new (fn [] (shared-param)) 1)))
   (fiber/resume f nil)
   (let ((child-value (fiber/value f)))
-    (assert-eq child-value 100 "fiber: inherits default outside parameterize")))
+    (assert (= child-value 100) "fiber: inherits default outside parameterize")))
 
 (display "  Fiber inheritance: child sees default outside parameterize")
 (newline)

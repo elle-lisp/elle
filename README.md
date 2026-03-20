@@ -13,7 +13,9 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Memory](#memory)
 - [JIT](#jit)
 - [FFI](#ffi)
-- [Modules and Plugins](#modules-and-plugins)
+- [Modules](#modules)
+- [Plugins](#plugins)
+- [Epochs](#epochs)
 - [Tooling](#tooling)
 - [Getting Started](#getting-started)
 - [License](#license)
@@ -545,7 +547,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **FFI calls are tagged in the signal system.** Compiler knows where Elle's safety guarantees end and C's begin.
 
-## Modules and Plugins
+## Modules
 
 - **Module system is minimal by design.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. No module declarations, no export lists, no special import form. It's a function call.
 
@@ -562,6 +564,10 @@ Exactly two values are falsy. Everything else is truthy.
   (add 1 2)  # => 6
   ```
 
+- **Module system is user-replaceable.** `import` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
+
+## Plugins
+
 - **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
 
   ```janet
@@ -571,9 +577,41 @@ Exactly two values are falsy. Everything else is truthy.
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **Five plugins ship with Elle:** regex, sqlite, crypto, random, selkie.
+- **21 plugins ship with Elle:**
 
-- **Module system is user-replaceable.** `import` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
+  | Plugin | Description |
+  |--------|-------------|
+  | `base64` | Base64 encoding/decoding |
+  | `clap` | Declarative CLI argument parsing |
+  | `compress` | Compression (gzip, zstd, etc.) |
+  | `crypto` | SHA-2 hashing and HMAC |
+  | `csv` | CSV reading and writing |
+  | `git` | Git repository operations |
+  | `glob` | Filesystem glob patterns |
+  | `jiff` | Date, time, and duration arithmetic |
+  | `msgpack` | MessagePack serialization |
+  | `oxigraph` | RDF graph database (SPARQL) |
+  | `protobuf` | Protocol Buffers serialization |
+  | `random` | Pseudo-random number generation |
+  | `regex` | Regular expressions |
+  | `selkie` | Mermaid diagram rendering |
+  | `semver` | Semantic version parsing and comparison |
+  | `sqlite` | SQLite database |
+  | `syn` | Rust source code parsing |
+  | `toml` | TOML parsing and generation |
+  | `uuid` | UUID generation |
+  | `xml` | XML parsing and generation |
+  | `yaml` | YAML parsing and generation |
+
+## Epochs
+
+- **Breaking changes are versioned.** Each source file can declare an epoch — `(elle N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
+
+- **Three migration rule types.** `Rename` swaps symbols mechanically. `Replace` restructures call forms using templates with positional placeholders. `Remove` flags deleted forms with a compile error and guidance message.
+
+- **`elle rewrite` migrates source files.** One command applies all epoch rules, preserves formatting, and strips the epoch tag. `--check` mode verifies files are up to date in CI.
+
+  See [`docs/epochs.md`](docs/epochs.md) for details.
 
 ## Tooling
 

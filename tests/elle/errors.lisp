@@ -2,43 +2,39 @@
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.
 
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 # ── argument-error ───────────────────────────────────────────────────────────
-(assert-err-kind (fn [] (pop @[])) :argument-error "pop empty @array")
-(assert-err-kind (fn [] (range 0 10 0)) :argument-error "range zero step")
+(let (([ok? err] (protect ((fn [] (pop @[])))))) (assert (not ok?) "pop empty @array") (assert (= (get err :error) :argument-error) "pop empty @array"))
+(let (([ok? err] (protect ((fn [] (range 0 10 0)))))) (assert (not ok?) "range zero step") (assert (= (get err :error) :argument-error) "range zero step"))
 
 # ── parse-error ──────────────────────────────────────────────────────────────
-(assert-err-kind (fn [] (float "nope")) :parse-error "float parse bad input")
-(assert-err-kind (fn [] (integer "nope")) :parse-error "integer parse bad input")
+(let (([ok? err] (protect ((fn [] (float "nope")))))) (assert (not ok?) "float parse bad input") (assert (= (get err :error) :parse-error) "float parse bad input"))
+(let (([ok? err] (protect ((fn [] (integer "nope")))))) (assert (not ok?) "integer parse bad input") (assert (= (get err :error) :parse-error) "integer parse bad input"))
 
 # ── encoding-error ───────────────────────────────────────────────────────────
-(assert-err-kind (fn [] (string (bytes 0xff 0xfe))) :encoding-error "bytes->string bad utf8")
+(let (([ok? err] (protect ((fn [] (string (bytes 0xff 0xfe))))))) (assert (not ok?) "bytes->string bad utf8") (assert (= (get err :error) :encoding-error) "bytes->string bad utf8"))
 
 # ── io-error (slurp) ─────────────────────────────────────────────────────────
-(assert-err-kind (fn [] (slurp "/no/such/file/at/all")) :io-error "slurp missing file")
+(let (([ok? err] (protect ((fn [] (slurp "/no/such/file/at/all")))))) (assert (not ok?) "slurp missing file") (assert (= (get err :error) :io-error) "slurp missing file"))
 
 # ── io-error extra :path field ───────────────────────────────────────────────
 (let (([ok? err] (protect (slurp "/no/such/file/at/all"))))
-  (assert-false ok? "slurp should error")
-  (assert-eq (get err :error) :io-error "slurp error kind is :io-error")
-  (assert-true (string? (get err :path)) "slurp error has :path field"))
+  (assert (not ok?) "slurp should error")
+  (assert (= (get err :error) :io-error) "slurp error kind is :io-error")
+  (assert (string? (get err :path)) "slurp error has :path field"))
 
 # ── state-error (fiber) ──────────────────────────────────────────────────────
 (let ((f (fiber/new (fn [] 42) 0)))
   (fiber/resume f)
-  (assert-err-kind (fn [] (fiber/resume f)) :state-error "resume completed fiber"))
+  (let (([ok? err] (protect ((fn [] (fiber/resume f)))))) (assert (not ok?) "resume completed fiber") (assert (= (get err :error) :state-error) "resume completed fiber")))
 
 # ── state-error (chan) ────────────────────────────────────────────────────────
 (let (([tx _] (chan)))
   (chan/close tx)
-  (assert-err-kind (fn [] (chan/clone tx)) :state-error "clone closed sender"))
+  (let (([ok? err] (protect ((fn [] (chan/clone tx)))))) (assert (not ok?) "clone closed sender") (assert (= (get err :error) :state-error) "clone closed sender")))
 
 # ── signal-error ─────────────────────────────────────────────────────────────
-(assert-err-kind
-  (fn [] (fiber/new (fn [] 42) :not-a-signal-keyword))
-  :signal-error
-  "fiber/new unknown signal keyword")
+(let (([ok? err] (protect ((fn [] (fiber/new (fn [] 42) :not-a-signal-keyword)))))) (assert (not ok?) "fiber/new unknown signal keyword") (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 
 # ── stack-overflow ────────────────────────────────────────────────────────────
 # stack-overflow is hard to reliably trigger without killing the test process;

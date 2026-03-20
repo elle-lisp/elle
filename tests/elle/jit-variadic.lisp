@@ -1,4 +1,3 @@
-(def {:assert-eq assert-eq :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-equal assert-equal :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "tests/elle/assert.lisp")))
 
 ## Regression test for #510: JIT must correctly handle variadic functions.
 ##
@@ -19,30 +18,30 @@
 
 ## Call 15 times — past the JIT threshold of 10.
 ## Every call must succeed; before the fix, call 10+ would crash.
-(assert-eq (variadic-fn 1) "1" "variadic call 1")
-(assert-eq (variadic-fn 2) "2" "variadic call 2")
-(assert-eq (variadic-fn 3) "3" "variadic call 3")
-(assert-eq (variadic-fn 4) "4" "variadic call 4")
-(assert-eq (variadic-fn 5) "5" "variadic call 5")
-(assert-eq (variadic-fn 6) "6" "variadic call 6")
-(assert-eq (variadic-fn 7) "7" "variadic call 7")
-(assert-eq (variadic-fn 8) "8" "variadic call 8")
-(assert-eq (variadic-fn 9) "9" "variadic call 9")
-(assert-eq (variadic-fn 10) "10" "variadic call 10")
-(assert-eq (variadic-fn 11) "11" "variadic call 11")
-(assert-eq (variadic-fn 12) "12" "variadic call 12")
-(assert-eq (variadic-fn 13 :extra) "13 extra" "variadic call 13 with rest arg")
-(assert-eq (variadic-fn 14) "14" "variadic call 14")
-(assert-eq (variadic-fn 15) "15" "variadic call 15")
+(assert (= (variadic-fn 1) "1") "variadic call 1")
+(assert (= (variadic-fn 2) "2") "variadic call 2")
+(assert (= (variadic-fn 3) "3") "variadic call 3")
+(assert (= (variadic-fn 4) "4") "variadic call 4")
+(assert (= (variadic-fn 5) "5") "variadic call 5")
+(assert (= (variadic-fn 6) "6") "variadic call 6")
+(assert (= (variadic-fn 7) "7") "variadic call 7")
+(assert (= (variadic-fn 8) "8") "variadic call 8")
+(assert (= (variadic-fn 9) "9") "variadic call 9")
+(assert (= (variadic-fn 10) "10") "variadic call 10")
+(assert (= (variadic-fn 11) "11") "variadic call 11")
+(assert (= (variadic-fn 12) "12") "variadic call 12")
+(assert (= (variadic-fn 13 :extra) "13 extra") "variadic call 13 with rest arg")
+(assert (= (variadic-fn 14) "14") "variadic call 14")
+(assert (= (variadic-fn 15) "15") "variadic call 15")
 
 ## Test rest arg is a proper list (not NIL)
 (defn check-rest-type (& rest)
    "Returns an array of (list? rest, length rest, empty? rest)."
    (list (list? rest) (length rest) (empty? rest)))
 
-(assert-eq (check-rest-type) (list true 0 true) "zero rest args: list? true, length 0, empty? true")
-(assert-eq (check-rest-type 1) (list true 1 false) "one rest arg: list? true, length 1, empty? false")
-(assert-eq (check-rest-type 1 2 3) (list true 3 false) "three rest args: list? true, length 3, empty? false")
+(assert (= (check-rest-type) (list true 0 true)) "zero rest args: list? true, length 0, empty? true")
+(assert (= (check-rest-type 1) (list true 1 false)) "one rest arg: list? true, length 1, empty? false")
+(assert (= (check-rest-type 1 2 3) (list true 3 false)) "three rest args: list? true, length 3, empty? false")
 
 ## Call past JIT threshold to ensure JIT path works
 (check-rest-type)
@@ -55,8 +54,8 @@
 (check-rest-type)
 (check-rest-type)
 (check-rest-type)
-(assert-eq (check-rest-type 10 20) (list true 2 false) "post-JIT: two rest args")
-(assert-eq (check-rest-type) (list true 0 true) "post-JIT: zero rest args")
+(assert (= (check-rest-type 10 20) (list true 2 false)) "post-JIT: two rest args")
+(assert (= (check-rest-type) (list true 0 true)) "post-JIT: zero rest args")
 
 ## Test multiple rest args — verify cons list order
 (defn collect-rest (& args)
@@ -73,9 +72,9 @@
 (collect-rest 1 2 3)
 (collect-rest)
 (collect-rest 1)
-(assert-eq (collect-rest) (list) "post-JIT collect: empty")
-(assert-eq (collect-rest 1) (list 1) "post-JIT collect: one")
-(assert-eq (collect-rest 1 2 3) (list 1 2 3) "post-JIT collect: three in order")
+(assert (= (collect-rest) (list)) "post-JIT collect: empty")
+(assert (= (collect-rest 1) (list 1)) "post-JIT collect: one")
+(assert (= (collect-rest 1 2 3) (list 1 2 3)) "post-JIT collect: three in order")
 
 ## Test variadic with closure capture of rest param
 (defn make-rest-getter (& rest)
@@ -96,6 +95,6 @@
 (def getter-empty ((make-rest-getter)))
 (def getter-one ((make-rest-getter 42)))
 (def getter-multi ((make-rest-getter 10 20 30)))
-(assert-eq getter-empty (list) "captured rest: empty")
-(assert-eq getter-one (list 42) "captured rest: one")
-(assert-eq getter-multi (list 10 20 30) "captured rest: three")
+(assert (= getter-empty (list)) "captured rest: empty")
+(assert (= getter-one (list 42)) "captured rest: one")
+(assert (= getter-multi (list 10 20 30)) "captured rest: three")

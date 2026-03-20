@@ -21,7 +21,6 @@
 #   each            — iteration macro (brief — see collections.lisp)
 #   -> / ->>        — threading macros
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -52,22 +51,22 @@
       false)
     false))
 
-(assert-true (literal? [:lit 42]) "literal?: yes")
-(assert-false (literal? [:add [:lit 1] [:lit 2]]) "literal?: compound")
-(assert-false (literal? 42) "literal?: bare number is not an expr")
+(assert (literal? [:lit 42]) "literal?: yes")
+(assert (not (literal? [:add [:lit 1] [:lit 2]])) "literal?: compound")
+(assert (not (literal? 42)) "literal?: bare number is not an expr")
 (display "  (literal? [:lit 42]) = ") (print (literal? [:lit 42]))
 
 # Only nil and false are falsy — everything else is truthy
-(assert-eq (if true :yes :no) :yes "if: true branch")
-(assert-eq (if false :yes :no) :no "if: false branch")
-(assert-eq (if nil :yes :no) :no "if: nil is falsy")
-(assert-eq (if true :yes) :yes "if: no else, true")
-(assert-eq (if false :yes) nil "if: no else, false → nil")
+(assert (= (if true :yes :no) :yes) "if: true branch")
+(assert (= (if false :yes :no) :no) "if: false branch")
+(assert (= (if nil :yes :no) :no) "if: nil is falsy")
+(assert (= (if true :yes) :yes) "if: no else, true")
+(assert (= (if false :yes) nil) "if: no else, false → nil")
 
 # Truthiness: 0, empty string, empty list are all truthy (unlike C/Python)
-(assert-eq (if 0 :yes :no) :yes "if: 0 is truthy")
-(assert-eq (if "" :yes :no) :yes "if: empty string is truthy")
-(assert-eq (if (list) :yes :no) :yes "if: empty list is truthy")
+(assert (= (if 0 :yes :no) :yes) "if: 0 is truthy")
+(assert (= (if "" :yes :no) :yes) "if: empty string is truthy")
+(assert (= (if (list) :yes :no) :yes) "if: empty list is truthy")
 
 
 # ========================================
@@ -89,10 +88,10 @@
     ((= (get expr 0) :div)  :binary)
     (true                    :unknown)))
 
-(assert-eq (expr-type [:lit 5]) :literal "cond: literal")
-(assert-eq (expr-type [:neg [:lit 3]]) :unary "cond: unary")
-(assert-eq (expr-type [:add [:lit 1] [:lit 2]]) :binary "cond: binary")
-(assert-eq (expr-type 42) :invalid "cond: not an array")
+(assert (= (expr-type [:lit 5]) :literal) "cond: literal")
+(assert (= (expr-type [:neg [:lit 3]]) :unary) "cond: unary")
+(assert (= (expr-type [:add [:lit 1] [:lit 2]]) :binary) "cond: binary")
+(assert (= (expr-type 42) :invalid) "cond: not an array")
 (display "  expr-type([:add ...]) = ") (print (expr-type [:add [:lit 1] [:lit 2]]))
 
 # The operator symbol for pretty-printing
@@ -106,8 +105,8 @@
     ((= op :neg) "neg")
     (true "?")))
 
-(assert-eq (op-symbol :add) "+" "cond dispatch: add")
-(assert-eq (op-symbol :unknown) "?" "cond dispatch: default")
+(assert (= (op-symbol :add) "+") "cond dispatch: add")
+(assert (= (op-symbol :unknown) "?") "cond dispatch: default")
 
 
 # ========================================
@@ -126,10 +125,10 @@
     :div (/ a b)
     (error [:unknown-op (string/join (list "unknown: " (string op)) "")])))
 
-(assert-eq (binary-op :add 3 4) 7 "case: add")
-(assert-eq (binary-op :sub 10 3) 7 "case: sub")
-(assert-eq (binary-op :mul 6 7) 42 "case: mul")
-(assert-eq (binary-op :div 15 3) 5 "case: div")
+(assert (= (binary-op :add 3 4) 7) "case: add")
+(assert (= (binary-op :sub 10 3) 7) "case: sub")
+(assert (= (binary-op :mul 6 7) 42) "case: mul")
+(assert (= (binary-op :div 15 3) 5) "case: div")
 (display "  (binary-op :mul 6 7) = ") (print (binary-op :mul 6 7))
 
 
@@ -153,17 +152,17 @@
     (push warnings :also-not-a-tuple)))
 
 (check-expr [:add [:lit 1] [:lit 2]])
-(assert-eq (length warnings) 0 "when: no warnings for valid add")
+(assert (= (length warnings) 0) "when: no warnings for valid add")
 
 (check-expr [:div [:lit 10] [:lit 0]])
-(assert-eq (pop warnings) :has-division "when: division warning")
+(assert (= (pop warnings) :has-division) "when: division warning")
 
 (check-expr 42)
-(assert-eq (length warnings) 2 "when: two warnings for bare number")
+(assert (= (length warnings) 2) "when: two warnings for bare number")
 
 # when/unless return nil when the test doesn't fire
-(assert-eq (when false :never) nil "when: nil on false")
-(assert-eq (unless true :never) nil "unless: nil on true")
+(assert (= (when false :never) nil) "when: nil on false")
+(assert (= (unless true :never) nil) "unless: nil on true")
 
 
 # ========================================
@@ -185,8 +184,8 @@
     (string/join (list (string a) "/" (string b) " = " (string q)) "")
     (string/join (list (string a) "/0 is undefined") "")))
 
-(assert-eq (describe-result 10 2) "10/2 = 5" "if-let: truthy")
-(assert-eq (describe-result 10 0) "10/0 is undefined" "if-let: falsy")
+(assert (= (describe-result 10 2) "10/2 = 5") "if-let: truthy")
+(assert (= (describe-result 10 0) "10/0 is undefined") "if-let: falsy")
 (display "  ") (print (describe-result 10 2))
 (display "  ") (print (describe-result 10 0))
 
@@ -201,8 +200,8 @@
 (try-divide 20 4)
 (try-divide 10 0)
 (try-divide 15 3)
-(assert-eq (length quotients) 2 "when-let: only truthy pushes")
-(assert-eq (get quotients 0) 5 "when-let: first quotient")
+(assert (= (length quotients) 2) "when-let: only truthy pushes")
+(assert (= (get quotients 0) 5) "when-let: first quotient")
 
 
 # ========================================
@@ -228,7 +227,7 @@
 (while (< i (length batch))
   (push results (eval-simple (get batch i)))
   (assign i (+ i 1)))
-(assert-eq results @[10 20 -5 7] "while: evaluated batch")
+(assert (= results @[10 20 -5 7]) "while: evaluated batch")
 (display "  batch results: ") (print results)
 
 # while always returns nil
@@ -236,7 +235,7 @@
 (def while-result
   (while (< j 3)
     (assign j (+ j 1))))
-(assert-eq while-result nil "while: always returns nil")
+(assert (= while-result nil) "while: always returns nil")
 
 # Factorial via while — the classic accumulator pattern
 (defn factorial [n]
@@ -248,9 +247,9 @@
     (assign k (- k 1)))
   acc)
 
-(assert-eq (factorial 0) 1 "factorial: 0")
-(assert-eq (factorial 5) 120 "factorial: 5")
-(assert-eq (factorial 10) 3628800 "factorial: 10")
+(assert (= (factorial 0) 1) "factorial: 0")
+(assert (= (factorial 5) 120) "factorial: 5")
+(assert (= (factorial 10) 3628800) "factorial: 10")
 (display "  10! = ") (print (factorial 10))
 
 # while has an implicit block named :while — break overrides the nil return
@@ -260,7 +259,7 @@
     (assign k (+ k 1))
     (when (= k 5)
       (break :while k))))
-(assert-eq found 5 "while: break :while returns a value")
+(assert (= found 5) "while: break :while returns a value")
 
 
 # ========================================
@@ -280,10 +279,9 @@
       (_
         (break :while expr)))))     # stable — return it
 
-(assert-eq (simplify [:lit 5]) [:lit 5] "simplify: already simple")
-(assert-eq (simplify [:neg [:neg [:lit 5]]]) [:lit 5] "simplify: double neg")
-(assert-eq (simplify [:neg [:neg [:neg [:neg [:lit 3]]]]]) [:lit 3]
-  "simplify: four negations")
+(assert (= (simplify [:lit 5]) [:lit 5]) "simplify: already simple")
+(assert (= (simplify [:neg [:neg [:lit 5]]]) [:lit 5]) "simplify: double neg")
+(assert (= (simplify [:neg [:neg [:neg [:neg [:lit 3]]]]]) [:lit 3]) "simplify: four negations")
 (display "  simplify(--5) = ") (print (simplify [:neg [:neg [:lit 5]]]))
 
 # Bare (break) exits without a value — returns nil
@@ -292,8 +290,8 @@
   (forever
     (assign x (+ x 1))
     (when (= x 3) (break))))
-(assert-eq bare-result nil "forever: bare break returns nil")
-(assert-eq x 3 "forever: ran 3 times")
+(assert (= bare-result nil) "forever: bare break returns nil")
+(assert (= x 3) "forever: ran 3 times")
 
 # Collatz sequence: count steps to reach 1
 (defn collatz-steps [n]
@@ -309,9 +307,9 @@
         (+ (* 3 x) 1)))
     (assign steps (+ steps 1))))
 
-(assert-eq (collatz-steps 1) 0 "collatz: 1 → 0 steps")
-(assert-eq (collatz-steps 6) 8 "collatz: 6 → 8 steps")
-(assert-eq (collatz-steps 27) 111 "collatz: 27 → 111 steps")
+(assert (= (collatz-steps 1) 0) "collatz: 1 → 0 steps")
+(assert (= (collatz-steps 6) 8) "collatz: 6 → 8 steps")
+(assert (= (collatz-steps 27) 111) "collatz: 27 → 111 steps")
 (display "  collatz(27) = ") (display (collatz-steps 27)) (print " steps")
 
 
@@ -347,10 +345,10 @@
           (break :check :wrong-arity))))
     :ok))
 
-(assert-eq (validate-expr [:lit 42]) :ok "validate: good literal")
-(assert-eq (validate-expr [:add [:lit 1] [:lit 2]]) :ok "validate: good binary")
-(assert-eq (validate-expr 42) :not-a-tuple "validate: bare number")
-(assert-eq (validate-expr [:lit "nope"]) :bad-literal "validate: bad literal")
+(assert (= (validate-expr [:lit 42]) :ok) "validate: good literal")
+(assert (= (validate-expr [:add [:lit 1] [:lit 2]]) :ok) "validate: good binary")
+(assert (= (validate-expr 42) :not-a-tuple) "validate: bare number")
+(assert (= (validate-expr [:lit "nope"]) :bad-literal) "validate: bad literal")
 (display "  validate([:lit 42]) = ") (print (validate-expr [:lit 42]))
 (display "  validate(42) = ") (print (validate-expr 42))
 
@@ -359,7 +357,7 @@
   (block :compute
     (+ 10 20)
     (* 6 7)))
-(assert-eq no-break 42 "block: no break → last expr")
+(assert (= no-break 42) "block: no break → last expr")
 
 # Named break targets a specific block — useful for nesting
 (def nested-result
@@ -367,7 +365,7 @@
     (block :inner
       (break :outer :escaped))
     :never-reached))
-(assert-eq nested-result :escaped "block: named break targets outer")
+(assert (= nested-result :escaped) "block: named break targets outer")
 
 # Inner block completes normally, outer continues
 (def inner-runs
@@ -376,7 +374,7 @@
       (block :inner
         (+ 1 2)))
     (+ inner-val 10)))
-(assert-eq inner-runs 13 "block: inner completes, outer continues")
+(assert (= inner-runs 13) "block: inner completes, outer continues")
 
 # find-first: block + each for early exit from iteration
 (defn find-first [arr pred]
@@ -387,10 +385,8 @@
         (break :search elem)))
     nil))
 
-(assert-eq (find-first @[1 4 9 16 25] (fn [x] (> x 10))) 16
-  "find-first: found 16")
-(assert-eq (find-first @[1 2 3] (fn [x] (> x 100))) nil
-  "find-first: not found")
+(assert (= (find-first @[1 4 9 16 25] (fn [x] (> x 10))) 16) "find-first: found 16")
+(assert (= (find-first @[1 2 3] (fn [x] (> x 100))) nil) "find-first: not found")
 (display "  find-first(>10) = ")
 (print (find-first @[1 4 9 16 25] (fn [x] (> x 10))))
 
@@ -410,38 +406,38 @@
 (var m-lit (match 42
   (42 :found)
   (_ :nope)))
-(assert-eq m-lit :found "match: literal int")
+(assert (= m-lit :found) "match: literal int")
 
 (var m-bind (match 7
   (x (* x x))))
-(assert-eq m-bind 49 "match: variable binding")
+(assert (= m-bind 49) "match: variable binding")
 
 (var m-nil (match nil
   (nil :got-nil)
   (_ :other)))
-(assert-eq m-nil :got-nil "match: nil pattern")
+(assert (= m-nil :got-nil) "match: nil pattern")
 
 # --- List patterns ---
 (var m-list (match (list 1 2 3)
   ((1 2 3) :exact)
   (_ :no)))
-(assert-eq m-list :exact "match: exact list")
+(assert (= m-list :exact) "match: exact list")
 
 (var m-cons (match (list 1 2 3)
   ((h . t) h)
   (_ nil)))
-(assert-eq m-cons 1 "match: cons head")
+(assert (= m-cons 1) "match: cons head")
 
 # --- Array, struct, guard ---
 (var m-tup (match [10 20]
   ([a b] (+ a b))
   (_ 0)))
-(assert-eq m-tup 30 "match: array binding")
+(assert (= m-tup 30) "match: array binding")
 
 (var m-struct (match {:x 1 :y 2}
   ({:x x :y y} (+ x y))
   (_ 0)))
-(assert-eq m-struct 3 "match: struct binding")
+(assert (= m-struct 3) "match: struct binding")
 
 (defn abs-val [n]
   "Absolute value via guarded match."
@@ -449,8 +445,8 @@
     (x when (< x 0) (- 0 x))
     (x x)))
 
-(assert-eq (abs-val -7) 7 "match guard: negative")
-(assert-eq (abs-val 0) 0 "match guard: zero")
+(assert (= (abs-val -7) 7) "match guard: negative")
+(assert (= (abs-val 0) 0) "match guard: zero")
 
 # --- The full recursive evaluator ---
 #
@@ -474,16 +470,16 @@
     (_ (error "unknown expression"))))
 
 # Simple expressions
-(assert-eq (eval-expr [:lit 42]) 42 "eval: literal")
-(assert-eq (eval-expr [:neg [:lit 7]]) -7 "eval: negation")
-(assert-eq (eval-expr [:add [:lit 3] [:lit 4]]) 7 "eval: addition")
+(assert (= (eval-expr [:lit 42]) 42) "eval: literal")
+(assert (= (eval-expr [:neg [:lit 7]]) -7) "eval: negation")
+(assert (= (eval-expr [:add [:lit 3] [:lit 4]]) 7) "eval: addition")
 
 # Nested: (3 + 4) * (10 - 3) = 49
 (def complex-expr
   [:mul
     [:add [:lit 3] [:lit 4]]
     [:sub [:lit 10] [:lit 3]]])
-(assert-eq (eval-expr complex-expr) 49 "eval: (3+4)*(10-3)")
+(assert (= (eval-expr complex-expr) 49) "eval: (3+4)*(10-3)")
 (display "  (3+4)*(10-3) = ") (print (eval-expr complex-expr))
 
 # Deeper: -(2 * (5 + 3)) = -16
@@ -491,14 +487,14 @@
   [:neg
     [:mul [:lit 2]
           [:add [:lit 5] [:lit 3]]]])
-(assert-eq (eval-expr deep-expr) -16 "eval: -(2*(5+3))")
+(assert (= (eval-expr deep-expr) -16) "eval: -(2*(5+3))")
 (display "  -(2*(5+3)) = ") (print (eval-expr deep-expr))
 
 # Simplify + eval: double-neg removal feeds into the evaluator
 (def tricky [:neg [:neg [:mul [:lit 3] [:lit 4]]]])
 (display "  simplify then eval: ")
 (display (eval-expr (simplify tricky))) (print "")
-(assert-eq (eval-expr (simplify tricky)) 12 "simplify → eval")
+(assert (= (eval-expr (simplify tricky)) 12) "simplify → eval")
 
 # --- Nested and rest patterns in match ---
 (var m-nested
@@ -506,14 +502,14 @@
     (((a b) (c d))
       (+ a (* b (+ c d))))
     (_ 0)))
-(assert-eq m-nested 15 "match: nested list")
+(assert (= m-nested 15) "match: nested list")
 
 (var m-rest
   (match (list 1 2 3 4 5)
     ((a b & rest)
       (+ a b (length rest)))
     (_ 0)))
-(assert-eq m-rest 6 "match: rest pattern")
+(assert (= m-rest 6) "match: rest pattern")
 
 # Struct dispatch — tagged shapes
 (var m-dispatch
@@ -521,24 +517,19 @@
     ({:type :square :s s} (* s s))
     ({:type :circle :r r} (* r r))
     (_ 0)))
-(assert-eq m-dispatch 25 "match: struct tag dispatch")
+(assert (= m-dispatch 25) "match: struct tag dispatch")
 
 # --- Or-patterns ---
 # (or p1 p2 ...) matches if any alternative matches.
-(assert-eq (match 2 ((or 1 2 3) :small) (_ :big)) :small
-  "match: or-pattern matches any alternative")
-(assert-eq (match 5 ((or 1 2 3) :small) (_ :big)) :big
-  "match: or-pattern falls through when none match")
-(assert-eq (match :b ((or :a :b :c) :found) (_ :not)) :found
-  "match: or-pattern with keywords")
+(assert (= (match 2 ((or 1 2 3) :small) (_ :big)) :small) "match: or-pattern matches any alternative")
+(assert (= (match 5 ((or 1 2 3) :small) (_ :big)) :big) "match: or-pattern falls through when none match")
+(assert (= (match :b ((or :a :b :c) :found) (_ :not)) :found) "match: or-pattern with keywords")
 
 # Or-patterns can nest inside compound patterns
-(assert-eq (match (cons 2 :x) (((or 1 2) . t) t) (_ :fail)) :x
-  "match: or-pattern nested in cons")
+(assert (= (match (cons 2 :x) (((or 1 2) . t) t) (_ :fail)) :x) "match: or-pattern nested in cons")
 
 # Or-patterns with bindings — each alternative must bind the same names
-(assert-eq (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1
-  "match: or-pattern with binding")
+(assert (= (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1) "match: or-pattern with binding")
 
 
 # ========================================
@@ -560,14 +551,14 @@
 (each expr in program
   (push outputs (eval-expr expr)))
 
-(assert-eq outputs @[10 7 42 -5 5] "each: evaluated program")
+(assert (= outputs @[10 7 42 -5 5]) "each: evaluated program")
 (display "  program outputs: ") (print outputs)
 
 # each over an array
 (var tuple-sum 0)
 (each x in [10 20 30]
   (assign tuple-sum (+ tuple-sum x)))
-(assert-eq tuple-sum 60 "each: array sum")
+(assert (= tuple-sum 60) "each: array sum")
 
 
 # ========================================
@@ -592,23 +583,22 @@
                         (append (format-expr b)) (append ")")))
     (_ "?")))
 
-(assert-eq (format-expr [:lit 42]) "42" "format: literal")
-(assert-eq (format-expr [:add [:lit 3] [:lit 4]]) "(3 + 4)" "format: add")
+(assert (= (format-expr [:lit 42]) "42") "format: literal")
+(assert (= (format-expr [:add [:lit 3] [:lit 4]]) "(3 + 4)") "format: add")
 (display "  format complex: ") (print (format-expr complex-expr))
 (display "  format deep:    ") (print (format-expr deep-expr))
 
 # Thread-first for nested access
 (def config {:db {:host "localhost" :port 5432}})
-(assert-eq (-> config (get :db) (get :port)) 5432 "->: nested struct access")
+(assert (= (-> config (get :db) (get :port)) 5432) "->: nested struct access")
 
 # Thread-last for pipeline
-(assert-eq (->> "  hello  " string/trim string/upcase) "HELLO"
-  "->>: trim then upcase")
+(assert (= (->> "  hello  " string/trim string/upcase) "HELLO") "->>: trim then upcase")
 (display "  (->> \"  hello  \" trim upcase) = ")
 (print (->> "  hello  " string/trim string/upcase))
 
 # Bare symbol threading: (-> x f g) = (g (f x))
-(assert-eq (-> -7 abs-val string) "7" "->: bare symbol threading")
+(assert (= (-> -7 abs-val string) "7") "->: bare symbol threading")
 
 # The full pipeline: format, eval, display
 (display "  ") (display (format-expr complex-expr))

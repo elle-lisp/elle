@@ -12,7 +12,6 @@
 #   Fiber error handling — mask, terminal vs resumable, cancel vs abort
 #   Practical patterns — safe wrappers, validation, error inspection
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -29,21 +28,21 @@
 (def result (try
   (error {:error :demo :message "something went wrong"})
   (catch e :caught)))
-(assert-eq result :caught "try/catch: error triggers catch")
+(assert (= result :caught) "try/catch: error triggers catch")
 
 # The catch binding holds the error struct {:error :kind :message "message"}
 (def err (try
   (error {:error :bad-input :message "expected a number"})
   (catch e e)))
 (display "  caught error: ") (print err)
-(assert-eq (get err :error) :bad-input "error kind is a keyword")
-(assert-eq (get err :message) "expected a number" "error message is a string")
+(assert (= (get err :error) :bad-input) "error kind is a keyword")
+(assert (= (get err :message) "expected a number") "error message is a string")
 
 # When no error occurs, try returns the body's result
 (def ok-result (try
   (+ 10 20)
   (catch e :should-not-reach)))
-(assert-eq ok-result 30 "try/catch: no error returns body result")
+(assert (= ok-result 30) "try/catch: no error returns body result")
 
 # Multiple expressions in the try body — last value is returned
 (def multi (try
@@ -51,7 +50,7 @@
   (def y 20)
   (+ x y)
   (catch e :error)))
-(assert-eq multi 30 "try/catch: multiple body expressions")
+(assert (= multi 30) "try/catch: multiple body expressions")
 
 
 # ========================================
@@ -68,12 +67,12 @@
         (error {:error :wrapped :message (string/join (list "wrapped: " (get e :message)) "")})))
     (catch e e)))
 (display "  nested re-signal: ") (print outer-result)
-(assert-eq (get outer-result :error) :wrapped "nested: outer catches re-signaled error")
+(assert (= (get outer-result :error) :wrapped) "nested: outer catches re-signaled error")
 
 # Built-in errors (like division by zero) are also catchable
 (def div-err (try (/ 1 0) (catch e e)))
 (display "  division by zero: ") (print div-err)
-(assert-eq (get div-err :error) :division-by-zero "built-in error: division by zero")
+(assert (= (get div-err :error) :division-by-zero) "built-in error: division by zero")
 
 
 # ========================================
@@ -84,14 +83,14 @@
 # Success case:
 (def [ok1? val1] (protect (+ 100 200)))
 (display "  protect ok: [") (display ok1?) (display " ") (display val1) (print "]")
-(assert-true ok1? "protect: success returns true")
-(assert-eq val1 300 "protect: success value")
+(assert ok1? "protect: success returns true")
+(assert (= val1 300) "protect: success value")
 
 # Error case:
 (def [ok2? val2] (protect (error {:error :boom :message "exploded"})))
 (display "  protect err: [") (display ok2?) (display " ") (display val2) (print "]")
-(assert-false ok2? "protect: error returns false")
-(assert-eq (get val2 :error) :boom "protect: error kind preserved")
+(assert (not ok2?) "protect: error returns false")
+(assert (= (get val2 :error) :boom) "protect: error kind preserved")
 
 # protect is useful for "try this, fall back to that" patterns
 (defn safe-parse [s]
@@ -99,8 +98,8 @@
   (def [ok? val] (protect (integer s)))
   (if ok? val nil))
 
-(assert-eq (safe-parse "42") 42 "safe-parse: valid input")
-(assert-eq (safe-parse "abc") nil "safe-parse: invalid input returns nil")
+(assert (= (safe-parse "42") 42) "safe-parse: valid input")
+(assert (= (safe-parse "abc") nil) "safe-parse: invalid input returns nil")
 (display "  safe-parse \"42\" = ") (print (safe-parse "42"))
 (display "  safe-parse \"abc\" = ") (print (safe-parse "abc"))
 
@@ -115,8 +114,8 @@
 # Success case: cleanup runs, body result returned
 (def log @[])
 (def defer-result (defer (push log :cleanup) (push log :body) 42))
-(assert-eq defer-result 42 "defer: returns body result")
-(assert-eq log @[:body :cleanup] "defer: cleanup runs after body")
+(assert (= defer-result 42) "defer: returns body result")
+(assert (= log @[:body :cleanup]) "defer: cleanup runs after body")
 (display "  defer log: ") (print log)
 
 # Error case: cleanup runs, then error re-propagates
@@ -127,7 +126,7 @@
     (error {:error :fail :message "oops"})
     (push err-log :unreachable))
   (catch e (push err-log :caught) e)))
-(assert-eq err-log @[:body :cleanup :caught] "defer: cleanup before catch")
+(assert (= err-log @[:body :cleanup :caught]) "defer: cleanup before catch")
 (display "  defer error log: ") (print err-log)
 
 
@@ -155,8 +154,8 @@
     (push res-log :used)
     (get conn :id)))
 
-(assert-eq with-result 1 "with: returns body result")
-(assert-eq res-log @[:opened :used :closed] "with: acquire, use, release")
+(assert (= with-result 1) "with: returns body result")
+(assert (= res-log @[:opened :used :closed]) "with: acquire, use, release")
 (display "  with log: ") (print res-log)
 
 # Cleanup happens even when body errors
@@ -175,8 +174,8 @@
     (error {:error :io :message "write failed"}))
   (catch e :recovered)))
 
-(assert-eq with-err :recovered "with: error caught after cleanup")
-(assert-eq err-res-log @[:opened :used :closed] "with: cleanup on error")
+(assert (= with-err :recovered) "with: error caught after cleanup")
+(assert (= err-res-log @[:opened :used :closed]) "with: cleanup on error")
 (display "  with error log: ") (print err-res-log)
 
 
@@ -202,7 +201,7 @@
 
 # Valid input works fine
 (def alice (create-person "Alice" 30))
-(assert-eq (get alice :name) "Alice" "propagation: valid input")
+(assert (= (get alice :name) "Alice") "propagation: valid input")
 (display "  person: ") (print alice)
 
 # Invalid input: error propagates from validate-age through create-person
@@ -210,13 +209,13 @@
   (create-person "Bob" -5)
   (catch e e)))
 (display "  bad age: ") (print person-err)
-(assert-eq (get person-err :error) :value-error "propagation: error kind correct")
+(assert (= (get person-err :error) :value-error) "propagation: error kind correct")
 
 (def type-err (try
   (create-person "Charlie" "thirty")
   (catch e e)))
 (display "  bad type: ") (print type-err)
-(assert-eq (get type-err :error) :type-error "propagation: type error caught")
+(assert (= (get type-err :error) :type-error) "propagation: type error caught")
 
 
 # ========================================
@@ -233,21 +232,21 @@
 # The error propagates to us, so we must catch it to survive.
 (def [ok? err] (protect (fiber/resume f0)))
 (display "  mask=0 fiber errored: ") (print err)
-(assert-false ok? "mask=0: error propagates to parent")
-(assert-eq (get err :error) :boom "mask=0: error kind preserved")
+(assert (not ok?) "mask=0: error propagates to parent")
+(assert (= (get err :error) :boom) "mask=0: error kind preserved")
 
 (def status0 (fiber/status f0))
 (display "  fiber status: ") (print status0)
-(assert-eq status0 :error "mask=0: fiber is in :error status")
+(assert (= status0 :error) "mask=0: fiber is in :error status")
 
 # Attempting to resume an errored fiber fails
 (def [ok2? err2] (protect (fiber/resume f0)))
 (display "  resume errored fiber: ") (print err2)
-(assert-false ok2? "resume errored: signals an error")
-(assert-eq (get err2 :error) :state-error "resume errored: error kind is :state-error")
+(assert (not ok2?) "resume errored: signals an error")
+(assert (= (get err2 :error) :state-error) "resume errored: error kind is :state-error")
 
 # The fiber is still in :error — nothing changed.
-(assert-eq (fiber/status f0) :error "fiber still :error after failed resume")
+(assert (= (fiber/status f0) :error) "fiber still :error after failed resume")
 
 
 # Fiber with mask=1: errors are caught, fiber stays :paused
@@ -258,14 +257,14 @@
 (def value1 (fiber/value f1))
 (display "  mask=1 fiber status: ") (print status1)
 (display "  mask=1 fiber value: ") (print value1)
-(assert-eq status1 :paused "mask=1: fiber is :paused, not :error")
-(assert-eq (get value1 :error) :caught-boom "mask=1: error value accessible")
+(assert (= status1 :paused) "mask=1: fiber is :paused, not :error")
+(assert (= (get value1 :error) :caught-boom) "mask=1: error value accessible")
 
 # A suspended fiber can be resumed (though it has nothing left to do).
 (fiber/resume f1 nil)
 (def status1b (fiber/status f1))
 (display "  mask=1 after second resume: ") (print status1b)
-(assert-eq status1b :dead "mask=1: fiber completes on second resume")
+(assert (= status1b :dead) "mask=1: fiber completes on second resume")
 
 
 # ========================================
@@ -284,18 +283,18 @@
     (push log1 :body-done)
     :done)) 3))
 (fiber/resume f-cancel nil)
-(assert-eq (fiber/status f-cancel) :paused "cancel: starts paused")
+(assert (= (fiber/status f-cancel) :paused) "cancel: starts paused")
 
 (fiber/cancel f-cancel {:error :cancelled})
 (display "  cancel status: ") (print (fiber/status f-cancel))
 (display "  cancel log: ") (print log1)
-(assert-eq (fiber/status f-cancel) :error "cancel: fiber is :error")
-(assert-eq (length log1) 0 "cancel: no defer ran")
+(assert (= (fiber/status f-cancel) :error) "cancel: fiber is :error")
+(assert (= (length log1) 0) "cancel: no defer ran")
 
 # Resuming a cancelled fiber fails.
 (def [ok-c? err-c] (protect (fiber/resume f-cancel)))
 (display "  resume cancelled: ") (print err-c)
-(assert-false ok-c? "resume cancelled: signals error")
+(assert (not ok-c?) "resume cancelled: signals error")
 
 # fiber/abort — inject error and resume
 #
@@ -308,15 +307,15 @@
   (yield :waiting)
   :done) 3))  # mask=3 catches errors+yields
 (fiber/resume f-abort nil)
-(assert-eq (fiber/status f-abort) :paused "abort: starts paused")
-(assert-eq (fiber/value f-abort) :waiting "abort: yielded :waiting")
+(assert (= (fiber/status f-abort) :paused) "abort: starts paused")
+(assert (= (fiber/value f-abort) :waiting) "abort: yielded :waiting")
 
 (fiber/abort f-abort {:error :aborted})
 (display "  abort status: ") (print (fiber/status f-abort))
 (display "  abort value: ") (print (fiber/value f-abort))
 # With mask=3, the injected error is caught — fiber is :paused with the error
-(assert-eq (fiber/status f-abort) :paused "abort: error caught by mask")
-(assert-eq (get (fiber/value f-abort) :error) :aborted "abort: error value preserved")
+(assert (= (fiber/status f-abort) :paused) "abort: error caught by mask")
+(assert (= (get (fiber/value f-abort) :error) :aborted) "abort: error value preserved")
 
 # Contrast with cancel: cancel kills immediately, abort goes through mask.
 # cancel with mask=3: fiber is dead regardless of mask.
@@ -328,7 +327,7 @@
 (fiber/resume f-cmp nil)
 (fiber/cancel f-cmp {:error :killed})
 (display "  cancel vs abort - cancel: ") (print (fiber/status f-cmp))
-(assert-eq (fiber/status f-cmp) :error "cancel ignores mask")
+(assert (= (fiber/status f-cmp) :error) "cancel ignores mask")
 
 # fiber/cancel self — a fiber can cancel itself
 #
@@ -350,8 +349,8 @@
     [:ok val]
     [:err (get val :message)]))
 
-(assert-eq (safe-divide 10 2) [:ok 5] "safe-divide: success")
-(assert-eq (get (safe-divide 1 0) 0) :err "safe-divide: division by zero")
+(assert (= (safe-divide 10 2) [:ok 5]) "safe-divide: success")
+(assert (= (get (safe-divide 1 0) 0) :err) "safe-divide: division by zero")
 (display "  10 / 2 = ") (print (safe-divide 10 2))
 (display "  1 / 0 = ") (print (safe-divide 1 0))
 
@@ -377,8 +376,8 @@
 
 (display "  valid config: ") (print (validate-config good-cfg))
 (display "  bad config:   ") (print (validate-config bad-cfg))
-(assert-eq (get (validate-config good-cfg) 0) :ok "validate: good config")
-(assert-eq (get (validate-config bad-cfg) 0) :err "validate: bad config")
+(assert (= (get (validate-config good-cfg) 0) :ok) "validate: good config")
+(assert (= (get (validate-config bad-cfg) 0) :err) "validate: bad config")
 
 (print "")
 (print "all errors passed.")

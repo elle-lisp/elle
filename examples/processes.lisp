@@ -23,7 +23,6 @@
 #   (yield [:trap-exit bool])  → sets trap_exit flag, resumes with :ok
 #   (yield [:spawn-link closure]) → spawn + link in one step, resumes with PID
 
-(def {:assert-eq assert-eq :assert-equal assert-equal :assert-true assert-true :assert-false assert-false :assert-list-eq assert-list-eq :assert-not-nil assert-not-nil :assert-string-eq assert-string-eq :assert-err assert-err :assert-err-kind assert-err-kind} ((import-file "./examples/assertions.lisp")))
 
 
 # ========================================
@@ -245,7 +244,7 @@
       (send ponger [me :ping])
       (let ([reply (recv)])
         (display "  ping-pong reply: ") (print reply)
-        (assert-eq reply :pong "ping-pong reply is :pong"))))))
+        (assert (= reply :pong) "ping-pong reply is :pong"))))))
 
 
 # ========================================
@@ -266,7 +265,7 @@
         (send p1 0)
         (let ([result (recv)])
           (display "  sent 0 through 3 forwarders, got: ") (print result)
-          (assert-eq result 3 "ring increments message 3 times")))))))
+          (assert (= result 3) "ring increments message 3 times")))))))
 
 
 # ========================================
@@ -291,7 +290,7 @@
           (assign i (+ i 1))))
 
       (display "  fan-in sum of 5 worker ids: ") (print total)
-      (assert-eq total 10 "fan-in: 0+1+2+3+4 = 10")))))
+      (assert (= total 10) "fan-in: 0+1+2+3+4 = 10")))))
 
 
 # ========================================
@@ -321,7 +320,7 @@
           (display ", reason: ") (print (get msg 2))
           (match msg
             ([:EXIT pid reason]
-              (assert-eq pid worker-a "EXIT from worker-a"))
+              (assert (= pid worker-a) "EXIT from worker-a"))
             (_ nil))))))))
 
 
@@ -340,10 +339,10 @@
         (display "  trapped exit: ") (print msg)
         (match msg
           ([:EXIT pid reason]
-            (assert-eq pid child "EXIT from child")
+            (assert (= pid child) "EXIT from child")
             (match reason
               ([:error _]
-                (assert-true true "got error reason"))
+                (assert true "got error reason"))
               (_ nil)))
           (_ nil)))))))
 
@@ -360,10 +359,10 @@
         (display "  normal exit: ") (print msg)
         (match msg
           ([:EXIT pid reason]
-            (assert-eq pid child "EXIT from child")
+            (assert (= pid child) "EXIT from child")
             (match reason
               ([:normal val]
-                (assert-eq val 42 "normal exit value is 42"))
+                (assert (= val 42) "normal exit value is 42"))
               (_ nil)))
           (_ nil)))))))
 
@@ -392,7 +391,7 @@
 
       (let ([msg (recv)])
         (display "  after unlink, got: ") (print msg)
-        (assert-eq msg :still-alive "no EXIT after unlink"))))))
+        (assert (= msg :still-alive) "no EXIT after unlink"))))))
 
 
 (print "")
