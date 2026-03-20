@@ -11,7 +11,9 @@
 use crate::error::LocationMap;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
-use crate::value::{BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK};
+use crate::value::{
+    BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_OK, SIG_SWITCH,
+};
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
 // full cache line regardless of arg count, and the is-inline branch on
@@ -288,6 +290,7 @@ impl VM {
                 && !bits.is_ok()
                 && !bits.contains(SIG_ERROR)
                 && !bits.contains(SIG_HALT)
+                && bits != SIG_SWITCH
             {
                 let squelched = bits.0 & closure_squelch_mask;
                 if squelched != 0 {

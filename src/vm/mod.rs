@@ -28,7 +28,9 @@ use crate::io::backend::SyncBackend;
 use crate::io::request::IoRequest;
 use crate::port::Port;
 use crate::symbol::SymbolTable;
-use crate::value::{error_val, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_YIELD};
+use crate::value::{
+    error_val, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_SWITCH, SIG_YIELD,
+};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -81,43 +83,94 @@ impl VM {
         let mut current_env = closure_env.cloned().unwrap_or(empty_env);
         let mut current_location_map = Rc::new(self.location_map.clone());
 
+        // Initial execution with tail-call loop.
+        let mut bits;
         loop {
-            let (bits, _ip) = self.execute_bytecode_inner_impl(
+            let (b, _ip) = self.execute_bytecode_inner_impl(
                 &current_bytecode,
                 &current_constants,
                 &current_env,
                 0,
                 &current_location_map,
             );
-
+            bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;
                 current_location_map = tail.location_map;
             } else {
-                return if bits.is_ok() || bits == SIG_HALT {
-                    let (_, value) = self.fiber.signal.take().unwrap();
-                    Ok(value)
-                } else if bits.contains(SIG_ERROR) {
-                    // Extract the error from fiber.signal
-                    let (_, err_value) =
-                        self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                    Err(self.format_error_with_location(err_value))
-                } else if bits.contains(SIG_YIELD) {
-                    // SIG_YIELD may also have SIG_IO set — that's fine,
-                    // it's still a yield. The scheduler catches it.
-                    Err("Unexpected yield outside coroutine context".to_string())
-                } else {
-                    // Any other suspending signal (user-defined bits 16+,
-                    // bare SIG_IO, etc.) — unexpected outside a fiber.
-                    self.fiber.signal.take();
-                    Err(format!(
-                        "Unexpected signal outside coroutine context: 0x{:x}",
-                        bits.0
-                    ))
-                };
+                break;
             }
+        }
+
+        // Signal handling loop — handles SIG_SWITCH iteratively.
+        loop {
+            if bits.is_ok() || bits == SIG_HALT {
+                let (_, value) = self.fiber.signal.take().unwrap();
+                return Ok(value);
+            } else if bits.contains(SIG_ERROR) {
+                let (_, err_value) =
+                    self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+                return Err(self.format_error_with_location(err_value));
+            } else if bits == SIG_SWITCH {
+                bits = self.handle_sig_switch();
+            } else if bits.contains(SIG_YIELD) {
+                return Err("Unexpected yield outside coroutine context".to_string());
+            } else {
+                self.fiber.signal.take();
+                return Err(format!(
+                    "Unexpected signal outside coroutine context: 0x{:x}",
+                    bits.0
+                ));
+            }
+        }
+    }
+
+    /// Handle a SIG_SWITCH signal: execute the pending fiber resume
+    /// and resume the caller with the result. Returns the new signal bits.
+    fn handle_sig_switch(&mut self) -> SignalBits {
+        let pending = self
+            .pending_fiber_resume
+            .take()
+            .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
+        let caller_frames = self.fiber.suspended.take().unwrap_or_default();
+        self.fiber.signal.take();
+        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+            eprintln!(
+                "[handle_sig_switch] caller_frames={} fiber_status={:?}",
+                caller_frames.len(),
+                pending.handle.with(|f| f.status),
+            );
+        }
+
+        let (result_bits, result_value) =
+            self.do_fiber_resume(&pending.handle, pending.fiber_value);
+
+        let mask = pending.handle.with(|f| f.mask);
+
+        if result_bits.contains(SIG_HALT) {
+            pending
+                .handle
+                .with_mut(|f| f.status = crate::value::FiberStatus::Dead);
+        }
+
+        let caught = result_bits.is_ok()
+            || (mask.covers(result_bits)
+                && !result_bits.contains(crate::value::SIG_TERMINAL));
+
+        if caught {
+            self.fiber.child = None;
+            self.fiber.child_value = None;
+            self.resume_suspended(caller_frames, result_value)
+        } else {
+            if result_bits.contains(SIG_ERROR) {
+                pending
+                    .handle
+                    .with_mut(|f| f.status = crate::value::FiberStatus::Error);
+            }
+            self.fiber.signal = Some((result_bits, result_value));
+            result_bits
         }
     }
 
@@ -241,6 +294,8 @@ impl VM {
                 // This restores locals and call frames at every level.
                 let frames = self.fiber.suspended.take().unwrap_or_default();
                 bits = self.resume_suspended(frames, io_result);
+            } else if bits == SIG_SWITCH {
+                bits = self.handle_sig_switch();
             } else if bits.contains(SIG_YIELD) {
                 // SIG_YIELD without SIG_IO — unexpected outside coroutine.
                 return Err("Unexpected yield outside coroutine context".to_string());

@@ -59,6 +59,7 @@ pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to schedu
 pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signal (non-resumable)
 pub const SIG_EXEC: SignalBits = SignalBits::new(1 << 11); // subprocess capability (capability bit, not dispatch)
 pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget exhaustion
+pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
 
 /// Signal classification for expressions and functions.
 ///
