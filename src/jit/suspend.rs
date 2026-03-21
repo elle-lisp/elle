@@ -155,19 +155,20 @@ pub extern "C" fn elle_jit_yield_through_call(
     YIELD_SENTINEL
 }
 
-/// Check if any signal (error, halt, or yield) is pending on the VM.
+/// Check if any actionable signal is pending on the VM.
 /// Returns TRUE if set, FALSE otherwise.
 ///
-/// This extends `elle_jit_has_exception` to also detect SIG_YIELD.
+/// This extends `elle_jit_has_exception` to also detect yield signals.
 /// Used after Call instructions in yielding functions.
+///
+/// Uses bitwise containment (`contains`) rather than exact equality,
+/// because I/O primitives return compound signals like `SIG_YIELD | SIG_IO`.
+/// Exact-match would miss these, causing yield sentinels to leak into
+/// registers as values.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
-    use crate::value::fiber::{SIG_ERROR, SIG_HALT, SIG_YIELD};
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    JitValue::bool_val(matches!(
-        vm.fiber.signal,
-        Some((SIG_ERROR | SIG_HALT | SIG_YIELD, _))
-    ))
+    JitValue::bool_val(vm.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok()))
 }
 
 #[cfg(test)]
