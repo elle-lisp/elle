@@ -153,6 +153,12 @@ impl VM {
                         stack: vec![],
                     };
                 }
+                // Capture the inner stack for the caller. When a tail call
+                // changed current_bytecode before the signal, this stack
+                // belongs to the tail-called function's context — the caller
+                // (resume_suspended) may need it to build a continuation
+                // frame for the outer level.
+                let inner_stack = std::mem::take(&mut self.fiber.stack).into_vec();
                 break ExecResult {
                     bits,
                     ip,
@@ -160,11 +166,7 @@ impl VM {
                     constants: current_constants,
                     env: current_env,
                     location_map: current_location_map,
-                    // execute_bytecode_from_ip does not own a saved outer stack;
-                    // the stack at this point belongs to the caller's context.
-                    // Callers of this function are resume paths that manage the
-                    // stack themselves (see resume_suspended in core.rs).
-                    stack: vec![],
+                    stack: inner_stack,
                 };
             }
 

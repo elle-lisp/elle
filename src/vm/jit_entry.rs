@@ -137,12 +137,14 @@ impl VM {
                     let (_, val) = self.fiber.signal.take().unwrap();
                     self.fiber.stack.push(val);
                     return None;
-                } else if eb.contains(SIG_YIELD) {
-                    return Some(SIG_YIELD);
-                } else {
+                } else if eb.contains(SIG_ERROR) {
                     // SIG_ERROR — signal already set on fiber
                     self.fiber.stack.push(Value::NIL);
                     return None;
+                } else {
+                    // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
+                    // Propagate so call_inner can build the caller frame.
+                    return Some(eb);
                 }
             }
         }

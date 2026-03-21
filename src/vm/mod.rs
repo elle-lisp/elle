@@ -29,7 +29,8 @@ use crate::io::request::IoRequest;
 use crate::port::Port;
 use crate::symbol::SymbolTable;
 use crate::value::{
-    error_val, SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_SWITCH, SIG_YIELD,
+    error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_SWITCH,
+    SIG_YIELD,
 };
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -168,6 +169,22 @@ impl VM {
                     .with_mut(|f| f.status = crate::value::FiberStatus::Error);
             }
             self.fiber.signal = Some((result_bits, result_value));
+
+            // Rebuild fiber.suspended for uncaught signals: the outer code
+            // (execute_scheduled, execute_bytecode) needs the suspension chain
+            // to resume after handling the signal (e.g., SIG_IO → sync I/O).
+            // Prepend a FiberResume frame so resume_suspended can re-enter
+            // the child fiber when the signal is handled.
+            if !result_bits.contains(SIG_ERROR) && !result_bits.contains(SIG_HALT) {
+                let fiber_resume_frame = SuspendedFrame::FiberResume {
+                    handle: pending.handle.clone(),
+                    fiber_value: pending.fiber_value,
+                };
+                let mut frames = vec![fiber_resume_frame];
+                frames.extend(caller_frames);
+                self.fiber.suspended = Some(frames);
+            }
+
             result_bits
         }
     }
