@@ -1,7 +1,25 @@
 ## Stream I/O stress tests
 ##
-## Tests sustained port/lines, stream/collect, and nested ev/run
-## to catch SIG_IO propagation and JIT interaction bugs.
+## Tests sustained port/lines, stream/collect, nested ev/run,
+## and ReadLine EOF handling.
+
+# ============================================================================
+# ReadLine EOF: last line without trailing newline
+# ============================================================================
+
+(spit "/tmp/elle-test-io-stress-eof" "alpha\nbeta\ngamma")
+
+(ev/run (fn []
+  (let ((p (port/open "/tmp/elle-test-io-stress-eof" :read)))
+    (assert (= (stream/read-line p) "alpha") "readline eof: first line")
+    (assert (= (stream/read-line p) "beta") "readline eof: second line")
+    (assert (= (stream/read-line p) "gamma") "readline eof: unterminated last line")
+    (assert (= (stream/read-line p) nil) "readline eof: nil after EOF"))))
+
+(ev/run (fn []
+  (let ((lines (stream/collect (port/lines (port/open "/tmp/elle-test-io-stress-eof" :read)))))
+    (assert (= lines (list "alpha" "beta" "gamma"))
+            "port/lines: includes unterminated last line"))))
 
 # ============================================================================
 # port/lines + stream/collect basic

@@ -1130,6 +1130,20 @@
         (ev/spawn t))
       ((get sched :pump)))))
 
+(defn ev/gather (& thunks)
+  "Run thunks concurrently with async I/O and return their results.
+   Spawns each thunk as a fiber, pumps until all complete, returns a
+   list of results (or a single value for one thunk)."
+  (let ((sched (make-async-scheduler)))
+    (parameterize ((*scheduler* (get sched :spawn))
+                   (*shutdown* (get sched :shutdown)))
+      (let ((fibers (map ev/spawn thunks)))
+        ((get sched :pump))
+        (let ((results (map fiber/value fibers)))
+          (if (= (length results) 1)
+            (first results)
+            results))))))
+
 (defn inc [x]
   "Return x + 1."
   (+ x 1))
@@ -1193,7 +1207,7 @@
     :print print :println println :eprint eprint :eprintln eprintln
     :sync-scheduler sync-scheduler :*scheduler* *scheduler*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
-     :ev/run ev/run :ev/shutdown ev/shutdown :*shutdown* *shutdown*
+     :ev/run ev/run :ev/gather ev/gather :ev/shutdown ev/shutdown :*shutdown* *shutdown*
      :merge merge :inc inc :dec dec
      :stream/for-each stream/for-each :stream/fold stream/fold
      :stream/collect stream/collect :stream/into-array stream/into-array

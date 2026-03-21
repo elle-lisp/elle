@@ -233,6 +233,19 @@ pub(super) fn process_raw_completion(
                     .entry(port_key.clone())
                     .or_insert_with(FdState::new);
                 state.status = FdStatus::Eof;
+
+                // For ReadLine: check buffer for a partial last line
+                // (file content without trailing newline).
+                if matches!(op, IoOp::ReadLine) && !state.buffer.is_empty() {
+                    let remainder: Vec<u8> = state.buffer.drain(..).collect();
+                    let s = String::from_utf8_lossy(&remainder);
+                    let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
+                    return Completion {
+                        id,
+                        result: Ok(Value::string(trimmed)),
+                    };
+                }
+
                 return Completion {
                     id,
                     result: Ok(Value::NIL),
