@@ -29,6 +29,7 @@ pub(super) fn submit_uring_stream(
             let buf = buffer_pool.get_mut(buf_handle);
             buf.resize(4096, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+                .offset(u64::MAX)
                 .build()
                 .user_data(id)
         }
@@ -36,6 +37,7 @@ pub(super) fn submit_uring_stream(
             let buf = buffer_pool.get_mut(buf_handle);
             buf.resize(*count, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+                .offset(u64::MAX)
                 .build()
                 .user_data(id)
         }
@@ -45,6 +47,7 @@ pub(super) fn submit_uring_stream(
             buf.clear();
             buf.extend_from_slice(&bytes);
             opcode::Write::new(Fd(fd), buf.as_ptr(), buf.len() as u32)
+                .offset(u64::MAX)
                 .build()
                 .user_data(id)
         }
