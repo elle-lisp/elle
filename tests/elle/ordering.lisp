@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Ordering and equality tests
 ##
 ## Tests for Eq/Hash/Ord consistency at the Elle level.

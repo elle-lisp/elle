@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## Base64 plugin integration tests
 ## Tests the base64 plugin (.so loaded via import-file)
@@ -6,7 +5,7 @@
 ## Try to load the base64 plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_base64.so")))
 (when (not ok?)
-  (display "SKIP: base64 plugin not built\n")
+  (print "SKIP: base64 plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

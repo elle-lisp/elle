@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Reader Roundtrip Tests
 ##
 ## Migrated from tests/property/reader.rs

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## Regex plugin integration tests
 ## Tests the regex plugin (.so loaded via import-file)
@@ -12,7 +11,7 @@
 ## Try to load the regex plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_regex.so")))
 (when (not ok?)
-  (display "SKIP: regex plugin not built\n")
+  (print "SKIP: regex plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

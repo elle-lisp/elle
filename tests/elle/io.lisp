@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # I/O — stream primitives, sync scheduler, ev/spawn, async backend
 
 

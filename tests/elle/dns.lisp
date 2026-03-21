@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## DNS client tests
 ##
 ## Tests the wire-format codec and pure helpers from lib/dns.lisp.
@@ -46,4 +45,4 @@
 (let [[[ok? _] (protect (dns:parse-response (bytes 0 0 0)))]]
   (assert (not ok?) "parse-response rejects short buffer"))
 
-(print "all dns tests passed")
+(println "all dns tests passed")

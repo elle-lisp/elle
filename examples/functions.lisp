@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Functions — a student gradebook
@@ -30,13 +29,13 @@
 # (fn [params] body) — brackets delimit the parameter list.
 (def average (fn [a b] (/ (+ a b) 2)))  # bind a lambda to 'average'
 (assert (= (average 80 90) 85) "fn: average")
-(display "  (average 80 90) = ") (print (average 80 90))
+(print "  (average 80 90) = ") (println (average 80 90))
 
 # A function body can have multiple expressions.
 # The last expression is the return value.
 (def report (fn [name score]
   (def line (string/join (list name ": " (string score)) ""))  # build string
-  (print line)           # side effect: print it
+  (println line)           # side effect: print it
   line))                 # return value: the string
 (assert (= (report "Alice" 95) "Alice: 95") "fn: report returns last expr")
 
@@ -54,11 +53,11 @@
 (assert (= (letter-grade 95) "A") "defn: A")
 (assert (= (letter-grade 85) "B") "defn: B")
 (assert (= (letter-grade 55) "F") "defn: F")
-(display "  (letter-grade 95) = ") (print (letter-grade 95))
+(print "  (letter-grade 95) = ") (println (letter-grade 95))
 
 # (doc name) retrieves the docstring — bare symbol, no quoting needed
 (assert (= (doc letter-grade) "Convert a numeric score to a letter grade.") "doc retrieves docstring")
-(display "  (doc letter-grade) = ") (print (doc letter-grade))
+(print "  (doc letter-grade) = ") (println (doc letter-grade))
 
 
 # ========================================
@@ -116,7 +115,7 @@
 (def curve10 (make-curver 10))     # remembers bonus=10
 (assert (= (curve5 80) 85) "closure: curve5")
 (assert (= (curve10 80) 90) "closure: curve10")
-(display "  (curve5 80) = ") (print (curve5 80))
+(print "  (curve5 80) = ") (println (curve5 80))
 
 # Mutable closure — a grader that tracks how many scores it's seen.
 (defn make-grader []
@@ -177,7 +176,7 @@
 
 (assert (= (my-fold + 0 scores) 410) "my-fold: sum scores")
 (assert (= (my-fold max 0 scores) 95) "my-fold: max score")
-(display "  sum of scores = ") (print (my-fold + 0 scores))
+(print "  sum of scores = ") (println (my-fold + 0 scores))
 
 
 # ========================================
@@ -194,7 +193,7 @@
 
 (def curved-grade (compose letter-grade curve5))  # curve5 → letter-grade
 (assert (= (curved-grade 78) "B") "compose: curve then grade")
-(display "  (curved-grade 78) = ") (print (curved-grade 78))
+(print "  (curved-grade 78) = ") (println (curved-grade 78))
 
 # -> thread-first: inserts value as the first argument to each form
 (assert (= (-> 75 (+ 10) letter-grade) "B") "->: curve then grade via threading")
@@ -235,7 +234,7 @@
 
 (assert (= (best-of 72 85 90 68) 90) "variadic: best of four")
 (assert (= (best-of 100) 100) "variadic: single score")
-(display "  (best-of 72 85 90 68) = ") (print (best-of 72 85 90 68))
+(print "  (best-of 72 85 90 68) = ") (println (best-of 72 85 90 68))
 
 
 # ========================================
@@ -318,7 +317,7 @@
 (record! 80)
 (record! 70)
 (assert (= (avg) 80) "mutable capture: running average")
-(display "  running avg after 90,80,70 = ") (print (avg))
+(print "  running avg after 90,80,70 = ") (println (avg))
 
 # Accumulator — another shared-cell pattern
 (defn make-accumulator [initial]
@@ -344,8 +343,8 @@
   (grade-student {:name "Bob" :score 87}))
 (assert (= rname "Bob") "param destructure: name")
 (assert (= rgrade "B") "param destructure: grade")
-(display "  grade-student({Bob, 87}) → ") (display rname) (display " ") (print rgrade)
+(print "  grade-student({Bob, 87}) → ") (print rname) (print " ") (println rgrade)
 
 
-(print "")
-(print "all functions passed.")
+(println "")
+(println "all functions passed.")

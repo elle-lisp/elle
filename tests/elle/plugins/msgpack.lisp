@@ -1,10 +1,9 @@
-(elle/epoch 1)
 
 ## MessagePack plugin integration tests
 
 (def [ok? plugin] (protect (import-file "target/release/libelle_msgpack.so")))
 (when (not ok?)
-  (display "SKIP: msgpack plugin not built\n")
+  (print "SKIP: msgpack plugin not built\n")
   (exit 0))
 
 (def encode-fn          (get plugin :encode))

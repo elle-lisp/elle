@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## LSP Compliance Tests
 ##

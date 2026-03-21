@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Good naming conventions
 
 (var square 42)

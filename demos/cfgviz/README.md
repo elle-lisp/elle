@@ -39,7 +39,7 @@ Elle provides the `fn/cfg` primitive to extract a function's CFG:
   (let* ((dot (fn/cfg f :dot))
          (path (append "demos/cfgviz/" (append name ".dot"))))
     (file/write path dot)
-    (display (append "  wrote " (append path "\n")))))
+    (println "  wrote " path))))
 ```
 
 The `:dot` format is the DOT language used by Graphviz.

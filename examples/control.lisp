@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Control flow — building an expression evaluator
@@ -55,7 +54,7 @@
 (assert (literal? [:lit 42]) "literal?: yes")
 (assert (not (literal? [:add [:lit 1] [:lit 2]])) "literal?: compound")
 (assert (not (literal? 42)) "literal?: bare number is not an expr")
-(display "  (literal? [:lit 42]) = ") (print (literal? [:lit 42]))
+(print "  (literal? [:lit 42]) = ") (println (literal? [:lit 42]))
 
 # Only nil and false are falsy — everything else is truthy
 (assert (= (if true :yes :no) :yes) "if: true branch")
@@ -93,7 +92,7 @@
 (assert (= (expr-type [:neg [:lit 3]]) :unary) "cond: unary")
 (assert (= (expr-type [:add [:lit 1] [:lit 2]]) :binary) "cond: binary")
 (assert (= (expr-type 42) :invalid) "cond: not an array")
-(display "  expr-type([:add ...]) = ") (print (expr-type [:add [:lit 1] [:lit 2]]))
+(print "  expr-type([:add ...]) = ") (println (expr-type [:add [:lit 1] [:lit 2]]))
 
 # The operator symbol for pretty-printing
 (defn op-symbol [op]
@@ -130,7 +129,7 @@
 (assert (= (binary-op :sub 10 3) 7) "case: sub")
 (assert (= (binary-op :mul 6 7) 42) "case: mul")
 (assert (= (binary-op :div 15 3) 5) "case: div")
-(display "  (binary-op :mul 6 7) = ") (print (binary-op :mul 6 7))
+(print "  (binary-op :mul 6 7) = ") (println (binary-op :mul 6 7))
 
 
 # ========================================
@@ -187,8 +186,8 @@
 
 (assert (= (describe-result 10 2) "10/2 = 5") "if-let: truthy")
 (assert (= (describe-result 10 0) "10/0 is undefined") "if-let: falsy")
-(display "  ") (print (describe-result 10 2))
-(display "  ") (print (describe-result 10 0))
+(print "  ") (println (describe-result 10 2))
+(print "  ") (println (describe-result 10 0))
 
 # when-let: collect safe quotients, skip failures
 (var quotients @[])
@@ -229,7 +228,7 @@
   (push results (eval-simple (get batch i)))
   (assign i (+ i 1)))
 (assert (= results @[10 20 -5 7]) "while: evaluated batch")
-(display "  batch results: ") (print results)
+(print "  batch results: ") (println results)
 
 # while always returns nil
 (var j 0)
@@ -251,7 +250,7 @@
 (assert (= (factorial 0) 1) "factorial: 0")
 (assert (= (factorial 5) 120) "factorial: 5")
 (assert (= (factorial 10) 3628800) "factorial: 10")
-(display "  10! = ") (print (factorial 10))
+(print "  10! = ") (println (factorial 10))
 
 # while has an implicit block named :while — break overrides the nil return
 (var k 0)
@@ -283,7 +282,7 @@
 (assert (= (simplify [:lit 5]) [:lit 5]) "simplify: already simple")
 (assert (= (simplify [:neg [:neg [:lit 5]]]) [:lit 5]) "simplify: double neg")
 (assert (= (simplify [:neg [:neg [:neg [:neg [:lit 3]]]]]) [:lit 3]) "simplify: four negations")
-(display "  simplify(--5) = ") (print (simplify [:neg [:neg [:lit 5]]]))
+(print "  simplify(--5) = ") (println (simplify [:neg [:neg [:lit 5]]]))
 
 # Bare (break) exits without a value — returns nil
 (var x 0)
@@ -311,7 +310,7 @@
 (assert (= (collatz-steps 1) 0) "collatz: 1 → 0 steps")
 (assert (= (collatz-steps 6) 8) "collatz: 6 → 8 steps")
 (assert (= (collatz-steps 27) 111) "collatz: 27 → 111 steps")
-(display "  collatz(27) = ") (display (collatz-steps 27)) (print " steps")
+(print "  collatz(27) = ") (print (collatz-steps 27)) (println " steps")
 
 
 # ========================================
@@ -350,8 +349,8 @@
 (assert (= (validate-expr [:add [:lit 1] [:lit 2]]) :ok) "validate: good binary")
 (assert (= (validate-expr 42) :not-a-tuple) "validate: bare number")
 (assert (= (validate-expr [:lit "nope"]) :bad-literal) "validate: bad literal")
-(display "  validate([:lit 42]) = ") (print (validate-expr [:lit 42]))
-(display "  validate(42) = ") (print (validate-expr 42))
+(print "  validate([:lit 42]) = ") (println (validate-expr [:lit 42]))
+(print "  validate(42) = ") (println (validate-expr 42))
 
 # Block without break returns the last expression
 (def no-break
@@ -388,8 +387,8 @@
 
 (assert (= (find-first @[1 4 9 16 25] (fn [x] (> x 10))) 16) "find-first: found 16")
 (assert (= (find-first @[1 2 3] (fn [x] (> x 100))) nil) "find-first: not found")
-(display "  find-first(>10) = ")
-(print (find-first @[1 4 9 16 25] (fn [x] (> x 10))))
+(print "  find-first(>10) = ")
+(println (find-first @[1 4 9 16 25] (fn [x] (> x 10))))
 
 
 # ========================================
@@ -481,7 +480,7 @@
     [:add [:lit 3] [:lit 4]]
     [:sub [:lit 10] [:lit 3]]])
 (assert (= (eval-expr complex-expr) 49) "eval: (3+4)*(10-3)")
-(display "  (3+4)*(10-3) = ") (print (eval-expr complex-expr))
+(print "  (3+4)*(10-3) = ") (println (eval-expr complex-expr))
 
 # Deeper: -(2 * (5 + 3)) = -16
 (def deep-expr
@@ -489,12 +488,12 @@
     [:mul [:lit 2]
           [:add [:lit 5] [:lit 3]]]])
 (assert (= (eval-expr deep-expr) -16) "eval: -(2*(5+3))")
-(display "  -(2*(5+3)) = ") (print (eval-expr deep-expr))
+(print "  -(2*(5+3)) = ") (println (eval-expr deep-expr))
 
 # Simplify + eval: double-neg removal feeds into the evaluator
 (def tricky [:neg [:neg [:mul [:lit 3] [:lit 4]]]])
-(display "  simplify then eval: ")
-(display (eval-expr (simplify tricky))) (print "")
+(print "  simplify then eval: ")
+(print (eval-expr (simplify tricky))) (println "")
 (assert (= (eval-expr (simplify tricky)) 12) "simplify → eval")
 
 # --- Nested and rest patterns in match ---
@@ -553,7 +552,7 @@
   (push outputs (eval-expr expr)))
 
 (assert (= outputs @[10 7 42 -5 5]) "each: evaluated program")
-(display "  program outputs: ") (print outputs)
+(print "  program outputs: ") (println outputs)
 
 # each over an array
 (var tuple-sum 0)
@@ -586,8 +585,8 @@
 
 (assert (= (format-expr [:lit 42]) "42") "format: literal")
 (assert (= (format-expr [:add [:lit 3] [:lit 4]]) "(3 + 4)") "format: add")
-(display "  format complex: ") (print (format-expr complex-expr))
-(display "  format deep:    ") (print (format-expr deep-expr))
+(print "  format complex: ") (println (format-expr complex-expr))
+(print "  format deep:    ") (println (format-expr deep-expr))
 
 # Thread-first for nested access
 (def config {:db {:host "localhost" :port 5432}})
@@ -595,16 +594,16 @@
 
 # Thread-last for pipeline
 (assert (= (->> "  hello  " string/trim string/upcase) "HELLO") "->>: trim then upcase")
-(display "  (->> \"  hello  \" trim upcase) = ")
-(print (->> "  hello  " string/trim string/upcase))
+(print "  (->> \"  hello  \" trim upcase) = ")
+(println (->> "  hello  " string/trim string/upcase))
 
 # Bare symbol threading: (-> x f g) = (g (f x))
 (assert (= (-> -7 abs-val string) "7") "->: bare symbol threading")
 
 # The full pipeline: format, eval, display
-(display "  ") (display (format-expr complex-expr))
-(display " = ") (print (eval-expr complex-expr))
+(print "  ") (print (format-expr complex-expr))
+(print " = ") (println (eval-expr complex-expr))
 
 
-(print "")
-(print "all control flow passed.")
+(println "")
+(println "all control flow passed.")

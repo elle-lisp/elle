@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Sequence Operation Tests
 ##
 ## Migrated from tests/property/sequences.rs

@@ -418,7 +418,7 @@ Variables defined at the top level are global and accessible everywhere.
 (var global-x 100)
 
 (var my-function (lambda ()
-  (display global-x)))  # Can access global-x
+  (print global-x)))  # Can access global-x
 
 (my-function)  # Prints: 100
 ```
@@ -446,9 +446,9 @@ Block scopes are created by `block` expressions. The `block` form creates a new 
 
 (block
   (var x 50)  # Block-scoped, shadows outer x
-  (display x))   # Prints: 50
+  (print x))   # Prints: 50
 
-(display x)      # Prints: 100
+(print x)      # Prints: 100
 ```
 
 You can optionally name a block and use `break` to exit early with a value:
@@ -470,7 +470,7 @@ Let-bindings create local variables with scope isolation.
 ```janet
 (let ((x 5)
       (y 10))
-  (display (+ x y)))  # x and y are local
+  (print (+ x y)))  # x and y are local
 
 # x and y are NOT accessible here
 ```
@@ -489,7 +489,7 @@ When a variable is referenced, Elle searches for it in this order:
 
 (var outer-function (lambda (param-x)
   (let ((let-x 5))
-    (display (+ global-x param-x let-x)))))
+    (print (+ global-x param-x let-x)))))
     # Lookup order: let-x (found) → param-x (found) → global-x (found)
 
 (outer-function 2)  # Prints: 1 + 2 + 5 = 8
@@ -606,28 +606,28 @@ Inner functions access outer scope:
 #### Undefined Variable
 
 ```janet
-(display undefined-var)  # ERROR: Undefined global variable
+(print undefined-var)  # ERROR: Undefined global variable
 ```
 
 **Fix**: Define the variable first:
 ```janet
 (var undefined-var 42)
-(display undefined-var)  # OK
+(print undefined-var)  # OK
 ```
 
 #### Variable Out of Scope
 
 ```janet
 (let ((x 5))
-  (display x))  # OK - inside let
+  (print x))  # OK - inside let
 
-(display x)     # ERROR: x not defined
+(print x)     # ERROR: x not defined
 ```
 
 **Fix**: Use the variable inside its scope:
 ```janet
 (let ((x 5))
-  (display x))
+  (print x))
 ```
 
 ---
@@ -809,7 +809,7 @@ The else branch is optional:
 
 ```janet
 (if (> 5 10)
-  (display "5 is greater"))
+  (println "5 is greater"))
 ```
 
 ### cond - Multiple Conditions
@@ -834,10 +834,8 @@ The final clause `(true ...)` acts as a catch-all.
 
 ```janet
 (begin
-  (display "First expression")
-  (newline)
-  (display "Second expression")
-  (newline)
+  (println "First expression")
+  (println "Second expression")
   (+ 2 2))
 ⟹ 4
 ```
@@ -852,7 +850,7 @@ Inside a function body, `begin` performs a two-pass analysis for mutual recursio
 # Simple block
 (block
   (var x 10)
-  (display x))
+  (print x))
 # x is not accessible here
 
 # Named block with break
@@ -875,8 +873,7 @@ result  # ⟹ "early exit"
 (var counter 0)
 (while (< counter 5)
   (begin
-    (display counter)
-    (newline)
+    (println counter)
     (assign counter (+ counter 1))))
 ⟹ nil (prints 0 1 2 3 4)
 
@@ -901,8 +898,7 @@ result  # ⟹ "early exit"
 ```janet
 # Simple infinite loop (would need break to exit)
 (forever
-  (display "Running...")
-  (newline))
+  (println "Running..."))
 
 # Event loop pattern
 (var running true)
@@ -913,8 +909,7 @@ result  # ⟹ "early exit"
 
 # Multiple statements in body
 (forever
-  (display "Tick")
-  (newline)
+  (println "Tick")
   (time/sleep 1)
   (if should-stop
     (break)))
@@ -956,8 +951,7 @@ full signal system design.
 (try
   (/ 10 0)
   (catch e
-    (display "Error caught!")
-    (newline)))
+    (println "Error caught!")))
 ```
 
 The catch block receives the error value (by convention a struct like
@@ -969,16 +963,12 @@ The catch block receives the error value (by convention a struct like
 
 ```janet
 (try
-  (display "Attempting operation")
-  (newline)
+  (println "Attempting operation")
   (error {:error :failed :message "Something went wrong"})
   (catch e
-    (display "Caught: ")
-    (display e)
-    (newline))
+    (println "Caught: " e))
   (finally
-    (display "Cleanup code runs here")
-    (newline)))
+    (println "Cleanup code runs here")))
 ```
 
 ### protect and defer
@@ -1020,7 +1010,7 @@ Use `protect` to inspect success vs. failure directly:
 (let (([ok? val] (protect (/ 10 0))))
   (if ok?
     val
-    (begin (display "Error: ") (display val) (newline))))
+    (println "Error: " val)))
 ```
 
 `protect` returns `[true result]` on success and `[false error-value]` on error.
@@ -1221,7 +1211,7 @@ Note: `json-parse` returns an @struct (mutable), and `json-serialize` accepts @s
 ### Concurrency
 
 ```janet
-(spawn (fn () (display "Hello from thread") (newline)))
+(spawn (fn () (println "Hello from thread")))
 # Creates a new thread and runs the function
 
 (var t (spawn (fn () (+ 2 2))))
@@ -1282,8 +1272,7 @@ Macros transform code at compile time:
     `(if ,test ,body nil)))
 
 (when (> 10 5)
-  (display "True!")
-  (newline))
+  (println "True!"))
 ```
 
 ### Module System
@@ -1349,9 +1338,7 @@ Use try-catch for expected error cases:
 (try
   (risky-operation)
   (catch e
-    (display "Error: ")
-    (display (get e :message))
-    (newline)))
+    (println "Error: " (get e :message))))
 ```
 
 ### Prefer cond for Multiple Conditions

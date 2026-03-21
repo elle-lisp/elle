@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Subprocess integration tests
 # All I/O-yielding tests run inside ev/spawn.
 

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 # eval property tests
 # Migrated from tests/property/eval.rs

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## clap plugin integration tests
 ## Tests clap/parse via the plugin .so loaded at runtime.
@@ -11,7 +10,7 @@
 ## Try to load the clap plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_clap.so")))
 (when (not ok?)
-  (display "SKIP: clap plugin not built\n")
+  (print "SKIP: clap plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

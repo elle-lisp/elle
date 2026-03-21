@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs

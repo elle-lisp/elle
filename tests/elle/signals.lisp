@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection

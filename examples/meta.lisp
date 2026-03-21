@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Meta-programming — macros, quasiquote, hygiene, and introspection
@@ -25,7 +24,7 @@
 
 (assert (= (double 21) 42) "double(21) equals 42")
 (assert (= (double 10) 20) "double(10) equals 20")
-(display "  (double 21) => ") (print (double 21))
+(print "  (double 21) => ") (println (double 21))
 
 
 # ========================================
@@ -36,7 +35,7 @@
 # evaluates to 6.
 
 (assert (= (double (+ 1 2)) 6) "double((+ 1 2)) expands to (* (+ 1 2) 2)")
-(display "  (double (+ 1 2)) => ") (print (double (+ 1 2)))
+(print "  (double (+ 1 2)) => ") (println (double (+ 1 2)))
 
 
 # ========================================
@@ -49,7 +48,7 @@
 
 (assert (= (abs-value -42) 42) "abs-value(-42) equals 42")
 (assert (= (abs-value 42) 42) "abs-value(42) equals 42")
-(display "  (abs-value -42) => ") (print (abs-value -42))
+(print "  (abs-value -42) => ") (println (abs-value -42))
 
 
 # ========================================
@@ -64,8 +63,8 @@
 
 (assert (= (add-10 5) 15) "make-adder(10) generates working function")
 (assert (= (add-20 5) 25) "make-adder(20) generates working function")
-(display "  (add-10 5) => ") (print (add-10 5))
-(display "  (add-20 5) => ") (print (add-20 5))
+(print "  (add-10 5) => ") (println (add-10 5))
+(print "  (add-20 5) => ") (println (add-20 5))
 
 
 # ========================================
@@ -82,7 +81,7 @@
 
 (assert (= (square 5) 25) "square(5) equals 25")
 (assert (= (quad 2) 16) "quad(2) = square(square(2)) = 16")
-(display "  (quad 2) => ") (print (quad 2))
+(print "  (quad 2) => ") (println (quad 2))
 
 
 # ========================================
@@ -96,7 +95,7 @@
 
 (var expanded (expand-macro '(double 5)))
 (assert (= expanded (list '* 5 2)) "expand-macro shows expansion")
-(display "  (expand-macro '(double 5)) => ") (print expanded)
+(print "  (expand-macro '(double 5)) => ") (println expanded)
 
 
 # ========================================
@@ -108,13 +107,13 @@
 (var sym1 (gensym))
 (var sym2 (gensym))
 (assert (not (identical? sym1 sym2)) "gensym symbols are unique")
-(display "  gensym => ") (print sym1)
+(print "  gensym => ") (println sym1)
 
 # With prefix for readability
 (var tmp1 (gensym "tmp"))
 (var tmp2 (gensym "tmp"))
 (assert (not (identical? tmp1 tmp2)) "prefixed gensym symbols are unique")
-(display "  (gensym \"tmp\") => ") (print tmp1)
+(print "  (gensym \"tmp\") => ") (println tmp1)
 
 
 # ========================================
@@ -127,7 +126,7 @@
 (var result `(the answer is ,x))
 (assert (= (length result) 4) "quasiquote builds a 4-element list")
 (assert (= (last result) 42) "unquoted value is spliced in")
-(display "  `(the answer is ,x) => ") (print result)
+(print "  `(the answer is ,x) => ") (println result)
 
 # Quasiquote without unquote is like quote
 (assert (= `(a b c) (list 'a 'b 'c)) "quasiquote without unquote is like quote")
@@ -149,7 +148,7 @@
   (assert (= x 2) "swap: x is now 2")
   (assert (= y 1) "swap: y is now 1"))
 
-(display "  swap hygiene: caller's tmp preserved after swap") (print "")
+(print "  swap hygiene: caller's tmp preserved after swap") (println "")
 
 
 # ========================================
@@ -165,7 +164,7 @@
   `(let ((tmp ,x)) (+ tmp 2)))
 
 (assert (= (+ (add-one 10) (add-two 20)) 33) "nested macros with same-named tmp don't interfere")
-(display "  (+ (add-one 10) (add-two 20)) => ") (print (+ (add-one 10) (add-two 20)))
+(print "  (+ (add-one 10) (add-two 20)) => ") (println (+ (add-one 10) (add-two 20)))
 
 
 # ========================================
@@ -204,7 +203,7 @@
 
 (assert (= (aif (+ 1 2) (+ it 10) 0) 13) "aif: `it` works with compound test expressions")
 
-(display "  (aif (+ 1 2) (+ it 10) 0) => ") (print (aif (+ 1 2) (+ it 10) 0))
+(print "  (aif (+ 1 2) (+ it 10) 0) => ") (println (aif (+ 1 2) (+ it 10) 0))
 
 
 # ========================================
@@ -225,8 +224,8 @@
 # arguments as data.
 
 (assert (= (syntax->datum 42) 42) "syntax->datum: plain values pass through unchanged")
-(display "  (syntax->datum 42) => ") (print (syntax->datum 42))
+(print "  (syntax->datum 42) => ") (println (syntax->datum 42))
 
 
-(print "")
-(print "all meta-programming passed.")
+(println "")
+(println "all meta-programming passed.")

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## === Shebang Handling ===
 

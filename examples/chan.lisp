@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Channels — inter-fiber message passing with crossbeam-channel
@@ -23,8 +22,8 @@
 (let* (([s r] (chan))
        (send-result (chan/send s 42))
        (recv-result (chan/recv r)))
-  (display "  send result: ") (print send-result)
-  (display "  recv result: ") (print recv-result)
+  (print "  send result: ") (println send-result)
+  (print "  recv result: ") (println recv-result)
   (assert (= (get send-result 0) :ok) "unbounded send returns :ok")
   (assert (= (get recv-result 0) :ok) "recv status is :ok")
   (assert (= (get recv-result 1) 42) "recv message is 42"))
@@ -37,8 +36,8 @@
 (let* (([s r] (chan 1))
        (first (chan/send s "hello"))
        (second (chan/send s "world")))
-  (display "  bounded(1) first send: ") (print first)
-  (display "  bounded(1) second send: ") (print second)
+  (print "  bounded(1) first send: ") (println first)
+  (print "  bounded(1) second send: ") (println second)
   (assert (= (get first 0) :ok) "first send fits")
   (assert (= (get second 0) :full) "second send is full"))
 
@@ -49,12 +48,12 @@
 
 (let (([s r] (chan)))
   (let ((empty-result (chan/recv r)))
-    (display "  recv from empty: ") (print empty-result)
+    (print "  recv from empty: ") (println empty-result)
     (assert (= (get empty-result 0) :empty) "empty channel returns :empty"))
 
   (chan/close s)
   (let ((disc-result (chan/recv r)))
-    (display "  recv after close: ") (print disc-result)
+    (print "  recv after close: ") (println disc-result)
     (assert (= (get disc-result 0) :disconnected) "closed sender means :disconnected")))
 
 
@@ -71,9 +70,9 @@
   (let* ((r1 (chan/recv r))
          (r2 (chan/recv r))
          (r3 (chan/recv r)))
-    (display "  sent :empty, got: ") (print r1)
-    (display "  sent :ok, got: ") (print r2)
-    (display "  sent :disconnected, got: ") (print r3)
+    (print "  sent :empty, got: ") (println r1)
+    (print "  sent :ok, got: ") (println r2)
+    (print "  sent :disconnected, got: ") (println r3)
     (assert (= (get r1 0) :ok) "status is :ok")
     (assert (= (get r1 1) :empty) "message is :empty (not confused with status)")
     (assert (= (get r2 1) :ok) "message is :ok (not confused with status)")
@@ -90,8 +89,8 @@
   (chan/send s2 "from-clone")
   (let* ((r1 (chan/recv r))
          (r2 (chan/recv r)))
-    (display "  original sender: ") (print (get r1 1))
-    (display "  cloned sender: ") (print (get r2 1))
+    (print "  original sender: ") (println (get r1 1))
+    (print "  cloned sender: ") (println (get r2 1))
     (assert (= (get r1 1) "from-original") "original sender message")
     (assert (= (get r2 1) "from-clone") "cloned sender message")))
 
@@ -105,17 +104,17 @@
   (chan/send s2 "second-wins")
   # r1 is empty, r2 has a message — select should pick r2 (index 1).
   (let ((result (chan/select @[r1 r2] 1000)))
-    (display "  select picked index ") (display (get result 0))
-    (display " with message: ") (print (get result 1))
+    (print "  select picked index ") (print (get result 0))
+    (print " with message: ") (println (get result 1))
     (assert (= (get result 0) 1) "select returns index of ready receiver")
     (assert (= (get result 1) "second-wins") "select returns the message")))
 
 # Timeout when nothing is ready.
 (let (([s r] (chan)))
   (let ((result (chan/select @[r] 10)))
-    (display "  select timeout: ") (print result)
+    (print "  select timeout: ") (println result)
     (assert (= (get result 0) :timeout) "select times out on empty channel")))
 
 
-(print "")
-(print "all channel tests passed.")
+(println "")
+(println "all channel tests passed.")
