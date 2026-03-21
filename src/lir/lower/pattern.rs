@@ -24,6 +24,7 @@ impl<'a> Lowerer<'a> {
         scrutinee_slot: u16,
         result_slot: u16,
         done_label: Label,
+        lowered_arms: &mut std::collections::HashMap<usize, Label>,
     ) -> Result<(), String> {
         match tree {
             DecisionTree::Fail => {
@@ -62,6 +63,26 @@ impl<'a> Lowerer<'a> {
                         self.emit(LirInstr::StoreLocal { slot, src: val_reg });
                     }
                 }
+
+                // If this arm's body was already lowered (e.g., multiple cases
+                // in an or-pattern reaching the same arm), jump to the existing
+                // body instead of re-lowering it.  Re-lowering would share
+                // binding slots but only initialize cells (MakeLBox) in the
+                // first copy, causing "Expected cell, got ..." panics when a
+                // later copy runs at runtime.
+                if let Some(&body_label) = lowered_arms.get(arm_index) {
+                    self.terminate(Terminator::Jump(body_label));
+                    self.finish_block();
+                    return Ok(());
+                }
+
+                // First time lowering this arm — record its label for reuse.
+                let body_label = self.fresh_label();
+                lowered_arms.insert(*arm_index, body_label);
+                self.terminate(Terminator::Jump(body_label));
+                self.finish_block();
+                self.current_block = BasicBlock::new(body_label);
+
                 // Lower body
                 let body = &arms[*arm_index].2;
                 let body_reg = self.lower_expr(body)?;
@@ -125,7 +146,14 @@ impl<'a> Lowerer<'a> {
 
                 // Guard failed: continue with otherwise
                 self.current_block = BasicBlock::new(fail_label);
-                self.lower_decision_tree(otherwise, arms, scrutinee_slot, result_slot, done_label)
+                self.lower_decision_tree(
+                    otherwise,
+                    arms,
+                    scrutinee_slot,
+                    result_slot,
+                    done_label,
+                    lowered_arms,
+                )
             }
             DecisionTree::Switch {
                 access,
@@ -179,6 +207,7 @@ impl<'a> Lowerer<'a> {
                         scrutinee_slot,
                         result_slot,
                         done_label,
+                        lowered_arms,
                     )?;
 
                     // Start next test block (if not the last case)
@@ -190,7 +219,14 @@ impl<'a> Lowerer<'a> {
                 // Default block
                 self.current_block = BasicBlock::new(default_label);
                 if let Some(def) = default {
-                    self.lower_decision_tree(def, arms, scrutinee_slot, result_slot, done_label)?;
+                    self.lower_decision_tree(
+                        def,
+                        arms,
+                        scrutinee_slot,
+                        result_slot,
+                        done_label,
+                        lowered_arms,
+                    )?;
                 } else {
                     // No default → fail (non-exhaustive)
                     let nil_reg = self.emit_const(LirConst::Nil)?;
