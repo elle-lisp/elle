@@ -17,6 +17,7 @@ use cranelift_module::{FuncId, Linkage, Module};
 
 use crate::lir::{Label, LirFunction};
 use crate::value::{Arity, SymbolId};
+use crate::Value;
 
 use super::code::JitCode;
 use super::translate::FunctionTranslator;
@@ -277,24 +278,22 @@ impl JitCompiler {
             scc_peers.insert(member.sym, func_id);
         }
 
-        // Define each function with the SCC peer map
+        // Define each function with the SCC peer map, collecting closure
+        // constants so they stay alive as long as the JitCode does.
+        let mut all_closure_constants: Vec<(SymbolId, Vec<Value>)> = Vec::new();
         for (i, member) in members.iter().enumerate() {
             let (_, func_id) = func_ids[i];
             let mut ctx = self.module.make_context();
             ctx.func.signature = sig.clone();
             ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-            // closure_constants from batch compile are dropped — batch JitCodes use
-            // new_shared which has no closure_constants field to populate from here.
-            // Closures containing inner lambdas are capture-free, so MakeClosure in
-            // SCC peers is rare; if it occurs the inner template Value leaks its Rc
-            // until the JIT module is freed.
-            let _closure_constants = self.translate_function(
+            let closure_constants = self.translate_function(
                 member.lir,
                 &mut ctx.func,
                 Some(&scc_peers),
                 Some(member.sym),
             )?;
+            all_closure_constants.push((member.sym, closure_constants));
 
             self.module
                 .define_function(func_id, &mut ctx)
@@ -315,10 +314,15 @@ impl JitCompiler {
         // Wrap module in shared Arc so all JitCode entries keep it alive
         let shared_module = Arc::new(super::code::ModuleHolder::new(self.module));
 
-        // Build results — all share the same module
+        // Build results — all share the same module, each with its closure constants
+        let mut constants_map: std::collections::HashMap<SymbolId, Vec<Value>> =
+            all_closure_constants.into_iter().collect();
         let results = fn_ptrs
             .into_iter()
-            .map(|(sym, ptr)| (sym, JitCode::new_shared(ptr, shared_module.clone())))
+            .map(|(sym, ptr)| {
+                let cc = constants_map.remove(&sym).unwrap_or_default();
+                (sym, JitCode::new_shared(ptr, shared_module.clone(), cc))
+            })
             .collect();
 
         Ok(results)
