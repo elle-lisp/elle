@@ -160,6 +160,7 @@ on these returns a `:type-error`.
 | `docs/` | Design documents and guides |
 | `demos/` | Comparison implementations |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
+| `tools/` | MCP server, graph extractor, codemod scripts |
 | `site/` | Generated documentation site |
 
 ## Testing
@@ -289,6 +290,62 @@ When in doubt, run the tests.
    common cross-cutting changes.
 6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how
    to add new tests.
+
+## MCP Server
+
+`tools/mcp-server.lisp` is an MCP (Model Context Protocol) server that
+exposes an oxigraph RDF store over SPARQL via JSON-RPC 2.0 on stdio.
+
+### Tools exposed
+
+| Tool | Purpose |
+|------|---------|
+| `sparql_query` | Execute SPARQL SELECT / ASK / CONSTRUCT |
+| `sparql_update` | Execute SPARQL UPDATE (INSERT DATA, DELETE, etc.) |
+| `load_rdf` | Load RDF data from a string (turtle/ntriples/nquads/rdfxml) |
+| `dump_rdf` | Serialize the store to a string |
+
+### Store location
+
+Resolution order:
+1. CLI arg: `elle tools/mcp-server.lisp -- /path/to/store`
+2. Env var: `ELLE_MCP_STORE=/path/to/store`
+3. Default: `.elle-mcp/store/` in CWD (auto-created)
+
+The store is always persistent (no in-memory fallback). `.elle-mcp/` is
+gitignored.
+
+### Static TLS requirement
+
+The oxigraph plugin embeds RocksDB (C++), which uses `__thread` storage.
+This causes `dlopen` to fail with "cannot allocate memory in static TLS
+block" on glibc systems. Set the tunable before running:
+
+```bash
+export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384
+```
+
+### Related tools
+
+| File | Purpose |
+|------|---------|
+| `tools/elle-graph.lisp` | Extract RDF triples from Elle source files via `read-all` |
+| `tools/run-graph.sh` | Wrapper that sets `GLIBC_TUNABLES` and runs elle-graph |
+| `tools/demo-queries.lisp` | Example SPARQL queries against the Elle knowledge graph |
+| `tools/test-mcp.lisp` | Smoke test: spawns server, exercises all tools |
+| `tools/test-oxigraph-load.lisp` | Verifies oxigraph plugin loads |
+| `tools/bug-repro.lisp` | VM panic repro: glob + nested let+protect + push |
+
+### Graph schema
+
+`elle-graph.lisp` emits ntriples with `urn:elle:` namespace:
+
+| Type | Predicates |
+|------|-----------|
+| `elle:Fn` | `elle:name`, `elle:file`, `elle:arity`, `elle:param`, `elle:doc` |
+| `elle:Def` | `elle:name`, `elle:file` |
+| `elle:Macro` | `elle:name`, `elle:file` |
+| `elle:Import` | `elle:name`, `elle:path`, `elle:file` |
 
 ## Standard Library Functions
 
