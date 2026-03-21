@@ -4,37 +4,6 @@ use crate::value::fiber::{SignalBits, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::Value;
 
-/// (display val ...) — human-readable output, no quotes on strings
-pub(crate) fn prim_display(args: &[Value]) -> (SignalBits, Value) {
-    for arg in args {
-        print!("{}", arg);
-    }
-    (SIG_OK, Value::NIL)
-}
-
-/// (print val ...) — human-readable output with newline, no quotes on strings
-pub(crate) fn prim_print(args: &[Value]) -> (SignalBits, Value) {
-    for arg in args {
-        print!("{}", arg);
-    }
-    println!();
-    (SIG_OK, Value::NIL)
-}
-
-/// (write val ...) — readable literal form, strings quoted
-pub(crate) fn prim_write(args: &[Value]) -> (SignalBits, Value) {
-    for arg in args {
-        print!("{:?}", arg);
-    }
-    (SIG_OK, Value::NIL)
-}
-
-/// (newline) — print a newline
-pub(crate) fn prim_newline(_args: &[Value]) -> (SignalBits, Value) {
-    println!();
-    (SIG_OK, Value::NIL)
-}
-
 /// Generate a flat single-line representation of a value
 fn flat_repr(val: Value, depth: usize) -> String {
     // Depth limit to prevent infinite recursion on circular structures
@@ -444,50 +413,6 @@ pub(crate) fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
 }
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
-    PrimitiveDef {
-        name: "display",
-        func: prim_display,
-        signal: Signal::silent(),
-        arity: Arity::AtLeast(0),
-        doc: "Human-readable output without quotes on strings.",
-        params: &["vals"],
-        category: "io",
-        example: "(display \"hello\") #=> hello",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "print",
-        func: prim_print,
-        signal: Signal::silent(),
-        arity: Arity::AtLeast(0),
-        doc: "Human-readable output with trailing newline.",
-        params: &["vals"],
-        category: "io",
-        example: "(print \"hello\") #=> hello\\n",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "write",
-        func: prim_write,
-        signal: Signal::silent(),
-        arity: Arity::AtLeast(0),
-        doc: "Write values in readable literal form. Strings are quoted.",
-        params: &["vals"],
-        category: "io",
-        example: "(write \"hello\") #=> \"hello\"",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "newline",
-        func: prim_newline,
-        signal: Signal::silent(),
-        arity: Arity::Exact(0),
-        doc: "Print a newline.",
-        params: &[],
-        category: "io",
-        example: "(newline) #=> (prints newline)",
-        aliases: &[],
-    },
     PrimitiveDef {
         name: "pp",
         func: prim_pp,

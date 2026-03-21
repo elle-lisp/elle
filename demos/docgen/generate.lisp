@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 1)
 ## Elle Documentation Generator
 ## Reads JSON input files and produces static HTML documentation
 
