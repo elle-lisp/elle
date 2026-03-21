@@ -155,16 +155,16 @@ pub extern "C" fn elle_jit_yield_through_call(
     YIELD_SENTINEL
 }
 
-/// Check if any actionable signal is pending on the VM.
+/// Check if any non-OK signal is pending on the VM.
 /// Returns TRUE if set, FALSE otherwise.
 ///
-/// This extends `elle_jit_has_exception` to also detect yield signals.
-/// Used after Call instructions in yielding functions.
+/// This extends `elle_jit_has_exception` to also detect suspending signals
+/// (SIG_YIELD, SIG_SWITCH, user-defined). Used after Call instructions in
+/// yielding functions.
 ///
-/// Uses bitwise containment (`contains`) rather than exact equality,
-/// because I/O primitives return compound signals like `SIG_YIELD | SIG_IO`.
-/// Exact-match would miss these, causing yield sentinels to leak into
-/// registers as values.
+/// Checks `!is_ok()` rather than matching specific signal bits, because
+/// I/O primitives return compound signals like `SIG_YIELD | SIG_IO` and
+/// SIG_SWITCH must also be detected for fiber/resume trampolining.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };

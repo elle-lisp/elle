@@ -340,6 +340,16 @@ impl VM {
                     });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                    if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                        eprintln!(
+                            "[call_inner] suspend: bits=0x{:x} ip={} bc_len={} inner_frames={} env_len={}",
+                            bits.0,
+                            *ip,
+                            bytecode.len(),
+                            frames.len(),
+                            closure_env.len(),
+                        );
+                    }
                     frames.push(caller_frame);
                     self.fiber.signal = Some((bits, value));
                     self.fiber.suspended = Some(frames);
