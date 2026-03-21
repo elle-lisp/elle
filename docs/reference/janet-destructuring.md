@@ -344,8 +344,8 @@ from the pattern:
 
 ```janet
 (match x
-  (n (even? n)) (println "even")
-  n (println "odd"))
+  (n (even? n)) (print "even")
+  n (print "odd"))
 ```
 
 **`(@ sym)` global unification** — binds `sym` across the entire match form.
@@ -354,8 +354,8 @@ all occurrences must be equal. This is a form of join:
 
 ```janet
 (match [a b]
-  [(@ x) (@ x)] (println "equal")
-  _ (println "different"))
+  [(@ x) (@ x)] (print "equal")
+  _ (print "different"))
 ```
 
 **Local unification** — if the same plain symbol appears twice in a pattern,
@@ -363,8 +363,8 @@ all occurrences must be equal:
 
 ```janet
 (match [1 1]
-  [x x] (println "same")   # matches
-  _ (println "different"))
+  [x x] (print "same")   # matches
+  _ (print "different"))
 ```
 
 This works because `visit-pattern-1` accumulates gensyms per symbol name, and
