@@ -1,4 +1,6 @@
 mod lexer;
+mod lua_lexer;
+mod lua_parser;
 mod numeric;
 mod parser;
 mod syntax;
@@ -102,6 +104,15 @@ pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, St
 
     let mut parser = SyntaxReader::new(tokens, locations, lengths);
     parser.read_all()
+}
+
+/// Parse source, dispatching to the Lua reader for `.lua` files.
+pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
+    if source_name.ends_with(".lua") {
+        lua_parser::parse_lua_file(input, source_name)
+    } else {
+        read_syntax_all(input, source_name)
+    }
 }
 
 #[cfg(test)]
