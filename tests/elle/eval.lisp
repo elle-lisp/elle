@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Integration tests for the eval special form
 #
 # Migrated from tests/integration/eval.rs (46 tests)

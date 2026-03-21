@@ -1,4 +1,3 @@
-#!/usr/bin/env elle
 ## Elle Documentation Generator
 ## Reads JSON input files and produces static HTML documentation
 
@@ -669,14 +668,14 @@ tbody tr:nth-child(even) {
   (create-directory-all output-dir))
 
 ## Read and parse site configuration
-(display "Reading site configuration...")
-(newline)
+(print "Reading site configuration...")
+(println)
 (var site-json (slurp (path/join docs-dir "site.json")))
 (var site-config (json-parse site-json))
 
 ## Generate and write CSS
-(display "Generating CSS...")
-(newline)
+(print "Generating CSS...")
+(println)
 (var css-content (generate-css))
 (spit (path/join output-dir "style.css") css-content)
 
@@ -688,8 +687,8 @@ tbody tr:nth-child(even) {
   (fn (all-nav-items current-nav-items)
     (if (empty? current-nav-items)
       (begin
-        (display "Done!")
-        (newline))
+        (print "Done!")
+        (println))
       (begin
         (var nav-item (first current-nav-items))
         (var rest-nav-items (rest current-nav-items))
@@ -697,10 +696,10 @@ tbody tr:nth-child(even) {
         (var title (get nav-item "title"))
         (var page-file (path/join docs-dir (-> "pages/" (append slug) (append ".json"))))
         
-        (display "Generating: ")
-        (display slug)
-        (display ".html...")
-        (newline)
+        (print "Generating: ")
+        (print slug)
+        (print ".html...")
+        (println)
         
         ## For stdlib-reference, generate from runtime metadata
         ## For all other pages, read from JSON
@@ -735,7 +734,7 @@ tbody tr:nth-child(even) {
 (process-pages nav-items nav-items)
 
 ## Print summary
-(display "Generated documentation in ")
-(display output-dir)
-(display "/")
-(newline)
+(print "Generated documentation in ")
+(print output-dir)
+(print "/")
+(println)

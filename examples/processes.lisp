@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Processes — Erlang-style message passing via fibers
@@ -244,7 +243,7 @@
 
       (send ponger [me :ping])
       (let ([reply (recv)])
-        (display "  ping-pong reply: ") (print reply)
+        (print "  ping-pong reply: ") (println reply)
         (assert (= reply :pong) "ping-pong reply is :pong"))))))
 
 
@@ -265,7 +264,7 @@
              [p1 (spawn (make-forwarder p2))])
         (send p1 0)
         (let ([result (recv)])
-          (display "  sent 0 through 3 forwarders, got: ") (print result)
+          (print "  sent 0 through 3 forwarders, got: ") (println result)
           (assert (= result 3) "ring increments message 3 times")))))))
 
 
@@ -290,7 +289,7 @@
           (assign total (+ total (recv)))
           (assign i (+ i 1))))
 
-      (display "  fan-in sum of 5 worker ids: ") (print total)
+      (print "  fan-in sum of 5 worker ids: ") (println total)
       (assert (= total 10) "fan-in: 0+1+2+3+4 = 10")))))
 
 
@@ -317,8 +316,8 @@
 
         # We should get an EXIT message because worker-a died (linked to us)
         (let ([msg (recv)])
-          (display "  supervisor got EXIT from pid ") (display (get msg 1))
-          (display ", reason: ") (print (get msg 2))
+          (print "  supervisor got EXIT from pid ") (print (get msg 1))
+          (print ", reason: ") (println (get msg 2))
           (match msg
             ([:EXIT pid reason]
               (assert (= pid worker-a) "EXIT from worker-a"))
@@ -337,7 +336,7 @@
                     (emit 1 {:error :intentional :message "test crash"})))])
 
       (let ([msg (recv)])
-        (display "  trapped exit: ") (print msg)
+        (print "  trapped exit: ") (println msg)
         (match msg
           ([:EXIT pid reason]
             (assert (= pid child) "EXIT from child")
@@ -357,7 +356,7 @@
     (trap-exit true)
     (let ([child (spawn-link (fn () 42))])
       (let ([msg (recv)])
-        (display "  normal exit: ") (print msg)
+        (print "  normal exit: ") (println msg)
         (match msg
           ([:EXIT pid reason]
             (assert (= pid child) "EXIT from child")
@@ -391,9 +390,9 @@
       (send me :still-alive)
 
       (let ([msg (recv)])
-        (display "  after unlink, got: ") (print msg)
+        (print "  after unlink, got: ") (println msg)
         (assert (= msg :still-alive) "no EXIT after unlink"))))))
 
 
-(print "")
-(print "all processes passed.")
+(println "")
+(println "all processes passed.")

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # file/stat and file/lstat — error cases and symlink behavior
 
 

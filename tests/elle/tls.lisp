@@ -20,7 +20,7 @@
       (protect (import-file "target/debug/libelle_tls.so")))))
 
 (when (not ok?)
-  (display "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
+  (print "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
   (exit 0))
 
 ## Extract the handshake-complete? primitive for use in assertions.
@@ -45,7 +45,7 @@
       # Clean up without trying to send data.
       (port/close conn:tcp)))))
 
-(print "tls chunk 4: handshake test PASSED\n")
+(println "tls chunk 4: handshake test PASSED\n")
 
 ## ── Chunk 5a: HTTPS GET with tls/read-all ─────────────────────────────────
 
@@ -59,7 +59,7 @@
         (assert (string/contains? body "Example Domain")
                 "tls: response body must contain 'Example Domain'"))))))
 
-(print "tls chunk 5a: HTTPS GET with read-all PASSED\n")
+(println "tls chunk 5a: HTTPS GET with read-all PASSED\n")
 
 ## ── Chunk 5b: tls/lines with stream/collect ───────────────────────────────
 
@@ -71,7 +71,7 @@
       (assert (> (length lines) 0) "tls: lines must yield at least one line")
       (assert (string? (first lines)) "tls: each line must be a string")))))
 
-(print "tls chunk 5b: tls/lines with stream/collect PASSED\n")
+(println "tls chunk 5b: tls/lines with stream/collect PASSED\n")
 
 ## ── Chunk 5c: tls/chunks with stream/map ──────────────────────────────────
 
@@ -85,7 +85,7 @@
       (each sz in sizes
         (assert (> sz 0) "tls: each chunk must be non-empty"))))))
 
-(print "tls chunk 5c: tls/chunks with stream/map PASSED\n")
+(println "tls chunk 5c: tls/chunks with stream/map PASSED\n")
 
 ## ── Chunk 6: loopback echo server/client ──────────────────────────────────
 ##
@@ -104,7 +104,7 @@
              "-days" "1" "-nodes"
              "-subj" "/CN=localhost"])]]
     (if (not (= gen-result:exit 0))
-      (print "tls chunk 6: SKIPPED (openssl not available)\n")
+      (println "tls chunk 6: SKIPPED (openssl not available)\n")
 
       (begin
         ## Shared mutable cell: the client fiber writes true here when done.
@@ -147,7 +147,7 @@
 
         (assert (get loopback-ok 0) "tls loopback: client fiber must complete and verify response")
         (port/close listener)
-        (print "tls chunk 6: loopback echo test PASSED\n")))))
+        (println "tls chunk 6: loopback echo test PASSED\n")))))
 
 ## ── Chunk 7: error cases ─────────────────────────────────────────────────────
 ##
@@ -167,7 +167,7 @@
           (concat "empty hostname: error kind must be :tls-error, got: "
                   (string (get err :error)))))
 
-(print "tls chunk 7: empty hostname rejected ✓\n")
+(println "tls chunk 7: empty hostname rejected ✓\n")
 
 ## Error 2: wrong type for tls/process (string instead of bytes) → :type-error signal
 (let [[state (client-state-fn "example.com")]]
@@ -177,7 +177,7 @@
             (concat "tls/process with string: must be :type-error, got: "
                     (string (get err :error))))))
 
-(print "tls chunk 7: tls/process type-check ✓\n")
+(println "tls chunk 7: tls/process type-check ✓\n")
 
 ## Error 3: tls/write-plaintext before handshake → {:status :error} (SIG_OK, error in struct)
 (let [[state (client-state-fn "example.com")]]
@@ -186,7 +186,7 @@
             (concat "write-plaintext before handshake: result:status must be :error, got: "
                     (string result:status)))))
 
-(print "tls chunk 7: write-plaintext before handshake returns error struct ✓\n")
+(println "tls chunk 7: write-plaintext before handshake returns error struct ✓\n")
 
 ## Error 4: tls/server-config with non-existent cert path → :io-error signal
 (let [[[ok? err] (protect (server-config-fn "/nonexistent/cert.pem" "/nonexistent/key.pem"))]]
@@ -195,7 +195,7 @@
           (concat "invalid cert path: must be :io-error, got: "
                   (string (get err :error)))))
 
-(print "tls chunk 7: invalid cert path rejected ✓\n")
+(println "tls chunk 7: invalid cert path rejected ✓\n")
 
 ## Error 5: tls/connect to a closed port → :io-error or :connect-error
 ## Port 19999 on 127.0.0.1 should have nothing listening.
@@ -209,7 +209,7 @@
           (concat "connect to closed port: must be :io-error or :connect-error, got: "
                   (string (get err :error)))))
 
-(print "tls chunk 7: connect to closed port rejected ✓\n")
+(println "tls chunk 7: connect to closed port rejected ✓\n")
 
 ## Error 6: tls/connect to a plain-HTTP port → :tls-error (handshake fails on non-TLS data)
 ## example.com:80 speaks plain HTTP — rustls will see a non-TLS record and reject it.
@@ -223,6 +223,6 @@
           (concat "connect to plain HTTP port: must be :tls-error or :io-error, got: "
                   (string (get err :error)))))
 
-(print "tls chunk 7: connect to plain-HTTP port rejected ✓\n")
+(println "tls chunk 7: connect to plain-HTTP port rejected ✓\n")
 
-(print "tls chunk 7: all error cases PASSED\n")
+(println "tls chunk 7: all error cases PASSED\n")

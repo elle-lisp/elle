@@ -1,10 +1,9 @@
-(elle/epoch 1)
 
 ## Random plugin integration tests
 
 (def [ok? plugin] (protect (import-file "target/release/libelle_random.so")))
 (when (not ok?)
-  (display "SKIP: random plugin not built\n")
+  (print "SKIP: random plugin not built\n")
   (exit 0))
 
 (def seed-fn        (get plugin :seed))

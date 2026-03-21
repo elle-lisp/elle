@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Collections — a contact book application
@@ -59,7 +58,7 @@
 (put book "carol" carol)
 (put book "dave"  dave)
 (assert (= (length (keys book)) 4) "book has 4 contacts")
-(display "  book has ") (display (length (keys book))) (print " contacts")
+(print "  book has ") (print (length (keys book))) (println " contacts")
 
 
 # ========================================
@@ -87,7 +86,7 @@
 (def alice-email
   (-> book (get "alice") (get :email)))
 (assert (= alice-email "alice@example.com") "->: nested access")
-(display "  alice email: ") (print alice-email)
+(print "  alice email: ") (println alice-email)
 
 
 # ========================================
@@ -101,7 +100,7 @@
   (get book "alice"))
 (assert (= aname "Alice") "struct destructure: name")
 (assert (= aemail "alice@example.com") "struct destructure: email")
-(display "  alice → ") (display aname) (display " <") (display aemail) (print ">")
+(print "  alice → ") (print aname) (print " <") (print aemail) (println ">")
 
 # Unpack tags by position
 (def [first-tag second-tag] atags)
@@ -112,7 +111,7 @@
 (let ([{:name n :tags [t & _]} (get book "carol")])
   (assert (= n "Carol") "let destructure: name")
   (assert (= t :ops) "let destructure: first tag")
-  (display "  carol → ") (display n) (display " first-tag=") (print t))
+  (print "  carol → ") (print n) (print " first-tag=") (println t))
 
 # Destructuring in function params
 (defn contact-line [{:name name :email email}]
@@ -158,7 +157,7 @@
 (var total-tags 0)
 (each c in all-contacts
   (assign total-tags (+ total-tags (length (get c :tags)))))
-(display "  total tags across all contacts: ") (print total-tags)
+(print "  total tags across all contacts: ") (println total-tags)
 (assert (> total-tags 0) "each: summed tag counts")
 
 # each over an array (alice's tags)
@@ -195,7 +194,7 @@
   (when (has-tag? (get book k) :lead)
     (push leads k)))
 (assert (= (length leads) 2) "two leads found")
-(display "  leads: ") (print leads)
+(print "  leads: ") (println leads)
 
 # Collect devs
 (var devs @[])
@@ -203,7 +202,7 @@
   (when (has-tag? (get book k) :dev)
     (push devs k)))
 (assert (= (length devs) 3) "three devs found")
-(display "  devs: ") (print devs)
+(print "  devs: ") (println devs)
 
 
 # ========================================
@@ -228,7 +227,7 @@
 (def alice-str (format-contact alice))
 (assert (string/contains? alice-str "Alice") "format: name")
 (assert (string/contains? alice-str "dev") "format: tag")
-(display "  ") (print alice-str)
+(print "  ") (println alice-str)
 
 # Format every contact
 (var formatted @[])
@@ -236,7 +235,7 @@
   (push formatted (format-contact (get book k))))
 (assert (= (length formatted) 4) "formatted all contacts")
 (each line in formatted
-  (display "  ") (print line))
+  (print "  ") (println line))
 
 
 # ========================================
@@ -256,7 +255,7 @@
   (push clean (string/trim n)))
 (assert (= (get clean 0) "Alice") "trimmed first name")
 (assert (= (get clean 3) "Dave") "trimmed last name")
-(display "  cleaned import: ") (print clean)
+(print "  cleaned import: ") (println clean)
 
 # String operations on email addresses
 (assert (string/starts-with? alice-email "alice") "starts-with?")
@@ -273,7 +272,7 @@
     domain))
 
 (assert (= (email-domain "alice@example.com") "example.com") "email-domain")
-(display "  domain: ") (print (email-domain "alice@example.com"))
+(print "  domain: ") (println (email-domain "alice@example.com"))
 
 # Case and replace
 (assert (= (string/upcase "hello") "HELLO") "upcase")
@@ -292,8 +291,8 @@
 (assert (= (length "héllo") 5) "precomposed é: one grapheme")
 (assert (= (length "👋🏽") 1) "wave + skin tone: one grapheme")
 (assert (= (get "👋🏽" 0) "👋🏽") "get: whole cluster")
-(display "  length(\"hello\")=") (display (length "hello"))
-(display "  length(\"👋🏽\")=") (print (length "👋🏽"))
+(print "  length(\"hello\")=") (print (length "hello"))
+(print "  length(\"👋🏽\")=") (println (length "👋🏽"))
 
 # Iterating yields grapheme clusters
 (var graphemes @[])
@@ -348,7 +347,7 @@
 (put book "alice" updated-alice)
 (def {:tags new-tags} (get book "alice"))
 (assert (= (length new-tags) 3) "alice now has 3 tags")
-(display "  updated alice tags: ") (print new-tags)
+(print "  updated alice tags: ") (println new-tags)
 
 # del creates a new struct without a key
 (def point {:x 1 :y 2 :z 3})
@@ -427,9 +426,9 @@
 (assert (= (get csv 0) "name,email,tags") "csv: header")
 (assert (= (length csv) 4) "csv: header + 3 data lines")
 
-(display "  csv output:") (print "")
+(print "  csv output:") (println "")
 (each line in csv
-  (display "    ") (print line))
+  (print "    ") (println line))
 
 # Every data line should contain an @
 (each line in (rest (list ;csv))
@@ -438,7 +437,7 @@
 (assert (string/contains? (get csv 1) "Alice") "csv: alice in first line")
 
 
-(print "")
+(println "")
 
 # ========================================
 # 15. Sets — immutable and mutable
@@ -513,4 +512,4 @@
 (assert (contains? doubled 4) "map: 2*2=4")
 (assert (contains? doubled 6) "map: 3*2=6")
 
-(print "all collections passed.")
+(println "all collections passed.")

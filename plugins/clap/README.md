@@ -136,5 +136,5 @@ includes suggestions and help hints.
 (let (([ok? result] (protect (parse-fn spec argv))))
   (if ok?
     (process result)
-    (display (get result :message) "\n")))
+    (println (get result :message))))
 ```

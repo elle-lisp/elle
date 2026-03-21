@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Coroutines — generators, delegation, and cooperative multitasking
@@ -28,7 +27,7 @@
 (assert (= (coro/status co) :new) "initial status is :new")
 
 (def v (coro/resume co))
-(display "  first resume: ") (print v)
+(print "  first resume: ") (println v)
 (assert (= v 42) "first resume returns yielded value")
 (assert (= (coro/status co) :paused) "status after yield is :paused")
 (assert (not (coro/done? co)) "not done while suspended")
@@ -46,7 +45,7 @@
 (def co2 (coro/new (fn [] (yield 10) (yield 20) (yield 30))))
 
 (coro/resume co2)
-(display "  after 1st yield, value: ") (print (coro/value co2))
+(print "  after 1st yield, value: ") (println (coro/value co2))
 (assert (= (coro/value co2) 10) "value after first yield")
 
 (coro/resume co2)
@@ -70,9 +69,9 @@
 (assert (= (coro/resume co3) 6) "yield sum")
 (assert (= (coro/resume co3) 20) "yield product")
 (assert (= (coro/resume co3) 100) "yield conditional")
-(display "  (+ 1 2 3)=") (display 6)
-  (display "  (* 4 5)=") (display 20)
-  (display "  (if true 100 200)=") (print 100)
+(print "  (+ 1 2 3)=") (print 6)
+  (print "  (* 4 5)=") (print 20)
+  (print "  (if true 100 200)=") (println 100)
 
 
 # ========================================
@@ -93,17 +92,17 @@
       (assign b next)))))
 
 (def fib (make-fib))
-(display "  fib: ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(display (coro/resume fib)) (display " ")
-(print (coro/resume fib))
+(print "  fib: ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(print (coro/resume fib)) (print " ")
+(println (coro/resume fib))
 # 0 1 1 2 3 5 8 13 21 34
 
 # Verify the sequence
@@ -141,7 +140,7 @@
 (assert (= (coro/resume from-99) 99) "counter from 99")
 (assert (= (coro/resume from-10) 11) "counter from 10, step 2")
 (assert (= (coro/resume from-99) 100) "counter from 99, step 2")
-(display "  from-10: 10, 11  from-99: 99, 100") (print "")
+(print "  from-10: 10, 11  from-99: 99, 100") (println "")
 
 
 # ========================================
@@ -152,13 +151,13 @@
 (def odds (coro/new (fn [] (yield 1) (yield 3) (yield 5))))
 (def evens (coro/new (fn [] (yield 2) (yield 4) (yield 6))))
 
-(display "  interleaved: ")
-(display (coro/resume odds)) (display " ")
-(display (coro/resume evens)) (display " ")
-(display (coro/resume odds)) (display " ")
-(display (coro/resume evens)) (display " ")
-(display (coro/resume odds)) (display " ")
-(print (coro/resume evens))
+(print "  interleaved: ")
+(print (coro/resume odds)) (print " ")
+(print (coro/resume evens)) (print " ")
+(print (coro/resume odds)) (print " ")
+(print (coro/resume evens)) (print " ")
+(print (coro/resume odds)) (print " ")
+(println (coro/resume evens))
 # 1 2 3 4 5 6
 
 (assert (= (coro/status odds) :paused) "odds still paused")
@@ -179,7 +178,7 @@
 (assert (= (coro/resume outer) 100) "nested: inner first")
 (assert (= (coro/resume outer) 200) "nested: inner second")
 (assert (= (coro/resume outer) 300) "nested: outer continues")
-(display "  nested: 100 200 300") (print "")
+(print "  nested: 100 200 300") (println "")
 
 
 # ========================================
@@ -202,10 +201,10 @@
 (def sub (coro/new (fn [] (yield 10) (yield 20))))
 (def main (coro/new (fn [] (yield* sub) (yield 30))))
 
-(display "  delegated: ")
-(display (coro/resume main)) (display " ")
-(display (coro/resume main)) (display " ")
-(print (coro/resume main))
+(print "  delegated: ")
+(print (coro/resume main)) (print " ")
+(print (coro/resume main)) (print " ")
+(println (coro/resume main))
 # 10 20 30
 
 (assert (= (coro/status main) :paused) "main paused after final yield")
@@ -218,5 +217,5 @@
 (assert (= (coro/resume main2) :c) "own yield after delegation")
 
 
-(print "")
-(print "all coroutines passed.")
+(println "")
+(println "all coroutines passed.")

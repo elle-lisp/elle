@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Coroutine Tests
 ##
 ## Migrated from tests/property/coroutines.rs (behavioral property tests).

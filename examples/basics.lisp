@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Basics — Elle's type system and value representations
@@ -51,13 +50,13 @@
 (assert (not (nil? (list))) "empty list is NOT nil")     # () and nil differ!
 
 # (type x) returns a keyword describing x's type
-(display "  (type 42)   = ") (print (type 42))       # :integer
-(display "  (type 3.14) = ") (print (type 3.14))     # :float
-(display "  (type \"hi\") = ") (print (type "hi"))    # :string
-(display "  (type true) = ") (print (type true))     # :boolean
-(display "  (type nil)  = ") (print (type nil))      # :nil
-(display "  (type :foo) = ") (print (type :foo))     # :keyword
-(display "  (type 'foo) = ") (print (type 'foo))     # :symbol
+(print "  (type 42)   = ") (println (type 42))       # :integer
+(print "  (type 3.14) = ") (println (type 3.14))     # :float
+(print "  (type \"hi\") = ") (println (type "hi"))    # :string
+(print "  (type true) = ") (println (type true))     # :boolean
+(print "  (type nil)  = ") (println (type nil))      # :nil
+(print "  (type :foo) = ") (println (type :foo))     # :keyword
+(print "  (type 'foo) = ") (println (type 'foo))     # :symbol
 (assert (= (type 42) :integer) "type of int")
 (assert (= (type "hi") :string) "type of string")
 (assert (= (type nil) :nil) "type of nil")
@@ -83,12 +82,12 @@
 (assert (if :keyword true false) "keyword is truthy")
 (assert (if 'symbol true false) "symbol is truthy")
 
-(display "  falsy:  nil=") (display (if nil :T :F))
-  (display " false=") (print (if false :T :F))
-(display "  truthy: 0=") (display (if 0 :T :F))
-  (display " \"\"=") (display (if "" :T :F))
-  (display " ()=") (display (if (list) :T :F))
-  (display " []=") (print (if [] :T :F))
+(print "  falsy:  nil=") (print (if nil :T :F))
+  (print " false=") (println (if false :T :F))
+(print "  truthy: 0=") (print (if 0 :T :F))
+  (print " \"\"=") (print (if "" :T :F))
+  (print " ()=") (print (if (list) :T :F))
+  (print " []=") (println (if [] :T :F))
 
 
 # ========================================
@@ -104,14 +103,14 @@
 (assert (= (% 10 3) 1) "% is mod alias")     # % is shorthand for mod
 
 # + and * accept any number of arguments
-(display "  (+ 1 2 3 4) = ") (print (+ 1 2 3 4))   # 10
-(display "  (* 1 2 3 4) = ") (print (* 1 2 3 4))    # 24
+(print "  (+ 1 2 3 4) = ") (println (+ 1 2 3 4))   # 10
+(print "  (* 1 2 3 4) = ") (println (* 1 2 3 4))    # 24
 (assert (= (+ 1 2 3 4) 10) "+ is variadic")
 (assert (= (* 1 2 3 4) 24) "* is variadic")
 
 # Integer division truncates; float division doesn't
-(display "  (/ 7 2)   = ") (print (/ 7 2))          # 3 (truncated)
-(display "  (/ 7.0 2) = ") (print (/ 7.0 2))        # 3.5
+(print "  (/ 7 2)   = ") (println (/ 7 2))          # 3 (truncated)
+(print "  (/ 7.0 2) = ") (println (/ 7.0 2))        # 3.5
 (assert (= (/ 7 2) 3) "int / int = int (truncates)")
 (assert (= (/ 7.0 2) 3.5) "float / int = float")
 
@@ -129,9 +128,9 @@
 # ========================================
 
 # math/ prefix for transcendental functions
-(display "  (math/sqrt 16) = ") (print (math/sqrt 16))    # 4.0
-(display "  (math/pow 2 10) = ") (print (math/pow 2 10))  # 1024
-(display "  (math/pi) = ") (print (math/pi))               # 3.14159...
+(print "  (math/sqrt 16) = ") (println (math/sqrt 16))    # 4.0
+(print "  (math/pow 2 10) = ") (println (math/pow 2 10))  # 1024
+(print "  (math/pi) = ") (println (math/pi))               # 3.14159...
 (assert (= (math/sqrt 16) 4.0) "sqrt returns float")   # always returns float
 (assert (= (math/floor 3.7) 3) "floor returns integer") # round down → int
 (assert (= (math/ceil 3.2) 4) "ceil returns integer")   # round up → int
@@ -159,9 +158,9 @@
 (assert (not (not 0)) "not 0 (0 is truthy)")  # 0 is truthy, so (not 0) = false
 
 # and/or short-circuit and return the deciding value (not always a boolean)
-(display "  (and 1 2 3)       = ") (print (and 1 2 3))       # 3
-(display "  (and 1 false 3)   = ") (print (and 1 false 3))   # false
-(display "  (or nil false 42) = ") (print (or nil false 42))  # 42
+(print "  (and 1 2 3)       = ") (println (and 1 2 3))       # 3
+(print "  (and 1 false 3)   = ") (println (and 1 false 3))   # false
+(print "  (or nil false 42) = ") (println (or nil false 42))  # 42
 (assert (= (and 1 2 3) 3) "and: returns last if all truthy")
 (assert (= (and 1 false 3) false) "and: returns first falsy")  # stops at false
 (assert (= (or nil false 42) 42) "or: returns first truthy")   # skips nil, false
@@ -181,7 +180,7 @@
 (assert (= (bit/shr 16 2) 4) "bit/shr")    # 16 >> 2 = 4
 
 # Build a byte from nibbles: 0xA5 = (10 << 4) | 5 = 165
-(display "  0xA5 = (10 << 4) | 5 = ") (print (bit/or (bit/shl 10 4) 5))
+(print "  0xA5 = (10 << 4) | 5 = ") (println (bit/or (bit/shl 10 4) 5))
 (assert (= (bit/or (bit/shl 10 4) 5) 165) "nibble assembly")
 
 
@@ -190,8 +189,8 @@
 # ========================================
 
 # number->string and back
-(display "  42 → \"") (display (number->string 42)) (print "\"")
-(display "  \"42\" → ") (print (integer "42"))
+(print "  42 → \"") (print (number->string 42)) (println "\"")
+(print "  \"42\" → ") (println (integer "42"))
 (assert (= (number->string 42) "42") "number->string int")
 (assert (= (integer "42") 42) "integer from string")          # parse string → int
 (assert (= (float "3.14") 3.14) "float from string")          # parse string → float
@@ -217,10 +216,10 @@
 #   {...}  struct (immutable)    @{...}  @struct (mutable)
 #   "..."  string (immutable)    @"..."  @string (mutable)
 
-(display "  [1 2 3]  → ") (print (type [1 2 3]))     # :array
-(display "  @[1 2 3] → ") (print (type @[1 2 3]))    # :@array
-(display "  {:a 1}   → ") (print (type {:a 1}))      # :struct
-(display "  @{:a 1}  → ") (print (type @{:a 1}))     # :@struct
+(print "  [1 2 3]  → ") (println (type [1 2 3]))     # :array
+(print "  @[1 2 3] → ") (println (type @[1 2 3]))    # :@array
+(print "  {:a 1}   → ") (println (type {:a 1}))      # :struct
+(print "  @{:a 1}  → ") (println (type @{:a 1}))     # :@struct
 (assert (= (type [1 2 3]) :array) "[] is array")       # immutable indexed
 (assert (= (type @[1 2 3]) :@array) "@[] is @array")      # mutable indexed
 (assert (= (type {:a 1}) :struct) "{} is struct")       # immutable keyed
@@ -239,8 +238,8 @@
 
 # bytes (immutable) and @bytes (mutable) — raw binary data
 (def b (bytes 72 101 108 108 111))   # "Hello" in ASCII
-(display "  (bytes 72 101 108 108 111) → \"") (display (string b)) (print "\"")
-(display "  hex: ") (print (bytes->hex b))
+(print "  (bytes 72 101 108 108 111) → \"") (print (string b)) (println "\"")
+(print "  hex: ") (println (bytes->hex b))
 (assert (= (length b) 5) "bytes length")
 (assert (= (get b 0) 72) "get returns integer byte value")  # not a char
 (assert (= (string b) "Hello") "bytes->string (UTF-8)")
@@ -292,7 +291,7 @@
 (inc!)
 (inc!)
 (inc!)
-(display "  counter after 3 increments: ") (print (get-count))
+(print "  counter after 3 increments: ") (println (get-count))
 (assert (= (get-count) 3) "shared counter via box")
 
 
@@ -314,14 +313,14 @@
 
 # Destructuring works on any compound type
 (def [a b c] [10 20 30])            # unpack an array into bindings
-(display "  [10 20 30] → a=") (display a) (display " b=") (display b) (display " c=") (print c)
+(print "  [10 20 30] → a=") (print a) (print " b=") (print b) (print " c=") (println c)
 (assert (= a 10) "array destructure: first")
 (assert (= c 30) "array destructure: third")
 
 (def {:x px :y py} {:x 5 :y 10})    # unpack a struct by key
-(display "  {:x 5 :y 10} → px=") (display px) (display " py=") (print py)
+(print "  {:x 5 :y 10} → px=") (print px) (print " py=") (println py)
 (assert (= px 5) "struct destructure: x")
 (assert (= py 10) "struct destructure: y")
 
-(print "")
-(print "all basics passed.")
+(println "")
+(println "all basics passed.")

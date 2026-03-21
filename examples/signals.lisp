@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Signals — user-defined signals and signal restrictions
@@ -53,8 +52,8 @@
 
 # if the fiber paused, it caught an :abort signal; fiber/value holds the payload
 (def found (fiber/value search-fiber))
-(display "  first even in [1 3 5 4 7 9]: ") # display prompt
-(print found)                                # print the found value
+(print "  first even in [1 3 5 4 7 9]: ") # display prompt
+(println found)                                # print the found value
 (assert (= found 4) "abort: found first even, stopped early")
 
 # ========================================
@@ -98,8 +97,8 @@
 # use -> to drill into the first and last progress entries
 (assert (= (-> progress-log (get 0) (get :result)) 1)  "progress: 1^2 = 1")
 (assert (= (-> progress-log (get 4) (get :result)) 25) "progress: 5^2 = 25")
-(display "  progress log: ") # display prompt
-(print progress-log)         # print the log
+(print "  progress log: ") # display prompt
+(println progress-log)         # print the log
 
 # ========================================
 # 4. Logging — caller decides what to do with log entries
@@ -141,8 +140,8 @@
 (assert (= (length log-entries) 3) "log: 3 entries collected")
 # the fiber's final return value is accessible via fiber/value after completion
 (assert (= (fiber/value lf) 20) "log: result is 20")
-(display "  log entries: ") # display prompt
-(print log-entries)         # print the entries
+(print "  log entries: ") # display prompt
+(println log-entries)         # print the entries
 
 # caller 2: ignore :log entirely — run in a fiber that catches :log but
 # discards the payloads, driving to completion for the return value
@@ -158,8 +157,8 @@
 
 (def direct-result (fiber/value lf2))
 (assert (= direct-result 20) "log: same result when logs ignored")
-(display "  direct result (logs ignored): ") # display prompt
-(print direct-result)                        # print the result
+(print "  direct result (logs ignored): ") # display prompt
+(println direct-result)                        # print the result
 
 # ========================================
 # 5. silence — protecting iteration from signaling callbacks
@@ -181,8 +180,8 @@
 
 (def squares (safe-map square [1 2 3 4 5]))  # works fine
 (assert (= squares (list 1 4 9 16 25)) "safe-map: silent callback works")
-(display "  squares: ") # display prompt
-(print squares)         # print the squares
+(print "  squares: ") # display prompt
+(println squares)         # print the squares
 
 # noisy-double signals :log mid-iteration — violates the silence bound
 (defn noisy-double [x]
@@ -193,15 +192,15 @@
 
 # protect catches the :signal-violation error as data
 (def [ok? err] (protect (safe-map noisy-double [1 2 3])))
-(display "  signal violation: ") # display prompt
-(print err)                       # print the error
+(print "  signal violation: ") # display prompt
+(println err)                       # print the error
 # err is {:error :signal-violation :message "..."} — inspect with ->
 (assert (not ok?) "safe-map: signaling callback rejected")
 (assert (= (-> err (get :error)) :signal-violation) "safe-map: signal-violation error")
 
 # match on the error kind to handle different violations distinctly
 (match err:error  # syntax-sugar for (get err :error)
-  (:signal-violation (display "  safe-map: callback tried to signal mid-iteration\n"))
+  (:signal-violation (print "  safe-map: callback tried to signal mid-iteration\n"))
   (_ (error err)))
 
 # squelch forbids specific signals (blacklist), allowing everything else.
@@ -224,8 +223,8 @@
 # safe-iterate accepts double because double has no :yield signal
 (def doubled-results (safe-iterate double [1 2 3]))
 (assert (= doubled-results (list 2 4 6)) "squelch: silent callback passes")
-(display "  doubled results: ")  # display prompt
-(print doubled-results)          # print the results
+(print "  doubled results: ")  # display prompt
+(println doubled-results)          # print the results
 
 # yielding-callback yields — violates the squelch bound
 (defn yielding-callback [x]
@@ -235,14 +234,14 @@
 
 # safe-iterate rejects yielding-callback because :yield is squelched
 (def [ok4? err4] (protect (safe-iterate yielding-callback [1 2 3])))
-(display "  squelch violation: ")  # display prompt
-(print err4)                         # print the error
+(print "  squelch violation: ")  # display prompt
+(println err4)                         # print the error
 (assert (not ok4?) "squelch: yielding callback rejected")
 (assert (= (-> err4 (get :error)) :signal-violation) "squelch: signal-violation error")
 
 # match on the error kind to handle the violation
 (match err4:error
-  (:signal-violation (display "  squelch: callback tried to yield — rejected\n"))
+  (:signal-violation (print "  squelch: callback tried to yield — rejected\n"))
   (_ (error err4)))
 
 # ========================================
@@ -265,8 +264,8 @@
 
 (def plugin-result (run-pure good-plugin 21))
 (assert (= plugin-result 42) "plugin: silent plugin works")
-(display "  good plugin result: ") # display prompt
-(print plugin-result)              # print the result
+(print "  good plugin result: ") # display prompt
+(println plugin-result)              # print the result
 
 # bad-plugin yields — violates the silent restriction
 (defn bad-plugin [data]
@@ -276,13 +275,13 @@
 
 # protect catches the :signal-violation error as data
 (def [ok? err] (protect (run-pure bad-plugin 21)))
-(display "  sandbox violation: ") # display prompt
-(print err)                        # print the error
+(print "  sandbox violation: ") # display prompt
+(println err)                        # print the error
 (assert (not ok?) "plugin: yielding plugin caught")
 (assert (= (-> err (get :error)) :signal-violation) "plugin: signal-violation error")
 
 (match err:error
-  (:signal-violation (display "  plugin: callback tried to yield — rejected by silence\n"))
+  (:signal-violation (print "  plugin: callback tried to yield — rejected by silence\n"))
   (_ (error err)))
 
 # ========================================
@@ -311,8 +310,8 @@
 
 # the fiber paused on the composed signal — inspect the signal payload
 (def sig-val (fiber/value monitor))
-(display "  composed signal payload: ")  # display prompt
-(print sig-val)                           # print the signal payload
+(print "  composed signal payload: ")  # display prompt
+(println sig-val)                           # print the signal payload
 
 # verify the payload contains both the operation and user fields
 (assert (= (-> sig-val (get :op)) :write) "composition: op field present")
@@ -341,12 +340,12 @@
 
 # the audit monitor also paused on the same composed signal
 (def audit-sig-val (fiber/value audit-monitor))
-(display "  audit monitor signal: ")  # display prompt
-(print audit-sig-val)                  # print the audit signal
+(print "  audit monitor signal: ")  # display prompt
+(println audit-sig-val)                  # print the audit signal
 
 # verify the audit monitor received the same payload
 (assert (= (-> audit-sig-val (get :op)) :write) "audit: op field present")
 (assert (= (-> audit-sig-val (get :user)) "alice") "audit: user field present")
 
-(print "")                                    # blank line
-(print "all signals tests passed.")           # final message
+(println "")                                    # blank line
+(println "all signals tests passed.")           # final message

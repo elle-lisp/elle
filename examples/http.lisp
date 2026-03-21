@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # HTTP — server and client in a single event loop
@@ -71,7 +70,7 @@
 (let [[listener (tcp/listen "127.0.0.1" 0)]]
   (let* [[addr (port/path listener)]
          [port-num (integer (get (string/split addr ":") 1))]]
-    (display "  server listening on port ") (print port-num)
+    (print "  server listening on port ") (println port-num)
     (let [[results @[]]]
       (ev/run
         # Server fiber
@@ -85,12 +84,12 @@
           (let [[session (http:connect
                            (string/format "http://127.0.0.1:{}/" port-num))]]
             (let [[r1 (http:send session "GET" "/hello")]]
-              (display "  keep-alive GET /hello: ") (print r1:status)
+              (print "  keep-alive GET /hello: ") (println r1:status)
               (push results r1))
 
             (let [[r2 (http:send session "POST" "/echo"
                         :body "ping" :headers {:content-type "text/plain"})]]
-              (display "  keep-alive POST /echo: ") (print r2:status)
+              (print "  keep-alive POST /echo: ") (println r2:status)
               (push results r2))
 
             (http:close session))
@@ -99,7 +98,7 @@
 
           (let [[r3 (http:get
                        (string/format "http://127.0.0.1:{}/count" port-num))]]
-            (display "  one-shot GET /count: ") (print r3:body)
+            (print "  one-shot GET /count: ") (println r3:body)
             (push results r3))
 
           # ── Shut down the event loop ─────────────────────────
@@ -127,5 +126,5 @@
 
       (assert (= request-count 3) "server handled exactly 3 requests"))))
 
-(print "")
-(print "all http passed.")
+(println "")
+(println "all http passed.")

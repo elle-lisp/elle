@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## Glob plugin integration tests
 ## Tests the glob plugin (.so loaded via import-file)
@@ -11,7 +10,7 @@
 ## Try to load the glob plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_glob.so")))
 (when (not ok?)
-  (display "SKIP: glob plugin not built\n")
+  (print "SKIP: glob plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

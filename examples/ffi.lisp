@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # FFI — calling C from Elle
@@ -23,16 +22,16 @@
 (ffi/defbind sqrt libc "sqrt" :double @[:double])
 (ffi/defbind strlen libc "strlen" :size @[:string])
 
-(display "  abs(-42) = ")
-(print (abs -42))
+(print "  abs(-42) = ")
+(println (abs -42))
 (assert (= (abs -42) 42) "abs(-42) should be 42")
 
-(display "  sqrt(2)  = ")
-(print (sqrt 2.0))
+(print "  sqrt(2)  = ")
+(println (sqrt 2.0))
 (assert (= (sqrt 2.0) 1.4142135623730951) "sqrt(2.0)")
 
-(display "  strlen   = ")
-(print (strlen "hello world"))
+(print "  strlen   = ")
+(println (strlen "hello world"))
 (assert (= (strlen "hello world") 11) "strlen of 'hello world'")
 
 
@@ -40,8 +39,8 @@
 (def buf (ffi/malloc 64))
 (ffi/write buf :double 3.14159)
 (def read-back (ffi/read buf :double))
-(display "  read back: ")
-(print read-back)
+(print "  read back: ")
+(println read-back)
 (assert (= read-back 3.14159) "ffi/write then ffi/read :double")
 (ffi/free buf)
 
@@ -51,8 +50,8 @@
 (def p (ffi/malloc (ffi/size point-type)))
 (ffi/write p point-type @[1.5 2.5])
 (def point-val (ffi/read p point-type))
-(display "  struct:    ")
-(print point-val)
+(print "  struct:    ")
+(println point-val)
 (assert (= point-val @[1.5 2.5]) "ffi/struct read-back")
 (ffi/free p)
 
@@ -63,8 +62,8 @@
 (def out (ffi/malloc 128))
 (ffi/call snprintf-ptr snprintf-sig out 128 "the answer is %d" 42)
 (def formatted (ffi/string out))
-(display "  snprintf:  ")
-(print formatted)
+(print "  snprintf:  ")
+(println formatted)
 (assert (= formatted "the answer is 42") "snprintf formatting")
 (ffi/free out)
 
@@ -82,12 +81,12 @@
 
 (ffi/call qsort-ptr qsort-sig arr 5 4 cmp)
 (def sorted (ffi/read arr (ffi/array :i32 5)))
-(display "  sorted:    ")
-(print sorted)
+(print "  sorted:    ")
+(println sorted)
 (assert (= sorted @[1 2 3 4 5]) "qsort should sort ascending")
 
 (ffi/callback-free cmp)
 (ffi/free arr)
 
-(print "")
-(print "all ffi passed.")
+(println "")
+(println "all ffi passed.")

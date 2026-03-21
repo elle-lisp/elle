@@ -30,9 +30,10 @@ Follow these when writing or editing examples:
 - `each x in coll` for iteration. `->` / `->>` for pipelines.
 - `try`/`catch`/`protect`/`defer` for error handling.
 - `&opt`/`&keys`/`&named` where appropriate.
-- No `(print "=== Section ===")` headers. Use `(display ...)` / `(print ...)`
-  to show computed values — the program should visibly *do things* when run.
-  2-5 display lines per section showing interesting results.
+- No `(println "=== Section ===")` headers. Use `(print ...)` (no newline) /
+  `(println ...)` (with newline) to show computed values — the program should
+  visibly *do things* when run. 2-5 output lines per section showing
+  interesting results. For stderr, use `(eprint ...)` / `(eprintln ...)`.
 - Each file starts with a header comment listing what it demonstrates.
 - Each file should be a cohesive "application" or themed demonstration,
   not a bag of unrelated unit tests.

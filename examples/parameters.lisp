@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Parameters — dynamic binding with lexical scope
@@ -26,13 +25,13 @@
 # Calling the parameter (with no args) reads its current value.
 (def output-port (parameter "stdout"))
 (assert (= (output-port) "stdout") "parameter: read default")
-(display "  (output-port) = ") (print (output-port))
+(print "  (output-port) = ") (println (output-port))
 
 # parameter? tests if a value is a parameter
 (assert (parameter? output-port) "parameter?: true for parameter")
 (assert (not (parameter? "stdout")) "parameter?: false for string")
 (assert (not (parameter? 42)) "parameter?: false for number")
-(display "  (parameter? output-port) = ") (print (parameter? output-port))
+(print "  (parameter? output-port) = ") (println (parameter? output-port))
 
 # Parameters can hold any value
 (def current-user (parameter nil))
@@ -55,12 +54,12 @@
 # Inside parameterize, p reads the new value
 (parameterize ((p 20))
   (assert (= (p) 20) "parameterize: override active"))
-(display "  Inside parameterize: (p) = 20")
-(newline)
+(print "  Inside parameterize: (p) = 20")
+(println)
 
 # Outside parameterize, p reverts to the default
 (assert (= (p) 10) "parameterize: reverts after")
-(display "  After parameterize: (p) = ") (print (p))
+(print "  After parameterize: (p) = ") (println (p))
 
 
 # ========================================
@@ -83,8 +82,8 @@
 
 # After all parameterize, default is visible
 (assert (= (level) 1) "nested: default after all")
-(display "  Nested parameterize: level reverts correctly")
-(newline)
+(print "  Nested parameterize: level reverts correctly")
+(println)
 
 
 # ========================================
@@ -102,8 +101,8 @@
 
 (assert (= (x) 1) "multi: x reverted")
 (assert (= (y) 10) "multi: y reverted")
-(display "  Multiple parameters: both override and revert correctly")
-(newline)
+(print "  Multiple parameters: both override and revert correctly")
+(println)
 
 
 # ========================================
@@ -117,7 +116,7 @@
 
 (def result (parameterize ((config "test"))
   (def msg (string/join (list "Config: " (config)) ""))
-  (print msg)
+  (println msg)
   (+ 1 2)))
 
 (assert (= result 3) "parameterize: body returns last expr")
@@ -148,8 +147,8 @@
 # Reverted to default
 (assert (= (write-line "done") "[stdout] done") "io-port: reverted output")
 
-(display "  I/O port simulation: ")
-(print (write-line "success"))
+(print "  I/O port simulation: ")
+(println (write-line "success"))
 
 
 # ========================================
@@ -169,8 +168,8 @@
     (let ((child-value (fiber/value f)))
       (assert (= child-value 200) "fiber: inherits parent parameterize"))))
 
-(display "  Fiber inheritance: child sees parent's parameter override")
-(newline)
+(print "  Fiber inheritance: child sees parent's parameter override")
+(println)
 
 # Outside parameterize, child would see the default
 (let ((f (fiber/new (fn [] (shared-param)) 1)))
@@ -178,5 +177,5 @@
   (let ((child-value (fiber/value f)))
     (assert (= child-value 100) "fiber: inherits default outside parameterize")))
 
-(display "  Fiber inheritance: child sees default outside parameterize")
-(newline)
+(print "  Fiber inheritance: child sees default outside parameterize")
+(println)

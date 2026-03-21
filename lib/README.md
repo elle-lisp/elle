@@ -18,8 +18,8 @@ Pure Elle HTTP/1.1 client and server.
 (def http ((import-file "./lib/http.lisp")))
 
 (def resp (ev/spawn (fn () (http:get "http://example.com/"))))
-(print (get resp :status))  # 200
-(print (get resp :body))
+(println (get resp :status))  # 200
+(println (get resp :body))
 ```
 
 ## API reference
@@ -37,8 +37,8 @@ Make a GET request. Returns `{:status :headers :body}`.
 **Example:**
 ```lisp
 (let ((resp (http:get "http://example.com/")))
-  (print (get resp :status))
-  (print (get resp :body)))
+  (println (get resp :status))
+  (println (get resp :body)))
 ```
 
 ### `(http:post url body &keys {:headers})`
@@ -55,7 +55,7 @@ Make a POST request. `body` is a string. Returns `{:status :headers :body}`.
 **Example:**
 ```lisp
 (let ((resp (http:post "http://example.com/api" "{\"key\": \"value\"}")))
-  (print (get resp :status)))
+  (println (get resp :status)))
 ```
 
 ### `(http:request method url &keys {:body :headers})`
@@ -121,10 +121,10 @@ Parse a URL string into `{:scheme :host :port :path :query}`.
 **Example:**
 ```lisp
 (let ((u (http:parse-url "http://example.com:8080/api?q=test")))
-  (print (get u :host))   # "example.com"
-  (print (get u :port))   # 8080
-  (print (get u :path))   # "/api"
-  (print (get u :query))) # "q=test"
+  (println (get u :host))   # "example.com"
+  (println (get u :port))   # 8080
+  (println (get u :path))   # "/api"
+  (println (get u :query))) # "q=test"
 ```
 
 ## Limitations
@@ -151,8 +151,8 @@ All HTTP errors signal with `:http-error` kind:
 (try
   (http:get "http://invalid-host/")
   (catch [err]
-    (print (get err :error))    # :http-error
-    (print (get err :message))))
+    (println (get err :error))    # :http-error
+    (println (get err :message))))
 ```
 
 ## Concurrency
@@ -166,5 +166,5 @@ connection runs in its own fiber. The client uses `tcp/connect` which yields
 (ev/run
   (fn []
     (let ((resp (http:get "http://example.com/")))
-      (print (get resp :status)))))
+      (println (get resp :status)))))
 ```

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Files, JSON, and modules
@@ -39,7 +38,7 @@
 
 (spit (tmp "hello.txt") "Hello, Elle!")
 (def content (slurp (tmp "hello.txt")))
-(display "  slurp: ") (print content)
+(print "  slurp: ") (println content)
 (assert (= content "Hello, Elle!") "spit then slurp round-trips")
 
 (append-file (tmp "hello.txt") "\nSecond line.")
@@ -48,7 +47,7 @@
 
 (spit (tmp "lines.txt") "alpha\nbeta\ngamma\n")
 (def lines (read-lines (tmp "lines.txt")))
-(display "  lines: ") (print lines)
+(print "  lines: ") (println lines)
 (assert (= (length lines) 3) "read-lines splits on newlines")
 
 
@@ -62,7 +61,7 @@
 (assert (directory? tmp-dir) "directory? on directory")
 
 (def size (file-size (tmp "hello.txt")))
-(display "  file-size: ") (print size)
+(print "  file-size: ") (println size)
 (assert (= size 25) "file-size returns byte count")
 
 
@@ -135,7 +134,7 @@
 (spit (path/join sub "one.txt") "1")
 (spit (path/join sub "two.txt") "2")
 (def entries (list-directory sub))
-(display "  list-directory: ") (print entries)
+(print "  list-directory: ") (println entries)
 (assert (= (length entries) 2) "list-directory returns all entries")
 
 
@@ -149,11 +148,11 @@
 (assert (= (path/parent p) "/home/user/docs") "path/parent")
 
 (def joined (path/join "a" "b" "c.txt"))
-(display "  path/join: ") (print joined)
+(print "  path/join: ") (println joined)
 (assert (= joined "a/b/c.txt") "path/join composes segments")
 
 (def cwd (path/cwd))
-(display "  path/cwd: ") (print cwd)
+(print "  path/cwd: ") (println cwd)
 (assert (> (length cwd) 0) "path/cwd returns non-empty string")
 
 
@@ -164,36 +163,36 @@
 (let ((p (port/open "/tmp/elle-example-seek-tell" :read-write)))
   # Write 10 bytes
   (stream/write p "0123456789")
-  (display "  wrote 10 bytes\n")
+  (print "  wrote 10 bytes\n")
 
   # Seek to start and read
   (port/seek p 0 :from :start)
   (let ((first (stream/read p 1)))
-    (display "  seek to start, read: ") (display first) (display "\n")
+    (print "  seek to start, read: ") (print first) (print "\n")
     (assert (= first "0") "byte at position 0 is '0'"))
 
   # Seek to position 5
   (port/seek p 5 :from :start)
   (let ((mid (stream/read p 1)))
-    (display "  seek to 5, read: ") (display mid) (display "\n")
+    (print "  seek to 5, read: ") (print mid) (print "\n")
     (assert (= mid "5") "byte at position 5 is '5'"))
 
   # Tell at current position
   (port/seek p 0 :from :start)
   (let ((pos (port/tell p)))
-    (display "  tell at start: ") (display pos) (display "\n")
+    (print "  tell at start: ") (print pos) (print "\n")
     (assert (= pos 0) "tell at start is 0"))
 
   # Seek relative to current
   (port/seek p 3 :from :current)
   (let ((pos2 (port/tell p)))
-    (display "  tell after +3 relative seek: ") (display pos2) (display "\n")
+    (print "  tell after +3 relative seek: ") (print pos2) (print "\n")
     (assert (= pos2 3) "relative seek +3 gives position 3"))
 
   # Seek from end
   (port/seek p -2 :from :end)
   (let ((last (stream/read p 1)))
-    (display "  seek to -2 from end, read: ") (display last) (display "\n")
+    (print "  seek to -2 from end, read: ") (print last) (print "\n")
     (assert (= last "8") "byte at -2 from end of 10-byte file is '8'"))
 
   (port/close p)
@@ -229,12 +228,12 @@
 # ========================================
 
 (def arr (json-parse "[1, \"two\", true, null]"))
-(display "  parsed array: ") (print arr)
+(print "  parsed array: ") (println arr)
 (assert (= (length arr) 4) "json-parse array length")
 (assert (= (get arr 1) "two") "json-parse array element")
 
 (def obj (json-parse "{\"name\": \"Alice\", \"age\": 30}"))
-(display "  parsed object: ") (print obj)
+(print "  parsed object: ") (println obj)
 (assert (= (get obj "name") "Alice") "json-parse object field")
 (assert (= (get obj "age") 30) "json-parse object field int")
 
@@ -256,11 +255,11 @@
 (put product "price" 24.99)
 (put product "sale" true)
 (def updated-json (json-serialize product))
-(display "  round-trip: ") (print updated-json)
+(print "  round-trip: ") (println updated-json)
 
 # Pretty-print for readability.
 (def pretty (json-serialize-pretty product))
-(display "  pretty:\n") (display pretty) (print "")
+(print "  pretty:\n") (print pretty) (println "")
 
 # Verify the modified value survived the round-trip.
 (def reparsed (json-parse updated-json))
@@ -280,7 +279,7 @@
 
 (spit (tmp "config.json") (json-serialize-pretty config))
 (def loaded (json-parse (slurp (tmp "config.json"))))
-(display "  config from file: ") (print loaded)
+(print "  config from file: ") (println loaded)
 (assert (= (get loaded "app") "elle-test") "JSON config round-trips through file")
 (assert (= (get loaded "version") 1) "JSON config preserves int")
 
@@ -305,5 +304,5 @@
 # Verify cleanup.
 (assert (not (file-exists? tmp-dir)) "temp directory removed")
 
-(print "")
-(print "all io passed.")
+(println "")
+(println "all io passed.")

@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## Crypto plugin integration tests
 ## Tests the crypto plugin (.so loaded via import-file)
@@ -6,7 +5,7 @@
 ## Try to load the crypto plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_crypto.so")))
 (when (not ok?)
-  (display "SKIP: crypto plugin not built\n")
+  (print "SKIP: crypto plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct
