@@ -131,10 +131,18 @@ fn jit_handle_primitive_signal(vm: &mut crate::vm::VM, bits: SignalBits, value: 
 
 /// Check if a terminal signal is pending on the VM (error or halt).
 /// Returns TRUE if one is set, FALSE otherwise.
+///
+/// Uses bitwise containment (`contains`) rather than exact equality,
+/// because signals can be compound (e.g. `SIG_ERROR | SIG_IO`).
 #[no_mangle]
 pub extern "C" fn elle_jit_has_exception(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };
-    JitValue::bool_val(matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))))
+    JitValue::bool_val(
+        vm.fiber
+            .signal
+            .as_ref()
+            .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT)),
+    )
 }
 
 // =============================================================================
@@ -236,13 +244,24 @@ pub extern "C" fn elle_jit_call(
 
             vm.fiber.call_depth -= 1;
 
-            // Check for exception (error or halt)
-            if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
+            // Check for exception (error or halt) — use contains for compound signals
+            if vm
+                .fiber
+                .signal
+                .as_ref()
+                .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+            {
                 return JitValue::nil();
             }
 
-            // Check for yield from callee
-            if matches!(vm.fiber.signal, Some((SIG_YIELD, _))) {
+            // Check for yield from callee — use contains for compound signals
+            // (e.g. SIG_YIELD | SIG_IO from I/O primitives)
+            if vm
+                .fiber
+                .signal
+                .as_ref()
+                .is_some_and(|(b, _)| b.contains(SIG_YIELD))
+            {
                 return YIELD_SENTINEL;
             }
 
@@ -576,13 +595,23 @@ pub extern "C" fn elle_jit_tail_call(
                 )
             };
 
-            // Check for exception
-            if matches!(vm.fiber.signal, Some((SIG_ERROR | SIG_HALT, _))) {
+            // Check for exception — use contains for compound signals
+            if vm
+                .fiber
+                .signal
+                .as_ref()
+                .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
+            {
                 return JitValue::nil();
             }
 
-            // Check for yield from callee
-            if matches!(vm.fiber.signal, Some((SIG_YIELD, _))) {
+            // Check for yield from callee — use contains for compound signals
+            if vm
+                .fiber
+                .signal
+                .as_ref()
+                .is_some_and(|(b, _)| b.contains(SIG_YIELD))
+            {
                 return YIELD_SENTINEL;
             }
 
