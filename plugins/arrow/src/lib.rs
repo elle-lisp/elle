@@ -179,10 +179,7 @@ fn batch_to_elle(batch: &RecordBatch) -> Value {
     for row_idx in 0..num_rows {
         let mut fields = BTreeMap::new();
         for (col_vals, field) in columns.iter().zip(schema.fields().iter()) {
-            fields.insert(
-                TableKey::Keyword(field.name().clone()),
-                col_vals[row_idx],
-            );
+            fields.insert(TableKey::Keyword(field.name().clone()), col_vals[row_idx]);
         }
         rows.push(Value::struct_from(fields));
     }
