@@ -6,7 +6,7 @@ use crate::hir::tailcall::mark_tail_calls;
 use crate::hir::{Analyzer, BindingArena, FileForm};
 use crate::lir::{Emitter, Lowerer};
 use crate::primitives::intern_primitive_names;
-use crate::reader::{read_syntax, read_syntax_all};
+use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 
@@ -109,7 +109,7 @@ pub fn compile_file(
 ) -> Result<CompileResult, String> {
     intern_primitive_names(symbols);
 
-    let mut syntaxes = read_syntax_all(source, source_name)?;
+    let mut syntaxes = read_syntax_all_for(source, source_name)?;
 
     // Phase 0: Epoch migration — rewrite old-epoch syntax before expansion
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
