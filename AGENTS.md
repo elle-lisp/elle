@@ -102,7 +102,9 @@ bytecode. Error messages include file:line:col information.
     `elle-git` (Git repository operations), `elle-msgpack` (MessagePack binary serialization),
     `elle-protobuf` (Protocol Buffers encode/decode/introspect),
     `elle-tls` (TLS client and server via rustls),
-    `elle-tree-sitter` (multi-language parsing and structural queries)
+    `elle-tree-sitter` (multi-language parsing and structural queries),
+    `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
+    `elle-polars` (Polars DataFrames with eager and lazy APIs)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))

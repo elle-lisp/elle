@@ -6,6 +6,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 
 | Plugin | Purpose | Key Primitives |
 |--------|---------|-----------------|
+| [`arrow/`](arrow/) | Apache Arrow columnar data | `arrow/batch`, `arrow/schema`, `arrow/column`, `arrow/to-rows`, `arrow/display`, `arrow/slice`, `arrow/write-ipc`, `arrow/read-ipc`, `arrow/write-parquet`, `arrow/read-parquet` |
 | [`base64/`](base64/) | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
 | [`clap/`](clap/) | Declarative CLI argument parsing | `clap/parse` |
 | [`compress/`](compress/) | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
@@ -16,6 +17,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 | [`jiff/`](jiff/) | Date, time, and duration arithmetic | `date/year`, `date/month`, `date/day`, `date/weekday` |
 | [`msgpack/`](msgpack/) | MessagePack serialization | `msgpack/encode`, `msgpack/decode`, `msgpack/valid?`, `msgpack/encode-tagged`, `msgpack/decode-tagged` |
 | [`oxigraph/`](oxigraph/) | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
+| [`polars/`](polars/) | Polars DataFrames | `polars/df`, `polars/read-csv`, `polars/write-csv`, `polars/select`, `polars/sort`, `polars/lazy`, `polars/lfilter`, `polars/lgroupby`, `polars/collect` |
 | [`protobuf/`](protobuf/) | Protocol Buffers serialization | `protobuf/schema`, `protobuf/encode`, `protobuf/decode`, `protobuf/messages`, `protobuf/fields` |
 | [`random/`](random/) | Random number generation | `random/int`, `random/float`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/sample` |
 | [`regex/`](regex/) | Regular expressions | `regex/compile`, `regex/match?`, `regex/find`, `regex/replace`, `regex/split`, `regex/captures` |

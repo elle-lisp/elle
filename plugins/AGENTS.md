@@ -23,6 +23,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 
 | Plugin | Purpose | Primitives |
 |--------|---------|-----------|
+| `arrow/` | Apache Arrow columnar data | `arrow/batch`, `arrow/schema`, `arrow/column`, `arrow/to-rows`, `arrow/display`, `arrow/slice`, `arrow/write-ipc`, `arrow/read-ipc`, `arrow/write-parquet`, `arrow/read-parquet` |
 | `base64/` | Base64 encoding/decoding | `base64/encode`, `base64/decode`, `base64/encode-url`, `base64/decode-url` |
 | `clap/` | CLI argument parsing | `clap/parse` |
 | `compress/` | Gzip, deflate, and zstd compression | `compress/gzip`, `compress/gunzip`, `compress/deflate`, `compress/inflate`, `compress/zstd`, `compress/unzstd` |
@@ -40,6 +41,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 | `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
+| `polars/` | Polars DataFrames (eager + lazy) | `polars/df`, `polars/read-csv`, `polars/write-csv`, `polars/select`, `polars/sort`, `polars/lazy`, `polars/lfilter`, `polars/lgroupby`, `polars/collect` |
 | `protobuf/` | Protocol Buffers encode/decode/introspect | `protobuf/schema`, `protobuf/schema-bytes`, `protobuf/encode`, `protobuf/decode`, `protobuf/messages`, `protobuf/fields`, `protobuf/enums` |
 
 ## Building plugins
@@ -133,6 +135,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 
 | File | Purpose |
 |------|---------|
+| `arrow/` | Apache Arrow columnar data and Parquet serialization |
 | `base64/` | Base64 encoding and decoding |
 | `compress/` | Gzip, deflate, and zstd compression and decompression |
 | `csv/` | CSV parsing and serialization |
@@ -150,4 +153,5 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
 | `yaml/` | YAML parsing and serialization |
+| `polars/` | Polars DataFrame operations (eager and lazy APIs) |
 | `protobuf/` | Protocol Buffers encoding, decoding, and introspection |
