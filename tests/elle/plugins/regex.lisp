@@ -16,11 +16,15 @@
   (exit 0))
 
 ## Extract plugin functions from the returned struct
-(def compile-fn  (get plugin :compile))
-(def match-fn    (get plugin :match?))
-(def find-fn     (get plugin :find))
-(def find-all-fn (get plugin :find-all))
-(def captures-fn (get plugin :captures))
+(def compile-fn      (get plugin :compile))
+(def match-fn        (get plugin :match?))
+(def find-fn         (get plugin :find))
+(def find-all-fn     (get plugin :find-all))
+(def captures-fn     (get plugin :captures))
+(def captures-all-fn (get plugin :captures-all))
+(def replace-fn      (get plugin :replace))
+(def replace-all-fn  (get plugin :replace-all))
+(def split-fn        (get plugin :split))
 
 # ── regex/compile ──────────────────────────────────────────────────
 
@@ -78,3 +82,39 @@
 (assert (= (captures-fn (compile-fn "\\d+") "abc") nil) "regex/captures no match returns nil")
 
 (let (([ok? _] (protect ((fn () (captures-fn (compile-fn "x"))))))) (assert (not ok?) "regex/captures wrong arity"))
+
+# ── regex/captures-all ─────────────────────────────────────────────
+
+(let ((results (captures-all-fn (compile-fn "(\\d+)-(\\w+)") "1-a 2-b 3-c")))
+  (assert (= (length results) 3) "regex/captures-all count")
+  (assert (= (get (first results) :1) "1") "regex/captures-all first group 1")
+  (assert (= (get (first results) :2) "a") "regex/captures-all first group 2"))
+
+(assert (empty? (captures-all-fn (compile-fn "\\d+") "abc")) "regex/captures-all no matches")
+
+# ── regex/replace ──────────────────────────────────────────────────
+
+(assert (= (replace-fn (compile-fn "\\d+") "a1b2c3" "N") "aNb2c3") "regex/replace first only")
+
+(assert (= (replace-fn (compile-fn "\\d+") "abc" "N") "abc") "regex/replace no match unchanged")
+
+(assert (= (replace-fn (compile-fn "(\\d+)") "val=42" "[$1]") "val=[42]") "regex/replace backreference")
+
+(let (([ok? _] (protect ((fn () (replace-fn (compile-fn "x") "abc")))))) (assert (not ok?) "regex/replace wrong arity"))
+
+# ── regex/replace-all ──────────────────────────────────────────────
+
+(assert (= (replace-all-fn (compile-fn "\\d+") "a1b2c3" "N") "aNbNcN") "regex/replace-all all matches")
+
+(assert (= (replace-all-fn (compile-fn "\\d+") "abc" "N") "abc") "regex/replace-all no match unchanged")
+
+# ── regex/split ────────────────────────────────────────────────────
+
+(let ((parts (split-fn (compile-fn "[,;]+") "a,b;;c")))
+  (assert (= (length parts) 3) "regex/split count")
+  (assert (= (first parts) "a") "regex/split first")
+  (assert (= (last parts) "c") "regex/split last"))
+
+(assert (= (length (split-fn (compile-fn ",") "abc")) 1) "regex/split no delimiter")
+
+(let (([ok? _] (protect ((fn () (split-fn (compile-fn ","))))))) (assert (not ok?) "regex/split wrong arity"))

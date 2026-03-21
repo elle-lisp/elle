@@ -1,4 +1,4 @@
-.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git clean help
+.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help
 
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
@@ -11,8 +11,30 @@ else
 endif
 TIMEOUT ?= 10s
 
-PLUGINS := base64 compress crypto csv glob oxigraph random regex selkie \
-    semver sqlite syn toml uuid xml yaml
+PLUGINS := \
+    base64 \
+    clap \
+    compress \
+    crypto \
+    csv \
+    git \
+    glob \
+    jiff \
+    msgpack \
+    oxigraph \
+    protobuf \
+    random \
+    regex \
+    selkie \
+    semver \
+    sqlite \
+    syn \
+    tls \
+    toml \
+    tree-sitter \
+    uuid \
+    xml \
+    yaml
 
 all: elle plugins docs  ## Build everything
 
@@ -67,6 +89,18 @@ plugin-tests:  ## Run plugin tests
 test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build -p elle-git
 	$(ELLE) tests/git.lisp
+
+check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
+	@ws=$$(sed -n 's/.*"plugins\/\([^"]*\)".*/\1/p' Cargo.toml | sort); \
+	mk=$$(echo '$(PLUGINS)' | tr ' ' '\n' | sort); \
+	if [ "$$ws" = "$$mk" ]; then \
+		echo "✓ PLUGINS list matches Cargo.toml workspace members"; \
+	else \
+		echo "ERROR: Makefile PLUGINS and Cargo.toml workspace members differ"; \
+		echo "  Cargo.toml:"; echo "$$ws" | sed 's/^/    /'; \
+		echo "  Makefile:";   echo "$$mk" | sed 's/^/    /'; \
+		exit 1; \
+	fi
 
 test: smoke  ## Rust unit tests + clippy + fmt after smoke
 	cargo fmt --check
