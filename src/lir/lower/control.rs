@@ -394,7 +394,15 @@ impl<'a> Lowerer<'a> {
         let tree = matrix.compile(vec![AccessPath::Root]);
 
         // Lower decision tree
-        self.lower_decision_tree(&tree, arms, scrutinee_slot, result_slot, done_label)?;
+        let mut lowered_arms = std::collections::HashMap::new();
+        self.lower_decision_tree(
+            &tree,
+            arms,
+            scrutinee_slot,
+            result_slot,
+            done_label,
+            &mut lowered_arms,
+        )?;
 
         // Done block: reload result
         self.current_block = BasicBlock::new(done_label);
