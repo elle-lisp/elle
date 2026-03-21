@@ -75,14 +75,19 @@ impl JitCode {
     /// Create a new JitCode from a function pointer and a shared module
     ///
     /// This constructor is used for batch compilation where multiple JitCode
-    /// instances share one module.
-    pub(crate) fn new_shared(fn_ptr: *const u8, module: Arc<ModuleHolder>) -> Self {
+    /// instances share one module. Closure constants must be passed in to
+    /// keep `Rc<ClosureTemplate>` alive for the lifetime of the JitCode.
+    pub(crate) fn new_shared(
+        fn_ptr: *const u8,
+        module: Arc<ModuleHolder>,
+        closure_constants: Vec<Value>,
+    ) -> Self {
         JitCode {
             fn_ptr,
             _module: module,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
-            closure_constants: Vec::new(),
+            closure_constants,
         }
     }
 
