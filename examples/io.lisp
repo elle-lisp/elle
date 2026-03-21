@@ -1,9 +1,10 @@
 #!/usr/bin/env elle
 
-# Files, JSON, and modules
+# I/O: async-first, files, ports, JSON
 #
 # Demonstrates:
-#   Module loading    — import-file loads .lisp files
+#   Async I/O         — ev/run, ev/spawn, ev/gather, ev/sleep
+#   Port I/O          — port/read, port/write, port/read-all, port/flush
 #   File read/write   — slurp, spit, append-file, read-lines
 #   File info         — file-exists?, file?, directory?, file-size
 #   File ops          — delete-file, rename-file, copy-file
@@ -11,14 +12,10 @@
 #                       delete-directory, list-directory
 #   Path ops          — path/filename, path/extension, path/parent,
 #                       path/join, path/cwd
+#   File seeking      — port/tell, port/seek :from :start/:current/:end
 #   JSON parse        — json-parse for null, bool, int, float, string,
 #                       array, object, nested
 #   JSON serialize    — json-serialize, json-serialize-pretty, round-trip
-#   File seeking      — port/tell, port/seek :from :start/:current/:end
-
-# import-file loads another .lisp file and returns its last expression's
-# value. assertions.lisp is loaded at the top of every example — this
-# line IS the module-loading demonstration.
 
 
 # All temp files live under a unique directory relative to the working dir.
@@ -33,7 +30,74 @@
 
 
 # ========================================
-# 1. Read/write files
+# 1. Async I/O — ev/run, ev/gather
+# ========================================
+
+# Elle is async-first: all port I/O (port/read, port/write, port/read-all,
+# port/read-line, port/flush) yields to the scheduler.  ev/run creates an
+# async scheduler and pumps fibers to completion.
+
+# Write test files for concurrent reads.
+(spit (tmp "async-1.txt") "hello from file one")
+(spit (tmp "async-2.txt") "hello from file two")
+
+# ev/run: spawn concurrent thunks, collect results via shared state.
+(let ((results @[]))
+  (ev/run
+    (fn []
+      (push results (string (port/read-all (port/open (tmp "async-1.txt") :read)))))
+    (fn []
+      (push results (string (port/read-all (port/open (tmp "async-2.txt") :read))))))
+  (assert (= (length results) 2) "ev/run: both concurrent reads completed")
+  (print "  ev/run: ") (println results))
+
+# ev/gather: like ev/run but returns thunk results directly.
+(def gathered
+  (ev/gather
+    (fn [] (string (port/read-all (port/open (tmp "async-1.txt") :read))))
+    (fn [] (string (port/read-all (port/open (tmp "async-2.txt") :read))))))
+(assert (= (length gathered) 2) "ev/gather: returns list of results")
+(print "  ev/gather: ") (println gathered)
+
+# ev/gather with a single thunk returns a single value (not a list).
+(def single (ev/gather (fn [] (+ 1 2))))
+(assert (= single 3) "ev/gather: single thunk returns unwrapped value")
+
+# ev/spawn inside ev/run for fire-and-forget work.
+(let ((ran @[]))
+  (ev/run
+    (fn []
+      (ev/spawn (fn [] (push ran :a)))
+      (ev/spawn (fn [] (push ran :b)))))
+  (assert (= (length ran) 2) "ev/spawn: both spawned fibers ran"))
+
+
+# ========================================
+# 2. Port I/O
+# ========================================
+
+# port/write, port/read, port/read-all, port/read-line, port/flush are
+# async primitives that yield SIG_IO.  They need a scheduler context
+# (ev/run or ev/gather).
+
+(ev/run (fn []
+  (let ((p (port/open (tmp "port-test.txt") :write)))
+    (port/write p "line one\nline two\n")
+    (port/flush p)
+    (port/close p))
+
+  (let ((p (port/open (tmp "port-test.txt") :read)))
+    (let ((line1 (port/read-line p)))
+      (print "  port/read-line: ") (println line1)
+      (assert (= line1 "line one") "port/read-line reads first line"))
+    (port/close p))
+
+  (let ((content (string (port/read-all (port/open (tmp "port-test.txt") :read)))))
+    (assert (= content "line one\nline two\n") "port/read-all reads everything"))))
+
+
+# ========================================
+# 3. Read/write files (sync convenience)
 # ========================================
 
 (spit (tmp "hello.txt") "Hello, Elle!")
@@ -52,7 +116,7 @@
 
 
 # ========================================
-# 2. File info
+# 4. File info
 # ========================================
 
 (assert (file-exists? (tmp "hello.txt")) "file-exists? on existing file")
@@ -66,7 +130,7 @@
 
 
 # ========================================
-# 2b. file/stat and file/lstat
+# 4b. file/stat and file/lstat
 # ========================================
 
 # file/stat on a regular file
@@ -106,7 +170,7 @@
 
 
 # ========================================
-# 4. File operations
+# 5. File operations
 # ========================================
 
 (copy-file (tmp "hello.txt") (tmp "copy.txt"))
@@ -119,7 +183,7 @@
 
 
 # ========================================
-# 5. Directory operations
+# 6. Directory operations
 # ========================================
 
 (def sub (tmp "sub"))
@@ -139,7 +203,7 @@
 
 
 # ========================================
-# 6. Path operations
+# 7. Path operations
 # ========================================
 
 (def p "/home/user/docs/report.pdf")
@@ -157,7 +221,7 @@
 
 
 # ========================================
-# 5.5. File seeking and positioning
+# 8. File seeking and positioning
 # ========================================
 
 (let ((p (port/open "/tmp/elle-example-seek-tell" :read-write)))
@@ -200,7 +264,7 @@
 
 
 # ========================================
-# 6. JSON: parsing scalars
+# 9. JSON: parsing scalars
 # ========================================
 
 (assert (= (json-parse "null") nil) "json-parse null")
@@ -212,7 +276,7 @@
 
 
 # ========================================
-# 7. JSON: serializing scalars
+# 10. JSON: serializing scalars
 # ========================================
 
 (assert (= (json-serialize nil) "null") "json-serialize nil")
@@ -224,7 +288,7 @@
 
 
 # ========================================
-# 8. JSON: collections and nesting
+# 11. JSON: collections and nesting
 # ========================================
 
 (def arr (json-parse "[1, \"two\", true, null]"))
@@ -244,7 +308,7 @@
 
 
 # ========================================
-# 9. JSON: round-trip
+# 12. JSON: round-trip
 # ========================================
 
 # Serialize a list as a JSON array.
@@ -268,7 +332,7 @@
 
 
 # ========================================
-# 10. JSON: file I/O integration
+# 13. JSON: file I/O integration
 # ========================================
 
 # Write JSON to a file and read it back — the natural use case.
@@ -289,6 +353,9 @@
 # ========================================
 
 # Remove all files and directories we created.
+(delete-file (tmp "async-1.txt"))
+(delete-file (tmp "async-2.txt"))
+(delete-file (tmp "port-test.txt"))
 (delete-file (tmp "hello.txt"))
 (delete-file (tmp "lines.txt"))
 (delete-file (tmp "renamed.txt"))

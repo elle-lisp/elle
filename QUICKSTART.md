@@ -625,10 +625,23 @@ fiber context. For network servers and any code doing concurrent I/O, use
         (handle-connection conn)))))))
 ```
 
+`ev/gather` is the easiest way to do concurrent I/O and collect results:
+
+```lisp
+# Read two files concurrently, get results as a list
+(def [a b] (ev/gather
+  (fn [] (slurp "file1.txt"))
+  (fn [] (slurp "file2.txt"))))
+
+# Single thunk returns a single value (not a list)
+(def content (ev/gather (fn [] (slurp "file.txt"))))
+```
+
 Key primitives:
 
 ```lisp
 (ev/run thunk...)           # start event loop, spawn each thunk, pump until done
+(ev/gather thunk...)        # like ev/run but returns thunk results
 (ev/spawn thunk)            # schedule a new fiber (inside ev/run)
 (ev/sleep seconds)          # yield for N seconds
 
@@ -840,7 +853,7 @@ Elle's API has three layers:
 
 1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `port/write`, etc.)
 2. **stdlib.lisp** — standard library closures and macros (`map`, `filter`, `fold`, etc.)
-3. **prelude.lisp** — higher-level abstractions (`ev/run`, `ev/spawn`, `each`, `match`, etc.)
+3. **prelude.lisp** — higher-level abstractions (`ev/run`, `ev/gather`, `ev/spawn`, `each`, `match`, etc.)
 
 `vm/list-primitives` and `vm/primitive-meta` only cover layer 1 — they do NOT
 list stdlib or prelude functions. If you don't find something in the primitive
@@ -872,7 +885,7 @@ the source of truth for the full API.
 
 # To discover stdlib/prelude functions, read the source files:
 #   stdlib.lisp   — map, filter, fold, append, reverse, etc.
-#   prelude.lisp  — ev/run, ev/spawn, each, match, cond, etc.
+#   prelude.lisp  — ev/run, ev/gather, ev/spawn, each, match, cond, etc.
 ```
 
 ---
