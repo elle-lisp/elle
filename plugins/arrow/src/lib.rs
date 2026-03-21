@@ -5,8 +5,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayRef, BooleanArray, Float64Array, Int64Array, NullArray, RecordBatch,
-    StringArray,
+    Array, ArrayRef, BooleanArray, Float64Array, Int64Array, NullArray, RecordBatch, StringArray,
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::ipc::reader::StreamReader;
@@ -28,7 +27,6 @@ use elle::value::{error_val, Value};
 
 /// Wrapped RecordBatch stored as an external value.
 struct BatchWrap(RecordBatch);
-
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -69,24 +67,15 @@ fn elle_values_to_arrow(values: &[Value], field_name: &str) -> Result<ArrayRef, 
     match first_non_nil {
         None => Ok(Arc::new(NullArray::new(values.len()))),
         Some(v) if v.as_int().is_some() => {
-            let arr: Int64Array = values
-                .iter()
-                .map(|v| v.as_int())
-                .collect();
+            let arr: Int64Array = values.iter().map(|v| v.as_int()).collect();
             Ok(Arc::new(arr))
         }
         Some(v) if v.as_float().is_some() => {
-            let arr: Float64Array = values
-                .iter()
-                .map(|v| v.as_float())
-                .collect();
+            let arr: Float64Array = values.iter().map(|v| v.as_float()).collect();
             Ok(Arc::new(arr))
         }
         Some(v) if v.as_bool().is_some() => {
-            let arr: BooleanArray = values
-                .iter()
-                .map(|v| v.as_bool())
-                .collect();
+            let arr: BooleanArray = values.iter().map(|v| v.as_bool()).collect();
             Ok(Arc::new(arr))
         }
         Some(v) if v.with_string(|_| ()).is_some() => {
@@ -114,10 +103,7 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<Value> {
         } else {
             match arr.data_type() {
                 DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 => {
-                    let a = arr
-                        .as_any()
-                        .downcast_ref::<Int64Array>()
-                        .or_else(|| None);
+                    let a = arr.as_any().downcast_ref::<Int64Array>().or_else(|| None);
                     if let Some(a) = a {
                         out.push(Value::int(a.value(i)));
                     } else {
@@ -163,7 +149,8 @@ fn arrow_to_elle_values(arr: &dyn Array) -> Vec<Value> {
                 }
                 _ => {
                     // Fallback: stringify
-                    let formatted = arrow::util::display::ArrayFormatter::try_new(arr, &Default::default());
+                    let formatted =
+                        arrow::util::display::ArrayFormatter::try_new(arr, &Default::default());
                     if let Ok(f) = formatted {
                         out.push(Value::string(f.value(i).to_string()));
                     } else {
@@ -231,7 +218,10 @@ fn prim_batch(args: &[Value]) -> (SignalBits, Value) {
     } else {
         return (
             SIG_ERROR,
-            error_val("type-error", format!("{}: expected struct of column arrays", name)),
+            error_val(
+                "type-error",
+                format!("{}: expected struct of column arrays", name),
+            ),
         );
     };
 
@@ -251,14 +241,22 @@ fn prim_batch(args: &[Value]) -> (SignalBits, Value) {
                 fields.push(Field::new(col_name, arr.data_type().clone(), true));
                 arrays.push(arr);
             }
-            Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val("arrow-error", format!("{}: {}", name, e)),
+                )
+            }
         }
     }
 
     let schema = Arc::new(Schema::new(fields));
     match RecordBatch::try_new(schema, arrays) {
         Ok(batch) => (SIG_OK, Value::external("arrow/batch", BatchWrap(batch))),
-        Err(e) => (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -347,7 +345,10 @@ fn prim_display(args: &[Value]) -> (SignalBits, Value) {
     };
     match pretty_format_batches(&[batch.0.clone()]) {
         Ok(table) => (SIG_OK, Value::string(table.to_string())),
-        Err(e) => (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -363,13 +364,24 @@ fn prim_write_ipc(args: &[Value]) -> (SignalBits, Value) {
     let schema = batch.0.schema();
     let mut writer = match StreamWriter::try_new(&mut buf, &schema) {
         Ok(w) => w,
-        Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            )
+        }
     };
     if let Err(e) = writer.write(&batch.0) {
-        return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e)));
+        return (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        );
     }
     if let Err(e) = writer.finish() {
-        return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e)));
+        return (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        );
     }
     (SIG_OK, Value::bytes(buf))
 }
@@ -394,19 +406,35 @@ fn prim_read_ipc(args: &[Value]) -> (SignalBits, Value) {
     let cursor = Cursor::new(bytes.to_vec());
     let reader = match StreamReader::try_new(cursor, None) {
         Ok(r) => r,
-        Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            )
+        }
     };
 
     let mut batches = Vec::new();
     for batch_result in reader {
         match batch_result {
             Ok(batch) => batches.push(batch),
-            Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val("arrow-error", format!("{}: {}", name, e)),
+                )
+            }
         }
     }
 
     if batches.len() == 1 {
-        (SIG_OK, Value::external("arrow/batch", BatchWrap(batches.into_iter().next().unwrap())))
+        (
+            SIG_OK,
+            Value::external(
+                "arrow/batch",
+                BatchWrap(batches.into_iter().next().unwrap()),
+            ),
+        )
     } else {
         let vals: Vec<Value> = batches
             .into_iter()
@@ -428,13 +456,24 @@ fn prim_write_parquet(args: &[Value]) -> (SignalBits, Value) {
     let schema = batch.0.schema();
     let mut writer = match ArrowWriter::try_new(&mut buf, schema, None) {
         Ok(w) => w,
-        Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            )
+        }
     };
     if let Err(e) = writer.write(&batch.0) {
-        return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e)));
+        return (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        );
     }
     if let Err(e) = writer.close() {
-        return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e)));
+        return (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: {}", name, e)),
+        );
     }
     (SIG_OK, Value::bytes(buf))
 }
@@ -456,35 +495,63 @@ fn prim_read_parquet(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
 
-    let builder = match ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes.to_vec())) {
+    let builder = match ParquetRecordBatchReaderBuilder::try_new(bytes::Bytes::from(bytes.to_vec()))
+    {
         Ok(b) => b,
-        Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            )
+        }
     };
     let reader = match builder.build() {
         Ok(r) => r,
-        Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            )
+        }
     };
 
     let mut batches = Vec::new();
     for batch_result in reader {
         match batch_result {
             Ok(batch) => batches.push(batch),
-            Err(e) => return (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val("arrow-error", format!("{}: {}", name, e)),
+                )
+            }
         }
     }
 
     if batches.is_empty() {
-        return (SIG_ERROR, error_val("arrow-error", format!("{}: no data in parquet", name)));
+        return (
+            SIG_ERROR,
+            error_val("arrow-error", format!("{}: no data in parquet", name)),
+        );
     }
 
     // Concatenate all batches
     if batches.len() == 1 {
-        (SIG_OK, Value::external("arrow/batch", BatchWrap(batches.into_iter().next().unwrap())))
+        (
+            SIG_OK,
+            Value::external(
+                "arrow/batch",
+                BatchWrap(batches.into_iter().next().unwrap()),
+            ),
+        )
     } else {
         let schema = batches[0].schema();
         match arrow::compute::concat_batches(&schema, &batches) {
             Ok(merged) => (SIG_OK, Value::external("arrow/batch", BatchWrap(merged))),
-            Err(e) => (SIG_ERROR, error_val("arrow-error", format!("{}: {}", name, e))),
+            Err(e) => (
+                SIG_ERROR,
+                error_val("arrow-error", format!("{}: {}", name, e)),
+            ),
         }
     }
 }

@@ -72,13 +72,15 @@ fn extract_string_list(val: &Value, name: &str) -> Result<Vec<String>, (SignalBi
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("{}: expected array of strings, got {}", name, val.type_name()),
+                format!(
+                    "{}: expected array of strings, got {}",
+                    name,
+                    val.type_name()
+                ),
             ),
         ));
     };
-    arr.iter()
-        .map(|v| extract_string(v, name))
-        .collect()
+    arr.iter().map(|v| extract_string(v, name)).collect()
 }
 
 /// Convert a Polars Series to an Elle array of values.
@@ -115,17 +117,19 @@ fn df_to_elle(df: &DataFrame) -> Value {
     let columns: Vec<(&str, Vec<Value>)> = df
         .get_columns()
         .iter()
-        .map(|s| (s.name().as_str(), series_to_elle(s.as_materialized_series())))
+        .map(|s| {
+            (
+                s.name().as_str(),
+                series_to_elle(s.as_materialized_series()),
+            )
+        })
         .collect();
 
     let mut rows: Vec<Value> = Vec::with_capacity(num_rows);
     for i in 0..num_rows {
         let mut fields = BTreeMap::new();
         for (col_name, col_vals) in &columns {
-            fields.insert(
-                TableKey::Keyword(col_name.to_string()),
-                col_vals[i],
-            );
+            fields.insert(TableKey::Keyword(col_name.to_string()), col_vals[i]);
         }
         rows.push(Value::struct_from(fields));
     }
@@ -147,7 +151,10 @@ fn elle_struct_to_columns(val: &Value, name: &str) -> Result<Vec<Series>, (Signa
     } else {
         return Err((
             SIG_ERROR,
-            error_val("type-error", format!("{}: expected struct of column arrays", name)),
+            error_val(
+                "type-error",
+                format!("{}: expected struct of column arrays", name),
+            ),
         ));
     };
 
@@ -160,7 +167,10 @@ fn elle_struct_to_columns(val: &Value, name: &str) -> Result<Vec<Series>, (Signa
         } else {
             return Err((
                 SIG_ERROR,
-                error_val("type-error", format!("{}: column '{}' must be an array", name, col_name)),
+                error_val(
+                    "type-error",
+                    format!("{}: column '{}' must be an array", name, col_name),
+                ),
             ));
         };
 
@@ -218,10 +228,7 @@ fn elle_values_to_series(
             SIG_ERROR,
             error_val(
                 "polars-error",
-                format!(
-                    "{}: cannot infer type for column '{}'",
-                    prim_name, col_name
-                ),
+                format!("{}: cannot infer type for column '{}'", prim_name, col_name),
             ),
         )),
     }
@@ -242,7 +249,10 @@ fn prim_df(args: &[Value]) -> (SignalBits, Value) {
     let columns: Vec<Column> = columns.into_iter().map(Column::from).collect();
     match DataFrame::new(columns) {
         Ok(df) => (SIG_OK, Value::external("polars/df", DfWrap(df))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -257,7 +267,10 @@ fn prim_read_csv(args: &[Value]) -> (SignalBits, Value) {
     let cursor = Cursor::new(text.into_bytes());
     match CsvReader::new(cursor).finish() {
         Ok(df) => (SIG_OK, Value::external("polars/df", DfWrap(df))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -274,9 +287,15 @@ fn prim_write_csv(args: &[Value]) -> (SignalBits, Value) {
     match CsvWriter::new(&mut buf).finish(&mut df_clone) {
         Ok(_) => match String::from_utf8(buf) {
             Ok(s) => (SIG_OK, Value::string(s)),
-            Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+            Err(e) => (
+                SIG_ERROR,
+                error_val("polars-error", format!("{}: {}", name, e)),
+            ),
         },
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -285,16 +304,24 @@ fn prim_read_parquet(args: &[Value]) -> (SignalBits, Value) {
     let name = "polars/read-parquet";
     let bytes = match args[0].as_bytes() {
         Some(b) => b.to_vec(),
-        None => return (
-            SIG_ERROR,
-            error_val("type-error", format!("{}: expected bytes, got {}", name, args[0].type_name())),
-        ),
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("{}: expected bytes, got {}", name, args[0].type_name()),
+                ),
+            )
+        }
     };
 
     let cursor = Cursor::new(bytes);
     match ParquetReader::new(cursor).finish() {
         Ok(df) => (SIG_OK, Value::external("polars/df", DfWrap(df))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -310,7 +337,10 @@ fn prim_write_parquet(args: &[Value]) -> (SignalBits, Value) {
     let mut df_clone = df.0.clone();
     match ParquetWriter::new(&mut buf).finish(&mut df_clone) {
         Ok(_) => (SIG_OK, Value::bytes(buf)),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -325,7 +355,10 @@ fn prim_read_json(args: &[Value]) -> (SignalBits, Value) {
     let cursor = Cursor::new(text.into_bytes());
     match JsonReader::new(cursor).finish() {
         Ok(df) => (SIG_OK, Value::external("polars/df", DfWrap(df))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -341,7 +374,10 @@ fn prim_shape(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
     let (rows, cols) = df.0.shape();
-    (SIG_OK, Value::array(vec![Value::int(rows as i64), Value::int(cols as i64)]))
+    (
+        SIG_OK,
+        Value::array(vec![Value::int(rows as i64), Value::int(cols as i64)]),
+    )
 }
 
 /// (polars/columns df) — return column names as an array of strings.
@@ -351,7 +387,11 @@ fn prim_columns(args: &[Value]) -> (SignalBits, Value) {
         Ok(d) => d,
         Err(e) => return e,
     };
-    let names: Vec<Value> = df.0.get_column_names().iter().map(|n| Value::string(n.as_str())).collect();
+    let names: Vec<Value> =
+        df.0.get_column_names()
+            .iter()
+            .map(|n| Value::string(n.as_str()))
+            .collect();
     (SIG_OK, Value::array(names))
 }
 
@@ -362,7 +402,11 @@ fn prim_dtypes(args: &[Value]) -> (SignalBits, Value) {
         Ok(d) => d,
         Err(e) => return e,
     };
-    let types: Vec<Value> = df.0.dtypes().iter().map(|dt| Value::string(format!("{}", dt))).collect();
+    let types: Vec<Value> =
+        df.0.dtypes()
+            .iter()
+            .map(|dt| Value::string(format!("{}", dt)))
+            .collect();
     (SIG_OK, Value::array(types))
 }
 
@@ -430,8 +474,14 @@ fn prim_column(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return e,
     };
     match df.0.column(&col_name) {
-        Ok(s) => (SIG_OK, Value::array(series_to_elle(s.as_materialized_series()))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Ok(s) => (
+            SIG_OK,
+            Value::array(series_to_elle(s.as_materialized_series())),
+        ),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -452,7 +502,10 @@ fn prim_select(args: &[Value]) -> (SignalBits, Value) {
     };
     match df.0.select(&cols) {
         Ok(result) => (SIG_OK, Value::external("polars/df", DfWrap(result))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -489,7 +542,10 @@ fn prim_rename(args: &[Value]) -> (SignalBits, Value) {
     let mut result = df.0.clone();
     match result.rename(&from, PlSmallStr::from(to.as_str())) {
         Ok(_) => (SIG_OK, Value::external("polars/df", DfWrap(result))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -516,7 +572,10 @@ fn prim_sample(args: &[Value]) -> (SignalBits, Value) {
     let n = args[1].as_int().unwrap_or(1) as usize;
     match df.0.sample_n_literal(n, false, false, None) {
         Ok(result) => (SIG_OK, Value::external("polars/df", DfWrap(result))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -533,9 +592,7 @@ fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
     };
     let descending = if args.len() > 2 {
         // Check if third arg is :desc keyword
-        args[2]
-            .with_string(|s| s == "desc")
-            .unwrap_or(false)
+        args[2].with_string(|s| s == "desc").unwrap_or(false)
     } else {
         false
     };
@@ -544,7 +601,10 @@ fn prim_sort(args: &[Value]) -> (SignalBits, Value) {
         SortMultipleOptions::new().with_order_descending(descending),
     ) {
         Ok(result) => (SIG_OK, Value::external("polars/df", DfWrap(result))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -565,12 +625,19 @@ fn prim_unique(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let result = match cols {
-        Some(ref c) => df.0.unique::<&[String], String>(Some(c.as_slice()), UniqueKeepStrategy::First, None),
-        None => df.0.unique::<&[String], String>(None, UniqueKeepStrategy::First, None),
+        Some(ref c) => {
+            df.0.unique::<&[String], String>(Some(c.as_slice()), UniqueKeepStrategy::First, None)
+        }
+        None => {
+            df.0.unique::<&[String], String>(None, UniqueKeepStrategy::First, None)
+        }
     };
     match result {
         Ok(r) => (SIG_OK, Value::external("polars/df", DfWrap(r))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -587,7 +654,10 @@ fn prim_vstack(args: &[Value]) -> (SignalBits, Value) {
     };
     match df1.0.vstack(&df2.0) {
         Ok(stacked) => (SIG_OK, Value::external("polars/df", DfWrap(stacked))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -605,7 +675,10 @@ fn prim_hstack(args: &[Value]) -> (SignalBits, Value) {
     let cols: Vec<Column> = df2.0.get_columns().to_vec();
     match df1.0.hstack(&cols) {
         Ok(result) => (SIG_OK, Value::external("polars/df", DfWrap(result))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -633,7 +706,10 @@ fn prim_collect(args: &[Value]) -> (SignalBits, Value) {
     };
     match lazy.0.clone().collect() {
         Ok(df) => (SIG_OK, Value::external("polars/df", DfWrap(df))),
-        Err(e) => (SIG_ERROR, error_val("polars-error", format!("{}: {}", name, e))),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("polars-error", format!("{}: {}", name, e)),
+        ),
     }
 }
 
@@ -681,7 +757,12 @@ fn prim_lfilter(args: &[Value]) -> (SignalBits, Value) {
             ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val),
             ">=" => column.gt_eq(lit_val),
-            _ => return (SIG_ERROR, error_val("polars-error", format!("{}: unknown op '{}'", name, op))),
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val("polars-error", format!("{}: unknown op '{}'", name, op)),
+                )
+            }
         }
     } else if let Some(f) = val.as_float() {
         let lit_val = lit(f);
@@ -692,7 +773,12 @@ fn prim_lfilter(args: &[Value]) -> (SignalBits, Value) {
             ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val),
             ">=" => column.gt_eq(lit_val),
-            _ => return (SIG_ERROR, error_val("polars-error", format!("{}: unknown op '{}'", name, op))),
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val("polars-error", format!("{}: unknown op '{}'", name, op)),
+                )
+            }
         }
     } else if let Some(s) = val.with_string(|s| s.to_owned()) {
         let lit_val = lit(s);
@@ -703,12 +789,20 @@ fn prim_lfilter(args: &[Value]) -> (SignalBits, Value) {
             ">" => column.gt(lit_val),
             "<=" => column.lt_eq(lit_val),
             ">=" => column.gt_eq(lit_val),
-            _ => return (SIG_ERROR, error_val("polars-error", format!("{}: unknown op '{}'", name, op))),
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val("polars-error", format!("{}: unknown op '{}'", name, op)),
+                )
+            }
         }
     } else {
         return (
             SIG_ERROR,
-            error_val("type-error", format!("{}: unsupported filter value type", name)),
+            error_val(
+                "type-error",
+                format!("{}: unsupported filter value type", name),
+            ),
         );
     };
 
@@ -764,14 +858,21 @@ fn prim_lgroupby(args: &[Value]) -> (SignalBits, Value) {
 
     let mut agg_exprs: Vec<Expr> = Vec::new();
     for (key, spec) in &agg_map {
-        let out_name = if let TableKey::Keyword(s) = key { s.clone() } else { continue };
+        let out_name = if let TableKey::Keyword(s) = key {
+            s.clone()
+        } else {
+            continue;
+        };
 
         let spec_map = if let Some(m) = spec.as_struct() {
             m.clone()
         } else {
             return (
                 SIG_ERROR,
-                error_val("type-error", format!("{}: each agg spec must be a struct", name)),
+                error_val(
+                    "type-error",
+                    format!("{}: each agg spec must be a struct", name),
+                ),
             );
         };
 
@@ -811,10 +912,15 @@ fn prim_lgroupby(args: &[Value]) -> (SignalBits, Value) {
             "count" => col(src_col.as_str()).count().alias(out_name.as_str()),
             "first" => col(src_col.as_str()).first().alias(out_name.as_str()),
             "last" => col(src_col.as_str()).last().alias(out_name.as_str()),
-            other => return (
-                SIG_ERROR,
-                error_val("polars-error", format!("{}: unknown agg function '{}'", name, other)),
-            ),
+            other => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "polars-error",
+                        format!("{}: unknown agg function '{}'", name, other),
+                    ),
+                )
+            }
         };
         agg_exprs.push(expr);
     }
@@ -854,17 +960,24 @@ fn prim_ljoin(args: &[Value]) -> (SignalBits, Value) {
         "left" => JoinType::Left,
         "full" | "outer" => JoinType::Full,
         "cross" => JoinType::Cross,
-        other => return (
-            SIG_ERROR,
-            error_val("polars-error", format!("{}: unknown join type '{}'", name, other)),
-        ),
+        other => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "polars-error",
+                    format!("{}: unknown join type '{}'", name, other),
+                ),
+            )
+        }
     };
 
     let on_exprs: Vec<Expr> = on_cols.iter().map(|c| col(c.as_str())).collect();
-    let result = left
-        .0
-        .clone()
-        .join(right.0.clone(), on_exprs.clone(), on_exprs, JoinArgs::new(how));
+    let result = left.0.clone().join(
+        right.0.clone(),
+        on_exprs.clone(),
+        on_exprs,
+        JoinArgs::new(how),
+    );
     (SIG_OK, Value::external("polars/lazy", LazyWrap(result)))
 }
 
@@ -884,10 +997,22 @@ fn prim_describe(args: &[Value]) -> (SignalBits, Value) {
     for col in df.0.get_columns() {
         let s = col.as_materialized_series();
         let mut fields = BTreeMap::new();
-        fields.insert(TableKey::Keyword("column".into()), Value::string(s.name().as_str()));
-        fields.insert(TableKey::Keyword("dtype".into()), Value::string(format!("{}", s.dtype())));
-        fields.insert(TableKey::Keyword("count".into()), Value::int(s.len() as i64));
-        fields.insert(TableKey::Keyword("null_count".into()), Value::int(s.null_count() as i64));
+        fields.insert(
+            TableKey::Keyword("column".into()),
+            Value::string(s.name().as_str()),
+        );
+        fields.insert(
+            TableKey::Keyword("dtype".into()),
+            Value::string(format!("{}", s.dtype())),
+        );
+        fields.insert(
+            TableKey::Keyword("count".into()),
+            Value::int(s.len() as i64),
+        );
+        fields.insert(
+            TableKey::Keyword("null_count".into()),
+            Value::int(s.null_count() as i64),
+        );
         stat_rows.push(Value::struct_from(fields));
     }
     (SIG_OK, Value::array(stat_rows))
