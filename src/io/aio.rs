@@ -167,12 +167,18 @@ impl AsyncBackend {
 
         let buf_handle = inner.buffer_pool.alloc(4096);
 
-        // Flush on socket/pipe ports is a no-op: fsync(2) returns EINVAL on sockets.
+        // Flush on socket/pipe/stdio ports is a no-op: fsync(2) returns EINVAL on
+        // non-file fds (sockets, pipes, and stdio when redirected to pipes in subprocesses).
         // Return an immediate successful completion rather than submitting to the pool.
         if matches!(&request.op, IoOp::Flush)
             && matches!(
                 port.kind(),
-                PortKind::TcpStream | PortKind::UnixStream | PortKind::UdpSocket | PortKind::Pipe
+                PortKind::TcpStream
+                    | PortKind::UnixStream
+                    | PortKind::UdpSocket
+                    | PortKind::Pipe
+                    | PortKind::Stdout
+                    | PortKind::Stderr
             )
         {
             inner.buffer_pool.release(buf_handle);
@@ -921,6 +927,60 @@ impl AsyncBackend {
         } else {
             Some(timeout_ms as u64)
         };
+
+        // When stdin has pending ops and io_uring has nothing submitted,
+        // block on the stdin receiver directly instead of io_uring (which
+        // would block forever). This happens when the MCP server is a
+        // subprocess reading from a pipe via StdinThread.
+        if let Some(ref stdin_thread) = inner.stdin_thread {
+            // Check if all pending ops are stdin ops. Stdin ops go through
+            // StdinThread, not io_uring. If io_uring has nothing to wait on,
+            // block on the stdin receiver directly.
+            let all_pending_are_stdin = !inner.pending.is_empty()
+                && inner.pending.values().all(|op| {
+                    matches!(
+                        op,
+                        PendingOp::Port {
+                            port_key: PortKey::Stdin,
+                            ..
+                        }
+                    )
+                });
+
+            if all_pending_are_stdin {
+                // All pending ops are stdin ops — block on stdin receiver.
+                let timeout_dur = timeout.map(std::time::Duration::from_millis);
+                let recv_result = match timeout_dur {
+                    Some(dur) => stdin_thread.receiver().recv_timeout(dur).ok(),
+                    None => stdin_thread.receiver().recv().ok(),
+                };
+                if let Some(sc) = recv_result {
+                    if let Some(pending_op) = inner.pending.remove(&sc.id) {
+                        inner.buffer_pool.release(pending_op.buffer_handle());
+                        let c = match sc.result {
+                            Ok(data) if data.is_empty() => Completion {
+                                id: sc.id,
+                                result: Ok(Value::NIL), // EOF
+                            },
+                            Ok(data) => Completion {
+                                id: sc.id,
+                                result: Ok(Value::string(
+                                    String::from_utf8_lossy(&data)
+                                        .trim_end_matches('\n')
+                                        .trim_end_matches('\r'),
+                                )),
+                            },
+                            Err(e) => Completion {
+                                id: sc.id,
+                                result: Err(error_val("io-error", e)),
+                            },
+                        };
+                        inner.completions.push_back(c);
+                    }
+                }
+                return Ok(inner.completions.drain(..).collect());
+            }
+        }
 
         // Destructure to get independent borrows of each field.
         // Scoped so the borrows end before drain_stdin_completions.
