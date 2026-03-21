@@ -12,6 +12,7 @@ endif
 TIMEOUT ?= 10s
 
 PLUGINS := \
+    arrow \
     base64 \
     clap \
     compress \
@@ -22,6 +23,7 @@ PLUGINS := \
     jiff \
     msgpack \
     oxigraph \
+    polars \
     protobuf \
     random \
     regex \

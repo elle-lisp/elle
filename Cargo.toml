@@ -1,6 +1,7 @@
 [workspace]
 members = [
     ".",
+    "plugins/arrow",
     "plugins/base64",
     "plugins/clap",
     "plugins/compress",
@@ -11,6 +12,7 @@ members = [
     "plugins/jiff",
     "plugins/msgpack",
     "plugins/oxigraph",
+    "plugins/polars",
     "plugins/protobuf",
     "plugins/random",
     "plugins/regex",

@@ -1,0 +1,13 @@
+[package]
+name = "elle-arrow"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+arrow = { version = "54", features = ["ipc", "json", "prettyprint"] }
+bytes = "1"
+parquet = { version = "54", features = ["arrow"] }
