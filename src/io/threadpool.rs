@@ -536,6 +536,11 @@ impl StdinThread {
             .map_err(|_| "stdin thread channel disconnected".to_string())
     }
 
+    /// Expose the receiver for cross-source select in async wait.
+    pub(super) fn receiver(&self) -> &crossbeam_channel::Receiver<StdinCompletion> {
+        &self.completion_rx
+    }
+
     pub(super) fn poll_completions(&self) -> Vec<StdinCompletion> {
         let mut results = Vec::new();
         while let Ok(c) = self.completion_rx.try_recv() {
