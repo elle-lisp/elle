@@ -418,6 +418,25 @@ This metadata is used by the JIT to generate yield-through-call code: when a
 callee yields, the JIT builds the caller's `SuspendedFrame` using the recorded
 resume IP and stack state.
 
+### Environment Reconstruction on Side-Exit
+
+When building a `SuspendedFrame` for interpreter resumption, the JIT yield
+helpers (`elle_jit_yield`, `elle_jit_yield_through_call`) reconstruct the full
+interpreter environment from the closure's captures and the spilled locals:
+
+```
+env = [closure.env[0], ..., closure.env[n-1], local_0, ..., local_{m-1}]
+stack = [operand_0, ..., operand_k]
+```
+
+The interpreter's `LoadUpvalue` accesses `env[idx]` for ALL variables —
+captures, params, and locally-defined vars. The JIT stores captures in
+`closure.env` and params/locals in Cranelift variables. The spill buffer
+layout is `[locals..., operands...]`, where `num_locals` (from yield/call-site
+metadata) gives the split point. The first `num_locals` spilled values are
+appended to `closure.env` to form the full env; the remaining values form
+the operand stack.
+
 ## Future Phases
 
 - Phase 5:

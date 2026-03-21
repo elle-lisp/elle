@@ -59,10 +59,24 @@ pub extern "C" fn elle_jit_yield(
     let num_operands = yield_meta.num_spilled as usize;
     let total_spilled = num_locals + num_operands;
 
-    // Build the stack from spilled values.
-    // The JIT spills in interpreter layout: [locals..., operands...].
-    let mut stack = Vec::with_capacity(total_spilled);
-    for i in 0..total_spilled {
+    // Build the full interpreter env: captures + locals (params + locally-defined).
+    // The interpreter's LoadUpvalue accesses env[idx] for ALL variables (captures,
+    // params, and locals). The JIT stores captures in closure.env and params/locals
+    // in Cranelift variables. When spilling for yield, locals are in the first
+    // num_locals slots of the spilled buffer. We reconstruct the full env so the
+    // interpreter can resume correctly.
+    let num_captures = closure.env.len();
+    let mut env = Vec::with_capacity(num_captures + num_locals);
+    env.extend(closure.env.iter().copied());
+    for i in 0..num_locals {
+        let v = unsafe { *spilled_values.add(i) };
+        env.push(v);
+    }
+    let env = std::rc::Rc::new(env);
+
+    // The operand stack is the remaining spilled values after locals.
+    let mut stack = Vec::with_capacity(num_operands);
+    for i in num_locals..total_spilled {
         let v = unsafe { *spilled_values.add(i) };
         stack.push(v);
     }
@@ -70,7 +84,7 @@ pub extern "C" fn elle_jit_yield(
     let frame = SuspendedFrame::Bytecode(BytecodeFrame {
         bytecode: closure.template.bytecode.clone(),
         constants: closure.template.constants.clone(),
-        env: closure.env.clone(),
+        env,
         ip: yield_meta.resume_ip,
         stack,
         location_map: closure.template.location_map.clone(),
@@ -128,9 +142,28 @@ pub extern "C" fn elle_jit_yield_through_call(
         .expect("VM bug: elle_jit_yield_through_call called but no JitCode in cache");
     let call_meta = &jit_code.call_sites[call_site_index as usize];
 
-    let n = call_meta.num_spilled as usize;
-    let mut stack = Vec::with_capacity(n);
-    for i in 0..n {
+    let num_locals = call_meta.num_locals as usize;
+    let num_operands = call_meta.num_spilled as usize;
+    let total_spilled = num_locals + num_operands;
+
+    // Build the full interpreter env: captures + locals (params + locally-defined).
+    // The interpreter's LoadUpvalue accesses env[idx] for ALL variables (captures,
+    // params, and locals). The JIT stores captures in closure.env and params/locals
+    // in Cranelift variables. When spilling for yield-through-call, locals are in
+    // the first num_locals slots of the spilled buffer. We reconstruct the full
+    // env so the interpreter can resume correctly.
+    let num_captures = closure.env.len();
+    let mut env = Vec::with_capacity(num_captures + num_locals);
+    env.extend(closure.env.iter().copied());
+    for i in 0..num_locals {
+        let v = unsafe { *spilled_values.add(i) };
+        env.push(v);
+    }
+    let env = std::rc::Rc::new(env);
+
+    // The operand stack is the remaining spilled values after locals.
+    let mut stack = Vec::with_capacity(num_operands);
+    for i in num_locals..total_spilled {
         let v = unsafe { *spilled_values.add(i) };
         stack.push(v);
     }
@@ -138,7 +171,7 @@ pub extern "C" fn elle_jit_yield_through_call(
     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
         bytecode: closure.template.bytecode.clone(),
         constants: closure.template.constants.clone(),
-        env: closure.env.clone(),
+        env,
         ip: call_meta.resume_ip,
         stack,
         location_map: closure.template.location_map.clone(),
@@ -155,16 +188,16 @@ pub extern "C" fn elle_jit_yield_through_call(
     YIELD_SENTINEL
 }
 
-/// Check if any actionable signal is pending on the VM.
+/// Check if any non-OK signal is pending on the VM.
 /// Returns TRUE if set, FALSE otherwise.
 ///
-/// This extends `elle_jit_has_exception` to also detect yield signals.
-/// Used after Call instructions in yielding functions.
+/// This extends `elle_jit_has_exception` to also detect suspending signals
+/// (SIG_YIELD, SIG_SWITCH, user-defined). Used after Call instructions in
+/// yielding functions.
 ///
-/// Uses bitwise containment (`contains`) rather than exact equality,
-/// because I/O primitives return compound signals like `SIG_YIELD | SIG_IO`.
-/// Exact-match would miss these, causing yield sentinels to leak into
-/// registers as values.
+/// Checks `!is_ok()` rather than matching specific signal bits, because
+/// I/O primitives return compound signals like `SIG_YIELD | SIG_IO` and
+/// SIG_SWITCH must also be detected for fiber/resume trampolining.
 #[no_mangle]
 pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
     let vm = unsafe { &*(vm as *const crate::vm::VM) };

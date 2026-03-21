@@ -7,8 +7,7 @@
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::value::fiber::{
-    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
-    SIG_YIELD,
+    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_YIELD,
 };
 use crate::value::{error_val, Value};
 
@@ -254,15 +253,11 @@ pub extern "C" fn elle_jit_call(
                 return JitValue::nil();
             }
 
-            // Check for yield from callee — use contains for compound signals
-            // (e.g. SIG_YIELD | SIG_IO from I/O primitives)
-            if vm
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| b.contains(SIG_YIELD))
-            {
-                return YIELD_SENTINEL;
+            // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
+            if let Some((sig, _)) = vm.fiber.signal {
+                if !sig.is_ok() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                    return YIELD_SENTINEL;
+                }
             }
 
             // Handle tail call sentinel
@@ -514,16 +509,15 @@ pub extern "C" fn elle_jit_make_closure(
 /// Handles SIG_OK, SIG_HALT (both return the value), SIG_YIELD (returns
 /// YIELD_SENTINEL), and errors (signal already set, returns JitValue::nil()).
 fn exec_result_to_jit_value(vm: &mut crate::vm::VM, bits: SignalBits) -> JitValue {
-    match bits {
-        SIG_OK | SIG_HALT => {
-            let (_, val) = vm.fiber.signal.take().unwrap();
-            JitValue::from_value(val)
-        }
-        SIG_YIELD => YIELD_SENTINEL,
-        _ => {
-            // SIG_ERROR — signal already set on fiber
-            JitValue::nil()
-        }
+    if bits.is_ok() || bits == SIG_HALT {
+        let (_, val) = vm.fiber.signal.take().unwrap();
+        JitValue::from_value(val)
+    } else if bits.contains(SIG_ERROR) {
+        // SIG_ERROR — signal already set on fiber
+        JitValue::nil()
+    } else {
+        // Any suspending signal (SIG_YIELD, SIG_SWITCH, user-defined) — side-exit
+        YIELD_SENTINEL
     }
 }
 
@@ -605,14 +599,11 @@ pub extern "C" fn elle_jit_tail_call(
                 return JitValue::nil();
             }
 
-            // Check for yield from callee — use contains for compound signals
-            if vm
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| b.contains(SIG_YIELD))
-            {
-                return YIELD_SENTINEL;
+            // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
+            if let Some((sig, _)) = vm.fiber.signal {
+                if !sig.is_ok() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                    return YIELD_SENTINEL;
+                }
             }
 
             if result == YIELD_SENTINEL {
@@ -756,7 +747,7 @@ pub(crate) fn build_closure_env_for_jit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value::fiber::{SIG_DEBUG, SIG_IO};
+    use crate::value::fiber::{SIG_DEBUG, SIG_IO, SIG_OK};
     use crate::vm::VM;
 
     fn make_vm() -> VM {
