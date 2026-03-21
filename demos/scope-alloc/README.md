@@ -96,10 +96,10 @@ The demo uses three primitives:
 
 ```janet
 (let ((stats (arena/scope-stats)))
-  (display "Enters: ")
-  (display (get stats :enters))
-  (display "  Dtors: ")
-  (display (get stats :dtors-run)))
+  (print "Enters: ")
+  (print (get stats :enters))
+  (print "  Dtors: ")
+  (println (get stats :dtors-run)))
 ```
 
 ### The Workload

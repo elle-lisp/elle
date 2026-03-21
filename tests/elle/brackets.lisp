@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Bracket syntax tests
 #
 # Migrated from tests/integration/bracket_errors.rs

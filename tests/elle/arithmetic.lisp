@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Arithmetic Law Tests
 ##
 ## Migrated from tests/property/arithmetic.rs

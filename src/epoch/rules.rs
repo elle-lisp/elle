@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 1;
+pub const CURRENT_EPOCH: u64 = 3;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -103,6 +103,34 @@ static MIGRATIONS: &[Migration] = &[
             },
         ],
     },
+    Migration {
+        epoch: 2,
+        summary: "print→println, newline→println, drop write",
+        rules: &[
+            MigrationRule::Rename {
+                old: "print",
+                new: "println",
+            },
+            MigrationRule::Rename {
+                old: "newline",
+                new: "println",
+            },
+            MigrationRule::Remove {
+                symbol: "write",
+                message: "use (pp ...) for literal form or (stream/write port data) for port I/O",
+            },
+        ],
+    },
+    Migration {
+        epoch: 3,
+        summary: "display→print",
+        rules: &[
+            MigrationRule::Rename {
+                old: "display",
+                new: "print",
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -179,9 +207,14 @@ mod tests {
     }
 
     #[test]
-    fn test_no_migrations_beyond_current() {
+    fn test_renames_through_current() {
         let renames = collapsed_renames(0, CURRENT_EPOCH);
-        assert!(renames.is_empty());
+        // epoch 2: print→println, newline→println
+        // epoch 3: display→print
+        assert_eq!(renames.get("print"), Some(&"println"));
+        assert_eq!(renames.get("newline"), Some(&"println"));
+        assert_eq!(renames.get("display"), Some(&"print"));
+        assert_eq!(renames.len(), 3);
     }
 
     #[test]
@@ -192,10 +225,17 @@ mod tests {
 
     #[test]
     fn test_replace_rules_epoch_1() {
-        let replaces = replace_rules_in_range(0, CURRENT_EPOCH);
+        let replaces = replace_rules_in_range(0, 1);
         assert_eq!(replaces.len(), 9);
         // First rule should be assert-true
         assert_eq!(replaces[0].0, "assert-true");
+    }
+
+    #[test]
+    fn test_removals_epoch_2() {
+        let removals = removals_in_range(0, CURRENT_EPOCH);
+        assert!(removals.contains_key("write"));
+        assert_eq!(removals.len(), 1);
     }
 
     #[test]

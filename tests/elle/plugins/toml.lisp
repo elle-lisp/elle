@@ -1,11 +1,10 @@
-(elle/epoch 1)
 
 ## TOML plugin integration tests
 
 ## Try to load the toml plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_toml.so")))
 (when (not ok?)
-  (display "SKIP: toml plugin not built\n")
+  (print "SKIP: toml plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

@@ -10,14 +10,20 @@ the compiler will transparently rewrite old-epoch syntax before compilation.
 Place `(elle/epoch N)` as the first form in a source file:
 
 ```lisp
-(elle 0)
+(elle/epoch 0)
 (def x 10)
-(display x)
+(println x)
 ```
 
 The `(elle/epoch N)` declaration tells the compiler which epoch the file was written
 for. It is consumed during compilation and does not appear in the running
 program. Files without an epoch declaration target the current epoch.
+
+To query the current epoch at runtime:
+
+```lisp
+(elle/epoch)   # => 3
+```
 
 ## What happens at compile time
 
@@ -146,6 +152,35 @@ Migration {
 },
 ```
 
-Files that declare `(elle 0)` will continue to compile — the compiler
+Files that declare `(elle/epoch 0)` will continue to compile — the compiler
 transparently applies the migration rules. Authors can run `elle rewrite`
 to update their source and remove the epoch tag.
+
+## Epoch history
+
+### Epoch 1 — consolidate assertion helpers
+
+Replaced `assert-true`, `assert-false`, `assert-eq`, `assert-equal`,
+`assert-string-eq`, `assert-list-eq`, `assert-not-nil`, `assert-err`, and
+`assert-err-kind` with the single `(assert expr msg)` form.
+
+### Epoch 2 — print→println, newline→println, drop write
+
+- `print` renamed to `println` (output with trailing newline).
+- `newline` renamed to `println` (zero-arg newline is now `(println)`).
+- `write` removed — use `(pp ...)` for literal form or `(stream/write port data)` for port I/O.
+
+### Epoch 3 — display→print
+
+- `display` renamed to `print` (output without trailing newline).
+
+After epoch 3, the output API is:
+
+| Function   | Target   | Newline? |
+|------------|----------|----------|
+| `print`    | `*stdout*` | no     |
+| `println`  | `*stdout*` | yes    |
+| `eprint`   | `*stderr*` | no     |
+| `eprintln` | `*stderr*` | yes    |
+
+All four respect `parameterize` rebinding of `*stdout*`/`*stderr*`.

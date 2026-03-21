@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 
 # Concurrency — parallel computation with spawn and join
@@ -26,7 +25,7 @@
        [y 20]
        [handle (spawn (fn [] (+ x y)))]
        [result (join handle)])
-  (display "  10 + 20 in another thread: ") (print result)
+  (print "  10 + 20 in another thread: ") (println result)
   (assert (= result 30) "spawn/join computes 10+20"))
 
 
@@ -41,8 +40,8 @@
        [r1 (join h1)]
        [r2 (join h2)]
        [r3 (join h3)])
-  (display "  products: ") (display r1)
-    (display " ") (display r2) (display " ") (print r3)
+  (print "  products: ") (print r1)
+    (print " ") (print r2) (print " ") (println r3)
   (assert (= r1 6) "thread 1: 2*3")
   (assert (= r2 20) "thread 2: 4*5")
   (assert (= r3 42) "thread 3: 6*7")
@@ -59,7 +58,7 @@
        [age 30])
    (let* ([result (join (spawn (fn [] [name age])))]
            [greeting (string/join ["Hello, " (get result 0) "! You are " (string (get result 1)) " years old."] "")])
-     (display "  ") (print greeting)
+     (print "  ") (println greeting)
      (assert (string/contains? greeting "Alice") "captured string in thread")
      (assert (string/contains? greeting "30") "captured number conversion")))
 
@@ -67,7 +66,7 @@
 (let* ([nums [10 20 30]]
        [result (join (spawn (fn []
          (+ (get nums 0) (get nums 1) (get nums 2)))))])
-  (display "  sum of [10 20 30]: ") (print result)
+  (print "  sum of [10 20 30]: ") (println result)
   (assert (= result 60) "array elements accessible in thread"))
 
 
@@ -78,8 +77,8 @@
 # Each thread has a distinct ID (returned as an integer).
 (let* ([main-id (current-thread-id)]
        [spawned-id (join (spawn (fn [] (current-thread-id))))])
-  (display "  main thread: ") (display main-id)
-    (display "  spawned thread: ") (print spawned-id)
+  (print "  main thread: ") (print main-id)
+    (print "  spawned thread: ") (println spawned-id)
   (assert (integer? main-id) "thread ID is an integer")
   (assert (integer? spawned-id) "spawned thread ID is an integer")
   (assert (not (= main-id spawned-id)) "threads have distinct IDs"))
@@ -101,9 +100,9 @@
        [t4 (spawn (fn [] (- (/ (* 100 101) 2)             # sum 76..100
                             (/ (* 75 76) 2))))]
        [total (+ (join t1) (join t2) (join t3) (join t4))])
-  (display "  sum 1..100 across 4 threads: ") (print total)
+  (print "  sum 1..100 across 4 threads: ") (println total)
   (assert (= total 5050) "parallel sum of 1..100"))
 
 
-(print "")
-(print "all concurrency passed.")
+(println "")
+(println "all concurrency passed.")

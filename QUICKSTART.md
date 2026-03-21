@@ -251,7 +251,7 @@ true  false          # booleans (not #t/#f)
 
 # Iteration (prelude macro)
 (each x in [1 2 3]
-  (print x))
+  (println x))
 ```
 
 ---
@@ -644,9 +644,30 @@ Key primitives:
 
 **Important:** `stream/write` and `stream/flush` signal `:yield`. Outside an
 event loop they work for small amounts of I/O but will fail with "yield outside
-coroutine context" in tight loops. For synchronous stdout, use `display` or
-`print` (signal: silent). For synchronous stderr in non-async code, use FFI
-`write(2, ...)`.
+coroutine context" in tight loops. For synchronous output, use `print`/`println`
+(stdout) or `eprint`/`eprintln` (stderr) — these internally spawn a fiber and
+run a sync scheduler, so they work anywhere without an event loop.
+
+### Synchronous Output
+
+```lisp
+(print "no newline")           # write to *stdout*, no newline
+(println "with newline")       # write to *stdout* + newline
+(println "count: " 42)         # multiple args concatenated
+(println)                      # just a newline
+
+(eprint "no newline")          # write to *stderr*, no newline
+(eprintln "error: bad input")  # write to *stderr* + newline
+```
+
+All four respect `*stdout*`/`*stderr*` parameter rebinding:
+
+```lisp
+(parameterize ((*stdout* my-port))
+  (println "goes to my-port, not terminal"))
+```
+
+`pp` pretty-prints data structures in literal form (useful for debugging):
 
 ---
 
@@ -763,7 +784,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
     (let ((conn (tls:connect "example.com" 443)))
       (defer (tls:close conn)
         (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-        (print (string (tls:read-all conn)))))))
+        (println (string (tls:read-all conn)))))))
 ```
 
 #### `elle-tree-sitter` — Multi-language parsing and structural queries
@@ -804,8 +825,8 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 # greet.lisp
 (def args (drop 1 (sys/args)))   # skip "--"
 (if (empty? args)
-  (print "Usage: elle greet.lisp -- <name>")
-  (print (string/join ["Hello, " (first args) "!"] "")))
+  (println "Usage: elle greet.lisp -- <name>")
+  (println (string/join ["Hello, " (first args) "!"] "")))
 ```
 ```bash
 elle greet.lisp -- Alice   # => Hello, Alice!
@@ -899,7 +920,7 @@ the source of truth for the full API.
 ```lisp
 (var i 0)
 (each x in items
-  (print i x)
+  (println i x)
   (assign i (+ i 1)))
 ```
 
@@ -918,7 +939,8 @@ These are things agents commonly reach for that Elle does not have:
 | `define` | `def` / `defn` / `var` |
 | `lambda` | `fn` |
 | `begin` as scoped sequencing | `block` (`begin` shares surrounding scope) |
-| `display` with newline | `print` (adds newline); `display` does not |
+| `display` | `print` (epoch 3 renamed `display` to `print`) |
+| `write` (literal form) | `pp` for pretty-print, or `stream/write` for port I/O |
 | Mutable struct field update | `put` on `@struct` |
 | `null` | `nil` |
 | `char` type | `string` and `@string` are grapheme-indexed; use `get` to extract a grapheme cluster as a string |

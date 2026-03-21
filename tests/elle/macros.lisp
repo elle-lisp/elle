@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Macro desugaring tests
 #
 # Migrated from tests/property/macros.rs

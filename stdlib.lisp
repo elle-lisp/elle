@@ -961,6 +961,38 @@
 
 (def *scheduler* (parameter sync-scheduler))
 
+## ── Synchronous output ──────────────────────────────────────────────
+
+(defn print (& args)
+  "Write values to *stdout*, no newline. Respects *stdout* rebinding."
+  (sync-scheduler
+    (fiber/new (fn [] (stream/write (*stdout*) (apply string args))
+                      (stream/flush (*stdout*)))
+      |:error :io|)))
+
+(defn println (& args)
+  "Write values to *stdout* with trailing newline. Respects *stdout* rebinding."
+  (sync-scheduler
+    (fiber/new (fn [] (stream/write (*stdout*) (string (apply string args) "\n"))
+                      (stream/flush (*stdout*)))
+      |:error :io|)))
+
+(defn eprint (& args)
+  "Write values to *stderr*, no newline. Respects *stderr* rebinding."
+  (sync-scheduler
+    (fiber/new (fn [] (stream/write (*stderr*) (apply string args))
+                      (stream/flush (*stderr*)))
+      |:error :io|)))
+
+(defn eprintln (& args)
+  "Write values to *stderr* with trailing newline. Respects *stderr* rebinding."
+  (sync-scheduler
+    (fiber/new (fn [] (stream/write (*stderr*) (string (apply string args) "\n"))
+                      (stream/flush (*stderr*)))
+      |:error :io|)))
+
+## ── Spawn ───────────────────────────────────────────────────────────
+
 (def ev/spawn
   (fn [closure]
     "Spawn a closure in a new fiber managed by the current scheduler."
@@ -1151,6 +1183,7 @@
    :fn/cfg fn/cfg :fn/cfg-label fn/cfg-label
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
+    :print print :println println :eprint eprint :eprintln eprintln
     :sync-scheduler sync-scheduler :*scheduler* *scheduler*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/shutdown ev/shutdown :*shutdown* *shutdown*

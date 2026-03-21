@@ -1,10 +1,9 @@
-(elle/epoch 1)
 
 ## syn plugin integration tests
 
 (def [ok? plugin] (protect (import-file "target/release/libelle_syn.so")))
 (when (not ok?)
-  (display "SKIP: syn plugin not built\n")
+  (print "SKIP: syn plugin not built\n")
   (exit 0))
 
 (def parse-file-fn    (get plugin :parse-file))

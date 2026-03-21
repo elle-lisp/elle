@@ -1,11 +1,10 @@
-(elle/epoch 1)
 
 ## YAML plugin integration tests
 
 ## Try to load the yaml plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_yaml.so")))
 (when (not ok?)
-  (display "SKIP: yaml plugin not built\n")
+  (print "SKIP: yaml plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

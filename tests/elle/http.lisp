@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # HTTP module tests
 #
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
@@ -90,4 +89,4 @@
 # Deferred: requires ev/run cancellation so http:serve exits cleanly
 # when the listener is closed. See pending.md Phase 2/3.
 
-(print "all http tests passed")
+(println "all http tests passed")

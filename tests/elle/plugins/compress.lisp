@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 ## Compress plugin integration tests
 ## Tests the compress plugin (.so loaded via import-file)
@@ -6,7 +5,7 @@
 ## Try to load the compress plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_compress.so")))
 (when (not ok?)
-  (display "SKIP: compress plugin not built\n")
+  (print "SKIP: compress plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

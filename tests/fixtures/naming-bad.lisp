@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Bad naming conventions - should be flagged by linter
 
 (var myVariable 10)

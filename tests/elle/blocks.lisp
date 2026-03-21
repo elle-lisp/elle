@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Tests for named blocks with break
 #
 # Note: block expressions containing break must be bound to a var before

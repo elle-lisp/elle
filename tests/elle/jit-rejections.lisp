@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## jit/rejections — test JIT rejection tracking
 
 ## Before any hot functions, jit/rejections returns empty list

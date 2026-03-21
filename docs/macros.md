@@ -28,8 +28,8 @@ list operations, recursion — everything.
 (defmacro my-when (test body)
   `(if ,test ,body nil))
 
-(my-when (> x 0) (print "positive"))
-;# Expands to: (if (> x 0) (print "positive") nil)
+(my-when (> x 0) (println "positive"))
+;# Expands to: (if (> x 0) (println "positive") nil)
 ```
 
 ### What works

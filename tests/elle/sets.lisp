@@ -1,4 +1,3 @@
-(elle/epoch 1)
 ## Set types test suite
 ##
 ## Comprehensive tests for set types (immutable and mutable).

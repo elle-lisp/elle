@@ -769,7 +769,7 @@ PR and merge.
 
 (def [ok? plugin] (protect (import-file "target/release/libelle_myplugin.so")))
 (when (not ok?)
-  (display "SKIP: myplugin plugin not built\n")
+  (println "SKIP: myplugin plugin not built")
   (exit 0))
 
 (def hello-fn (get plugin :hello))

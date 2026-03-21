@@ -1,4 +1,3 @@
-(elle/epoch 1)
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]

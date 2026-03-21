@@ -1,11 +1,10 @@
-(elle/epoch 1)
 
 ## protobuf plugin integration tests
 
 ## Try to load the protobuf plugin. If it fails, exit cleanly.
 (def [ok? plugin] (protect (import-file "target/release/libelle_protobuf.so")))
 (when (not ok?)
-  (display "SKIP: protobuf plugin not built\n")
+  (print "SKIP: protobuf plugin not built\n")
   (exit 0))
 
 ## Extract plugin functions from the returned struct

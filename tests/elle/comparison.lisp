@@ -1,4 +1,3 @@
-(elle/epoch 1)
 # Comparison operators — string and keyword comparison
 #
 # Tests for <, >, <=, >= on strings and keywords.
