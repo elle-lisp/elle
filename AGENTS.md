@@ -330,6 +330,9 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384
 | File | Purpose |
 |------|---------|
 | `tools/elle-graph.lisp` | Extract RDF triples from Elle source files via `read-all` |
+| `tools/rust-graph.lisp` | Extract RDF triples from Rust source files via syn plugin |
+| `tools/load-all.lisp` | Extract Elle + Rust graphs and load into oxigraph store |
+| `tools/run-elle.sh` | Wrapper that sets GLIBC_TUNABLES for C++ plugins (oxigraph, syn) |
 | `tools/run-graph.sh` | Wrapper that sets `GLIBC_TUNABLES` and runs elle-graph |
 | `tools/demo-queries.lisp` | Example SPARQL queries against the Elle knowledge graph |
 | `tools/test-mcp.lisp` | Smoke test: spawns server, exercises all tools |
@@ -346,6 +349,20 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384
 | `elle:Def` | `elle:name`, `elle:file` |
 | `elle:Macro` | `elle:name`, `elle:file` |
 | `elle:Import` | `elle:name`, `elle:path`, `elle:file` |
+
+`rust-graph.lisp` and the `extract_rust` MCP tool emit ntriples with
+`urn:rust:` namespace:
+
+| Type | Predicates |
+|------|-----------|
+| `rust:Fn` | `rust:name`, `rust:file`, `rust:param`, `rust:param-type`, `rust:return-type`, `rust:async`, `rust:unsafe`, `rust:visibility`, `rust:attribute` |
+| `rust:Struct` | `rust:name`, `rust:file`, `rust:kind`, `rust:field`, `rust:field-type`, `rust:visibility`, `rust:attribute` |
+| `rust:Enum` | `rust:name`, `rust:file`, `rust:variant`, `rust:visibility`, `rust:attribute` |
+| `rust:Trait` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+| `rust:Const` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+| `rust:Static` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+| `rust:Type` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+| `rust:Mod` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
 
 ## Standard Library Functions
 
