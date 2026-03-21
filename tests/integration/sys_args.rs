@@ -14,7 +14,7 @@ fn get_elle_binary() -> &'static str {
 
 #[test]
 fn test_sys_args_no_trailing_args_returns_empty() {
-    // Run `elle -` with stdin `(display (sys/args))` and no trailing args.
+    // Run `elle -` with stdin `(print (sys/args))` and no trailing args.
     // sys/args should return () — display of empty list is "()".
     let elle_bin = get_elle_binary();
 
@@ -29,7 +29,7 @@ fn test_sys_args_no_trailing_args_returns_empty() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/args))")
+            .write_all(b"(print (sys/args))")
             .expect("Failed to write to stdin");
     }
 
@@ -44,14 +44,14 @@ fn test_sys_args_no_trailing_args_returns_empty() {
     assert_eq!(
         stdout.trim(),
         "()",
-        "sys/args without trailing args should display as (), got: {:?}",
+        "sys/args without trailing args should print as (), got: {:?}",
         stdout
     );
 }
 
 #[test]
 fn test_sys_args_trailing_args_returned() {
-    // Run `elle - foo bar` with stdin `(display (sys/args))`.
+    // Run `elle - foo bar` with stdin `(print (sys/args))`.
     // sys/args should return ("foo" "bar").
     let elle_bin = get_elle_binary();
 
@@ -66,7 +66,7 @@ fn test_sys_args_trailing_args_returned() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/args))")
+            .write_all(b"(print (sys/args))")
             .expect("Failed to write to stdin");
     }
 
@@ -92,7 +92,7 @@ fn test_sys_args_trailing_args_returned() {
 
 #[test]
 fn test_sys_args_flags_after_source_passed_through() {
-    // Run `elle - -v foo` with stdin `(display (sys/args))`.
+    // Run `elle - -v foo` with stdin `(print (sys/args))`.
     // Flags that appear after the source arg are passed through as user args,
     // not interpreted by elle.
     let elle_bin = get_elle_binary();
@@ -108,7 +108,7 @@ fn test_sys_args_flags_after_source_passed_through() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/args))")
+            .write_all(b"(print (sys/args))")
             .expect("Failed to write to stdin");
     }
 
@@ -136,7 +136,7 @@ fn test_sys_args_flags_after_source_passed_through() {
 
 #[test]
 fn test_sys_argv_includes_script_name() {
-    // Run `elle - foo bar` with stdin `(display (sys/argv))`.
+    // Run `elle - foo bar` with stdin `(print (sys/argv))`.
     // sys/argv should include "-" as element 0, then "foo", "bar".
     let elle_bin = get_elle_binary();
 
@@ -151,7 +151,7 @@ fn test_sys_argv_includes_script_name() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/argv))")
+            .write_all(b"(print (sys/argv))")
             .expect("Failed to write to stdin");
     }
 
@@ -163,8 +163,8 @@ fn test_sys_argv_includes_script_name() {
         "elle exited with error, stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // display of a list prints elements without quotes: (- foo bar)
-    // so "-" displays as "-" as a bare hyphen in the output.
+    // print of a list outputs elements without quotes: (- foo bar)
+    // so "-" appears as a bare hyphen in the output.
     assert!(
         stdout.contains('-'),
         "expected '-' in sys/argv output, got: {:?}",
@@ -184,7 +184,7 @@ fn test_sys_argv_includes_script_name() {
 
 #[test]
 fn test_sys_argv_no_trailing_args() {
-    // Run `elle -` with stdin `(display (sys/argv))` and no trailing args.
+    // Run `elle -` with stdin `(print (sys/argv))` and no trailing args.
     // sys/argv should return ("-") — a one-element list containing just the script name.
     let elle_bin = get_elle_binary();
 
@@ -199,7 +199,7 @@ fn test_sys_argv_no_trailing_args() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/argv))")
+            .write_all(b"(print (sys/argv))")
             .expect("Failed to write to stdin");
     }
 
@@ -226,7 +226,7 @@ fn test_sys_argv_no_trailing_args() {
 
 #[test]
 fn test_sys_argv_flags_after_source() {
-    // Run `elle - -v foo` with stdin `(display (sys/argv))`.
+    // Run `elle - -v foo` with stdin `(print (sys/argv))`.
     // Flags that appear after the source arg are passed through as user args.
     // sys/argv should include "-", "-v", "foo".
     let elle_bin = get_elle_binary();
@@ -242,7 +242,7 @@ fn test_sys_argv_flags_after_source() {
     {
         let stdin = child.stdin.as_mut().expect("Failed to open stdin");
         stdin
-            .write_all(b"(display (sys/argv))")
+            .write_all(b"(print (sys/argv))")
             .expect("Failed to write to stdin");
     }
 
