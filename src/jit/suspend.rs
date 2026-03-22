@@ -462,12 +462,7 @@ mod tests {
         // 10 locals go into env, 20 operands on stack
         assert_eq!(frame.env.len(), 10);
         for i in 0..10 {
-            assert_eq!(
-                frame.env[i].as_int(),
-                Some(i as i64),
-                "env[{}] mismatch",
-                i
-            );
+            assert_eq!(frame.env[i].as_int(), Some(i as i64), "env[{}] mismatch", i);
         }
         assert_eq!(frame.stack.len(), 20);
         for i in 0..20 {
