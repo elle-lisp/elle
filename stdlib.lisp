@@ -1012,16 +1012,21 @@
         (shutdown-req  @[nil]))  # nil = running, integer = shutdown requested with timeout
 
     (defn handle-fiber-after-resume [fiber]
-      "Route a fiber to the right place after resume."
+      "Route a fiber to the right place after resume.
+       Errored fibers are left in :error status for ev/gather to detect."
       (case (fiber/status fiber)
         :dead   nil
-        :error  (fiber/propagate fiber)
+        :error  nil
         :paused (cond
                   ((not (= 0 (bit/and (fiber/bits fiber) 1)))
-                   (fiber/propagate fiber))
+                   (fiber/abort fiber (fiber/value fiber)))  # error from within — mark as errored
                   ((not (= 0 (bit/and (fiber/bits fiber) 512)))
-                   (let ((id (io/submit backend (fiber/value fiber))))
-                     (put pending id fiber)))
+                   (let (([ok? result] (protect (io/submit backend (fiber/value fiber)))))
+                     (if ok?
+                       (put pending result fiber)
+                       (begin
+                         (fiber/abort fiber result)
+                         nil))))  # io/submit failed — fiber is now :error, leave it
                   (true
                    (push runnable fiber)))))
 
@@ -1139,6 +1144,11 @@
                    (*shutdown* (get sched :shutdown)))
       (let ((fibers (map ev/spawn thunks)))
         ((get sched :pump))
+        # Propagate errors: if any fiber errored or paused-with-error, re-raise.
+        (each f in fibers
+          (when (or (= (fiber/status f) :error)
+                    (not (= 0 (bit/and (fiber/bits f) 1))))
+            (error (fiber/value f))))
         (let ((results (map fiber/value fibers)))
           (if (= (length results) 1)
             (first results)
