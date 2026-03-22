@@ -59,7 +59,7 @@
                     (slice text (+ cb 2) cp)
                     "\">"
                     (slice text (+ bp 1) cb)
-                    "</a>"))))))))))))
+                    "</a>")))))))))))
 
 (def format-links (fn (text)
   (format-links-rec text "")))
@@ -484,7 +484,7 @@ details > pre {
           (-> acc (append "<tr>")
             (append (fold
               (fn (acc2 cell)
-                (-> acc2 (append "<td>") (append (html-escape cell)) (append "</td>")))
+                (-> acc2 (append "<td>") (append (format-inline cell)) (append "</td>")))
               ""
               row))
             (append "</tr>")))
