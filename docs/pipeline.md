@@ -1,4 +1,4 @@
-# pipeline
+# Compilation Pipeline
 
 Compilation entry points. Orchestrates Reader → Expander → Analyzer → Lowerer → Emitter.
 
