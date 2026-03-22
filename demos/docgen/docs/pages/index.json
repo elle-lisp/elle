@@ -1,6 +1,6 @@
 {
   "title": "Elle Programming Language",
-  "description": "A modern Lisp interpreter with bytecode compilation, pattern matching, and FFI",
+  "description": "A Lisp with deep static analysis: binding resolution, capture analysis, and signal inference at compile time",
   "sections": [
     {
       "heading": "Welcome to Elle",
@@ -8,31 +8,26 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Elle is a **modern Lisp interpreter** designed for clarity, performance, and expressiveness. It combines the elegance of Lisp with practical features like bytecode compilation, pattern matching, and seamless FFI integration."
-        },
-        {
-          "type": "paragraph",
-          "text": "Whether you're building command-line tools, data processing pipelines, or exploring functional programming, Elle provides a clean, powerful foundation."
+          "text": "Elle is a Lisp. What separates it from other Lisps is the depth of its static analysis: full binding resolution, capture analysis, and signal inference happen at compile time, before any code runs. This gives Elle a sound signal system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass."
         }
       ]
     },
     {
-      "heading": "Key Features",
+      "heading": "What Makes Elle Different",
       "level": 2,
       "content": [
         {
           "type": "list",
           "items": [
-            "**Bytecode Compilation** — Programs are compiled to bytecode for efficient execution",
-            "**Lisp Syntax** — Elegant, homoiconic syntax with full metaprogramming support",
-            "**First-Class Functions** — Closures, higher-order functions, and functional composition",
-            "**Pattern Matching** — Powerful destructuring with `match` expressions",
-            "**Immutable Data Structures** — Lists, vectors, and persistent data structures",
-            "**Mutable Collections** — Tables and structs for when you need state",
-            "**File I/O** — Comprehensive file and directory operations",
-            "**JSON Support** — Native JSON parsing and serialization",
-            "**Exception Handling** — `try/catch/finally` for robust error handling",
-            "**Module System** — Load and compose code with `import-file`"
+            "**Fibers** — independent execution contexts with their own stack, call frames, signal mask, and heap. Cooperative and explicitly resumed. When a fiber finishes, its heap is freed in O(1) — no GC pause, no reference counting.",
+            "**Signals** — typed, cooperative flow-control interrupts. A signal is a keyword (`:error`, `:log`, `:abort`, or user-defined) that a fiber emits to its parent. The compiler infers which functions can emit signals.",
+            "**Hygienic Macros** — full metaprogramming with `defmacro`, quasiquote/unquote, `gensym`, and scope sets",
+            "**Colorless Concurrency** — fibers, coroutines, and OS threads from the same primitives",
+            "**Mutable/Immutable Split** — `[array]` vs `@[array]`, `{struct}` vs `@{struct}`, `\"str\"` vs `@\"str\"`",
+            "**Pattern Matching** — `match` with destructuring, struct tags, wildcards, and `& rest`",
+            "**FFI** — call C functions directly with `ffi/native` and `ffi/defbind`",
+            "**Bytecode Compilation** — programs are compiled to bytecode with optional JIT",
+            "**Module System** — closure-as-module with parametric imports"
           ],
           "ordered": false
         }
@@ -44,30 +39,16 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Here's a simple Elle program that demonstrates core features:"
+          "text": "A fiber yields progress updates; the parent drives it to completion:"
         },
         {
           "type": "code",
           "language": "lisp",
-          "text": ";; Define a function to calculate factorial\n(define factorial\n  (lambda (n)\n    (if (<= n 1)\n      1\n      (* n (factorial (- n 1))))))\n\n;; Use it\n(display \"5! = \")\n(display (factorial 5))\n(newline)"
+          "text": "(defn process-items [items]\n  (each item items\n    (emit :progress {:item item :result (* item item)})))\n\n(def f (fiber/new (fn [] (process-items [1 2 3])) |:progress|))\n\n(forever\n  (fiber/resume f)\n  (if (= (fiber/status f) :paused)\n    (print \"progress:\" (fiber/value f))\n    (break)))"
         },
         {
           "type": "paragraph",
-          "text": "This program defines a recursive factorial function and prints the result. Elle handles the recursion efficiently with tail-call optimization."
-        }
-      ]
-    },
-    {
-      "heading": "Getting Started",
-      "level": 2,
-      "content": [
-        {
-          "type": "paragraph",
-          "text": "Ready to dive in? Start with the [Getting Started](getting-started.html) guide to install Elle and write your first program."
-        },
-        {
-          "type": "paragraph",
-          "text": "Then explore the [Language Guide](language-guide.html) to learn about Elle's data types, control flow, and advanced features."
+          "text": "When the fiber finishes, its entire heap is freed in O(1)."
         }
       ]
     },
@@ -76,12 +57,18 @@
       "level": 2,
       "content": [
         {
+          "type": "paragraph",
+          "text": "Elle ships with comprehensive design documents and runnable examples:"
+        },
+        {
           "type": "list",
           "items": [
-            "[Getting Started](getting-started.html) — Installation and first steps",
-            "[Language Guide](language-guide.html) — Data types, functions, and control flow",
-            "[Standard Library Reference](stdlib-reference.html) — Built-in functions and operations",
-            "[Examples](examples.html) — Real-world code examples"
+            "[Getting Started](getting-started.html) — installation and first steps",
+            "[Language Guide](language-guide.html) — data types, functions, and control flow",
+            "[Concurrency](concurrency.html) — fibers, coroutines, signals, and threads",
+            "[Documentation](documentation.html) — language reference, design documents, and contributor guides",
+            "[Examples](examples.html) — 20+ runnable programs covering every major feature",
+            "[Standard Library](stdlib-reference.html) — all built-in functions, auto-generated from runtime metadata"
           ],
           "ordered": false
         }
