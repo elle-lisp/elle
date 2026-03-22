@@ -8,7 +8,7 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Elle ships with 20+ executable example programs. Each file is self-contained — run it, read the output, read the source. Start with `hello.lisp` and work down."
+          "text": "Elle ships with 20+ executable example programs. Each file is self-contained — run it, read the output, read the source. Start with [hello.lisp](https://github.com/elle-lisp/elle/blob/main/examples/hello.lisp) and work down."
         },
         {
           "type": "code",
@@ -25,26 +25,26 @@
           "type": "table",
           "headers": ["File", "What It Covers"],
           "rows": [
-            ["hello.lisp", "Smoke test — one line, proves the toolchain works"],
-            ["basics.lisp", "Type system tour: immediates, truthiness, arithmetic, the mutable/immutable split, bytes, boxes, equality"],
-            ["functions.lisp", "A gradebook built with defn/fn, closures, higher-order functions, composition, pipelines, variadic and mutual recursion"],
-            ["control.lisp", "An expression evaluator: if, cond, case, when/unless, if-let/when-let, while, forever, block/break, full match patterns, -> / ->>"],
-            ["collections.lisp", "A contact book app exercising literal syntax, get/put, destructuring, each, threading, splice, string ops, grapheme clusters"],
-            ["destructuring.lisp", "Unpacking data: silent nil semantics, wildcards, & rest, nested patterns, struct/table by-key, match dispatch on struct tags"],
-            ["errors.lisp", "Error handling: error, try/catch, protect, defer, with, propagation, safe wrappers, validation"],
-            ["coroutines.lisp", "Cooperative sequences: coro/new, yield, lifecycle, Fibonacci generator, interleaving, nesting, yield* delegation"],
-            ["meta.lisp", "Macros and hygiene: defmacro, quasiquote/unquote, gensym, datum->syntax, syntax->datum"],
-            ["concurrency.lisp", "Parallel threads: spawn, join, closure capture across threads, parallel computation"],
-            ["processes.lisp", "Erlang-style actors: fiber-based scheduler, message passing with send/recv, links, trap-exit, crash propagation"],
-            ["io.lisp", "Files, JSON, modules: slurp/spit, paths, directories, json-parse/json-serialize, import-file"],
-            ["introspection.lisp", "Looking inside: clock primitives, time/elapsed, closure introspection, disbit/disjit, benchmarking"],
-            ["ffi.lisp", "C interop: ffi/native, ffi/defbind, structs, variadic calls, callbacks (qsort)"],
-            ["signals.lisp", "User-defined signals, silence restrictions, early termination, progress reporting, logging, plugin sandboxing"],
-            ["fuel.lisp", "Instruction budget management"],
-            ["parameters.lisp", "Dynamic bindings"],
-            ["channels.lisp", "Message passing channels"],
-            ["async_io.lisp", "Async I/O operations"],
-            ["http.lisp", "HTTP client"]
+            ["[hello.lisp](https://github.com/elle-lisp/elle/blob/main/examples/hello.lisp)", "Smoke test — one line, proves the toolchain works"],
+            ["[basics.lisp](https://github.com/elle-lisp/elle/blob/main/examples/basics.lisp)", "Type system tour: immediates, truthiness, arithmetic, the mutable/immutable split, bytes, boxes, equality"],
+            ["[functions.lisp](https://github.com/elle-lisp/elle/blob/main/examples/functions.lisp)", "A gradebook built with defn/fn, closures, higher-order functions, composition, pipelines, variadic and mutual recursion"],
+            ["[control.lisp](https://github.com/elle-lisp/elle/blob/main/examples/control.lisp)", "An expression evaluator: if, cond, case, when/unless, if-let/when-let, while, forever, block/break, full match patterns, -> / ->>"],
+            ["[collections.lisp](https://github.com/elle-lisp/elle/blob/main/examples/collections.lisp)", "A contact book app exercising literal syntax, get/put, destructuring, each, threading, splice, string ops, grapheme clusters"],
+            ["[destructuring.lisp](https://github.com/elle-lisp/elle/blob/main/examples/destructuring.lisp)", "Unpacking data: silent nil semantics, wildcards, & rest, nested patterns, struct/table by-key, match dispatch on struct tags"],
+            ["[errors.lisp](https://github.com/elle-lisp/elle/blob/main/examples/errors.lisp)", "Error handling: error, try/catch, protect, defer, with, propagation, safe wrappers, validation"],
+            ["[coroutines.lisp](https://github.com/elle-lisp/elle/blob/main/examples/coroutines.lisp)", "Cooperative sequences: coro/new, yield, lifecycle, Fibonacci generator, interleaving, nesting, yield* delegation"],
+            ["[meta.lisp](https://github.com/elle-lisp/elle/blob/main/examples/meta.lisp)", "Macros and hygiene: defmacro, quasiquote/unquote, gensym, datum->syntax, syntax->datum"],
+            ["[concurrency.lisp](https://github.com/elle-lisp/elle/blob/main/examples/concurrency.lisp)", "Parallel threads: spawn, join, closure capture across threads, parallel computation"],
+            ["[processes.lisp](https://github.com/elle-lisp/elle/blob/main/examples/processes.lisp)", "Erlang-style actors: fiber-based scheduler, message passing with send/recv, links, trap-exit, crash propagation"],
+            ["[io.lisp](https://github.com/elle-lisp/elle/blob/main/examples/io.lisp)", "Files, JSON, modules: slurp/spit, paths, directories, json-parse/json-serialize, import-file"],
+            ["[introspection.lisp](https://github.com/elle-lisp/elle/blob/main/examples/introspection.lisp)", "Looking inside: clock primitives, time/elapsed, closure introspection, disbit/disjit, benchmarking"],
+            ["[ffi.lisp](https://github.com/elle-lisp/elle/blob/main/examples/ffi.lisp)", "C interop: ffi/native, ffi/defbind, structs, variadic calls, callbacks (qsort)"],
+            ["[signals.lisp](https://github.com/elle-lisp/elle/blob/main/examples/signals.lisp)", "User-defined signals, silence restrictions, early termination, progress reporting, logging, plugin sandboxing"],
+            ["[fuel.lisp](https://github.com/elle-lisp/elle/blob/main/examples/fuel.lisp)", "Instruction budget management"],
+            ["[parameters.lisp](https://github.com/elle-lisp/elle/blob/main/examples/parameters.lisp)", "Dynamic bindings"],
+            ["[channels.lisp](https://github.com/elle-lisp/elle/blob/main/examples/channels.lisp)", "Message passing channels"],
+            ["[async_io.lisp](https://github.com/elle-lisp/elle/blob/main/examples/async_io.lisp)", "Async I/O operations"],
+            ["[http.lisp](https://github.com/elle-lisp/elle/blob/main/examples/http.lisp)", "HTTP client"]
           ]
         }
       ]
@@ -55,7 +55,7 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "The simplest Elle program:"
+          "text": "The simplest Elle program — [hello.lisp](https://github.com/elle-lisp/elle/blob/main/examples/hello.lisp):"
         },
         {
           "type": "code",
@@ -70,12 +70,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "From `functions.lisp` — a gradebook application that introduces Elle's function features:"
+          "text": "From [functions.lisp](https://github.com/elle-lisp/elle/blob/main/examples/functions.lisp) — a gradebook application that introduces Elle's function features:"
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# fn creates an anonymous function (a \"lambda\").\n# (fn [params] body) — brackets delimit the parameter list.\n(def average (fn [a b] (/ (+ a b) 2)))\n(assert (= (average 80 90) 85) \"fn: average\")\n(print \"  (average 80 90) = \") (println (average 80 90))\n\n# defn is shorthand for (def name (fn [params] body))\n(defn letter-grade [score]\n  (cond\n    ((>= score 90) \"A\")\n    ((>= score 80) \"B\")\n    ((>= score 70) \"C\")\n    ((>= score 60) \"D\")\n    (true          \"F\")))\n\n(assert (= (letter-grade 95) \"A\") \"defn: A\")\n(assert (= (letter-grade 72) \"C\") \"defn: C\")"
+          "type": "details",
+          "summary": "View source excerpt",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "# fn creates an anonymous function (a \"lambda\").\n# (fn [params] body) — brackets delimit the parameter list.\n(def average (fn [a b] (/ (+ a b) 2)))\n(assert (= (average 80 90) 85) \"fn: average\")\n(print \"  (average 80 90) = \") (println (average 80 90))\n\n# defn is shorthand for (def name (fn [params] body))\n(defn letter-grade [score]\n  (cond\n    ((>= score 90) \"A\")\n    ((>= score 80) \"B\")\n    ((>= score 70) \"C\")\n    ((>= score 60) \"D\")\n    (true          \"F\")))\n\n(assert (= (letter-grade 95) \"A\") \"defn: A\")\n(assert (= (letter-grade 72) \"C\") \"defn: C\")"
+            }
+          ]
         }
       ]
     },
@@ -85,12 +91,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "From `coroutines.lisp` — cooperative sequences with `coro/new`, `yield`, and lifecycle tracking:"
+          "text": "From [coroutines.lisp](https://github.com/elle-lisp/elle/blob/main/examples/coroutines.lisp) — cooperative sequences with `coro/new`, `yield`, and lifecycle tracking:"
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# coro/new wraps a zero-arg function into a coroutine.\n# coro/resume steps it forward; yield suspends and returns a value.\n(def co (coro/new (fn [] (yield 42))))\n(assert (coro? co) \"coro/new returns a coroutine\")\n(assert (= (coro/status co) :new) \"initial status is :new\")\n\n(def v (coro/resume co))\n(print \"  first resume: \") (println v)\n(assert (= v 42) \"first resume returns yielded value\")\n(assert (= (coro/status co) :paused) \"status after yield is :paused\")\n\n(coro/resume co)\n(assert (= (coro/status co) :dead) \"status after body completes is :dead\")"
+          "type": "details",
+          "summary": "View source excerpt",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "# coro/new wraps a zero-arg function into a coroutine.\n# coro/resume steps it forward; yield suspends and returns a value.\n(def co (coro/new (fn [] (yield 42))))\n(assert (coro? co) \"coro/new returns a coroutine\")\n(assert (= (coro/status co) :new) \"initial status is :new\")\n\n(def v (coro/resume co))\n(print \"  first resume: \") (println v)\n(assert (= v 42) \"first resume returns yielded value\")\n(assert (= (coro/status co) :paused) \"status after yield is :paused\")\n\n(coro/resume co)\n(assert (= (coro/status co) :dead) \"status after body completes is :dead\")"
+            }
+          ]
         }
       ]
     },
@@ -100,12 +112,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "From `signals.lisp` — user-defined signals for flow control. Signals are cooperative interrupts that suspend execution and let the caller decide how to respond:"
+          "text": "From [signals.lisp](https://github.com/elle-lisp/elle/blob/main/examples/signals.lisp) — user-defined signals for flow control:"
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# Declare user-defined signal keywords\n(signal :abort)    # early termination — caller catches and uses the value\n(signal :progress) # progress update — caller can display or collect\n(signal :log)      # log entry — caller decides whether to record it\n\n# find-first scans a list and signals :abort the moment pred is satisfied.\n# The rest of the list is never visited — no wasted work.\n(defn find-first [pred xs]\n  (each x in xs\n    (when (pred x)\n      (emit :abort x))))\n\n# Drive from a fiber with a signal mask\n(def f (fiber/new (fn [] (find-first even? [1 3 5 4 7])) |:abort|))\n(fiber/resume f)\n(assert (= (fiber/value f) 4) \"found first even\")"
+          "type": "details",
+          "summary": "View source excerpt",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "# Declare user-defined signal keywords\n(signal :abort)    # early termination — caller catches and uses the value\n(signal :progress) # progress update — caller can display or collect\n(signal :log)      # log entry — caller decides whether to record it\n\n# find-first scans a list and signals :abort the moment pred is satisfied.\n# The rest of the list is never visited — no wasted work.\n(defn find-first [pred xs]\n  (each x in xs\n    (when (pred x)\n      (emit :abort x))))\n\n# Drive from a fiber with a signal mask\n(def f (fiber/new (fn [] (find-first even? [1 3 5 4 7])) |:abort|))\n(fiber/resume f)\n(assert (= (fiber/value f) 4) \"found first even\")"
+            }
+          ]
         }
       ]
     },
@@ -115,7 +133,7 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "From `processes.lisp` — Erlang-style actors built on fibers, with message passing via `send`/`recv`, links, and crash propagation."
+          "text": "From [processes.lisp](https://github.com/elle-lisp/elle/blob/main/examples/processes.lisp) — Erlang-style actors built on fibers, with message passing via `send`/`recv`, links, and crash propagation."
         }
       ]
     },
@@ -125,12 +143,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "From `ffi.lisp` — calling C functions directly with automatic type marshalling:"
+          "text": "From [ffi.lisp](https://github.com/elle-lisp/elle/blob/main/examples/ffi.lisp) — calling C functions directly with automatic type marshalling:"
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# Load a shared library and bind a C function\n(def libc (ffi/native nil))\n(ffi/defbind libc puts [:string] :int)\n(puts \"hello from C\")"
+          "type": "details",
+          "summary": "View source excerpt",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "# Load a shared library and bind a C function\n(def libc (ffi/native nil))\n(ffi/defbind libc puts [:string] :int)\n(puts \"hello from C\")"
+            }
+          ]
         }
       ]
     }

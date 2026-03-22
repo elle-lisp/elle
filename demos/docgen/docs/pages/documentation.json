@@ -14,11 +14,11 @@
           "type": "table",
           "headers": ["Document", "Description"],
           "rows": [
-            ["language.md", "Complete language reference: syntax, data types, variables, functions, control flow, scoping"],
-            ["types.md", "Type system: the mutable/immutable split, all types, predicates, display format, equality"],
-            ["semantics.md", "Authoritative semantics: truthiness, lists, conditionals, equality, destructuring"],
-            ["macros.md", "Macro system: current state, architecture, hygiene, scope sets"],
-            ["modules.md", "Module system: closure-as-module, parametric imports, qualified symbols, trade-offs"]
+            ["[language.md](https://github.com/elle-lisp/elle/blob/main/docs/language.md)", "Complete language reference: syntax, data types, variables, functions, control flow, scoping"],
+            ["[types.md](https://github.com/elle-lisp/elle/blob/main/docs/types.md)", "Type system: the mutable/immutable split, all types, predicates, display format, equality"],
+            ["[semantics.md](https://github.com/elle-lisp/elle/blob/main/docs/semantics.md)", "Authoritative semantics: truthiness, lists, conditionals, equality, destructuring"],
+            ["[macros.md](https://github.com/elle-lisp/elle/blob/main/docs/macros.md)", "Macro system: current state, architecture, hygiene, scope sets"],
+            ["[modules.md](https://github.com/elle-lisp/elle/blob/main/docs/modules.md)", "Module system: closure-as-module, parametric imports, qualified symbols, trade-offs"]
           ]
         }
       ]
@@ -35,10 +35,10 @@
           "type": "table",
           "headers": ["Document", "Description"],
           "rows": [
-            ["signals.md", "Signal system: motivation, signal protocol, signal inference, JIT integration"],
-            ["fibers.md", "Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains"],
-            ["ffi.md", "FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling"],
-            ["epochs.md", "Epoch versioning system"]
+            ["[signals.md](https://github.com/elle-lisp/elle/blob/main/docs/signals.md)", "Signal system: motivation, signal protocol, signal inference, JIT integration"],
+            ["[fibers.md](https://github.com/elle-lisp/elle/blob/main/docs/fibers.md)", "Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains"],
+            ["[ffi.md](https://github.com/elle-lisp/elle/blob/main/docs/ffi.md)", "FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling"],
+            ["[epochs.md](https://github.com/elle-lisp/elle/blob/main/docs/epochs.md)", "Epoch versioning system"]
           ]
         }
       ]
@@ -55,11 +55,11 @@
           "type": "table",
           "headers": ["Document", "Description"],
           "rows": [
-            ["cookbook.md", "Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros"],
-            ["testing.md", "Testing strategy: decision tree, test categories, property tests, CI structure, running tests"],
-            ["pipeline.md", "Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching"],
-            ["debugging.md", "Debugging toolkit: introspection primitives, time API, signal system, memory profiling"],
-            ["oddities.md", "Intentional design oddities and their rationale"]
+            ["[cookbook.md](https://github.com/elle-lisp/elle/blob/main/docs/cookbook.md)", "Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros"],
+            ["[testing.md](https://github.com/elle-lisp/elle/blob/main/docs/testing.md)", "Testing strategy: decision tree, test categories, property tests, CI structure, running tests"],
+            ["[pipeline.md](https://github.com/elle-lisp/elle/blob/main/docs/pipeline.md)", "Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching"],
+            ["[debugging.md](https://github.com/elle-lisp/elle/blob/main/docs/debugging.md)", "Debugging toolkit: introspection primitives, time API, signal system, memory profiling"],
+            ["[oddities.md](https://github.com/elle-lisp/elle/blob/main/docs/oddities.md)", "Intentional design oddities and their rationale"]
           ]
         }
       ]
@@ -70,16 +70,22 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Signals are typed, cooperative flow-control interrupts. A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up."
+          "text": "Signals are typed, cooperative flow-control interrupts. A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up. See [signals.md](https://github.com/elle-lisp/elle/blob/main/docs/signals.md) for the full design document."
         },
         {
           "type": "paragraph",
           "text": "The compiler infers which functions can emit signals and enforces that silent contexts don't call yielding ones."
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# Declare a user-defined signal\n(signal :abort)\n\n# A function that signals early termination\n(defn find-first [pred xs]\n  (each x in xs\n    (when (pred x)\n      (emit :abort x))))\n\n# Drive it from a fiber\n(def f (fiber/new (fn [] (find-first even? [1 3 5 4 7])) |:abort|))\n(fiber/resume f)\n(print \"found:\" (fiber/value f))  # => found: 4"
+          "type": "details",
+          "summary": "Signal example — early termination with :abort",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "# Declare a user-defined signal\n(signal :abort)\n\n# A function that signals early termination\n(defn find-first [pred xs]\n  (each x in xs\n    (when (pred x)\n      (emit :abort x))))\n\n# Drive it from a fiber\n(def f (fiber/new (fn [] (find-first even? [1 3 5 4 7])) |:abort|))\n(fiber/resume f)\n(print \"found:\" (fiber/value f))  # => found: 4"
+            }
+          ]
         }
       ]
     },
@@ -89,16 +95,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. The parent drives execution by calling `fiber/resume`. When a fiber emits a signal, it suspends and the parent decides what to do next."
+          "text": "A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. When a fiber finishes, its entire heap is freed in O(1). See [fibers.md](https://github.com/elle-lisp/elle/blob/main/docs/fibers.md) for the full architecture reference."
         },
         {
-          "type": "paragraph",
-          "text": "When a fiber finishes, its entire heap is freed in O(1) — no GC pause, no reference counting."
-        },
-        {
-          "type": "code",
-          "language": "lisp",
-          "text": "# A fiber yields values one at a time\n(defn produce []\n  (emit :yield 1)\n  (emit :yield 2)\n  (emit :yield 3))\n\n(def f (fiber/new produce |:yield|))\n\n(fiber/resume f) (print (fiber/value f))  # => 1\n(fiber/resume f) (print (fiber/value f))  # => 2\n(fiber/resume f) (print (fiber/value f))  # => 3"
+          "type": "details",
+          "summary": "Fiber example — yielding values one at a time",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(defn produce []\n  (emit :yield 1)\n  (emit :yield 2)\n  (emit :yield 3))\n\n(def f (fiber/new produce |:yield|))\n\n(fiber/resume f) (print (fiber/value f))  # => 1\n(fiber/resume f) (print (fiber/value f))  # => 2\n(fiber/resume f) (print (fiber/value f))  # => 3"
+            }
+          ]
         }
       ]
     },
@@ -108,12 +116,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Elle has fully hygienic macros built on scope sets. Macros run at compile time and produce syntax objects that respect lexical scope."
+          "text": "Elle has fully hygienic macros built on scope sets. Macros run at compile time and produce syntax objects that respect lexical scope. See [macros.md](https://github.com/elle-lisp/elle/blob/main/docs/macros.md) for the full design document."
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# Define a macro that times an expression\n(defmacro time-it [expr]\n  (def g (gensym))\n  ~(let ((,g (clock/now)))\n     ,expr\n     (print \"elapsed:\" (- (clock/now) ,g))))\n\n(time-it (fold + 0 (range 10000)))"
+          "type": "details",
+          "summary": "Macro example — timing an expression",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(defmacro time-it [expr]\n  (def g (gensym))\n  ~(let ((,g (clock/now)))\n     ,expr\n     (print \"elapsed:\" (- (clock/now) ,g))))\n\n(time-it (fold + 0 (range 10000)))"
+            }
+          ]
         }
       ]
     },
@@ -123,12 +137,18 @@
       "content": [
         {
           "type": "paragraph",
-          "text": "Elle can call C functions directly. `ffi/native` loads shared libraries and `ffi/defbind` creates typed bindings with automatic marshalling."
+          "text": "Elle can call C functions directly. `ffi/native` loads shared libraries and `ffi/defbind` creates typed bindings with automatic marshalling. See [ffi.md](https://github.com/elle-lisp/elle/blob/main/docs/ffi.md) for the full architecture reference."
         },
         {
-          "type": "code",
-          "language": "lisp",
-          "text": "# Load libc and call puts\n(def libc (ffi/native nil))\n(ffi/defbind libc puts [:string] :int)\n(puts \"hello from C\")"
+          "type": "details",
+          "summary": "FFI example — calling libc puts",
+          "content": [
+            {
+              "type": "code",
+              "language": "lisp",
+              "text": "(def libc (ffi/native nil))\n(ffi/defbind libc puts [:string] :int)\n(puts \"hello from C\")"
+            }
+          ]
         }
       ]
     }

@@ -90,7 +90,7 @@
         },
         {
           "type": "paragraph",
-          "text": "See `examples/processes.lisp` for a complete fiber-based process scheduler with message passing, links, and crash propagation."
+          "text": "See [examples/processes.lisp](https://github.com/elle-lisp/elle/blob/main/examples/processes.lisp) for a complete fiber-based process scheduler with message passing, links, and crash propagation."
         }
       ]
     },
