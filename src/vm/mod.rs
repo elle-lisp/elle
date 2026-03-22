@@ -27,8 +27,7 @@ use crate::compiler::bytecode::{Bytecode, Instruction};
 use crate::pipeline::lookup_stdlib_value;
 use crate::symbol::SymbolTable;
 use crate::value::{
-    error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH,
-    SIG_YIELD,
+    error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH, SIG_YIELD,
 };
 use std::rc::Rc;
 
@@ -242,10 +241,15 @@ impl VM {
         // This uses the normal Call instruction path, which correctly builds
         // the closure env (captures, params, locals) and handles SIG_SWITCH.
         let synthetic_bc = vec![
-            Instruction::LoadConst as u8, 0, 0, // LoadConst idx=0 (thunk) — arg
-            Instruction::LoadConst as u8, 0, 1, // LoadConst idx=1 (ev/run) — func
-            Instruction::Call as u8, 1,          // Call with 1 arg
-            Instruction::Return as u8,           // Return
+            Instruction::LoadConst as u8,
+            0,
+            0, // LoadConst idx=0 (thunk) — arg
+            Instruction::LoadConst as u8,
+            0,
+            1, // LoadConst idx=1 (ev/run) — func
+            Instruction::Call as u8,
+            1,                         // Call with 1 arg
+            Instruction::Return as u8, // Return
         ];
         let synthetic_constants = vec![thunk, ev_run];
 
