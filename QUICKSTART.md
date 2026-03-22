@@ -608,45 +608,87 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 (stream/pipe src dst)
 ```
 
-### Async I/O and the Event Loop
+### Async I/O and Structured Concurrency
 
-`stream/write` and `stream/flush` are **async** — they yield and require a
-fiber context. For network servers and any code doing concurrent I/O, use
-`ev/run` to start the event loop and `ev/spawn` to create fibers:
+User code runs inside the async scheduler automatically. Port I/O
+(`port/write`, `port/read`, etc.) yields to the scheduler — no setup needed.
+
+**Spawn and join** — the fundamental building blocks:
 
 ```lisp
-# TCP server — accept connections, handle each in its own fiber
-(ev/run (fn []
-  (def listener (tcp/listen "0.0.0.0" 8080))
-  (forever
-    (def conn (tcp/accept listener))  # yields until client connects
-    (ev/spawn (fn []                  # handle in its own fiber
-      (defer (port/close conn)
-        (handle-connection conn)))))))
+# Spawn a fiber, wait for its result
+(def f (ev/spawn (fn [] (port/read-all (port/open "data.txt" :read)))))
+(def content (ev/join f))
+
+# Join a sequence — results in input order
+(def [a b] (ev/join [(ev/spawn (fn [] (fetch "/users")))
+                      (ev/spawn (fn [] (fetch "/posts")))]))
+```
+
+**Parallel map** — the most common pattern:
+
+```lisp
+(ev/map (fn [url] (http/get url)) urls)   # → [response1 response2 ...]
+```
+
+**Error handling** — `ev/join-protected` returns `[ok? value]` instead of
+raising errors:
+
+```lisp
+(let (([ok? val] (ev/join-protected (ev/spawn (fn [] (flaky-api-call))))))
+  (if ok? val (cached-fallback)))
+```
+
+**Select, race, timeout** — waiting for the first of N:
+
+```lisp
+# First to complete wins; abort the rest
+(ev/race [(ev/spawn (fn [] (query-replica-1)))
+          (ev/spawn (fn [] (query-replica-2)))])
+
+# Deadline on a computation
+(ev/timeout 5 (fn [] (http/get "https://slow-api.example.com")))
+```
+
+**Scoped concurrency** — all children must finish before scope exits:
+
+```lisp
+(ev/scope (fn [spawn]
+  (let ([users    (spawn (fn [] (fetch "/users")))]
+        [settings (spawn (fn [] (fetch "/settings")))])
+    # If /settings fails, /users is aborted automatically
+    {:users (ev/join users) :settings (ev/join settings)})))
 ```
 
 Key primitives:
 
 ```lisp
-(ev/run thunk...)           # start event loop, spawn each thunk, pump until done
-(ev/spawn thunk)            # schedule a new fiber (inside ev/run)
+(ev/spawn thunk)            # create a fiber, returns fiber handle
+(ev/join fiber-or-seq)      # wait for result(s), propagate errors
+(ev/join-protected target)  # wait without raising — returns [ok? value]
+(ev/abort fiber)            # graceful cancel (defer blocks run)
+(ev/select fibers)          # wait for first → [done remaining]
+(ev/race fibers)            # first wins, abort rest, return value
+(ev/timeout secs thunk)     # deadline — returns value or {:error :timeout}
+(ev/scope (fn [spawn] ...)) # nursery — children can't outlive scope
+(ev/map f items)            # parallel map, results in order
+(ev/map-limited f items n)  # bounded parallel map (at most n in flight)
+(ev/as-completed fibers)    # lazy iterator → [next-fn pool]
 (ev/sleep seconds)          # yield for N seconds
 
 (tcp/listen addr port)      # bind and listen, returns listener
 (tcp/accept listener)       # yields until connection, returns port
 (tcp/connect host port)     # yields until connected, returns port
 
-(stream/write port data)    # async write (yields) — use inside ev/run
-(stream/flush port)         # async flush (yields) — use inside ev/run
-(stream/read port n)        # async read N bytes (yields)
-(stream/read-line port)     # async read until \n (yields), nil on EOF
+(port/write port data)      # async write (yields)
+(port/flush port)           # async flush (yields)
+(port/read port n)          # async read N bytes (yields)
+(port/read-line port)       # async read until \n (yields), nil on EOF
 ```
 
-**Important:** `stream/write` and `stream/flush` signal `:yield`. Outside an
-event loop they work for small amounts of I/O but will fail with "yield outside
-coroutine context" in tight loops. For synchronous output, use `print`/`println`
-(stdout) or `eprint`/`eprintln` (stderr) — these internally spawn a fiber and
-run a sync scheduler, so they work anywhere without an event loop.
+**Important:** `port/write` and `port/flush` signal `:yield`. For synchronous
+output, use `print`/`println` (stdout) or `eprint`/`eprintln` (stderr) — these
+internally spawn a fiber and run a sync scheduler, so they work anywhere.
 
 ### Synchronous Output
 
@@ -779,12 +821,10 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 (def tls ((import-file "lib/tls.lisp")))
 # Client: tls:connect, tls:read, tls:write, tls:read-all, tls:close
 # Server: tls:server-config, tls:accept
-(ev/run
-  (fn []
-    (let ((conn (tls:connect "example.com" 443)))
-      (defer (tls:close conn)
-        (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-        (println (string (tls:read-all conn)))))))
+(let ((conn (tls:connect "example.com" 443)))
+  (defer (tls:close conn)
+    (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+    (println (string (tls:read-all conn)))))
 ```
 
 #### `elle-tree-sitter` — Multi-language parsing and structural queries
@@ -838,9 +878,9 @@ elle greet.lisp -- Alice   # => Hello, Alice!
 
 Elle's API has three layers:
 
-1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `stream/write`, etc.)
+1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `port/write`, etc.)
 2. **stdlib.lisp** — standard library closures and macros (`map`, `filter`, `fold`, etc.)
-3. **prelude.lisp** — higher-level abstractions (`ev/run`, `ev/spawn`, `each`, `match`, etc.)
+3. **prelude.lisp** — higher-level abstractions (`ev/spawn`, `ev/join`, `ev/map`, `each`, `match`, etc.)
 
 `vm/list-primitives` and `vm/primitive-meta` only cover layer 1 — they do NOT
 list stdlib or prelude functions. If you don't find something in the primitive
@@ -858,8 +898,8 @@ the source of truth for the full API.
 #   example: (+ 1 2 3) #=> 6
 
 # doc also works on prelude functions
-(doc ev/run)    # => "Run thunks concurrently with async I/O. ..."
 (doc ev/spawn)  # => "Spawn a closure in a new fiber ..."
+(doc ev/join)   # => "Wait for a fiber or sequence of fibers ..."
 (doc each)      # => "(each (name list) body...) ..."
 
 # vm/list-primitives lists ONLY native VM primitives, not stdlib/prelude
@@ -872,7 +912,7 @@ the source of truth for the full API.
 
 # To discover stdlib/prelude functions, read the source files:
 #   stdlib.lisp   — map, filter, fold, append, reverse, etc.
-#   prelude.lisp  — ev/run, ev/spawn, each, match, cond, etc.
+#   prelude.lisp  — ev/spawn, ev/join, ev/map, each, match, cond, etc.
 ```
 
 ---
@@ -940,7 +980,7 @@ These are things agents commonly reach for that Elle does not have:
 | `lambda` | `fn` |
 | `begin` as scoped sequencing | `block` (`begin` shares surrounding scope) |
 | `display` | `print` (epoch 3 renamed `display` to `print`) |
-| `write` (literal form) | `pp` for pretty-print, or `stream/write` for port I/O |
+| `write` (literal form) | `pp` for pretty-print, or `port/write` for port I/O |
 | Mutable struct field update | `put` on `@struct` |
 | `null` | `nil` |
 | `char` type | `string` and `@string` are grapheme-indexed; use `get` to extract a grapheme cluster as a string |

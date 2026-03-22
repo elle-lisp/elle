@@ -579,7 +579,7 @@ Exactly two values are falsy. Everything else is truthy.
 
   | Plugin | Description |
   |--------|-------------|
-  | `arrow/` | Apache Arrow columnar data and Parquet serialization |
+  | `arrow` | Apache Arrow columnar data and Parquet serialization |
   | `base64` | Base64 encoding/decoding |
   | `clap` | Declarative CLI argument parsing |
   | `compress` | Compression (gzip, zstd, etc.) |
@@ -590,7 +590,7 @@ Exactly two values are falsy. Everything else is truthy.
   | `jiff` | Date, time, and duration arithmetic |
   | `msgpack` | MessagePack serialization |
   | `oxigraph` | RDF graph database (SPARQL) |
-  | `polars/` | Polars DataFrame operations (eager and lazy APIs) |
+  | `polars` | Polars DataFrame operations (eager and lazy APIs) |
   | `protobuf` | Protocol Buffers serialization |
   | `random` | Pseudo-random number generation |
   | `regex` | Regular expressions |

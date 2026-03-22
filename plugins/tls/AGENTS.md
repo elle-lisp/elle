@@ -7,7 +7,7 @@ Agent guide for the `elle-tls` plugin — TLS state machine primitives via rustl
 The plugin exposes rustls's `UnbufferedClientConnection` /
 `UnbufferedServerConnection` as opaque `ExternalObject` values. These are
 pure state machines — no I/O happens in the plugin. All socket I/O is done
-in Elle code using `stream/read` and `stream/write` on native TCP ports.
+in Elle code using `port/read` and `port/write` on native TCP ports.
 
 This is the same pattern as `lib/dns.lisp` — a multi-step protocol driven
 entirely in Elle, with native I/O primitives handling the network.
@@ -87,7 +87,7 @@ pub struct TlsServerConfig {
 
 3. **Outgoing data invariant.** After every `tls/process` call, the caller
    MUST drain and send any outgoing bytes via `tls/get-outgoing` and
-   `stream/write`. TLS 1.3 may produce post-handshake messages at any time.
+   `port/write`. TLS 1.3 may produce post-handshake messages at any time.
    Failing to send them will stall the connection. `tls/write-plaintext`
    returns outgoing bytes directly in its result struct — no separate drain
    needed for writes.
@@ -97,7 +97,7 @@ pub struct TlsServerConfig {
    if called before `tls/handshake-complete?` returns true.
 
 5. **close_notify must be sent before closing TCP.** Call `tls/close-notify`
-   to get the encoded alert bytes, send them via `stream/write`, then call
+   to get the encoded alert bytes, send them via `port/write`, then call
    `port/close` on the TCP port. `lib/tls.lisp`'s `tls/close` does this
    automatically.
 

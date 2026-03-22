@@ -2,15 +2,15 @@ use crate::common::eval_source;
 
 #[test]
 fn test_stream_write_outside_scheduler_errors() {
-    // stream/write yields SIG_IO, which can't be caught by protect in Elle
-    let result = eval_source("(stream/write (port/stdout) \"hello\")");
+    // port/write yields SIG_IO, which can't be caught by protect in Elle
+    let result = eval_source("(port/write (port/stdout) \"hello\")");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_stream_read_line_outside_scheduler_errors() {
-    // stream/read-line yields SIG_IO, which should error at top level
-    let result = eval_source("(stream/read-line (port/open \"/dev/null\" :read))");
+    // port/read-line yields SIG_IO, which should error at top level
+    let result = eval_source("(port/read-line (port/open \"/dev/null\" :read))");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(
@@ -22,8 +22,8 @@ fn test_stream_read_line_outside_scheduler_errors() {
 
 #[test]
 fn test_stream_write_non_port_errors() {
-    // stream/write with a non-port should signal an error
-    let result = eval_source("(stream/write 42 \"hello\")");
+    // port/write with a non-port should signal an error
+    let result = eval_source("(port/write 42 \"hello\")");
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(

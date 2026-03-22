@@ -81,6 +81,10 @@ pub struct VM {
     /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
     /// Read by `sys/argv`. Empty string means REPL mode.
     pub source_arg: String,
+    /// JIT hotness threshold: a closure must be called this many times
+    /// before it becomes a JIT compilation candidate.
+    /// Initialized from `ELLE_JIT_THRESHOLD` env var, defaulting to 10.
+    pub jit_hotness_threshold: usize,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -144,6 +148,10 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
+            jit_hotness_threshold: std::env::var("ELLE_JIT_THRESHOLD")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(10),
         }
     }
 
@@ -235,11 +243,13 @@ impl VM {
         result
     }
 
-    /// Record a closure call and return whether it's "hot" (called 10+ times)
+    /// Record a closure call and return whether it's "hot" (called N+ times,
+    /// where N is `jit_hotness_threshold`, default 10, overridable via
+    /// `ELLE_JIT_THRESHOLD` env var).
     pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
         let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
         *count += 1;
-        *count >= 10
+        *count >= self.jit_hotness_threshold
     }
 
     /// Get call count for a closure

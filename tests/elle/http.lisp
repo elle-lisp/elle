@@ -80,7 +80,7 @@
 # ============================================================================
 
 # Connection refused (nothing listening on port 1)
-(let [[[ok? _] (protect (ev/spawn (fn [] (http:get "http://127.0.0.1:1/"))))]]
+(let [[[ok? _] (protect (http:get "http://127.0.0.1:1/"))]]
   (assert (not ok?) "http:get connection refused signals error"))
 
 # ============================================================================

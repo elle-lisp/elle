@@ -6,7 +6,9 @@
 
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME};
+use crate::value::fiber::{
+    Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
+};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -510,7 +512,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/resume",
         func: prim_fiber_resume,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_RESUME.0),
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_RESUME.0),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),

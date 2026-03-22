@@ -104,4 +104,4 @@ Load it in Elle:
 | `stream/map f (tls:lines c)` | ✓ | Coroutine composition |
 | `stream/collect (tls:lines c)` | ✓ | Coroutine consumption |
 | `port/lines conn` | ✗ | conn is not a Port |
-| `stream/read conn n` | ✗ | conn is not a Port |
+| `port/read conn n` | ✗ | conn is not a Port |

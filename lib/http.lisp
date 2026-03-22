@@ -73,7 +73,7 @@
    Signals :http-error on malformed header lines."
   (def headers @{})
   (forever
-    (let [[line (stream/read-line port)]]
+    (let [[line (port/read-line port)]]
       (when (or (nil? line) (empty? line))
         (break (freeze headers)))
       (let [[colon-pos (string/find line ":")]]
@@ -88,7 +88,7 @@
   "Write HTTP headers struct to port. Each header is written as 'Name: value\\r\\n'.
    Keys are keywords converted back to HTTP header name casing."
   (each [key value] in (pairs headers)
-    (stream/write port (string/format "{}: {}\r\n" (kw->header key) value))))
+    (port/write port (string/format "{}: {}\r\n" (kw->header key) value))))
 
 # ============================================================================
 # Request and response wire format
@@ -97,7 +97,7 @@
 (defn read-request-line [port]
   "Read and parse HTTP request line: 'GET /path HTTP/1.1'.
    Returns {:method :path :version} or nil on EOF."
-  (let [[line (stream/read-line port)]]
+  (let [[line (port/read-line port)]]
     (if (nil? line)
       nil
       (let [[parts (string/split line " ")]]
@@ -112,13 +112,13 @@
 
 (defn write-request-line [port method path]
   "Write HTTP request line: 'METHOD path HTTP/1.1\\r\\n'."
-  (stream/write port (string/format "{} {} HTTP/1.1\r\n" method path)))
+  (port/write port (string/format "{} {} HTTP/1.1\r\n" method path)))
 
 (defn read-status-line [port]
   "Read and parse HTTP status line: 'HTTP/1.1 200 OK'.
    Returns {:version :status :reason} where :status is an integer.
    Signals :http-error on malformed input."
-  (let* [[line (stream/read-line port)]
+  (let* [[line (port/read-line port)]
          [parts (string/split line " ")]]
     (when (< (length parts) 2)
       (error {:error :http-error :message "malformed status line"
@@ -130,13 +130,13 @@
 
 (defn write-status-line [port status reason]
   "Write HTTP status line: 'HTTP/1.1 status reason\\r\\n'."
-  (stream/write port (string/format "HTTP/1.1 {} {}\r\n" status reason)))
+  (port/write port (string/format "HTTP/1.1 {} {}\r\n" status reason)))
 
 (defn read-body [port headers]
   "Read request/response body based on Content-Length header.
    Returns body string, or nil if Content-Length is absent."
   (let [[cl headers:content-length]]
-    (and cl (string (stream/read port (integer cl))))))
+    (and cl (string (port/read port (integer cl))))))
 
 # ============================================================================
 # Reason phrases
@@ -198,9 +198,9 @@
   (write-request-line conn method path)
   (let [[headers (build-request-headers host extra-headers body keep-alive)]]
     (write-headers conn headers)
-    (stream/write conn "\r\n")
-    (unless (nil? body) (stream/write conn body))
-    (stream/flush conn)
+    (port/write conn "\r\n")
+    (unless (nil? body) (port/write conn body))
+    (port/flush conn)
     (let* [[status-line (read-status-line conn)]
            [resp-headers (read-headers conn)]
            [resp-body (read-body conn resp-headers)]]
@@ -268,10 +268,10 @@
   (write-status-line conn response:status
                      (or (get reason-phrases response:status) "Unknown"))
   (write-headers conn response:headers)
-  (stream/write conn "\r\n")
+  (port/write conn "\r\n")
   (unless (nil? response:body)
-    (stream/write conn response:body))
-  (stream/flush conn))
+    (port/write conn response:body))
+  (port/flush conn))
 
 (defn connection-loop [conn handler on-error]
   "Handle HTTP requests on a connection until it closes or either side
@@ -299,7 +299,7 @@
 
 (defn default-on-error [request err]
   "Default error handler: print to stderr."
-  (stream/write (port/stderr)
+  (port/write (port/stderr)
     (string/format "http: handler error on {} {}: {}\n"
                    request:method request:path err)))
 
@@ -347,7 +347,7 @@
   (spit "/tmp/elle-http-test-headers"
     "Content-Type: text/plain\r\nHost: example.com\r\nContent-Length: 42\r\n\r\n")
   (let [[p (port/open "/tmp/elle-http-test-headers" :read)]]
-    (let [[h (ev/spawn (fn [] (read-headers p)))]]
+    (let [[h (read-headers p)]]
       (port/close p)
       (assert (= h:content-type   "text/plain")  "read-headers content-type")
       (assert (= h:host           "example.com") "read-headers host")
@@ -356,24 +356,21 @@
   # read-headers trims whitespace
   (spit "/tmp/elle-http-test-headers-ws" "X-Foo:   bar baz   \r\n\r\n")
   (let [[p (port/open "/tmp/elle-http-test-headers-ws" :read)]]
-    (let [[h (ev/spawn (fn [] (read-headers p)))]]
+    (let [[h (read-headers p)]]
       (port/close p)
       (assert (= h:x-foo "bar baz") "read-headers trims whitespace")))
 
   # read-headers malformed
-  # port/open must be called before protect because port/open now yields SIG_IO;
-  # protect's fiber mask (1 = SIG_ERROR only) cannot handle SIG_IO propagation.
   (spit "/tmp/elle-http-test-headers-bad" "no-colon-here\r\n\r\n")
   (let [[p-bad (port/open "/tmp/elle-http-test-headers-bad" :read)]]
-    (let [[[ok? _] (protect (ev/spawn (fn [] (read-headers p-bad))))]]
+    (let [[[ok? _] (protect (read-headers p-bad))]]
       (assert (not ok?) "read-headers malformed signals error")))
 
   # write-headers
   (let [[p (port/open "/tmp/elle-http-test-write-headers" :write)]]
-    (ev/spawn (fn []
-      (write-headers p {:content-type "text/plain" :content-length "11"})
-      (stream/write p "\r\n")
-      (stream/flush p)))
+    (write-headers p {:content-type "text/plain" :content-length "11"})
+    (port/write p "\r\n")
+    (port/flush p)
     (port/close p))
   (let [[content (slurp "/tmp/elle-http-test-write-headers")]]
     (assert (string-contains? content "Content-Type: text/plain")
@@ -384,7 +381,7 @@
   # read-request-line
   (spit "/tmp/elle-http-test-req-line" "GET /path HTTP/1.1\r\n")
   (let [[p (port/open "/tmp/elle-http-test-req-line" :read)]]
-    (let [[rl (ev/spawn (fn [] (read-request-line p)))]]
+    (let [[rl (read-request-line p)]]
       (port/close p)
       (assert (= rl:method  "GET")      "request-line method")
       (assert (= rl:path    "/path")    "request-line path")
@@ -393,7 +390,7 @@
   # read-status-line
   (spit "/tmp/elle-http-test-status-200" "HTTP/1.1 200 OK\r\n")
   (let [[p (port/open "/tmp/elle-http-test-status-200" :read)]]
-    (let [[sl (ev/spawn (fn [] (read-status-line p)))]]
+    (let [[sl (read-status-line p)]]
       (port/close p)
       (assert (= sl:version "HTTP/1.1") "status-line version")
       (assert (= sl:status  200)         "status-line status")
@@ -402,14 +399,14 @@
   # read-body with Content-Length
   (spit "/tmp/elle-http-test-body" "hello world")
   (let [[p (port/open "/tmp/elle-http-test-body" :read)]]
-    (let [[body (ev/spawn (fn [] (read-body p {:content-length "11"})))]]
+    (let [[body (read-body p {:content-length "11"})]]
       (port/close p)
       (assert (= body "hello world") "read-body with content-length")))
 
   # read-body without Content-Length
   (spit "/tmp/elle-http-test-body-no-cl" "ignored")
   (let [[p (port/open "/tmp/elle-http-test-body-no-cl" :read)]]
-    (let [[body (ev/spawn (fn [] (read-body p {})))]]
+    (let [[body (read-body p {})]]
       (port/close p)
       (assert (nil? body) "read-body without content-length is nil")))
 
@@ -418,14 +415,13 @@
     "POST /submit HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\ndata")
   (let [[out @[nil nil nil nil]]]
     (let [[p (port/open "/tmp/elle-http-test-full-req" :read)]]
-      (ev/spawn (fn []
-        (let [[rl (read-request-line p)]]
-          (put out 0 rl:method)
-          (put out 1 rl:path)
-          (let [[h (read-headers p)]]
-            (put out 2 h:host)
-            (let [[body (read-body p h)]]
-              (put out 3 body))))))
+      (let [[rl (read-request-line p)]]
+        (put out 0 rl:method)
+        (put out 1 rl:path)
+        (let [[h (read-headers p)]]
+          (put out 2 h:host)
+          (let [[body (read-body p h)]]
+            (put out 3 body))))
       (port/close p))
     (assert (= (get out 0) "POST")      "full req method")
     (assert (= (get out 1) "/submit")   "full req path")

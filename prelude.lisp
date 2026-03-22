@@ -122,7 +122,7 @@
 ## :dead means normal completion; anything else means error.
 ##
 ## WARNING: protect is synchronous. The body must not perform async I/O
-## (port/open, stream/read-line, tcp/connect, etc.). Use protect inside
+## (port/open, port/read-line, tcp/connect, etc.). Use protect inside
 ## ev/spawn if you need error capture around async work.
 (defmacro protect (& body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
@@ -139,7 +139,7 @@
 ## Example:
 ##   (let ((p (port/open "data.txt" :read)))
 ##     (defer (port/close p)         # cleanup: always runs, closes port
-##       (stream/read-all p)))       # body: reads contents, return value
+##       (port/read-all p)))       # body: reads contents, return value
 (defmacro defer (cleanup & body)
   `(let ((f (fiber/new (fn () ,;body) 1)))
      (fiber/resume f nil)

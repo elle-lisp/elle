@@ -42,7 +42,9 @@ use std::fmt;
 //   Bit  10:    Terminal — non-resumable signal
 //   Bit  11:    Exec — subprocess capability (access control; NOT a dispatch bit)
 //   Bit  12:    Fuel — instruction budget exhaustion
-//   Bits 13-15: Reserved for future use
+//   Bit 13: SIG_SWITCH (fiber switch trampoline)
+//   Bit 14: SIG_WAIT (structured concurrency wait request)
+//   Bit 15: Reserved for future use
 //   Bits 16-31: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return
@@ -60,6 +62,7 @@ pub const SIG_TERMINAL: SignalBits = SignalBits::new(1 << 10); // terminal signa
 pub const SIG_EXEC: SignalBits = SignalBits::new(1 << 11); // subprocess capability (capability bit, not dispatch)
 pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget exhaustion
 pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
+pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
 
 /// Signal classification for expressions and functions.
 ///
