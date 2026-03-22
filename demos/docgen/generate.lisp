@@ -35,9 +35,31 @@
   (find-closing-helper text start (length text) delimiter (length delimiter))))
 
 ## Convert markdown links [text](url) to HTML anchor tags
-## NOTE: Disabled for now due to compiler bug with define in nested contexts
-(def format-links-rec (fn (remaining result)
-  (append result remaining)))
+## Uses let* to avoid the compiler bug with def in nested contexts
+(def format-links-rec (fn (text result)
+  (let* ((bp (find-closing text 0 "[")))
+    (if (nil? bp)
+      (append result text)
+      (let* ((cb (find-closing text (+ bp 1) "]")))
+        (if (nil? cb)
+          (append result text)
+          (if (or (>= (+ cb 1) (length text))
+                  (not (= (slice text (+ cb 1) (+ cb 2)) "(")))
+            (format-links-rec
+              (slice text (+ cb 1) (length text))
+              (append result (slice text 0 (+ cb 1))))
+            (let* ((cp (find-closing text (+ cb 2) ")")))
+              (if (nil? cp)
+                (append result text)
+                (format-links-rec
+                  (slice text (+ cp 1) (length text))
+                  (string result
+                    (slice text 0 bp)
+                    "<a href=\""
+                    (slice text (+ cb 2) cp)
+                    "\">"
+                    (slice text (+ bp 1) cb)
+                    "</a>")))))))))))
 
 (def format-links (fn (text)
   (format-links-rec text "")))
@@ -375,6 +397,37 @@ tbody tr:nth-child(even) {
   }
 }
 
+/* Details/Spoilers */
+details {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+details summary {
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  font-weight: 600;
+  background-color: var(--bg-secondary);
+  user-select: none;
+}
+
+details summary:hover {
+  color: var(--accent);
+}
+
+details[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+details > pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  padding: 1rem;
+}
+
 /* Utility */
 .container {
   max-width: 900px;
@@ -431,7 +484,7 @@ tbody tr:nth-child(even) {
           (-> acc (append "<tr>")
             (append (fold
               (fn (acc2 cell)
-                (-> acc2 (append "<td>") (append (html-escape cell)) (append "</td>")))
+                (-> acc2 (append "<td>") (append (format-inline cell)) (append "</td>")))
               ""
               row))
             (append "</tr>")))
@@ -446,6 +499,15 @@ tbody tr:nth-child(even) {
       (append (format-inline (get block "text")))
       (append "</div>"))))
 
+## Render a details/spoiler block
+(var render-details
+  (fn (block)
+    (string "<details><summary>"
+      (format-inline (get block "summary"))
+      "</summary>"
+      (render-blocks-in-section (get block "content") "")
+      "</details>")))
+
 ## Main dispatcher
 (var render-block
   (fn (block)
@@ -456,6 +518,7 @@ tbody tr:nth-child(even) {
       ((string-contains? (get block "type") "blockquote") (render-blockquote block))
       ((string-contains? (get block "type") "table") (render-table block))
       ((string-contains? (get block "type") "note") (render-note block))
+      ((string-contains? (get block "type") "details") (render-details block))
       ((string-contains? (get block "type") "heading") "")
       (true ""))))
 
