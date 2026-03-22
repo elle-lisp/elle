@@ -1,7 +1,7 @@
 # Async error propagation tests
 #
 # These tests document the expected behavior of error propagation through
-# ev/gather, the async scheduler, and stream combinators. They serve as
+# ev/join, the async scheduler, and stream combinators. They serve as
 # regression tests for a multi-session debugging effort.
 
 # === Helpers ===
@@ -38,40 +38,35 @@
         (make-range 3))))))))
   (assert (not ok?) "2: stream/map transform error propagates through collect"))
 
-# === 3. Basic async I/O through ev/gather (no error) ===
+# === 3. Basic async I/O with ev/join (no error) ===
 
 (spit "/tmp/elle-async-err-test-3" "line1\nline2\nline3\n")
-(let [[result (ev/gather (fn []
+(let [[result (ev/join (ev/spawn (fn []
     (let [[p (port/open "/tmp/elle-async-err-test-3" :read)]]
-      (stream/collect (port/lines p)))))]]
-  (assert (= (length result) 3) "3: ev/gather + port/lines collects 3 lines"))
+      (stream/collect (port/lines p))))))]]
+  (assert (= (length result) 3) "3: ev/join + port/lines collects 3 lines"))
 
-# === 4. Closed port error propagates through ev/gather ===
-#
-# This is the target bug: reading from a closed port inside ev/gather
-# should propagate the error to the caller via protect.
-# STATUS: this test documents the DESIRED behavior. If it fails, the
-# error propagation path (io/submit failure → fiber/abort → ev/gather)
-# is broken.
+# === 4. Closed port error propagates through ev/join ===
 
 (spit "/tmp/elle-async-err-test-4" "some data")
-(let (([ok? val] (protect ((fn []
-    (ev/gather (fn []
-      (let [[p (port/open "/tmp/elle-async-err-test-4" :read)]]
-        (port/close p)
-        (stream/collect (port/lines p))))))))))
-  (assert (not ok?) "4: closed port error propagates through ev/gather"))
+(let (([ok? val] (ev/join-protected (ev/spawn (fn []
+    (let [[p (port/open "/tmp/elle-async-err-test-4" :read)]]
+      (port/close p)
+      (stream/collect (port/lines p))))))))
+  (assert (not ok?) "4: closed port error propagates through ev/join-protected"))
 
-# === 5. Multiple fibers in ev/gather, one errors ===
+# === 5. Multiple fibers, one errors — ev/join-protected catches ===
 
 (spit "/tmp/elle-async-err-test-5" "data")
-(let (([ok? val] (protect ((fn []
-    (ev/gather
-      (fn [] 42)
-      (fn []
+(let ([f1 (ev/spawn (fn [] 42))]
+      [f2 (ev/spawn (fn []
         (let [[p (port/open "/tmp/elle-async-err-test-5" :read)]]
           (port/close p)
-          (stream/collect (port/lines p))))))))))
-  (assert (not ok?) "5: one erroring fiber in ev/gather propagates"))
+          (stream/collect (port/lines p)))))])
+  (let (([ok1? v1] (ev/join-protected f1))
+        ([ok2? v2] (ev/join-protected f2)))
+    (assert ok1? "5a: first fiber succeeds")
+    (assert (= 42 v1) "5b: first fiber returns 42")
+    (assert (not ok2?) "5c: second fiber (closed port) errors")))
 
 (println "all async error propagation tests passed")

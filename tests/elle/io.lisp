@@ -10,10 +10,10 @@
 
 # === Scheduler parameter ===
 
-(assert (parameter? *scheduler*) "*scheduler* is a parameter")
+(assert (parameter? *spawn*) "*spawn* is a parameter")
 # In the async-first model, user code runs under the async scheduler.
 # The sync-scheduler is still available but not the default for user code.
-(assert (fn? (*scheduler*)) "*scheduler* is bound to a function")
+(assert (fn? (*spawn*)) "*spawn* is bound to a function")
 
 # === sync-scheduler with pure fiber ===
 

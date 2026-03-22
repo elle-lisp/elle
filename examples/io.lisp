@@ -3,7 +3,7 @@
 # I/O: async-first, files, ports, JSON
 #
 # Demonstrates:
-#   Async I/O         — ev/run, ev/spawn, ev/gather, ev/sleep
+#   Async I/O         — ev/spawn, ev/join, ev/map, ev/sleep
 #   Port I/O          — port/read, port/write, port/read-all, port/flush
 #   File read/write   — slurp, spit, append-file, read-lines
 #   File info         — file-exists?, file?, directory?, file-size
@@ -30,45 +30,34 @@
 
 
 # ========================================
-# 1. Async I/O — ev/run, ev/gather
+# 1. Async I/O — ev/spawn, ev/join, ev/map
 # ========================================
 
 # Elle is async-first: all port I/O (port/read, port/write, port/read-all,
-# port/read-line, port/flush) yields to the scheduler.  ev/run creates an
-# async scheduler and pumps fibers to completion.
+# port/read-line, port/flush) yields to the scheduler.  User code runs inside
+# the async scheduler from the start; ev/spawn creates fibers, ev/join waits.
 
 # Write test files for concurrent reads.
 (spit (tmp "async-1.txt") "hello from file one")
 (spit (tmp "async-2.txt") "hello from file two")
 
-# ev/run: spawn concurrent thunks, collect results via shared state.
-(let ((results @[]))
-  (ev/run
-    (fn []
-      (push results (string (port/read-all (port/open (tmp "async-1.txt") :read)))))
-    (fn []
-      (push results (string (port/read-all (port/open (tmp "async-2.txt") :read))))))
-  (assert (= (length results) 2) "ev/run: both concurrent reads completed")
-  (print "  ev/run: ") (println results))
+# ev/map: apply a function to each item concurrently, results in order.
+(def results
+  (ev/map (fn [path] (string (port/read-all (port/open path :read))))
+          [(tmp "async-1.txt") (tmp "async-2.txt")]))
+(assert (= (length results) 2) "ev/map: both concurrent reads completed")
+(print "  ev/map: ") (println results)
 
-# ev/gather: like ev/run but returns thunk results directly.
-(def gathered
-  (ev/gather
-    (fn [] (string (port/read-all (port/open (tmp "async-1.txt") :read))))
-    (fn [] (string (port/read-all (port/open (tmp "async-2.txt") :read))))))
-(assert (= (length gathered) 2) "ev/gather: returns list of results")
-(print "  ev/gather: ") (println gathered)
+# ev/spawn + ev/join: manual spawn and wait.
+(let ([f (ev/spawn (fn [] (+ 1 2)))])
+  (assert (= 3 (ev/join f)) "ev/spawn + ev/join: returns value"))
 
-# ev/gather with a single thunk returns a single value (not a list).
-(def single (ev/gather (fn [] (+ 1 2))))
-(assert (= single 3) "ev/gather: single thunk returns unwrapped value")
-
-# ev/spawn inside ev/run for fire-and-forget work.
+# ev/spawn for fire-and-forget work (joined to ensure completion).
 (let ((ran @[]))
-  (ev/run
-    (fn []
-      (ev/spawn (fn [] (push ran :a)))
-      (ev/spawn (fn [] (push ran :b)))))
+  (let ([a (ev/spawn (fn [] (push ran :a)))]
+        [b (ev/spawn (fn [] (push ran :b)))])
+    (ev/join a)
+    (ev/join b))
   (assert (= (length ran) 2) "ev/spawn: both spawned fibers ran"))
 
 
@@ -77,23 +66,22 @@
 # ========================================
 
 # port/write, port/read, port/read-all, port/read-line, port/flush are
-# async primitives that yield SIG_IO.  They need a scheduler context
-# (ev/run or ev/gather).
+# async primitives that yield SIG_IO.  They work directly since user code
+# runs inside the async scheduler.
 
-(ev/run (fn []
-  (let ((p (port/open (tmp "port-test.txt") :write)))
-    (port/write p "line one\nline two\n")
-    (port/flush p)
-    (port/close p))
+(let ((p (port/open (tmp "port-test.txt") :write)))
+  (port/write p "line one\nline two\n")
+  (port/flush p)
+  (port/close p))
 
-  (let ((p (port/open (tmp "port-test.txt") :read)))
-    (let ((line1 (port/read-line p)))
-      (print "  port/read-line: ") (println line1)
-      (assert (= line1 "line one") "port/read-line reads first line"))
-    (port/close p))
+(let ((p (port/open (tmp "port-test.txt") :read)))
+  (let ((line1 (port/read-line p)))
+    (print "  port/read-line: ") (println line1)
+    (assert (= line1 "line one") "port/read-line reads first line"))
+  (port/close p))
 
-  (let ((content (string (port/read-all (port/open (tmp "port-test.txt") :read)))))
-    (assert (= content "line one\nline two\n") "port/read-all reads everything"))))
+(let ((content (string (port/read-all (port/open (tmp "port-test.txt") :read)))))
+  (assert (= content "line one\nline two\n") "port/read-all reads everything"))
 
 
 # ========================================

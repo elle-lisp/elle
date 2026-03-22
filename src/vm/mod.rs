@@ -188,7 +188,7 @@ impl VM {
     /// Execute user bytecode under the async scheduler.
     ///
     /// Looks up `ev/run` from stdlib, wraps the user bytecode in a
-    /// zero-arg thunk, and calls `ev/run(thunk)`. The async scheduler
+    /// zero-arg thunk, and calls `(ev/run thunk)`. The async scheduler
     /// (written in Elle) creates a fiber for the user code, pumps
     /// I/O, and handles all signals. All user code runs in a fiber
     /// from the start.
@@ -236,10 +236,7 @@ impl VM {
             squelch_mask: 0,
         });
 
-        // Build synthetic bytecode: push thunk (arg), push ev/run (func), Call 1, Return.
-        // Call pops func from top, then args below. So args are pushed first.
-        // This uses the normal Call instruction path, which correctly builds
-        // the closure env (captures, params, locals) and handles SIG_SWITCH.
+        // Build synthetic bytecode: (ev/run thunk)
         let synthetic_bc = vec![
             Instruction::LoadConst as u8,
             0,

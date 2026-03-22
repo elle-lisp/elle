@@ -947,11 +947,6 @@ impl VM {
                         vm.fiber.signal = Some((inner_bits, inner_result));
                         inner_bits
                     } else {
-                        // Propagate the error signal so the dispatch loop in
-                        // resume_suspended sees it and unwinds correctly.
-                        if inner_bits.contains(SIG_ERROR) {
-                            vm.fiber.signal = Some((inner_bits, inner_result));
-                        }
                         vm.resume_suspended(remaining, inner_result)
                     }
                 }

@@ -1,106 +1,190 @@
 #!/usr/bin/env elle
 
-# Concurrency — parallel computation with spawn and join
+# Concurrency — structured concurrency with fibers and OS threads
 #
 # Demonstrates:
-#   spawn, join          — create threads and collect results
-#   Closure captures     — immutable values cross thread boundaries
-#   current-thread-id    — threads have distinct identities
-#   Parallel work        — split computation across threads, combine
+#   Fibers (async)       — ev/spawn, ev/join, ev/join-protected
+#   Structured patterns  — ev/select, ev/race, ev/timeout, ev/scope, ev/map
+#   Bounded concurrency  — ev/map-limited, ev/as-completed
+#   Abort / cancel       — ev/abort
+#   OS threads           — spawn, join (for CPU-bound parallel work)
 #
-# Note: closures that capture mutable values (tables, arrays) cannot
-# be spawned — the runtime rejects non-sendable captures.
-# Spawned threads get a fresh VM with primitives only; globals are not
-# shared. Values the thread needs must be captured via closure scope.
-
+# Fibers are cooperative (single-threaded, no data races) and run under
+# the async scheduler.  OS threads are preemptive (multi-core) but cannot
+# share mutable state.
 
 
 # ========================================
-# 1. Basic spawn/join
+# 1. ev/spawn + ev/join — basic fiber concurrency
 # ========================================
 
-# spawn takes a zero-arg closure, runs it on a new OS thread.
-# join blocks until the thread finishes and returns the result.
+# ev/spawn creates a fiber; ev/join waits for its result.
+(let ([f (ev/spawn (fn [] (* 6 7)))])
+  (let ([result (ev/join f)])
+    (print "  spawn + join: ") (println result)
+    (assert (= result 42) "spawn/join computes 6*7")))
+
+# Join a sequence of fibers — results in input order.
+(let ([fibers [(ev/spawn (fn [] :a))
+               (ev/spawn (fn [] :b))
+               (ev/spawn (fn [] :c))]])
+  (let ([results (ev/join fibers)])
+    (print "  join sequence: ") (println results)
+    (assert (= results [:a :b :c]) "join sequence returns ordered results")))
+
+
+# ========================================
+# 2. ev/join-protected — error handling without crashing
+# ========================================
+
+# ev/join-protected returns [ok? value] — like protect but async-aware.
+(let (([ok? val] (ev/join-protected (ev/spawn (fn [] 42)))))
+  (print "  join-protected success: ") (println [ok? val])
+  (assert ok? "success returns true")
+  (assert (= 42 val) "success returns value"))
+
+(let (([ok? val] (ev/join-protected (ev/spawn (fn [] (error "oops"))))))
+  (print "  join-protected failure: ") (println [ok? val])
+  (assert (not ok?) "failure returns false"))
+
+# Sequence variant: joins all, never short-circuits.
+(let ([results (ev/join-protected [(ev/spawn (fn [] 1))
+                                    (ev/spawn (fn [] (error "fail")))
+                                    (ev/spawn (fn [] 3))])])
+  (print "  join-protected sequence: ") (println results)
+  (assert (= true (get (get results 0) 0)) "first succeeds")
+  (assert (= false (get (get results 1) 0)) "second fails")
+  (assert (= true (get (get results 2) 0)) "third succeeds"))
+
+
+# ========================================
+# 3. ev/select — wait for the first of N
+# ========================================
+
+# Returns [completed-fiber remaining-fibers].
+(let ([fast (ev/spawn (fn [] :fast))]
+      [slow (ev/spawn (fn [] (ev/sleep 10) :slow))])
+  (let (([done rest] (ev/select [fast slow])))
+    (print "  select winner: ") (println (ev/join done))
+    (assert (= (ev/join done) :fast) "fast fiber wins")
+    (assert (= 1 (length rest)) "one loser remains")
+    (each f in rest (ev/abort f))))
+
+
+# ========================================
+# 4. ev/race — first wins, rest aborted
+# ========================================
+
+(let ([result (ev/race [(ev/spawn (fn [] :winner))
+                         (ev/spawn (fn [] (ev/sleep 10) :loser))])])
+  (print "  race winner: ") (println result)
+  (assert (= :winner result) "race returns winner's value"))
+
+
+# ========================================
+# 5. ev/timeout — deadline on a computation
+# ========================================
+
+# Fast work finishes before timeout.
+(let ([result (ev/timeout 10 (fn [] 42))])
+  (print "  timeout (fast): ") (println result)
+  (assert (= 42 result) "fast work returns value"))
+
+# Slow work exceeds timeout.
+(let (([ok? val] (protect (ev/timeout 0.01 (fn [] (ev/sleep 100))))))
+  (print "  timeout (slow): ") (println [ok? val])
+  (assert (not ok?) "timeout fires")
+  (assert (= :timeout (get val :error)) "error is :timeout"))
+
+
+# ========================================
+# 6. ev/abort — graceful fiber cancellation
+# ========================================
+
+# Abort a sleeping fiber; defer blocks run.
+(let* ([cleaned @[false]]
+       [f (ev/spawn (fn []
+             (defer (put cleaned 0 true)
+               (ev/sleep 100))))])
+  (ev/abort f)
+  (assert (= :error (fiber/status f)) "aborted fiber is :error")
+  (assert (get cleaned 0) "defer block ran during abort"))
+
+# Abort on already-dead fiber is a no-op.
+(let ([f (ev/spawn (fn [] 42))])
+  (ev/join f)
+  (ev/abort f)
+  (assert (= :dead (fiber/status f)) "abort on dead fiber is no-op"))
+
+
+# ========================================
+# 7. ev/scope — structured concurrency nursery
+# ========================================
+
+# All children must complete before scope exits.
+(let ([result (ev/scope (fn [spawn]
+                (let ([a (spawn (fn [] 10))]
+                      [b (spawn (fn [] 20))])
+                  (+ (ev/join a) (ev/join b)))))])
+  (print "  scope result: ") (println result)
+  (assert (= 30 result) "scope joins children and returns body result"))
+
+# On error, remaining siblings are aborted.
+(let (([ok? val] (protect (ev/scope (fn [spawn]
+    (spawn (fn [] (ev/sleep 100)))
+    (spawn (fn [] (error "child-error")))
+    (ev/sleep 100))))))
+  (print "  scope error: ") (println [ok? val])
+  (assert (not ok?) "scope propagates first error"))
+
+
+# ========================================
+# 8. ev/map — parallel map
+# ========================================
+
+(let ([squares (ev/map (fn [x] (* x x)) [1 2 3 4 5])])
+  (print "  ev/map squares: ") (println squares)
+  (assert (= [1 4 9 16 25] squares) "ev/map returns ordered results"))
+
+
+# ========================================
+# 9. ev/as-completed — lazy completion iterator
+# ========================================
+
+# Process fibers as they finish (order depends on scheduling).
+(let ([fibers [(ev/spawn (fn [] :a))
+               (ev/spawn (fn [] :b))
+               (ev/spawn (fn [] :c))]]
+      [collected @[]])
+  (let (([next pool] (ev/as-completed fibers)))
+    (forever
+      (let ([done (next)])
+        (when (nil? done) (break nil))
+        (push collected (ev/join done)))))
+  (print "  as-completed: ") (println collected)
+  (assert (= 3 (length collected)) "all three fibers collected"))
+
+
+# ========================================
+# 10. OS threads — preemptive parallelism
+# ========================================
+
+# spawn/join create OS threads for CPU-bound work.
+# Spawned threads get a fresh VM; closures must capture only sendable values.
 (let* ([x 10]
        [y 20]
        [handle (spawn (fn [] (+ x y)))]
        [result (join handle)])
-  (print "  10 + 20 in another thread: ") (println result)
-  (assert (= result 30) "spawn/join computes 10+20"))
+  (print "  OS thread: 10 + 20 = ") (println result)
+  (assert (= result 30) "OS thread computes 10+20"))
 
-
-# ========================================
-# 2. Multiple threads
-# ========================================
-
-# Spawn several computations, join all, combine results.
-(let* ([h1 (spawn (fn [] (* 2 3)))]
-       [h2 (spawn (fn [] (* 4 5)))]
-       [h3 (spawn (fn [] (* 6 7)))]
-       [r1 (join h1)]
-       [r2 (join h2)]
-       [r3 (join h3)])
-  (print "  products: ") (print r1)
-    (print " ") (print r2) (print " ") (println r3)
-  (assert (= r1 6) "thread 1: 2*3")
-  (assert (= r2 20) "thread 2: 4*5")
-  (assert (= r3 42) "thread 3: 6*7")
-  (assert (= (+ r1 r2 r3) 68) "sum of all thread results"))
-
-
-# ========================================
-# 3. Captures
-# ========================================
-
-# Spawned closures capture immutable values from the enclosing scope.
-# Strings, numbers, arrays, structs — all fine.
-(let* ([name "Alice"]
-       [age 30])
-   (let* ([result (join (spawn (fn [] [name age])))]
-           [greeting (string/join ["Hello, " (get result 0) "! You are " (string (get result 1)) " years old."] "")])
-     (print "  ") (println greeting)
-     (assert (string/contains? greeting "Alice") "captured string in thread")
-     (assert (string/contains? greeting "30") "captured number conversion")))
-
-# Arrays are immutable, so they cross thread boundaries.
-(let* ([nums [10 20 30]]
-       [result (join (spawn (fn []
-         (+ (get nums 0) (get nums 1) (get nums 2)))))])
-  (print "  sum of [10 20 30]: ") (println result)
-  (assert (= result 60) "array elements accessible in thread"))
-
-
-# ========================================
-# 4. Thread IDs
-# ========================================
-
-# Each thread has a distinct ID (returned as an integer).
-(let* ([main-id (current-thread-id)]
-       [spawned-id (join (spawn (fn [] (current-thread-id))))])
-  (print "  main thread: ") (print main-id)
-    (print "  spawned thread: ") (println spawned-id)
-  (assert (integer? main-id) "thread ID is an integer")
-  (assert (integer? spawned-id) "spawned thread ID is an integer")
-  (assert (not (= main-id spawned-id)) "threads have distinct IDs"))
-
-
-# ========================================
-# 5. Practical: parallel computation
-# ========================================
-
-# Split a computation across threads and combine the results.
-# Spawned threads can't call user-defined functions (closures aren't
-# sendable), so each thread does its work with primitives and loops.
-# Gauss's formula: sum 1..n = n*(n+1)/2, so sum lo..hi = sum(hi) - sum(lo-1).
-(let* ([t1 (spawn (fn [] (/ (* 25 26) 2)))]               # sum 1..25 = 325
-       [t2 (spawn (fn [] (- (/ (* 50 51) 2)               # sum 26..50
-                            (/ (* 25 26) 2))))]
-       [t3 (spawn (fn [] (- (/ (* 75 76) 2)               # sum 51..75
-                            (/ (* 50 51) 2))))]
-       [t4 (spawn (fn [] (- (/ (* 100 101) 2)             # sum 76..100
-                            (/ (* 75 76) 2))))]
+# Parallel sum across 4 OS threads.
+(let* ([t1 (spawn (fn [] (/ (* 25 26) 2)))]
+       [t2 (spawn (fn [] (- (/ (* 50 51) 2) (/ (* 25 26) 2))))]
+       [t3 (spawn (fn [] (- (/ (* 75 76) 2) (/ (* 50 51) 2))))]
+       [t4 (spawn (fn [] (- (/ (* 100 101) 2) (/ (* 75 76) 2))))]
        [total (+ (join t1) (join t2) (join t3) (join t4))])
-  (print "  sum 1..100 across 4 threads: ") (println total)
+  (print "  parallel sum 1..100: ") (println total)
   (assert (= total 5050) "parallel sum of 1..100"))
 
 
