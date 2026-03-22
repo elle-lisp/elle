@@ -34,7 +34,7 @@ fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
 
 fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(lir, None)?;
+    let code = compiler.compile(lir, None, std::collections::HashMap::new())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(
@@ -675,7 +675,7 @@ fn test_jit_accepts_yielding() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -706,7 +706,7 @@ fn test_jit_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
@@ -735,7 +735,7 @@ fn test_jit_compiles_make_closure() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     assert!(
         result.is_ok(),
         "MakeClosure should compile successfully: {:?}",
@@ -1349,7 +1349,7 @@ fn test_jit_tail_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     // TailCall should now compile successfully
     assert!(result.is_ok(), "TailCall should compile: {:?}", result);
 }
@@ -1804,7 +1804,7 @@ fn test_jit_accepts_yields_errors_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     assert!(
         result.is_ok(),
         "JIT should accept yields_errors signal via side-exit: {:?}",
@@ -1835,7 +1835,7 @@ fn test_jit_accepts_errors_only_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None);
+    let result = compiler.compile(&func, None, std::collections::HashMap::new());
     assert!(
         result.is_ok(),
         "JIT should accept errors-only signal: {:?}",

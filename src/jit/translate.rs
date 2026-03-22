@@ -65,6 +65,8 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) shared_spill_slot: Option<cranelift_codegen::ir::StackSlot>,
     /// Closure template Values built during MakeClosure translation.
     pub(crate) closure_constants: Vec<crate::value::Value>,
+    /// Symbol name map for nested emitters (MakeClosure).
+    pub(crate) symbol_names: HashMap<u32, String>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -90,6 +92,7 @@ impl<'a> FunctionTranslator<'a> {
             call_site_index: 0,
             shared_spill_slot: None,
             closure_constants: Vec::new(),
+            symbol_names: HashMap::new(),
         }
     }
 
@@ -570,7 +573,7 @@ impl<'a> FunctionTranslator<'a> {
                 func,
                 captures,
             } => {
-                let mut emitter = crate::lir::Emitter::new();
+                let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
                 let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
                 let mut nested_lir = func.as_ref().clone();
                 nested_lir.yield_points = nested_yield_points;

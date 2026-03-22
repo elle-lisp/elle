@@ -52,7 +52,7 @@ impl VM {
 
                 // Solo compilation — pass self_sym for direct self-calls
                 match JitCompiler::new() {
-                    Ok(compiler) => match compiler.compile(lir_func, self_sym) {
+                    Ok(compiler) => match compiler.compile(lir_func, self_sym, (*closure.template.symbol_names).clone()) {
                         Ok(jit_code) => {
                             let jit_code = Rc::new(jit_code);
                             self.jit_cache.insert(bytecode_ptr, jit_code.clone());
@@ -233,7 +233,7 @@ impl VM {
             return None;
         }
 
-        let results = match compiler.compile_batch(&members) {
+        let results = match compiler.compile_batch(&members, (*closure.template.symbol_names).clone()) {
             Ok(r) => r,
             Err(e) => match &e {
                 crate::jit::JitError::UnsupportedInstruction(_)

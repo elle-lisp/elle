@@ -102,6 +102,7 @@ impl JitCompiler {
         mut self,
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
+        symbol_names: HashMap<u32, String>,
     ) -> Result<JitCode, JitError> {
         if lir.signal.propagates != 0 {
             return Err(JitError::Polymorphic);
@@ -148,7 +149,7 @@ impl JitCompiler {
 
         // Translate LIR to Cranelift IR
         let closure_constants =
-            self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+            self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym, symbol_names)?;
 
         // Compile the function
         self.module
@@ -223,7 +224,7 @@ impl JitCompiler {
         ctx.func.signature = sig;
         ctx.func.name = UserFuncName::user(0, func_id.as_u32());
 
-        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym)?;
+        self.translate_function(lir, &mut ctx.func, scc_peers.as_ref(), self_sym, HashMap::new())?;
         // closure_constants from clif_text are discarded — diagnostic only
 
         let text = format!("{}", ctx.func);
@@ -238,6 +239,7 @@ impl JitCompiler {
     pub fn compile_batch(
         mut self,
         members: &[BatchMember],
+        symbol_names: HashMap<u32, String>,
     ) -> Result<Vec<(SymbolId, JitCode)>, JitError> {
         // Validate all members are non-polymorphic and non-yielding.
         // Yielding functions require per-function YieldPointMeta in JitCode,
@@ -295,6 +297,7 @@ impl JitCompiler {
                 &mut ctx.func,
                 Some(&scc_peers),
                 Some(member.sym),
+                symbol_names.clone(),
             )?;
             all_closure_constants.push((member.sym, closure_constants));
 
@@ -343,12 +346,14 @@ impl JitCompiler {
         func: &mut Function,
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
         self_sym: Option<SymbolId>,
+        symbol_names: HashMap<u32, String>,
     ) -> Result<Vec<crate::value::Value>, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
 
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
+        translator.symbol_names = symbol_names;
 
         translator.self_sym = self_sym;
 
@@ -674,7 +679,7 @@ mod tests {
     fn test_compile_identity() {
         let lir = make_simple_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler.compile(&lir, None).expect("Failed to compile");
+        let code = compiler.compile(&lir, None, HashMap::new()).expect("Failed to compile");
 
         // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call)
         let args = [crate::value::Value::int(42)];
@@ -696,7 +701,7 @@ mod tests {
     fn test_compile_add() {
         let lir = make_add_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let code = compiler.compile(&lir, None).expect("Failed to compile");
+        let code = compiler.compile(&lir, None, HashMap::new()).expect("Failed to compile");
 
         // Call the compiled function with self_tag=0, self_payload=0
         let args = [crate::value::Value::int(10), crate::value::Value::int(32)];
@@ -720,7 +725,7 @@ mod tests {
         lir.signal = Signal::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None);
+        let result = compiler.compile(&lir, None, HashMap::new());
         assert!(matches!(result, Err(JitError::Polymorphic)));
     }
 
@@ -731,7 +736,7 @@ mod tests {
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         // Should compile (no Yield terminators in this simple LIR)
-        let result = compiler.compile(&lir, None);
+        let result = compiler.compile(&lir, None, HashMap::new());
         assert!(result.is_ok());
     }
 
@@ -745,7 +750,7 @@ mod tests {
             lir: &lir,
         }];
         let results = compiler
-            .compile_batch(&members)
+            .compile_batch(&members, HashMap::new())
             .expect("Failed to compile batch");
 
         assert_eq!(results.len(), 1);
@@ -911,7 +916,7 @@ mod tests {
             },
         ];
         let results = compiler
-            .compile_batch(&members)
+            .compile_batch(&members, HashMap::new())
             .expect("Failed to compile batch");
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].0, sym_f);
@@ -928,7 +933,7 @@ mod tests {
             sym: SymbolId(0),
             lir: &lir,
         }];
-        let result = compiler.compile_batch(&members);
+        let result = compiler.compile_batch(&members, HashMap::new());
         assert!(matches!(result, Err(JitError::Polymorphic)));
     }
 
@@ -973,7 +978,7 @@ mod tests {
         }];
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&func, None);
+        let result = compiler.compile(&func, None, HashMap::new());
         assert!(
             result.is_ok(),
             "Yielding function should compile: {:?}",
@@ -989,7 +994,7 @@ mod tests {
         lir.vararg_kind = crate::hir::VarargKind::Struct;
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None);
+        let result = compiler.compile(&lir, None, HashMap::new());
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
             "Struct variadic functions should be rejected: {:?}",
@@ -1004,7 +1009,7 @@ mod tests {
         lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None);
+        let result = compiler.compile(&lir, None, HashMap::new());
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
             "StrictStruct variadic functions should be rejected: {:?}",
@@ -1022,7 +1027,7 @@ mod tests {
         lir.num_params = 2; // x + rest
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None);
+        let result = compiler.compile(&lir, None, HashMap::new());
         assert!(
             result.is_ok(),
             "List variadic functions should compile: {:?}",
@@ -1041,7 +1046,7 @@ mod tests {
             sym: SymbolId(0),
             lir: &lir,
         }];
-        let result = compiler.compile_batch(&members);
+        let result = compiler.compile_batch(&members, HashMap::new());
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
             "Struct variadic functions should be rejected from batch: {:?}",
@@ -1061,7 +1066,7 @@ mod tests {
             sym: SymbolId(0),
             lir: &lir,
         }];
-        let result = compiler.compile_batch(&members);
+        let result = compiler.compile_batch(&members, HashMap::new());
         assert!(
             result.is_ok(),
             "List variadic functions should compile in batch: {:?}",
