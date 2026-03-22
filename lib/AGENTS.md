@@ -12,7 +12,7 @@ Single file. No Rust changes (other than `port/path`, added in Chunk 0).
 Client:
 ```
 http-get url → parse-url → tcp/connect → write-request-line → write-headers
-→ stream/flush → read-status-line → read-headers → read-body → port/close → response
+→ port/flush → read-status-line → read-headers → read-body → port/close → response
 ```
 
 Server:
@@ -151,12 +151,12 @@ tls:accept listener config → tcp/accept → tls/server-state → tls-handshake
 
 Read:
 ```
-tls:read conn n → check plaintext buffer → stream/read TCP → tls/process → tls/read-plaintext
+tls:read conn n → check plaintext buffer → port/read TCP → tls/process → tls/read-plaintext
 ```
 
 Write:
 ```
-tls:write conn data → tls/encrypt → stream/write TCP
+tls:write conn data → tls/encrypt → port/write TCP
 ```
 
 Stream:

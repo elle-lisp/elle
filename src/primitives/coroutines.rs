@@ -319,7 +319,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "coro/resume",
         func: prim_coroutine_resume,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_RESUME.0),
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_RESUME.0),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),

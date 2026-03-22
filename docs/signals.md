@@ -598,8 +598,8 @@ This is a convention, not a language rule — the bits compose freely.
 
 ### Stream Primitives and I/O Requests
 
-Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
-`stream/write`, `stream/flush`) have signal `io_errors()`. They do not
+Stream primitives (`port/read-line`, `port/read`, `port/read-all`,
+`port/write`, `port/flush`) have signal `io_errors()`. They do not
 perform I/O themselves. Instead, they:
 
 1. Build an `IoRequest` (typed descriptor of the I/O operation)

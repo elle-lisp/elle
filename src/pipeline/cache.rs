@@ -91,6 +91,18 @@ pub(super) fn get_cached_expander_and_meta() -> (Expander, PrimitiveMeta) {
     })
 }
 
+/// Look up a stdlib-exported value by SymbolId from the compilation cache.
+///
+/// Returns the value if the symbol was registered via `update_cache_with_stdlib`.
+pub fn lookup_stdlib_value(sym_id: crate::value::SymbolId) -> Option<crate::value::Value> {
+    COMPILATION_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .and_then(|c| c.meta.functions.get(&sym_id).copied())
+    })
+}
+
 /// Add stdlib exports to the cached PrimitiveMeta.
 ///
 /// Called by `init_stdlib` after compiling and executing stdlib.lisp.

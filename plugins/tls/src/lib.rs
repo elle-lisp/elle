@@ -2,8 +2,8 @@
 //!
 //! This plugin exposes rustls's UnbufferedClientConnection /
 //! UnbufferedServerConnection as pure state machine primitives.
-//! All socket I/O is performed in Elle code using stream/read and
-//! stream/write on native TCP ports. No I/O happens in this plugin.
+//! All socket I/O is performed in Elle code using port/read and
+//! port/write on native TCP ports. No I/O happens in this plugin.
 
 use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;

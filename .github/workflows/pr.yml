@@ -116,8 +116,8 @@ jobs:
           retention-days: 1
 
   tests:
-    name: Elle & Plugin Tests
-    needs: [changes, build-plugins]
+    name: Elle Tests
+    needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
     steps:
@@ -128,14 +128,26 @@ jobs:
         run: sudo apt-get install -y parallel
       - name: Build release binary
         run: cargo build --release -p elle
+      - name: Run examples and Elle script tests
+        run: make smoke
+
+  plugin-tests:
+    name: Plugin Tests
+    needs: [changes, build-plugins]
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release -p elle
       - name: Download all plugin artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: plugin-*
           path: target/release/
           merge-multiple: true
-      - name: Run examples and Elle script tests
-        run: make smoke
       - name: Run plugin tests
         run: make plugin-tests
 
@@ -158,7 +170,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -176,6 +188,9 @@ jobs:
         run: exit 1
       - name: Check tests
         if: needs.tests.result == 'failure'
+        run: exit 1
+      - name: Check plugin tests
+        if: needs.plugin-tests.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'

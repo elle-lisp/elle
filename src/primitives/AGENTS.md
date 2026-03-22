@@ -489,11 +489,11 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 **Location:** `src/primitives/stream.rs`
 
 All 5 stream primitives now accept optional `:timeout ms` keyword argument:
-- `stream/read-line port` or `stream/read-line port :timeout ms`
-- `stream/read port count` or `stream/read port count :timeout ms`
-- `stream/read-all port` or `stream/read-all port :timeout ms`
-- `stream/write port data` or `stream/write port data :timeout ms`
-- `stream/flush port` or `stream/flush port :timeout ms`
+- `port/read-line port` or `port/read-line port :timeout ms`
+- `port/read port count` or `port/read port count :timeout ms`
+- `port/read-all port` or `port/read-all port :timeout ms`
+- `port/write port data` or `port/write port data :timeout ms`
+- `port/flush port` or `port/flush port :timeout ms`
 
 Arity changed from `Exact(N)` to `AtLeast(N)` to allow keyword args. Timeout is extracted via `extract_keyword_timeout` and passed to `IoRequest::with_timeout()`.
 

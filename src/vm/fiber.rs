@@ -87,19 +87,17 @@ impl VM {
         //     (c) Parent has no shared_alloc → create on parent's heap.
         //         After issue-525, saved_heap is never null (root always has FiberHeap),
         //         so root→child transitions use this path too.
-        // Use template.signal (not effective_signal) here: the fiber needs a shared
-        // allocator if the underlying bytecode may yield or do I/O, regardless of
-        // whether a squelch mask would suppress the signal at the call boundary.
-        // The squelch conversion happens in call_inner, not inside the fiber's execution.
-        if self.fiber.closure.template.signal.may_yield()
-            || self.fiber.closure.template.signal.may_io()
+        // All child fibers get a shared allocator so that heap objects
+        // allocated during child execution live on the parent's heap.
+        // Without this, Values that escape the child (e.g., closures
+        // sharing a ClosureTemplate with the parent) would be freed
+        // when the child's FiberHeap is torn down.
         {
             let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
-                // Case (a): parent has shared_alloc from its own parent — propagate
+                // Parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
             } else {
-                // Case (c): create shared allocator on parent's heap.
-                // After issue-525, this handles root→child too (root always has FiberHeap).
+                // Create shared allocator on parent's heap.
                 child_fiber.heap.create_shared_allocator()
             };
             self.fiber.heap.set_shared_alloc(shared_ptr);

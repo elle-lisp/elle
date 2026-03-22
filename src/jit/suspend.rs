@@ -332,15 +332,18 @@ mod tests {
         assert_eq!(frame.ip, 42);
         assert_eq!(&*frame.bytecode, &bytecode);
         assert_eq!(&*frame.constants, &constants);
-        assert_eq!(&*frame.env, &env);
+        // env = original captures [777] + 3 locals [10, 20, 30]
+        assert_eq!(frame.env.len(), 4);
+        assert_eq!(frame.env[0].as_int(), Some(777));
+        assert_eq!(frame.env[1].as_int(), Some(10));
+        assert_eq!(frame.env[2].as_int(), Some(20));
+        assert_eq!(frame.env[3].as_int(), Some(30));
 
-        assert_eq!(frame.stack.len(), 6);
-        assert_eq!(frame.stack[0].as_int(), Some(10));
-        assert_eq!(frame.stack[1].as_int(), Some(20));
-        assert_eq!(frame.stack[2].as_int(), Some(30));
-        assert_eq!(frame.stack[3].as_int(), Some(40));
-        assert_eq!(frame.stack[4].as_int(), Some(50));
-        assert_eq!(frame.stack[5].as_int(), Some(60));
+        // stack = 3 operands [40, 50, 60]
+        assert_eq!(frame.stack.len(), 3);
+        assert_eq!(frame.stack[0].as_int(), Some(40));
+        assert_eq!(frame.stack[1].as_int(), Some(50));
+        assert_eq!(frame.stack[2].as_int(), Some(60));
     }
 
     #[test]
@@ -425,10 +428,12 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.stack.len(), 3);
-        assert_eq!(frame.stack[0].as_int(), Some(100));
-        assert_eq!(frame.stack[1].as_int(), Some(200));
-        assert_eq!(frame.stack[2].as_int(), Some(300));
+        // 3 locals go into env, 0 operands on stack
+        assert_eq!(frame.env.len(), 3);
+        assert_eq!(frame.env[0].as_int(), Some(100));
+        assert_eq!(frame.env[1].as_int(), Some(200));
+        assert_eq!(frame.env[2].as_int(), Some(300));
+        assert_eq!(frame.stack.len(), 0);
     }
 
     #[test]
@@ -454,11 +459,16 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.stack.len(), 30);
-        for i in 0..30 {
+        // 10 locals go into env, 20 operands on stack
+        assert_eq!(frame.env.len(), 10);
+        for i in 0..10 {
+            assert_eq!(frame.env[i].as_int(), Some(i as i64), "env[{}] mismatch", i);
+        }
+        assert_eq!(frame.stack.len(), 20);
+        for i in 0..20 {
             assert_eq!(
                 frame.stack[i].as_int(),
-                Some(i as i64),
+                Some((i + 10) as i64),
                 "stack[{}] mismatch",
                 i
             );
@@ -503,7 +513,10 @@ mod tests {
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
         assert_eq!(frame.ip, 20);
-        assert_eq!(frame.stack.len(), 4);
+        // yield point 1: num_locals=1, num_spilled=3
+        // env = 1 local, stack = 3 operands
+        assert_eq!(frame.env.len(), 1);
+        assert_eq!(frame.stack.len(), 3);
     }
 
     #[test]
@@ -534,10 +547,12 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
-        assert_eq!(frame.stack.len(), 4);
-        assert!(frame.stack[0].is_nil());
-        assert_eq!(frame.stack[1].as_bool(), Some(true));
-        assert_eq!(frame.stack[2].as_float(), Some(1.5));
-        assert!(frame.stack[3].is_empty_list());
+        // num_locals=2, num_spilled=2: 2 locals in env, 2 operands on stack
+        assert_eq!(frame.env.len(), 2);
+        assert!(frame.env[0].is_nil());
+        assert_eq!(frame.env[1].as_bool(), Some(true));
+        assert_eq!(frame.stack.len(), 2);
+        assert_eq!(frame.stack[0].as_float(), Some(1.5));
+        assert!(frame.stack[1].is_empty_list());
     }
 }

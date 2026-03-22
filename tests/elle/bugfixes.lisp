@@ -181,7 +181,7 @@
 
 (begin
   (defn do-write (port msg)
-    (stream/write port msg))
+    (port/write port msg))
 
   (let ((result @[]))
     (ev/run
@@ -208,11 +208,11 @@
 
 (begin
   # Minimal reproduction: deep call chain with many locals, fiber inside defer
-  # doing I/O (stream/write to a real port). Caused LoadLocal panic before fix.
+  # doing I/O (port/write to a real port). Caused LoadLocal panic before fix.
   (defn inner-with-many-locals (port msg)
     (let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8)
           (i 9) (j 10) (k 11) (l 12) (m 13) (n 14) (o 15) (p 16))
-      (stream/write port msg)
+      (port/write port msg)
       (+ a b c d e f g h i j k l m n o p)))
 
   (let ((result @[nil]))
@@ -243,17 +243,17 @@
             (fn ()  # server: accept, read, write, close via defer
               (let ((conn (tcp/accept listener)))
                 (defer (port/close conn)
-                  (let ((data (stream/read conn 64)))
+                  (let ((data (port/read conn 64)))
                     (put server-got 0 data)
-                    (stream/write conn "pong")))))
+                    (port/write conn "pong")))))
             (fn ()  # client: connect, write, read
               (let ((c (tcp/connect "127.0.0.1" port-num)))
-                (stream/write c "ping")
-                (let ((resp (stream/read c 64)))
+                (port/write c "ping")
+                (let ((resp (port/read c 64)))
                   (put client-got 0 resp)
                   (port/close c)))))
           (port/close listener)
-                    # TCP ports use binary encoding; stream/read returns bytes.
+                    # TCP ports use binary encoding; port/read returns bytes.
           # Convert to string for assertion.
           (assert (= (string (get server-got 0)) "ping")
             "server received data from client (Bug 7)")

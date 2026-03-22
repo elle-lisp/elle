@@ -169,8 +169,10 @@ pub fn compile_file(
     let lir_func = lowerer.lower(&hir)?;
 
     // Emit bytecode
+    let signal = lir_func.signal;
     let mut emitter = Emitter::new_with_symbols(symbol_names);
-    let (bytecode, _, _) = emitter.emit(&lir_func);
+    let (mut bytecode, _, _) = emitter.emit(&lir_func);
+    bytecode.signal = signal;
 
     Ok(CompileResult {
         bytecode,
