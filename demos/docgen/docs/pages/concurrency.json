@@ -1,200 +1,120 @@
 {
-  "title": "Concurrency Guide",
-  "description": "Concurrent programming with spawn and join",
+  "title": "Concurrency",
+  "description": "Fibers, coroutines, signals, and threads in Elle",
   "sections": [
     {
       "heading": "Overview",
       "level": 2,
       "content": [
         {
-          "type": "text",
-          "text": "Elle provides concurrency primitives for executing computations in parallel threads. The spawn and join operations allow you to run closures concurrently and retrieve their results."
+          "type": "paragraph",
+          "text": "Elle provides colorless concurrency from a small set of primitives: fibers for cooperative multitasking with signals, coroutines for generators and iterators, and OS threads via `spawn`/`join` for true parallelism."
         }
       ]
     },
     {
-      "heading": "Core Concepts",
+      "heading": "Fibers",
       "level": 2,
       "content": [
         {
-          "type": "list",
-          "items": [
-            "spawn: Creates a new thread and executes a closure",
-            "join: Waits for a thread to complete and returns its result",
-            "Thread handles: References to spawned threads used with join",
-            "Captured values: Immutable data that closures can use in threads"
-          ]
-        }
-      ]
-    },
-    {
-      "heading": "Basic Usage",
-      "level": 2,
-      "content": [
-        {
-          "type": "text",
-          "text": "Use spawn to execute a closure in a new thread and join to wait for completion:"
+          "type": "paragraph",
+          "text": "A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. When a fiber emits a signal, it suspends and the parent decides what to do next."
         },
         {
           "type": "code",
           "language": "lisp",
-          "code": "; Spawn a simple computation\n(let ((handle (spawn (lambda () (+ 5 10)))))\n  (let ((result (join handle)))\n    (display result)))  ; prints: 15"
+          "text": "# Create a fiber that yields values\n(defn produce []\n  (emit :yield 1)\n  (emit :yield 2)\n  (emit :yield 3))\n\n(def f (fiber/new produce |:yield|))\n\n(fiber/resume f) (println (fiber/value f))  # => 1\n(fiber/resume f) (println (fiber/value f))  # => 2\n(fiber/resume f) (println (fiber/value f))  # => 3"
+        },
+        {
+          "type": "paragraph",
+          "text": "When a fiber finishes, its entire heap is freed in O(1) — no GC pause, no reference counting."
         }
       ]
     },
     {
-      "heading": "Capturing Immutable Values",
+      "heading": "Signals",
       "level": 2,
       "content": [
         {
-          "type": "text",
-          "text": "Closures can capture immutable values from their enclosing scope. These values are safely transmitted to the spawned thread:"
+          "type": "paragraph",
+          "text": "Signals are typed, cooperative flow-control interrupts. A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface."
         },
         {
           "type": "code",
           "language": "lisp",
-          "code": "; Capture variables from outer scope\n(let ((x 42)\n      (y 8))\n  (let ((handle (spawn (lambda () (+ x y)))))\n    (display (join handle))))  ; prints: 50"
+          "text": "# Error handling via signals\n(defn risky [x]\n  (if (< x 0)\n    (error {:error :bad-input :message \"negative input\"})\n    (* x x)))\n\n(def f (fiber/new (fn [] (risky -1)) |:error|))\n(fiber/resume f)\n\n(if (= (fiber/status f) :paused)\n  (println \"caught:\" (fiber/value f))\n  (println \"result:\" (fiber/value f)))"
         },
         {
-          "type": "text",
-          "text": "Supported capture types:"
-        },
-        {
-          "type": "list",
-          "items": [
-            "Primitives: nil, booleans, integers, floats",
-            "Strings: immutable text values",
-            "Collections: vectors, lists (cons cells), structs",
-            "Symbols and keywords"
-          ]
+          "type": "paragraph",
+          "text": "The compiler infers which functions can emit signals and enforces that silent contexts don't call yielding ones."
         }
       ]
     },
     {
-      "heading": "Parallel Execution",
+      "heading": "Coroutines",
       "level": 2,
       "content": [
         {
-          "type": "text",
-          "text": "Multiple threads can execute in parallel. Use multiple spawn calls to start several computations:"
+          "type": "paragraph",
+          "text": "Coroutines are lightweight cooperative sequences. `coro/new` wraps a function, `yield` suspends with a value, `coro/resume` steps forward."
         },
         {
           "type": "code",
           "language": "lisp",
-          "code": "; Start multiple threads\n(let ((h1 (spawn (lambda () (* 2 3))))\n      (h2 (spawn (lambda () (* 4 5))))\n      (h3 (spawn (lambda () (* 6 7)))))\n  ; Threads execute in parallel while we're here\n  (let ((r1 (join h1))\n        (r2 (join h2))\n        (r3 (join h3)))\n    (display (+ r1 r2 r3))))  ; prints: 62"
+          "text": "# Fibonacci generator\n(def fib-gen (coro/new (fn []\n  (var a 0)\n  (var b 1)\n  (forever\n    (yield a)\n    (def tmp b)\n    (assign b (+ a b))\n    (assign a tmp)))))\n\n# Pull first 8 Fibonacci numbers\n(each _ in (range 8)\n  (print (coro/resume fib-gen) \" \"))\n(println)\n# => 0 1 1 2 3 5 8 13"
         }
       ]
     },
     {
-      "heading": "Error Handling",
+      "heading": "Threads",
       "level": 2,
       "content": [
         {
-          "type": "text",
-          "text": "If a spawned thread produces an error, join propagates that error to the calling thread:"
+          "type": "paragraph",
+          "text": "Use `spawn` to execute a closure in a new OS thread and `join` to wait for completion. Closures can capture immutable values; mutable values cannot cross thread boundaries."
         },
         {
           "type": "code",
           "language": "lisp",
-          "code": "; Error in spawned thread\n(try\n  (let ((handle (spawn (lambda () (/ 1 0)))))\n    (join handle))  ; propagates division by zero error\n  (catch (e)\n    (display \"Caught error: \")\n    (display e)))"
+          "text": "# Parallel computation\n(def h1 (spawn (fn [] (* 2 3))))\n(def h2 (spawn (fn [] (* 4 5))))\n(def h3 (spawn (fn [] (* 6 7))))\n\n(println (+ (join h1) (join h2) (join h3)))  # => 68"
         }
       ]
     },
     {
-      "heading": "Thread Isolation",
+      "heading": "Processes",
       "level": 2,
       "content": [
         {
-          "type": "text",
-          "text": "Each spawned thread runs in its own virtual machine instance with only the built-in primitives. It has no access to the parent thread's global variables or module state."
+          "type": "paragraph",
+          "text": "Elle supports Erlang-style actors built on fibers. Processes communicate via `send`/`recv`, can be linked for crash propagation, and use `trap-exit` for supervision."
+        },
+        {
+          "type": "paragraph",
+          "text": "See `examples/processes.lisp` for a complete fiber-based process scheduler with message passing, links, and crash propagation."
         }
       ]
     },
     {
-      "heading": "Restrictions",
-      "level": 2,
-      "content": [
-        {
-          "type": "text",
-          "text": "Due to thread safety requirements, closures cannot capture mutable values:"
-        },
-        {
-          "type": "list",
-          "items": [
-            "Tables (mutable collections) cannot be captured",
-            "Native functions cannot be captured",
-            "FFI handles cannot be captured",
-            "Closures that reference mutable variables cannot be spawned"
-          ]
-        },
-        {
-          "type": "text",
-          "text": "Attempting to spawn such a closure produces an error with a description of what couldn't be captured."
-        }
-      ]
-    },
-    {
-      "heading": "Concurrency Primitives Reference",
+      "heading": "Concurrency Primitives",
       "level": 2,
       "content": [
         {
           "type": "table",
-          "headers": ["Function", "Description", "Example"],
+          "headers": ["Function", "Description"],
           "rows": [
-            ["(spawn closure)", "Execute closure in a new thread, returns thread handle", "(spawn (lambda () 42))"],
-            ["(join handle)", "Wait for thread to complete and return result", "(join handle)"],
-            ["(time/sleep seconds)", "Sleep for specified duration", "(time/sleep 1.5)"],
-            ["(current-thread-id)", "Get ID of current thread", "(current-thread-id)"]
+            ["(fiber/new fn mask)", "Create a fiber with a signal mask"],
+            ["(fiber/resume f)", "Resume a suspended fiber"],
+            ["(fiber/status f)", "Get fiber status (:new, :paused, :dead)"],
+            ["(fiber/value f)", "Get the last yielded/returned value"],
+            ["(emit signal value)", "Emit a signal to the parent fiber"],
+            ["(coro/new fn)", "Create a coroutine from a zero-arg function"],
+            ["(coro/resume co)", "Step a coroutine forward"],
+            ["(yield value)", "Suspend coroutine and yield a value"],
+            ["(spawn fn)", "Execute closure in a new OS thread"],
+            ["(join handle)", "Wait for thread to complete, return result"],
+            ["(signal name)", "Declare a user-defined signal keyword"],
+            ["(silence fn signals)", "Restrict which signals a function may emit"]
           ]
-        }
-      ]
-    },
-    {
-      "heading": "Advanced Patterns",
-      "level": 2,
-      "content": [
-        {
-          "type": "text",
-          "text": "Complex computations with multiple captures:"
-        },
-        {
-          "type": "code",
-          "language": "lisp",
-          "code": "; Capture multiple values for a computation\n(let ((a 2) (b 3) (c 4) (d 5))\n  (let ((handle (spawn (lambda ()\n                         (+ (* a b) (* c d))))))\n    (display (join handle))))  ; prints: 26"
-        },
-        {
-           "type": "text",
-           "text": "Using arrays and collections in spawned threads:"
-         },
-         {
-           "type": "code",
-           "language": "lisp",
-           "code": "; Spawn with array capture\n(let ((numbers [1 2 3 4 5]))\n  (let ((handle (spawn (lambda ()\n                         (+ 1 (+ 2 (+ 3 (+ 4 5))))))))\n    (display (join handle))))  ; prints: 15"
-         }
-      ]
-    },
-    {
-      "heading": "Performance Considerations",
-      "level": 2,
-      "content": [
-        {
-          "type": "list",
-          "items": [
-            "spawn is lightweight and fast - creates only native OS threads",
-            "join blocks the calling thread until the spawned thread completes",
-            "Multiple threads can improve performance for CPU-bound tasks on multi-core systems",
-            "Thread overhead is small compared to the computation time in most cases"
-          ]
-        }
-      ]
-    },
-    {
-      "heading": "Examples",
-      "level": 2,
-      "content": [
-        {
-          "type": "text",
-          "text": "See examples/concurrency-spawn-join.lisp for 10 comprehensive examples of spawn and join usage patterns."
         }
       ]
     }
