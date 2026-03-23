@@ -356,7 +356,30 @@ true  false          # booleans (not #t/#f)
 (string/replace "foo-bar" "-" "_") # => "foo_bar"
 ```
 
-Note: `string-append` does not exist. Use `string/join`.
+**Byte length vs grapheme length:** `length` returns the grapheme count, not
+the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
+`string/size-of`:
+
+```lisp
+(length "hello\r\n")        # => 6  (\r\n is one grapheme cluster)
+(string/size-of "hello\r\n") # => 7  (byte count)
+(length "👋🏽")               # => 1  (one grapheme cluster)
+(string/size-of "👋🏽")       # => 8  (4+4 bytes UTF-8)
+```
+
+**String concatenation:** `(string ...)` converts all arguments to strings and concatenates them. This is the preferred way to build strings:
+
+```lisp
+(string "hello " "world")     # => "hello world"
+(string "count: " 42)         # => "count: 42"
+(string "key:" :foo "=" val)  # => "key:foo=123"
+```
+
+`string/join` is for joining a collection with a separator:
+
+```lisp
+(string/join ["a" "b" "c"] ",")  # => "a,b,c"
+```
 
 ### @Strings (mutable)
 
@@ -866,7 +889,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 (def args (drop 1 (sys/args)))   # skip "--"
 (if (empty? args)
   (println "Usage: elle greet.lisp -- <name>")
-  (println (string/join ["Hello, " (first args) "!"] "")))
+  (println (string "Hello, " (first args) "!")))
 ```
 ```bash
 elle greet.lisp -- Alice   # => Hello, Alice!
@@ -972,7 +995,7 @@ These are things agents commonly reach for that Elle does not have:
 
 | Missing | Use instead |
 |---------|-------------|
-| `string-append` | `string/join` |
+| `string-append` | `(string "a" x "b")` for concatenation; `string/join` for joining with separator |
 | `-e` flag | `echo '...' \| elle` |
 | `set!` / `set` for mutation | `assign` |
 | `#t` / `#f` | `true` / `false` |

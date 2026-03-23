@@ -58,6 +58,11 @@ pub(super) enum PoolOp {
     Resolve {
         hostname: String,
     },
+    /// Read until a newline is found or EOF. Loops internally so the caller
+    /// always receives data containing `\n` (or the final chunk at EOF).
+    ReadLine {
+        fd: RawFd,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -97,16 +102,63 @@ impl ThreadPoolBackend {
             let (result_code, data) = match op {
                 PoolOp::Read { fd, size } => {
                     let mut buf = vec![0u8; size];
-                    let ret =
-                        unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
-                    if ret < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
-                    } else {
-                        buf.truncate(ret as usize);
-                        (ret as i32, buf)
+                    let mut total = 0usize;
+                    loop {
+                        let ret = unsafe {
+                            libc::read(
+                                fd,
+                                buf[total..].as_mut_ptr() as *mut libc::c_void,
+                                size - total,
+                            )
+                        };
+                        if ret < 0 {
+                            if total == 0 {
+                                break (
+                                    -(std::io::Error::last_os_error()
+                                        .raw_os_error()
+                                        .unwrap_or(1)),
+                                    Vec::new(),
+                                );
+                            }
+                            // Return whatever we accumulated before the error
+                            break (total as i32, { buf.truncate(total); buf });
+                        }
+                        if ret == 0 {
+                            break (total as i32, { buf.truncate(total); buf });
+                        }
+                        total += ret as usize;
+                        if total >= size {
+                            break (total as i32, buf);
+                        }
+                    }
+                }
+                PoolOp::ReadLine { fd } => {
+                    let mut accumulated = Vec::new();
+                    let mut chunk = vec![0u8; 4096];
+                    loop {
+                        let ret = unsafe {
+                            libc::read(fd, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len())
+                        };
+                        if ret < 0 {
+                            if accumulated.is_empty() {
+                                break (
+                                    -(std::io::Error::last_os_error()
+                                        .raw_os_error()
+                                        .unwrap_or(1)),
+                                    Vec::new(),
+                                );
+                            }
+                            // Return whatever we accumulated before the error
+                            break (accumulated.len() as i32, accumulated);
+                        }
+                        if ret == 0 {
+                            // EOF — return whatever we have
+                            break (accumulated.len() as i32, accumulated);
+                        }
+                        accumulated.extend_from_slice(&chunk[..ret as usize]);
+                        if accumulated.contains(&b'\n') {
+                            break (accumulated.len() as i32, accumulated);
+                        }
                     }
                 }
                 PoolOp::Write { fd, data } => {

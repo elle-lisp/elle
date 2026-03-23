@@ -7,11 +7,16 @@ use crate::io::pool::{BufferHandle, BufferPool};
 use crate::io::request::{ConnectAddr, IoOp};
 use crate::io::types::{FdState, PortKey};
 use crate::io::Completion;
+use crate::port::{Port, PortKind};
 use std::collections::{HashMap, VecDeque};
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 
 /// Submit a stream I/O operation (Read, ReadLine, ReadAll, Write, Flush).
+///
+/// `read_buffered`: for Read ops, the number of bytes already sitting in the
+/// fd_state buffer. The kernel read is reduced by this amount so the
+/// completion handler can prepend the buffered prefix.
 pub(super) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: u64,
@@ -20,6 +25,7 @@ pub(super) fn submit_uring_stream(
     timeout: Option<Duration>,
     buffer_pool: &mut BufferPool,
     buf_handle: BufferHandle,
+    read_buffered: usize,
 ) -> Result<(), String> {
     use io_uring::opcode;
     use io_uring::types::Fd;
@@ -35,7 +41,7 @@ pub(super) fn submit_uring_stream(
         }
         IoOp::Read { count } => {
             let buf = buffer_pool.get_mut(buf_handle);
-            buf.resize(*count, 0);
+            buf.resize(*count - read_buffered, 0);
             opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
                 .offset(u64::MAX)
                 .build()
@@ -623,6 +629,10 @@ pub(super) fn drain_cqes(
     fd_states: &mut HashMap<PortKey, FdState>,
     completions: &mut VecDeque<Completion>,
 ) {
+    // Collect ReadLine and short-Read ops that need re-submission (can't
+    // submit SQEs while iterating the CQ ring).
+    let mut read_resubmits: Vec<(u64, RawFd, usize, PendingOp)> = Vec::new();
+
     for cqe in ring.completion() {
         let user_data = cqe.user_data();
         let result_code = cqe.result();
@@ -694,6 +704,80 @@ pub(super) fn drain_cqes(
                 },
                 _ => Vec::new(),
             };
+
+            // ReadLine re-submission: if the read returned data but no newline
+            // was found (combined with any previously buffered bytes), buffer
+            // the data and schedule another read instead of returning a
+            // truncated line.
+            if let PendingOp::Port {
+                op: IoOp::ReadLine,
+                ref port_key,
+                ..
+            } = pending_op
+            {
+                if result_code > 0 {
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    let has_newline = state
+                        .buffer
+                        .iter()
+                        .chain(data.iter())
+                        .any(|&b| b == b'\n');
+                    if !has_newline {
+                        state.buffer.extend_from_slice(&data);
+                        buffer_pool.release(buf_handle);
+                        let fd = match port_key {
+                            PortKey::Fd(raw) => *raw,
+                            PortKey::Stdout => 1,
+                            PortKey::Stderr => 2,
+                            PortKey::Stdin => unreachable!(),
+                        };
+                        // size=4096 for ReadLine (variable-length read)
+                        read_resubmits.push((id, fd, 4096, pending_op));
+                        continue;
+                    }
+                }
+            }
+
+            // Read short-read re-submission: on TCP sockets, a single read()
+            // can return fewer bytes than requested. Buffer partial data and
+            // resubmit for the remainder. Only applies to stream sockets —
+            // regular files return short at EOF, which is normal completion.
+            if let PendingOp::Port {
+                op: IoOp::Read { count },
+                ref port_key,
+                ref port,
+                ..
+            } = pending_op
+            {
+                let is_stream = port
+                    .as_external::<Port>()
+                    .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))
+                    .unwrap_or(false);
+                if is_stream && result_code > 0 {
+                    let got = result_code as usize;
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    let total = state.buffer.len() + got;
+                    if total < count {
+                        // Short read — buffer and resubmit for remainder.
+                        state.buffer.extend_from_slice(&data);
+                        buffer_pool.release(buf_handle);
+                        let fd = match port_key {
+                            PortKey::Fd(raw) => *raw,
+                            PortKey::Stdout => 1,
+                            PortKey::Stderr => 2,
+                            PortKey::Stdin => unreachable!(),
+                        };
+                        let remaining = count - total;
+                        read_resubmits.push((id, fd, remaining, pending_op));
+                        continue;
+                    }
+                }
+            }
+
             let completion = process_raw_completion(
                 id,
                 result_code,
@@ -705,6 +789,31 @@ pub(super) fn drain_cqes(
             );
             completions.push_back(completion);
         }
+    }
+
+    // Re-submit ReadLine and short-Read ops that need more data.
+    for (id, fd, size, pending_op) in read_resubmits {
+        let new_buf = buffer_pool.alloc(size);
+        let buf = buffer_pool.get_mut(new_buf);
+        buf.resize(size, 0);
+        let sqe = io_uring::opcode::Read::new(
+            io_uring::types::Fd(fd),
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+        )
+        .offset(u64::MAX)
+        .build()
+        .user_data(id);
+        // Re-insert pending op with new buffer handle.
+        let mut reinserted: PendingOp = pending_op;
+        *reinserted.buffer_handle_mut() = new_buf;
+        pending.insert(id, reinserted);
+        unsafe {
+            let _ = ring.submission().push(&sqe);
+        }
+    }
+    if ring.submission().len() > 0 {
+        let _ = ring.submit();
     }
 }
 

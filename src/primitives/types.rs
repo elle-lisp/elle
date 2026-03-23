@@ -419,15 +419,15 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
-        name: "type",
+        name: "type-of",
         func: prim_type_of,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
         doc: "Get the type of a value as a keyword.",
         params: &["value"],
         category: "predicate",
-        example: "(type 42) #=> :integer\n(type \"hello\") #=> :string",
-        aliases: &["type-of"],
+        example: "(type-of 42) #=> :integer\n(type-of \"hello\") #=> :string",
+        aliases: &["type"],
     },
     PrimitiveDef {
         name: "ptr?",

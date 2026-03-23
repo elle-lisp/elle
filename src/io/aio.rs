@@ -193,6 +193,11 @@ impl AsyncBackend {
         // When a previous raw libc::read returned more data than one line (common
         // with TCP), the excess is stored in fd_states[port_key].buffer.
         // Serve subsequent reads from the buffer before submitting to the pool.
+        //
+        // `read_buffered` tracks how many bytes were already in the buffer
+        // when a Read request can't be fully served — the completion handler
+        // must prepend those bytes to the fd data.
+        let mut read_buffered: usize = 0;
         {
             let state = inner
                 .fd_states
@@ -213,9 +218,9 @@ impl AsyncBackend {
                     }
                 }
                 IoOp::Read { count } => {
-                    if !state.buffer.is_empty() {
-                        let n = (*count).min(state.buffer.len());
-                        let chunk: Vec<u8> = state.buffer.drain(..n).collect();
+                    if state.buffer.len() >= *count {
+                        // Buffer has enough — serve entirely from buffer.
+                        let chunk: Vec<u8> = state.buffer.drain(..*count).collect();
                         let value = match port.encoding() {
                             Encoding::Text => {
                                 Value::string(String::from_utf8_lossy(&chunk).as_ref())
@@ -229,6 +234,10 @@ impl AsyncBackend {
                         });
                         return Ok(id);
                     }
+                    // Buffer has partial data — leave it in place and submit
+                    // a read for the remaining bytes. The completion handler
+                    // will prepend the buffered bytes.
+                    read_buffered = state.buffer.len();
                 }
                 _ => {}
             }
@@ -427,15 +436,17 @@ impl AsyncBackend {
                             request.timeout,
                             buffer_pool,
                             buf_handle,
+                            read_buffered,
                         )?;
                     }
                     PlatformBackend::ThreadPool(pool) => {
                         let _ = buffer_pool;
                         let pool_op = match &request.op {
-                            IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll => {
+                            IoOp::ReadLine => PoolOp::ReadLine { fd },
+                            IoOp::Read { .. } | IoOp::ReadAll => {
                                 let size = match &request.op {
-                                    IoOp::Read { count } => *count,
-                                    IoOp::ReadLine | IoOp::ReadAll => 4096,
+                                    IoOp::Read { count } => *count - read_buffered,
+                                    IoOp::ReadAll => 4096,
                                     _ => unreachable!(),
                                 };
                                 PoolOp::Read { fd, size }
