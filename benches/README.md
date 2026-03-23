@@ -1,6 +1,6 @@
 # Benchmarks
 
-Performance benchmarks for Elle using Criterion and IAI. Benchmarks measure compilation time, execution speed, and memory usage across various workloads.
+Performance benchmarks for Elle using Criterion. Benchmarks measure compilation time, execution speed, and memory usage across various workloads.
 
 ## Running Benchmarks
 
@@ -26,7 +26,6 @@ cargo bench -- --baseline my_baseline
 | Type | Tool | Measures | Use for |
 |------|------|----------|---------|
 | **Criterion** | Criterion.rs | Execution time, variance | Detecting regressions |
-| **IAI** | IAI Callgrind | Instruction count, cache misses | Deterministic comparisons |
 
 ## What Benchmarks Measure
 
@@ -64,4 +63,3 @@ Regressions are reported but don't fail the build (`fail-on-alert: false`).
 
 - [AGENTS.md](AGENTS.md) - technical reference for LLM agents
 - [Criterion.rs documentation](https://bheisler.github.io/criterion.rs/book/)
-- [IAI Callgrind documentation](https://docs.rs/iai-callgrind/)
