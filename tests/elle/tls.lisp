@@ -123,26 +123,26 @@
 
         (def server-config (tls:server-config cert-path key-path))
 
-        (let [[server-fiber
-                (ev/spawn (fn []
-                  (let [[conn (tls:accept listener server-config)]]
-                    (defer (tls:close conn)
-                      (let [[msg (tls:read-line conn)]]
-                        (when (not (nil? msg))
-                          (let [[trimmed (string/trim msg)]]
-                            (tls:write conn (string "echo: " trimmed "\n")))))))))
-              [client-fiber
-                (ev/spawn (fn []
-                  (let [[conn (tls:connect "127.0.0.1" server-port {:no-verify true})]]
-                    (defer (tls:close conn)
-                      (tls:write conn "hello\n")
-                      (let [[response (tls:read-line conn)]]
-                        (assert (= response "echo: hello\n")
-                                (string "tls loopback: expected \"echo: hello\\n\", got: "
-                                        response))
-                        (put loopback-ok 0 true))))))]]
-          (ev/join server-fiber)
-          (ev/join client-fiber))
+        (def server-fiber
+          (ev/spawn (fn []
+            (let [[conn (tls:accept listener server-config)]]
+              (defer (tls:close conn)
+                (let [[msg (tls:read-line conn)]]
+                  (when (not (nil? msg))
+                    (let [[trimmed (string/trim msg)]]
+                      (tls:write conn (string "echo: " trimmed "\n"))))))))))
+        (def client-fiber
+          (ev/spawn (fn []
+            (let [[conn (tls:connect "127.0.0.1" server-port {:no-verify true})]]
+              (defer (tls:close conn)
+                (tls:write conn "hello\n")
+                (let [[response (tls:read-line conn)]]
+                  (assert (= response "echo: hello\n")
+                          (string "tls loopback: expected \"echo: hello\\n\", got: "
+                                  response))
+                  (put loopback-ok 0 true)))))))
+        (ev/join server-fiber)
+        (ev/join client-fiber)
 
         (assert (get loopback-ok 0) "tls loopback: client fiber must complete and verify response")
         (port/close listener)
