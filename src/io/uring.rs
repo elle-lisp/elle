@@ -775,6 +775,31 @@ pub(super) fn drain_cqes(
                 }
             }
 
+            // ReadAll re-submission: buffer data and resubmit until EOF
+            // (result_code == 0). ReadAll reads until the write end closes.
+            if let PendingOp::Port {
+                op: IoOp::ReadAll,
+                ref port_key,
+                ..
+            } = pending_op
+            {
+                if result_code > 0 {
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    state.buffer.extend_from_slice(&data);
+                    buffer_pool.release(buf_handle);
+                    let fd = match port_key {
+                        PortKey::Fd(raw) => *raw,
+                        PortKey::Stdout => 1,
+                        PortKey::Stderr => 2,
+                        PortKey::Stdin => unreachable!(),
+                    };
+                    read_resubmits.push((id, fd, 4096, pending_op));
+                    continue;
+                }
+            }
+
             let completion = process_raw_completion(
                 id,
                 result_code,
@@ -860,5 +885,24 @@ pub(super) fn wait_uring(
     }
 
     drain_cqes(ring, pending, buffer_pool, fd_states, completions);
+
+    // If drain_cqes resubmitted ops (ReadAll/ReadLine) and produced no
+    // completions, loop to wait for the resubmitted read's CQE. Only do
+    // this for blocking waits (no timeout) — callers with timeouts
+    // should return and retry via the outer event loop.
+    if timeout.is_none() {
+        while completions.is_empty() && !pending.is_empty() {
+            loop {
+                match ring.submit_and_wait(1) {
+                    Ok(_) => break,
+                    Err(e) if e.raw_os_error() == Some(libc::EINTR) => continue,
+                    Err(e) => {
+                        return Err(format!("io/wait: io_uring wait failed: {}", e));
+                    }
+                }
+            }
+            drain_cqes(ring, pending, buffer_pool, fd_states, completions);
+        }
+    }
     Ok(())
 }
