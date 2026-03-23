@@ -441,7 +441,18 @@ impl JitCompiler {
                         .ins()
                         .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
                 let base = arg_var_base + i;
-                translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                // Wrap in LBox if this param is mutable-captured
+                if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                    let (cell_t, cell_p) = translator.call_helper_value_unary(
+                        &mut builder,
+                        translator.helpers.make_lbox,
+                        arg_tag,
+                        arg_payload,
+                    )?;
+                    translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                } else {
+                    translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                }
             }
 
             // Build cons list from remaining args (reverse iteration)
@@ -549,7 +560,18 @@ impl JitCompiler {
                         .ins()
                         .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
                 let base = arg_var_base + i;
-                translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                // Wrap in LBox if this param is mutable-captured
+                if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                    let (cell_t, cell_p) = translator.call_helper_value_unary(
+                        &mut builder,
+                        translator.helpers.make_lbox,
+                        arg_tag,
+                        arg_payload,
+                    )?;
+                    translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                } else {
+                    translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                }
             }
         }
 
