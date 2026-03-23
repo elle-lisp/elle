@@ -1,4 +1,4 @@
-//! Elle YAML plugin — YAML parsing and serialization via the `serde_yml` crate.
+//! Elle YAML plugin — YAML parsing and serialization via the `serde_yaml_ng` crate.
 
 use std::collections::BTreeMap;
 
@@ -33,15 +33,15 @@ pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
 // Type conversion: YAML → Elle
 // ---------------------------------------------------------------------------
 
-/// Recursively convert a `serde_yml::Value` to an Elle `Value`.
+/// Recursively convert a `serde_yaml_ng::Value` to an Elle `Value`.
 /// Mappings become immutable structs with keyword keys.
 /// Sequences become immutable arrays.
 /// Null becomes `Value::NIL`.
-fn yaml_to_value(yv: serde_yml::Value) -> Result<Value, String> {
+fn yaml_to_value(yv: serde_yaml_ng::Value) -> Result<Value, String> {
     match yv {
-        serde_yml::Value::Null => Ok(Value::NIL),
-        serde_yml::Value::Bool(b) => Ok(Value::bool(b)),
-        serde_yml::Value::Number(n) => {
+        serde_yaml_ng::Value::Null => Ok(Value::NIL),
+        serde_yaml_ng::Value::Bool(b) => Ok(Value::bool(b)),
+        serde_yaml_ng::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Ok(Value::int(i))
             } else if let Some(f) = n.as_f64() {
@@ -50,16 +50,16 @@ fn yaml_to_value(yv: serde_yml::Value) -> Result<Value, String> {
                 Err(format!("yaml: unsupported number: {}", n))
             }
         }
-        serde_yml::Value::String(s) => Ok(Value::string(s)),
-        serde_yml::Value::Sequence(seq) => {
+        serde_yaml_ng::Value::String(s) => Ok(Value::string(s)),
+        serde_yaml_ng::Value::Sequence(seq) => {
             let items: Result<Vec<_>, _> = seq.into_iter().map(yaml_to_value).collect();
             Ok(Value::array(items?))
         }
-        serde_yml::Value::Mapping(map) => {
+        serde_yaml_ng::Value::Mapping(map) => {
             let mut fields = BTreeMap::new();
             for (k, v) in map {
                 let key = match k {
-                    serde_yml::Value::String(s) => s,
+                    serde_yaml_ng::Value::String(s) => s,
                     other => {
                         return Err(format!("yaml: non-string map key: {:?}", other));
                     }
@@ -68,7 +68,7 @@ fn yaml_to_value(yv: serde_yml::Value) -> Result<Value, String> {
             }
             Ok(Value::struct_from(fields))
         }
-        serde_yml::Value::Tagged(tagged) => yaml_to_value(tagged.value),
+        serde_yaml_ng::Value::Tagged(tagged) => yaml_to_value(tagged.value),
     }
 }
 
@@ -76,42 +76,42 @@ fn yaml_to_value(yv: serde_yml::Value) -> Result<Value, String> {
 // Type conversion: Elle → YAML
 // ---------------------------------------------------------------------------
 
-/// Recursively convert an Elle `Value` to a `serde_yml::Value`.
+/// Recursively convert an Elle `Value` to a `serde_yaml_ng::Value`.
 /// Returns an error for types that have no YAML equivalent (closures, etc.).
 /// nil → Null (YAML supports null, unlike TOML).
-fn value_to_yaml(v: Value, name: &str) -> Result<serde_yml::Value, (SignalBits, Value)> {
+fn value_to_yaml(v: Value, name: &str) -> Result<serde_yaml_ng::Value, (SignalBits, Value)> {
     if v.is_nil() {
-        return Ok(serde_yml::Value::Null);
+        return Ok(serde_yaml_ng::Value::Null);
     }
     if let Some(b) = v.as_bool() {
-        return Ok(serde_yml::Value::Bool(b));
+        return Ok(serde_yaml_ng::Value::Bool(b));
     }
     if let Some(i) = v.as_int() {
-        return Ok(serde_yml::Value::Number(i.into()));
+        return Ok(serde_yaml_ng::Value::Number(i.into()));
     }
     if let Some(f) = v.as_float() {
-        return Ok(serde_yml::Value::Number(serde_yml::Number::from(f)));
+        return Ok(serde_yaml_ng::Value::Number(serde_yaml_ng::Number::from(f)));
     }
     if let Some(s) = v.with_string(|s| s.to_string()) {
-        return Ok(serde_yml::Value::String(s));
+        return Ok(serde_yaml_ng::Value::String(s));
     }
     // Immutable array
     if let Some(arr) = v.as_array() {
         let items: Result<Vec<_>, _> = arr.iter().map(|&item| value_to_yaml(item, name)).collect();
-        return Ok(serde_yml::Value::Sequence(items?));
+        return Ok(serde_yaml_ng::Value::Sequence(items?));
     }
     // Mutable @array
     if let Some(arr_ref) = v.as_array_mut() {
         let arr = arr_ref.borrow();
         let items: Result<Vec<_>, _> = arr.iter().map(|&item| value_to_yaml(item, name)).collect();
-        return Ok(serde_yml::Value::Sequence(items?));
+        return Ok(serde_yaml_ng::Value::Sequence(items?));
     }
     // Immutable struct — keyword keys become YAML mapping string keys
     if let Some(map) = v.as_struct() {
-        let mut mapping = serde_yml::Mapping::new();
+        let mut mapping = serde_yaml_ng::Mapping::new();
         for (k, &val) in map.iter() {
             let key = match k {
-                TableKey::Keyword(s) => serde_yml::Value::String(s.clone()),
+                TableKey::Keyword(s) => serde_yaml_ng::Value::String(s.clone()),
                 other => {
                     return Err((
                         SIG_ERROR,
@@ -124,15 +124,15 @@ fn value_to_yaml(v: Value, name: &str) -> Result<serde_yml::Value, (SignalBits, 
             };
             mapping.insert(key, value_to_yaml(val, name)?);
         }
-        return Ok(serde_yml::Value::Mapping(mapping));
+        return Ok(serde_yaml_ng::Value::Mapping(mapping));
     }
     // Mutable @struct — same treatment
     if let Some(map_ref) = v.as_struct_mut() {
         let map = map_ref.borrow();
-        let mut mapping = serde_yml::Mapping::new();
+        let mut mapping = serde_yaml_ng::Mapping::new();
         for (k, &val) in map.iter() {
             let key = match k {
-                TableKey::Keyword(s) => serde_yml::Value::String(s.clone()),
+                TableKey::Keyword(s) => serde_yaml_ng::Value::String(s.clone()),
                 other => {
                     return Err((
                         SIG_ERROR,
@@ -145,7 +145,7 @@ fn value_to_yaml(v: Value, name: &str) -> Result<serde_yml::Value, (SignalBits, 
             };
             mapping.insert(key, value_to_yaml(val, name)?);
         }
-        return Ok(serde_yml::Value::Mapping(mapping));
+        return Ok(serde_yaml_ng::Value::Mapping(mapping));
     }
     Err((
         SIG_ERROR,
@@ -183,7 +183,7 @@ fn prim_yaml_parse(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    match serde_yml::from_str::<serde_yml::Value>(&text) {
+    match serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&text) {
         Ok(yv) => match yaml_to_value(yv) {
             Ok(v) => (SIG_OK, v),
             Err(e) => (
@@ -222,8 +222,8 @@ fn prim_yaml_parse_all(args: &[Value]) -> (SignalBits, Value) {
         }
     };
     let mut docs = Vec::new();
-    for doc in serde_yml::Deserializer::from_str(&text) {
-        let yv = match serde_yml::Value::deserialize(doc) {
+    for doc in serde_yaml_ng::Deserializer::from_str(&text) {
+        let yv = match serde_yaml_ng::Value::deserialize(doc) {
             Ok(v) => v,
             Err(e) => {
                 return (
@@ -260,7 +260,7 @@ fn prim_yaml_encode(args: &[Value]) -> (SignalBits, Value) {
         Ok(v) => v,
         Err(e) => return e,
     };
-    match serde_yml::to_string(&yv) {
+    match serde_yaml_ng::to_string(&yv) {
         Ok(s) => (SIG_OK, Value::string(s)),
         Err(e) => (
             SIG_ERROR,

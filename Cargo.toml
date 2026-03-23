@@ -66,7 +66,6 @@ target-lexicon = "0.13"
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
-iai-callgrind = "0.11"
 stats_alloc = { version = "0.1.10", features = ["nightly"] }
 
 [features]
@@ -88,10 +87,6 @@ inherits = "release"
 
 [[bench]]
 name = "benchmarks"
-harness = false
-
-[[bench]]
-name = "iai_benchmarks"
 harness = false
 
 [[bench]]
