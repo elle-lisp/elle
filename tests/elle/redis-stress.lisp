@@ -2,6 +2,12 @@
 
 (def redis ((import-file "lib/redis.lisp")))
 
+# Skip if Redis is not reachable
+(let [[[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]]
+  (when (not ok?)
+    (println "SKIP: Redis not available at 127.0.0.1:6379")
+    (exit 0)))
+
 (redis:with "127.0.0.1" 6379
   (fn []
     (redis:flushdb)

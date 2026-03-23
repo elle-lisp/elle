@@ -14,6 +14,12 @@
 
 # ── Integration tests (need live Redis) ────────────────────────────────────
 
+# Skip if Redis is not reachable
+(let [[[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]]
+  (when (not ok?)
+    (println "SKIP: Redis not available at 127.0.0.1:6379")
+    (exit 0)))
+
 (println "Connecting to Redis at 127.0.0.1:6379...")
 
 (redis:with "127.0.0.1" 6379

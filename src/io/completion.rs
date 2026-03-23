@@ -11,6 +11,11 @@ use crate::value::{error_val, Value};
 use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, OwnedFd};
 
+/// Convert an errno to a human-readable message via strerror.
+fn errno_message(errno: i32) -> String {
+    std::io::Error::from_raw_os_error(errno).to_string()
+}
+
 pub(super) fn process_raw_completion(
     id: u64,
     result_code: i32,
@@ -133,7 +138,7 @@ pub(super) fn process_raw_completion(
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
-                    format!("I/O error: errno {}", errno)
+                    format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
                 return Completion {
@@ -213,7 +218,7 @@ pub(super) fn process_raw_completion(
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
-                    format!("I/O error: errno {}", errno)
+                    format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
                 let state = fd_states
