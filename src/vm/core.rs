@@ -39,7 +39,7 @@ pub struct VM {
     /// directly on the VM, not behind a handle). Used to wire up
     /// `child.parent` back-pointers during fiber resume.
     pub current_fiber_handle: Option<FiberHandle>,
-    /// Cached NaN-boxed Value for the current fiber. `None` for the root
+    /// Cached Value for the current fiber. `None` for the root
     /// fiber. Used to set `child.parent_value` during resume chain wiring,
     /// so `fiber/parent` can return the original Value without re-allocating.
     pub current_fiber_value: Option<Value>,

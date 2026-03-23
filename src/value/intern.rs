@@ -1,7 +1,7 @@
-//! String interning for the NaN-boxed value system.
+//! String interning for the tagged-union value system.
 //!
 //! All strings are interned to enable O(1) equality comparison via pointer
-//! equality. This is essential because NaN-boxed Values compare by bit pattern,
+//! equality. This is essential because Values compare by tag+payload equality,
 //! so strings must share the same heap allocation to be equal.
 
 use std::cell::RefCell;

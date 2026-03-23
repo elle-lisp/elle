@@ -14,7 +14,7 @@
 //!
 //! 1. No binding is captured by a nested lambda (`is_captured()`)
 //! 2. Body cannot suspend (`may_suspend()`)
-//! 3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
+//! 3. Body result is provably an immediate (`result_is_safe`)
 //! 4. Body contains no dangerous `set` to bindings outside this scope
 //!    (`body_contains_dangerous_outward_set`)
 //! 5. All breaks in body carry safe immediate values
@@ -41,8 +41,8 @@ use crate::lir::intrinsics::IntrinsicOp;
 use crate::lir::types::BinOp;
 
 impl<'a> Lowerer<'a> {
-    /// Check if the result of a HIR expression is provably a NaN-boxed
-    /// immediate (not a heap pointer to something allocated inside the scope).
+    /// Check if the result of a HIR expression is provably an immediate
+    /// (not a heap pointer to something allocated inside the scope).
     ///
     /// `scope_bindings` contains the bindings introduced by the let/letrec
     /// being analyzed. A `Var` referencing a binding NOT in this set is
@@ -58,7 +58,7 @@ impl<'a> Lowerer<'a> {
     /// value: non-intrinsic calls, lambdas, strings, quotes, etc.
     pub(super) fn result_is_safe(&self, hir: &Hir, scope_bindings: &[(Binding, &Hir)]) -> bool {
         match &hir.kind {
-            // Literals: all NaN-boxed immediates
+            // Literals: all immediates
             HirKind::Int(_)
             | HirKind::Float(_)
             | HirKind::Bool(_)
@@ -404,7 +404,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Check that every `Break` targeting `target_id` within the given body
-    /// has a value that is provably a NaN-boxed immediate.
+    /// has a value that is provably an immediate.
     ///
     /// `scope_bindings` tracks bindings introduced by let/letrec nodes
     /// between the block and the break site. This is critical for blocks:
@@ -680,7 +680,7 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Check that every `Break` node reachable from this HIR expression
-    /// has a value that is provably a NaN-boxed immediate.
+    /// has a value that is provably an immediate.
     ///
     /// Used by `can_scope_allocate_let`: if a break carries a heap value
     /// past the compensating RegionExit, the value dangles. If all break

@@ -8,9 +8,9 @@ compilation.
 ## What HIR Does
 
 **Binding Resolution**: Every variable reference becomes a `Binding` — a
-NaN-boxed Value pointing to a heap-allocated `BindingInner`. Each `Binding`
+Value pointing to a heap-allocated `BindingInner`. Each `Binding`
 is unique per binding site (two variables named `x` in different scopes get
-different Bindings). Identity is pointer equality (bit-pattern comparison).
+different Bindings). Identity is pointer equality (tag+payload comparison).
 
 **Capture Analysis**: When a lambda references a variable from an enclosing
 scope, HIR records what's captured and how to access it (directly from parent's
@@ -39,8 +39,8 @@ The analyzer produces:
 ## Key Types
 
 ```rust
-// A resolved variable reference — NaN-boxed pointer to heap BindingInner
-struct Binding(Value);  // Copy, 8 bytes
+// A resolved variable reference — tagged-union pointer to heap BindingInner
+struct Binding(Value);  // Copy, 16 bytes
 
 // Metadata stored on the heap (mutable during analysis, read-only after)
 struct BindingInner {

@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 elle = { path = "../.." }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "logging", "std"] }
 rustls-native-certs = "0.8"
-rustls-pemfile = "2"
+rustls-pki-types = { version = "1", features = ["std"] }
 webpki-roots = "0.26"
 
 [dev-dependencies]

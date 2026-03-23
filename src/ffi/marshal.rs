@@ -418,8 +418,7 @@ mod tests {
 
     #[test]
     fn test_u64_roundtrip_boundary() {
-        // i64::MAX + 1 is the first value that would have been truncated by the old
-        // 48-bit NaN-boxed Value. Verify it survives the new 64-bit representation.
+        // i64::MAX + 1 wraps to i64::MIN; verify the u64 roundtrip is lossless.
         let boundary: u64 = i64::MAX as u64 + 1; // 0x8000000000000000
         let buf = AlignedBuffer::new(8, 8);
 

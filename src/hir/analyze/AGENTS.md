@@ -5,7 +5,7 @@ Syntax to HIR analysis: binding resolution, capture computation, signal inferenc
 ## Responsibility
 
 Transform expanded Syntax trees into HIR by:
-1. Resolving all variable references to `Binding` (NaN-boxed heap objects)
+1. Resolving all variable references to `Binding` (u32 arena indices)
 2. Computing closure captures and lbox requirements
 3. Inferring signals (including interprocedural signal tracking)
 4. Validating scope rules and control flow
@@ -21,7 +21,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `Analyzer` | Main struct that transforms Syntax → HIR |
-| `Binding` | NaN-boxed Value wrapping `HeapObject::Binding(RefCell<BindingInner>)` — Copy, identity by bit-pattern |
+| `Binding` | `u32` index into `BindingArena` — Copy, identity by integer equality |
 | `BindingScope` | `Parameter`, `Local`, or `Global` |
 | `CaptureInfo` | What a closure captures and how (`Local`, `Capture`, or `Global`) |
 | `BlockContext` | Active block for `break` targeting (block_id, name, fn_depth) |

@@ -132,7 +132,7 @@ pub struct Lowerer<'a> {
     /// Intrinsic operations for operator specialization.
     /// Maps global SymbolId to specialized LIR instruction.
     intrinsics: FxHashMap<SymbolId, IntrinsicOp>,
-    /// Primitives known to return NaN-boxed immediates.
+    /// Primitives known to return immediates.
     /// Used by escape analysis (`result_is_safe`) to accept calls to
     /// these primitives in scope-allocated let bodies.
     immediate_primitives: FxHashSet<SymbolId>,
@@ -354,7 +354,7 @@ impl<'a> Lowerer<'a> {
     /// Returns `true` when ALL six conditions hold:
     /// 1. No binding is captured by a nested lambda (captured values escape)
     /// 2. Body cannot suspend (yield/debug/polymorphic signals prevent cleanup)
-    /// 3. Body result is provably a NaN-boxed immediate (not heap-allocated)
+    /// 3. Body result is provably an immediate (not heap-allocated)
     /// 4. Body contains no dangerous outward `set` (set to outer binding
     ///    with a value that could be heap-allocated inside the scope)
     /// 5. All breaks in body carry safe immediate values

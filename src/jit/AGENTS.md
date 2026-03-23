@@ -38,11 +38,11 @@ type JitFn = unsafe extern "C" fn(
     args: *const Value,     // arguments array
     nargs: u32,             // number of arguments
     vm: *mut VM,            // pointer to VM (for globals, function calls)
-    self_bits: u64,         // NaN-boxed bits of the closure (for self-tail-call detection)
+    self_bits: u64,         // tag+payload bits of the closure (for self-tail-call detection)
 ) -> Value;
 ```
 
-Values are 8 bytes (`u64` underneath the NaN-boxing).
+Values are 16 bytes (`(tag: u64, payload: u64)` pair).
 
 The 5th parameter `self_bits` enables self-tail-call optimization: when a
 function tail-calls itself, the JIT compares the callee against `self_bits`.
@@ -51,7 +51,7 @@ of calling `elle_jit_tail_call`. This turns self-recursive tail calls into
 native loops.
 
 **Return values:**
-- Normal return: NaN-boxed `Value`
+- Normal return: tagged-union `Value`
 - Tail call: `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64)
 - Yield: `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) — `fiber.signal` and `fiber.suspended` are set by the yield helper
 
@@ -108,9 +108,9 @@ Supported in yielding functions (via side-exit):
 ## Runtime Helpers
 
 All operations go through `extern "C"` runtime helpers for safety.
-These handle type checking and NaN-boxing.
+These handle type checking and tagged-union encoding.
 
-### runtime.rs (pure arithmetic on NaN-boxed values)
+### runtime.rs (pure arithmetic on tagged-union values)
 
 - **Arithmetic**: `elle_jit_add`, `_sub`, `_mul`, `_div`, `_rem`
 - **Bitwise**: `elle_jit_bit_and`, `_or`, `_xor`, `_shl`, `_shr`
@@ -202,18 +202,16 @@ merge_block(phi):
 Special cases:
 - **Div/Rem**: An extra `int_check_block` checks for zero divisor after the
   tag check. If divisor is zero, falls to `slow_block` (two predecessors).
-- **Eq/Ne**: Use bit equality on the full NaN-boxed value (both have the same
-  TAG_INT prefix, so bit equality is correct for integers).
-- **Ordered comparisons** (Lt/Le/Gt/Ge) and **shifts** (Shl/Shr): Sign-extend
-  the 48-bit payload to 64 bits before the native operation.
+- **Eq/Ne**: Use tag+payload equality (both have the same
+  TAG_INT tag, so direct comparison is correct for integers).
+- **Ordered comparisons** (Lt/Le/Gt/Ge) and **shifts** (Shl/Shr): Use the
+  full i64 payload directly for the native operation.
 - **Not** (unary): Fully inlined with no slow path. The truthiness check
-  (`ushr 48` then compare against `0x7FF9`) works for all types — only nil and
-  false have the falsy tag. Returns `TAG_TRUE` or `TAG_FALSE` directly.
+  (compare tag against the falsy tags) works for all types — only nil and
+  false have falsy tags. Returns `TAG_TRUE` or `TAG_FALSE` directly.
 - **Neg/BitNot** (unary): Same diamond pattern as binary ops but with a
-  single-operand tag check (`band` with `TAG_INT_MASK`, `icmp eq` against
-  `TAG_INT`). Neg sign-extends the payload, negates, truncates, re-tags.
-  BitNot XORs the payload with `PAYLOAD_MASK` (flips all 48 payload bits),
-  re-tags.
+  single-operand tag check (`icmp eq` against `TAG_INT`). Neg negates the
+  i64 payload, re-tags. BitNot inverts the payload bits, re-tags.
 
 ## Direct Self-Calls
 
@@ -281,8 +279,8 @@ without building an interpreter environment — zero heap allocations on the
 fast path. This is critical for recursive functions like `fib`.
 
 Key details:
-- **Zero-copy env**: `closure.env.as_ptr() as *const u64` — safe because
-  `Value` is `#[repr(transparent)]` over `u64`.
+- **Zero-copy env**: `closure.env.as_ptr() as *const Value` — safe because
+  `Value` layout is stable.
 - **Zero-copy args**: `args_ptr` passes through from the JIT caller directly.
 - **Zero-copy native args**: Native function calls use `args_ptr as *const Value`
   to create a slice without Vec allocation.
@@ -322,8 +320,8 @@ No errors are silently swallowed.
    - `TAIL_CALL_SENTINEL` (0xDEAD_BEEF_DEAD_BEEFu64) → resolve pending tail call
    - `YIELD_SENTINEL` (0xDEAD_CAFE_DEAD_CAFEu64) → side-exit to interpreter
 
-5. **NaN-boxing correctness.** The JIT uses the exact same bit patterns as
-   `Value::int()`, `Value::float()`, etc. Constants are encoded at compile time.
+5. **Value encoding correctness.** The JIT uses the exact same tag+payload
+   patterns as `Value::int()`, `Value::float()`, etc. Constants are encoded at compile time.
 
 6. **Module lifetime.** `JitCode` keeps the `JITModule` alive via `Arc` so the
    native code isn't freed while still in use.
@@ -333,16 +331,16 @@ No errors are silently swallowed.
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
    function calls, global variable access, and yield side-exit helpers.
 
-9. **Self-tail-call identity.** The 5th parameter `self_bits` is the NaN-boxed
-   closure pointer. Self-tail-calls are detected by comparing the callee's bits
+9. **Self-tail-call identity.** The 5th parameter `self_bits` is the
+   tagged-union closure pointer. Self-tail-calls are detected by comparing the callee's bits
    against `self_bits`.
 
 10. **No silent error swallowing.** Every error path in dispatch helpers sets
     `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
 
-11. **Value is repr(transparent) over u64.** JIT-to-JIT calling and native
-    function dispatch cast `*const u64` to `*const Value` (and vice versa)
-    without copying. If `Value`'s representation changes, these casts break.
+11. **Value is a 16-byte `(tag: u64, payload: u64)` pair.** JIT-to-JIT calling
+    and native function dispatch pass `*const Value` pointers directly.
+    If `Value`'s representation changes, these casts break.
 
 12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
      and `elle_jit_yield_through_call` are responsible for building the

@@ -77,7 +77,6 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
     // overwrites the caller's local variable slots — corrupting cells
     // that hold destructured bindings.
     let saved_stack = std::mem::take(&mut vm.fiber.stack);
-    let saved_allocator = crate::value::fiberheap::save_active_allocator();
 
     // Load prelude if this is a fresh expander
     if !expander.has_macros() {
@@ -85,7 +84,6 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
             Ok(_) => {}
             Err(e) => {
                 vm.fiber.stack = saved_stack;
-                crate::value::fiberheap::restore_active_allocator(saved_allocator);
                 vm.eval_expander = Some(expander);
                 return Err(LError::generic(format!("eval: prelude load failed: {}", e)));
             }
@@ -97,7 +95,6 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
         Ok(e) => e,
         Err(e) => {
             vm.fiber.stack = saved_stack;
-            crate::value::fiberheap::restore_active_allocator(saved_allocator);
             vm.eval_expander = Some(expander);
             return Err(LError::generic(format!("eval: expansion failed: {}", e)));
         }
@@ -105,7 +102,6 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
 
     // Restore the caller's stack after macro expansion
     vm.fiber.stack = saved_stack;
-    crate::value::fiberheap::restore_active_allocator(saved_allocator);
 
     // Put Expander back
     vm.eval_expander = Some(expander);

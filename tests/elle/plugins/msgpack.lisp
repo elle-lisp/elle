@@ -34,10 +34,10 @@
 
 (assert (= (decode-fn (encode-fn -32768)) -32768) "integer -32768 (i16 min) round-trips")
 
-## Elle integers are 48-bit signed: max = 2^47-1 = 140737488355327
-(assert (= (decode-fn (encode-fn 140737488355327)) 140737488355327) "integer 48-bit max round-trips")
+## Elle integers are full-range i64
+(assert (= (decode-fn (encode-fn 140737488355327)) 140737488355327) "integer large positive round-trips")
 
-(assert (= (decode-fn (encode-fn -140737488355328)) -140737488355328) "integer 48-bit min round-trips")
+(assert (= (decode-fn (encode-fn -140737488355328)) -140737488355328) "integer large negative round-trips")
 
 (assert (= (decode-fn (encode-fn 0.0)) 0.0) "float 0.0 round-trips")
 

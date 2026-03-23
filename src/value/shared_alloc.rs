@@ -17,6 +17,12 @@ use crate::value::fiberheap::RootSlab;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
+/// Saved position for scope-based release within a SharedAllocator.
+struct SharedMark {
+    allocs_len: usize,
+    dtors_len: usize,
+}
+
 pub(crate) struct SharedAllocator {
     slab: RootSlab,
     /// Raw pointers to slab-allocated HeapObjects that need Drop.
@@ -27,6 +33,8 @@ pub(crate) struct SharedAllocator {
     allocs: Vec<*mut HeapObject>,
     /// Total number of objects allocated (including those not needing Drop).
     alloc_count: usize,
+    /// Stack of scope marks for RegionEnter/RegionExit on child fibers.
+    marks: Vec<SharedMark>,
 }
 
 impl SharedAllocator {
@@ -36,6 +44,7 @@ impl SharedAllocator {
             dtors: Vec::new(),
             allocs: Vec::new(),
             alloc_count: 0,
+            marks: Vec::new(),
         }
     }
 
@@ -49,6 +58,37 @@ impl SharedAllocator {
         }
         self.alloc_count += 1;
         Value::from_heap_ptr(ptr as *const (), value_tag)
+    }
+
+    /// Push a scope mark recording the current allocs/dtors positions.
+    pub fn push_mark(&mut self) {
+        self.marks.push(SharedMark {
+            allocs_len: self.allocs.len(),
+            dtors_len: self.dtors.len(),
+        });
+    }
+
+    /// Pop the top scope mark and release objects allocated since it was pushed.
+    /// Runs destructors (LIFO), deallocates slab slots, truncates both vecs.
+    pub fn pop_mark_and_release(&mut self) {
+        let mark = self
+            .marks
+            .pop()
+            .expect("SharedAllocator::pop_mark_and_release without matching push_mark");
+        // Run destructors in reverse for objects allocated since the mark.
+        for i in (mark.dtors_len..self.dtors.len()).rev() {
+            unsafe {
+                std::ptr::drop_in_place(self.dtors[i]);
+            }
+        }
+        self.dtors.truncate(mark.dtors_len);
+        // Return slab slots to free list.
+        for &ptr in self.allocs[mark.allocs_len..].iter().rev() {
+            self.slab.dealloc(ptr);
+        }
+        let released = self.allocs.len() - mark.allocs_len;
+        self.allocs.truncate(mark.allocs_len);
+        self.alloc_count -= released;
     }
 
     /// Run destructors, return all slots to the slab free list, and reset.
@@ -68,6 +108,7 @@ impl SharedAllocator {
         self.allocs.clear();
         self.slab.clear();
         self.alloc_count = 0;
+        self.marks.clear();
     }
 
     #[cfg_attr(not(test), allow(dead_code))]

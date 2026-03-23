@@ -4,7 +4,7 @@ The analysis phase transforms expanded `Syntax` trees into `HIR` by resolving al
 
 ## What Analysis Does
 
-1. **Binding Resolution**: Every variable reference becomes a `Binding` — a unique NaN-boxed pointer to a heap-allocated `BindingInner`. Identity is pointer equality.
+1. **Binding Resolution**: Every variable reference becomes a `Binding` — a unique pointer (as a Value) to a heap-allocated `BindingInner`. Identity is pointer equality.
 
 2. **Capture Analysis**: When a lambda references a variable from an enclosing scope, the analyzer records what's captured and how to access it (directly from parent's locals, transitively through parent's captures, or from globals).
 
