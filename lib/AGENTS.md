@@ -201,3 +201,92 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 ```bash
 ./target/debug/elle tests/elle/tls.lisp
 ```
+
+---
+
+# lib/redis
+
+Agent guide for `lib/redis.lisp` — Pure Elle Redis client (RESP2).
+
+## Purpose
+
+Redis client over TCP using Elle's async I/O primitives. Single file. No Rust
+plugin. Speaks RESP2.
+
+## Data flow
+
+```
+redis:with host port thunk → tcp/connect → parameterize(*redis-port*) → thunk
+  redis:set "key" "val" → redis-cmd → resp-encode → port/write → port/flush → resp-read → resp-ok?
+  redis:get "key"        → redis-cmd → resp-encode → port/write → port/flush → resp-read
+```
+
+Manager:
+```
+redis:manager host port → {:run fn :port-param param}
+  run thunk → connect → defer(close) → loop: parameterize → thunk
+    on error: terminal? → crash | reconnect → retry
+```
+
+## Exported functions
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `redis:connect` | `host port` | TCP port | async |
+| `redis:close` | `port` | nil | |
+| `redis:with` | `host port thunk` | thunk result | async, manages lifecycle |
+| `redis:manager` | `host port [&named terminal? max-retries]` | manager struct | |
+| `redis:get` | `key` | string or nil | uses `*redis-port*` |
+| `redis:set` | `key value [&named ex px nx xx]` | true or string | uses `*redis-port*` |
+| `redis:hgetall` | `key` | struct (string keys) | uses `*redis-port*` |
+| `redis:subscribe` | `port & channels` | port | enters sub mode |
+| `redis:recv` | `port` | `{"channel" ... "data" ...}` or nil | |
+| `redis:pipeline` | `& commands` | array of results | uses `*redis-port*` |
+| `redis:ping` | | "PONG" | uses `*redis-port*` |
+| `redis:test` | | true | RESP self-tests |
+
+Full command list: strings, keys, hashes, lists, sets, sorted sets, server,
+pub/sub. See export struct at bottom of file.
+
+## Connection model
+
+The connection is a bare TCP port. No wrapper struct. `*redis-port*` is a
+`Parameter` that holds the current connection for ambient access by commands.
+
+Two usage patterns:
+1. **`redis:with`** — simple: opens connection, binds parameter, runs thunk,
+   closes on exit.
+2. **`redis:manager`** — resilient: reconnects on non-terminal errors, crashes
+   on terminal ones.
+
+## Value mapping
+
+| Redis | Elle |
+|-------|------|
+| Nil bulk string (`$-1`) | `nil` |
+| Integer reply | integer |
+| Simple string | string |
+| Array reply | array (immutable) |
+| HGETALL | struct with string keys |
+| EXISTS/HEXISTS/SISMEMBER/EXPIRE | boolean |
+| OK replies | `true` |
+
+## Invariants
+
+1. All commands require `*redis-port*` to be bound (via `redis:with` or
+   `redis:manager`).
+2. Pub/sub functions take the raw port directly (not through the parameter).
+3. `resp-read-raw` returns error structs; `resp-read` signals errors.
+4. HGETALL returns string keys, not keyword keys.
+5. `string/size-of` is used for bulk string length (byte length, not grapheme
+   count).
+
+## Running tests
+
+```bash
+# RESP self-tests only (no Redis needed)
+echo '((import-file "lib/redis.lisp"):test)' | ./target/debug/elle
+
+# Full integration tests (requires Redis on 127.0.0.1:6379)
+./target/debug/elle tests/elle/redis.lisp
+```
