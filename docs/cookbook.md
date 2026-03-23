@@ -129,7 +129,7 @@ dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
 
 ## 2. Adding a New Heap Type
 
-A heap type is a new kind of runtime value stored behind a NaN-boxed
+A heap type is a new kind of runtime value stored behind a tagged-union
 pointer. Use the `LStringMut` type as a reference — it's a recent, clean
 example.
 

@@ -42,7 +42,7 @@ bytecode. Error messages include file:line:col information.
   for source tracking
 - **`compiler`** — Bytecode instruction definitions, debug formatting
 - **`vm`** — Bytecode execution, builtin documentation storage
-- **`value`** — Runtime value representation (NaN-boxed); trait table field on
+- **`value`** — Runtime value representation (tagged-union); trait table field on
   19 user-facing heap variants
 - **`signals`** — Signal type (`Silent`, `Yields`, `Polymorphic`), signal
   registry for keyword-to-bit mapping;
@@ -112,9 +112,9 @@ bytecode. Error messages include file:line:col information.
 
 ### The Value type
 
-`Value` is the runtime representation using NaN-boxing. Create values via
-methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than
-enum variants. Notable types:
+`Value` is the runtime representation using a 16-byte tagged union
+`(tag: u64, payload: u64)`. Create values via methods like `Value::int()`,
+`Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
 - `Closure` — bytecode + captured environment + arity + signal +
   `location_map` + `doc` + `syntax` + `traits`
 - `LBox` / `LocalLBox` — mutable lboxes for captured variables
@@ -126,7 +126,7 @@ enum variants. Notable types:
 All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 
 **Trait table field:** Every user-facing heap variant carries a
-`traits: Value` field (8 bytes). Initialized to `Value::NIL` (meaning "no
+`traits: Value` field (16 bytes). Initialized to `Value::NIL` (meaning "no
 traits"). Only an immutable `LStruct` may be stored here; the `with-traits`
 primitive validates this at call time. The field is invisible to structural
 equality, ordering, and hashing.

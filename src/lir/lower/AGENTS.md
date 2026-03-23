@@ -70,7 +70,7 @@ Scope allocation uses `RegionEnter` and `RegionExit` instructions to mark alloca
 **Escape analysis conditions (all must hold for `let`/`letrec`):**
 1. No binding is captured by a nested lambda
 2. Body cannot suspend (`may_suspend()`)
-3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
+3. Body result is provably a immediate (`result_is_safe`)
 4. Body contains no dangerous `set` to bindings outside the scope (`body_contains_dangerous_outward_set`) — an outward set is dangerous only if the assigned value is not provably immediate
 5. Body contains no escaping `break` (`body_contains_escaping_break`) — breaks targeting blocks inside the scope are safe; only breaks targeting outer blocks are dangerous
 

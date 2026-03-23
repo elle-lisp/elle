@@ -20,7 +20,7 @@
 //!     args: *const Value,     // arguments array
 //!     nargs: u32,             // number of arguments
 //!     vm: *mut VM,            // pointer to VM (for globals, function calls)
-//!     self_bits: u64,         // NaN-boxed closure bits (for self-tail-call detection)
+//!     self_bits: u64,         // closure identity bits (for self-tail-call detection)
 //! ) -> Value;
 //! ```
 //!

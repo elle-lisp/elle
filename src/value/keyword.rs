@@ -1,6 +1,6 @@
 //! Hash-based keyword identity with global name recovery.
 //!
-//! Keywords are stored as NaN-boxed values where bits 0-46 hold a 47-bit FNV-1a
+//! Keywords are stored as tagged-union values where the payload holds an FNV-1a
 //! hash of the keyword name. The hash is deterministic across runs, threads, and
 //! DSO boundaries. Equality is `u64 == u64` — no string comparison, no heap
 //! dereference.

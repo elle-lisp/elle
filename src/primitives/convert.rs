@@ -391,7 +391,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_to_int,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Convert value to integer (48-bit signed). Accepts int, float, string, or keyword.",
+        doc: "Convert value to integer (i64). Accepts int, float, string, or keyword.",
         params: &["x"],
         category: "conversion",
         example: "(integer 3.7) #=> 3\n(integer \"42\") #=> 42",

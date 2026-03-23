@@ -1,10 +1,10 @@
 # value
 
-Runtime value representation using NaN-boxing.
+Runtime value representation using a tagged union.
 
 ## Responsibility
 
-- Define the `Value` type (NaN-boxed 8-byte representation)
+- Define the `Value` type (16-byte tagged-union representation)
 - Provide heap-allocated types (Closure, Fiber, Cons, etc.)
 - Handle value display and thread-safe transfer
 
@@ -12,11 +12,11 @@ Runtime value representation using NaN-boxing.
 
 | Module | Purpose |
 |--------|---------|
-| `repr/mod.rs` | NaN-boxed `Value` type, tag encoding |
+| `repr/mod.rs` | Tagged-union `Value` type, tag encoding |
 | `repr/constructors.rs` | Value construction methods |
 | `repr/accessors.rs` | Value field access and type checking |
 | `repr/traits.rs` | `Display`, `Debug`, `Clone` implementations |
-| `repr/tests.rs` | NaN-boxing tests |
+| `repr/tests.rs` | Value encoding tests |
 | `types.rs` | `Arity`, `SymbolId`, `NativeFn`, `TableKey` |
 | `closure.rs` | `Closure` struct with bytecode, env, and `location_map` |
 | `fiber.rs` | `Fiber`, `FiberHandle`, `WeakFiberHandle`, `SuspendedFrame`, `Frame`, `FiberStatus`, `SignalBits` |
@@ -35,7 +35,7 @@ Runtime value representation using NaN-boxing.
 
 | Type | Location | Purpose |
 |------|----------|---------|
-| `Value` | `repr/mod.rs` | NaN-boxed 8-byte value (Copy) |
+| `Value` | `repr/mod.rs` | 16-byte tagged-union value (Copy) |
 | `Closure` | `closure.rs` | Bytecode + env + arity + signal + location_map + syntax |
 | `Fiber` | `fiber.rs` | Independent execution context with stack, frames, signal mask |
 | `FiberHandle` | `fiber.rs` | `Rc<RefCell<Option<Fiber>>>` — take/put semantics for VM fiber swap |
@@ -48,16 +48,16 @@ Runtime value representation using NaN-boxing.
 
 ### Fiber fields for parent/child chain
 
-Fibers maintain cached NaN-boxed `Value`s alongside their handle references
+Fibers maintain cached `Value`s alongside their handle references
 so that `fiber/parent` and `fiber/child` return identity-preserving values
 (i.e., `(identical? (fiber/parent f) (fiber/parent f))` is `true`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
-| `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent |
+| `parent_value` | `Option<Value>` | Cached Value for parent |
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
-| `child_value` | `Option<Value>` | Cached NaN-boxed Value for child |
+| `child_value` | `Option<Value>` | Cached Value for child |
 
 These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 | `SuspendedFrame` | `fiber.rs` | Bytecode/constants/env/IP/stack for resuming a suspended fiber |
@@ -70,7 +70,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 
 ## Invariants
 
-1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
+1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data is `Rc`.
    The `traits: Value` field on heap variants is also `Copy`.
 
 2. **`traits` field is always NIL or an immutable struct.** The `with-traits`
@@ -114,9 +114,9 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
 
 ## Value encoding
 
-NaN-boxing uses the NaN space of IEEE 754 doubles:
+The tagged union uses a `(tag: u64, payload: u64)` pair:
 
-- **Immediate**: nil, bool, int (i48), symbol, keyword, float
+- **Immediate**: nil, bool, int (full-range i64), symbol, keyword, float
 - **Heap pointer**: cons, array, table, closure, fiber, lbox, parameter, syntax, binding, etc.
 
 ### Syntax objects
@@ -164,7 +164,7 @@ Create values via methods: `Value::int(42)`, `Value::cons(a, b)`,
 
 ## Trait table field
 
-Every user-facing heap variant carries a `traits: Value` field (8 bytes).
+Every user-facing heap variant carries a `traits: Value` field (16 bytes).
 Initialized to `Value::NIL` (meaning "no traits"). Only an immutable `LStruct`
 may be stored here; the `with-traits` primitive validates this at call time.
 
@@ -218,11 +218,11 @@ Each `SendValue` variant for the 19 traitable types carries a
 | File | Lines | Content |
 |------|-------|---------|
 | `mod.rs` | ~40 | Re-exports |
-| `repr/mod.rs` | ~280 | NaN-boxed Value type, tag encoding |
+| `repr/mod.rs` | ~280 | Tagged-union Value type, tag encoding |
 | `repr/constructors.rs` | ~250 | Value construction methods |
 | `repr/accessors.rs` | ~670 | Value field access and type checking |
 | `repr/traits.rs` | ~150 | Display, Debug, Clone implementations |
-| `repr/tests.rs` | ~100 | NaN-boxing tests |
+| `repr/tests.rs` | ~100 | Value encoding tests |
 | `types.rs` | ~150 | Arity, SymbolId, NativeFn, etc. |
 | `closure.rs` | ~70 | Closure struct |
 | `fiber.rs` | ~540 | Fiber, FiberHandle, WeakFiberHandle, SuspendedFrame, Frame, SignalBits |

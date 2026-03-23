@@ -108,9 +108,7 @@ The `if` special form evaluates the test expression and:
 (identical? nil ()) # ⟹ false
 ```
 
-They have different NaN-boxed representations:
-- `nil` = `0x7FFC_0000_0000_0000`
-- `()` = `0x7FFC_0000_0000_0003`
+They have different tagged-union representations (distinct `(tag, payload)` pairs).
 
 ## Destructuring
 

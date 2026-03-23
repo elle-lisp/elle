@@ -213,7 +213,7 @@ fn region_emitted_when_returning_outer_in_branches() {
 
 #[test]
 fn region_emitted_for_block_with_keyword_break() {
-    // Break carrying a keyword (NaN-boxed immediate)
+    // Break carrying a keyword (immediate)
     assert!(has_region(
         "(block :done (if true (break :done :found) :default))"
     ));

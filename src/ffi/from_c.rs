@@ -15,7 +15,7 @@
 //! to C: `extract_int(value)? as u64` recovers the original bits.
 //!
 //! This convention works correctly because `Value::int` stores a full i64
-//! (no 48-bit truncation as in the old NaN-boxed representation).
+//! (no truncation — the tagged-union representation stores a full i64).
 
 use crate::error::{LError, LResult};
 use crate::ffi::types::TypeDesc;

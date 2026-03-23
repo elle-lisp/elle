@@ -342,10 +342,11 @@ call only pays for marshalling and the libffi dispatch.
 
 ## Value::pointer()
 
-C pointers are represented as NaN-boxed values using tag `0x7FFE`:
+C pointers are represented as tagged-union values with a dedicated pointer
+tag and a `u64` payload holding the raw address:
 
 ```
-CPointer: 0x7FFE_XXXX_XXXX_XXXX where X = 48-bit raw C pointer address
+CPointer: (tag: POINTER_TAG, payload: raw C pointer address)
 ```
 
 - `Value::pointer(addr)` — create from a `usize` address

@@ -1,7 +1,7 @@
-//! Value representation and NaN-boxing architecture
+//! Value representation and tagged-union architecture
 //!
-//! This module implements the core value type for the Elle VM using NaN-boxing,
-//! a technique that encodes multiple types into a single 64-bit IEEE 754 double.
+//! This module implements the core value type for the Elle VM using a 16-byte
+//! tagged union (tag: u64, payload: u64).
 
 pub mod allocator;
 pub mod arena;
@@ -19,7 +19,7 @@ pub mod send;
 pub mod shared_alloc;
 pub mod types;
 
-// Export the new NaN-boxed Value as the canonical Value type
+// Export the tagged-union Value as the canonical Value type
 pub use repr::{cons, list, Value};
 
 // Export heap types

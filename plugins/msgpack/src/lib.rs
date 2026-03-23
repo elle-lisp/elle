@@ -11,16 +11,16 @@ use rmp::Marker;
 use std::collections::{BTreeMap, BTreeSet};
 
 // ---------------------------------------------------------------------------
-// Elle integer range (NaN-boxed 48-bit signed integers)
+// Elle integer range (full-range i64 integers)
 // ---------------------------------------------------------------------------
 
-const ELLE_INT_MIN: i64 = -(1i64 << 47);
-const ELLE_INT_MAX: i64 = (1i64 << 47) - 1;
+const ELLE_INT_MIN: i64 = i64::MIN;
+const ELLE_INT_MAX: i64 = i64::MAX;
 
 fn checked_int(n: i64, prim_name: &str) -> Result<Value, String> {
     if !(ELLE_INT_MIN..=ELLE_INT_MAX).contains(&n) {
         return Err(format!(
-            "msgpack/{}: integer {} out of Elle 48-bit range [{}, {}]",
+            "msgpack/{}: integer {} out of Elle i64 range [{}, {}]",
             prim_name, n, ELLE_INT_MIN, ELLE_INT_MAX
         ));
     }
@@ -304,7 +304,7 @@ fn decode_value_from_marker(
                 .map_err(|e| fmt_vread_err(prim_name, e))?;
             if n > ELLE_INT_MAX as u64 {
                 return Err(format!(
-                    "msgpack/{}: uint64 value {} out of Elle 48-bit range",
+                    "msgpack/{}: uint64 value {} out of Elle i64 range",
                     prim_name, n
                 ));
             }
