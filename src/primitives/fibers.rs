@@ -506,7 +506,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["closure", "mask"],
         category: "fiber",
         example: "(fiber/new (fn [] 42) 0)",
-        aliases: &[],
+        aliases: &["fiber"],
     },
     PrimitiveDef {
         name: "fiber/resume",

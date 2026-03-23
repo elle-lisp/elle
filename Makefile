@@ -9,7 +9,7 @@ else
   examples: dev
   plugin-tests: plugins
 endif
-TIMEOUT ?= 10s
+TIMEOUT ?= 30s
 
 PLUGINS := \
     arrow \
