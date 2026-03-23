@@ -579,6 +579,12 @@
 (def global? (fn (sym) (vm/query "global?" sym)))
 (def fiber/self (fn () (vm/query "fiber/self" nil)))
 
+(defn fiber/new?    [f] "True if fiber has not yet been resumed."    (= (fiber/status f) :new))
+(defn fiber/alive?  [f] "True if fiber is currently executing."      (= (fiber/status f) :alive))
+(defn fiber/paused? [f] "True if fiber is paused (waiting to resume)." (= (fiber/status f) :paused))
+(defn fiber/dead?   [f] "True if fiber completed normally."          (= (fiber/status f) :dead))
+(defn fiber/error?  [f] "True if fiber terminated with an error."    (= (fiber/status f) :error))
+
 ## ── Arena introspection ─────────────────────────────────────────────
 
 
@@ -1251,7 +1257,7 @@
 (defn ev/run (& thunks)
   "Create an async scheduler, run thunks, return the last thunk's result.
    Used internally by the compiler to wrap top-level code in a scheduler.
-   User code should not need this — the scheduler is already active."
+   Propagates errors from fibers — if the last fiber errored, the error is re-raised."
   (let ([sched (make-async-scheduler)])
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
@@ -1262,7 +1268,9 @@
         (assign last-fiber (ev/spawn t)))
       ((get sched :pump))
       (when (not (nil? last-fiber))
-        (assign result (fiber/value last-fiber)))
+        (if (= (fiber/status last-fiber) :error)
+          (error (fiber/value last-fiber))
+          (assign result (fiber/value last-fiber))))
       result)))
 
 ## ── Structured concurrency primitives ───────────────────────────────
@@ -1488,6 +1496,10 @@
    :min-key min-key :max-key max-key :memoize memoize :sort-by sort-by
    :time/stopwatch time/stopwatch :time/elapsed time/elapsed
    :call-count call-count :global? global? :fiber/self fiber/self
+   :fiber/new? fiber/new? :fiber/alive? fiber/alive? :fiber/paused? fiber/paused?
+   :fiber/dead? fiber/dead? :fiber/error? fiber/error?
+   :new? fiber/new? :alive? fiber/alive? :paused? fiber/paused?
+   :dead? fiber/dead? :error? fiber/error?
    :fn/cfg fn/cfg :fn/cfg-label fn/cfg-label
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*

@@ -150,6 +150,11 @@ impl VM {
                 .handle
                 .with_mut(|f| f.status = crate::value::FiberStatus::Dead);
         }
+        if result_bits.contains(SIG_ERROR) {
+            pending
+                .handle
+                .with_mut(|f| f.status = crate::value::FiberStatus::Error);
+        }
 
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(crate::value::SIG_TERMINAL));
@@ -159,11 +164,6 @@ impl VM {
             self.fiber.child_value = None;
             self.resume_suspended(caller_frames, result_value)
         } else {
-            if result_bits.contains(SIG_ERROR) {
-                pending
-                    .handle
-                    .with_mut(|f| f.status = crate::value::FiberStatus::Error);
-            }
             self.fiber.signal = Some((result_bits, result_value));
 
             // Rebuild fiber.suspended for uncaught signals: the outer code
