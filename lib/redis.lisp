@@ -98,9 +98,6 @@
   (let [[port (*redis-port*)]]
     (when (nil? port)
       (error {:error :redis-error :message "no active Redis connection"}))
-    (when (not (= (type port) :port))
-      (error {:error :redis-error
-              :message (string "*redis-port* corrupted: got " (type port))}))
     (port/write port (apply resp-encode args))
     (port/flush port)
     (resp-read port)))
