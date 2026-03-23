@@ -924,8 +924,19 @@ impl<'a> FunctionTranslator<'a> {
                 return Ok(true);
             }
 
-            LirInstr::RegionEnter | LirInstr::RegionExit => {
-                // No-op in JIT
+            LirInstr::RegionEnter => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.region_enter, builder.func);
+                let call = builder.ins().call(func_ref, &[]);
+                let _ = builder.inst_results(call);
+            }
+            LirInstr::RegionExit => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.region_exit, builder.func);
+                let call = builder.ins().call(func_ref, &[]);
+                let _ = builder.inst_results(call);
             }
 
             LirInstr::PushParamFrame { pairs } => {

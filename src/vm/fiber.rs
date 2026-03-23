@@ -43,7 +43,7 @@ impl VM {
     /// parent/child chain, swap fibers, run the closure, update status,
     /// extract result, swap back, put child back.
     ///
-    /// `child_value` is the NaN-boxed Value wrapping the child's FiberHandle,
+    /// `child_value` is the cached Value wrapping the child's FiberHandle,
     /// cached on the parent so `fiber/child` can return it without re-allocating.
     ///
     /// Returns `(signal_bits, signal_value)` from the child's execution.
@@ -97,8 +97,8 @@ impl VM {
                 // Parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
             } else {
-                // Create shared allocator on parent's heap.
-                child_fiber.heap.create_shared_allocator()
+                // Reuse existing or create shared allocator on parent's heap.
+                child_fiber.heap.get_or_create_shared_allocator()
             };
             self.fiber.heap.set_shared_alloc(shared_ptr);
         }

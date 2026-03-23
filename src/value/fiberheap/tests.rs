@@ -157,23 +157,8 @@ fn test_save_restore() {
 fn test_init_active_allocator_is_noop() {
     let mut heap = FiberHeap::new();
     heap.init_active_allocator();
-    // Still Slab after init (no scope bumps active).
-    assert!(matches!(heap.active_allocator, ActiveAlloc::Slab));
-}
-
-#[test]
-fn test_save_active_allocator_no_heap_installed() {
-    uninstall_fiber_heap();
-    // No heap installed — returns Slab (the safe default), no panic.
-    assert!(matches!(save_active_allocator(), ActiveAlloc::Slab));
-}
-
-#[test]
-fn test_restore_active_allocator_no_heap_installed() {
-    uninstall_fiber_heap();
-    // No heap installed — no-op, no panic.
-    restore_active_allocator(ActiveAlloc::Slab);
-    assert!(matches!(save_active_allocator(), ActiveAlloc::Slab));
+    // Always slab now.
+    assert_eq!(heap.active_allocator_keyword(), "slab");
 }
 
 // ── Scope mark stack tests ────────────────────────────────────
@@ -200,10 +185,10 @@ fn test_ensure_root_heap_idempotent() {
 
 #[test]
 fn test_root_heap_active_allocator_initialized() {
-    // After ensure_root_heap(), active_allocator must be Slab.
+    // After ensure_root_heap(), allocator is always slab.
     let ptr = ensure_root_heap();
     let heap = unsafe { &*ptr };
-    assert!(matches!(heap.active_allocator, ActiveAlloc::Slab));
+    assert_eq!(heap.active_allocator_keyword(), "slab");
 }
 
 #[test]

@@ -356,7 +356,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_is_integer,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Check if value is an integer (48-bit signed, range ±2^47).",
+        doc: "Check if value is an integer (full-range i64).",
         params: &["value"],
         category: "predicate",
         example: "(integer? 42) #=> true\n(integer? 3.14) #=> false",

@@ -1,16 +1,16 @@
 # Value
 
-Runtime value representation using NaN-boxing.
+Runtime value representation using a tagged union.
 
 ## Overview
 
-The `value` module defines the `Value` type — an 8-byte NaN-boxed representation that encodes all Elle runtime values: integers, floats, booleans, strings, lists, arrays, tables, closures, fibers, sets, and more.
+The `value` module defines the `Value` type — a 16-byte tagged-union representation (`tag: u64, payload: u64`) that encodes all Elle runtime values: integers, floats, booleans, strings, lists, arrays, tables, closures, fibers, sets, and more.
 
 ## Value Types
 
 | Type | Display | Mutable | Purpose |
 |------|---------|---------|---------|
-| Integer | `42` | — | 48-bit signed integer |
+| Integer | `42` | — | Full-range i64 integer |
 | Float | `3.14` | — | IEEE 754 double |
 | Boolean | `true`, `false` | — | Truth value |
 | Nil | `nil` | — | Absence (falsy) |
@@ -117,7 +117,7 @@ All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `
 
 ## Invariants
 
-1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
+1. **`Value` is `Copy`.** All 16 bytes (tag + payload) are inline. Heap data is `Rc`.
 
 2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
@@ -128,7 +128,7 @@ All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `
 ## See Also
 
 - [AGENTS.md](AGENTS.md) — technical reference for LLM agents
-- [`repr/`](repr/) — NaN-boxing implementation
+- [`repr/`](repr/) — tagged-union implementation
 - [`heap.rs`](heap.rs) — heap-allocated object types
 - [`closure.rs`](closure.rs) — closure representation
 - [`fiber.rs`](fiber.rs) — fiber (coroutine) implementation

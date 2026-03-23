@@ -689,8 +689,8 @@ pub fn prim_ptr_diff(args: &[Value]) -> (SignalBits, Value) {
 
 /// `(ptr/to-int pointer)` — Extract the raw address of a pointer as an integer.
 ///
-/// The address is at most 47 bits (Elle's pointer range), so it always fits
-/// in a signed 48-bit integer (INT_MAX = 2^47-1 >= 2^47-1). The cast is safe.
+/// The address is at most 48 bits on current hardware, so it always fits
+/// in a signed i64 (2^63-1 >> 2^48-1). The cast is safe.
 pub fn prim_ptr_to_int(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (

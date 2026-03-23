@@ -37,7 +37,7 @@ native functions. Both `(protobuf/encode ...)` (after loading) and
 | `int32`, `sint32`, `sfixed32` | `int` | Direct |
 | `int64`, `sint64`, `sfixed64` | `int` | Direct |
 | `uint32`, `fixed32` | `int` | Max 4,294,967,295 — fits in Elle int |
-| `uint64`, `fixed64` | `int` | Error if > 2⁴⁷−1 (Elle 48-bit signed range) |
+| `uint64`, `fixed64` | `int` | Error if > 2⁶³−1 (Elle i64 signed range) |
 | `float` | `float` | Widened to f64 |
 | `double` | `float` | Direct |
 | `bool` | `bool` | Direct |
@@ -70,7 +70,7 @@ during encode. This avoids errors when a struct carries extra metadata keys.
 ### uint64/fixed64 map key limitation
 
 `uint64` and `fixed64` map keys can hold values 0–2⁶⁴−1. Elle's `int` is
-48-bit signed. Values above 2⁴⁷−1 are represented as **string keys** in the
+i64 signed. Values above 2⁶³−1 are represented as **string keys** in the
 decoded struct (decimal representation). Encode accepts either int or string
 keys for uint64/fixed64 map fields.
 

@@ -231,7 +231,7 @@ Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit 
 |------|---------|-------|
 | nil | `nil` | Absence of a value. Falsy. |
 | boolean | `true`, `false` | `false` is falsy; `true` is truthy. |
-| integer | `42`, `-17` | 48-bit signed. No auto-coercion to float. Overflow panics. |
+| integer | `42`, `-17` | Full-range i64. No auto-coercion to float. Overflow wraps. |
 | float | `3.14`, `1e10` | IEEE 754 double. NaN/Infinity are heap-allocated. |
 | symbol | `foo`, `'foo` | Interned identifier. |
 | keyword | `:foo` | Self-evaluating interned name. Used for keys and tags. |

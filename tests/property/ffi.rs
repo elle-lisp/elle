@@ -1,6 +1,6 @@
 // Property tests for the FFI module.
 //
-// Tests cover: pointer NaN-boxing invariants, marshal range checking,
+// Tests cover: pointer tagged-union invariants, marshal range checking,
 // memory read-write roundtrips, TypeDesc size/align consistency,
 // string marshalling edge cases, and struct/array marshalling roundtrips.
 
@@ -16,7 +16,7 @@ use proptest::prelude::*;
 use crate::property::strategies::{arb_flat_struct, arb_primitive_type, arb_struct_and_values};
 
 // =========================================================================
-// A. Pointer NaN-boxing invariants
+// A. Pointer tagged-union invariants
 // =========================================================================
 
 proptest! {
@@ -159,7 +159,7 @@ proptest! {
         prop_assert!(MarshalledArg::new(&v, &TypeDesc::U32).is_ok());
     }
 
-    // i64 always in-range (Elle ints are i48 which fits in i64)
+    // i64 always in-range (Elle ints are full i64)
     #[test]
     fn marshal_i64_always_ok(n in i64::MIN..=i64::MAX) {
         let v = Value::int(n);

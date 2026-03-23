@@ -5,7 +5,7 @@ Property-based tests: invariants that must hold across all inputs.
 ## Responsibility
 
 Test invariants that must hold for *all* valid inputs using proptest. Cover:
-- Roundtrip fidelity (NaN-boxing, reader parse/display, type conversions)
+- Roundtrip fidelity (value encoding, reader parse/display, type conversions)
 - Mathematical laws (commutativity, associativity, identity, inverse)
 - Type discrimination (exactly one type predicate is true for any Value)
 - Determinism (same source always produces same result)
@@ -78,7 +78,7 @@ Choose case counts based on the cost of each test case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
-| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, signal combine laws |
+| Cheap (no eval, pure Rust) | 1000 | Value encoding roundtrips, signal combine laws |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals or recursion) | 10-50 | Bug regression, determinism, complex programs |
 
@@ -124,7 +124,7 @@ Tests are organized by domain in separate files:
 |------|----------|
 | `strategies.rs` | Shared proptest strategies |
 | `fibers.rs` | Fiber operations and properties |
-| `nanboxing.rs` | NaN-boxing roundtrips and encoding |
+| `nanboxing.rs` | Value encoding roundtrips |
 | `reader.rs` | Reader parse/display roundtrips |
 | `signals.rs` | Signal inference soundness |
 | `strings.rs` | String operations and properties |
@@ -147,7 +147,7 @@ Property test files follow a consistent structure:
 | `mod.rs` | ~23 | Module declarations and includes |
 | `strategies.rs` | ~195 | Shared proptest strategies |
 | `fibers.rs` | ~100-200 | Fiber property tests |
-| `nanboxing.rs` | ~100-200 | NaN-boxing property tests |
+| `nanboxing.rs` | ~100-200 | Value encoding property tests |
 | `reader.rs` | ~100-200 | Reader property tests |
 | `signals.rs` | ~100-200 | Signal inference property tests |
 | `strings.rs` | ~100-200 | String property tests |

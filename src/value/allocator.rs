@@ -31,7 +31,7 @@ pub trait ElleAllocator: 'static {
     /// Allocate `size` bytes with alignment `align`.
     ///
     /// Returns a pointer to the allocated memory, or null on failure.
-    /// On null, the runtime falls back to bumpalo.
+    /// On null, the runtime falls back to the root slab.
     fn alloc(&self, size: usize, align: usize) -> *mut u8;
 
     /// Deallocate memory previously returned by `alloc`.

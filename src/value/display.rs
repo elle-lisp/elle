@@ -1,7 +1,7 @@
 //! Display and Debug implementations for values
 //!
 //! This module contains the Display and Debug trait implementations
-//! for the NaN-boxed Value type, providing human-readable representations
+//! for the tagged-union Value type, providing human-readable representations
 //! of values for debugging and user output.
 
 use crate::value::Value;

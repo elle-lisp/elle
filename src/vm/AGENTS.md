@@ -146,7 +146,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 |-------|-------|---------|
 | `fiber` | `Fiber` | Root fiber: stack, call frames, signal state |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
-| `current_fiber_value` | `Option<Value>` | Cached NaN-boxed Value for current fiber (`None` for root) |
+| `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
 | `globals` | `Vec<Value>` | Global bindings by SymbolId |
 | `defined_globals` | `Vec<bool>` | Tracks which global slots have been assigned (shadows `globals`) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
@@ -171,9 +171,9 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `signal_mask` | `SignalBits` | Which signals this fiber catches |
 | `param_frames` | `Vec<Vec<(Value, Value)>>` | Parameter binding frames (stack of frames, each frame is vec of (param, value) pairs) |
 | `parent` | `Option<WeakFiberHandle>` | Weak back-pointer to parent fiber |
-| `parent_value` | `Option<Value>` | Cached NaN-boxed Value for parent (identity-preserving) |
+| `parent_value` | `Option<Value>` | Cached Value for parent (identity-preserving) |
 | `child` | `Option<FiberHandle>` | Strong pointer to child fiber |
-| `child_value` | `Option<Value>` | Cached NaN-boxed Value for child (identity-preserving) |
+| `child_value` | `Option<Value>` | Cached Value for child (identity-preserving) |
 
 ## Re-entrancy
 
@@ -306,15 +306,15 @@ execution route to this shared allocator instead of the child's private bump.
 Note: case (b) `saved_heap.is_null()` no longer exists after issue-525. The root
 fiber always has a FiberHeap installed. Root→child transitions use case (c).
 
-**Signal gate (M1)**: Fibers whose closure has signal bits `SIG_YIELD` or `SIG_IO`
-(checked via `may_yield() || may_io()`) get shared allocators. I/O fibers yield
-`SIG_IO` requests that the parent (scheduler) must read, requiring a shared
-allocator for value exchange. Non-yielding, non-I/O fibers skip step 3b entirely.
+**Signal gate (M1)**: All child fibers get shared allocators so that heap
+objects allocated during child execution live on the parent's heap. Without
+this, Values that escape the child (e.g., closures sharing a ClosureTemplate
+with the parent) would be freed when the child's FiberHeap is torn down.
 
-**Per-resume creation (M2 tech debt)**: Each resume of a yielding child creates
-a new shared allocator because `shared_alloc` was nulled on the previous
-swap-back. Old shared allocators accumulate in `owned_shared` until the owner's
-`FiberHeap::clear()`. Optimization (reuse across resumes) is deferred.
+**Shared allocator reuse**: Case (c) uses `get_or_create_shared_allocator()`,
+which reuses the last entry in `owned_shared` if one exists. This keeps
+`owned_shared` at most length 1 for non-propagation cases, preventing the
+per-resume leak where each resume would push a new `Box<SharedAllocator>`.
 
 **Cleanup (step 7a)**: Before swap-back, `self.fiber.heap.clear_shared_alloc()`
 nulls the child's `shared_alloc` pointer. The shared allocator data remains

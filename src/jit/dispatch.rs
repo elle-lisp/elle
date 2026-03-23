@@ -346,6 +346,24 @@ pub extern "C" fn elle_jit_check_signal_bound(
     JitValue::nil()
 }
 
+// =============================================================================
+// Region (scope) helpers for JIT
+// =============================================================================
+
+/// Push a scope mark on the current fiber heap (called by JIT `RegionEnter`).
+#[no_mangle]
+pub extern "C" fn elle_jit_region_enter() -> JitValue {
+    crate::value::fiberheap::region_enter();
+    JitValue::nil()
+}
+
+/// Pop a scope mark and release scoped objects (called by JIT `RegionExit`).
+#[no_mangle]
+pub extern "C" fn elle_jit_region_exit() -> JitValue {
+    crate::value::fiberheap::region_exit();
+    JitValue::nil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

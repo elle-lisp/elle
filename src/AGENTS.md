@@ -33,7 +33,7 @@ Provide the complete Elle implementation:
 | `lir` | SSA form with virtual registers, basic blocks, source tracking |
 | `compiler` | Bytecode instruction definitions and debug formatting |
 | `vm` | Bytecode execution, builtin documentation storage |
-| `value` | Runtime value representation (NaN-boxed) with types: LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
+| `value` | Runtime value representation (16-byte tagged union) with types: LArray, LArrayMut, LStruct, LStructMut, LString, LStringMut, LBytes, LBytesMut, LSet, LSetMut |
 | `signals` | Signal type system (`Signal` struct with `bits` and `propagates`) |
 | `lint` | Diagnostic types and lint rules |
 | `symbols` | Symbol index types for IDE features |
@@ -67,7 +67,7 @@ Source locations flow through the entire pipeline: Syntax spans â†’ HIR spans â†
 
 ## Key invariants
 
-1. **Bindings are resolved at analysis time.** HIR contains `Binding` (NaN-boxed Value), not symbols.
+1. **Bindings are resolved at analysis time.** HIR contains `Binding` (a `u32` index into a `BindingArena`), not symbols.
 2. **Closures capture by value into their environment.** Mutable captures use `LocalLBox`.
 3. **Signals are inferred, not declared.** The `Signal` struct propagates from leaves to root during analysis.
 4. **The VM is stack-based for operands, register-addressed for locals.** Instructions reference registers by index.

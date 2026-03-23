@@ -335,16 +335,15 @@ pub fn pb_to_elle(val: &PbValue, field: &FieldDescriptor) -> Result<Value, Strin
         PbValue::U32(n) => Ok(Value::int(*n as i64)),
         PbValue::U64(n) => {
             // Uint64: if it fits in i64, return as int; otherwise error.
-            // The plan says: error if > 2^47-1, but Elle int is actually
-            // 48-bit signed (-2^47 to 2^47-1). However, protobuf uint64 can
-            // hold values up to 2^64-1. Elle int is NaN-boxed 48-bit signed.
+            // Protobuf uint64 can hold values up to 2^64-1, but Elle int
+            // is i64 signed (-2^63 to 2^63-1).
             //
             // For scalar uint64 fields: error if out of Elle range.
             // For map keys: handled separately in decode_map_key.
-            const ELLE_INT_MAX: u64 = (1u64 << 47) - 1;
+            const ELLE_INT_MAX: u64 = i64::MAX as u64;
             if *n > ELLE_INT_MAX {
                 Err(format!(
-                    "field '{}': uint64 value {} out of Elle 48-bit range",
+                    "field '{}': uint64 value {} out of Elle i64 range",
                     field.name(),
                     n
                 ))
@@ -540,7 +539,7 @@ fn elle_to_u32(val: Value, field_name: &str) -> Result<u32, String> {
 /// Extract and range-check a u64 (from Elle int or string for large values).
 fn elle_to_u64(val: Value, field_name: &str) -> Result<u64, String> {
     if let Some(n) = val.as_int() {
-        // Elle int is signed 48-bit; non-negative values fit in u64.
+        // Elle int is signed i64; non-negative values fit in u64.
         if n < 0 {
             Err(format!(
                 "negative value {} cannot be encoded as uint64 for field '{}'",

@@ -3,7 +3,7 @@
 //! This module provides SendValue, a wrapper around Value that implements Send
 //! by deep-copying heap values instead of sharing raw pointers.
 //!
-//! The problem with raw Value copies: NaN-boxed Value contains raw pointers to Rc
+//! The problem with raw Value copies: Value contains raw pointers to Rc
 //! heap objects. When sent to another thread, the original Rc may drop and free the
 //! heap object while the thread still holds a raw pointer to it.
 //!

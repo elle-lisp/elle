@@ -1,14 +1,14 @@
 # value/repr
 
-NaN-boxing representation: Value constructors, accessors, and trait implementations.
+Tagged-union representation: Value constructors, accessors, and trait implementations.
 
 ## Responsibility
 
-- Define the `Value` type (NaN-boxed 8-byte representation)
+- Define the `Value` type (16-byte tagged-union representation)
 - Provide constructors for immediate and heap-allocated values
 - Provide accessors and type checking predicates
 - Implement `Display`, `Debug`, `Clone`, `PartialEq` for values
-- Handle NaN-boxing encoding/decoding
+- Handle tag/payload encoding/decoding
 
 Does NOT:
 - Allocate heap objects (that's `value/heap`)
@@ -19,44 +19,39 @@ Does NOT:
 
 | Type | Purpose |
 |------|---------|
-| `Value` | NaN-boxed 8-byte value (Copy) |
+| `Value` | 16-byte tagged-union value `(tag: u64, payload: u64)` (Copy) |
 
-## NaN-boxing encoding
+## Tagged-union encoding
 
-IEEE 754 double-precision: 1 sign + 11 exponent + 52 mantissa = 64 bits
+`Value` is a `(tag: u64, payload: u64)` pair (16 bytes total):
 
-A quiet NaN has: exponent = all 1s (0x7FF), mantissa bit 51 = 1
-This gives us the quiet NaN prefix: 0x7FF8 in the upper 16 bits
-
-Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
-
-| Tag | Upper 16 bits | Payload | Type |
-|-----|---------------|---------|------|
-| Float | Not 0x7FF8+ | 64-bit float bits | Any f64 that is NOT a quiet NaN |
-| Int | 0x7FF8 | 48-bit signed integer | Integer (-2^47 to 2^47-1) |
-| Falsy | 0x7FF9 | 0 (nil) or 1 (false) | Nil or False |
-| EmptyList | 0x7FFA | (none) | Empty list (truthy) |
-| Pointer | 0x7FFB | 48-bit heap pointer | Cons, Array, Table, Closure, Fiber, etc. |
-| Truthy | 0x7FFC | Bit 47=0: singleton (0=true, 1=undefined), Bit 47=1: symbol (32-bit ID) | True, Undefined, or Symbol |
-| NaN/Inf | 0x7FFD | 64-bit float bits | NaN or Infinity |
-| PtrVal | 0x7FFE | Bit 47=0: keyword (47-bit FNV-1a hash of name), Bit 47=1: cpointer (47-bit ptr) | Keyword or C pointer |
-| SSO | 0x7FFF | Up to 6 UTF-8 bytes | Short string (reserved) |
+| Tag | Payload | Type |
+|-----|---------|------|
+| TAG_INT | i64 | Integer (full-range i64) |
+| TAG_FLOAT | f64 bits | Float |
+| TAG_NIL | 0 | Nil (falsy) |
+| TAG_FALSE | 0 | False (falsy) |
+| TAG_TRUE | 0 | True (truthy) |
+| TAG_EMPTY_LIST | 0 | Empty list (truthy) |
+| TAG_SYMBOL | u32 symbol ID | Symbol |
+| TAG_KEYWORD | FNV-1a hash of name | Keyword |
+| TAG_PTR | heap pointer | Cons, Array, Table, Closure, Fiber, etc. |
 
 ## Files
 
 | File | Lines | Content |
 |------|-------|---------|
-| `mod.rs` | ~280 | NaN-boxed Value type, tag encoding, constants |
+| `mod.rs` | ~280 | Tagged-union Value type, tag encoding, constants |
 | `constructors.rs` | ~380 | Value construction methods (int, float, bool, symbol, keyword, cons, array, table, closure, fiber, etc.) |
 | `accessors.rs` | ~670 | Value field access and type checking (is_int, as_int, is_string, as_string, etc.) |
 | `traits.rs` | ~150 | Display, Debug, Clone implementations |
-| `tests.rs` | ~100 | NaN-boxing roundtrip tests |
+| `tests.rs` | ~100 | Value encoding roundtrip tests |
 
 ## Constructors
 
 | Constructor | Type | Notes |
 |-------------|------|-------|
-| `Value::int(n)` | Int | Panics if outside 48-bit range |
+| `Value::int(n)` | Int | Full-range i64 |
 | `Value::float(f)` | Float | Handles NaN/Infinity specially |
 | `Value::bool(b)` | Bool | True or False |
 | `Value::symbol(id)` | Symbol | From SymbolId |
@@ -117,7 +112,7 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 
 ## Invariants
 
-1. **`Value` is `Copy`.** All 8 bytes fit in a register. Heap data is `Rc`.
+1. **`Value` is `Copy`.** All 16 bytes (tag + payload). Heap data is `Rc`.
 
 2. **Trait tables are invisible to equality and ordering.** The `traits` field
    on heap variants is **not compared** by `PartialEq`, not hashed by `Hash`,
@@ -130,16 +125,16 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 
 5. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
 
-6. **NaN-boxing is transparent.** Callers use constructors and accessors; they don't manipulate bits directly.
+6. **Tag encoding is transparent.** Callers use constructors and accessors; they don't manipulate tags directly.
 
 7. **Floats are bit-exact.** `Value::float(f).as_float()` returns the exact same bits (including NaN, Infinity, -0.0).
 
-8. **Integers are sign-extended.** 48-bit signed integers are stored with sign extension in the lower 48 bits.
+8. **Integers are full-range i64.** The payload holds the complete i64 value.
 
 ## When to modify
 
 - **Adding a new heap type**: Add variant to `HeapObject` enum in `value/heap.rs`, then add constructor and accessors here
-- **Changing NaN-boxing encoding**: Update tag constants and encoding/decoding logic
+- **Changing tag encoding**: Update tag constants and encoding/decoding logic
 - **Adding new type predicates**: Add to `accessors.rs`
 - **Changing Display/Debug format**: Update `traits.rs`
 
@@ -147,5 +142,4 @@ Our encoding uses upper 16 bits as type tags, lower 48 bits as payload:
 
 - **Confusing nil and empty list**: Use `is_nil()` only for nil; use `is_empty_list()` for empty list
 - **Assuming all floats are normal**: Handle NaN, Infinity, and -0.0 specially
-- **Integer overflow**: Check bounds before calling `Value::int()` (panics on overflow)
-- **Heap pointer alignment**: Heap pointers must fit in 48 bits (2^48 address space)
+- **Heap pointer alignment**: Heap pointers are stored in the payload u64
