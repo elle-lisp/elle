@@ -17,6 +17,7 @@ use std::time::Duration;
 /// `read_buffered`: for Read ops, the number of bytes already sitting in the
 /// fd_state buffer. The kernel read is reduced by this amount so the
 /// completion handler can prepend the buffered prefix.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn submit_uring_stream(
     ring: &mut io_uring::IoUring,
     id: u64,
@@ -808,7 +809,7 @@ pub(super) fn drain_cqes(
             let _ = ring.submission().push(&sqe);
         }
     }
-    if ring.submission().len() > 0 {
+    if !ring.submission().is_empty() {
         let _ = ring.submit();
     }
 }
