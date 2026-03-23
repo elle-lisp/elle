@@ -201,7 +201,20 @@ impl<'a> FunctionTranslator<'a> {
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    self.def_var_pair(builder, dst.0, tag, payload);
+                    if (param_index as u32) < 64
+                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
+                    {
+                        // cell-wrapped param: auto-unwrap via load_lbox
+                        let (rt, rp) = self.call_helper_value_unary(
+                            builder,
+                            self.helpers.load_lbox,
+                            tag,
+                            payload,
+                        )?;
+                        self.def_var_pair(builder, dst.0, rt, rp);
+                    } else {
+                        self.def_var_pair(builder, dst.0, tag, payload);
+                    }
                 } else {
                     // Locally-defined variable
                     let local_index = *index - num_captures - arity;
@@ -375,7 +388,8 @@ impl<'a> FunctionTranslator<'a> {
                 let arity = self.lir.num_params as u16;
                 let (vt, vp) = self.use_var_pair(builder, src.0);
 
-                if *index < num_captures + arity {
+                if *index < num_captures {
+                    // Store to a capture slot in the closure env
                     let env_ptr = self.env_ptr.ok_or_else(|| {
                         JitError::InvalidLir("StoreCapture without env pointer".to_string())
                     })?;
@@ -385,6 +399,22 @@ impl<'a> FunctionTranslator<'a> {
                         .declare_func_in_func(self.helpers.store_capture, builder.func);
                     let call = builder.ins().call(func_ref, &[env_ptr, idx_val, vt, vp]);
                     let _ = builder.inst_results(call);
+                } else if *index < num_captures + arity {
+                    // Store to a param slot — use store_lbox if lbox-wrapped
+                    let param_index = *index - num_captures;
+                    let base = self.arg_var_base + param_index as u32;
+                    if (param_index as u32) < 64
+                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
+                    {
+                        let (ct, cp) = self.use_var_pair(builder, base);
+                        let func_ref = self
+                            .module
+                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                        let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
+                        let _ = builder.inst_results(call);
+                    } else {
+                        self.def_var_pair(builder, base, vt, vp);
+                    }
                 } else {
                     let local_index = *index - num_captures - arity;
                     let base = self.local_var_base + local_index as u32;
