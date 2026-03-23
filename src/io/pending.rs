@@ -73,4 +73,16 @@ impl PendingOp {
             PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
         }
     }
+
+    pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
+        match self {
+            PendingOp::Port { buffer_handle, .. } => buffer_handle,
+            PendingOp::Connect { buffer_handle, .. } => buffer_handle,
+            PendingOp::Sleep { buffer_handle, .. } => buffer_handle,
+            PendingOp::ProcessWait { buffer_handle, .. } => buffer_handle,
+            PendingOp::Open { buffer_handle, .. } => buffer_handle,
+            PendingOp::Task { buffer_handle, .. } => buffer_handle,
+            PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
+        }
+    }
 }

@@ -11,6 +11,11 @@ use crate::value::{error_val, Value};
 use std::collections::HashMap;
 use std::os::unix::io::{FromRawFd, OwnedFd};
 
+/// Convert an errno to a human-readable message via strerror.
+fn errno_message(errno: i32) -> String {
+    std::io::Error::from_raw_os_error(errno).to_string()
+}
+
 pub(super) fn process_raw_completion(
     id: u64,
     result_code: i32,
@@ -133,7 +138,7 @@ pub(super) fn process_raw_completion(
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
-                    format!("I/O error: errno {}", errno)
+                    format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
                 return Completion {
@@ -213,7 +218,7 @@ pub(super) fn process_raw_completion(
                 let msg = if is_timeout {
                     "I/O operation timed out".to_string()
                 } else {
-                    format!("I/O error: errno {}", errno)
+                    format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
                 let state = fd_states
@@ -275,17 +280,30 @@ pub(super) fn process_raw_completion(
                     }
                 }
                 IoOp::Read { .. } | IoOp::ReadAll => {
-                    // Check port encoding
+                    // Prepend any bytes left in the fd_state buffer from a
+                    // previous over-read (e.g. ReadLine read past the line
+                    // boundary). The submit path reduced the kernel read count
+                    // by this amount so the total equals the requested count.
+                    let state = fd_states
+                        .entry(port_key.clone())
+                        .or_insert_with(FdState::new);
+                    let combined = if !state.buffer.is_empty() {
+                        let mut buf: Vec<u8> = state.buffer.drain(..).collect();
+                        buf.extend_from_slice(&data);
+                        buf
+                    } else {
+                        data
+                    };
                     if let Some(p) = port.as_external::<Port>() {
                         match p.encoding() {
                             Encoding::Text => {
-                                let s = String::from_utf8_lossy(&data);
+                                let s = String::from_utf8_lossy(&combined);
                                 Value::string(s.as_ref())
                             }
-                            Encoding::Binary => Value::bytes(data),
+                            Encoding::Binary => Value::bytes(combined),
                         }
                     } else {
-                        Value::string(String::from_utf8_lossy(&data).as_ref())
+                        Value::string(String::from_utf8_lossy(&combined).as_ref())
                     }
                 }
                 IoOp::Write { .. } | IoOp::SendTo { .. } => Value::int(result_code as i64),
