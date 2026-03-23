@@ -719,11 +719,7 @@ pub(super) fn drain_cqes(
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
-                    let has_newline = state
-                        .buffer
-                        .iter()
-                        .chain(data.iter())
-                        .any(|&b| b == b'\n');
+                    let has_newline = state.buffer.iter().chain(data.iter()).any(|&b| b == b'\n');
                     if !has_newline {
                         state.buffer.extend_from_slice(&data);
                         buffer_pool.release(buf_handle);

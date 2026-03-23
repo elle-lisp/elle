@@ -114,17 +114,21 @@ impl ThreadPoolBackend {
                         if ret < 0 {
                             if total == 0 {
                                 break (
-                                    -(std::io::Error::last_os_error()
-                                        .raw_os_error()
-                                        .unwrap_or(1)),
+                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
                                     Vec::new(),
                                 );
                             }
                             // Return whatever we accumulated before the error
-                            break (total as i32, { buf.truncate(total); buf });
+                            break (total as i32, {
+                                buf.truncate(total);
+                                buf
+                            });
                         }
                         if ret == 0 {
-                            break (total as i32, { buf.truncate(total); buf });
+                            break (total as i32, {
+                                buf.truncate(total);
+                                buf
+                            });
                         }
                         total += ret as usize;
                         if total >= size {
@@ -142,9 +146,7 @@ impl ThreadPoolBackend {
                         if ret < 0 {
                             if accumulated.is_empty() {
                                 break (
-                                    -(std::io::Error::last_os_error()
-                                        .raw_os_error()
-                                        .unwrap_or(1)),
+                                    -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
                                     Vec::new(),
                                 );
                             }
