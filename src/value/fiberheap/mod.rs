@@ -522,6 +522,22 @@ impl FiberHeap {
         ptr
     }
 
+    /// Return an existing shared allocator from `owned_shared`, or create one.
+    ///
+    /// Prevents the per-resume leak: without this, each `with_child_fiber`
+    /// call pushes a new `SharedAllocator` that accumulates until the
+    /// owner's `FiberHeap::clear()` runs. Reusing the last allocator keeps
+    /// `owned_shared` at most length 1 for non-propagation cases.
+    pub(crate) fn get_or_create_shared_allocator(
+        &mut self,
+    ) -> *mut crate::value::shared_alloc::SharedAllocator {
+        if let Some(sa) = self.owned_shared.last_mut() {
+            &mut **sa as *mut crate::value::shared_alloc::SharedAllocator
+        } else {
+            self.create_shared_allocator()
+        }
+    }
+
     /// Current shared allocator pointer. Returns null if none is set.
     pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc

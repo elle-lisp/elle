@@ -97,8 +97,8 @@ impl VM {
                 // Parent has shared_alloc from its own parent — propagate
                 child_fiber.heap.shared_alloc()
             } else {
-                // Create shared allocator on parent's heap.
-                child_fiber.heap.create_shared_allocator()
+                // Reuse existing or create shared allocator on parent's heap.
+                child_fiber.heap.get_or_create_shared_allocator()
             };
             self.fiber.heap.set_shared_alloc(shared_ptr);
         }
