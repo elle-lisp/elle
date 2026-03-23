@@ -181,7 +181,7 @@ impl JitCompiler {
             .iter()
             .map(|cs| super::dispatch::CallSiteMeta {
                 resume_ip: cs.resume_ip,
-                num_spilled: cs.num_locals + cs.stack_regs.len() as u16,
+                num_spilled: cs.stack_regs.len() as u16,
                 num_locals: cs.num_locals,
             })
             .collect();
