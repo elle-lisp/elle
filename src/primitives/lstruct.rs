@@ -38,11 +38,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "put",
         func: prim_put,
         signal: Signal::errors(),
-        arity: Arity::Exact(3),
-        doc: "Put a key-value pair into a struct",
-        params: &["collection", "key", "value"],
+        arity: Arity::Range(2, 3),
+        doc: "Put a value into a collection. For structs/arrays/strings: (put coll key value). For sets: (put set value).",
+        params: &["collection", "key-or-value", "value"],
         category: "struct",
-        example: "(put (@struct) :a 1)",
+        example: "(put {:a 1} :b 2) #=> {:a 1 :b 2}\n(put |1 2| 3) #=> |1 2 3|",
         aliases: &[],
     },
     PrimitiveDef {
@@ -83,11 +83,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
          func: prim_has_key,
          signal: Signal::errors(),
          arity: Arity::Exact(2),
-         doc: "Check if a collection has a key or element",
-         params: &["collection", "key"],
+         doc: "Check if a collection has a key, element, or substring. Works on structs (key lookup), sets (membership), and strings (substring check).",
+         params: &["collection", "key-or-value"],
          category: "struct",
-         example: "(has? (@struct :a 1) :a)",
-         aliases: &["has-key?"],
+         example: "(has? {:a 1} :a) #=> true\n(has? |1 2 3| 2) #=> true\n(has? \"hello\" \"ell\") #=> true",
+         aliases: &["has-key?", "contains?"],
      },
 ];
 
@@ -311,8 +311,12 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
-/// Polymorphic has? - works on structs and sets
-/// `(has? collection key)`
+/// Polymorphic has? - works on structs, sets, and strings
+/// `(has? collection key-or-value)`
+///
+/// For structs: checks if key exists
+/// For sets: checks if value is a member
+/// For strings: checks if substring is present
 pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -324,8 +328,8 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Delegate to set membership check
-    if args[0].is_set() || args[0].is_set_mut() {
+    // Delegate to set/string membership check
+    if args[0].is_set() || args[0].is_set_mut() || args[0].is_string() || args[0].is_string_mut() {
         return crate::primitives::sets::prim_contains(args);
     }
 
@@ -350,7 +354,7 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("has-key?: expected struct, got {}", args[0].type_name()),
+                        format!("has?: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
@@ -364,7 +368,7 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
                     SIG_ERROR,
                     error_val(
                         "type-error",
-                        format!("has-key?: expected struct, got {}", args[0].type_name()),
+                        format!("has?: expected struct, got {}", args[0].type_name()),
                     ),
                 )
             }
@@ -375,7 +379,10 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val(
                 "type-error",
-                format!("has?: expected struct or set, got {}", args[0].type_name()),
+                format!(
+                    "has?: expected struct, set, or string, got {}",
+                    args[0].type_name()
+                ),
             ),
         )
     }

@@ -96,6 +96,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     // Collection predicates → bool
     "empty?",
     "has?",
+    "contains?",
     // String predicates → bool (canonical + aliases)
     "string/contains?",
     "string-contains?",
