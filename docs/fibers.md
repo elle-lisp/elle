@@ -302,6 +302,12 @@ Error handling is signal handling:
 4. The handler inspects `fiber/value` and decides: handle, resume, or
    propagate further
 
+**Errors are not implicitly unwinding.** An errored fiber remains suspended
+(not dead). A parent that catches an error can resume the errored fiber,
+delivering a recovery value — this enables restart-style error handling.
+Uncaught errors crash the runtime; no `ev/join` is needed for error
+propagation.
+
 `try`/`catch` will be sugar for this pattern (blocked on macro system).
 
 

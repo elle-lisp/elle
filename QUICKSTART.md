@@ -19,12 +19,15 @@ Read these first. They are the most common sources of bugs.
 
 **Always use `empty?` to check end-of-list.** If you use `nil?` as your loop termination condition, it will never trigger — `()` is not `nil` — and your recursion will never bottom out.
 
+These are separate values because they are genuinely distinguishable: `()` is what you get when you remove the last element from `(x)` — it's an empty container, not the absence of value. Any abstraction that conflates them is open to error.
+
 ### `#` is comment, `;` is splice
 
 ```lisp
 # This is a comment
-;[1 2 3]        # Splice: spreads array into surrounding call
+;[1 2 3]        # Splice: spreads array into surrounding form
 (f 1 ;[2 3] 4)  # => (f 1 2 3 4)
+[1 ;[2 3] 4]    # => [1 2 3 4]  — works in collection literals too
 ```
 
 ### `assign` mutates; `set` creates a set value
@@ -74,6 +77,8 @@ Read these first. They are the most common sources of bugs.
 ```
 
 `put` on an immutable collection returns a new copy. `put` on a mutable collection mutates in place.
+
+`freeze` and `thaw` convert between mutable and immutable forms for all collection types (strings, arrays, structs, sets). Both are shallow — nested collections keep their original mutability.
 
 ### Elle has no `-e` flag and no `-` flags at all
 
@@ -129,7 +134,8 @@ true  false          # booleans (not #t/#f)
 ## Binding and Scope
 
 ```lisp
-# Top-level immutable
+# Top-level immutable (top-level is under implicit letrec,
+# so defs may be mutually recursive without special declaration)
 (def x 42)
 
 # Top-level mutable
@@ -152,20 +158,37 @@ true  false          # booleans (not #t/#f)
 
 ### Destructuring
 
+Destructuring is strict — missing elements or keys signal an error (no silent nil). Extra elements are silently ignored. Works in all binding forms: `def`, `var`, `let`, `let*`, `fn`, `defn`, `match`.
+
 ```lisp
 # List
 (def (a b c) (list 1 2 3))
 (def (head & tail) (list 1 2 3))   # head=1, tail=(2 3)
 
-# Array
+# Array (& rest collects into an array, not a list)
 (def [x y] [10 20])
-(def [first & rest] [1 2 3])
+(def [first & rest] [1 2 3])       # rest = [2 3]
 
 # Struct
 (def {:x x :y y} {:x 5 :y 10})
 
-# Nested
+# Struct remainder — & collects unmatched keys into a struct
+(def {:a a & more} {:a 1 :b 2 :c 3})  # a=1, more={:b 2 :c 3}
+
+# Wildcard — _ discards the matched value
+(def (_ mid _) (list 10 20 30))    # mid=20
+
+# Nested — any depth, mixed types
 (def ((a b) c) (list (list 1 2) 3))
+(def {:point [_ y]} {:point [:skip :target]})   # y=:target
+
+# In function parameters
+(defn magnitude [{:x x :y y}]
+  (+ x y))
+
+# Mutable destructuring
+(var (a b) (list 1 2))
+(assign a 100)
 ```
 
 ---
@@ -220,13 +243,16 @@ true  false          # booleans (not #t/#f)
   2 :two
   :other)
 
-# Pattern matching
+# Pattern matching (compiler errors on non-exhaustive match;
+# any unbound symbol works as a wildcard, not just _)
 (match value
   ([a b c] (+ a b c))
   ({:x x}  x)
   (_        :default))
 
-# Sequencing (shares surrounding scope)
+# Sequencing (shares surrounding scope — useful in macros to collect
+# expressions without introducing a new lexical scope and its attendant
+# automatic memory management machinery)
 (begin expr1 expr2 ...)
 
 # Sequencing with a new scope
@@ -241,7 +267,7 @@ true  false          # booleans (not #t/#f)
       (break :label item)))
   nil)
 
-# Loops
+# Loops — (break) exits while/forever directly; no label needed
 (while (< i 10)
   (assign i (+ i 1)))
 
@@ -249,9 +275,13 @@ true  false          # booleans (not #t/#f)
   (process)
   (when done (break)))
 
-# Iteration (prelude macro)
+# break does not cross function boundaries
+
+# Iteration (prelude macro; `in` is optional sugar)
 (each x in [1 2 3]
   (println x))
+(each x [1 2 3]
+  (println x))        # equivalent
 ```
 
 ---
@@ -271,13 +301,14 @@ true  false          # booleans (not #t/#f)
   ))
 
 # Capture as data — returns [ok? value]
+# protect captures errors as data; try/catch affords a body for control flow
 (def [ok? val] (protect (/ 10 0)))
 
 # Guaranteed cleanup
 (defer (close f)
   (use f))
 
-# Resource management
+# Resource management — with is defer with a constructor binding
 (with f (open "data.txt") close
   (read-all f))
 ```
@@ -358,6 +389,13 @@ true  false          # booleans (not #t/#f)
 
 Note: `string-append` does not exist. Use `string/join`.
 
+`string` with multiple args concatenates, coercing non-strings:
+
+```lisp
+(string "a" 3 "b")                     # => "a3b"
+(string/format "{} + {} = {}" 1 2 3)   # => "1 + 2 = 3"
+```
+
 ### @Strings (mutable)
 
 `get`, `put`, `length`, `push`, and `pop` are all grapheme-indexed, consistent with immutable strings.
@@ -395,7 +433,8 @@ Note: `string-append` does not exist. Use `string/join`.
 (seq->hex (bytes 1 2 3))     # => "010203"  (canonical name)
 (bytes->hex (bytes 1 2 3))   # => "010203"  (alias for seq->hex)
 (seq->hex [1 2 3])           # => "010203"  (also works with arrays)
-(seq->hex 255)               # => "ff"      (and integers)
+(seq->hex 255)               # => "ff"      (and non-negative integers)
+(seq->hex 0)                 # => "00"
 (string (bytes 97 98 99))    # => "abc"
 ```
 
@@ -424,6 +463,14 @@ Note: `string-append` does not exist. Use `string/join`.
 
 Note: `map` and `filter` always return lists, even when given arrays.
 
+### Sorting
+
+```lisp
+(sort [3 1 2])                    # => (1 2 3)  — natural order
+(sort-by length ["bb" "a" "ccc"]) # => ("a" "bb" "ccc")  — by key function
+(sort-with (fn [a b] (> a b)) [3 1 2])  # => (3 2 1)  — custom comparator
+```
+
 ---
 
 ## Arithmetic and Math
@@ -448,6 +495,22 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 (bit/and 12 10)  (bit/or 12 10)  (bit/xor 12 10)
 (bit/not 0)      (bit/shl 1 3)   (bit/shr 16 2)
+```
+
+### Comparison and Equality
+
+```lisp
+(= 1 1)         # => true  (structural equality)
+(< 1 2)         (> 2 1)
+(<= 1 1)        (>= 2 1)
+```
+
+### Logical Operators
+
+```lisp
+(and x y z)     # short-circuiting; returns last truthy or first falsy
+(or x y z)      # short-circuiting; returns first truthy or last falsy
+(not false)     # => true  (not is a function, not a macro)
 ```
 
 ---
@@ -536,7 +599,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 # Create a fiber (mask = SIG_YIELD = 2)
 (def f (fiber/new (fn [] (yield 42)) 2))
 
-# Resume, delivering a value
+# Resume, delivering a value; returns the next yielded value
 (fiber/resume f nil)
 
 # Inspect
@@ -548,6 +611,13 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 # Terminate
 (fiber/cancel f)   # hard kill (no unwinding)
 (fiber/abort f)    # graceful (with unwinding)
+
+# The signal mask is fixed at fiber creation time.
+# Uncaught signals propagate to the parent fiber.
+# Uncaught errors crash the runtime — you don't need ev/join for propagation.
+
+# Errors are NOT implicitly unwinding. A parent that catches an error
+# can resume the errored fiber to offer restart functionality.
 
 # Signal inference: the compiler infers signal types from the body.
 # silence constrains a parameter to be silent at compile time.
@@ -594,6 +664,8 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 ### Streams
 
+Streams are lazy and pull-based. Use `stream/map`, `stream/filter`, etc. to transform streams — the eager `map`/`filter` functions operate on lists, not streams.
+
 ```lisp
 (stream/map    f stream)
 (stream/filter f stream)
@@ -629,7 +701,7 @@ Key primitives:
 
 ```lisp
 (ev/run thunk...)           # start event loop, spawn each thunk, pump until done
-(ev/spawn thunk)            # schedule a new fiber (inside ev/run)
+(ev/spawn thunk)            # schedule a new fiber (inside ev/run); returns the fiber
 (ev/sleep seconds)          # yield for N seconds
 
 (tcp/listen addr port)      # bind and listen, returns listener
@@ -648,6 +720,34 @@ coroutine context" in tight loops. For synchronous output, use `print`/`println`
 (stdout) or `eprint`/`eprintln` (stderr) — these internally spawn a fiber and
 run a sync scheduler, so they work anywhere without an event loop.
 
+### Channels
+
+Crossbeam-based channels for inter-fiber (and inter-thread) messaging. Often unnecessary in single-threaded designs where a list or array suffices.
+
+```lisp
+(def [tx rx] (chan))            # unbounded channel; returns [sender receiver]
+(def [tx rx] (chan 10))         # bounded (capacity 10)
+
+(chan/send tx 42)               # non-blocking; returns [:ok], [:full], or [:disconnected]
+(chan/recv rx)                  # non-blocking; returns [:ok msg], [:empty], or [:disconnected]
+
+(chan/clone tx)                 # clone sender (multiple producers)
+(chan/close tx)                 # close sender half
+(chan/close-recv rx)            # close receiver half
+
+# Multiplex: block until one receiver has data
+(chan/select @[r1 r2])          # => [index msg] or [:disconnected]
+(chan/select @[r1 r2] 1000)    # with timeout (ms); may return [:timeout]
+```
+
+### Threads
+
+```lisp
+(def handle (sys/spawn (fn [] (+ 1 2))))  # spawn OS thread
+(sys/join handle)                          # wait for result; => 3
+(sys/thread-id)                            # current thread ID
+```
+
 ### Synchronous Output
 
 ```lisp
@@ -660,9 +760,21 @@ run a sync scheduler, so they work anywhere without an event loop.
 (eprintln "error: bad input")  # write to *stderr* + newline
 ```
 
-All four respect `*stdout*`/`*stderr*` parameter rebinding:
+All four respect `*stdout*`/`*stderr*` parameter rebinding.
+
+### Dynamic Parameters
+
+You can define your own dynamic parameters with `make-parameter`:
 
 ```lisp
+(def *my-param* (make-parameter :default-value))
+(*my-param*)                  # => :default-value
+(parameter? *my-param*)       # => true
+
+(parameterize ((*my-param* :overridden))
+  (*my-param*))               # => :overridden
+
+# Built-in parameters include *stdout* and *stderr*
 (parameterize ((*stdout* my-port))
   (println "goes to my-port, not terminal"))
 ```
@@ -802,7 +914,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 - Plugins are **never unloaded** — the library handle is intentionally leaked.
 - Plugins have **no stable ABI** — recompile when upgrading Elle.
 - The analyzer has **no static knowledge** of plugin functions — no compile-time checking.
-- Every `import` call **reloads** the plugin (no caching).
+- Every `import` call **reloads** the plugin — plugins follow the same strict re-interpretation code-path as modules.
 
 ---
 
@@ -881,6 +993,8 @@ the source of truth for the full API.
 
 ### Tail-recursive list processing
 
+Tail call optimization is guaranteed — tail calls in Elle never grow the stack.
+
 ```lisp
 (defn sum [lst acc]
   (if (empty? lst)
@@ -893,6 +1007,7 @@ the source of truth for the full API.
 ### Mutable accumulator
 
 ```lisp
+# var captures in closures are semantically box-like
 (defn make-counter []
   (var n 0)
   (fn []
