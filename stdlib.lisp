@@ -967,6 +967,7 @@
 
 (def *spawn* (make-parameter nil))
 (def *scheduler* (make-parameter nil))
+(def *io-backend* (make-parameter nil))
 
 ## ── Output ──────────────────────────────────────────────────────────
 
@@ -1226,7 +1227,8 @@
      :shutdown
       # shutdown-fn: signal shutdown
       (fn (timeout-ms)
-        (put shutdown-req 0 timeout-ms))}))
+        (put shutdown-req 0 timeout-ms))
+     :backend backend}))
 
 (def *shutdown* (make-parameter nil))
 
@@ -1245,7 +1247,8 @@
    Parameterizes *scheduler*, *spawn*, and *shutdown*; spawns each thunk; pumps until done."
   (parameterize ((*scheduler* sched)
                  (*spawn* (get sched :spawn))
-                 (*shutdown* (get sched :shutdown)))
+                 (*shutdown* (get sched :shutdown))
+                 (*io-backend* (get sched :backend)))
     (each t in thunks
       (ev/spawn t))
     ((get sched :pump))))
@@ -1257,7 +1260,8 @@
   (let ([sched (make-async-scheduler)])
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
-                   (*shutdown* (get sched :shutdown)))
+                   (*shutdown* (get sched :shutdown))
+                   (*io-backend* (get sched :backend)))
       (var result nil)
       (var last-fiber nil)
       (each t in thunks
@@ -1500,7 +1504,7 @@
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
     :print print :println println :eprint eprint :eprintln eprintln
-    :sync-scheduler sync-scheduler :*spawn* *spawn* :*scheduler* *scheduler*
+    :sync-scheduler sync-scheduler :*spawn* *spawn* :*scheduler* *scheduler* :*io-backend* *io-backend*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/with-scheduler ev/with-scheduler
      :ev/join ev/join :ev/join-protected ev/join-protected
