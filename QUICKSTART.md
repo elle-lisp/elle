@@ -242,7 +242,7 @@ true  false          # booleans (not #t/#f)
   2 :two
   :other)
 
-# Pattern matching
+# Pattern matching — always include a wildcard `_` arm (match is not exhaustive-checked)
 (match value
   ([a b c] (+ a b c))
   ({:x x}  x)

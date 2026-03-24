@@ -172,17 +172,19 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         edits.extend(replace_edits);
     }
 
-    // Add edit to strip the (elle/epoch N) tag
+    // Replace old (elle/epoch N) with current epoch, or add it if absent
     if let Some(info) = &epoch_info {
-        // Extend past trailing whitespace/newline so we don't leave a blank line
-        let remove_end = source[info.byte_end..]
-            .find('\n')
-            .map_or(info.byte_end, |i| info.byte_end + i + 1);
-
         edits.push(Edit {
             byte_offset: info.byte_start,
-            byte_len: remove_end - info.byte_start,
-            replacement: String::new(),
+            byte_len: info.byte_end - info.byte_start,
+            replacement: format!("(elle/epoch {})", CURRENT_EPOCH),
+        });
+    } else if !edits.is_empty() {
+        // File had no epoch tag but needed rewrites — prepend the current epoch
+        edits.push(Edit {
+            byte_offset: 0,
+            byte_len: 0,
+            replacement: format!("(elle/epoch {})\n", CURRENT_EPOCH),
         });
     }
 
@@ -383,7 +385,9 @@ fn print_help() {
         "(epoch {}). Applies symbol renames and structural replacements,",
         CURRENT_EPOCH
     );
-    println!("strips the (elle/epoch N) tag, and reports removed forms that need");
+    println!(
+        "updates the (elle/epoch N) tag to the current epoch, and reports removed forms that need"
+    );
     println!("manual attention.");
     println!();
     println!("Usage: elle rewrite [OPTIONS] <file...>");
