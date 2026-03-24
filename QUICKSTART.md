@@ -64,6 +64,33 @@ Read these first. They are the most common sources of bugs.
 (squelch f)     # arity error
 ```
 
+### `let` is parallel; `let*` is sequential — causes "undefined variable"
+
+`let` evaluates all right-hand sides in the **outer** scope. Later bindings
+cannot see earlier ones. Use `let*` when a binding depends on a previous one.
+
+```lisp
+# WRONG: y cannot see x — "undefined variable: x"
+(let ((x 5) (y (* x 2)))
+  y)
+
+# RIGHT: let* makes x visible to y
+(let* ((x 5) (y (* x 2)))
+  y)   # => 10
+```
+
+Also works with array-style syntax:
+
+```lisp
+(let* [[url (parse-url input)]
+       [host url:host]           # host depends on url
+       [conn (tcp/connect host 80)]]  # conn depends on host
+  conn)
+```
+
+If you get "undefined variable" inside a `let` and the variable is defined
+on an earlier line of the same `let`, change `let` to `let*`.
+
 ### Bare delimiters = immutable; `@`-prefix = mutable
 
 ```lisp
