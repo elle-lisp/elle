@@ -1261,8 +1261,8 @@ fn test_prim_squelch_unknown_keyword_error() {
     assert!(result.is_err(), "expected error, got ok");
     let err = result.unwrap_err();
     assert!(
-        err.contains("not registered"),
-        "expected 'not registered', got: {}",
+        err.contains("unknown signal keyword"),
+        "expected 'unknown signal keyword', got: {}",
         err
     );
 }

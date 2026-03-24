@@ -1,3 +1,24 @@
+# lib/
+
+Reusable Elle modules. Each is a closure: `import-file` loads it, calling
+the result initializes it and returns a struct of exports. Modules that
+depend on other modules or plugins take them as arguments.
+
+## Modules
+
+| File | Purpose |
+|------|---------|
+| `http.lisp` | HTTP/1.1 client and server over TCP |
+| `tls.lisp` | TLS 1.2/1.3 client and server |
+| `redis.lisp` | Redis client (RESP2) over TCP |
+| `dns.lisp` | DNS client (RFC 1035) |
+| `aws.lisp` | AWS client: SigV4 signing, HTTPS, service dispatch |
+| `aws/` | AWS service modules (generated) + SigV4 signing — see [`aws/AGENTS.md`](aws/AGENTS.md) |
+| `contract.lisp` | Compositional validation for function boundaries |
+| `lua.lisp` | Lua standard library compatibility prelude |
+
+---
+
 # lib/http
 
 Agent guide for `lib/http.lisp` — Pure Elle HTTP/1.1 client and server.
@@ -17,7 +38,7 @@ http-get url → parse-url → tcp/connect → write-request-line → write-head
 
 Server:
 ```
-http-serve port handler → tcp/listen → ev/run → forever:
+http-serve port handler → tcp/listen → forever:
   tcp/accept → ev/spawn → defer(port/close):
     read-request → handler → write-response
 ```
@@ -189,7 +210,7 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 
 ## Invariants
 
-1. All functions require a scheduler context (`ev/run` or `ev/spawn`).
+1. All functions yield (async I/O).
 2. `tls:close` always closes the TCP port, even if `close_notify` fails.
 3. After every `tls/process` call, outgoing data must be drained and sent.
 4. `tls:lines` and `tls:chunks` close the connection when exhausted.

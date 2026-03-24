@@ -1,4 +1,30 @@
-# HTTP Module for Elle
+# lib/ — Reusable Elle modules
+
+| Module | Purpose | Docs |
+|--------|---------|------|
+| `http.lisp` | HTTP/1.1 client and server over TCP | [below](#http) |
+| `tls.lisp` | TLS 1.2/1.3 client and server | |
+| `redis.lisp` | Redis client (RESP2) over TCP | |
+| `dns.lisp` | DNS client (RFC 1035) | |
+| `aws.lisp` | AWS client: SigV4 signing, HTTPS requests | [`aws/README.md`](aws/README.md) |
+| `aws/` | Generated AWS service modules + SigV4 | [`aws/README.md`](aws/README.md) |
+| `contract.lisp` | Compositional validation for function boundaries | |
+| `lua.lisp` | Lua standard library compatibility prelude | |
+
+Each module is a closure. `import-file` loads it; calling the result
+initializes the module and returns a struct of its exports. Modules
+that depend on other modules or plugins take them as arguments.
+
+```lisp
+(def http ((import-file "lib/http.lisp")))
+(def tls  ((import-file "lib/tls.lisp") tls-plugin))
+(def aws  ((import-file "lib/aws.lisp") crypto jiff tls))
+```
+
+---
+
+<a id="http"></a>
+# HTTP
 
 Pure Elle HTTP/1.1 client and server.
 
@@ -17,7 +43,7 @@ Pure Elle HTTP/1.1 client and server.
 ```lisp
 (def http ((import-file "./lib/http.lisp")))
 
-(def resp (ev/spawn (fn () (http:get "http://example.com/"))))
+(def resp (http:get "http://example.com/"))
 (println (get resp :status))  # 200
 (println (get resp :body))
 ```
@@ -73,8 +99,7 @@ General request. `method` is a string (`"GET"`, `"POST"`, `"PUT"`, etc.).
 ### `(http:serve port-num handler)`
 
 Start a server on `port-num`. `handler` is `(fn [request]) → response`.
-Runs the accept loop with `ev/run`. Runs until the process exits or the
-listener is closed.
+Runs until the process exits or the listener is closed.
 
 **Parameters:**
 - `port-num` (integer): Port to listen on (0 = OS-assigned)
@@ -157,14 +182,10 @@ All HTTP errors signal with `:http-error` kind:
 
 ## Concurrency
 
-The server uses `ev/run` for concurrent connection handling. Each accepted
-connection runs in its own fiber. The client uses `tcp/connect` which yields
-(SIG_IO) and must run inside a scheduler context.
+The server handles connections concurrently — each accepted connection
+runs in its own fiber.
 
 ```lisp
-# Client must run inside ev/run or ev/spawn
-(ev/run
-  (fn []
-    (let ((resp (http:get "http://example.com/")))
-      (println (get resp :status)))))
+(let ((resp (http:get "http://example.com/")))
+  (println (get resp :status)))
 ```

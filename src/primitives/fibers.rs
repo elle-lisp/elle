@@ -60,7 +60,10 @@ fn resolve_keyword_slice(
     Ok(bits)
 }
 
-fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (SignalBits, Value)> {
+pub(crate) fn resolve_signal_bits(
+    val: &Value,
+    context: &str,
+) -> Result<SignalBits, (SignalBits, Value)> {
     // 1. Integer passthrough (existing behavior)
     if let Some(i) = val.as_int() {
         return Ok(SignalBits::new(i as u32));

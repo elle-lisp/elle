@@ -965,38 +965,34 @@
                        (true
                         (fiber/resume fiber))))))))
 
-(def *spawn* (parameter sync-scheduler))
+(def *spawn* (make-parameter nil))
 (def *scheduler* (make-parameter nil))
 
-## ── Synchronous output ──────────────────────────────────────────────
+## ── Output ──────────────────────────────────────────────────────────
 
-(defn print (& args)
+(defn print [& args]
   "Write values to *stdout*, no newline. Respects *stdout* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stdout*) (apply string args))
-                      (port/flush (*stdout*)))
-      |:error :io|)))
+  (let [[stdout (*stdout*)]]
+    (port/write stdout (apply string args))
+    (port/flush stdout)))
 
-(defn println (& args)
+(defn println [& args]
   "Write values to *stdout* with trailing newline. Respects *stdout* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stdout*) (string (apply string args) "\n"))
-                      (port/flush (*stdout*)))
-      |:error :io|)))
+  (let [[stdout (*stdout*)]]
+    (port/write stdout (string (apply string args) "\n"))
+    (port/flush stdout)))
 
-(defn eprint (& args)
+(defn eprint [& args]
   "Write values to *stderr*, no newline. Respects *stderr* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stderr*) (apply string args))
-                      (port/flush (*stderr*)))
-      |:error :io|)))
+  (let [[stderr (*stderr*)]]
+    (port/write stderr (apply string args))
+    (port/flush stderr)))
 
-(defn eprintln (& args)
+(defn eprintln [& args]
   "Write values to *stderr* with trailing newline. Respects *stderr* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stderr*) (string (apply string args) "\n"))
-                      (port/flush (*stderr*)))
-      |:error :io|)))
+  (let [[stderr (*stderr*)]]
+    (port/write stderr (string (apply string args) "\n"))
+    (port/flush stderr)))
 
 ## ── Spawn ───────────────────────────────────────────────────────────
 
@@ -1277,7 +1273,7 @@
 
 (defn emit-wait [request]
   "Emit a :wait signal. Guards against use outside async scheduler."
-  (when (= (*spawn*) sync-scheduler)
+  (when (nil? (*spawn*))
     (error {:error :state-error
             :message (string "ev/" (get request :op) " requires an async scheduler")}))
   (emit :wait request))
