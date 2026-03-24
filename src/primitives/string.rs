@@ -694,7 +694,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["s", "substr"],
         category: "string",
         example: "(string/contains? \"hello\" \"ell\") #=> true",
-        aliases: &["string-contains?"],
+        aliases: &[],
     },
     PrimitiveDef {
         name: "string/starts-with?",

@@ -1,3 +1,24 @@
+# lib/
+
+Reusable Elle modules. Each is a closure: `import-file` loads it, calling
+the result initializes it and returns a struct of exports. Modules that
+depend on other modules or plugins take them as arguments.
+
+## Modules
+
+| File | Purpose |
+|------|---------|
+| `http.lisp` | HTTP/1.1 client and server over TCP |
+| `tls.lisp` | TLS 1.2/1.3 client and server |
+| `redis.lisp` | Redis client (RESP2) over TCP |
+| `dns.lisp` | DNS client (RFC 1035) |
+| `aws.lisp` | AWS client: SigV4 signing, HTTPS, service dispatch |
+| `aws/` | AWS service modules (generated) + SigV4 signing — see [`aws/AGENTS.md`](aws/AGENTS.md) |
+| `contract.lisp` | Compositional validation for function boundaries |
+| `lua.lisp` | Lua standard library compatibility prelude |
+
+---
+
 # lib/http
 
 Agent guide for `lib/http.lisp` — Pure Elle HTTP/1.1 client and server.

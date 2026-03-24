@@ -1,4 +1,30 @@
-# HTTP Module for Elle
+# lib/ — Reusable Elle modules
+
+| Module | Purpose | Docs |
+|--------|---------|------|
+| `http.lisp` | HTTP/1.1 client and server over TCP | [below](#http) |
+| `tls.lisp` | TLS 1.2/1.3 client and server | |
+| `redis.lisp` | Redis client (RESP2) over TCP | |
+| `dns.lisp` | DNS client (RFC 1035) | |
+| `aws.lisp` | AWS client: SigV4 signing, HTTPS requests | [`aws/README.md`](aws/README.md) |
+| `aws/` | Generated AWS service modules + SigV4 | [`aws/README.md`](aws/README.md) |
+| `contract.lisp` | Compositional validation for function boundaries | |
+| `lua.lisp` | Lua standard library compatibility prelude | |
+
+Each module is a closure. `import-file` loads it; calling the result
+initializes the module and returns a struct of its exports. Modules
+that depend on other modules or plugins take them as arguments.
+
+```lisp
+(def http ((import-file "lib/http.lisp")))
+(def tls  ((import-file "lib/tls.lisp") tls-plugin))
+(def aws  ((import-file "lib/aws.lisp") crypto jiff tls))
+```
+
+---
+
+<a id="http"></a>
+# HTTP
 
 Pure Elle HTTP/1.1 client and server.
 
