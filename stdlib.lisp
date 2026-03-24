@@ -1017,6 +1017,7 @@
         (waiters       @{})        # target-fiber → @[waiting-fibers...]
         (select-sets   @{})        # waiting-fiber → @{:candidates [...] :woken @[false]}
         (completed     @{})        # fiber → :ok | :error (already-completed fibers)
+        (joined        @|  |)      # set of fibers whose result was observed
         (shutdown-req  @[nil]))    # nil = running, integer = shutdown requested with timeout
 
     (defn cleanup-select [waiter entry]
@@ -1055,6 +1056,7 @@
 
     (defn handle-join [caller target]
       "Handle a :join wait request. Resumes caller with [ok? value]."
+      (add joined target)
       (let ([comp (get completed target)])
         (if (not (nil? comp))
           # Already completed — resume immediately
@@ -1090,6 +1092,7 @@
 
     (defn handle-abort [caller target]
       "Handle an :abort wait request."
+      (add joined target)
       (when (nil? (get completed target))
         # Cancel pending I/O if any
         (let ([id (get fiber-io target)])
@@ -1223,7 +1226,11 @@
               (unless (nil? timeout)
                 (do-shutdown timeout)
                 (break :loop nil)))
-            (process-completions))))
+            (process-completions)))
+        # Crash on unjoined errored fibers — never swallow errors silently
+        (each [fiber status] in (pairs completed)
+          (when (and (= status :error) (not (contains? joined fiber)))
+            (error (fiber/value fiber)))))
      :shutdown
       # shutdown-fn: signal shutdown
       (fn (timeout-ms)
@@ -1256,22 +1263,18 @@
 (defn ev/run (& thunks)
   "Create an async scheduler, run thunks, return the last thunk's result.
    Used internally by the compiler to wrap top-level code in a scheduler.
-   Propagates errors from fibers — if the last fiber errored, the error is re-raised."
+   Propagates errors from fibers — unjoined errored fibers crash the process."
   (let ([sched (make-async-scheduler)])
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
                    (*shutdown* (get sched :shutdown))
                    (*io-backend* (get sched :backend)))
-      (var result nil)
       (var last-fiber nil)
       (each t in thunks
         (assign last-fiber (ev/spawn t)))
       ((get sched :pump))
       (when (not (nil? last-fiber))
-        (if (= (fiber/status last-fiber) :error)
-          (error (fiber/value last-fiber))
-          (assign result (fiber/value last-fiber))))
-      result)))
+        (fiber/value last-fiber)))))
 
 ## ── Structured concurrency primitives ───────────────────────────────
 
@@ -1352,37 +1355,42 @@
 (defn ev/scope [body-fn]
   "Structured concurrency nursery. body-fn receives a spawn function.
    All spawned fibers must complete before scope exits.
-   On error, remaining siblings are aborted."
+   If any fiber (body or child) errors, all remaining siblings are aborted
+   immediately — the scope does not wait for the body to finish first."
   (let* ([scope-fibers @[]]
+         [[next pool] (ev/as-completed @[])]
          [scope-spawn (fn [closure]
                         (let ([f (ev/spawn closure)])
                           (push scope-fibers f)
+                          (push pool f)
                           f))])
-    # Run body in its own fiber so ev/join works
     (let ([body-fiber (ev/spawn (fn [] (body-fn scope-spawn)))])
       (push scope-fibers body-fiber)
-      # Wait for body to finish
-      (let (([body-ok? body-val] (ev/join-protected body-fiber)))
-        # If body errored, abort all remaining scope fibers
-        (unless body-ok?
-          (each f in scope-fibers
-            (when (= (fiber/status f) :paused)
-              (ev/abort f))))
-        # Join all remaining scope fibers
-        (let ([first-error @[(if body-ok? nil body-val)]])
-          (each f in scope-fibers
-            (unless (= f body-fiber)
-              (let (([ok? val] (ev/join-protected f)))
-                (when (and (not ok?) (nil? (get first-error 0)))
-                  (put first-error 0 val)
-                  # First child error: abort remaining siblings
-                  (each s in scope-fibers
-                    (when (= (fiber/status s) :paused)
-                      (ev/abort s)))))))
-          # Propagate first error, or return body result
-          (if (not (nil? (get first-error 0)))
-            (error (get first-error 0))
-            body-val))))))
+      (push pool body-fiber)
+      # Monitor all fibers — detect errors from any fiber immediately
+      (var body-val nil)
+      (var first-error nil)
+      (block :done
+        (forever
+          (let ([done (next)])
+            (when (nil? done) (break :done nil))
+            # Use ev/join-protected to get the scheduler's view of completion
+            # status (fiber/status stays :paused for caught errors).
+            (let (([ok? val] (ev/join-protected done)))
+              (when (= done body-fiber)
+                (assign body-val val))
+              (when (and (not ok?) (nil? first-error))
+                (assign first-error val)
+                # Abort all remaining fibers — check :paused (running/waiting)
+                # and :new (not yet started). handle-abort is a no-op for
+                # already-completed fibers.
+                (each f in scope-fibers
+                  (let ([s (fiber/status f)])
+                    (when (or (= s :paused) (= s :new))
+                      (ev/abort f)))))))))
+      (if (not (nil? first-error))
+        (error first-error)
+        body-val))))
 
 (defn ev/map [f items]
   "Apply f to each item concurrently, return results in input order."

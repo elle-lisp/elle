@@ -662,6 +662,11 @@ impl VM {
 
         if result_bits.is_ok() || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL))
         {
+            // Abort is terminal — even if the parent catches the signal,
+            // the aborted fiber is finished and must not stay :paused.
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -712,6 +717,10 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // Abort is terminal — set child to :error even when caught
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
@@ -860,6 +869,10 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // Abort is terminal — set child to :error even when caught
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)
