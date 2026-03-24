@@ -150,6 +150,7 @@ impl Emitter {
         let saved_yield_points = std::mem::take(&mut self.yield_points);
         let saved_call_sites = std::mem::take(&mut self.call_sites);
         let saved_may_suspend = self.current_func_may_suspend;
+        let saved_num_locals = self.current_func_num_locals;
 
         // Emit the nested function
         let result = self.emit(func);
@@ -164,6 +165,7 @@ impl Emitter {
         self.yield_points = saved_yield_points;
         self.call_sites = saved_call_sites;
         self.current_func_may_suspend = saved_may_suspend;
+        self.current_func_num_locals = saved_num_locals;
 
         result
     }
@@ -779,8 +781,18 @@ impl Emitter {
                 // Stack: [func, args_array] → [result]
                 self.ensure_binary_on_top(*func, *args);
                 self.bytecode.emit(Instruction::CallArrayMut);
+                let call_resume_ip = self.bytecode.current_pos();
                 self.pop(); // args
                 self.pop(); // func
+
+                if self.current_func_may_suspend {
+                    self.call_sites.push(CallSiteInfo {
+                        resume_ip: call_resume_ip,
+                        stack_regs: self.stack.clone(),
+                        num_locals: self.current_func_num_locals,
+                    });
+                }
+
                 self.push_reg(*dst);
             }
 

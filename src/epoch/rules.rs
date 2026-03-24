@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 4;
+pub const CURRENT_EPOCH: u64 = 5;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -157,6 +157,25 @@ static MIGRATIONS: &[Migration] = &[
             },
         ],
     },
+    Migration {
+        epoch: 5,
+        summary: "add→put for sets, string-contains?→has?, string/contains?→has?",
+        rules: &[
+            MigrationRule::Replace {
+                symbol: "add",
+                arity: 2,
+                template: "(put $1 $2)",
+            },
+            MigrationRule::Rename {
+                old: "string-contains?",
+                new: "has?",
+            },
+            MigrationRule::Rename {
+                old: "string/contains?",
+                new: "has?",
+            },
+        ],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -246,7 +265,10 @@ mod tests {
         assert_eq!(renames.get("stream/read-all"), Some(&"port/read-all"));
         assert_eq!(renames.get("stream/write"), Some(&"port/write"));
         assert_eq!(renames.get("stream/flush"), Some(&"port/flush"));
-        assert_eq!(renames.len(), 8);
+        // epoch 5: string-contains?→has?, string/contains?→has?
+        assert_eq!(renames.get("string-contains?"), Some(&"has?"));
+        assert_eq!(renames.get("string/contains?"), Some(&"has?"));
+        assert_eq!(renames.len(), 10);
     }
 
     #[test]

@@ -56,7 +56,11 @@ Read these first. They are the most common sources of bugs.
 (let ((safe-f (squelch f :yield)))
   (safe-f x))
 
-# Wrong: squelch requires at least 2 args
+# squelch accepts any signal spec: keyword, set, array, list, or integer
+(squelch f |:yield :error|)   # set of signals
+(squelch f [:yield :error])   # array also works
+
+# Wrong: squelch requires exactly 2 args
 (squelch f)     # arity error
 ```
 
@@ -194,6 +198,24 @@ true  false          # booleans (not #t/#f)
 
 (def add5 (make-adder 5))
 (add5 10)   # => 15
+
+# Optional positional params (nil if omitted)
+(defn greet [name &opt greeting]
+  (println (or greeting "Hello") ", " name "!"))
+(greet "Alice")         # Hello, Alice!
+(greet "Bob" "Hey")     # Hey, Bob!
+
+# Named keyword params (nil if omitted)
+(defn connect [host port &named timeout]
+  [host port timeout])
+(connect "localhost" 8080 :timeout 30)  # => ["localhost" 8080 30]
+(connect "localhost" 8080)              # => ["localhost" 8080 nil]
+
+# Keyword args collected as a struct
+(defn request [method path &keys opts]
+  [method path opts])
+(request "GET" "/" :timeout 30 :headers {:accept "text/html"})
+# => ["GET" "/" {:timeout 30 :headers {:accept "text/html"}}]
 ```
 
 ---
@@ -220,7 +242,7 @@ true  false          # booleans (not #t/#f)
   2 :two
   :other)
 
-# Pattern matching
+# Pattern matching — always include a wildcard `_` arm (match is not exhaustive-checked)
 (match value
   ([a b c] (+ a b c))
   ({:x x}  x)
@@ -503,12 +525,15 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (native-fn? x)   # native functions only; aliases: native?, primitive?
 
 # Conversions
-(integer "42")       (float "3.14")
-(string 42)          (string 'foo)   # => "foo"  (works for symbols too)
-(string :foo)        # => "foo"  (no colon)
-(number->string 42)  # => "42"  (decimal)
-(number->string 255 16)  # => "ff"   (hex, radix 2–36)
-(number->string 255 2)   # => "11111111"  (binary)
+(integer "42")             (float "3.14")
+(integer "ff" 16)          # => 255  (hex, radix 2–36)
+(integer "1010" 2)         # => 10   (binary)
+(string 42)                (string 'foo)   # => "foo"
+(string :foo)              # => "foo"  (no colon)
+(string @"hello")          # => "hello"  (@string → string)
+(number->string 42)        # => "42"  (decimal)
+(number->string 255 16)    # => "ff"   (hex, radix 2–36)
+(number->string 255 2)     # => "11111111"  (binary)
 ```
 
 ---
@@ -709,11 +734,11 @@ Key primitives:
 (port/read-line port)       # async read until \n (yields), nil on EOF
 ```
 
-**Important:** `port/write` and `port/flush` signal `:yield`. For synchronous
-output, use `print`/`println` (stdout) or `eprint`/`eprintln` (stderr) — these
-internally spawn a fiber and run a sync scheduler, so they work anywhere.
+**Important:** `port/write` and `port/flush` signal `:yield`. `print`/`println`
+and `eprint`/`eprintln` are also async — they write to `*stdout*`/`*stderr*`
+via the same async I/O path.
 
-### Synchronous Output
+### Output
 
 ```lisp
 (print "no newline")           # write to *stdout*, no newline
@@ -1008,6 +1033,172 @@ These are things agents commonly reach for that Elle does not have:
 | `null` | `nil` |
 | `char` type | `string` and `@string` are grapheme-indexed; use `get` to extract a grapheme cluster as a string |
 | `function?` | `fn?` (callable), `closure?` (closure only), `native-fn?` (native only) |
+
+---
+
+## Deeper Understanding
+
+### `silence` vs `squelch`
+
+They solve different problems at different times:
+
+- **`silence`** is a compile-time declaration. It appears in a function preamble and means "totally silent" — no signal keywords accepted. Two forms: `(silence)` constrains the whole function body; `(silence param)` constrains a parameter. If a `(silence)` function's body may emit signals, the **compiler rejects it** at compile time. If a `(silence param)` parameter emits a signal at runtime, it becomes a `:signal-violation` error.
+
+- **`squelch`** is a runtime primitive that returns a **new closure** with a selective signal blacklist. It takes exactly two arguments: a closure and a signal spec (keyword, set, array, list, or integer). You can compose them: `(squelch (squelch f :yield) :error)`.
+
+```lisp
+# silence — total compile-time contract
+(defn safe-map [f xs]
+  (silence f)              # f must be completely silent
+  (map f xs))
+
+# squelch — selective runtime wrapper
+(defn safe-iterate [f xs]
+  (let ((safe-f (squelch f |:yield|)))  # forbid :yield only
+    (map safe-f xs)))
+```
+
+| Aspect | `silence` | `squelch` |
+|--------|-----------|-----------|
+| Type | Special form (preamble) | Runtime primitive |
+| Granularity | All-or-nothing | Per-signal keyword |
+| Checking | Compile-time (body) / runtime (params) | Runtime |
+| Returns | `nil` | New closure |
+
+### `begin` vs `block`
+
+`begin` is the default sequential form. `block` is for early exit.
+
+- **`begin`** shares the surrounding scope. Inside a function body, it performs two-pass analysis (pre-binds all `def`/`var` forms, then analyzes), enabling forward references and mutual recursion. All multi-body macros (`when`, `unless`, `let*`, etc.) desugar to `begin`.
+
+- **`block`** creates a new isolated scope and supports `break` for early exit with a value. It has more overhead (scope infrastructure, exit labels, region tracking).
+
+```lisp
+# begin — idiomatic for sequencing (used in macro expansion)
+(when ready
+  (begin
+    (process)
+    (cleanup)))
+
+# block — needed for early exit
+(block :search
+  (each item in items
+    (when (= item target)
+      (break :search item)))
+  nil)
+```
+
+Use `begin` unless you need `break`.
+
+### Fiber signal masks
+
+Signal masks accept multiple formats, but **set literals are preferred**:
+
+```lisp
+# Preferred — symbolic set literal
+(fiber/new (fn [] (yield 42)) |:yield|)
+(fiber/new thunk |:yield :io|)
+
+# Also accepted: keyword, array, integer
+(fiber/new thunk :yield)
+(fiber/new thunk [:yield :io])
+(fiber/new thunk 2)              # raw bit value (fragile)
+```
+
+Built-in signal bits: `:error` (0), `:yield` (1), `:debug` (2), `:ffi` (4), `:halt` (8), `:io` (9), `:exec` (11), `:fuel` (12), `:wait` (14). User-defined signals (via `(signal :keyword)`) get bits 16–31.
+
+The runtime resolves set literals by looking up each keyword in the signal registry and OR-ing the bits together. Use `|:yield :io|` rather than `(bit/or 2 512)`.
+
+### `import` reloads every time
+
+There is no module cache. Every `import` call reads the file, compiles it, and executes it fresh. This is intentional — it gives each import independent state:
+
+```lisp
+# Two imports of the same counter module get independent state
+(let ([c1 ((import-file "lib/counter.lisp"))]
+      [c2 ((import-file "lib/counter.lisp"))])
+  (c1:inc) (c1:inc)
+  (c1:count)   # => 2
+  (c2:count))  # => 0
+```
+
+**To avoid redundant loads**, bind the result at the top level and reuse it:
+
+```lisp
+(def utils (import-file "lib/utils.lisp"))
+(utils:helper1 x)
+(utils:helper2 y)
+```
+
+For plugins (`.so` files), the library handle is intentionally leaked (never unloaded). Importing the same plugin twice registers primitives twice, so always bind once.
+
+### Lists vs arrays
+
+`map` and `filter` always return lists because Elle follows the Lisp tradition of structural recursion with `cons`/`first`/`rest`. Lists are the natural output of recursive accumulation.
+
+**When to use which:**
+- **Lists** — functional pipelines (`map`, `filter`, `fold`), recursive processing, variable-length results
+- **Arrays** — indexed access, fixed-size data, interop with plugins expecting arrays
+
+**Getting arrays from transforms:**
+- `stream/into-array` — collect a stream into an array
+- `mapcat` on arrays — preserves array type
+- `map-indexed` on arrays — preserves array type
+- Manual: accumulate into `@[]` with `push`, then `freeze`
+
+### `protect` vs `try/catch`
+
+They have different return conventions and error propagation:
+
+```lisp
+# try/catch — handle and recover
+(try
+  (risky-op)
+  (catch e
+    (fallback e)))       # returns fallback value
+
+# protect — capture as data, never propagates
+(def [ok? val] (protect (risky-op)))
+(if ok? (use val) (handle val))
+
+# defer — guaranteed cleanup, then propagates
+(defer (cleanup)
+  (risky-op))           # error continues unwinding after cleanup
+```
+
+| Aspect | `try/catch` | `protect` | `defer` |
+|--------|------------|----------|--------|
+| On success | Body value | `[true value]` | Body value |
+| On error | Handler result | `[false error]` | Propagates |
+| Error escapes? | Only if handler re-raises | Never | Always |
+| Use case | Recovery | Safe capture | Resource cleanup |
+
+All three are macros over `fiber/new` with mask `1` (`SIG_ERROR`). The difference is what happens after the fiber completes: `try/catch` runs a handler, `protect` wraps the result, `defer` calls `fiber/propagate` to continue unwinding.
+
+### Streams are lazy coroutines
+
+Streams are **lazy, demand-driven coroutines**. Each `coro/resume` pulls exactly one value. Transforms like `stream/map` and `stream/filter` return new coroutines that wrap a source — nothing executes until you pull.
+
+```lisp
+# Infinite stream — works because it's lazy
+(defn naturals []
+  (coro/new (fn []
+    (var n 0)
+    (forever
+      (yield n)
+      (assign n (+ n 1))))))
+
+# Compose lazily, consume finitely
+(stream/collect
+  (stream/take 5
+    (stream/map (fn [x] (* x x))
+      (naturals))))
+# => (0 1 4 9 16)
+```
+
+**Sink combinators** (`stream/collect`, `stream/fold`, `stream/for-each`, `stream/into-array`) consume a stream to completion — don't call them on infinite streams without `stream/take`.
+
+**Port streams** (`port/lines`, `port/chunks`) yield `SIG_IO` under the hood. User code runs inside the async scheduler by default, so this works out of the box.
 
 ---
 

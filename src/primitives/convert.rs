@@ -6,27 +6,79 @@ use crate::value::types::Arity;
 use crate::value::{error_val, error_val_extra, Value};
 
 /// Convert to integer. Accepts int, float, string, or keyword.
+/// With an optional radix (2–36), parses a string/keyword in the given base.
 pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 1 {
+    if args.is_empty() || args.len() > 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("integer: expected 1 argument, got {}", args.len()),
+                format!("integer: expected 1-2 arguments, got {}", args.len()),
             ),
         );
     }
+
+    // Extract optional radix from second argument.
+    let radix: Option<u32> = if args.len() == 2 {
+        match args[1].as_int() {
+            Some(r) if (2..=36).contains(&r) => Some(r as u32),
+            Some(r) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("integer: radix must be 2-36, got {}", r),
+                    ),
+                );
+            }
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "integer: radix must be integer, got {}",
+                            args[1].type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+    } else {
+        None
+    };
+
+    // When a radix is given, only string/keyword inputs are valid.
+    if radix.is_some() {
+        if let Some(result) = args[0].with_string(|s| parse_int(s, radix)) {
+            return result;
+        }
+        if let Some(name) = args[0].as_keyword_name() {
+            return parse_int(&name, radix);
+        }
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "integer: radix conversion requires string or keyword, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    }
+
     if let Some(n) = args[0].as_int() {
         return (SIG_OK, Value::int(n));
     }
     if let Some(f) = args[0].as_float() {
         return (SIG_OK, Value::int(f as i64));
     }
-    if let Some(result) = args[0].with_string(parse_int) {
+    if let Some(result) = args[0].with_string(|s| parse_int(s, None)) {
         return result;
     }
     if let Some(name) = args[0].as_keyword_name() {
-        return parse_int(&name);
+        return parse_int(&name, None);
     }
     (
         SIG_ERROR,
@@ -40,14 +92,15 @@ pub(crate) fn prim_to_int(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-fn parse_int(s: &str) -> (SignalBits, Value) {
-    match s.parse::<i64>() {
+fn parse_int(s: &str, radix: Option<u32>) -> (SignalBits, Value) {
+    let radix = radix.unwrap_or(10);
+    match i64::from_str_radix(s, radix) {
         Ok(n) => (SIG_OK, Value::int(n)),
         Err(_) => (
             SIG_ERROR,
             error_val_extra(
                 "parse-error",
-                format!("integer: cannot parse \"{}\" as integer", s),
+                format!("integer: cannot parse \"{}\" as base-{} integer", s, radix),
                 &[("input", Value::string(s))],
             ),
         ),
@@ -232,6 +285,20 @@ pub(crate) fn prim_to_string(args: &[Value]) -> (SignalBits, Value) {
                 }
                 if let Some(s) = val.with_string(|s| s.to_string()) {
                     result.push_str(&s);
+                } else if let Some(ms) = val.as_string_mut() {
+                    let borrowed = ms.borrow();
+                    match std::str::from_utf8(&borrowed) {
+                        Ok(s) => result.push_str(s),
+                        Err(e) => {
+                            return (
+                                SIG_ERROR,
+                                error_val(
+                                    "encoding-error",
+                                    format!("string: invalid UTF-8: {}", e),
+                                ),
+                            )
+                        }
+                    }
                 } else {
                     return (
                         SIG_ERROR,
@@ -254,9 +321,16 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
         return (SIG_OK, val);
     }
 
-    // @string: return as-is (preserves mutability)
-    if val.as_string_mut().is_some() {
-        return (SIG_OK, val);
+    // @string: convert to immutable string
+    if let Some(ms) = val.as_string_mut() {
+        let borrowed = ms.borrow();
+        return match std::str::from_utf8(&borrowed) {
+            Ok(s) => (SIG_OK, Value::string(s)),
+            Err(e) => (
+                SIG_ERROR,
+                error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
+            ),
+        };
     }
 
     // bytes (immutable): UTF-8 decode to immutable string
@@ -390,11 +464,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "integer",
         func: prim_to_int,
         signal: Signal::errors(),
-        arity: Arity::Exact(1),
-        doc: "Convert value to integer (i64). Accepts int, float, string, or keyword.",
-        params: &["x"],
+        arity: Arity::Range(1, 2),
+        doc: "Convert value to integer (i64). Accepts int, float, string, or keyword. With an optional radix (2–36), parses a string/keyword in the given base.",
+        params: &["x", "radix?"],
         category: "conversion",
-        example: "(integer 3.7) #=> 3\n(integer \"42\") #=> 42",
+        example: "(integer 3.7) #=> 3\n(integer \"42\") #=> 42\n(integer \"ff\" 16) #=> 255\n(integer \"1010\" 2) #=> 10",
         aliases: &["int"],
     },
     PrimitiveDef {

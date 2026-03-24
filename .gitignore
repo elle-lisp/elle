@@ -17,3 +17,8 @@ issue-*/
 
 # MCP store
 .elle-mcp/
+
+# AWS codegen (generated on demand)
+aws-models/
+lib/aws/*.lisp
+!lib/aws/sigv4.lisp

@@ -251,6 +251,15 @@ pub(super) fn process_raw_completion(
                     };
                 }
 
+                // For ReadAll: return accumulated buffer on EOF.
+                if matches!(op, IoOp::ReadAll) && !state.buffer.is_empty() {
+                    let all: Vec<u8> = state.buffer.drain(..).collect();
+                    return Completion {
+                        id,
+                        result: Ok(Value::bytes(all)),
+                    };
+                }
+
                 return Completion {
                     id,
                     result: Ok(Value::NIL),

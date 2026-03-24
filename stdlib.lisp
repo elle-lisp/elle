@@ -965,38 +965,35 @@
                        (true
                         (fiber/resume fiber))))))))
 
-(def *spawn* (parameter sync-scheduler))
+(def *spawn* (make-parameter nil))
 (def *scheduler* (make-parameter nil))
+(def *io-backend* (make-parameter nil))
 
-## ── Synchronous output ──────────────────────────────────────────────
+## ── Output ──────────────────────────────────────────────────────────
 
-(defn print (& args)
+(defn print [& args]
   "Write values to *stdout*, no newline. Respects *stdout* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stdout*) (apply string args))
-                      (port/flush (*stdout*)))
-      |:error :io|)))
+  (let [[stdout (*stdout*)]]
+    (port/write stdout (apply string args))
+    (port/flush stdout)))
 
-(defn println (& args)
+(defn println [& args]
   "Write values to *stdout* with trailing newline. Respects *stdout* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stdout*) (string (apply string args) "\n"))
-                      (port/flush (*stdout*)))
-      |:error :io|)))
+  (let [[stdout (*stdout*)]]
+    (port/write stdout (string (apply string args) "\n"))
+    (port/flush stdout)))
 
-(defn eprint (& args)
+(defn eprint [& args]
   "Write values to *stderr*, no newline. Respects *stderr* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stderr*) (apply string args))
-                      (port/flush (*stderr*)))
-      |:error :io|)))
+  (let [[stderr (*stderr*)]]
+    (port/write stderr (apply string args))
+    (port/flush stderr)))
 
-(defn eprintln (& args)
+(defn eprintln [& args]
   "Write values to *stderr* with trailing newline. Respects *stderr* rebinding."
-  (sync-scheduler
-    (fiber/new (fn [] (port/write (*stderr*) (string (apply string args) "\n"))
-                      (port/flush (*stderr*)))
-      |:error :io|)))
+  (let [[stderr (*stderr*)]]
+    (port/write stderr (string (apply string args) "\n"))
+    (port/flush stderr)))
 
 ## ── Spawn ───────────────────────────────────────────────────────────
 
@@ -1230,7 +1227,8 @@
      :shutdown
       # shutdown-fn: signal shutdown
       (fn (timeout-ms)
-        (put shutdown-req 0 timeout-ms))}))
+        (put shutdown-req 0 timeout-ms))
+     :backend backend}))
 
 (def *shutdown* (make-parameter nil))
 
@@ -1249,7 +1247,8 @@
    Parameterizes *scheduler*, *spawn*, and *shutdown*; spawns each thunk; pumps until done."
   (parameterize ((*scheduler* sched)
                  (*spawn* (get sched :spawn))
-                 (*shutdown* (get sched :shutdown)))
+                 (*shutdown* (get sched :shutdown))
+                 (*io-backend* (get sched :backend)))
     (each t in thunks
       (ev/spawn t))
     ((get sched :pump))))
@@ -1261,7 +1260,8 @@
   (let ([sched (make-async-scheduler)])
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
-                   (*shutdown* (get sched :shutdown)))
+                   (*shutdown* (get sched :shutdown))
+                   (*io-backend* (get sched :backend)))
       (var result nil)
       (var last-fiber nil)
       (each t in thunks
@@ -1277,7 +1277,7 @@
 
 (defn emit-wait [request]
   "Emit a :wait signal. Guards against use outside async scheduler."
-  (when (= (*spawn*) sync-scheduler)
+  (when (nil? (*spawn*))
     (error {:error :state-error
             :message (string "ev/" (get request :op) " requires an async scheduler")}))
   (emit :wait request))
@@ -1504,7 +1504,7 @@
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
     :print print :println println :eprint eprint :eprintln eprintln
-    :sync-scheduler sync-scheduler :*spawn* *spawn* :*scheduler* *scheduler*
+    :sync-scheduler sync-scheduler :*spawn* *spawn* :*scheduler* *scheduler* :*io-backend* *io-backend*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/with-scheduler ev/with-scheduler
      :ev/join ev/join :ev/join-protected ev/join-protected

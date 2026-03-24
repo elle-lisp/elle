@@ -382,6 +382,34 @@ fn print_jit_stats(vm: &VM) {
 }
 
 fn main() {
+    // Ensure enough static TLS space for dlopen'd plugins.
+    // GLIBC_TUNABLES is read by the dynamic linker before main(), so if
+    // it's missing we must re-exec ourselves with it set.
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::process::CommandExt;
+
+        let key = "GLIBC_TUNABLES";
+        let needed = "glibc.rtld.optional_static_tls=65536";
+        let already_set = env::var(key)
+            .map(|v| v.contains("glibc.rtld.optional_static_tls"))
+            .unwrap_or(false);
+        if !already_set {
+            // Merge with any existing tunables
+            let new_val = match env::var(key) {
+                Ok(existing) if !existing.is_empty() => format!("{}:{}", existing, needed),
+                _ => needed.to_string(),
+            };
+            let exe = env::current_exe().expect("failed to get current exe path");
+            let err = std::process::Command::new(exe)
+                .args(&env::args().collect::<Vec<_>>()[1..])
+                .env(key, &new_val)
+                .exec();
+            eprintln!("elle: re-exec failed: {}", err);
+            std::process::exit(1);
+        }
+    }
+
     let args: Vec<String> = env::args().collect();
 
     // Subcommand dispatch — no VM setup needed for these

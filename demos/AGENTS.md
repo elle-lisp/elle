@@ -10,7 +10,6 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 
 | Demo | Purpose | Features tested |
 |------|---------|-----------------|
-| `aws-sigv4/` | AWS API authentication | String manipulation, datetime handling, URL encoding, FFI (hashing) |
 | `blas/` | BLAS-style linear algebra | Numeric computation, array operations |
 | `cfgviz/` | Configuration visualization | Data transformation, graph generation |
 | `docgen/` | Documentation site generator | Full pipeline, file I/O, string processing |
@@ -26,9 +25,6 @@ These demos validate that Elle can express the same algorithms as other Lisps (C
 ```bash
 # N-Queens
 cargo run --release -- demos/nqueens/nqueens.lisp
-
-# AWS SigV4
-cargo run --release -- demos/aws-sigv4/sigv4.lisp
 
 # Fibonacci
 cargo run --release -- demos/fib/fib.lisp
@@ -85,7 +81,6 @@ See `demos/README.md` for a detailed list of known issues, their status, and how
 
 | Directory | Purpose |
 |-----------|---------|
-| `aws-sigv4/` | AWS API authentication implementation |
 | `blas/` | BLAS-style linear algebra operations |
 | `cfgviz/` | Configuration visualization |
 | `docgen/` | Documentation site generator |
