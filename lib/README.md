@@ -43,7 +43,7 @@ Pure Elle HTTP/1.1 client and server.
 ```lisp
 (def http ((import-file "./lib/http.lisp")))
 
-(def resp (ev/spawn (fn () (http:get "http://example.com/"))))
+(def resp (http:get "http://example.com/"))
 (println (get resp :status))  # 200
 (println (get resp :body))
 ```
@@ -99,8 +99,7 @@ General request. `method` is a string (`"GET"`, `"POST"`, `"PUT"`, etc.).
 ### `(http:serve port-num handler)`
 
 Start a server on `port-num`. `handler` is `(fn [request]) → response`.
-Runs the accept loop with `ev/run`. Runs until the process exits or the
-listener is closed.
+Runs until the process exits or the listener is closed.
 
 **Parameters:**
 - `port-num` (integer): Port to listen on (0 = OS-assigned)
@@ -183,14 +182,10 @@ All HTTP errors signal with `:http-error` kind:
 
 ## Concurrency
 
-The server uses `ev/run` for concurrent connection handling. Each accepted
-connection runs in its own fiber. The client uses `tcp/connect` which yields
-(SIG_IO) and must run inside a scheduler context.
+The server handles connections concurrently — each accepted connection
+runs in its own fiber.
 
 ```lisp
-# Client must run inside ev/run or ev/spawn
-(ev/run
-  (fn []
-    (let ((resp (http:get "http://example.com/")))
-      (println (get resp :status)))))
+(let ((resp (http:get "http://example.com/")))
+  (println (get resp :status)))
 ```

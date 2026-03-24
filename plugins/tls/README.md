@@ -23,39 +23,33 @@ Load it in Elle:
 ### HTTPS client
 
 ```lisp
-(ev/run
-  (fn []
-    (let [[conn (tls:connect "example.com" 443)]]
-      (defer (tls:close conn)
-        (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-        (println (string (tls:read-all conn)))))))
+(let [[conn (tls:connect "example.com" 443)]]
+  (defer (tls:close conn)
+    (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+    (println (string (tls:read-all conn)))))
 ```
 
 ### Stream processing
 
 ```lisp
-(ev/run
-  (fn []
-    (let [[conn (tls:connect "api.example.com" 443)]]
-      (defer (tls:close conn)
-        (tls:write conn "GET /data HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n\r\n")
-        (stream/for-each println (tls:lines conn))))))
+(let [[conn (tls:connect "api.example.com" 443)]]
+  (defer (tls:close conn)
+    (tls:write conn "GET /data HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n\r\n")
+    (stream/for-each println (tls:lines conn))))
 ```
 
 ### TLS server
 
 ```lisp
-(ev/run
-  (fn []
-    (let [[config (tls:server-config "cert.pem" "key.pem")]
-          [listener (tcp/listen "0.0.0.0" 8443)]]
-      (forever
-        (let [[conn (tls:accept listener config)]]
-          (ev/spawn
-            (fn []
-              (defer (tls:close conn)
-                (let [[line (tls:read-line conn)]]
-                  (tls:write conn (concat "echo: " line)))))))))))
+(let [[config (tls:server-config "cert.pem" "key.pem")]
+      [listener (tcp/listen "0.0.0.0" 8443)]]
+  (forever
+    (let [[conn (tls:accept listener config)]]
+      (ev/spawn
+        (fn []
+          (defer (tls:close conn)
+            (let [[line (tls:read-line conn)]]
+              (tls:write conn (concat "echo: " line)))))))))
 ```
 
 ## API

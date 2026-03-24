@@ -38,7 +38,7 @@ http-get url → parse-url → tcp/connect → write-request-line → write-head
 
 Server:
 ```
-http-serve port handler → tcp/listen → ev/run → forever:
+http-serve port handler → tcp/listen → forever:
   tcp/accept → ev/spawn → defer(port/close):
     read-request → handler → write-response
 ```
@@ -210,7 +210,7 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 
 ## Invariants
 
-1. All functions require a scheduler context (`ev/run` or `ev/spawn`).
+1. All functions yield (async I/O).
 2. `tls:close` always closes the TCP port, even if `close_notify` fails.
 3. After every `tls/process` call, outgoing data must be drained and sent.
 4. `tls:lines` and `tls:chunks` close the connection when exhausted.

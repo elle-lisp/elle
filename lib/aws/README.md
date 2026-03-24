@@ -26,12 +26,11 @@ elle tools/aws/aws-codegen.lisp -- s3 > lib/aws/s3.lisp
 (def s3 ((import-file "lib/aws/s3.lisp") aws))
 
 # Use it
-(ev/run (fn []
-  (println s3:api-version)                     # "2006-03-01"
-  (println (s3:list-buckets))                  # {:status 200 ...}
-  (println (s3:get-object "bucket" "key"))     # {:status 200 ...}
-  (s3:put-object "bucket" "key" :body "data") # keyword args
-  (s3:list-objects-v2 "bucket" :prefix "dir/" :max-keys "10")))
+(println s3:api-version)                     # "2006-03-01"
+(println (s3:list-buckets))                  # {:status 200 ...}
+(println (s3:get-object "bucket" "key"))     # {:status 200 ...}
+(s3:put-object "bucket" "key" :body "data") # keyword args
+(s3:list-objects-v2 "bucket" :prefix "dir/" :max-keys "10")
 ```
 
 ## Architecture
