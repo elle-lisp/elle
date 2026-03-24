@@ -96,15 +96,23 @@ bytecode. Error messages include file:line:col information.
   closures were rejected
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
-    available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
-    `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP), `elle-uuid`
-    (UUID generation), `elle-xml` (XML parsing/serialization), `elle-syn` (Rust syntax parsing via syn crate),
-    `elle-git` (Git repository operations), `elle-msgpack` (MessagePack binary serialization),
+    available plugins: `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
+    `elle-base64` (base64 encoding/decoding), `elle-clap` (CLI argument parsing),
+    `elle-compress` (gzip, deflate, and zstd compression), `elle-crypto`,
+    `elle-csv` (CSV parsing and serialization),
+    `elle-git` (Git repository operations), `elle-glob`,
+    `elle-jiff` (date/time via jiff), `elle-msgpack` (MessagePack binary serialization),
+    `elle-oxigraph` (RDF/SPARQL), `elle-polars` (Polars DataFrames with eager and lazy APIs),
     `elle-protobuf` (Protocol Buffers encode/decode/introspect),
+    `elle-random`, `elle-regex`, `elle-selkie` (HTTP),
+    `elle-semver` (semantic version parsing and comparison),
+    `elle-sqlite`, `elle-syn` (Rust syntax parsing via syn crate),
     `elle-tls` (TLS client and server via rustls),
+    `elle-toml` (TOML parsing and serialization),
     `elle-tree-sitter` (multi-language parsing and structural queries),
-    `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
-    `elle-polars` (Polars DataFrames with eager and lazy APIs)
+    `elle-uuid` (UUID generation),
+    `elle-xml` (XML parsing/serialization),
+    `elle-yaml` (YAML parsing and serialization)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
@@ -147,6 +155,7 @@ on these returns a `:type-error`.
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
 | lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
+| lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 
 ## Directories
 
@@ -155,7 +164,7 @@ on these returns a `:type-error`.
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
-| `lib/` | Reusable Elle modules (HTTP, etc.) |
+| `lib/` | Reusable Elle modules (HTTP, TLS, Redis, DNS, AWS, etc.) |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |
