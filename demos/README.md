@@ -6,7 +6,6 @@ Demonstration programs that dogfood Elle with non-trivial algorithms and serve a
 
 | Demo | Purpose |
 |------|---------|
-| [aws-sigv4/](aws-sigv4/) | AWS API authentication with string manipulation, datetime handling, and cryptographic hashing |
 | [blas/](blas/) | BLAS-style linear algebra operations |
 | [cfgviz/](cfgviz/) | Configuration visualization generating control flow graphs |
 | [docgen/](docgen/) | Documentation site generator written in Elle |
@@ -25,9 +24,6 @@ cargo run --release -- demos/fib/fib.lisp
 
 # N-Queens
 cargo run --release -- demos/nqueens/nqueens.lisp
-
-# AWS SigV4
-cargo run --release -- demos/aws-sigv4/sigv4.lisp
 
 # Configuration visualization
 cargo run --release -- demos/cfgviz/cfgviz.lisp

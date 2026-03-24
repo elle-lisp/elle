@@ -195,6 +195,11 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
 /// Concatenate one or more collections of the same type.
 /// Collects all elements in a single pass, then builds the result once.
 pub(crate) fn prim_concat(args: &[Value]) -> (SignalBits, Value) {
+    // No arguments: return empty list (identity element for concat)
+    if args.is_empty() {
+        return (SIG_OK, Value::EMPTY_LIST);
+    }
+
     // Single argument: return as-is (identity)
     if args.len() == 1 {
         return (SIG_OK, args[0]);
