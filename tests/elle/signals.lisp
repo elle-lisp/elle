@@ -139,7 +139,7 @@
 # so we test with a yielding closure to verify the multi-keyword check fires on :yield.
 (begin
   # A closure that yields — :yield is in the forbidden set — use let for non-tail position
-  (def [ok-sq-multi? err-sq-multi] (protect (let ((r ((squelch (fn () (yield 42)) :yield :error)))) r)))
+  (def [ok-sq-multi? err-sq-multi] (protect (let ((r ((squelch (fn () (yield 42)) |:yield :error|)))) r)))
   (assert (not ok-sq-multi?) "squelch runtime: multi-keyword squelch rejects :yield")
   (assert (= (get err-sq-multi :error) :signal-violation) "squelch runtime: multi-keyword rejection is :signal-violation"))
 
