@@ -559,16 +559,18 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(set? (set 1 2)) #=> true\n(set? 42) #=> false",
         aliases: &[],
     },
+    // contains? is an alias of has? (defined in lstruct.rs).
+    // string-contains? remains registered for old-epoch code; epoch 5 renames it to has?.
     PrimitiveDef {
-        name: "contains?",
+        name: "string-contains?",
         func: prim_contains,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Check if a set contains a value, or a string contains a substring",
-        params: &["collection", "value"],
+        doc: "Deprecated: use has? instead. Check if a string contains a substring.",
+        params: &["string", "substring"],
         category: "set",
-        example: "(contains? (set 1 2 3) 2) #=> true\n(contains? \"hello world\" \"world\") #=> true",
-        aliases: &["string-contains?"],
+        example: "(string-contains? \"hello world\" \"world\") #=> true",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "add",
