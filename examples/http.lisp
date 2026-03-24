@@ -8,7 +8,7 @@
 #   http:get                          — one-shot client request
 #   http:respond                      — response construction
 #   http:parse-url                    — URL parsing
-#   ev/run + ev/spawn                 — single async event loop
+#   ev/spawn + ev/abort                — fiber lifecycle management
 #
 # The server accepts connections and routes requests.  The client exercises
 # keep-alive (two requests on one TCP connection) then one-shot mode.
@@ -42,11 +42,9 @@
 #
 # Architecture:
 #   1. Bind a TCP listener on port 0 (OS-assigned)
-#   2. ev/run launches two fibers:
-#      - Server: http:serve handles accept loop + connection handling
-#      - Client: exercises keep-alive then one-shot modes
-#   3. Client calls ev/shutdown when done, which aborts the server fiber
-#      and gives it a chance to clean up (close listener, connections).
+#   2. ev/spawn launches the server fiber (accept loop + connection handling)
+#   3. Client exercises keep-alive then one-shot modes
+#   4. Client aborts the server fiber when done
 
 (var request-count 0)
 
@@ -71,60 +69,56 @@
   (let* [[addr (port/path listener)]
          [port-num (integer (get (string/split addr ":") 1))]]
     (print "  server listening on port ") (println port-num)
-    (let [[results @[]]]
-      (ev/run
-        # Server fiber
-        (fn [] (http:serve listener handler))
 
-        # Client fiber
-        (fn []
+    (def server (ev/spawn (fn [] (http:serve listener handler))))
 
-          # ── Keep-alive: two requests on one TCP connection ──
+    (def results @[])
 
-          (let [[session (http:connect
-                           (string/format "http://127.0.0.1:{}/" port-num))]]
-            (let [[r1 (http:send session "GET" "/hello")]]
-              (print "  keep-alive GET /hello: ") (println r1:status)
-              (push results r1))
+    # ── Keep-alive: two requests on one TCP connection ──
 
-            (let [[r2 (http:send session "POST" "/echo"
-                        :body "ping" :headers {:content-type "text/plain"})]]
-              (print "  keep-alive POST /echo: ") (println r2:status)
-              (push results r2))
+    (let [[session (http:connect
+                     (string/format "http://127.0.0.1:{}/" port-num))]]
+      (let [[r1 (http:send session "GET" "/hello")]]
+        (print "  keep-alive GET /hello: ") (println r1:status)
+        (push results r1))
 
-            (http:close session))
+      (let [[r2 (http:send session "POST" "/echo"
+                    :body "ping" :headers {:content-type "text/plain"})]]
+        (print "  keep-alive POST /echo: ") (println r2:status)
+        (push results r2))
 
-          # ── One-shot: new TCP connection, connection: close ──
+      (http:close session))
 
-          (let [[r3 (http:get
-                       (string/format "http://127.0.0.1:{}/count" port-num))]]
-            (print "  one-shot GET /count: ") (println r3:body)
-            (push results r3))
+    # ── One-shot: new TCP connection, connection: close ──
 
-          # ── Shut down the event loop ─────────────────────────
-          # Aborts the server fiber (cancels pending accept I/O),
-          # lets defer blocks run, then exits ev/run.
-          (ev/shutdown 100)))
+    (let [[r3 (http:get
+                 (string/format "http://127.0.0.1:{}/count" port-num))]]
+      (print "  one-shot GET /count: ") (println r3:body)
+      (push results r3))
 
-      # ── Assertions ──────────────────────────────────────────────
+    # ── Teardown ────────────────────────────────────────────────
+    (ev/abort server)
+    (port/close listener)
 
-      (let [[[r1 r2 r3] results]]
+    # ── Assertions ──────────────────────────────────────────────
 
-        # Keep-alive GET
-        (assert (= r1:status 200)            "keep-alive GET: status 200")
-        (assert (= r1:body "Hello, World!")  "keep-alive GET: body")
+    (let [[[r1 r2 r3] results]]
 
-        # Keep-alive POST
-        (assert (= r2:status 201)            "keep-alive POST: status 201")
-        (assert (= r2:body "ping")           "keep-alive POST: echoed body")
-        (assert (= (get r2:headers :content-type) "application/octet-stream")
-          "keep-alive POST: custom content-type")
+      # Keep-alive GET
+      (assert (= r1:status 200)            "keep-alive GET: status 200")
+      (assert (= r1:body "Hello, World!")  "keep-alive GET: body")
 
-        # One-shot GET (connection: close)
-        (assert (= r3:status 200)            "one-shot GET: status 200")
-        (assert (= r3:body "3")              "one-shot GET: 3 requests served"))
+      # Keep-alive POST
+      (assert (= r2:status 201)            "keep-alive POST: status 201")
+      (assert (= r2:body "ping")           "keep-alive POST: echoed body")
+      (assert (= (get r2:headers :content-type) "application/octet-stream")
+        "keep-alive POST: custom content-type")
 
-      (assert (= request-count 3) "server handled exactly 3 requests"))))
+      # One-shot GET (connection: close)
+      (assert (= r3:status 200)            "one-shot GET: status 200")
+      (assert (= r3:body "3")              "one-shot GET: 3 requests served"))
+
+    (assert (= request-count 3) "server handled exactly 3 requests")))
 
 (println "")
 (println "all http passed.")
