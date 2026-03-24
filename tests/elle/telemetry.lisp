@@ -2,9 +2,9 @@
 
 # tests/elle/telemetry.lisp — Unit tests for lib/telemetry.lisp
 #
-# Tests the OTLP JSON payload construction, attribute encoding,
-# and metric aggregation without requiring a running collector.
-# Run: ./target/debug/elle tests/elle/telemetry.lisp
+# Tests OTLP JSON payload construction, attribute encoding,
+# metric aggregation, and new v0.2 features without a running collector.
+# Run: elle tests/elle/telemetry.lisp
 
 (def telemetry ((import-file "lib/telemetry.lisp")))
 
@@ -38,54 +38,35 @@
 (println "  attribute encoding: ok")
 
 
-(println "=== telemetry: payload construction ===")
+(println "=== telemetry: payload construction (pre-aggregated) ===")
 
-# Build a meter without starting the export loop (test the data model only).
-# We construct the internal struct directly to avoid needing ev/run.
-
+# Build a meter struct directly — no export loop needed for unit tests.
 (def test-meter
-  @{"service"     "test-svc"
-    "endpoint"    "http://localhost:9999"
-    "interval"    9999
-    "resource"    {"service.name" "test-svc" "env" "test"}
-    "headers"     {}
-    "metrics"     @[]
-    "start-nanos" 1000000000000000000
-    "shutdown?"   false
-    "exporter"    nil})
+  @{:service     "test-svc"
+    :endpoint    "http://localhost:9999"
+    :interval    9999
+    :resource    {"service.name" "test-svc" "env" "test"}
+    :headers     {}
+    :metrics     @[]
+    :start-nanos 1000000000000000000
+    :shutdown?   false
+    :exporter    nil
+    :temporality :cumulative
+    :enabled     true
+    :on-export   nil})
 
-# Create instruments manually (no export loop)
-(def counter
-  @{"type"        "sum"
-    "name"        "test.requests"
-    "unit"        "1"
-    "description" "Test counter"
-    "meter"       test-meter
-    "monotonic"   true
-    "points"      @[]})
-(push (get test-meter "metrics") counter)
+# Create instruments via constructor functions
+(def counter (telemetry:counter test-meter "test.requests" :unit "1" :description "Test counter"))
+(def gauge   (telemetry:gauge   test-meter "test.temperature" :unit "C" :description "Test gauge"))
 
-(def gauge
-  @{"type"        "gauge"
-    "name"        "test.temperature"
-    "unit"        "C"
-    "description" "Test gauge"
-    "meter"       test-meter
-    "points"      @[]})
-(push (get test-meter "metrics") gauge)
+# Record some points via the public API
+(telemetry:add counter 5 :attributes {"method" "GET"})
+(telemetry:add counter 3 :attributes {"method" "GET"})
+(telemetry:add counter 1 :attributes {"method" "POST"})
 
-# Record some points
-(push (get counter "points")
-  {"value" 5 "attributes" {"method" "GET"} "time" 1000000001000000000})
-(push (get counter "points")
-  {"value" 3 "attributes" {"method" "GET"} "time" 1000000002000000000})
-(push (get counter "points")
-  {"value" 1 "attributes" {"method" "POST"} "time" 1000000001500000000})
+(telemetry:set gauge 22.5)
 
-(push (get gauge "points")
-  {"value" 22.5 "attributes" {} "time" 1000000003000000000})
-
-# Build the payload
+# Build the payload (non-destructive peek)
 (def payload (telemetry:build-payload test-meter))
 (assert (not (nil? payload)) "payload is not nil")
 
@@ -104,7 +85,7 @@
 (def sm (get scope-metrics 0))
 (def scope (get sm "scope"))
 (assert (= (get scope "name") "elle-telemetry") "scope name")
-(assert (= (get scope "version") "0.1.0") "scope version")
+(assert (= (get scope "version") "0.2.0") "scope version")
 
 (def metrics (get sm "metrics"))
 (assert (= (length metrics) 2) "two metrics")
@@ -136,7 +117,6 @@
 
 (println "=== telemetry: JSON round-trip ===")
 
-# Verify the payload serializes to valid JSON and back
 (def json-str (json-serialize payload))
 (assert (string? json-str) "serializes to string")
 (assert (string-contains? json-str "resourceMetrics") "contains resourceMetrics")
@@ -151,31 +131,21 @@
 
 (println "=== telemetry: histogram encoding ===")
 
-(def hist
-  @{"type"        "histogram"
-    "name"        "test.latency"
-    "unit"        "s"
-    "description" "Test histogram"
-    "meter"       test-meter
-    "boundaries"  [0.01 0.05 0.1 0.5 1.0]
-    "points"      @[]})
-(push (get test-meter "metrics") hist)
+(def hist (telemetry:histogram test-meter "test.latency"
+  :unit "s" :description "Test histogram"
+  :boundaries [0.01 0.05 0.1 0.5 1.0]))
 
 # Record observations across buckets
-(push (get hist "points")
-  {"value" 0.005 "attributes" {} "time" 1000000004000000000})  # bucket 0 (<=0.01)
-(push (get hist "points")
-  {"value" 0.03  "attributes" {} "time" 1000000004100000000})  # bucket 1 (<=0.05)
-(push (get hist "points")
-  {"value" 0.07  "attributes" {} "time" 1000000004200000000})  # bucket 2 (<=0.1)
-(push (get hist "points")
-  {"value" 2.0   "attributes" {} "time" 1000000004300000000})  # overflow bucket
+(telemetry:record hist 0.005)  # bucket 0 (<=0.01)
+(telemetry:record hist 0.03)   # bucket 1 (<=0.05)
+(telemetry:record hist 0.07)   # bucket 2 (<=0.1)
+(telemetry:record hist 2.0)    # overflow bucket
 
 (def payload2 (telemetry:build-payload test-meter))
 (def metrics2 (get (get (get payload2 "resourceMetrics") 0) "scopeMetrics"))
 (def all-metrics (get (get metrics2 0) "metrics"))
 
-# Find the histogram metric (it's the third one)
+# Find the histogram
 (def hist-metric (get all-metrics 2))
 (assert (= (get hist-metric "name") "test.latency") "histogram name")
 (def hist-data (get hist-metric "histogram"))
@@ -194,27 +164,176 @@
 
 (println "=== telemetry: empty payload ===")
 
-# A meter with no recorded points should produce nil payload
 (def empty-meter
-  @{"service"     "empty"
-    "endpoint"    "http://localhost:9999"
-    "interval"    9999
-    "resource"    {"service.name" "empty"}
-    "headers"     {}
-    "metrics"     @[]
-    "start-nanos" 1000000000000000000
-    "shutdown?"   false
-    "exporter"    nil})
+  @{:service     "empty"
+    :endpoint    "http://localhost:9999"
+    :interval    9999
+    :resource    {"service.name" "empty"}
+    :headers     {}
+    :metrics     @[]
+    :start-nanos 1000000000000000000
+    :shutdown?   false
+    :exporter    nil
+    :temporality :cumulative
+    :enabled     true
+    :on-export   nil})
 (assert (nil? (telemetry:build-payload empty-meter)) "empty meter => nil payload")
 
-# Meter with instruments but no points
-(def empty-counter
-  @{"type" "sum" "name" "x" "unit" "1" "description" ""
-    "meter" empty-meter "monotonic" true "points" @[]})
-(push (get empty-meter "metrics") empty-counter)
-(assert (nil? (telemetry:build-payload empty-meter)) "no points => nil payload")
+# Meter with instruments but no observations
+(telemetry:counter empty-meter "x" :unit "1")
+(assert (nil? (telemetry:build-payload empty-meter)) "no observations => nil payload")
 
 (println "  empty payload: ok")
+
+
+(println "=== telemetry: isMonotonic from struct ===")
+
+(def up-down-meter
+  @{:service "ud" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "ud"} :headers {} :metrics @[]
+    :start-nanos 1000000000000000000 :shutdown? false :exporter nil
+    :temporality :cumulative :enabled true :on-export nil})
+
+(def up-down (telemetry:counter up-down-meter "conns"
+  :unit "1" :monotonic false))
+(telemetry:add up-down 3)
+(telemetry:add up-down (- 0 1))  # decrement
+
+(def ud-payload (telemetry:build-payload up-down-meter))
+(def ud-rm (get (get ud-payload "resourceMetrics") 0))
+(def ud-metrics (get (get (get ud-rm "scopeMetrics") 0) "metrics"))
+(def ud-sum (get ud-metrics 0))
+(assert (= (get (get ud-sum "sum") "isMonotonic") false) "updown counter isMonotonic=false")
+
+# Verify sum is 2 (3 + -1)
+(def ud-dp (get (get (get ud-sum "sum") "dataPoints") 0))
+(assert (= (get ud-dp "asDouble") 2.0) "updown sum is 2")
+
+(println "  isMonotonic: ok")
+
+
+(println "=== telemetry: gauge last-value semantics ===")
+
+(def gauge-meter
+  @{:service "g" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "g"} :headers {} :metrics @[]
+    :start-nanos 1000000000000000000 :shutdown? false :exporter nil
+    :temporality :cumulative :enabled true :on-export nil})
+
+(def temp (telemetry:gauge gauge-meter "temperature" :unit "C"))
+(telemetry:set temp 20)
+(telemetry:set temp 25)
+(telemetry:set temp 22)
+
+# Only one aggregate entry (last value), not 3 accumulated points
+(assert (= (length (pairs temp:aggregates)) 1) "gauge has 1 aggregate entry")
+(def g-payload (telemetry:build-payload gauge-meter))
+(def g-rm (get (get g-payload "resourceMetrics") 0))
+(def g-metrics (get (get (get g-rm "scopeMetrics") 0) "metrics"))
+(def g-metric (get g-metrics 0))
+(def g-dp (get (get (get g-metric "gauge") "dataPoints") 0))
+(assert (= (get g-dp "asDouble") 22.0) "gauge exports last value")
+
+(println "  gauge last-value: ok")
+
+
+(println "=== telemetry: SDK resource attributes ===")
+
+(def sdk-meter
+  @{:service "sdk-test" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "sdk-test"
+               "telemetry.sdk.name" "elle-telemetry"
+               "telemetry.sdk.version" "0.2.0"
+               "telemetry.sdk.language" "elle"}
+    :headers {} :metrics @[] :start-nanos 1000000000000000000
+    :shutdown? false :exporter nil :temporality :cumulative
+    :enabled true :on-export nil})
+
+(def sdk-counter (telemetry:counter sdk-meter "x"))
+(telemetry:add sdk-counter 1)
+
+(def sdk-payload (telemetry:build-payload sdk-meter))
+(def sdk-attrs (get (get (get (get sdk-payload "resourceMetrics") 0) "resource") "attributes"))
+
+# Find SDK attributes in the encoded array
+(var found-sdk-name false)
+(var found-sdk-version false)
+(var found-sdk-lang false)
+(each kv in sdk-attrs
+  (cond
+    ((= (get kv "key") "telemetry.sdk.name")
+     (assign found-sdk-name true))
+    ((= (get kv "key") "telemetry.sdk.version")
+     (assign found-sdk-version true))
+    ((= (get kv "key") "telemetry.sdk.language")
+     (assign found-sdk-lang true))))
+
+(assert found-sdk-name "resource has telemetry.sdk.name")
+(assert found-sdk-version "resource has telemetry.sdk.version")
+(assert found-sdk-lang "resource has telemetry.sdk.language")
+
+(println "  SDK resource attributes: ok")
+
+
+(println "=== telemetry: observe alias ===")
+
+(def obs-meter
+  @{:service "obs" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "obs"} :headers {} :metrics @[]
+    :start-nanos 1000000000000000000 :shutdown? false :exporter nil
+    :temporality :cumulative :enabled true :on-export nil})
+
+(def obs-hist (telemetry:histogram obs-meter "lat" :unit "s"
+  :boundaries [0.1 0.5 1.0]))
+(telemetry:observe obs-hist 0.3)
+(telemetry:observe obs-hist 0.7)
+
+(def obs-payload (telemetry:build-payload obs-meter))
+(assert (not (nil? obs-payload)) "observe recorded data")
+(def obs-rm (get (get obs-payload "resourceMetrics") 0))
+(def obs-metric (get (get (get (get obs-rm "scopeMetrics") 0) "metrics") 0))
+(def obs-hdata (get obs-metric "histogram"))
+(assert (= (get (get (get obs-hdata "dataPoints") 0) "count") "2") "observe: 2 observations")
+
+(println "  observe alias: ok")
+
+
+(println "=== telemetry: enabled? check ===")
+
+(def disabled-meter
+  @{:service "dis" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "dis"} :headers {} :metrics @[]
+    :start-nanos 1000000000000000000 :shutdown? false :exporter nil
+    :temporality :cumulative :enabled false :on-export nil})
+
+(def dis-counter (telemetry:counter disabled-meter "x"))
+(telemetry:add dis-counter 1)
+(telemetry:add dis-counter 2)
+
+(assert (= (length (pairs dis-counter:aggregates)) 0) "disabled meter: no aggregates")
+(assert (nil? (telemetry:build-payload disabled-meter)) "disabled meter: nil payload")
+(assert (not (telemetry:enabled? disabled-meter)) "enabled? returns false")
+
+(println "  enabled? check: ok")
+
+
+(println "=== telemetry: DELTA temporality ===")
+
+(def delta-meter
+  @{:service "delta" :endpoint "http://localhost:9999" :interval 9999
+    :resource {"service.name" "delta"} :headers {} :metrics @[]
+    :start-nanos 1000000000000000000 :shutdown? false :exporter nil
+    :temporality :delta :enabled true :on-export nil})
+
+(def delta-counter (telemetry:counter delta-meter "x"))
+(telemetry:add delta-counter 1)
+
+(def delta-payload (telemetry:build-payload delta-meter))
+(def delta-rm (get (get delta-payload "resourceMetrics") 0))
+(def delta-metric (get (get (get (get delta-rm "scopeMetrics") 0) "metrics") 0))
+(assert (= (get (get delta-metric "sum") "aggregationTemporality") 1) "DELTA temporality code = 1")
+
+(println "  DELTA temporality: ok")
 
 
 (println "")

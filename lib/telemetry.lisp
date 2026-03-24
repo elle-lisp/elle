@@ -10,11 +10,17 @@
 ## Exports OTLP/HTTP JSON — natively accepted by Prometheus (remote-write receiver),
 ## OpenTelemetry Collector, Grafana Alloy, and others.
 ##
-## Metric types: counter, gauge, histogram.
-## Export model: background fiber flushes accumulated data points at a configurable
-## interval (default 60s). Manual flush via telemetry:flush.
+## Metric types: counter (monotonic and up-down), gauge, histogram.
+## Export model: background fiber flushes at a configurable interval (default 60s).
+## Manual flush via telemetry:flush.
+##
+## Data is pre-aggregated at record time (running sums, last-value gauges,
+## histogram bucket counts).  Export snapshots and clears in one cooperative
+## step — no races between background and manual flushes.
 
 (def http ((import-file "lib/http.lisp")))
+
+(def *telemetry-version* "0.2.0")
 
 # ============================================================================
 # Timestamp helpers
@@ -26,7 +32,7 @@
     (integer (* secs 1_000_000_000))))
 
 # ============================================================================
-# Attribute encoding
+# Attribute encoding (OTLP JSON wire format)
 # ============================================================================
 
 (defn encode-value [v]
@@ -42,297 +48,389 @@
    Returns an array, or an empty array if attrs is nil."
   (if (nil? attrs)
     []
-    (begin
-      (def result @[])
+    (let [[result @[]]]
       (each [key val] in (pairs attrs)
         (push result {"key" (string key) "value" (encode-value val)}))
       (freeze result))))
 
 # ============================================================================
+# Attribute key — deterministic string for aggregation map lookups
+# ============================================================================
+
+(defn attrs-key [attrs]
+  "Deterministic string key for an attribute set.
+   Structs are BTreeMap-backed so (string (freeze ...)) is ordered."
+  (if (or (nil? attrs) (empty? attrs))
+    ""
+    (string (freeze attrs))))
+
+# ============================================================================
+# Binary search for histogram bucket placement
+# ============================================================================
+
+(defn find-bucket [boundaries value]
+  "Return index of first boundary >= value, or (length boundaries) for overflow.
+   Boundaries must be sorted ascending."
+  (var lo 0)
+  (var hi (length boundaries))
+  (while (< lo hi)
+    (let [[mid (integer (/ (+ lo hi) 2))]]
+      (if (<= value (get boundaries mid))
+        (assign hi mid)
+        (assign lo (+ mid 1)))))
+  lo)
+
+# ============================================================================
 # Metric data structures
 #
-# Each metric is a mutable struct holding:
-#   :name :unit :description :type :meter
-#   :data — mutable accumulation (type-specific)
+# Each metric is a mutable struct with pre-aggregated data in :aggregates.
+# Counter  agg: @{:sum N :time nanos :attrs struct :count N}
+# Gauge    agg: @{:value N :time nanos :attrs struct}
+# Histogram agg: @{:counts @[] :sum F :count N :min N :max N :time nanos :attrs struct}
 # ============================================================================
 
-(defn make-counter [meter name unit description]
-  @{"type"        "sum"
-    "name"        name
-    "unit"        (or unit "1")
-    "description" (or description "")
-    "meter"       meter
-    "monotonic"   true
-    "points"      @[]})
+(defn make-counter [meter name unit description monotonic]
+  @{:type        "sum"
+    :name        name
+    :unit        (or unit "1")
+    :description (or description "")
+    :meter       meter
+    :monotonic   (if (nil? monotonic) true monotonic)
+    :aggregates  @{}})
 
 (defn make-gauge [meter name unit description]
-  @{"type"        "gauge"
-    "name"        name
-    "unit"        (or unit "1")
-    "description" (or description "")
-    "meter"       meter
-    "points"      @[]})
+  @{:type        "gauge"
+    :name        name
+    :unit        (or unit "1")
+    :description (or description "")
+    :meter       meter
+    :aggregates  @{}})
 
 (defn make-histogram [meter name unit description boundaries]
-  @{"type"        "histogram"
-    "name"        name
-    "unit"        (or unit "ms")
-    "description" (or description "")
-    "meter"       meter
-    "boundaries"  (or boundaries [0.005 0.01 0.025 0.05 0.075
-                                   0.1 0.25 0.5 0.75 1.0 2.5
-                                   5.0 7.5 10.0])
-    "points"      @[]})
+  @{:type        "histogram"
+    :name        name
+    :unit        (or unit "ms")
+    :description (or description "")
+    :meter       meter
+    :boundaries  (or boundaries [0.005 0.01 0.025 0.05 0.075
+                                  0.1 0.25 0.5 0.75 1.0 2.5
+                                  5.0 7.5 10.0])
+    :aggregates  @{}})
 
 # ============================================================================
-# Recording data points
+# Recording — pre-aggregate at record time
 # ============================================================================
 
 (defn add-point [metric value attrs]
-  "Append a numeric data point with attributes and timestamp."
-  (push (get metric "points")
-    {"value"      value
-     "attributes" (or attrs {})
-     "time"       (now-nanos)}))
+  "Update running aggregate for a counter or gauge.
+   Counters: running sum per attribute set.
+   Gauges: last-value per attribute set (no growing list)."
+  (block :done
+    (when (not (get metric:meter :enabled)) (break :done nil))
+    (let [[key   (attrs-key attrs)]
+          [aggs  metric:aggregates]
+          [now   (now-nanos)]]
+      (if (= metric:type "gauge")
+        # Gauge: replace with latest value
+        (if (has? aggs key)
+          (let [[agg (get aggs key)]]
+            (put agg :value value)
+            (put agg :time now))
+          (put aggs key @{:value value :time now :attrs (or attrs {})}))
+        # Counter: accumulate
+        (if (has? aggs key)
+          (let [[agg (get aggs key)]]
+            (put agg :sum (+ agg:sum value))
+            (put agg :time now)
+            (put agg :count (+ agg:count 1)))
+          (put aggs key @{:sum value :time now :attrs (or attrs {}) :count 1}))))))
 
 (defn histogram-record [metric value attrs]
-  "Record a histogram observation."
-  (push (get metric "points")
-    {"value"      value
-     "attributes" (or attrs {})
-     "time"       (now-nanos)}))
+  "Update running histogram aggregate.
+   Bucket placement uses binary search (O(log n) per observation)."
+  (block :done
+    (when (not (get metric:meter :enabled)) (break :done nil))
+    (let* [[key    (attrs-key attrs)]
+           [aggs   metric:aggregates]
+           [now    (now-nanos)]
+           [bounds metric:boundaries]
+           [bi     (find-bucket bounds value)]]
+      (if (has? aggs key)
+        (let [[agg (get aggs key)]]
+          (put (get agg :counts) bi (+ (get (get agg :counts) bi) 1))
+          (put agg :sum (+ agg:sum (float value)))
+          (put agg :count (+ agg:count 1))
+          (put agg :min (min agg:min value))
+          (put agg :max (max agg:max value))
+          (put agg :time now))
+        (begin
+          (let [[counts @[]]]
+            (var i 0)
+            (while (<= i (length bounds))
+              (push counts 0)
+              (assign i (+ i 1)))
+            (put counts bi 1)
+            (put aggs key @{:counts counts
+                            :sum    (float value)
+                            :count  1
+                            :min    value
+                            :max    value
+                            :time   now
+                            :attrs  (or attrs {})})))))))
 
 # ============================================================================
-# OTLP JSON payload construction
+# Snapshot-and-clear — atomic under cooperative scheduling
+#
+# No yield points (no I/O) between reading and clearing aggregates,
+# so background export and manual flush cannot race.
 # ============================================================================
 
-(defn group-points-by-attrs [points]
-  "Group data points by their serialized attributes key.
-   Returns a list of (attrs . points) pairs."
-  (def groups @{})
-  (each pt in points
-    (let [[key (json-serialize (get pt "attributes"))]]
-      (unless (has? groups key)
-        (put groups key @{"attrs" (get pt "attributes") "points" @[]}))
-      (push (get (get groups key) "points") pt)))
-  (values groups))
+(defn snapshot-and-clear [meter]
+  "Swap each metric's :aggregates with a fresh @{}.
+   Returns a frozen list of {:metric m :snapshot aggs} pairs."
+  (let [[snapshots @[]]]
+    (each m in meter:metrics
+      (let [[aggs m:aggregates]]
+        (push snapshots {:metric m :snapshot aggs})
+        (put m :aggregates @{})))
+    # DELTA temporality: reset start time each export
+    (when (= meter:temporality :delta)
+      (put meter :start-nanos (now-nanos)))
+    (freeze snapshots)))
 
-(defn encode-sum-datapoints [points start-nanos]
-  "Encode counter data points: aggregate by attributes, emit cumulative sums."
-  (def result @[])
-  (each group in (group-points-by-attrs points)
-    (let* [[attrs  (get group "attrs")]
-           [pts    (get group "points")]
-           [total  (fold (fn [acc p] (+ acc (get p "value"))) 0 pts)]
-           [latest (fold (fn [acc p] (max acc (get p "time"))) 0 pts)]]
+# ============================================================================
+# OTLP JSON payload construction (from pre-aggregated snapshots)
+# ============================================================================
+
+(defn encode-sum-datapoints [snapshot start-nanos]
+  "Encode counter data points from pre-aggregated snapshot."
+  (let [[result @[]]]
+    (each [_ agg] in (pairs snapshot)
       (push result
-        {"attributes"        (encode-attributes attrs)
+        {"attributes"        (encode-attributes agg:attrs)
          "startTimeUnixNano" (string start-nanos)
-         "timeUnixNano"      (string latest)
-         "asDouble"          (float total)})))
-  (freeze result))
+         "timeUnixNano"      (string agg:time)
+         "asDouble"          (float agg:sum)}))
+    (freeze result)))
 
-(defn encode-gauge-datapoints [points]
-  "Encode gauge data points: last value per attribute set."
-  (def result @[])
-  (each group in (group-points-by-attrs points)
-    (let* [[attrs  (get group "attrs")]
-           [pts    (get group "points")]
-           [last-pt (get pts (- (length pts) 1))]]
+(defn encode-gauge-datapoints [snapshot]
+  "Encode gauge data points — each entry is already the last value."
+  (let [[result @[]]]
+    (each [_ agg] in (pairs snapshot)
       (push result
-        {"attributes"   (encode-attributes attrs)
-         "timeUnixNano" (string (get last-pt "time"))
-         "asDouble"     (float (get last-pt "value"))})))
-  (freeze result))
+        {"attributes"   (encode-attributes agg:attrs)
+         "timeUnixNano" (string agg:time)
+         "asDouble"     (float agg:value)}))
+    (freeze result)))
 
-(defn encode-histogram-datapoints [points boundaries start-nanos]
-  "Encode histogram data points: bucket counts per attribute set."
-  (def result @[])
-  (each group in (group-points-by-attrs points)
-    (let [[attrs (get group "attrs")]
-          [pts   (get group "points")]]
-      # Build bucket counts
-      (def counts @[])
-      (var i 0)
-      (while (<= i (length boundaries))
-        (push counts 0)
-        (assign i (+ i 1)))
-      (var total-sum 0.0)
-      (var count 0)
-      (var mn nil)
-      (var mx nil)
-      (var latest 0)
-      (each pt in pts
-        (let [[v (get pt "value")]
-              [t (get pt "time")]]
-          (assign total-sum (+ total-sum (float v)))
-          (assign count (+ count 1))
-          (assign mn (if (nil? mn) v (min mn v)))
-          (assign mx (if (nil? mx) v (max mx v)))
-          (assign latest (max latest t))
-          # Find bucket
-          (var found false)
-          (var bi 0)
-          (while (< bi (length boundaries))
-            (when (<= v (get boundaries bi))
-              (put counts bi (+ (get counts bi) 1))
-              (assign found true)
-              (break))
-            (assign bi (+ bi 1)))
-          (unless found
-            # Overflow bucket (last)
-            (let [[last-idx (length boundaries)]]
-              (put counts last-idx (+ (get counts last-idx) 1))))))
+(defn encode-histogram-datapoints [snapshot boundaries start-nanos]
+  "Encode histogram data points from pre-computed bucket counts."
+  (let [[result @[]]]
+    (each [_ agg] in (pairs snapshot)
       (push result
-        {"attributes"        (encode-attributes attrs)
+        {"attributes"        (encode-attributes agg:attrs)
          "startTimeUnixNano" (string start-nanos)
-         "timeUnixNano"      (string latest)
-         "count"             (string count)
-         "sum"               total-sum
-         "min"               (float (or mn 0))
-         "max"               (float (or mx 0))
+         "timeUnixNano"      (string agg:time)
+         "count"             (string agg:count)
+         "sum"               agg:sum
+         "min"               (float agg:min)
+         "max"               (float agg:max)
          "explicitBounds"    boundaries
-         "bucketCounts"      (map (fn [c] (string c)) (freeze counts))})))
-  (freeze result))
+         "bucketCounts"      (map (fn [c] (string c)) (freeze agg:counts))}))
+    (freeze result)))
 
-(defn encode-metric [metric start-nanos]
-  "Encode a single metric instrument as an OTLP Metric object."
-  (let [[typ    (get metric "type")]
-        [points (freeze (get metric "points"))]
-        [name   (get metric "name")]]
-    (if (empty? points)
-      nil
-      (begin
-        (def base {"name"        name
-                   "unit"        (get metric "unit")
-                   "description" (get metric "description")})
-        (case typ
-          "sum"
-            (put base "sum"
-              {"dataPoints"            (encode-sum-datapoints points start-nanos)
-               "aggregationTemporality" 2   # CUMULATIVE
-               "isMonotonic"           true})
+(defn temporality-code [meter]
+  "OTLP aggregation temporality: 1=DELTA, 2=CUMULATIVE."
+  (if (= meter:temporality :delta) 1 2))
 
-          "gauge"
-            (put base "gauge"
-              {"dataPoints" (encode-gauge-datapoints points)})
+(defn encode-metric [metric snapshot start-nanos]
+  "Encode a single metric from its snapshot."
+  (if (= (length (pairs snapshot)) 0)
+    nil
+    (let [[base {"name"        metric:name
+                 "unit"        metric:unit
+                 "description" metric:description}]
+          [meter metric:meter]]
+      (case metric:type
+        "sum"
+          (put base "sum"
+            {"dataPoints"             (encode-sum-datapoints snapshot start-nanos)
+             "aggregationTemporality" (temporality-code meter)
+             "isMonotonic"            metric:monotonic})
 
-          "histogram"
-            (put base "histogram"
-              {"dataPoints"            (encode-histogram-datapoints
-                                         points (get metric "boundaries") start-nanos)
-               "aggregationTemporality" 2})
-          base)))))
+        "gauge"
+          (put base "gauge"
+            {"dataPoints" (encode-gauge-datapoints snapshot)})
 
-(defn build-export-payload [meter]
-  "Build the full OTLP ExportMetricsServiceRequest JSON body."
-  (let [[metrics (get meter "metrics")]
-        [start   (get meter "start-nanos")]
-        [res     (get meter "resource")]]
-    (def encoded @[])
-    (each m in metrics
-      (let [[enc (encode-metric m start)]]
+        "histogram"
+          (put base "histogram"
+            {"dataPoints"             (encode-histogram-datapoints
+                                        snapshot metric:boundaries start-nanos)
+             "aggregationTemporality" (temporality-code meter)})
+        base))))
+
+(defn build-export-payload [meter snapshots]
+  "Build the full OTLP ExportMetricsServiceRequest JSON body from snapshots."
+  (let [[encoded @[]]]
+    (each snap in snapshots
+      (let [[enc (encode-metric (get snap :metric) (get snap :snapshot) meter:start-nanos)]]
         (unless (nil? enc)
           (push encoded enc))))
     (if (empty? encoded)
       nil
       {"resourceMetrics"
        [{"resource"
-         {"attributes" (encode-attributes res)}
+         {"attributes" (encode-attributes meter:resource)}
          "scopeMetrics"
-         [{"scope" {"name" "elle-telemetry" "version" "0.1.0"}
+         [{"scope" {"name" "elle-telemetry" "version" *telemetry-version*}
            "metrics" (freeze encoded)}]}]})))
 
+(defn build-payload-peek [meter]
+  "Build payload from current live aggregates without clearing.
+   For inspection and testing — does not affect export state."
+  (let [[snapshots @[]]]
+    (each m in meter:metrics
+      (push snapshots {:metric m :snapshot m:aggregates}))
+    (build-export-payload meter (freeze snapshots))))
+
 # ============================================================================
-# Export (HTTP POST)
+# Export with retry and data recovery
 # ============================================================================
 
+(defn merge-snapshot-back [snapshots]
+  "Merge snapshot aggregates back into live metrics after failed export.
+   Counters/histograms: add values back.  Gauges: skip (live is newer)."
+  (each snap in snapshots
+    (let [[metric (get snap :metric)]
+          [old    (get snap :snapshot)]]
+      (each [key agg] in (pairs old)
+        (let [[live metric:aggregates]]
+          (if (has? live key)
+            (case metric:type
+              "sum"
+                (let [[l (get live key)]]
+                  (put l :sum (+ l:sum agg:sum))
+                  (put l :count (+ l:count agg:count)))
+              "gauge" nil   # live gauge is newer — don't overwrite
+              "histogram"
+                (let [[l (get live key)]]
+                  (put l :sum (+ l:sum agg:sum))
+                  (put l :count (+ l:count agg:count))
+                  (put l :min (min l:min agg:min))
+                  (put l :max (max l:max agg:max))
+                  (var i 0)
+                  (while (< i (length l:counts))
+                    (put l:counts i (+ (get l:counts i) (get agg:counts i)))
+                    (assign i (+ i 1))))
+              nil)
+            # No live entry yet — restore the snapshot entry
+            (put live key agg)))))))
+
 (defn do-export [meter]
-  "Export accumulated data points via OTLP/HTTP JSON. Clears points on success."
-  (let [[payload (build-export-payload meter)]]
-    (if (nil? payload)
-      nil
-      (let [[body     (json-serialize payload)]
-            [endpoint (get meter "endpoint")]
-            [headers  (or (get meter "headers") {})]]
-        (let [[resp (http:post endpoint body
-                      :headers (merge {:content-type "application/json"} headers))]]
-          (if (and (>= resp:status 200) (< resp:status 300))
-            (begin
-              # Clear collected points on successful export
-              (each m in (get meter "metrics")
-                (let [[pts (get m "points")]]
-                  (while (not (empty? pts))
-                    (pop pts))))
-              true)
-            (begin
-              (eprintln "telemetry: export failed: " resp:status " " (or resp:body ""))
-              false)))))))
+  "Export: snapshot-and-clear, build payload, HTTP POST with retry.
+   On final failure, merge snapshot back so data is not lost."
+  (let [[snapshots (snapshot-and-clear meter)]]
+    (let [[payload (build-export-payload meter snapshots)]]
+      (if (nil? payload)
+        nil
+        (let [[body     (json-serialize payload)]
+              [endpoint meter:endpoint]
+              [headers  (or meter:headers {})]]
+          # On-export hook
+          (when meter:on-export
+            (meter:on-export payload))
+          # Export with retry (up to 3 attempts, backoff 1s/2s)
+          (var attempts 0)
+          (var success false)
+          (while (and (< attempts 3) (not success))
+            (let [[[ok? result] (protect
+                    (http:post endpoint body
+                      :headers (merge {:content-type "application/json"} headers)))]]
+              (if (and ok? (>= result:status 200) (< result:status 300))
+                (assign success true)
+                (begin
+                  (assign attempts (+ attempts 1))
+                  (when (< attempts 3)
+                    (ev/sleep attempts))))))
+          (unless success
+            (eprintln "telemetry: export failed after 3 attempts, recovering data")
+            (merge-snapshot-back snapshots))
+          success)))))
 
 # ============================================================================
 # Background export fiber
 # ============================================================================
 
 (defn start-export-loop [meter]
-  "Spawn a background fiber that exports at the configured interval.
-   Returns the fiber handle."
+  "Spawn a background fiber that exports at the configured interval."
   (ev/spawn (fn []
-    (let [[interval (get meter "interval")]]
+    (let [[interval meter:interval]]
       (forever
         (ev/sleep interval)
         (let [[[ok? _] (protect (do-export meter))]]
           (unless ok?
             (eprintln "telemetry: background export error")))
-        (when (get meter "shutdown?")
+        (when meter:shutdown?
           (break)))))))
 
 # ============================================================================
 # Meter (top-level registry)
 # ============================================================================
 
-(defn telemetry-meter [service-name &named endpoint interval resource headers]
+(defn telemetry-meter [service-name &named endpoint interval resource headers
+                                          temporality enabled on-export]
   "Create a meter (metric registry + exporter).
-   :endpoint — OTLP/HTTP endpoint URL (default: Prometheus OTLP receiver)
-   :interval — export interval in seconds (default: 60)
-   :resource — extra resource attributes struct
-   :headers  — extra HTTP headers for export requests
+   :endpoint    — OTLP/HTTP endpoint URL (default: Prometheus OTLP receiver)
+   :interval    — export interval in seconds (default: 60)
+   :resource    — extra resource attributes struct
+   :headers     — extra HTTP headers for export requests
+   :temporality — :cumulative (default) or :delta
+   :enabled     — false to disable recording (default: true)
+   :on-export   — (fn [payload]) callback before HTTP send
    Returns a mutable struct."
-  (let [[base-resource (merge {"service.name" service-name}
-                              (or resource {}))]]
+  (let* [[sdk-attrs {"telemetry.sdk.name"     "elle-telemetry"
+                     "telemetry.sdk.version"   *telemetry-version*
+                     "telemetry.sdk.language"  "elle"}]
+          [base-resource (merge (merge sdk-attrs
+                                       {"service.name" service-name})
+                                (or resource {}))]]
     (def meter
-      @{"service"     service-name
-        "endpoint"    (or endpoint "http://localhost:9090/api/v1/otlp/v1/metrics")
-        "interval"    (or interval 60)
-        "resource"    base-resource
-        "headers"     (or headers {})
-        "metrics"     @[]
-        "start-nanos" (now-nanos)
-        "shutdown?"   false
-        "exporter"    nil})
-    (put meter "exporter" (start-export-loop meter))
+      @{:service     service-name
+        :endpoint    (or endpoint "http://localhost:9090/api/v1/otlp/v1/metrics")
+        :interval    (or interval 60)
+        :resource    base-resource
+        :headers     (or headers {})
+        :metrics     @[]
+        :start-nanos (now-nanos)
+        :shutdown?   false
+        :exporter    nil
+        :temporality (or temporality :cumulative)
+        :enabled     (if (nil? enabled) true enabled)
+        :on-export   on-export})
+    (put meter :exporter (start-export-loop meter))
     meter))
 
 # ============================================================================
 # Instrument constructors
 # ============================================================================
 
-(defn telemetry-counter [meter name &named unit description]
-  "Create a monotonic counter. Returns the instrument."
-  (let [[c (make-counter meter name unit description)]]
-    (push (get meter "metrics") c)
+(defn telemetry-counter [meter name &named unit description monotonic]
+  "Create a counter. Monotonic by default; pass :monotonic false for UpDownCounter."
+  (let [[c (make-counter meter name unit description monotonic)]]
+    (push meter:metrics c)
     c))
 
 (defn telemetry-gauge [meter name &named unit description]
-  "Create a gauge. Returns the instrument."
+  "Create a gauge (last-value instrument)."
   (let [[g (make-gauge meter name unit description)]]
-    (push (get meter "metrics") g)
+    (push meter:metrics g)
     g))
 
 (defn telemetry-histogram [meter name &named unit description boundaries]
-  "Create a histogram. Returns the instrument.
-   :boundaries — explicit bucket boundaries (default: HTTP latency buckets)."
+  "Create a histogram with explicit bucket boundaries.
+   Default boundaries are HTTP latency buckets (seconds)."
   (let [[h (make-histogram meter name unit description boundaries)]]
-    (push (get meter "metrics") h)
+    (push meter:metrics h)
     h))
 
 # ============================================================================
@@ -344,11 +442,15 @@
   (add-point instrument value attributes))
 
 (defn telemetry-record [instrument value &named attributes]
-  "Record a value to a histogram."
+  "Record an observation to a histogram."
+  (histogram-record instrument value attributes))
+
+(defn telemetry-observe [instrument value &named attributes]
+  "Record an observation to a histogram (alias for :record)."
   (histogram-record instrument value attributes))
 
 (defn telemetry-set [instrument value &named attributes]
-  "Set a gauge to a specific value (alias for add on gauge)."
+  "Set a gauge to a specific value."
   (add-point instrument value attributes))
 
 # ============================================================================
@@ -362,11 +464,15 @@
 (defn telemetry-shutdown [meter]
   "Flush remaining data and stop the background exporter."
   (do-export meter)
-  (put meter "shutdown?" true)
-  (let [[exporter (get meter "exporter")]]
+  (put meter :shutdown? true)
+  (let [[exporter meter:exporter]]
     (when exporter
       (ev/abort exporter)))
   nil)
+
+(defn telemetry-enabled? [meter]
+  "Check if the meter is enabled for recording."
+  meter:enabled)
 
 # ============================================================================
 # Convenience: timed operation
@@ -374,7 +480,9 @@
 
 (defn telemetry-time [histogram thunk &named attributes]
   "Execute thunk and record its duration in a histogram instrument.
-   Returns the thunk's result."
+   Returns the thunk's result.
+   Uses var/assign to work around the let*-ffi-signature bug
+   (let bindings after a yielding call produce corrupted values)."
   (var start (clock/monotonic))
   (var result (thunk))
   (var elapsed (- (clock/monotonic) start))
@@ -387,23 +495,25 @@
 
 (fn []
   {# Meter lifecycle
-   :meter     telemetry-meter
-   :flush     telemetry-flush
-   :shutdown  telemetry-shutdown
+   :meter       telemetry-meter
+   :flush       telemetry-flush
+   :shutdown    telemetry-shutdown
+   :enabled?    telemetry-enabled?
 
    # Instruments
-   :counter   telemetry-counter
-   :gauge     telemetry-gauge
-   :histogram telemetry-histogram
+   :counter     telemetry-counter
+   :gauge       telemetry-gauge
+   :histogram   telemetry-histogram
 
    # Recording
-   :add       telemetry-add
-   :record    telemetry-record
-   :set       telemetry-set
+   :add         telemetry-add
+   :record      telemetry-record
+   :observe     telemetry-observe
+   :set         telemetry-set
 
    # Convenience
-   :time      telemetry-time
+   :time        telemetry-time
 
    # Low-level (for testing / custom export)
-   :build-payload  build-export-payload
+   :build-payload  build-payload-peek
    :encode-attributes encode-attributes})

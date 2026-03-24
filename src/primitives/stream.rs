@@ -9,7 +9,7 @@ use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -75,12 +75,13 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     };
     let count = match args[1].as_int() {
         Some(n) if n > 0 => n as usize,
+        Some(0) => return (SIG_OK, Value::bytes(vec![])),
         Some(n) => {
             return (
                 SIG_ERROR,
                 error_val(
                     "value-error",
-                    format!("port/read: count must be positive, got {}", n),
+                    format!("port/read: count must be non-negative, got {}", n),
                 ),
             )
         }
@@ -153,13 +154,22 @@ fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
+    // Short-circuit empty writes to avoid unnecessary I/O.
+    let data = args[1];
+    let is_empty = data.with_string(|s| s.is_empty()).unwrap_or(false)
+        || data.as_bytes().is_some_and(|b| b.is_empty())
+        || data.as_bytes_mut().is_some_and(|b| b.borrow().is_empty())
+        || data.as_string_mut().is_some_and(|b| b.borrow().is_empty());
+    if is_empty {
+        return (SIG_OK, Value::int(0));
+    }
     let timeout = match extract_keyword_timeout(args, 2, "port/write") {
         Ok(t) => t,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Write { data: args[1] }, port, timeout),
+        IoRequest::with_timeout(IoOp::Write { data }, port, timeout),
     )
 }
 

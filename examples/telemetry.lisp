@@ -1,187 +1,171 @@
 #!/usr/bin/env elle
 
-# Telemetry — OpenTelemetry metrics with OTLP/HTTP export
+# A small bookstore API that tracks its own metrics.
 #
-# Demonstrates:
-#   telemetry:meter              — create a meter with OTLP endpoint
-#   telemetry:counter            — monotonic counter instrument
-#   telemetry:gauge              — last-value gauge instrument
-#   telemetry:histogram          — distribution with explicit buckets
-#   telemetry:add / record / set — recording observations
-#   telemetry:time               — automatic latency measurement
-#   telemetry:flush              — manual export to collector
-#   telemetry:shutdown           — graceful teardown
+# The store handles orders, searches, and inventory checks.  Every request
+# is counted, timed, and — for purchases — the revenue is accumulated.
+# A gauge tracks the number of books currently in stock.
 #
-# A mock OTLP collector captures exported payloads for verification.
-# The toy application simulates an HTTP service processing requests
-# with varying latencies and tracks revenue, connections, and errors.
+# Metrics are exported to Prometheus via OTLP/HTTP every 10 seconds.
+# Open http://localhost:9090 and try:
+#
+#   bookstore_orders_total
+#   rate(bookstore_request_duration_seconds_sum[1m])
+#   bookstore_inventory_books
+#
+# Run:  elle examples/telemetry.lisp
 
-(def http ((import-file "./lib/http.lisp")))
 (def telemetry ((import-file "lib/telemetry.lisp")))
 
+# ── The meter ────────────────────────────────────────────────────────
 
-# ── Mock OTLP collector ──────────────────────────────────────────────
+(def meter (telemetry:meter "bookstore"
+  :endpoint "http://localhost:9090/api/v1/otlp/v1/metrics"
+  :interval 10
+  :resource {"deployment.environment" "dev"
+             "host.name"              "laptop"}))
 
-(def received @[])
+# ── Instruments ──────────────────────────────────────────────────────
 
-(defn collector-handler [request]
-  (push received (json-parse request:body))
-  (http:respond 200 ""))
+(def requests
+  (telemetry:counter meter "bookstore_requests"
+    :unit "1" :description "Total API requests"))
 
-(def listener (tcp/listen "127.0.0.1" 0))
-(def collector-port (integer (get (string/split (port/path listener) ":") 1)))
-(def collector-url (string "http://127.0.0.1:" collector-port "/v1/metrics"))
-(def server (ev/spawn (fn [] (http:serve listener collector-handler))))
-(print "  collector on port ") (println collector-port)
+(def latency
+  (telemetry:histogram meter "bookstore_request_duration"
+    :unit "s" :description "Request processing time"
+    :boundaries [0.001 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0]))
 
+(def orders
+  (telemetry:counter meter "bookstore_orders"
+    :unit "1" :description "Completed orders"))
 
-# ── Create the meter ─────────────────────────────────────────────────
+(def revenue
+  (telemetry:counter meter "bookstore_revenue"
+    :unit "USD" :description "Total revenue"))
 
-(def meter (telemetry:meter "order-service"
-  :endpoint collector-url
-  :interval 9999
-  :resource {"deployment.environment" "staging"
-             "host.name" "web-01"}))
+(def inventory
+  (telemetry:gauge meter "bookstore_inventory_books"
+    :unit "1" :description "Books currently in stock"))
 
+# ── Simulated catalog ───────────────────────────────────────────────
 
-# ── Register instruments ─────────────────────────────────────────────
+(def catalog
+  {"978-0-13-468599-1" {:title "The C Programming Language"   :price 45.00  :stock 12}
+   "978-0-262-51087-5" {:title "SICP"                         :price 55.00  :stock 8}
+   "978-0-321-12521-7" {:title "Domain-Driven Design"         :price 52.00  :stock 5}
+   "978-1-49-195016-0" {:title "Designing Data-Intensive Apps" :price 48.00  :stock 15}
+   "978-0-596-51774-8" {:title "JavaScript: The Good Parts"   :price 25.00  :stock 20}})
 
-(def http-requests
-  (telemetry:counter meter "http.server.request.count"
-    :unit "1"
-    :description "Total inbound HTTP requests"))
+(var stock @{})
+(each [isbn book] in (pairs catalog)
+  (put stock isbn book:stock))
 
-(def http-latency
-  (telemetry:histogram meter "http.server.request.duration"
-    :unit "s"
-    :description "Request processing time"
-    :boundaries [0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0]))
+(defn books-in-stock []
+  (fold (fn [acc [_ n]] (+ acc n)) 0 (pairs stock)))
 
-(def db-connections
-  (telemetry:gauge meter "db.client.connections"
-    :unit "1"
-    :description "Active database connections"))
+# ── Request handlers ────────────────────────────────────────────────
 
-(def order-revenue
-  (telemetry:counter meter "orders.revenue"
-    :unit "USD"
-    :description "Cumulative order revenue"))
+(defn handle-search [query]
+  "Search the catalog by title substring."
+  (var results @[])
+  (each [isbn book] in (pairs catalog)
+    (when (string-contains? (string/lowercase book:title)
+                            (string/lowercase query))
+      (push results isbn)))
+  (freeze results))
 
+(defn handle-purchase [isbn qty]
+  "Buy qty copies.  Returns {:ok true :total N} or {:ok false :reason ...}."
+  (let [[avail (get stock isbn)]]
+    (cond
+      ((nil? avail) {:ok false :reason "not found"})
+      ((> qty avail) {:ok false :reason "insufficient stock"})
+      (true
+        (let* [[price (get (get catalog isbn) :price)]
+               [total (* price qty)]]
+          (put stock isbn (- avail qty))
+          (telemetry:add orders 1
+            :attributes {"isbn" isbn})
+          (telemetry:add revenue total
+            :attributes {"currency" "USD"})
+          {:ok true :total total})))))
 
-# ── Simulate application traffic ─────────────────────────────────────
+(defn handle-request [method path]
+  "Dispatch a simulated API request."
+  (var attrs {"method" method "path" path})
+  (telemetry:add requests 1 :attributes attrs)
+  (telemetry:time latency
+    (fn []
+      (case path
+        "/search"    (begin (ev/sleep (/ (+ 1 (mod (length method) 5)) 1000.0))
+                            (handle-search "programming"))
+        "/purchase"  (begin (ev/sleep (/ (+ 2 (mod (length path) 8)) 1000.0))
+                            (handle-purchase "978-0-262-51087-5" 1))
+        "/inventory" (begin (ev/sleep 0.001)
+                            (books-in-stock))
+        (begin (ev/sleep 0.001) nil)))
+    :attributes attrs))
 
-(defn simulate-request [method path status price]
-  "Simulate handling one HTTP request."
-  (let [[attrs {"http.method" method
-                "http.route"  path
-                "http.status" status}]]
-    (telemetry:add http-requests 1 :attributes attrs)
-    (telemetry:time http-latency
-      (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))
-      :attributes attrs)
-    (when price
-      (telemetry:add order-revenue price
-        :attributes {"currency" "USD" "region" "us-east"}))))
+# ── Run the "app" ───────────────────────────────────────────────────
 
-(simulate-request "GET"  "/api/orders"     200 nil)
-(simulate-request "POST" "/api/orders"     201 49.99)
-(simulate-request "GET"  "/api/orders/123" 200 nil)
-(simulate-request "POST" "/api/orders"     201 129.50)
-(simulate-request "GET"  "/api/orders"     200 nil)
-(simulate-request "GET"  "/api/health"     200 nil)
-(simulate-request "GET"  "/api/orders/999" 404 nil)
-(simulate-request "POST" "/api/orders"     201 24.95)
-(println "  simulated 8 requests")
+(println "bookstore starting (Ctrl-C to stop)")
+(println "  metrics → http://localhost:9090")
+(println "")
 
+# Set initial inventory gauge
+(telemetry:set inventory (books-in-stock)
+  :attributes {"warehouse" "main"})
 
-# ── Gauge: connection pool over time ─────────────────────────────────
+# Simulate a burst of traffic
+(defn traffic-burst [label reqs]
+  (println "  " label "...")
+  (each [method path] in reqs
+    (handle-request method path))
+  # Update inventory after purchases
+  (telemetry:set inventory (books-in-stock)
+    :attributes {"warehouse" "main"}))
 
-(telemetry:set db-connections 2 :attributes {"db.system" "postgresql"})
-(telemetry:set db-connections 5 :attributes {"db.system" "postgresql"})
-(telemetry:set db-connections 3 :attributes {"db.system" "postgresql"})
-(println "  db pool: 2 -> 5 -> 3")
+(traffic-burst "morning rush"
+  [["GET"  "/search"]
+   ["GET"  "/search"]
+   ["POST" "/purchase"]
+   ["GET"  "/inventory"]
+   ["POST" "/purchase"]
+   ["GET"  "/search"]
+   ["POST" "/purchase"]
+   ["GET"  "/inventory"]])
 
+(traffic-burst "lunch lull"
+  [["GET"  "/search"]
+   ["GET"  "/inventory"]])
 
-# ── Flush to the mock collector ──────────────────────────────────────
+(traffic-burst "afternoon spike"
+  [["POST" "/purchase"]
+   ["GET"  "/search"]
+   ["POST" "/purchase"]
+   ["POST" "/purchase"]
+   ["GET"  "/search"]
+   ["GET"  "/search"]
+   ["GET"  "/inventory"]
+   ["POST" "/purchase"]
+   ["GET"  "/search"]
+   ["GET"  "/404"]])
 
+# Flush to Prometheus
+(println "")
+(println "  flushing to Prometheus...")
 (telemetry:flush meter)
-(ev/sleep 0.05)
+(println "  done")
+(println "")
 
-(print "  collector received ") (print (length received)) (println " export(s)")
-(assert (>= (length received) 1) "collector got at least one export")
-
-
-# ── Inspect the exported payload ─────────────────────────────────────
-
-(def export (get received 0))
-(def exported-rm (get (get export "resourceMetrics") 0))
-(def resource-attrs (get (get exported-rm "resource") "attributes"))
-(def exported-scope (get (get (get exported-rm "scopeMetrics") 0) "metrics"))
-
-(print "  resource attributes: ") (println (length resource-attrs))
-(each m in exported-scope
-  (print "    ") (print (get m "name"))
-  (cond
-    ((has? m "sum")       (println " (sum)"))
-    ((has? m "gauge")     (println " (gauge)"))
-    ((has? m "histogram") (println " (histogram)"))))
-
-(assert (= (length exported-scope) 4) "all four metrics exported")
-
-
-# ── Second flush: points cleared, nothing new ────────────────────────
-
-(def count-before (length received))
-(telemetry:flush meter)
-(ev/sleep 0.05)
-(assert (= (length received) count-before) "no duplicate after flush")
-(println "  second flush: no duplicate (points cleared)")
-
-
-# ── Incremental export after new observations ────────────────────────
-
-(simulate-request "DELETE" "/api/orders/123" 204 nil)
-(telemetry:set db-connections 4 :attributes {"db.system" "postgresql"})
-(telemetry:flush meter)
-(ev/sleep 0.05)
-(assert (> (length received) count-before) "new data triggers export")
-(println "  incremental export after new activity")
-
-
-# ── Verify histogram bucketing ───────────────────────────────────────
-
-(var hist-metric nil)
-(each m in exported-scope
-  (when (= (get m "name") "http.server.request.duration")
-    (assign hist-metric m)))
-
-(assert (not (nil? hist-metric)) "histogram was exported")
-(def hist-data (get hist-metric "histogram"))
-(def total-obs
-  (fold (fn [acc dp] (+ acc (integer (get dp "count"))))
-    0
-    (get hist-data "dataPoints")))
-(print "  histogram observations: ") (println total-obs)
-(assert (= total-obs 8) "histogram captured all 8 requests")
-
-(def sample-dp (get (get hist-data "dataPoints") 0))
-(print "  sample bucket counts: ") (println (get sample-dp "bucketCounts"))
-(assert (= (length (get sample-dp "bucketCounts")) 9) "8 boundaries + overflow")
-
-
-# ── JSON round-trip ──────────────────────────────────────────────────
-
-(def json-str (json-serialize export))
-(def reparsed (json-parse json-str))
-(assert (= (length (get reparsed "resourceMetrics")) 1) "JSON round-trips")
-(println "  OTLP JSON round-trip: ok")
-
-
-# ── Shutdown + teardown ──────────────────────────────────────────────
+(println "  check Prometheus at http://localhost:9090:")
+(println "    bookstore_requests_total")
+(println "    bookstore_orders_total")
+(println "    bookstore_revenue_USD_total")
+(println "    bookstore_inventory_books")
+(println "    histogram_quantile(0.95, rate(bookstore_request_duration_seconds_bucket[5m]))")
 
 (telemetry:shutdown meter)
-(ev/abort server)
-(port/close listener)
-
 (println "")
-(println "all telemetry passed.")
+(println "bookstore stopped.")

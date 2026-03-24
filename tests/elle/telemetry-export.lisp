@@ -50,15 +50,18 @@
     # ── 3. http:post with telemetry-sized JSON body ───────────────────
 
     (def meter-stub
-      @{"service"     "test"
-        "endpoint"    url
-        "interval"    9999
-        "resource"    {"service.name" "test"}
-        "headers"     {}
-        "metrics"     @[]
-        "start-nanos" 1000000000000000000
-        "shutdown?"   false
-        "exporter"    nil})
+      @{:service     "test"
+        :endpoint    url
+        :interval    9999
+        :resource    {"service.name" "test"}
+        :headers     {}
+        :metrics     @[]
+        :start-nanos 1000000000000000000
+        :shutdown?   false
+        :exporter    nil
+        :temporality :cumulative
+        :enabled     true
+        :on-export   nil})
 
     (def c (telemetry:counter meter-stub "req"))
     (telemetry:add c 1 :attributes {"method" "GET"})
@@ -211,16 +214,36 @@
     (println "  6e. exact example sequence: ok")
 
 
-    # ── 6f. Known failure: simulate + inspect payload + flush ───────────
+    # ── 6f. simulate + inspect payload + flush (was known failure) ──────
     #
-    # When many higher-order function calls (map, fold, contains?) run
-    # in the same scope after yielding operations (ev/sleep inside
-    # telemetry:time), the VM hits "Upvalue index N out of bounds".
-    # This is a VM bug in upvalue reconstruction.
-    # See: project_jit_letstar_ffi_signature.md
-    #
-    # The example (examples/telemetry.lisp) works around this by
-    # skipping pre-flush payload inspection.
+    # Previously crashed with "Upvalue index N out of bounds" due to
+    # the emitter not saving/restoring current_func_num_locals around
+    # nested function emission.  Fixed in #673.
+
+    (while (not (empty? received)) (pop received))
+
+    (simulate-request "GET"  "/api/orders"     200 nil)
+    (simulate-request "POST" "/api/orders"     201 49.99)
+    (simulate-request "GET"  "/api/orders/123" 200 nil)
+    (simulate-request "POST" "/api/orders"     201 129.50)
+    (simulate-request "GET"  "/api/orders"     200 nil)
+    (simulate-request "GET"  "/api/health"     200 nil)
+    (simulate-request "GET"  "/api/orders/999" 404 nil)
+    (simulate-request "POST" "/api/orders"     201 24.95)
+
+    (telemetry:set db-conns 2 :attributes {"db.system" "postgresql"})
+    (telemetry:set db-conns 5 :attributes {"db.system" "postgresql"})
+    (telemetry:set db-conns 3 :attributes {"db.system" "postgresql"})
+
+    (def f-payload (telemetry:build-payload meter))
+    (def f-rm (get (get f-payload "resourceMetrics") 0))
+    (def f-scope (get (get (get f-rm "scopeMetrics") 0) "metrics"))
+    (assert (>= (length f-scope) 4) "6f payload has instruments")
+
+    (telemetry:flush meter)
+    (ev/sleep 0.05)
+    (assert (>= (length received) 1) "6f flush delivered")
+    (println "  6f. simulate + inspect + flush (was known failure): ok")
 
 
     # ── 7. Second flush sends nothing (points cleared) ────────────────

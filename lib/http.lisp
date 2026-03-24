@@ -119,9 +119,12 @@
 
 (defn read-body [port headers]
   "Read request/response body based on Content-Length header.
-   Returns body string, or nil if Content-Length is absent."
+   Returns body string, or nil if Content-Length is absent.
+   Returns empty string for Content-Length: 0 without issuing I/O."
   (let [[cl headers:content-length]]
-    (and cl (string (port/read port (integer cl))))))
+    (when cl
+      (let [[n (integer cl)]]
+        (if (= n 0) "" (string (port/read port n)))))))
 
 # ============================================================================
 # Reason phrases
