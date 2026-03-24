@@ -61,7 +61,7 @@ fn call_closure(vm: &mut VM, closure_val: Value) -> Value {
 ///
 /// Layout: [params..., locals..., captures...]
 /// For a zero-arg closure: [locals..., captures...]
-fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Vec<Value> {
+pub fn build_closure_call_env(closure: &crate::value::Closure, args: &[Value]) -> Vec<Value> {
     let template = &closure.template;
     let total = template.num_locals + template.num_captures;
     let mut env = vec![Value::NIL; total];

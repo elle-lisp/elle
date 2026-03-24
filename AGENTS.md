@@ -42,7 +42,7 @@ bytecode. Error messages include file:line:col information.
   for source tracking
 - **`compiler`** — Bytecode instruction definitions, debug formatting
 - **`vm`** — Bytecode execution, builtin documentation storage
-- **`value`** — Runtime value representation (NaN-boxed); trait table field on
+- **`value`** — Runtime value representation (tagged-union); trait table field on
   19 user-facing heap variants
 - **`signals`** — Signal type (`Silent`, `Yields`, `Polymorphic`), signal
   registry for keyword-to-bit mapping;
@@ -96,15 +96,23 @@ bytecode. Error messages include file:line:col information.
   closures were rejected
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
-    available plugins: `elle-oxigraph` (RDF/SPARQL), `elle-sqlite`, `elle-crypto`,
-    `elle-regex`, `elle-glob`, `elle-random`, `elle-selkie` (HTTP), `elle-uuid`
-    (UUID generation), `elle-xml` (XML parsing/serialization), `elle-syn` (Rust syntax parsing via syn crate),
-    `elle-git` (Git repository operations), `elle-msgpack` (MessagePack binary serialization),
+    available plugins: `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
+    `elle-base64` (base64 encoding/decoding), `elle-clap` (CLI argument parsing),
+    `elle-compress` (gzip, deflate, and zstd compression), `elle-crypto`,
+    `elle-csv` (CSV parsing and serialization),
+    `elle-git` (Git repository operations), `elle-glob`,
+    `elle-jiff` (date/time via jiff), `elle-msgpack` (MessagePack binary serialization),
+    `elle-oxigraph` (RDF/SPARQL), `elle-polars` (Polars DataFrames with eager and lazy APIs),
     `elle-protobuf` (Protocol Buffers encode/decode/introspect),
+    `elle-random`, `elle-regex`, `elle-selkie` (HTTP),
+    `elle-semver` (semantic version parsing and comparison),
+    `elle-sqlite`, `elle-syn` (Rust syntax parsing via syn crate),
     `elle-tls` (TLS client and server via rustls),
+    `elle-toml` (TOML parsing and serialization),
     `elle-tree-sitter` (multi-language parsing and structural queries),
-    `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
-    `elle-polars` (Polars DataFrames with eager and lazy APIs)
+    `elle-uuid` (UUID generation),
+    `elle-xml` (XML parsing/serialization),
+    `elle-yaml` (YAML parsing and serialization)
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
@@ -112,9 +120,9 @@ bytecode. Error messages include file:line:col information.
 
 ### The Value type
 
-`Value` is the runtime representation using NaN-boxing. Create values via
-methods like `Value::int()`, `Value::cons()`, `Value::closure()` rather than
-enum variants. Notable types:
+`Value` is the runtime representation using a 16-byte tagged union
+`(tag: u64, payload: u64)`. Create values via methods like `Value::int()`,
+`Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
 - `Closure` — bytecode + captured environment + arity + signal +
   `location_map` + `doc` + `syntax` + `traits`
 - `LBox` / `LocalLBox` — mutable lboxes for captured variables
@@ -126,7 +134,7 @@ enum variants. Notable types:
 All heap-allocated values use `Rc`. Mutable values use `RefCell`.
 
 **Trait table field:** Every user-facing heap variant carries a
-`traits: Value` field (8 bytes). Initialized to `Value::NIL` (meaning "no
+`traits: Value` field (16 bytes). Initialized to `Value::NIL` (meaning "no
 traits"). Only an immutable `LStruct` may be stored here; the `with-traits`
 primitive validates this at call time. The field is invisible to structural
 equality, ordering, and hashing.
@@ -147,6 +155,7 @@ on these returns a `:type-error`.
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
 | lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
+| lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 
 ## Directories
 
@@ -155,7 +164,7 @@ on these returns a `:type-error`.
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
-| `lib/` | Reusable Elle modules (HTTP, etc.) |
+| `lib/` | Reusable Elle modules (HTTP, TLS, Redis, DNS, AWS, etc.) |
 | `examples/` | Executable semantics documentation |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |

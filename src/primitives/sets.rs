@@ -86,11 +86,13 @@ pub(crate) fn prim_is_set(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// Check if a value is in a set
+/// Check if a value is in a set, or if a string contains a substring
 ///
 /// (contains? set value) -> bool
+/// (contains? string substring) -> bool
 ///
-/// Returns true if the value is a member of the set
+/// For sets: returns true if the value is a member of the set.
+/// For strings: returns true if the string contains the substring.
 pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -101,23 +103,94 @@ pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+
+    // Set membership check
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
-        (SIG_OK, Value::bool(s.contains(&frozen)))
+        return (SIG_OK, Value::bool(s.contains(&frozen)));
     } else if let Some(s) = args[0].as_set_mut() {
-        (SIG_OK, Value::bool(s.borrow().contains(&frozen)))
-    } else {
-        (
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "contains?: expected set or mutable set, got {}",
-                    args[0].type_name()
-                ),
-            ),
-        )
+        return (SIG_OK, Value::bool(s.borrow().contains(&frozen)));
     }
+
+    // String substring check (immutable string)
+    if args[0].is_string() {
+        let needle = if let Some(n) = args[1].with_string(|s| s.to_string()) {
+            n
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "contains?: expected string as substring, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        };
+        return args[0]
+            .with_string(|haystack| {
+                (
+                    SIG_OK,
+                    if haystack.contains(&*needle) {
+                        Value::TRUE
+                    } else {
+                        Value::FALSE
+                    },
+                )
+            })
+            .unwrap();
+    }
+
+    // Mutable @string substring check
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        let needle = if let Some(n) = args[1].with_string(|s| s.to_string()) {
+            n
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "contains?: expected string as substring, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        };
+        let borrowed = buf_ref.borrow();
+        let haystack = match String::from_utf8(borrowed.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "encoding-error",
+                        format!("contains?: buffer contains invalid UTF-8: {}", e),
+                    ),
+                )
+            }
+        };
+        return (
+            SIG_OK,
+            if haystack.contains(&*needle) {
+                Value::TRUE
+            } else {
+                Value::FALSE
+            },
+        );
+    }
+
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "contains?: expected set, string, or @string, got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
 }
 
 /// Add an element to a set
@@ -486,15 +559,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(set? (set 1 2)) #=> true\n(set? 42) #=> false",
         aliases: &[],
     },
+    // contains? is an alias of has? (defined in lstruct.rs).
+    // string-contains? remains registered for old-epoch code; epoch 5 renames it to has?.
     PrimitiveDef {
-        name: "contains?",
+        name: "string-contains?",
         func: prim_contains,
         signal: Signal::errors(),
         arity: Arity::Exact(2),
-        doc: "Check if a value is a member of a set",
-        params: &["set", "value"],
+        doc: "Deprecated: use has? instead. Check if a string contains a substring.",
+        params: &["string", "substring"],
         category: "set",
-        example: "(contains? (set 1 2 3) 2) #=> true",
+        example: "(string-contains? \"hello world\" \"world\") #=> true",
         aliases: &[],
     },
     PrimitiveDef {

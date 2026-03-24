@@ -6,7 +6,9 @@
 
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME};
+use crate::value::fiber::{
+    Fiber, FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_RESUME, SIG_YIELD,
+};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -58,7 +60,10 @@ fn resolve_keyword_slice(
     Ok(bits)
 }
 
-fn resolve_signal_bits(val: &Value, context: &str) -> Result<SignalBits, (SignalBits, Value)> {
+pub(crate) fn resolve_signal_bits(
+    val: &Value,
+    context: &str,
+) -> Result<SignalBits, (SignalBits, Value)> {
     // 1. Integer passthrough (existing behavior)
     if let Some(i) = val.as_int() {
         return Ok(SignalBits::new(i as u32));
@@ -504,13 +509,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["closure", "mask"],
         category: "fiber",
         example: "(fiber/new (fn [] 42) 0)",
-        aliases: &[],
+        aliases: &["fiber"],
     },
     PrimitiveDef {
         name: "fiber/resume",
         func: prim_fiber_resume,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_RESUME.0),
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_RESUME.0),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),

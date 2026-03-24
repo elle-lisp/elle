@@ -59,9 +59,40 @@ These are separate values because they are genuinely distinguishable: `()` is wh
 (let ((safe-f (squelch f :yield)))
   (safe-f x))
 
-# Wrong: squelch requires at least 2 args
+# squelch accepts any signal spec: keyword, set, array, list, or integer
+(squelch f |:yield :error|)   # set of signals
+(squelch f [:yield :error])   # array also works
+
+# Wrong: squelch requires exactly 2 args
 (squelch f)     # arity error
 ```
+
+### `let` is parallel; `let*` is sequential — causes "undefined variable"
+
+`let` evaluates all right-hand sides in the **outer** scope. Later bindings
+cannot see earlier ones. Use `let*` when a binding depends on a previous one.
+
+```lisp
+# WRONG: y cannot see x — "undefined variable: x"
+(let ((x 5) (y (* x 2)))
+  y)
+
+# RIGHT: let* makes x visible to y
+(let* ((x 5) (y (* x 2)))
+  y)   # => 10
+```
+
+Also works with array-style syntax:
+
+```lisp
+(let* [[url (parse-url input)]
+       [host url:host]           # host depends on url
+       [conn (tcp/connect host 80)]]  # conn depends on host
+  conn)
+```
+
+If you get "undefined variable" inside a `let` and the variable is defined
+on an earlier line of the same `let`, change `let` to `let*`.
 
 ### Bare delimiters = immutable; `@`-prefix = mutable
 
@@ -217,6 +248,24 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 
 (def add5 (make-adder 5))
 (add5 10)   # => 15
+
+# Optional positional params (nil if omitted)
+(defn greet [name &opt greeting]
+  (println (or greeting "Hello") ", " name "!"))
+(greet "Alice")         # Hello, Alice!
+(greet "Bob" "Hey")     # Hey, Bob!
+
+# Named keyword params (nil if omitted)
+(defn connect [host port &named timeout]
+  [host port timeout])
+(connect "localhost" 8080 :timeout 30)  # => ["localhost" 8080 30]
+(connect "localhost" 8080)              # => ["localhost" 8080 nil]
+
+# Keyword args collected as a struct
+(defn request [method path &keys opts]
+  [method path opts])
+(request "GET" "/" :timeout 30 :headers {:accept "text/html"})
+# => ["GET" "/" {:timeout 30 :headers {:accept "text/html"}}]
 ```
 
 ---
@@ -387,7 +436,30 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 (string/replace "foo-bar" "-" "_") # => "foo_bar"
 ```
 
-Note: `string-append` does not exist. Use `string/join`.
+**Byte length vs grapheme length:** `length` returns the grapheme count, not
+the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
+`string/size-of`:
+
+```lisp
+(length "hello\r\n")        # => 6  (\r\n is one grapheme cluster)
+(string/size-of "hello\r\n") # => 7  (byte count)
+(length "👋🏽")               # => 1  (one grapheme cluster)
+(string/size-of "👋🏽")       # => 8  (4+4 bytes UTF-8)
+```
+
+**String concatenation:** `(string ...)` converts all arguments to strings and concatenates them. This is the preferred way to build strings:
+
+```lisp
+(string "hello " "world")     # => "hello world"
+(string "count: " 42)         # => "count: 42"
+(string "key:" :foo "=" val)  # => "key:foo=123"
+```
+
+`string/join` is for joining a collection with a separator:
+
+```lisp
+(string/join ["a" "b" "c"] ",")  # => "a,b,c"
+```
 
 `string` with multiple args concatenates, coercing non-strings:
 
@@ -543,12 +615,15 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (native-fn? x)   # native functions only; aliases: native?, primitive?
 
 # Conversions
-(integer "42")       (float "3.14")
-(string 42)          (string 'foo)   # => "foo"  (works for symbols too)
-(string :foo)        # => "foo"  (no colon)
-(number->string 42)  # => "42"  (decimal)
-(number->string 255 16)  # => "ff"   (hex, radix 2–36)
-(number->string 255 2)   # => "11111111"  (binary)
+(integer "42")             (float "3.14")
+(integer "ff" 16)          # => 255  (hex, radix 2–36)
+(integer "1010" 2)         # => 10   (binary)
+(string 42)                (string 'foo)   # => "foo"
+(string :foo)              # => "foo"  (no colon)
+(string @"hello")          # => "hello"  (@string → string)
+(number->string 42)        # => "42"  (decimal)
+(number->string 255 16)    # => "ff"   (hex, radix 2–36)
+(number->string 255 2)     # => "11111111"  (binary)
 ```
 
 ---
@@ -680,45 +755,87 @@ Streams are lazy and pull-based. Use `stream/map`, `stream/filter`, etc. to tran
 (stream/pipe src dst)
 ```
 
-### Async I/O and the Event Loop
+### Async I/O and Structured Concurrency
 
-`stream/write` and `stream/flush` are **async** — they yield and require a
-fiber context. For network servers and any code doing concurrent I/O, use
-`ev/run` to start the event loop and `ev/spawn` to create fibers:
+User code runs inside the async scheduler automatically. Port I/O
+(`port/write`, `port/read`, etc.) yields to the scheduler — no setup needed.
+
+**Spawn and join** — the fundamental building blocks:
 
 ```lisp
-# TCP server — accept connections, handle each in its own fiber
-(ev/run (fn []
-  (def listener (tcp/listen "0.0.0.0" 8080))
-  (forever
-    (def conn (tcp/accept listener))  # yields until client connects
-    (ev/spawn (fn []                  # handle in its own fiber
-      (defer (port/close conn)
-        (handle-connection conn)))))))
+# Spawn a fiber, wait for its result
+(def f (ev/spawn (fn [] (port/read-all (port/open "data.txt" :read)))))
+(def content (ev/join f))
+
+# Join a sequence — results in input order
+(def [a b] (ev/join [(ev/spawn (fn [] (fetch "/users")))
+                      (ev/spawn (fn [] (fetch "/posts")))]))
+```
+
+**Parallel map** — the most common pattern:
+
+```lisp
+(ev/map (fn [url] (http/get url)) urls)   # → [response1 response2 ...]
+```
+
+**Error handling** — `ev/join-protected` returns `[ok? value]` instead of
+raising errors:
+
+```lisp
+(let (([ok? val] (ev/join-protected (ev/spawn (fn [] (flaky-api-call))))))
+  (if ok? val (cached-fallback)))
+```
+
+**Select, race, timeout** — waiting for the first of N:
+
+```lisp
+# First to complete wins; abort the rest
+(ev/race [(ev/spawn (fn [] (query-replica-1)))
+          (ev/spawn (fn [] (query-replica-2)))])
+
+# Deadline on a computation
+(ev/timeout 5 (fn [] (http/get "https://slow-api.example.com")))
+```
+
+**Scoped concurrency** — all children must finish before scope exits:
+
+```lisp
+(ev/scope (fn [spawn]
+  (let ([users    (spawn (fn [] (fetch "/users")))]
+        [settings (spawn (fn [] (fetch "/settings")))])
+    # If /settings fails, /users is aborted automatically
+    {:users (ev/join users) :settings (ev/join settings)})))
 ```
 
 Key primitives:
 
 ```lisp
-(ev/run thunk...)           # start event loop, spawn each thunk, pump until done
-(ev/spawn thunk)            # schedule a new fiber (inside ev/run); returns the fiber
+(ev/spawn thunk)            # create a fiber, returns fiber handle
+(ev/join fiber-or-seq)      # wait for result(s), propagate errors
+(ev/join-protected target)  # wait without raising — returns [ok? value]
+(ev/abort fiber)            # graceful cancel (defer blocks run)
+(ev/select fibers)          # wait for first → [done remaining]
+(ev/race fibers)            # first wins, abort rest, return value
+(ev/timeout secs thunk)     # deadline — returns value or {:error :timeout}
+(ev/scope (fn [spawn] ...)) # nursery — children can't outlive scope
+(ev/map f items)            # parallel map, results in order
+(ev/map-limited f items n)  # bounded parallel map (at most n in flight)
+(ev/as-completed fibers)    # lazy iterator → [next-fn pool]
 (ev/sleep seconds)          # yield for N seconds
 
 (tcp/listen addr port)      # bind and listen, returns listener
 (tcp/accept listener)       # yields until connection, returns port
 (tcp/connect host port)     # yields until connected, returns port
 
-(stream/write port data)    # async write (yields) — use inside ev/run
-(stream/flush port)         # async flush (yields) — use inside ev/run
-(stream/read port n)        # async read N bytes (yields)
-(stream/read-line port)     # async read until \n (yields), nil on EOF
+(port/write port data)      # async write (yields)
+(port/flush port)           # async flush (yields)
+(port/read port n)          # async read N bytes (yields)
+(port/read-line port)       # async read until \n (yields), nil on EOF
 ```
 
-**Important:** `stream/write` and `stream/flush` signal `:yield`. Outside an
-event loop they work for small amounts of I/O but will fail with "yield outside
-coroutine context" in tight loops. For synchronous output, use `print`/`println`
-(stdout) or `eprint`/`eprintln` (stderr) — these internally spawn a fiber and
-run a sync scheduler, so they work anywhere without an event loop.
+**Important:** `port/write` and `port/flush` signal `:yield`. `print`/`println`
+and `eprint`/`eprintln` are also async — they write to `*stdout*`/`*stderr*`
+via the same async I/O path.
 
 ### Channels
 
@@ -748,7 +865,7 @@ Crossbeam-based channels for inter-fiber (and inter-thread) messaging. Often unn
 (sys/thread-id)                            # current thread ID
 ```
 
-### Synchronous Output
+### Output
 
 ```lisp
 (print "no newline")           # write to *stdout*, no newline
@@ -891,12 +1008,10 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 (def tls ((import-file "lib/tls.lisp")))
 # Client: tls:connect, tls:read, tls:write, tls:read-all, tls:close
 # Server: tls:server-config, tls:accept
-(ev/run
-  (fn []
-    (let ((conn (tls:connect "example.com" 443)))
-      (defer (tls:close conn)
-        (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
-        (println (string (tls:read-all conn)))))))
+(let ((conn (tls:connect "example.com" 443)))
+  (defer (tls:close conn)
+    (tls:write conn "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")
+    (println (string (tls:read-all conn)))))
 ```
 
 #### `elle-tree-sitter` — Multi-language parsing and structural queries
@@ -938,7 +1053,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 (def args (drop 1 (sys/args)))   # skip "--"
 (if (empty? args)
   (println "Usage: elle greet.lisp -- <name>")
-  (println (string/join ["Hello, " (first args) "!"] "")))
+  (println (string "Hello, " (first args) "!")))
 ```
 ```bash
 elle greet.lisp -- Alice   # => Hello, Alice!
@@ -950,9 +1065,9 @@ elle greet.lisp -- Alice   # => Hello, Alice!
 
 Elle's API has three layers:
 
-1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `stream/write`, etc.)
+1. **VM primitives** — native functions implemented in Rust (`+`, `get`, `port/write`, etc.)
 2. **stdlib.lisp** — standard library closures and macros (`map`, `filter`, `fold`, etc.)
-3. **prelude.lisp** — higher-level abstractions (`ev/run`, `ev/spawn`, `each`, `match`, etc.)
+3. **prelude.lisp** — higher-level abstractions (`ev/spawn`, `ev/join`, `ev/map`, `each`, `match`, etc.)
 
 `vm/list-primitives` and `vm/primitive-meta` only cover layer 1 — they do NOT
 list stdlib or prelude functions. If you don't find something in the primitive
@@ -970,8 +1085,8 @@ the source of truth for the full API.
 #   example: (+ 1 2 3) #=> 6
 
 # doc also works on prelude functions
-(doc ev/run)    # => "Run thunks concurrently with async I/O. ..."
 (doc ev/spawn)  # => "Spawn a closure in a new fiber ..."
+(doc ev/join)   # => "Wait for a fiber or sequence of fibers ..."
 (doc each)      # => "(each (name list) body...) ..."
 
 # vm/list-primitives lists ONLY native VM primitives, not stdlib/prelude
@@ -984,7 +1099,7 @@ the source of truth for the full API.
 
 # To discover stdlib/prelude functions, read the source files:
 #   stdlib.lisp   — map, filter, fold, append, reverse, etc.
-#   prelude.lisp  — ev/run, ev/spawn, each, match, cond, etc.
+#   prelude.lisp  — ev/spawn, ev/join, ev/map, each, match, cond, etc.
 ```
 
 ---
@@ -1047,7 +1162,7 @@ These are things agents commonly reach for that Elle does not have:
 
 | Missing | Use instead |
 |---------|-------------|
-| `string-append` | `string/join` |
+| `string-append` | `(string "a" x "b")` for concatenation; `string/join` for joining with separator |
 | `-e` flag | `echo '...' \| elle` |
 | `set!` / `set` for mutation | `assign` |
 | `#t` / `#f` | `true` / `false` |
@@ -1055,11 +1170,177 @@ These are things agents commonly reach for that Elle does not have:
 | `lambda` | `fn` |
 | `begin` as scoped sequencing | `block` (`begin` shares surrounding scope) |
 | `display` | `print` (epoch 3 renamed `display` to `print`) |
-| `write` (literal form) | `pp` for pretty-print, or `stream/write` for port I/O |
+| `write` (literal form) | `pp` for pretty-print, or `port/write` for port I/O |
 | Mutable struct field update | `put` on `@struct` |
 | `null` | `nil` |
 | `char` type | `string` and `@string` are grapheme-indexed; use `get` to extract a grapheme cluster as a string |
 | `function?` | `fn?` (callable), `closure?` (closure only), `native-fn?` (native only) |
+
+---
+
+## Deeper Understanding
+
+### `silence` vs `squelch`
+
+They solve different problems at different times:
+
+- **`silence`** is a compile-time declaration. It appears in a function preamble and means "totally silent" — no signal keywords accepted. Two forms: `(silence)` constrains the whole function body; `(silence param)` constrains a parameter. If a `(silence)` function's body may emit signals, the **compiler rejects it** at compile time. If a `(silence param)` parameter emits a signal at runtime, it becomes a `:signal-violation` error.
+
+- **`squelch`** is a runtime primitive that returns a **new closure** with a selective signal blacklist. It takes exactly two arguments: a closure and a signal spec (keyword, set, array, list, or integer). You can compose them: `(squelch (squelch f :yield) :error)`.
+
+```lisp
+# silence — total compile-time contract
+(defn safe-map [f xs]
+  (silence f)              # f must be completely silent
+  (map f xs))
+
+# squelch — selective runtime wrapper
+(defn safe-iterate [f xs]
+  (let ((safe-f (squelch f |:yield|)))  # forbid :yield only
+    (map safe-f xs)))
+```
+
+| Aspect | `silence` | `squelch` |
+|--------|-----------|-----------|
+| Type | Special form (preamble) | Runtime primitive |
+| Granularity | All-or-nothing | Per-signal keyword |
+| Checking | Compile-time (body) / runtime (params) | Runtime |
+| Returns | `nil` | New closure |
+
+### `begin` vs `block`
+
+`begin` is the default sequential form. `block` is for early exit.
+
+- **`begin`** shares the surrounding scope. Inside a function body, it performs two-pass analysis (pre-binds all `def`/`var` forms, then analyzes), enabling forward references and mutual recursion. All multi-body macros (`when`, `unless`, `let*`, etc.) desugar to `begin`.
+
+- **`block`** creates a new isolated scope and supports `break` for early exit with a value. It has more overhead (scope infrastructure, exit labels, region tracking).
+
+```lisp
+# begin — idiomatic for sequencing (used in macro expansion)
+(when ready
+  (begin
+    (process)
+    (cleanup)))
+
+# block — needed for early exit
+(block :search
+  (each item in items
+    (when (= item target)
+      (break :search item)))
+  nil)
+```
+
+Use `begin` unless you need `break`.
+
+### Fiber signal masks
+
+Signal masks accept multiple formats, but **set literals are preferred**:
+
+```lisp
+# Preferred — symbolic set literal
+(fiber/new (fn [] (yield 42)) |:yield|)
+(fiber/new thunk |:yield :io|)
+
+# Also accepted: keyword, array, integer
+(fiber/new thunk :yield)
+(fiber/new thunk [:yield :io])
+(fiber/new thunk 2)              # raw bit value (fragile)
+```
+
+Built-in signal bits: `:error` (0), `:yield` (1), `:debug` (2), `:ffi` (4), `:halt` (8), `:io` (9), `:exec` (11), `:fuel` (12), `:wait` (14). User-defined signals (via `(signal :keyword)`) get bits 16–31.
+
+The runtime resolves set literals by looking up each keyword in the signal registry and OR-ing the bits together. Use `|:yield :io|` rather than `(bit/or 2 512)`.
+
+### `import` reloads every time
+
+There is no module cache. Every `import` call reads the file, compiles it, and executes it fresh. This is intentional — it gives each import independent state:
+
+```lisp
+# Two imports of the same counter module get independent state
+(let ([c1 ((import-file "lib/counter.lisp"))]
+      [c2 ((import-file "lib/counter.lisp"))])
+  (c1:inc) (c1:inc)
+  (c1:count)   # => 2
+  (c2:count))  # => 0
+```
+
+**To avoid redundant loads**, bind the result at the top level and reuse it:
+
+```lisp
+(def utils (import-file "lib/utils.lisp"))
+(utils:helper1 x)
+(utils:helper2 y)
+```
+
+For plugins (`.so` files), the library handle is intentionally leaked (never unloaded). Importing the same plugin twice registers primitives twice, so always bind once.
+
+### Lists vs arrays
+
+`map` and `filter` always return lists because Elle follows the Lisp tradition of structural recursion with `cons`/`first`/`rest`. Lists are the natural output of recursive accumulation.
+
+**When to use which:**
+- **Lists** — functional pipelines (`map`, `filter`, `fold`), recursive processing, variable-length results
+- **Arrays** — indexed access, fixed-size data, interop with plugins expecting arrays
+
+**Getting arrays from transforms:**
+- `stream/into-array` — collect a stream into an array
+- `mapcat` on arrays — preserves array type
+- `map-indexed` on arrays — preserves array type
+- Manual: accumulate into `@[]` with `push`, then `freeze`
+
+### `protect` vs `try/catch`
+
+They have different return conventions and error propagation:
+
+```lisp
+# try/catch — handle and recover
+(try
+  (risky-op)
+  (catch e
+    (fallback e)))       # returns fallback value
+
+# protect — capture as data, never propagates
+(def [ok? val] (protect (risky-op)))
+(if ok? (use val) (handle val))
+
+# defer — guaranteed cleanup, then propagates
+(defer (cleanup)
+  (risky-op))           # error continues unwinding after cleanup
+```
+
+| Aspect | `try/catch` | `protect` | `defer` |
+|--------|------------|----------|--------|
+| On success | Body value | `[true value]` | Body value |
+| On error | Handler result | `[false error]` | Propagates |
+| Error escapes? | Only if handler re-raises | Never | Always |
+| Use case | Recovery | Safe capture | Resource cleanup |
+
+All three are macros over `fiber/new` with mask `1` (`SIG_ERROR`). The difference is what happens after the fiber completes: `try/catch` runs a handler, `protect` wraps the result, `defer` calls `fiber/propagate` to continue unwinding.
+
+### Streams are lazy coroutines
+
+Streams are **lazy, demand-driven coroutines**. Each `coro/resume` pulls exactly one value. Transforms like `stream/map` and `stream/filter` return new coroutines that wrap a source — nothing executes until you pull.
+
+```lisp
+# Infinite stream — works because it's lazy
+(defn naturals []
+  (coro/new (fn []
+    (var n 0)
+    (forever
+      (yield n)
+      (assign n (+ n 1))))))
+
+# Compose lazily, consume finitely
+(stream/collect
+  (stream/take 5
+    (stream/map (fn [x] (* x x))
+      (naturals))))
+# => (0 1 4 9 16)
+```
+
+**Sink combinators** (`stream/collect`, `stream/fold`, `stream/for-each`, `stream/into-array`) consume a stream to completion — don't call them on infinite streams without `stream/take`.
+
+**Port streams** (`port/lines`, `port/chunks`) yield `SIG_IO` under the hood. User code runs inside the async scheduler by default, so this works out of the box.
 
 ---
 

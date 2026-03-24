@@ -251,7 +251,7 @@ case counts uniformly without modifying test files.
 
 | Cost per case | Default cases | Example |
 |---------------|---------------|---------|
-| Cheap (pure Rust, no eval) | 1000 | NaN-boxing roundtrips, signal combine |
+| Cheap (pure Rust, no eval) | 1000 | Value roundtrips, signal combine |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals, fibers, coroutines) | 10–50 | Pipeline properties, fiber determinism |
 

@@ -40,11 +40,11 @@
 (defn jsonrpc-error [id code message]
   {:jsonrpc "2.0" :id id :error {:code code :message message}})
 
-# ── Logging (to stderr via stream/write — must be called inside ev/run) ──
+# ── Logging (to stderr via port/write — must be called inside ev/run) ──
 
 (defn log [err & parts]
-  (stream/write err (string (apply string parts) "\n"))
-  (stream/flush err))
+  (port/write err (string (apply string parts) "\n"))
+  (port/flush err))
 
 # ── Tool definitions (MCP schema) ─────────────────────────────────────
 
@@ -194,8 +194,8 @@
 
 (defn send-response [out response]
   "Write a JSON-RPC response as a single line to stdout and flush."
-  (stream/write out (string (json/serialize response) "\n"))
-  (stream/flush out))
+  (port/write out (string (json/serialize response) "\n"))
+  (port/flush out))
 
 (ev/run
   (fn []
@@ -204,7 +204,7 @@
           [err (*stderr*)]]
       (log err "elle-mcp-oxigraph server starting")
       (forever
-        (let [[line (stream/read-line in)]]
+        (let [[line (port/read-line in)]]
           (when (nil? line)
             (log err "stdin closed, shutting down")
             (break))

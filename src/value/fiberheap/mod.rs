@@ -1,45 +1,26 @@
 //! Per-fiber heap ownership and thread-local current-heap routing.
 //!
-//! `FiberHeap` uses bumpalo for fast bump allocation. Destructor tracking
-//! ensures that `HeapObject` variants with inner heap allocations (`Vec`, `Rc`,
-//! `BTreeMap`, `Box<str>`, etc.) have their `Drop` impls called on release/clear.
+//! `FiberHeap` uses a slab allocator (`RootSlab`) for all allocations.
+//! Destructor tracking ensures that `HeapObject` variants with inner heap
+//! allocations (`Vec`, `Rc`, `BTreeMap`, `Box<str>`, etc.) have their `Drop`
+//! impls called on release/clear.
 //!
 //! `peak_alloc_count` tracks the high-water mark of `alloc_count` since the
 //! last `clear()`. Updated on every `alloc()`. Queryable via `arena/peak`
 //! and `arena/fiber-stats`.
 //!
-//! ## Per-scope bump allocators
-//!
-//! Each `RegionEnter` pushes a fresh `bumpalo::Bump` onto `scope_bumps`.
-//! All allocations within the scope go to this scope bump. `RegionExit`
-//! runs destructors for scoped objects, then pops and drops the scope bump,
-//! reclaiming ALL bump memory allocated in that scope.
-//!
-//! The root slab is used when `scope_bumps` is empty (no active scope).
-//! `clear()` drops all scope bumps and resets the root slab.
-//!
 //! ## Scope marks
 //!
 //! `FiberHeap` maintains a stack of scope marks (`scope_marks: Vec<ArenaMark>`)
-//! for `RegionEnter`/`RegionExit` bytecodes. `RegionEnter` pushes a mark;
-//! `RegionExit` pops the mark and calls `release()` to run destructors for
-//! objects allocated within the scope, then drops the scope bump.
+//! for `RegionEnter`/`RegionExit` bytecodes. `RegionEnter` pushes a mark
+//! recording the current slab position; `RegionExit` pops the mark and calls
+//! `release()` to run destructors and deallocate slab slots for objects
+//! allocated within the scope, returning them to the slab free list.
 //!
 //! The lowerer gates `RegionEnter`/`RegionExit` emission on escape analysis
 //! (`src/lir/lower/escape.rs`): only scopes where no allocated values can
 //! escape get region instructions. The analysis checks: no captures, no
 //! suspension, result is immediate, no outward mutation.
-//!
-//! ## Active allocator
-//!
-//! `FiberHeap` carries an `active_allocator: ActiveAlloc` enum that tracks
-//! which allocator the current execution context should use:
-//! - `ActiveAlloc::Slab` — allocate from `root_slab` (the default root context)
-//! - `ActiveAlloc::Bump(ptr)` — allocate from a scope bump (inside a `RegionEnter`)
-//!
-//! The active allocator is saved/restored:
-//! - On **Call/Return** via `execute_bytecode_saving_stack` (local variable pair)
-//! - On **Fiber swap** implicitly (each fiber owns its own `FiberHeap`)
 //!
 //! ## Shared allocator for inter-fiber exchange
 //!
@@ -47,7 +28,7 @@
 //! and has a `shared_alloc: *mut SharedAllocator` pointer for routing.
 //!
 //! When `shared_alloc` is non-null, `alloc()` routes ALL allocations to the
-//! shared allocator instead of the private bump. This is set by `with_child_fiber`
+//! shared allocator instead of the slab. This is set by `with_child_fiber`
 //! for yielding child fibers and nulled on swap-back.
 //!
 //! Ownership model: the parent's FiberHeap owns the `Box<SharedAllocator>`;
@@ -61,19 +42,6 @@ use crate::value::allocator::AllocatorBox;
 use crate::value::arena::ArenaMark;
 use crate::value::heap::{HeapObject, HeapTag};
 use crate::value::Value;
-
-/// Discriminates between the two root-context allocators on `FiberHeap`.
-///
-/// `Slab` is the default: root-context allocations use `root_slab` and are
-/// tracked in `root_allocs` for release-time dealloc.
-/// `Bump(ptr)` is active inside a `RegionEnter`/`RegionExit` scope: allocations
-/// go to the bumpalo scope bump identified by `ptr`. The scope bump is freed
-/// atomically on `RegionExit` — no per-object dealloc needed.
-#[derive(Clone, Copy)]
-pub(crate) enum ActiveAlloc {
-    Slab,
-    Bump(*const bumpalo::Bump),
-}
 
 mod routing;
 pub use routing::*;
@@ -106,21 +74,13 @@ pub(crate) struct CustomAllocState {
 }
 
 pub struct FiberHeap {
-    /// Chunk-based slab for root-context allocations. Slots freed by
+    /// Chunk-based slab for all allocations. Slots freed by
     /// `release()` are returned to the free list for reuse.
     root_slab: RootSlab,
     /// All root-slab allocations, in allocation order.
     /// Tracked so `release(mark)` can dealloc slots allocated after the mark.
-    /// Does NOT include scope-bump or shared-allocator allocations.
+    /// Does NOT include shared-allocator allocations.
     root_allocs: Vec<*mut HeapObject>,
-    /// Discriminates between slab (root context) and scope-bump allocation.
-    /// Starts as `ActiveAlloc::Slab`. Set to `Bump(ptr)` by `push_scope_mark()`,
-    /// restored by `pop_scope_mark_and_release()`.
-    active_allocator: ActiveAlloc,
-    /// Per-scope bump allocators. `RegionEnter` pushes a new `Bump`;
-    /// `RegionExit` pops and drops it, reclaiming all bump memory for
-    /// that scope. When empty, allocations go to the root slab.
-    scope_bumps: Vec<bumpalo::Bump>,
     /// Raw pointers to HeapObjects that need Drop.
     /// Ordered by allocation time (oldest first).
     dtors: Vec<*mut HeapObject>,
@@ -165,8 +125,6 @@ impl FiberHeap {
         FiberHeap {
             root_slab: RootSlab::new(),
             root_allocs: Vec::new(),
-            active_allocator: ActiveAlloc::Slab,
-            scope_bumps: Vec::new(),
             dtors: Vec::new(),
             alloc_count: 0,
             peak_alloc_count: 0,
@@ -181,12 +139,8 @@ impl FiberHeap {
         }
     }
 
-    /// No-op: `active_allocator` starts as `ActiveAlloc::Slab` at construction.
-    /// Kept for call-site compatibility (routing.rs and vm/fiber.rs call this).
-    pub fn init_active_allocator(&mut self) {
-        // No-op: `active_allocator` starts as `ActiveAlloc::Slab` at construction.
-        // Kept for call-site compatibility (routing.rs and vm/fiber.rs call this).
-    }
+    /// No-op kept for call-site compatibility (routing.rs and vm/fiber.rs call this).
+    pub fn init_active_allocator(&mut self) {}
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         // When a shared allocator is installed (yielding child fiber),
@@ -230,36 +184,18 @@ impl FiberHeap {
             }
         }
 
-        // Slab or scope bump dispatch.
+        // Always allocate from the root slab.
         let needs_drop = needs_drop(obj.tag());
-        match self.active_allocator {
-            ActiveAlloc::Slab => {
-                let ptr = self.root_slab.alloc(obj);
-                self.root_allocs.push(ptr);
-                if needs_drop {
-                    self.dtors.push(ptr);
-                }
-                self.alloc_count += 1;
-                if self.alloc_count > self.peak_alloc_count {
-                    self.peak_alloc_count = self.alloc_count;
-                }
-                Value::from_heap_ptr(ptr as *const (), value_tag)
-            }
-            ActiveAlloc::Bump(bump_ptr) => {
-                // `bumpalo::Bump::alloc` takes `&self` (interior mutability).
-                let bump_ref = unsafe { &*bump_ptr };
-                let ptr: &mut HeapObject = bump_ref.alloc(obj);
-                let raw = ptr as *mut HeapObject;
-                if needs_drop {
-                    self.dtors.push(raw);
-                }
-                self.alloc_count += 1;
-                if self.alloc_count > self.peak_alloc_count {
-                    self.peak_alloc_count = self.alloc_count;
-                }
-                Value::from_heap_ptr(raw as *const (), value_tag)
-            }
+        let ptr = self.root_slab.alloc(obj);
+        self.root_allocs.push(ptr);
+        if needs_drop {
+            self.dtors.push(ptr);
         }
+        self.alloc_count += 1;
+        if self.alloc_count > self.peak_alloc_count {
+            self.peak_alloc_count = self.alloc_count;
+        }
+        Value::from_heap_ptr(ptr as *const (), value_tag)
     }
 
     pub fn mark(&self) -> ArenaMark {
@@ -271,7 +207,6 @@ impl FiberHeap {
             self.alloc_count,
             self.dtors.len(),
             custom_ptrs_len,
-            self.scope_bumps.len(),
             self.root_allocs.len(),
         )
     }
@@ -320,47 +255,36 @@ impl FiberHeap {
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
     ///
-    /// Records the current `(alloc_count, dtors.len(), bump_depth)` so that
-    /// `pop_scope_mark_and_release` can run destructors and reclaim bump
-    /// memory for objects allocated within the scope.
+    /// Records the current slab position so that `pop_scope_mark_and_release`
+    /// can run destructors and deallocate slab slots for objects allocated
+    /// within the scope. When a shared allocator is active (child fiber),
+    /// also pushes a mark on the shared allocator.
     pub fn push_scope_mark(&mut self) {
+        if !self.shared_alloc.is_null() {
+            unsafe { &mut *self.shared_alloc }.push_mark();
+        }
         self.scope_marks.push(self.mark());
-        self.scope_bumps.push(bumpalo::Bump::new());
-        self.active_allocator =
-            ActiveAlloc::Bump(self.scope_bumps.last().unwrap() as *const bumpalo::Bump);
         self.scope_enters += 1;
     }
 
     /// Pop the top scope mark and release objects allocated since it
     /// was pushed (called by `RegionExit`).
     ///
-    /// Runs destructors for objects allocated within the scope (dtors
-    /// point into the scope bump, so they MUST run before the bump is
-    /// dropped), then pops and drops the scope bump to reclaim all
-    /// bump memory for this scope.
+    /// Runs destructors for objects allocated within the scope, then
+    /// deallocates their slab slots back to the free list. When a shared
+    /// allocator is active, also pops its mark and releases shared objects.
     ///
     /// Panics (debug) if the scope stack is empty.
     pub fn pop_scope_mark_and_release(&mut self) {
+        if !self.shared_alloc.is_null() {
+            unsafe { &mut *self.shared_alloc }.pop_mark_and_release();
+        }
         let mark = self
             .scope_marks
             .pop()
             .expect("RegionExit without matching RegionEnter");
         let dtors_before = self.dtors.len();
-        let bump_depth = mark.bump_depth();
-        // Run dtors and dealloc custom objects FIRST — pointers are into
-        // the scope bump which we're about to drop.
         self.release(mark);
-        // Drop the scope bump — reclaims all bump memory for this scope.
-        debug_assert_eq!(
-            self.scope_bumps.len(),
-            bump_depth + 1,
-            "scope bump stack depth mismatch on RegionExit"
-        );
-        self.scope_bumps.pop(); // Drop reclaims memory
-        self.active_allocator = match self.scope_bumps.last() {
-            Some(b) => ActiveAlloc::Bump(b as *const bumpalo::Bump),
-            None => ActiveAlloc::Slab,
-        };
         self.scope_dtors_run += dtors_before - self.dtors.len();
     }
 
@@ -397,14 +321,9 @@ impl FiberHeap {
         self.alloc_error.take()
     }
 
-    /// Bytes committed by root slab plus all scope bumps.
+    /// Bytes committed by root slab.
     pub fn allocated_bytes(&self) -> usize {
         self.root_slab.allocated_bytes()
-            + self
-                .scope_bumps
-                .iter()
-                .map(|b| b.allocated_bytes())
-                .sum::<usize>()
     }
 
     /// Number of `RegionEnter` instructions executed (scope regions entered).
@@ -422,9 +341,9 @@ impl FiberHeap {
         self.peak_alloc_count
     }
 
-    /// Number of active scope bumps (scope depth).
+    /// Number of active scope marks (scope depth).
     pub(crate) fn scope_depth(&self) -> usize {
-        self.scope_bumps.len()
+        self.scope_marks.len()
     }
 
     /// Number of objects in the destructor list.
@@ -447,12 +366,9 @@ impl FiberHeap {
         self.owned_shared.len()
     }
 
-    /// Active allocator discriminant as a keyword: `"slab"` or `"bump"`.
+    /// Active allocator discriminant as a keyword (always `"slab"` now).
     pub(crate) fn active_allocator_keyword(&self) -> &'static str {
-        match self.active_allocator {
-            ActiveAlloc::Slab => "slab",
-            ActiveAlloc::Bump(_) => "bump",
-        }
+        "slab"
     }
 
     /// Reset peak to current count. Returns previous peak.
@@ -522,6 +438,22 @@ impl FiberHeap {
         ptr
     }
 
+    /// Return an existing shared allocator from `owned_shared`, or create one.
+    ///
+    /// Prevents the per-resume leak: without this, each `with_child_fiber`
+    /// call pushes a new `SharedAllocator` that accumulates until the
+    /// owner's `FiberHeap::clear()` runs. Reusing the last allocator keeps
+    /// `owned_shared` at most length 1 for non-propagation cases.
+    pub(crate) fn get_or_create_shared_allocator(
+        &mut self,
+    ) -> *mut crate::value::shared_alloc::SharedAllocator {
+        if let Some(sa) = self.owned_shared.last_mut() {
+            &mut **sa as *mut crate::value::shared_alloc::SharedAllocator
+        } else {
+            self.create_shared_allocator()
+        }
+    }
+
     /// Current shared allocator pointer. Returns null if none is set.
     pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc
@@ -545,7 +477,7 @@ impl FiberHeap {
     /// Drop all tracked objects and reset the slab allocator.
     ///
     /// Also tears down all owned shared allocators and nulls the
-    /// shared_alloc pointer. Resets `active_allocator` to `ActiveAlloc::Slab`.
+    /// shared_alloc pointer.
     pub fn clear(&mut self) {
         // Tear down owned shared allocators first.
         for sa in &mut self.owned_shared {
@@ -576,8 +508,6 @@ impl FiberHeap {
         self.peak_alloc_count = 0;
         self.scope_enters = 0;
         self.scope_dtors_run = 0;
-        self.scope_bumps.clear();
-        self.active_allocator = ActiveAlloc::Slab;
     }
 }
 

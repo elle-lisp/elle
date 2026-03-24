@@ -1,4 +1,4 @@
-//! Heap-allocated value types for the NaN-boxed value system.
+//! Heap-allocated value types for the tagged-union value system.
 //!
 //! All non-immediate values (strings, cons cells, vectors, closures, etc.)
 //! are stored on the heap and accessed through `HeapObject`.
@@ -17,7 +17,7 @@ use crate::value::Value;
 pub use crate::value::closure::Closure;
 pub use crate::value::types::{Arity, NativeFn, TableKey};
 
-/// Cons cell for list construction using NaN-boxed values.
+/// Cons cell for list construction.
 pub struct Cons {
     pub first: Value,
     pub rest: Value,
@@ -116,7 +116,7 @@ pub enum HeapTag {
 /// All heap-allocated value types.
 ///
 /// Each variant corresponds to a type that cannot be represented inline
-/// in the NaN-boxed Value. Objects are allocated on the heap and accessed
+/// in the tagged-union Value. Objects are allocated on the heap and accessed
 /// via pointer.
 ///
 /// 19 user-facing variants carry a `traits: Value` field (initialized to

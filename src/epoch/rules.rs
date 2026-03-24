@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 3;
+pub const CURRENT_EPOCH: u64 = 5;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -117,7 +117,7 @@ static MIGRATIONS: &[Migration] = &[
             },
             MigrationRule::Remove {
                 symbol: "write",
-                message: "use (pp ...) for literal form or (stream/write port data) for port I/O",
+                message: "use (pp ...) for literal form or (port/write port data) for port I/O",
             },
         ],
     },
@@ -128,6 +128,51 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Rename {
                 old: "display",
                 new: "print",
+            },
+        ],
+    },
+    Migration {
+        epoch: 4,
+        summary: "stream/{read,read-line,read-all,write,flush} → port/...",
+        rules: &[
+            MigrationRule::Rename {
+                old: "stream/read-line",
+                new: "port/read-line",
+            },
+            MigrationRule::Rename {
+                old: "stream/read",
+                new: "port/read",
+            },
+            MigrationRule::Rename {
+                old: "stream/read-all",
+                new: "port/read-all",
+            },
+            MigrationRule::Rename {
+                old: "stream/write",
+                new: "port/write",
+            },
+            MigrationRule::Rename {
+                old: "stream/flush",
+                new: "port/flush",
+            },
+        ],
+    },
+    Migration {
+        epoch: 5,
+        summary: "add→put for sets, string-contains?→has?, string/contains?→has?",
+        rules: &[
+            MigrationRule::Replace {
+                symbol: "add",
+                arity: 2,
+                template: "(put $1 $2)",
+            },
+            MigrationRule::Rename {
+                old: "string-contains?",
+                new: "has?",
+            },
+            MigrationRule::Rename {
+                old: "string/contains?",
+                new: "has?",
             },
         ],
     },
@@ -211,10 +256,19 @@ mod tests {
         let renames = collapsed_renames(0, CURRENT_EPOCH);
         // epoch 2: print→println, newline→println
         // epoch 3: display→print
+        // epoch 4: stream/{read,read-line,read-all,write,flush} → port/...
         assert_eq!(renames.get("print"), Some(&"println"));
         assert_eq!(renames.get("newline"), Some(&"println"));
         assert_eq!(renames.get("display"), Some(&"print"));
-        assert_eq!(renames.len(), 3);
+        assert_eq!(renames.get("stream/read-line"), Some(&"port/read-line"));
+        assert_eq!(renames.get("stream/read"), Some(&"port/read"));
+        assert_eq!(renames.get("stream/read-all"), Some(&"port/read-all"));
+        assert_eq!(renames.get("stream/write"), Some(&"port/write"));
+        assert_eq!(renames.get("stream/flush"), Some(&"port/flush"));
+        // epoch 5: string-contains?→has?, string/contains?→has?
+        assert_eq!(renames.get("string-contains?"), Some(&"has?"));
+        assert_eq!(renames.get("string/contains?"), Some(&"has?"));
+        assert_eq!(renames.len(), 10);
     }
 
     #[test]

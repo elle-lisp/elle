@@ -125,8 +125,8 @@ annotations. This is critical for escape analysis: `may_suspend()` checks
 needs to know that a function may yield an I/O request. Primitives that
 return `(SIG_YIELD | SIG_IO, IoRequest)` must declare both bits.
 
-Stream primitives (`stream/read-line`, `stream/read`, `stream/read-all`,
-`stream/write`, `stream/flush`) have signal `SIG_ERROR | SIG_YIELD | SIG_IO`.
+Stream primitives (`port/read-line`, `port/read`, `port/read-all`,
+`port/write`, `port/flush`) have signal `SIG_ERROR | SIG_YIELD | SIG_IO`.
 Network primitives (`tcp/accept`, `tcp/connect`, `tcp/shutdown`, `udp/send-to`,
 `udp/recv-from`, `unix/accept`, `unix/connect`, `unix/shutdown`) also include
 `SIG_YIELD | SIG_IO`. The async sleep primitive `ev/sleep` has signal

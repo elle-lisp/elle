@@ -229,9 +229,9 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    if let Some(map) = args[0].as_struct() {
+    // Helper: convert a BTreeMap into a list of [key value] pairs
+    fn pairs_from_map(map: &BTreeMap<TableKey, Value>) -> Value {
         let mut result = Value::EMPTY_LIST;
-        // Build list in reverse, then we'll reverse the final result
         for (key, value) in map.iter().rev() {
             let key_val = match key {
                 TableKey::Nil => Value::NIL,
@@ -240,22 +240,30 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
                 TableKey::Symbol(sym) => Value::symbol(sym.0),
                 TableKey::String(s) => Value::string(s.as_str()),
                 TableKey::Keyword(kw) => Value::keyword(kw.as_str()),
-                TableKey::Identity(_) => {
-                    // Identity keys are opaque; skip them
-                    continue;
-                }
+                TableKey::Identity(v) => *v,
             };
             let pair = Value::array(vec![key_val, *value]);
             result = Value::cons(pair, result);
         }
-        return (SIG_OK, result);
+        result
+    }
+
+    if let Some(map) = args[0].as_struct() {
+        return (SIG_OK, pairs_from_map(map));
+    }
+
+    if let Some(map) = args[0].as_struct_mut() {
+        return (SIG_OK, pairs_from_map(&map.borrow()));
     }
 
     (
         SIG_ERROR,
         error_val(
             "type-error",
-            format!("pairs: expected struct, got {}", args[0].type_name()),
+            format!(
+                "pairs: expected struct or @struct, got {}",
+                args[0].type_name()
+            ),
         ),
     )
 }

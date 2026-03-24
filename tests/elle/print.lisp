@@ -30,7 +30,7 @@
 (ev/run
   (fn []
     (def in (port/open tmp-path :read))
-    (def contents (stream/read-all in))
+    (def contents (port/read-all in))
     (port/close in)
     (assert (= (string contents) "captured line\n") "println respects *stdout* rebinding")))
 

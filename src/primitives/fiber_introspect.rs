@@ -332,13 +332,15 @@ pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
             // Return SIG_ABORT — VM will inject error, resume, let it unwind
             (SIG_ABORT, args[0])
         }
-        FiberStatus::New => (
-            SIG_ERROR,
-            error_val(
-                "state-error",
-                "fiber/abort: cannot abort a fiber that was never started",
-            ),
-        ),
+        FiberStatus::New => {
+            // Nothing to unwind — set to error directly (like cancel)
+            handle.with_mut(|fiber| {
+                fiber.status = FiberStatus::Error;
+                fiber.signal = Some((SIG_ERROR, error_value));
+                fiber.suspended = None;
+            });
+            (SIG_OK, error_value)
+        }
         FiberStatus::Alive => (
             SIG_ERROR,
             error_val("state-error", "fiber/abort: cannot abort a running fiber"),

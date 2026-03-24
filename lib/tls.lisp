@@ -6,7 +6,7 @@
 ## Dependencies:
 ##   - elle-tls plugin loaded via (import-file "path/to/libelle_tls.so")
 ##   - tcp/connect, tcp/accept from net primitives
-##   - stream/read, stream/write from stream primitives  (stream/read returns
+##   - port/read, port/write from stream primitives  (port/read returns
 ##     bytes for TCP ports — TCP streams use binary encoding in this runtime)
 ##   - ev/run, ev/spawn from scheduler
 ##   - port/close for TCP port lifecycle
@@ -91,15 +91,15 @@
       # and after every subsequent process call.
       (let [[out (get-outgoing-fn tls)]]
         (when (> (length out) 0)
-          (stream/write port out)))          # async — yields SIG_IO
+          (port/write port out)))          # async — yields SIG_IO
 
       # If handshake is complete, we're done.
       (when (handshake-complete?-fn tls)
         (break nil))
 
       # Read more ciphertext from the network.
-      # Note: TCP ports use binary encoding; stream/read returns bytes.
-      (let [[data (stream/read port 16384)]]  # async — yields SIG_IO
+      # Note: TCP ports use binary encoding; port/read returns bytes.
+      (let [[data (port/read port 16384)]]  # async — yields SIG_IO
         (when (nil? data)
           (error {:error :tls-error
                   :message "tls: connection closed during handshake"}))
@@ -176,7 +176,7 @@
           (when (> (length buffered) 0)
             (break buffered)))
         # Plaintext buffer empty — read from network.
-        (let [[data (stream/read port 16384)]]  # async
+        (let [[data (port/read port 16384)]]  # async
           (when (nil? data) (break nil))         # EOF
           (process-fn tls data)
           # INVARIANT: Send outgoing after every tls/process.
@@ -184,7 +184,7 @@
           # be sent or the connection stalls.
           (let [[out (get-outgoing-fn tls)]]
             (when (> (length out) 0)
-              (stream/write port out)))))))
+              (port/write port out)))))))
 
   (defn tls/read-line [conn]
     "Read a line (through \\n, byte 10) from a TLS connection.
@@ -207,7 +207,7 @@
               # for the next tls/read-line call.
               (break (apply concat chunks)))))
         # No newline in buffer yet — read more from network.
-        (let [[data (stream/read port 16384)]]
+        (let [[data (port/read port 16384)]]
           (when (nil? data)
             # EOF. Return whatever we have accumulated, or nil if nothing.
             (let [[remaining (get-plaintext-fn tls)]]
@@ -220,7 +220,7 @@
           # INVARIANT: Send outgoing after every tls/process.
           (let [[out (get-outgoing-fn tls)]]
             (when (> (length out) 0)
-              (stream/write port out)))))))   # async
+              (port/write port out)))))))   # async
 
   (defn tls/read-all [conn]
     "Read all remaining decrypted bytes until EOF. Returns bytes.
@@ -230,7 +230,7 @@
           [port conn:tcp]
           [chunks @[]]]
       (forever
-        (let [[data (stream/read port 16384)]]
+        (let [[data (port/read port 16384)]]
           (when (nil? data)
             # EOF. Drain any remaining plaintext and return accumulated data.
             (let [[remaining (get-plaintext-fn tls)]]
@@ -243,7 +243,7 @@
           # INVARIANT: Send outgoing after every tls/process.
           (let [[out (get-outgoing-fn tls)]]
             (when (> (length out) 0)
-              (stream/write port out)))         # async
+              (port/write port out)))         # async
           # Accumulate any newly decrypted plaintext.
           (let [[pt (get-plaintext-fn tls)]]
             (when (> (length pt) 0)
@@ -261,7 +261,7 @@
         (error {:error :tls-error :message result:message}))
       (let [[out result:outgoing]]
         (when (> (length out) 0)
-          (stream/write port out)))             # async
+          (port/write port out)))             # async
       (length plaintext)))
 
   (defn tls/close [conn]
@@ -271,7 +271,7 @@
     (let* [[notify-result (close-notify-fn conn:tls)]
            [outgoing notify-result:outgoing]]
       (when (> (length outgoing) 0)
-        (stream/write conn:tcp outgoing))
+        (port/write conn:tcp outgoing))
       (port/close conn:tcp))
     nil)
 

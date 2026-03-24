@@ -168,7 +168,7 @@ Replaced `assert-true`, `assert-false`, `assert-eq`, `assert-equal`,
 
 - `print` renamed to `println` (output with trailing newline).
 - `newline` renamed to `println` (zero-arg newline is now `(println)`).
-- `write` removed — use `(pp ...)` for literal form or `(stream/write port data)` for port I/O.
+- `write` removed — use `(pp ...)` for literal form or `(port/write port data)` for port I/O.
 
 ### Epoch 3 — display→print
 
@@ -184,3 +184,32 @@ After epoch 3, the output API is:
 | `eprintln` | `*stderr*` | yes    |
 
 All four respect `parameterize` rebinding of `*stdout*`/`*stderr*`.
+
+### Epoch 4 — stream/{read,read-line,read-all,write,flush} → port/...
+
+Port I/O primitives moved from the `stream/` namespace to `port/`:
+
+| Old name | New name |
+|----------|----------|
+| `stream/read-line` | `port/read-line` |
+| `stream/read` | `port/read` |
+| `stream/read-all` | `port/read-all` |
+| `stream/write` | `port/write` |
+| `stream/flush` | `port/flush` |
+
+These five operations act exclusively on ports, not on abstract streams.
+The `stream/` namespace now contains only stream combinators (`stream/map`,
+`stream/filter`, `stream/collect`, etc.) which operate on lazy sequences.
+The old `stream/` names remain as aliases.
+
+### Epoch 5 — polymorphic `has?`/`put`, retire string-specific containment
+
+- `has?` is now the canonical membership predicate for structs, sets, and
+  strings. `contains?` remains as a permanent alias.
+- `string-contains?` renamed to `has?`.
+- `string/contains?` renamed to `has?`.
+- `put` now accepts 2 arguments for sets: `(put set value)`. The set-specific
+  `add` is rewritten to `put` by `elle rewrite`.
+
+`elle rewrite` now updates the `(elle/epoch N)` tag to the current epoch
+instead of stripping it.

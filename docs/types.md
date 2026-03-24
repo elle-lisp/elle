@@ -64,12 +64,12 @@ Error values are structs: `{:error :division-by-zero :message "division by zero"
 ## All types
 
 Elle has two categories of values: **immediates** (encoded directly in a
-NaN-boxed 64-bit word, no heap allocation) and **heap values** (reference-
-counted, accessed via pointer).
+16-byte `(tag: u64, payload: u64)` pair, no heap allocation) and **heap values**
+(reference-counted, accessed via pointer).
 
 ### Immediate types
 
-These fit in 8 bytes with no allocation.
+These fit in 16 bytes with no allocation.
 
 #### nil
 
@@ -92,7 +92,7 @@ false              # false (falsy)
 
 #### integer
 
-48-bit signed integer. Range: -2^47 to 2^47-1.
+Full-range i64 integer. Range: -2^63 to 2^63-1.
 
 ```janet
 42              # decimal literal
@@ -110,8 +110,8 @@ No automatic coercion to float. Overflow panics.
 
 #### float
 
-IEEE 754 double-precision. NaN and Infinity are heap-allocated to avoid
-collision with the NaN-boxing scheme.
+IEEE 754 double-precision. All float values (including NaN and Infinity) are
+stored as immediates in the tagged-union representation.
 
 ```janet
 3.14            # literal
@@ -154,7 +154,7 @@ the absence of one).
 
 #### pointer
 
-Raw C pointer. 48-bit address space. FFI only. NULL becomes nil.
+Raw C pointer. Full 64-bit address space. FFI only. NULL becomes nil.
 
 ```janet
 (ptr? x)        # predicate (alias: pointer?)

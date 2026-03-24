@@ -266,6 +266,11 @@ pub struct Bytecode {
     /// Bytecode offset → source location mapping for error reporting.
     /// Maps instruction offsets to their source locations.
     pub location_map: LocationMap,
+    /// Inferred signal of the top-level expression. Carried through the
+    /// pipeline so that `execute_scheduled` can build a thunk with the
+    /// correct signal metadata for fiber scheduling and shared allocator
+    /// provisioning.
+    pub signal: crate::signals::Signal,
 }
 
 impl Bytecode {
@@ -275,6 +280,7 @@ impl Bytecode {
             constants: Vec::new(),
             symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
+            signal: crate::signals::Signal::silent(),
         }
     }
 

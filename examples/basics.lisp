@@ -31,9 +31,9 @@
 (assert (boolean? false) "boolean? on false")
 (assert (not (boolean? 1)) "boolean? not on int")  # 1 is not a boolean
 
-# Integers are 48-bit signed: -140,737,488,355,328 to 140,737,488,355,327.
+# Integers are full-range i64: -2^63 to 2^63-1.
 # Floats are 64-bit IEEE 754 doubles.
-# (Both are NaN-boxed into a single 8-byte Value representation.)
+# (Both are stored as 16-byte tagged-union Values.)
 (assert (number? 42) "number? on int")     # integers are numbers
 (assert (number? 3.14) "number? on float") # floats are numbers
 (assert (= (type 42) :integer) "42 is integer")  # type returns a keyword

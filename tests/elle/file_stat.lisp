@@ -32,8 +32,7 @@
 (file/write target-path "hello")
 
 # create symlink: ln -sf <target> <link>
-(ev/spawn (fn []
-  (subprocess/system "ln" ["-sf" target-path link-path])))
+(subprocess/system "ln" ["-sf" target-path link-path])
 
 # file/stat follows the symlink — reports the target's metadata
 (def stat-info (file/stat link-path))

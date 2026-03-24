@@ -133,10 +133,10 @@ impl Port {
             fd: RefCell::new(Some(fd)),
             kind: PortKind::TcpStream,
             direction: Direction::ReadWrite,
-            // Binary encoding: TCP is a byte stream. stream/read returns bytes,
+            // Binary encoding: TCP is a byte stream. port/read returns bytes,
             // enabling binary protocols (TLS, msgpack, custom wire formats).
-            // stream/write accepts both bytes and strings.
-            // stream/read-line always returns a string regardless of encoding.
+            // port/write accepts both bytes and strings.
+            // port/read-line always returns a string regardless of encoding.
             encoding: Encoding::Binary,
             closed: Cell::new(false),
             path: Some(peer_addr),
@@ -235,6 +235,7 @@ impl Port {
         self.path.as_deref()
     }
 
+    #[cfg(test)]
     pub fn timeout_ms(&self) -> Option<u64> {
         self.timeout.get()
     }

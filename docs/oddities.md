@@ -77,7 +77,7 @@ Coroutine primitives (`coro/resume`) are implemented as fiber wrappers. They ret
 
 ### Cons type in value/heap.rs
 
-The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data. `Value::cons(car, cdr)` creates a NaN-boxed pointer to a heap Cons.
+The `Cons` type in `value/heap.rs` is the heap-allocated cons cell data. `Value::cons(car, cdr)` creates a tagged-union pointer to a heap Cons.
 
 ### Signal bits partitioning
 

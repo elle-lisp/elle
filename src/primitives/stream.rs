@@ -9,7 +9,7 @@ use crate::port::Port;
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::kwarg::extract_keyword_timeout;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_YIELD};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -27,7 +27,7 @@ fn extract_port_value(value: &Value, prim_name: &str) -> Result<Value, (SignalBi
     Ok(*value)
 }
 
-/// (stream/read-line port [:timeout ms]) → string | nil
+/// (port/read-line port [:timeout ms]) → string | nil
 fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (
@@ -35,17 +35,17 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "stream/read-line: expected at least 1 argument, got {}",
+                    "port/read-line: expected at least 1 argument, got {}",
                     args.len()
                 ),
             ),
         );
     }
-    let port = match extract_port_value(&args[0], "stream/read-line") {
+    let port = match extract_port_value(&args[0], "port/read-line") {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "stream/read-line") {
+    let timeout = match extract_keyword_timeout(args, 1, "port/read-line") {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -55,7 +55,7 @@ fn prim_stream_read_line(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (stream/read port n [:timeout ms]) → bytes | nil
+/// (port/read port n [:timeout ms]) → bytes | nil
 fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
@@ -63,24 +63,25 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "stream/read: expected at least 2 arguments, got {}",
+                    "port/read: expected at least 2 arguments, got {}",
                     args.len()
                 ),
             ),
         );
     }
-    let port = match extract_port_value(&args[0], "stream/read") {
+    let port = match extract_port_value(&args[0], "port/read") {
         Ok(p) => p,
         Err(e) => return e,
     };
     let count = match args[1].as_int() {
         Some(n) if n > 0 => n as usize,
+        Some(0) => return (SIG_OK, Value::bytes(vec![])),
         Some(n) => {
             return (
                 SIG_ERROR,
                 error_val(
                     "value-error",
-                    format!("stream/read: count must be positive, got {}", n),
+                    format!("port/read: count must be non-negative, got {}", n),
                 ),
             )
         }
@@ -90,14 +91,14 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
                 error_val(
                     "type-error",
                     format!(
-                        "stream/read: expected integer for count, got {}",
+                        "port/read: expected integer for count, got {}",
                         args[1].type_name()
                     ),
                 ),
             )
         }
     };
-    let timeout = match extract_keyword_timeout(args, 2, "stream/read") {
+    let timeout = match extract_keyword_timeout(args, 2, "port/read") {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -107,7 +108,7 @@ fn prim_stream_read(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (stream/read-all port [:timeout ms]) → string | bytes
+/// (port/read-all port [:timeout ms]) → string | bytes
 fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (
@@ -115,17 +116,17 @@ fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "stream/read-all: expected at least 1 argument, got {}",
+                    "port/read-all: expected at least 1 argument, got {}",
                     args.len()
                 ),
             ),
         );
     }
-    let port = match extract_port_value(&args[0], "stream/read-all") {
+    let port = match extract_port_value(&args[0], "port/read-all") {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "stream/read-all") {
+    let timeout = match extract_keyword_timeout(args, 1, "port/read-all") {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -135,7 +136,7 @@ fn prim_stream_read_all(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
-/// (stream/write port data [:timeout ms]) → int
+/// (port/write port data [:timeout ms]) → int
 fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
     if args.len() < 2 {
         return (
@@ -143,27 +144,36 @@ fn prim_stream_write(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "stream/write: expected at least 2 arguments, got {}",
+                    "port/write: expected at least 2 arguments, got {}",
                     args.len()
                 ),
             ),
         );
     }
-    let port = match extract_port_value(&args[0], "stream/write") {
+    let port = match extract_port_value(&args[0], "port/write") {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 2, "stream/write") {
+    // Short-circuit empty writes to avoid unnecessary I/O.
+    let data = args[1];
+    let is_empty = data.with_string(|s| s.is_empty()).unwrap_or(false)
+        || data.as_bytes().is_some_and(|b| b.is_empty())
+        || data.as_bytes_mut().is_some_and(|b| b.borrow().is_empty())
+        || data.as_string_mut().is_some_and(|b| b.borrow().is_empty());
+    if is_empty {
+        return (SIG_OK, Value::int(0));
+    }
+    let timeout = match extract_keyword_timeout(args, 2, "port/write") {
         Ok(t) => t,
         Err(e) => return e,
     };
     (
         SIG_YIELD | SIG_IO,
-        IoRequest::with_timeout(IoOp::Write { data: args[1] }, port, timeout),
+        IoRequest::with_timeout(IoOp::Write { data }, port, timeout),
     )
 }
 
-/// (stream/flush port [:timeout ms]) → nil
+/// (port/flush port [:timeout ms]) → nil
 fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() {
         return (
@@ -171,17 +181,17 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "arity-error",
                 format!(
-                    "stream/flush: expected at least 1 argument, got {}",
+                    "port/flush: expected at least 1 argument, got {}",
                     args.len()
                 ),
             ),
         );
     }
-    let port = match extract_port_value(&args[0], "stream/flush") {
+    let port = match extract_port_value(&args[0], "port/flush") {
         Ok(p) => p,
         Err(e) => return e,
     };
-    let timeout = match extract_keyword_timeout(args, 1, "stream/flush") {
+    let timeout = match extract_keyword_timeout(args, 1, "port/flush") {
         Ok(t) => t,
         Err(e) => return e,
     };
@@ -193,7 +203,7 @@ fn prim_stream_flush(args: &[Value]) -> (SignalBits, Value) {
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
-        name: "stream/read-line",
+        name: "port/read-line",
         func: prim_stream_read_line,
         signal: Signal {
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
@@ -202,12 +212,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(1),
         doc: "Read one line from port. Returns string or nil (EOF).",
         params: &["port"],
-        category: "stream",
-        example: "(stream/read-line (port/open \"file.txt\" :read))",
-        aliases: &[],
+        category: "port",
+        example: "(port/read-line (port/open \"file.txt\" :read))",
+        aliases: &["port/read-line"],
     },
     PrimitiveDef {
-        name: "stream/read",
+        name: "port/read",
         func: prim_stream_read,
         signal: Signal {
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
@@ -216,12 +226,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(2),
         doc: "Read up to n bytes from port. Returns bytes or nil (EOF).",
         params: &["port", "n"],
-        category: "stream",
-        example: "(stream/read (port/open \"file.txt\" :read) 1024)",
-        aliases: &[],
+        category: "port",
+        example: "(port/read (port/open \"file.txt\" :read) 1024)",
+        aliases: &["stream/read"],
     },
     PrimitiveDef {
-        name: "stream/read-all",
+        name: "port/read-all",
         func: prim_stream_read_all,
         signal: Signal {
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
@@ -230,12 +240,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(1),
         doc: "Read everything remaining from port.",
         params: &["port"],
-        category: "stream",
-        example: "(stream/read-all (port/open \"file.txt\" :read))",
-        aliases: &[],
+        category: "port",
+        example: "(port/read-all (port/open \"file.txt\" :read))",
+        aliases: &["port/read-all"],
     },
     PrimitiveDef {
-        name: "stream/write",
+        name: "port/write",
         func: prim_stream_write,
         signal: Signal {
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
@@ -244,12 +254,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(2),
         doc: "Write data to port. Returns bytes written.",
         params: &["port", "data"],
-        category: "stream",
-        example: "(stream/write (port/stdout) \"hello\")",
-        aliases: &[],
+        category: "port",
+        example: "(port/write (port/stdout) \"hello\")",
+        aliases: &["stream/write"],
     },
     PrimitiveDef {
-        name: "stream/flush",
+        name: "port/flush",
         func: prim_stream_flush,
         signal: Signal {
             bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
@@ -258,9 +268,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::AtLeast(1),
         doc: "Flush port's write buffer.",
         params: &["port"],
-        category: "stream",
-        example: "(stream/flush (port/stdout))",
-        aliases: &[],
+        category: "port",
+        example: "(port/flush (port/stdout))",
+        aliases: &["stream/flush"],
     },
 ];
 

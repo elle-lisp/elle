@@ -1,30 +1,30 @@
 # Value Representation
 
-The value representation module implements NaN-boxing, the technique used to represent all Elle runtime values in 8 bytes.
+The value representation module implements the tagged union used to represent all Elle runtime values in 16 bytes.
 
-## NaN-Boxing
+## Tagged Union
 
-NaN-boxing uses the IEEE 754 floating-point format to encode multiple types in a single 64-bit value:
+Each `Value` is a `(tag: u64, payload: u64)` pair. The tag discriminates the type, and the payload carries the data:
 
-- **Floating-point numbers**: Use the standard IEEE 754 representation
-- **Integers**: Encoded in the mantissa with a special exponent
-- **Pointers**: Heap-allocated objects encoded as tagged pointers
-- **Immediates**: Booleans, nil, keywords encoded as special bit patterns
+- **Floating-point numbers**: Payload is the IEEE 754 bit pattern
+- **Integers**: Payload is a full-range i64
+- **Pointers**: Payload is a pointer to a heap-allocated object
+- **Immediates**: Booleans, nil, keywords encoded in the payload
 
 ## Value Types
 
 | Type | Representation | Size |
 |------|----------------|------|
-| Integer | Mantissa + exponent | 8 bytes |
-| Float | IEEE 754 | 8 bytes |
-| String | Pointer to heap | 8 bytes |
-| List | Pointer to heap | 8 bytes |
-| Array | Pointer to heap | 8 bytes |
-| Table | Pointer to heap | 8 bytes |
-| Closure | Pointer to heap | 8 bytes |
-| Boolean | Immediate | 8 bytes |
-| Nil | Immediate | 8 bytes |
-| Keyword | Immediate | 8 bytes |
+| Integer | Tag + i64 payload | 16 bytes |
+| Float | Tag + IEEE 754 payload | 16 bytes |
+| String | Tag + pointer to heap | 16 bytes |
+| List | Tag + pointer to heap | 16 bytes |
+| Array | Tag + pointer to heap | 16 bytes |
+| Table | Tag + pointer to heap | 16 bytes |
+| Closure | Tag + pointer to heap | 16 bytes |
+| Boolean | Tag + immediate | 16 bytes |
+| Nil | Tag + immediate | 16 bytes |
+| Keyword | Tag + immediate | 16 bytes |
 
 ## Key Modules
 
@@ -36,11 +36,11 @@ NaN-boxing uses the IEEE 754 floating-point format to encode multiple types in a
 
 ## Performance
 
-NaN-boxing provides:
+The tagged-union representation provides:
 
-- **Compact representation**: All values fit in 8 bytes
 - **Fast operations**: No indirection for immediates
-- **Efficient GC**: Pointer tagging enables fast type checks
+- **Efficient type checks**: Tag comparison is a single integer compare
+- **Full-range integers**: i64 without truncation
 
 ## See Also
 

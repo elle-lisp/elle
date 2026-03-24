@@ -209,7 +209,7 @@ Function bodies never get region instructions.
 **Escape analysis conditions (all must hold):**
 1. No binding is captured by a nested lambda
 2. Body cannot suspend (`may_suspend()`)
-3. Body result is provably a NaN-boxed immediate (`result_is_safe`)
+3. Body result is provably a immediate (`result_is_safe`)
 4. Body contains no dangerous `set` to bindings outside the scope
    (`body_contains_dangerous_outward_set`) — Tier 8: an outward set is
    dangerous only if the assigned value is not provably immediate

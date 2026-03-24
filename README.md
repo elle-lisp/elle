@@ -231,7 +231,7 @@ Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit 
 |------|---------|-------|
 | nil | `nil` | Absence of a value. Falsy. |
 | boolean | `true`, `false` | `false` is falsy; `true` is truthy. |
-| integer | `42`, `-17` | 48-bit signed. No auto-coercion to float. Overflow panics. |
+| integer | `42`, `-17` | Full-range i64. No auto-coercion to float. Overflow wraps. |
 | float | `3.14`, `1e10` | IEEE 754 double. NaN/Infinity are heap-allocated. |
 | symbol | `foo`, `'foo` | Interned identifier. |
 | keyword | `:foo` | Self-evaluating interned name. Used for keys and tags. |
@@ -579,7 +579,7 @@ Exactly two values are falsy. Everything else is truthy.
 
   | Plugin | Description |
   |--------|-------------|
-  | `arrow/` | Apache Arrow columnar data and Parquet serialization |
+  | `arrow` | Apache Arrow columnar data and Parquet serialization |
   | `base64` | Base64 encoding/decoding |
   | `clap` | Declarative CLI argument parsing |
   | `compress` | Compression (gzip, zstd, etc.) |
@@ -590,7 +590,7 @@ Exactly two values are falsy. Everything else is truthy.
   | `jiff` | Date, time, and duration arithmetic |
   | `msgpack` | MessagePack serialization |
   | `oxigraph` | RDF graph database (SPARQL) |
-  | `polars/` | Polars DataFrame operations (eager and lazy APIs) |
+  | `polars` | Polars DataFrame operations (eager and lazy APIs) |
   | `protobuf` | Protocol Buffers serialization |
   | `random` | Pseudo-random number generation |
   | `regex` | Regular expressions |

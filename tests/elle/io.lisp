@@ -10,8 +10,10 @@
 
 # === Scheduler parameter ===
 
-(assert (parameter? *scheduler*) "*scheduler* is a parameter")
-(assert (= (*scheduler*) sync-scheduler) "*scheduler* default is sync-scheduler")
+(assert (parameter? *spawn*) "*spawn* is a parameter")
+# In the async-first model, user code runs under the async scheduler.
+# The sync-scheduler is still available but not the default for user code.
+(assert (fn? (*spawn*)) "*spawn* is bound to a function")
 
 # === sync-scheduler with pure fiber ===
 
@@ -22,31 +24,38 @@
 (spit "/tmp/elle-test-io-lisp" "hello from io test")
 (assert (= (sync-scheduler
     (fiber/new
-      (fn [] (stream/read-all (port/open "/tmp/elle-test-io-lisp" :read)))
-      (bit/or 1 512))) "hello from io test") "sync-scheduler dispatches stream/read-all")
+      (fn [] (port/read-all (port/open "/tmp/elle-test-io-lisp" :read)))
+      (bit/or 1 512))) "hello from io test") "sync-scheduler dispatches port/read-all")
 
-# === ev/spawn pure ===
+# === ev/spawn returns fiber ===
 
-(assert (= (ev/spawn (fn [] 42)) 42) "ev/spawn pure closure")
+(assert (fiber? (ev/spawn (fn [] 42))) "ev/spawn returns a fiber")
 
-# === ev/spawn with I/O ===
+# === ev/spawn with I/O (result collected via mutable) ===
 
 (spit "/tmp/elle-test-ev-spawn-lisp" "spawn content")
-(assert (= (ev/spawn (fn []
-    (stream/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))) "spawn content") "ev/spawn with stream/read-all")
+(let ((result @[]))
+  (ev/spawn (fn []
+    (push result (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))))
+  # Pump happens naturally since we're inside ev/run; spawned fiber runs before user code returns.
+  )
 
 # === Error propagation ===
 
 (let (([ok? _] (protect ((fn () (sync-scheduler (fiber/new (fn [] (error :boom)) (bit/or 1 512)))))))) (assert (not ok?) "sync-scheduler propagates errors"))
 
-(let (([ok? _] (protect ((fn () (ev/spawn (fn [] (error :kaboom)))))))) (assert (not ok?) "ev/spawn propagates errors"))
+# ev/spawn errors propagate when the scheduler pump drains the fiber
+(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/spawn (fn [] (error :kaboom))))))))))
+  (assert (not ok?) "ev/spawn propagates errors via ev/run"))
 
-# === stream/read-line ===
+# === port/read-line ===
 
 (spit "/tmp/elle-test-readline-lisp" "line1\nline2\nline3")
-(assert (= (ev/spawn (fn []
-    (let ((p (port/open "/tmp/elle-test-readline-lisp" :read)))
-      (stream/read-line p)))) "line1") "stream/read-line reads first line")
+(let ((result @[]))
+  (ev/run (fn []
+    (push result (let ((p (port/open "/tmp/elle-test-readline-lisp" :read)))
+      (port/read-line p)))))
+  (assert (= (get result 0) "line1") "port/read-line reads first line"))
 
 # === io/backend errors ===
 
@@ -57,7 +66,7 @@
 (spit "/tmp/elle-test-io-exec-lisp" "hello from elle")
 (let* ((backend (io/backend :sync))
        (port (port/open "/tmp/elle-test-io-exec-lisp" :read))
-       (f (fiber/new (fn [] (stream/read-all port)) 512)))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (assert (= (io/execute backend (fiber/value f)) "hello from elle") "io/execute roundtrip reads file"))
 
@@ -66,18 +75,20 @@
 (spit "/tmp/elle-test-sched-io-lisp" "scheduler test")
 (assert (= (sync-scheduler
     (fiber/new
-      (fn [] (stream/read-all (port/open "/tmp/elle-test-sched-io-lisp" :read)))
+      (fn [] (port/read-all (port/open "/tmp/elle-test-sched-io-lisp" :read)))
       (bit/or 1 512))) "scheduler test") "sync-scheduler dispatches I/O")
 
 # === Pure code unchanged with scheduler ===
 
 (assert (= (+ 1 2 3) 6) "pure code works with scheduler")
 
-# === stream I/O via ev/spawn ===
+# === stream I/O via ev/run ===
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(assert (= (ev/spawn (fn []
-    (stream/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))) "top level") "stream I/O via ev/spawn")
+(let ((result @[]))
+  (ev/run (fn []
+    (push result (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))))
+  (assert (= (get result 0) "top level") "stream I/O via ev/run"))
 
 # === stdlib functions work with scheduler ===
 
@@ -92,7 +103,7 @@
 (spit "/tmp/elle-test-submit-lisp" "test")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-submit-lisp" :read))
-       (f (fiber/new (fn [] (stream/read-all port)) 512)))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (assert (int? (io/submit backend (fiber/value f))) "io/submit returns int"))
 
@@ -112,7 +123,7 @@
 (let ((submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)))
   (let (([ok? _] (protect ((fn ()
       (let* ((backend (io/backend :sync))
-             (f (fiber/new (fn [] (stream/read-all submit-sync-port)) 512)))
+             (f (fiber/new (fn [] (port/read-all submit-sync-port)) 512)))
         (fiber/resume f)
         (io/submit backend (fiber/value f)))))))) (assert (not ok?) "io/submit on sync backend errors")))
 
@@ -121,7 +132,7 @@
 (spit "/tmp/elle-test-submit-wait-lisp" "roundtrip")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-submit-wait-lisp" :read))
-       (f (fiber/new (fn [] (stream/read-all port)) 512)))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
@@ -132,7 +143,7 @@
 (spit "/tmp/elle-test-comp-id-lisp" "test")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-comp-id-lisp" :read))
-       (f (fiber/new (fn [] (stream/read-all port)) 512)))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
@@ -143,7 +154,7 @@
 (spit "/tmp/elle-test-comp-val-lisp" "hello async")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-comp-val-lisp" :read))
-       (f (fiber/new (fn [] (stream/read-all port)) 512)))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
@@ -151,7 +162,7 @@
 
 # === make-async-scheduler ===
 
-(assert (pair? (make-async-scheduler)) "make-async-scheduler returns pair")
+(assert (struct? (make-async-scheduler)) "make-async-scheduler returns struct")
 
 # === ev/run pure thunk ===
 
@@ -163,7 +174,7 @@
 (let ((result @[]))
   (ev/run
     (fn []
-      (push result (stream/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))))
+      (push result (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))))
   (assert (= (get result 0) "async scheduler") "ev/run I/O thunk reads file"))
 
 # === ev/run multiple thunks ===
@@ -173,9 +184,9 @@
 (let ((results @[]))
   (ev/run
     (fn []
-      (push results (stream/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read))))
+      (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read))))
     (fn []
-      (push results (stream/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))
+      (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))
   (assert (= (length results) 2) "ev/run runs multiple thunks"))
 
 # === ev/run error propagation ===
@@ -187,8 +198,8 @@
 (ev/run
   (fn []
     (let ((p (port/open "/tmp/elle-test-ev-write-lisp" :write)))
-      (stream/write p "async write test")
-      (stream/flush p))))
+      (port/write p "async write test")
+      (port/flush p))))
 (assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test") "ev/run write thunk")
 
 # ============================================================================
@@ -231,7 +242,7 @@
       (ev/sleep 0.01)
       (push result :slept))
     (fn []
-      (push result (stream/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read)))))
+      (push result (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read)))))
   (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")
   (assert (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
   (assert (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
@@ -250,14 +261,15 @@
   (assert (= (get result 1) :slow) "longer sleep finishes second"))
 
 # === ev/sleep error: negative duration ===
+# No need for nested ev/run — user code already runs in async scheduler.
 
-(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep -1)))))))) (assert (not ok?) "ev/sleep rejects negative int"))
+(let (([ok? _] (protect (ev/sleep -1)))) (assert (not ok?) "ev/sleep rejects negative int"))
 
-(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep -0.5)))))))) (assert (not ok?) "ev/sleep rejects negative float"))
+(let (([ok? _] (protect (ev/sleep -0.5)))) (assert (not ok?) "ev/sleep rejects negative float"))
 
 # === ev/sleep error: non-numeric ===
 
-(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/sleep "hello")))))))) (assert (not ok?) "ev/sleep rejects non-numeric"))
+(let (([ok? _] (protect (ev/sleep "hello")))) (assert (not ok?) "ev/sleep rejects non-numeric"))
 
 # === ev/sleep error: wrong arity ===
 
@@ -274,4 +286,4 @@
 # This is testable from Rust (eval_source catches all signals) but not from Elle.
 
 # stream_write_non_port_errors — SKIPPED
-# Same issue: stream/write yields SIG_IO before type checking the port argument.
+# Same issue: port/write yields SIG_IO before type checking the port argument.

@@ -2,8 +2,8 @@
 //!
 //! This plugin exposes rustls's UnbufferedClientConnection /
 //! UnbufferedServerConnection as pure state machine primitives.
-//! All socket I/O is performed in Elle code using stream/read and
-//! stream/write on native TCP ports. No I/O happens in this plugin.
+//! All socket I/O is performed in Elle code using port/read and
+//! port/write on native TCP ports. No I/O happens in this plugin.
 
 use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
@@ -17,7 +17,8 @@ use rustls::server::UnbufferedServerConnection;
 use rustls::unbuffered::{ConnectionState, UnbufferedStatus};
 use rustls::{ClientConfig, RootCertStore, ServerConfig};
 use rustls_native_certs::load_native_certs;
-use rustls_pemfile::{certs, private_key};
+use rustls_pki_types::pem::PemObject;
+use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -143,7 +144,7 @@ fn build_client_config(
     if let Some(path) = ca_file {
         let data = std::fs::read(path).map_err(|e| format!("ca-file: {}", e))?;
         let mut reader = Cursor::new(&data);
-        for cert in certs(&mut reader) {
+        for cert in CertificateDer::pem_reader_iter(&mut reader) {
             let cert = cert.map_err(|e| format!("ca-file PEM error: {}", e))?;
             root_store
                 .add(cert)
@@ -883,8 +884,8 @@ fn prim_tls_server_config(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return io_err(name, format!("reading cert-path '{}': {}", cert_path, e)),
     };
     let mut cert_reader = Cursor::new(&cert_data);
-    let cert_chain: Vec<rustls::pki_types::CertificateDer<'static>> =
-        match certs(&mut cert_reader).collect::<Result<Vec<_>, _>>() {
+    let cert_chain: Vec<CertificateDer<'static>> =
+        match CertificateDer::pem_reader_iter(&mut cert_reader).collect::<Result<Vec<_>, _>>() {
             Ok(c) if !c.is_empty() => c,
             Ok(_) => return tls_err(name, format!("no certificates found in '{}'", cert_path)),
             Err(e) => return tls_err(name, format!("cert parse error: {}", e)),
@@ -895,10 +896,9 @@ fn prim_tls_server_config(args: &[Value]) -> (SignalBits, Value) {
         Err(e) => return io_err(name, format!("reading key-path '{}': {}", key_path, e)),
     };
     let mut key_reader = Cursor::new(&key_data);
-    let private_key = match private_key(&mut key_reader) {
-        Ok(Some(k)) => k,
-        Ok(None) => return tls_err(name, format!("no private key found in '{}'", key_path)),
-        Err(e) => return tls_err(name, format!("key parse error: {}", e)),
+    let private_key = match PrivateKeyDer::from_pem_reader(&mut key_reader) {
+        Ok(k) => k,
+        Err(e) => return tls_err(name, format!("key parse error in '{}': {}", key_path, e)),
     };
 
     let config = match ServerConfig::builder()

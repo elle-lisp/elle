@@ -64,7 +64,7 @@ Do NOT put these in Elle scripts:
 Use for **invariants that must hold across all inputs**. These use proptest to
 generate random inputs and verify properties like:
 
-- Roundtrip fidelity (NaN-boxing, reader parse/display, type conversions)
+- Roundtrip fidelity (value encoding, reader parse/display, type conversions)
 - Mathematical laws (commutativity, associativity, identity, inverse)
 - Type discrimination (exactly one type predicate is true for any Value)
 - Determinism (same source always produces same result)
@@ -293,7 +293,7 @@ Choose case counts based on the cost of each test case:
 
 | Cost per case | Cases | Example |
 |---------------|-------|---------|
-| Cheap (no eval, pure Rust) | 1000 | NaN-boxing roundtrips, signal combine laws |
+| Cheap (no eval, pure Rust) | 1000 | Value encoding roundtrips, signal combine laws |
 | Medium (single eval) | 200 | Arithmetic properties, reader roundtrips |
 | Expensive (multiple evals or recursion) | 10-50 | Bug regression, determinism, complex programs |
 

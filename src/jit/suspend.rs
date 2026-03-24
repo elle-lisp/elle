@@ -59,12 +59,9 @@ pub extern "C" fn elle_jit_yield(
     let num_operands = yield_meta.num_spilled as usize;
     let total_spilled = num_locals + num_operands;
 
-    // Build the full interpreter env: captures + locals (params + locally-defined).
-    // The interpreter's LoadUpvalue accesses env[idx] for ALL variables (captures,
-    // params, and locals). The JIT stores captures in closure.env and params/locals
-    // in Cranelift variables. When spilling for yield, locals are in the first
-    // num_locals slots of the spilled buffer. We reconstruct the full env so the
-    // interpreter can resume correctly.
+    // Build the env: captures + locals (params + locally-defined).
+    // The interpreter's LoadUpvalue/StoreUpvalue access env[idx] for all
+    // variables: captures, params, and locally-defined.
     let num_captures = closure.env.len();
     let mut env = Vec::with_capacity(num_captures + num_locals);
     env.extend(closure.env.iter().copied());
@@ -74,9 +71,11 @@ pub extern "C" fn elle_jit_yield(
     }
     let env = std::rc::Rc::new(env);
 
-    // The operand stack is the remaining spilled values after locals.
-    let mut stack = Vec::with_capacity(num_operands);
-    for i in num_locals..total_spilled {
+    // The interpreter stack must have locals first (at frame_base offsets),
+    // then any operand stack entries. LoadLocal/StoreLocal read/write
+    // stack[frame_base + idx].
+    let mut stack = Vec::with_capacity(total_spilled);
+    for i in 0..total_spilled {
         let v = unsafe { *spilled_values.add(i) };
         stack.push(v);
     }
@@ -146,12 +145,10 @@ pub extern "C" fn elle_jit_yield_through_call(
     let num_operands = call_meta.num_spilled as usize;
     let total_spilled = num_locals + num_operands;
 
-    // Build the full interpreter env: captures + locals (params + locally-defined).
-    // The interpreter's LoadUpvalue accesses env[idx] for ALL variables (captures,
-    // params, and locals). The JIT stores captures in closure.env and params/locals
-    // in Cranelift variables. When spilling for yield-through-call, locals are in
-    // the first num_locals slots of the spilled buffer. We reconstruct the full
-    // env so the interpreter can resume correctly.
+    // Build the env: captures + locals (params + locally-defined).
+    // The interpreter's LoadUpvalue/StoreUpvalue access env[idx] for all
+    // variables: captures, params, and locally-defined. The JIT stores
+    // captures in closure.env and params/locals in the spill buffer.
     let num_captures = closure.env.len();
     let mut env = Vec::with_capacity(num_captures + num_locals);
     env.extend(closure.env.iter().copied());
@@ -161,9 +158,12 @@ pub extern "C" fn elle_jit_yield_through_call(
     }
     let env = std::rc::Rc::new(env);
 
-    // The operand stack is the remaining spilled values after locals.
-    let mut stack = Vec::with_capacity(num_operands);
-    for i in num_locals..total_spilled {
+    // The interpreter stack must have locals first (at frame_base offsets),
+    // then any operand stack entries. LoadLocal/StoreLocal read/write
+    // stack[frame_base + idx]. The spill buffer layout matches this:
+    // [params..., locally-defined..., operands...].
+    let mut stack = Vec::with_capacity(total_spilled);
+    for i in 0..total_spilled {
         let v = unsafe { *spilled_values.add(i) };
         stack.push(v);
     }
@@ -332,8 +332,14 @@ mod tests {
         assert_eq!(frame.ip, 42);
         assert_eq!(&*frame.bytecode, &bytecode);
         assert_eq!(&*frame.constants, &constants);
-        assert_eq!(&*frame.env, &env);
+        // env = captures [777] + locals [10, 20, 30]
+        assert_eq!(frame.env.len(), 4);
+        assert_eq!(frame.env[0].as_int(), Some(777));
+        assert_eq!(frame.env[1].as_int(), Some(10));
+        assert_eq!(frame.env[2].as_int(), Some(20));
+        assert_eq!(frame.env[3].as_int(), Some(30));
 
+        // stack = locals [10, 20, 30] + operands [40, 50, 60]
         assert_eq!(frame.stack.len(), 6);
         assert_eq!(frame.stack[0].as_int(), Some(10));
         assert_eq!(frame.stack[1].as_int(), Some(20));
@@ -425,6 +431,12 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+        // env = captures (0) + locals [100, 200, 300]
+        assert_eq!(frame.env.len(), 3);
+        assert_eq!(frame.env[0].as_int(), Some(100));
+        assert_eq!(frame.env[1].as_int(), Some(200));
+        assert_eq!(frame.env[2].as_int(), Some(300));
+        // stack = locals [100, 200, 300] + operands (0)
         assert_eq!(frame.stack.len(), 3);
         assert_eq!(frame.stack[0].as_int(), Some(100));
         assert_eq!(frame.stack[1].as_int(), Some(200));
@@ -454,6 +466,12 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+        // env = captures (0) + 10 locals
+        assert_eq!(frame.env.len(), 10);
+        for i in 0..10 {
+            assert_eq!(frame.env[i].as_int(), Some(i as i64), "env[{}] mismatch", i);
+        }
+        // stack = 10 locals + 20 operands
         assert_eq!(frame.stack.len(), 30);
         for i in 0..30 {
             assert_eq!(
@@ -503,6 +521,9 @@ mod tests {
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
         assert_eq!(frame.ip, 20);
+        // yield point 1: num_locals=1, num_spilled=3
+        // env = captures (0) + 1 local; stack = 1 local + 3 operands
+        assert_eq!(frame.env.len(), 1);
         assert_eq!(frame.stack.len(), 4);
     }
 
@@ -534,6 +555,10 @@ mod tests {
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+        // env = captures (0) + 2 locals; stack = 2 locals + 2 operands
+        assert_eq!(frame.env.len(), 2);
+        assert!(frame.env[0].is_nil());
+        assert_eq!(frame.env[1].as_bool(), Some(true));
         assert_eq!(frame.stack.len(), 4);
         assert!(frame.stack[0].is_nil());
         assert_eq!(frame.stack[1].as_bool(), Some(true));

@@ -32,9 +32,9 @@ pub struct Fiber {
     pub status: FiberStatus,                  // New, Alive, Suspended, Dead, Error
     pub mask: SignalBits,                     // which signals parent catches from this fiber
     pub parent: Option<WeakFiberHandle>,      // weak back-pointer (avoids Rc cycles)
-    pub parent_value: Option<Value>,          // cached NaN-boxed Value for parent
+    pub parent_value: Option<Value>,          // cached Value for parent
     pub child: Option<FiberHandle>,           // most recently resumed child
-    pub child_value: Option<Value>,           // cached NaN-boxed Value for child
+    pub child_value: Option<Value>,           // cached Value for child
     pub closure: Rc<Closure>,                 // the closure this fiber wraps
     pub env: Option<HashMap<u32, Value>>,     // dynamic bindings (future)
     pub signal: Option<(SignalBits, Value)>,  // signal payload or return value
@@ -44,7 +44,7 @@ pub struct Fiber {
 }
 ```
 
-The `parent_value` and `child_value` fields cache the NaN-boxed `Value`
+The `parent_value` and `child_value` fields cache the `Value`
 wrapping the handle, so `fiber/parent` and `fiber/child` return
 identity-preserving values without re-allocating heap objects.
 

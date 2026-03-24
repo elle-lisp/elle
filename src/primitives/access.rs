@@ -321,12 +321,28 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
 /// For structs: mutates in-place (@struct) or returns new (struct)
 /// `(put collection key value)`
 pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
+    // 2-arg form: (put set value) — delegates to add
+    if args.len() == 2 {
+        if args[0].is_set() || args[0].is_set_mut() {
+            return crate::primitives::sets::prim_add(args);
+        }
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "put: 2-argument form requires a set, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    }
     if args.len() != 3 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("put: expected 3 arguments, got {}", args.len()),
+                format!("put: expected 2-3 arguments, got {}", args.len()),
             ),
         );
     }

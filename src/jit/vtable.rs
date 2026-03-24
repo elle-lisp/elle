@@ -99,6 +99,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,
     pub(crate) has_signal: FuncId,
+    pub(crate) region_enter: FuncId,
+    pub(crate) region_exit: FuncId,
 }
 
 /// Register all `elle_jit_*` symbols with the JITBuilder.
@@ -285,6 +287,14 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         "elle_jit_has_signal",
         dispatch::elle_jit_has_signal as *const u8,
     );
+    builder.symbol(
+        "elle_jit_region_enter",
+        dispatch::elle_jit_region_enter as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_region_exit",
+        dispatch::elle_jit_region_exit as *const u8,
+    );
 }
 
 /// Declare all runtime helper functions in the JITModule, returning their FuncIds.
@@ -360,6 +370,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let yield_sig = make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[I64, I64]);
     // jit_yield_through_call: (spilled_ptr, call_site_idx, vm, ctag, cpay) -> (tag, payload)
     let ytc_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
+    // void -> (tag, payload)  (no arguments, returns NIL)
+    let void_to_value = make_sig(module, &[], &[I64, I64]);
 
     Ok(RuntimeHelpers {
         add: declare(module, "elle_jit_add", &value_binary)?,
@@ -435,5 +447,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         jit_yield: declare(module, "elle_jit_yield", &yield_sig)?,
         jit_yield_through_call: declare(module, "elle_jit_yield_through_call", &ytc_sig)?,
         has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
+        region_enter: declare(module, "elle_jit_region_enter", &void_to_value)?,
+        region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
     })
 }

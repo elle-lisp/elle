@@ -1,3 +1,24 @@
+# lib/
+
+Reusable Elle modules. Each is a closure: `import-file` loads it, calling
+the result initializes it and returns a struct of exports. Modules that
+depend on other modules or plugins take them as arguments.
+
+## Modules
+
+| File | Purpose |
+|------|---------|
+| `http.lisp` | HTTP/1.1 client and server over TCP |
+| `tls.lisp` | TLS 1.2/1.3 client and server |
+| `redis.lisp` | Redis client (RESP2) over TCP |
+| `dns.lisp` | DNS client (RFC 1035) |
+| `aws.lisp` | AWS client: SigV4 signing, HTTPS, service dispatch |
+| `aws/` | AWS service modules (generated) + SigV4 signing — see [`aws/AGENTS.md`](aws/AGENTS.md) |
+| `contract.lisp` | Compositional validation for function boundaries |
+| `lua.lisp` | Lua standard library compatibility prelude |
+
+---
+
 # lib/http
 
 Agent guide for `lib/http.lisp` — Pure Elle HTTP/1.1 client and server.
@@ -12,12 +33,12 @@ Single file. No Rust changes (other than `port/path`, added in Chunk 0).
 Client:
 ```
 http-get url → parse-url → tcp/connect → write-request-line → write-headers
-→ stream/flush → read-status-line → read-headers → read-body → port/close → response
+→ port/flush → read-status-line → read-headers → read-body → port/close → response
 ```
 
 Server:
 ```
-http-serve port handler → tcp/listen → ev/run → forever:
+http-serve port handler → tcp/listen → forever:
   tcp/accept → ev/spawn → defer(port/close):
     read-request → handler → write-response
 ```
@@ -151,12 +172,12 @@ tls:accept listener config → tcp/accept → tls/server-state → tls-handshake
 
 Read:
 ```
-tls:read conn n → check plaintext buffer → stream/read TCP → tls/process → tls/read-plaintext
+tls:read conn n → check plaintext buffer → port/read TCP → tls/process → tls/read-plaintext
 ```
 
 Write:
 ```
-tls:write conn data → tls/encrypt → stream/write TCP
+tls:write conn data → tls/encrypt → port/write TCP
 ```
 
 Stream:
@@ -189,7 +210,7 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 
 ## Invariants
 
-1. All functions require a scheduler context (`ev/run` or `ev/spawn`).
+1. All functions yield (async I/O).
 2. `tls:close` always closes the TCP port, even if `close_notify` fails.
 3. After every `tls/process` call, outgoing data must be drained and sent.
 4. `tls:lines` and `tls:chunks` close the connection when exhausted.
@@ -200,4 +221,93 @@ tls:lines conn → coro/new (loop: tls:read-line → yield)
 
 ```bash
 ./target/debug/elle tests/elle/tls.lisp
+```
+
+---
+
+# lib/redis
+
+Agent guide for `lib/redis.lisp` — Pure Elle Redis client (RESP2).
+
+## Purpose
+
+Redis client over TCP using Elle's async I/O primitives. Single file. No Rust
+plugin. Speaks RESP2.
+
+## Data flow
+
+```
+redis:with host port thunk → tcp/connect → parameterize(*redis-port*) → thunk
+  redis:set "key" "val" → redis-cmd → resp-encode → port/write → port/flush → resp-read → resp-ok?
+  redis:get "key"        → redis-cmd → resp-encode → port/write → port/flush → resp-read
+```
+
+Manager:
+```
+redis:manager host port → {:run fn :port-param param}
+  run thunk → connect → defer(close) → loop: parameterize → thunk
+    on error: terminal? → crash | reconnect → retry
+```
+
+## Exported functions
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `redis:connect` | `host port` | TCP port | async |
+| `redis:close` | `port` | nil | |
+| `redis:with` | `host port thunk` | thunk result | async, manages lifecycle |
+| `redis:manager` | `host port [&named terminal? max-retries]` | manager struct | |
+| `redis:get` | `key` | string or nil | uses `*redis-port*` |
+| `redis:set` | `key value [&named ex px nx xx]` | true or string | uses `*redis-port*` |
+| `redis:hgetall` | `key` | struct (string keys) | uses `*redis-port*` |
+| `redis:subscribe` | `port & channels` | port | enters sub mode |
+| `redis:recv` | `port` | `{"channel" ... "data" ...}` or nil | |
+| `redis:pipeline` | `& commands` | array of results | uses `*redis-port*` |
+| `redis:ping` | | "PONG" | uses `*redis-port*` |
+| `redis:test` | | true | RESP self-tests |
+
+Full command list: strings, keys, hashes, lists, sets, sorted sets, server,
+pub/sub. See export struct at bottom of file.
+
+## Connection model
+
+The connection is a bare TCP port. No wrapper struct. `*redis-port*` is a
+`Parameter` that holds the current connection for ambient access by commands.
+
+Two usage patterns:
+1. **`redis:with`** — simple: opens connection, binds parameter, runs thunk,
+   closes on exit.
+2. **`redis:manager`** — resilient: reconnects on non-terminal errors, crashes
+   on terminal ones.
+
+## Value mapping
+
+| Redis | Elle |
+|-------|------|
+| Nil bulk string (`$-1`) | `nil` |
+| Integer reply | integer |
+| Simple string | string |
+| Array reply | array (immutable) |
+| HGETALL | struct with string keys |
+| EXISTS/HEXISTS/SISMEMBER/EXPIRE | boolean |
+| OK replies | `true` |
+
+## Invariants
+
+1. All commands require `*redis-port*` to be bound (via `redis:with` or
+   `redis:manager`).
+2. Pub/sub functions take the raw port directly (not through the parameter).
+3. `resp-read-raw` returns error structs; `resp-read` signals errors.
+4. HGETALL returns string keys, not keyword keys.
+5. `string/size-of` is used for bulk string length (byte length, not grapheme
+   count).
+
+## Running tests
+
+```bash
+# RESP self-tests only (no Redis needed)
+echo '((import-file "lib/redis.lisp"):test)' | ./target/debug/elle
+
+# Full integration tests (requires Redis on 127.0.0.1:6379)
+./target/debug/elle tests/elle/redis.lisp
 ```

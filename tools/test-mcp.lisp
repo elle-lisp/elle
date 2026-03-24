@@ -15,13 +15,13 @@
 
 (defn send [pin msg]
   "Send a JSON-RPC message to the server."
-  (stream/write pin (json/serialize msg))
-  (stream/write pin "\n")
-  (stream/flush pin))
+  (port/write pin (json/serialize msg))
+  (port/write pin "\n")
+  (port/flush pin))
 
 (defn recv [pout]
   "Read a JSON-RPC response from the server."
-  (let [[line (stream/read-line pout)]]
+  (let [[line (port/read-line pout)]]
     (when (nil? line)
       (error {:error :eof :message "server closed stdout"}))
     (json/parse line)))

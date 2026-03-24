@@ -1,4 +1,6 @@
-use super::{SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_HALT, SIG_IO, SIG_YIELD};
+use super::{
+    SIG_DEBUG, SIG_ERROR, SIG_EXEC, SIG_FFI, SIG_FUEL, SIG_HALT, SIG_IO, SIG_WAIT, SIG_YIELD,
+};
 /// Signal registry for mapping signal keywords to bit positions.
 ///
 /// The registry maintains a global mapping of signal keywords (`:error`, `:yield`, etc.)
@@ -46,6 +48,7 @@ impl SignalRegistry {
     /// - `:io` at bit 9
     /// - `:exec` at bit 11
     /// - `:fuel` at bit 12
+    /// - `:wait` at bit 14
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
@@ -57,6 +60,7 @@ impl SignalRegistry {
         let _ = registry.register_builtin("io", SIG_IO.0.trailing_zeros());
         let _ = registry.register_builtin("exec", SIG_EXEC.0.trailing_zeros());
         let _ = registry.register_builtin("fuel", SIG_FUEL.0.trailing_zeros());
+        let _ = registry.register_builtin("wait", SIG_WAIT.0.trailing_zeros());
         registry
     }
 

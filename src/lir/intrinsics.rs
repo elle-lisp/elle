@@ -5,7 +5,7 @@
 //! of generic LoadGlobal + Call sequences.
 //!
 //! Also provides `build_immediate_primitives` — a set of primitive names
-//! whose return value is guaranteed to be a NaN-boxed immediate (int, float,
+//! whose return value is guaranteed to be an immediate (int, float,
 //! bool, nil, keyword, symbol). Used by escape analysis (`result_is_safe`)
 //! to accept calls to these primitives in scope-allocated let bodies.
 
@@ -59,11 +59,11 @@ pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, Int
     map
 }
 
-/// Primitives guaranteed to return NaN-boxed immediates.
+/// Primitives guaranteed to return immediates.
 ///
 /// Every name here has been verified: on success, the primitive returns
 /// `Value::int(...)`, `Value::float(...)`, `Value::bool(...)`, or
-/// `Value::keyword(...)` — all NaN-boxed immediates that `RegionExit`
+/// `Value::keyword(...)` — all immediates that `RegionExit`
 /// will not free. On error, primitives return `(SIG_ERROR, ...)` which
 /// propagates via the signal mechanism, never as a normal return value.
 ///
@@ -96,6 +96,7 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     // Collection predicates → bool
     "empty?",
     "has?",
+    "contains?",
     // String predicates → bool (canonical + aliases)
     "string/contains?",
     "string-contains?",

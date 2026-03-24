@@ -23,17 +23,13 @@ pub mod variables;
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
 
-use crate::compiler::bytecode::Bytecode;
-use crate::io::backend::SyncBackend;
-use crate::io::request::IoRequest;
-use crate::port::Port;
+use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::pipeline::lookup_stdlib_value;
 use crate::symbol::SymbolTable;
 use crate::value::{
-    error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_IO, SIG_SWITCH,
-    SIG_YIELD,
+    error_val, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH, SIG_YIELD,
 };
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 impl VM {
     pub fn execute(&mut self, bytecode: &Bytecode) -> Result<Value, String> {
@@ -154,6 +150,11 @@ impl VM {
                 .handle
                 .with_mut(|f| f.status = crate::value::FiberStatus::Dead);
         }
+        if result_bits.contains(SIG_ERROR) {
+            pending
+                .handle
+                .with_mut(|f| f.status = crate::value::FiberStatus::Error);
+        }
 
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(crate::value::SIG_TERMINAL));
@@ -163,11 +164,6 @@ impl VM {
             self.fiber.child_value = None;
             self.resume_suspended(caller_frames, result_value)
         } else {
-            if result_bits.contains(SIG_ERROR) {
-                pending
-                    .handle
-                    .with_mut(|f| f.status = crate::value::FiberStatus::Error);
-            }
             self.fiber.signal = Some((result_bits, result_value));
 
             // Rebuild fiber.suspended for uncaught signals: the outer code
@@ -189,140 +185,66 @@ impl VM {
         }
     }
 
-    /// Execute bytecode with inline SIG_IO handling.
+    /// Execute user bytecode under the async scheduler.
     ///
-    /// Used for user-facing execution (files, REPL). Not used for
-    /// internal compilation (prelude, stdlib, macro expansion).
+    /// Wraps the bytecode in a thunk and calls `(ev/run thunk)` to
+    /// install the async scheduler. The thunk carries the bytecode's
+    /// inferred signal so fiber scheduling and shared allocator
+    /// provisioning work correctly.
     ///
-    /// Unlike `execute`, which errors on SIG_IO, this method handles
-    /// I/O requests inline: when a stream primitive yields SIG_IO,
-    /// the request is executed synchronously via SyncBackend and the
-    /// result is pushed back onto the stack. Execution then resumes
-    /// from where it left off.
-    ///
-    /// This avoids wrapping user code in a fiber, which would add an
-    /// extra nesting level and break code that manages its own fibers
-    /// (e.g., process schedulers, coroutine examples).
-    ///
-    /// If `*scheduler*` is not yet defined (stdlib hasn't loaded),
-    /// falls back to `vm.execute` (direct execution without I/O).
+    /// Falls back to direct execution if stdlib isn't loaded yet.
     pub fn execute_scheduled(
         &mut self,
         bytecode: &Bytecode,
         symbols: &SymbolTable,
     ) -> Result<Value, String> {
-        // Check if *scheduler* exists as a gate: if stdlib hasn't loaded
-        // yet, fall back to direct execution (no I/O support needed).
-        // In the file-as-letrec model, *scheduler* is a parameter defined in stdlib.
-        // If the symbol exists in the symbol table, stdlib has been loaded.
-        let has_scheduler = symbols.get("*scheduler*").is_some();
-
-        if !has_scheduler {
-            return self.execute(bytecode);
-        }
-
-        // Execute with inline SIG_IO handling.
-        //
-        // When a primitive yields SIG_IO, the VM saves the entire call
-        // stack into `fiber.suspended` (a Vec<SuspendedFrame>). We
-        // execute the I/O synchronously, then replay the suspended
-        // frames via `resume_suspended` — the same mechanism used by
-        // fiber resume. This correctly restores locals, call frames,
-        // and stack state at every nesting level.
-        self.location_map = bytecode.location_map.clone();
-        self.error_loc = None;
-
-        let mut backend: Option<SyncBackend> = None;
-
-        // Initial execution.
-        let mut bits = {
-            let bc = Rc::new(bytecode.instructions.to_vec());
-            let cs = Rc::new(bytecode.constants.to_vec());
-            let env = Rc::new(vec![]);
-            let lm = Rc::new(self.location_map.clone());
-            self.execute_bytecode_inner_impl(&bc, &cs, &env, 0, &lm).0
+        let ev_run_id = match symbols.get("ev/run") {
+            Some(id) => id,
+            None => return self.execute(bytecode),
+        };
+        let ev_run = match lookup_stdlib_value(ev_run_id) {
+            Some(v) => v,
+            None => return self.execute(bytecode),
         };
 
-        loop {
-            if let Some(tail) = self.pending_tail_call.take() {
-                bits = self
-                    .execute_bytecode_inner_impl(
-                        &tail.bytecode,
-                        &tail.constants,
-                        &tail.env,
-                        0,
-                        &tail.location_map,
-                    )
-                    .0;
-                continue;
-            }
+        let thunk = Value::closure(crate::value::Closure {
+            template: Rc::new(crate::value::ClosureTemplate {
+                bytecode: Rc::new(bytecode.instructions.to_vec()),
+                arity: crate::value::Arity::Exact(0),
+                num_locals: 0,
+                num_captures: 0,
+                num_params: 0,
+                constants: Rc::new(bytecode.constants.to_vec()),
+                signal: bytecode.signal,
+                lbox_params_mask: 0,
+                lbox_locals_mask: 0,
+                symbol_names: Rc::new(std::collections::HashMap::new()),
+                location_map: Rc::new(bytecode.location_map.clone()),
+                jit_code: None,
+                lir_function: None,
+                doc: None,
+                syntax: None,
+                vararg_kind: crate::hir::VarargKind::List,
+                name: None,
+            }),
+            env: Rc::new(vec![]),
+            squelch_mask: 0,
+        });
 
-            if bits.is_ok() || bits == SIG_HALT {
-                let (_, value) = self.fiber.signal.take().unwrap();
-                return Ok(value);
-            } else if bits.contains(SIG_ERROR) {
-                let (_, err_value) = self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
-                return Err(self.format_error_with_location(err_value));
-            } else if bits.contains(SIG_YIELD) && bits.contains(SIG_IO) {
-                // SIG_YIELD | SIG_IO — an I/O request from a fiber.
-                // Extract the IoRequest, execute I/O, then resume the
-                // suspended frame chain with the result.
-                let (_, request_val) = self.fiber.signal.take().unwrap();
-                let backend = backend.get_or_insert_with(SyncBackend::new);
-                let io_result = match request_val.as_external::<IoRequest>() {
-                    Some(req) => {
-                        // Resolve effective timeout: per-call overrides port-level.
-                        let effective_timeout = req.timeout.or_else(|| {
-                            req.port
-                                .as_external::<Port>()
-                                .and_then(|p| p.timeout_ms())
-                                .map(Duration::from_millis)
-                        });
-                        let deadline = effective_timeout.map(|d| Instant::now() + d);
+        let synthetic_bc = vec![
+            Instruction::LoadConst as u8,
+            0,
+            0,
+            Instruction::LoadConst as u8,
+            0,
+            1,
+            Instruction::Call as u8,
+            1,
+            Instruction::Return as u8,
+        ];
+        let synthetic_constants = vec![thunk, ev_run];
 
-                        let (result_bits, result_val) = backend.execute(req);
-
-                        // Post-hoc deadline check (sync backend blocks).
-                        if let Some(dl) = deadline {
-                            if Instant::now() > dl {
-                                return Err(self.format_error_with_location(error_val(
-                                    "timeout",
-                                    "I/O operation timed out",
-                                )));
-                            }
-                        }
-
-                        if result_bits.contains(SIG_ERROR) {
-                            return Err(self.format_error_with_location(result_val));
-                        }
-                        result_val
-                    }
-                    None => {
-                        return Err(format!(
-                            "SIG_IO with non-IoRequest value: {}",
-                            request_val.type_name()
-                        ));
-                    }
-                };
-
-                // Resume the suspended frame chain with the I/O result.
-                // This restores locals and call frames at every level.
-                let frames = self.fiber.suspended.take().unwrap_or_default();
-                bits = self.resume_suspended(frames, io_result);
-            } else if bits == SIG_SWITCH {
-                bits = self.handle_sig_switch();
-            } else if bits.contains(SIG_YIELD) {
-                // SIG_YIELD without SIG_IO — unexpected outside coroutine.
-                return Err("Unexpected yield outside coroutine context".to_string());
-            } else {
-                // Any other suspending signal (user-defined bits 16+, bare
-                // SIG_IO, etc.) — unexpected outside a fiber/scheduler.
-                self.fiber.signal.take();
-                return Err(format!(
-                    "Unexpected signal outside coroutine context: 0x{:x}",
-                    bits.0
-                ));
-            }
-        }
+        self.location_map = bytecode.location_map.clone();
+        self.execute_bytecode(&synthetic_bc, &synthetic_constants, None)
     }
 }
