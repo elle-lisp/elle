@@ -1235,6 +1235,9 @@
       # shutdown-fn: signal shutdown
       (fn (timeout-ms)
         (put shutdown-req 0 timeout-ms))
+     :mark-joined
+      # mark a fiber as observed (suppress unjoined-error crash)
+      (fn (fiber) (add joined fiber))
      :backend backend}))
 
 (def *shutdown* (make-parameter nil))
@@ -1269,12 +1272,28 @@
                    (*spawn* (get sched :spawn))
                    (*shutdown* (get sched :shutdown))
                    (*io-backend* (get sched :backend)))
-      (var last-fiber nil)
-      (each t in thunks
-        (assign last-fiber (ev/spawn t)))
-      ((get sched :pump))
-      (when (not (nil? last-fiber))
-        (fiber/value last-fiber)))))
+      (let ([mark (get sched :mark-joined)]
+            [fibers @[]])
+        (each t in thunks
+          (push fibers (ev/spawn t)))
+        ((get sched :pump))
+        # Mark all entry-point fibers as joined — they're owned by ev/run,
+        # not orphaned.  Propagate the first error we find among them.
+        (var result nil)
+        (var first-error nil)
+        (each f in fibers
+          (mark f)
+          (let ([s (fiber/status f)])
+            (when (and (nil? first-error)
+                       (or (= s :error)
+                           (not (= 0 (bit/and (fiber/bits f) 1)))))
+              (assign first-error (fiber/value f)))))
+        (when (not (nil? first-error))
+          (error first-error))
+        # Return the last fiber's value
+        (when (> (length fibers) 0)
+          (assign result (fiber/value (get fibers (- (length fibers) 1)))))
+        result))))
 
 ## ── Structured concurrency primitives ───────────────────────────────
 
@@ -1442,8 +1461,8 @@
         (break true))))
 
 (defn all? [pred coll]
-  "Return true if all values in the sequence are truthy. Short-circuits."
-  (any? (fn [x] (not (pred x))) coll))
+  "Return true if pred is truthy for every element. Short-circuits on first failure."
+  (not (any? (fn [x] (not (pred x))) coll)))
 
 (defn find [pred coll]
   "Return the first value in the sequence where (pred value) is truthy. Short-circuits.

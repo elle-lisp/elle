@@ -82,13 +82,11 @@
 
 (assert (= (+ 1 2 3) 6) "pure code works with scheduler")
 
-# === stream I/O via ev/run ===
+# === stream I/O ===
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(let ((result @[]))
-  (ev/run (fn []
-    (push result (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))))
-  (assert (= (get result 0) "top level") "stream I/O via ev/run"))
+(assert (= (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read))
+           "top level") "stream I/O works")
 
 # === stdlib functions work with scheduler ===
 
