@@ -20,10 +20,6 @@
 ## mqtt-conn shape:
 ##   {:tcp port :mqtt mqtt-state}
 
-(defn resolve-host [host]
-  "Resolve hostname to IP for tcp/connect."
-  (first (sys/resolve host)))
-
 ## ── Entry-point thunk ─────────────────────────────────────────────────
 
 (fn [plugin]
@@ -55,10 +51,10 @@
 
   (defn mqtt/connect [host port-num &named client-id username password clean-session keep-alive]
     "Connect to an MQTT broker. Returns {:tcp port :mqtt mqtt-state}."
+    (default clean-session true)
     (let* [[opts {:client-id client-id :username username :password password
-                  :clean-session (or clean-session true) :keep-alive keep-alive}]
-           [ip (resolve-host host)]
-           [tcp-port (tcp/connect ip port-num)]
+                  :clean-session clean-session :keep-alive keep-alive}]
+           [tcp-port (tcp/connect host port-num)]
            [mqtt (plugin:state opts)]
            [conn {:tcp tcp-port :mqtt mqtt}]]
       (let [[[ok? err] (protect
