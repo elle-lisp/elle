@@ -9,6 +9,11 @@
 #   zmq:send/recv-string  — message passing
 #   inproc:// transport   — in-process messaging (no network)
 
+(let [([ok? _] (protect (ffi/native "libzmq.so")))]
+  (unless ok?
+    (println "SKIP: libzmq.so not found")
+    (sys/exit 0)))
+
 (def zmq (import-file "lib/zmq.lisp"))
 
 (def ctx (zmq:context))

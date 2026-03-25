@@ -631,6 +631,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
 
         Value::closure(Closure {

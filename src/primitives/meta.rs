@@ -686,6 +686,8 @@ mod tests {
             syntax,
             vararg_kind: VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         Value::closure(Closure {
             template,

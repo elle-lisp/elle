@@ -46,14 +46,16 @@
       (stream/collect (port/lines p))))))]]
   (assert (= (length result) 3) "3: ev/join + port/lines collects 3 lines"))
 
-# === 4. Closed port error propagates through ev/join ===
+# === 4. Closed port: port/lines yields the io-error as a value ===
 
 (spit "/tmp/elle-async-err-test-4" "some data")
 (let (([ok? val] (ev/join-protected (ev/spawn (fn []
     (let [[p (port/open "/tmp/elle-async-err-test-4" :read)]]
       (port/close p)
       (stream/collect (port/lines p))))))))
-  (assert (not ok?) "4: closed port error propagates through ev/join-protected"))
+  (assert ok? "4: stream/collect succeeds (error yielded as value, not signaled)")
+  (assert (= (length val) 1) "4: one element collected")
+  (assert (= (get (first val) :error) :io-error) "4: collected element is io-error"))
 
 # === 5. Multiple fibers, one errors — ev/join-protected catches ===
 
@@ -67,6 +69,7 @@
         ([ok2? v2] (ev/join-protected f2)))
     (assert ok1? "5a: first fiber succeeds")
     (assert (= 42 v1) "5b: first fiber returns 42")
-    (assert (not ok2?) "5c: second fiber (closed port) errors")))
+    (assert ok2? "5c: second fiber succeeds (io-error yielded as value)")
+    (assert (= (get (first v2) :error) :io-error) "5d: collected io-error")))
 
 (println "all async error propagation tests passed")

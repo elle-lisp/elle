@@ -80,27 +80,16 @@ impl VM {
         // Initialize active_allocator now that the heap is in its stable Box.
         self.fiber.heap.init_active_allocator();
 
-        // 3b. Provide shared allocator to child (for yielding or I/O fibers).
-        //     After the swap: self.fiber is child, child_fiber is parent.
-        //     Two cases:
-        //     (a) Parent already has shared_alloc → propagate down the chain.
-        //     (c) Parent has no shared_alloc → create on parent's heap.
-        //         After issue-525, saved_heap is never null (root always has FiberHeap),
-        //         so root→child transitions use this path too.
-        // All child fibers get a shared allocator so that heap objects
-        // allocated during child execution live on the parent's heap.
-        // Without this, Values that escape the child (e.g., closures
-        // sharing a ClosureTemplate with the parent) would be freed
-        // when the child's FiberHeap is torn down.
-        {
-            let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
-                // Parent has shared_alloc from its own parent — propagate
-                child_fiber.heap.shared_alloc()
-            } else {
-                // Reuse existing or create shared allocator on parent's heap.
-                child_fiber.heap.get_or_create_shared_allocator()
-            };
-            self.fiber.heap.set_shared_alloc(shared_ptr);
+        // 3b. Install shared allocator when escape analysis indicates the fiber
+        // body may produce heap values that escape to the parent:
+        // - result is not provably immediate (return value could be heap)
+        // - body may suspend (yielded values escape)
+        // - body has outward set of heap values (captured mutation)
+        let tmpl = &self.fiber.closure.template;
+        if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
+            let parent_heap: &mut crate::value::FiberHeap = &mut child_fiber.heap;
+            let ptr = parent_heap.get_or_create_shared_allocator();
+            self.fiber.heap.set_shared_alloc(ptr);
         }
 
         // 4. Execute the closure
@@ -662,6 +651,11 @@ impl VM {
 
         if result_bits.is_ok() || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL))
         {
+            // Abort is terminal — even if the parent catches the signal,
+            // the aborted fiber is finished and must not stay :paused.
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.stack.push(result_value);
@@ -712,6 +706,10 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // Abort is terminal — set child to :error even when caught
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             self.fiber.signal = Some((SIG_OK, result_value));
@@ -791,7 +789,18 @@ impl VM {
                 if result_bits.contains(SIG_ERROR) {
                     JitValue::nil()
                 } else {
-                    // Uncaught non-error signal (yield, etc.) — side-exit
+                    // Uncaught non-error signal (yield, I/O, etc.) — side-exit.
+                    // Create a FiberResume frame so that resume_suspended will
+                    // re-resume the child fiber after the signal is resolved.
+                    // Without this, the raw io-request value leaks through as
+                    // the call result instead of the resolved I/O value.
+                    let fiber_resume_frame = SuspendedFrame::FiberResume {
+                        handle: handle.clone(),
+                        fiber_value,
+                    };
+                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                    frames.push(fiber_resume_frame);
+                    self.fiber.suspended = Some(frames);
                     YIELD_SENTINEL
                 }
             }
@@ -860,6 +869,10 @@ impl VM {
         let caught = result_bits.is_ok()
             || (mask.covers(result_bits) && !result_bits.contains(SIG_TERMINAL));
         if caught {
+            // Abort is terminal — set child to :error even when caught
+            if result_bits.contains(SIG_ERROR) {
+                handle.with_mut(|f| f.status = FiberStatus::Error);
+            }
             self.fiber.child = None;
             self.fiber.child_value = None;
             JitValue::from_value(result_value)

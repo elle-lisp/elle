@@ -158,6 +158,11 @@ fn prim_port_open_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// (port/close port) → nil
 ///
 /// Close a port. Idempotent — closing an already-closed port is a no-op.
+///
+/// For ports with an fd (file, network, pipe), yields SIG_IO so the
+/// async scheduler can cancel pending io_uring operations before the
+/// fd is dropped. For stdio ports (no owned fd) and already-closed
+/// ports, completes synchronously.
 fn prim_port_close(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -172,8 +177,18 @@ fn prim_port_close(args: &[Value]) -> (SignalBits, Value) {
         Ok(p) => p,
         Err(e) => return e,
     };
-    port.close();
-    (SIG_OK, Value::NIL)
+    // Already closed: no-op.
+    if port.is_closed() {
+        return (SIG_OK, Value::NIL);
+    }
+    // Stdio ports don't own their fd — close synchronously.
+    if !port.has_fd() {
+        port.close();
+        return (SIG_OK, Value::NIL);
+    }
+    // Ports with an fd: yield to the I/O scheduler so it can cancel
+    // pending operations before the fd is dropped.
+    (SIG_YIELD | SIG_IO, IoRequest::new(IoOp::Close, args[0]))
 }
 
 /// (port/stdin) → port
@@ -570,9 +585,12 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "port/close",
         func: prim_port_close,
-        signal: Signal::errors(),
+        signal: Signal {
+            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
         arity: Arity::Exact(1),
-        doc: "Close a port. Idempotent.",
+        doc: "Close a port. Idempotent. Yields to cancel pending I/O before closing the fd.",
         params: &["port"],
         category: "port",
         example: "(port/close p)",

@@ -755,6 +755,8 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 syntax: None,
                 vararg_kind: sc.vararg_kind,
                 name: sc.name.map(|s| Rc::from(s.as_str())),
+                result_is_immediate: false,
+                has_outward_heap_set: false,
             });
 
             let val = Value::closure(Closure {

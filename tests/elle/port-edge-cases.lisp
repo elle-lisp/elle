@@ -12,7 +12,7 @@
     (let [[[ok? conn] (protect (tcp/accept listener))]]
       (unless ok? (break nil))
       (ev/spawn (fn []
-        (defer (port/close conn)
+        (defer (protect (port/close conn))
           (port/write conn "hello world")
           (port/flush conn)
           (ev/sleep 5)))))))))

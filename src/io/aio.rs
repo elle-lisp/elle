@@ -136,6 +136,57 @@ impl AsyncBackend {
             .as_external::<Port>()
             .ok_or_else(|| "io/submit: request contains non-port value".to_string())?;
 
+        // Close: cancel pending ops on this fd, then close the port.
+        // Must come before the is_closed() check since the port is open
+        // when close is requested.
+        if matches!(&request.op, IoOp::Close) {
+            let port_key = PortKey::from_port(port);
+            if let PortKey::Fd(fd) = &port_key {
+                let mut inner = self.inner.borrow_mut();
+                // Cancel all pending ops on this fd
+                let ids_to_cancel: Vec<u64> = inner
+                    .pending
+                    .iter()
+                    .filter_map(|(&op_id, op)| match op {
+                        PendingOp::Port { port_key: pk, .. } if *pk == port_key => Some(op_id),
+                        _ => None,
+                    })
+                    .collect();
+
+                for op_id in ids_to_cancel {
+                    match inner.platform {
+                        #[cfg(target_os = "linux")]
+                        PlatformBackend::Uring(ref mut ring) => {
+                            let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
+                        }
+                        PlatformBackend::ThreadPool(_) => {
+                            // Thread pool: remove pending entry. The blocking
+                            // syscall will get EBADF when the fd closes.
+                            inner.pending.remove(&op_id);
+                        }
+                    }
+                }
+
+                // Remove fd state
+                inner.fd_states.remove(&PortKey::Fd(*fd));
+
+                drop(inner);
+            }
+
+            // Now actually close the port (drops the fd).
+            port.close();
+
+            // Queue immediate completion.
+            let mut inner = self.inner.borrow_mut();
+            let id = inner.next_id;
+            inner.next_id += 1;
+            inner.completions.push_back(Completion {
+                id,
+                result: Ok(Value::NIL),
+            });
+            return Ok(id);
+        }
+
         if port.is_closed() {
             return Err("io/submit: port is closed".into());
         }
@@ -1276,9 +1327,8 @@ impl AsyncBackendInner {
             | IoOp::Seek { .. }
             | IoOp::Tell
             | IoOp::Task(_)
-            | IoOp::Resolve { .. } => {
-                return Err("io/submit: unsupported operation on stdin".into())
-            }
+            | IoOp::Resolve { .. }
+            | IoOp::Close => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)

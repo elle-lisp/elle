@@ -481,8 +481,9 @@
 (defn telemetry-time [histogram thunk &named attributes]
   "Execute thunk and record its duration in a histogram instrument.
    Returns the thunk's result.
-   Uses var/assign to work around the let*-ffi-signature bug
-   (let bindings after a yielding call produce corrupted values)."
+   Uses var/assign to work around the let*-ffi-signature bug (#673):
+   let* + yield + &named + large captured env from import corrupts
+   upvalue types after resume. See tests/elle/letstar-yield.lisp."
   (var start (clock/monotonic))
   (var result (thunk))
   (var elapsed (- (clock/monotonic) start))
