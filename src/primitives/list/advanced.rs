@@ -581,7 +581,7 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(vec))
 }
 
-/// Get the last element of a sequence
+/// Get the last element of a sequence (list, array, @array, string)
 pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -592,89 +592,144 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-
-    let empty_err = (
-        SIG_ERROR,
-        error_val("argument-error", "last: empty sequence"),
-    );
-    // Cons cell — walk to end
-    if args[0].is_cons() || args[0].is_empty_list() {
-        if args[0].is_empty_list() {
-            return empty_err;
-        }
-        let mut current = args[0];
-        let mut last = Value::NIL;
-        while let Some(cons) = current.as_cons() {
-            last = cons.first;
-            current = cons.rest;
-        }
-        return (SIG_OK, last);
+    // Cons cell — walk to the last element
+    if args[0].as_cons().is_some() || args[0].is_empty_list() {
+        let vec = match args[0].list_to_vec() {
+            Ok(v) => v,
+            Err(e) => return (SIG_ERROR, error_val("type-error", format!("last: {}", e))),
+        };
+        return match vec.last().cloned() {
+            Some(v) => (SIG_OK, v),
+            None => (SIG_OK, Value::NIL),
+        };
     }
     // Array
     if let Some(elems) = args[0].as_array() {
-        return match elems.last() {
-            Some(v) => (SIG_OK, *v),
-            None => empty_err,
+        return if elems.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, elems[elems.len() - 1])
         };
     }
-    // @array
+    // @Array
     if let Some(arr) = args[0].as_array_mut() {
         let borrowed = arr.borrow();
-        return match borrowed.last() {
-            Some(v) => (SIG_OK, *v),
-            None => empty_err,
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, borrowed[borrowed.len() - 1])
         };
     }
-    // String — last grapheme
+    // String / @String — last grapheme cluster
     if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next_back() {
         Some(g) => (SIG_OK, Value::string(g)),
-        None => (
-            SIG_ERROR,
-            error_val("argument-error", "last: empty sequence"),
-        ),
+        None => (SIG_OK, Value::NIL),
     }) {
         return result;
     }
-    // @string — last grapheme
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
-            return match s.graphemes(true).next_back() {
-                Some(g) => (SIG_OK, Value::string(g)),
-                None => empty_err,
-            };
-        }
-        return empty_err;
-    }
-    // Bytes — last byte as integer
+    // Bytes
     if let Some(b) = args[0].as_bytes() {
-        return match b.last() {
-            Some(&byte) => (SIG_OK, Value::int(byte as i64)),
-            None => empty_err,
+        return if b.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(b[b.len() - 1] as i64))
         };
     }
-    // @bytes — last byte as integer
+    // @Bytes
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
-        return match borrowed.last() {
-            Some(&byte) => (SIG_OK, Value::int(byte as i64)),
-            None => empty_err,
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(borrowed[borrowed.len() - 1] as i64))
         };
     }
-
     (
         SIG_ERROR,
         error_val(
             "type-error",
-            format!(
-                "last: expected sequence (list, array, string, bytes), got {}",
-                args[0].type_name()
-            ),
+            format!("last: expected sequence, got {}", args[0].type_name()),
         ),
     )
 }
 
-/// Get all elements of a sequence except the last
+/// Get the second element of a sequence (list, array, @array, string)
+pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("second: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    // Cons cell
+    if let Some(cons) = args[0].as_cons() {
+        if let Some(inner) = cons.rest.as_cons() {
+            return (SIG_OK, inner.first);
+        }
+        return (SIG_OK, Value::NIL);
+    }
+    // Empty list
+    if args[0].is_empty_list() {
+        return (SIG_OK, Value::NIL);
+    }
+    // Array
+    if let Some(elems) = args[0].as_array() {
+        return if elems.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, elems[1])
+        };
+    }
+    // @Array
+    if let Some(arr) = args[0].as_array_mut() {
+        let borrowed = arr.borrow();
+        return if borrowed.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, borrowed[1])
+        };
+    }
+    // String / @String — second grapheme cluster
+    if let Some(result) = args[0].with_string(|s| {
+        let mut iter = s.graphemes(true);
+        iter.next(); // skip first
+        match iter.next() {
+            Some(g) => (SIG_OK, Value::string(g)),
+            None => (SIG_OK, Value::NIL),
+        }
+    }) {
+        return result;
+    }
+    // Bytes
+    if let Some(b) = args[0].as_bytes() {
+        return if b.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(b[1] as i64))
+        };
+    }
+    // @Bytes
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(borrowed[1] as i64))
+        };
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("second: expected sequence, got {}", args[0].type_name()),
+        ),
+    )
+}
+
+/// Get all elements of a list except the last
 pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -686,97 +741,26 @@ pub(crate) fn prim_butlast(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Lists
-    if args[0].is_cons() || args[0].is_empty_list() {
-        if args[0].is_empty_list() {
-            return (SIG_OK, Value::EMPTY_LIST);
+    let vec = match args[0].list_to_vec() {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                SIG_ERROR,
+                error_val("type-error", format!("butlast: {}", e)),
+            )
         }
-        let vec = match args[0].list_to_vec() {
-            Ok(v) => v,
-            Err(e) => {
-                return (
-                    SIG_ERROR,
-                    error_val("type-error", format!("butlast: {}", e)),
-                )
-            }
-        };
-        if vec.is_empty() {
-            return (SIG_OK, Value::EMPTY_LIST);
-        }
-        return (SIG_OK, list(vec[..vec.len() - 1].to_vec()));
-    }
-    // Array
-    if let Some(elems) = args[0].as_array() {
-        if elems.is_empty() {
-            return (SIG_OK, Value::array(vec![]));
-        }
-        return (SIG_OK, Value::array(elems[..elems.len() - 1].to_vec()));
-    }
-    // @array
-    if let Some(arr) = args[0].as_array_mut() {
-        let borrowed = arr.borrow();
-        if borrowed.is_empty() {
-            return (SIG_OK, Value::array_mut(vec![]));
-        }
+    };
+    if vec.is_empty() {
         return (
-            SIG_OK,
-            Value::array_mut(borrowed[..borrowed.len() - 1].to_vec()),
-        );
-    }
-    // String — all but last grapheme
-    if let Some(result) = args[0].with_string(|s| {
-        let graphemes: Vec<&str> = s.graphemes(true).collect();
-        if graphemes.is_empty() {
-            (SIG_OK, Value::string(""))
-        } else {
-            let init: String = graphemes[..graphemes.len() - 1].concat();
-            (SIG_OK, Value::string(init))
-        }
-    }) {
-        return result;
-    }
-    // @string — all but last grapheme
-    if let Some(buf_ref) = args[0].as_string_mut() {
-        let borrowed = buf_ref.borrow();
-        if let Ok(s) = std::str::from_utf8(&borrowed) {
-            let graphemes: Vec<&str> = s.graphemes(true).collect();
-            if graphemes.is_empty() {
-                return (SIG_OK, Value::string_mut(vec![]));
-            }
-            let init: String = graphemes[..graphemes.len() - 1].concat();
-            return (SIG_OK, Value::string_mut(init.into_bytes()));
-        }
-        return (SIG_OK, Value::string_mut(vec![]));
-    }
-    // Bytes — all but last byte
-    if let Some(b) = args[0].as_bytes() {
-        if b.is_empty() {
-            return (SIG_OK, Value::bytes(vec![]));
-        }
-        return (SIG_OK, Value::bytes(b[..b.len() - 1].to_vec()));
-    }
-    // @bytes — all but last byte
-    if let Some(blob_ref) = args[0].as_bytes_mut() {
-        let borrowed = blob_ref.borrow();
-        if borrowed.is_empty() {
-            return (SIG_OK, Value::bytes_mut(vec![]));
-        }
-        return (
-            SIG_OK,
-            Value::bytes_mut(borrowed[..borrowed.len() - 1].to_vec()),
-        );
-    }
-
-    (
-        SIG_ERROR,
-        error_val(
-            "type-error",
-            format!(
-                "butlast: expected sequence (list, array, string, bytes), got {}",
-                args[0].type_name()
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                "butlast: cannot get butlast of empty list".to_string(),
             ),
-        ),
-    )
+        );
+    }
+    let init: Vec<Value> = vec[..vec.len() - 1].to_vec();
+    (SIG_OK, list(init))
 }
 
 /// Take the first n elements of a list

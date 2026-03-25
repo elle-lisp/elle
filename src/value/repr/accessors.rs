@@ -279,8 +279,8 @@ impl Value {
     // Heap Value Extractors
     // =========================================================================
 
-    /// Access string contents via closure. Works for heap strings.
-    /// Returns None if this is not a string.
+    /// Access string contents via closure. Works for both string and @string.
+    /// Returns None if this is neither a string nor an @string.
     #[inline]
     pub fn with_string<R>(&self, f: impl FnOnce(&str) -> R) -> Option<R> {
         use crate::value::heap::{deref, HeapObject};
@@ -289,6 +289,11 @@ impl Value {
         }
         match unsafe { deref(*self) } {
             HeapObject::LString { s, .. } => Some(f(s)),
+            HeapObject::LStringMut { data, .. } => {
+                let borrowed = data.borrow();
+                let str_ref = std::str::from_utf8(&borrowed).unwrap_or("");
+                Some(f(str_ref))
+            }
             _ => None,
         }
     }

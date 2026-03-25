@@ -18,6 +18,89 @@ depend on other modules or plugins take them as arguments.
 | `lua.lisp` | Lua standard library compatibility prelude |
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
+| `agent.lisp` | LLM agent subprocess abstraction (Claude Code / OpenCode) |
+
+---
+
+# lib/agent
+
+Agent guide for `lib/agent.lisp` — LLM agent subprocess abstraction.
+
+## Purpose
+
+Runtime abstraction over Claude Code and OpenCode subprocesses. One subprocess
+per turn, session continuation via `--resume` (Claude) or `--session --continue`
+(OpenCode). The handle is mutable and tracks the session ID across sends.
+
+## Data flow
+
+```
+make-handle config → @{:config config :session-id nil :total-cost 0 :proc nil}
+send handle prompt → build-args → subprocess/exec → port/read-line loop
+  → normalize NDJSON → yield chunks (stdout + stderr in parallel)
+  → update session-id and total-cost from result
+```
+
+## Exported functions
+
+| Function | Signature | Returns | Notes |
+|----------|-----------|---------|-------|
+| `make-handle` | `config` | mutable handle | creates agent state |
+| `send` | `handle prompt` | stream of chunks | one subprocess per call |
+| `send-collect` | `handle prompt` | result struct | drains stream, concatenates text |
+| `kill` | `handle` | nil | kills current subprocess |
+| `build-args` | `config prompt session-id` | array of CLI args | pure |
+
+## Config keys
+
+| Key | Type | Claude flag | OpenCode flag |
+|-----|------|-------------|---------------|
+| `:backend` | `:claude`/`:opencode` | — | — |
+| `:model` | string | `--model` | `-m` |
+| `:system-prompt` | string | `--system-prompt` | `--prompt` |
+| `:allowed-tools` | array | `--allowedTools` | — |
+| `:denied-tools` | array | `--disallowedTools` | — |
+| `:skip-permissions` | bool | `--dangerously-skip-permissions` | — |
+| `:dir` | string | `--add-dir` | `--dir` |
+| `:effort` | keyword | `--effort` | `--variant` |
+| `:max-budget` | float | `--max-budget-usd` | — |
+| `:opts` | array | passthrough | passthrough |
+| `:command` | array | overrides build-args | for testing |
+
+## Chunk types
+
+| Type | Shape | Notes |
+|------|-------|-------|
+| `:text` | `{:text "partial" :type :text}` | text content delta |
+| `:tool-use` | `{:type :tool-use :name "Read" :id "tu_1"}` | tool invocation start |
+| `:tool-input` | `{:text "{\"path\":" :type :tool-input}` | partial tool input JSON |
+| `:stderr` | `{:type :stderr :text "warning..."}` | subprocess stderr line |
+| `:result` | `{:text "full" :type :result :cost 0.05 :session-id "uuid" :tokens {:input 100 :output 50}}` | final result |
+
+## Timeout pattern
+
+```lisp
+(let [[[ok? val] (protect (ev/timeout 30 (fn []
+        (stream/collect (agent:send handle "slow task")))))]]
+  (when (not ok?) (agent:kill handle)))
+```
+
+## Invariants
+
+1. One subprocess per `send` call. No long-lived child process.
+2. Session continuity via `--resume` / `--session --continue`.
+3. Handle `:session-id` and `:total-cost` are updated after each result chunk.
+4. Handle `:proc` is set during `send`, cleared on completion or `kill`.
+5. Stderr is drained in parallel via `ev/spawn`; yielded as `:stderr` chunks.
+6. NDJSON parse errors are yielded as `:stderr` chunks, not swallowed.
+7. Nonzero exit without a result chunk signals `:agent-error`.
+8. Flag table drives config→CLI mapping; adding a flag is one table row.
+
+## Running tests
+
+```bash
+./target/debug/elle tests/elle/agent.lisp
+```
 
 ---
 
