@@ -85,6 +85,12 @@
     (assert (= line1 "line one") "port/read-line reads first line"))
   (port/close p))
 
+# Use a separate file for port/read-all to avoid stale uring buffers
+# from the partially-read port above (FD reuse + pending completions).
+(spit (tmp "port-readall.txt") "line one\nline two\n")
+(let ((content (string (port/read-all (port/open (tmp "port-readall.txt") :read)))))
+  (assert (= content "line one\nline two\n") "port/read-all reads everything"))
+
 
 # ========================================
 # 3. Read/write files (sync convenience)
