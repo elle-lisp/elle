@@ -461,6 +461,7 @@ impl FiberHeap {
     /// call pushes a new `SharedAllocator` that accumulates until the
     /// owner's `FiberHeap::clear()` runs. Reusing the last allocator keeps
     /// `owned_shared` at most length 1 for non-propagation cases.
+    #[allow(dead_code)]
     pub(crate) fn get_or_create_shared_allocator(
         &mut self,
     ) -> *mut crate::value::shared_alloc::SharedAllocator {
@@ -479,6 +480,7 @@ impl FiberHeap {
 
     /// Set the shared allocator pointer for this fiber.
     /// When non-null, `alloc()` routes all allocations to the shared allocator.
+    #[allow(dead_code)]
     pub(crate) fn set_shared_alloc(
         &mut self,
         ptr: *mut crate::value::shared_alloc::SharedAllocator,
