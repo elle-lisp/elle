@@ -91,3 +91,4 @@ Source locations flow through the entire pipeline: Syntax spans â†’ HIR spans â†
 | `context.rs` | 56 | Thread-local VM/symbol table context |
 | `plugin.rs` | 102 | Plugin loading |
 | `path.rs` | 359 | UTF-8 path operations |
+| `resolve.rs` | ~190 | Module resolution (ELLE_HOME, ELLE_PATH, candidate generation) |

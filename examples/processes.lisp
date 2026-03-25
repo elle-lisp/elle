@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # Processes — Erlang-style concurrent task processing
@@ -10,7 +11,7 @@
 #   5. Key-value service    — named process + process dictionary
 #   6. I/O inside processes — println doesn't block sibling processes
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "process")))
 
 # Share the ev/run backend so all process schedulers use one event loop
 (def backend (*io-backend*))

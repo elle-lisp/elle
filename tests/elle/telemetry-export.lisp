@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # tests/elle/telemetry-export.lisp — OTLP export integration tests
@@ -8,8 +9,8 @@
 #
 # Run: elle tests/elle/telemetry-export.lisp
 
-(def http ((import-file "./lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "http")))
+(def telemetry ((import "telemetry")))
 
 
 # ── Mock collector ────────────────────────────────────────────────────

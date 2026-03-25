@@ -1,9 +1,10 @@
+(elle/epoch 6)
 
 ## Oxigraph plugin integration tests
 ## Tests the oxigraph plugin (.so loaded via import-file)
 
 ## Try to load the oxigraph plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_oxigraph.so")))
+(def [ok? plugin] (protect (import-native "oxigraph")))
 (when (not ok?)
   (print "SKIP: oxigraph plugin not built\n")
   (exit 0))

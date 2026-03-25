@@ -1,8 +1,9 @@
+(elle/epoch 6)
 
 ## YAML plugin integration tests
 
 ## Try to load the yaml plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_yaml.so")))
+(def [ok? plugin] (protect (import-native "yaml")))
 (when (not ok?)
   (print "SKIP: yaml plugin not built\n")
   (exit 0))

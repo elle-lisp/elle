@@ -1,8 +1,9 @@
+(elle/epoch 6)
 ## tests/elle/process.lisp — Tests for lib/process.lisp
 ##
 ## Run: ./target/debug/elle tests/elle/process.lisp
 
-(def process ((import-file "lib/process.lisp")))
+(def process ((import "process")))
 (def backend (*io-backend*))
 
 # Wrap process:start to always share the ev/run backend

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 5;
+pub const CURRENT_EPOCH: u64 = 6;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -175,6 +175,11 @@ static MIGRATIONS: &[Migration] = &[
                 new: "has?",
             },
         ],
+    },
+    Migration {
+        epoch: 6,
+        summary: "smart module resolution (import, import-native)",
+        rules: &[],
     },
 ];
 

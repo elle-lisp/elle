@@ -1,7 +1,8 @@
+(elle/epoch 6)
 
 ## XML plugin integration tests
 
-(def [ok? plugin] (protect (import-file "target/release/libelle_xml.so")))
+(def [ok? plugin] (protect (import-native "xml")))
 (when (not ok?)
   (print "SKIP: xml plugin not built\n")
   (exit 0))

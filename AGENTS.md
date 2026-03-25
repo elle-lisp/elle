@@ -114,6 +114,10 @@ bytecode. Error messages include file:line:col information.
     `elle-xml` (XML parsing/serialization),
     `elle-yaml` (YAML parsing and serialization)
 - **`path`** — UTF-8 path operations
+- **`resolve`** — Module resolution: `classify` (bare/relative/absolute),
+  `candidates` (platform-aware filename generation), `elle_home`
+  (auto-detection from binary path), `search_path` (ELLE_PATH or defaults),
+  `resolve` (specifier → filesystem path)
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
 - **`error`** — `LocationMap` for bytecode offset → source location mapping

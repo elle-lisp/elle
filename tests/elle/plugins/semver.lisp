@@ -1,9 +1,10 @@
+(elle/epoch 6)
 
 ## Semver plugin integration tests
 ## Tests the semver plugin (.so loaded via import-file)
 
 ## Try to load the semver plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_semver.so")))
+(def [ok? plugin] (protect (import-native "semver")))
 (when (not ok?)
   (print "SKIP: semver plugin not built\n")
   (exit 0))

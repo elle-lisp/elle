@@ -1,4 +1,5 @@
-(def process ((import-file "lib/process.lisp")))
+(elle/epoch 6)
+(def process ((import "process")))
 (def backend (*io-backend*))
 
 (defn run-ring []

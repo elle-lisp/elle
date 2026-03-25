@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tools/aws/aws-gen.lisp — Fetch Smithy models and generate Elle API modules
 ##
 ## Usage:
@@ -9,8 +10,8 @@
 ##
 ## To force regeneration, delete the generated file first.
 
-(def tls-p  (import-file "target/debug/libelle_tls.so"))
-(def tls    ((import-file "lib/tls.lisp") tls-p))
+(def tls-p  (import-native "tls"))
+(def tls    ((import "tls") tls-p))
 
 (defn https-get [host path]
   (def conn (tls:connect host 443))

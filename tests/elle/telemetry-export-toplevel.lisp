@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # tests/elle/telemetry-export-toplevel.lisp
@@ -5,8 +6,8 @@
 # Reproduces the exact top-level structure of examples/telemetry.lisp
 # to isolate whether the flush hang is scope-dependent.
 
-(def http ((import-file "./lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "http")))
+(def telemetry ((import "telemetry")))
 
 (def received @[])
 

@@ -1,8 +1,9 @@
+(elle/epoch 6)
 
 ## protobuf plugin integration tests
 
 ## Try to load the protobuf plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_protobuf.so")))
+(def [ok? plugin] (protect (import-native "protobuf")))
 (when (not ok?)
   (print "SKIP: protobuf plugin not built\n")
   (exit 0))

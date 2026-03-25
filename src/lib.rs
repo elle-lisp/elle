@@ -55,6 +55,7 @@ pub mod port;
 pub mod primitives;
 pub mod reader;
 pub mod repl;
+pub(crate) mod resolve;
 pub mod rewrite;
 pub mod signals;
 pub mod symbol;

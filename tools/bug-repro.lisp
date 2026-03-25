@@ -1,4 +1,4 @@
-(elle/epoch 1)
+(elle/epoch 6)
 #!/usr/bin/env elle
 ## VM bug repro: "Expected cell, got closure"
 ##
@@ -18,4 +18,4 @@
             (when (pair? form)
               (push out (string (first form))))))))))
 
-(print (length out))
+(println (length out))

@@ -1,6 +1,6 @@
 //! Dynamic library loading with platform abstraction.
 //!
-//! Supports loading .so files on Linux and provides stubs for other platforms.
+//! Supports loading shared libraries on Unix platforms (.so on Linux, .dylib on macOS).
 
 /// Handle to a loaded shared library.
 pub(crate) struct LibraryHandle {
@@ -8,8 +8,8 @@ pub(crate) struct LibraryHandle {
     pub id: u32,
     /// Path to the library file
     pub path: String,
-    /// The underlying native library (Linux only)
-    #[cfg(target_os = "linux")]
+    /// The underlying native library (Unix only)
+    #[cfg(unix)]
     pub native: libloading::Library,
 }
 
@@ -23,7 +23,7 @@ impl LibraryHandle {
     /// * `Ok(pointer)` - Raw function pointer
     /// * `Err(message)` - If symbol not found or other error
     pub fn get_symbol(&self, symbol_name: &str) -> Result<*const std::ffi::c_void, String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             unsafe {
                 self.native
@@ -35,7 +35,7 @@ impl LibraryHandle {
             }
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(unix))]
         {
             Err(format!(
                 "Dynamic library loading not supported on this platform (attempted to load {})",
@@ -61,11 +61,12 @@ impl LibraryHandle {
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
 pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         // Only check existence for absolute/relative paths.
-        // Bare names like "libm.so.6" are resolved by the dynamic linker
-        // via LD_LIBRARY_PATH / /etc/ld.so.cache — don't reject them.
+        // Bare names like "libm.so.6" / "libSystem.B.dylib" are resolved
+        // by the dynamic linker (LD_LIBRARY_PATH / DYLD_LIBRARY_PATH /
+        // /etc/ld.so.cache) — don't reject them.
         if path.contains('/') && !crate::path::exists(path) {
             return Err(format!("Library file not found: {}", path));
         }
@@ -82,10 +83,10 @@ pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     {
         Err(format!(
-            "Dynamic library loading only supported on Linux (attempted to load {})",
+            "Dynamic library loading only supported on Unix (attempted to load {})",
             path
         ))
     }
@@ -107,7 +108,7 @@ pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
 pub(crate) fn load_self() -> Result<LibraryHandle, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         use libloading::os::unix::Library as UnixLibrary;
         let unix_lib = UnixLibrary::this();
@@ -118,7 +119,7 @@ pub(crate) fn load_self() -> Result<LibraryHandle, String> {
         })
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     {
         Err("Self-process loading not supported on this platform".to_string())
     }
@@ -128,16 +129,21 @@ pub(crate) fn load_self() -> Result<LibraryHandle, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn test_load_libc() {
-        // Load system libc
-        let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
+    /// Try to load libc by platform-appropriate paths.
+    #[cfg(unix)]
+    fn try_load_libc() -> Result<LibraryHandle, String> {
+        // Linux paths
+        load_library("/lib/x86_64-linux-gnu/libc.so.6")
             .or_else(|_| load_library("/lib64/libc.so.6"))
-            .or_else(|_| load_library("libc.so.6"));
+            .or_else(|_| load_library("libc.so.6"))
+            // macOS: libSystem includes libc
+            .or_else(|_| load_library("libSystem.B.dylib"))
+    }
 
-        // If libc is findable, test loading succeeds
-        if let Ok(lib) = lib {
+    #[test]
+    #[cfg(unix)]
+    fn test_load_libc() {
+        if let Ok(lib) = try_load_libc() {
             assert!(!lib.path.is_empty());
         }
     }
@@ -149,15 +155,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_get_symbol_strlen() {
-        let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
-            .or_else(|_| load_library("/lib64/libc.so.6"))
-            .or_else(|_| load_library("libc.so.6"));
-
-        if let Ok(lib) = lib {
+        if let Ok(lib) = try_load_libc() {
             let result = lib.get_symbol("strlen");
-            // strlen should exist in libc
             if let Ok(sym) = result {
                 assert!(!sym.is_null());
             }
@@ -165,20 +166,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_get_symbol_missing() {
-        let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
-            .or_else(|_| load_library("/lib64/libc.so.6"))
-            .or_else(|_| load_library("libc.so.6"));
-
-        if let Ok(lib) = lib {
+        if let Ok(lib) = try_load_libc() {
             let result = lib.get_symbol("this_function_does_not_exist_in_libc_12345");
             assert!(result.is_err());
         }
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_load_self() {
         let lib = load_self();
         assert!(lib.is_ok());

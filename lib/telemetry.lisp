@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## lib/telemetry.lisp — OpenTelemetry metrics (OTLP/HTTP JSON export)
 ##
 ## Loaded via: (def telemetry ((import-file "lib/telemetry.lisp")))
@@ -18,7 +19,7 @@
 ## histogram bucket counts).  Export snapshots and clears in one cooperative
 ## step — no races between background and manual flushes.
 
-(def http ((import-file "lib/http.lisp")))
+(def http ((import "http")))
 
 (def *telemetry-version* "0.2.0")
 

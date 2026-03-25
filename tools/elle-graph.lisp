@@ -1,4 +1,4 @@
-(elle/epoch 1)
+(elle/epoch 6)
 #!/usr/bin/env elle
 ## elle-graph.lisp — extract RDF triples from Elle source files
 ##
@@ -141,4 +141,4 @@
                                (process-def form file))
                   nil)))))))))
 
-(print (freeze out))
+(println (freeze out))

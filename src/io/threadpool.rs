@@ -1,6 +1,8 @@
 //! Thread-pool backend and stdin thread for async I/O.
 
 use std::os::unix::io::{IntoRawFd, RawFd};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Typed thread-pool operation (replaces `op_kind: u8` + overloaded `data`/`size`/`fd`).
 pub(super) enum PoolOp {
@@ -76,10 +78,18 @@ pub(crate) struct ThreadPoolBackend {
     sender: crossbeam_channel::Sender<PoolCompletion>,
     receiver: crossbeam_channel::Receiver<PoolCompletion>,
     in_flight: usize,
+    /// Shared shutdown flag. Set on Drop to signal worker threads to exit.
+    shutdown: Arc<AtomicBool>,
 }
 
 /// Maximum concurrent thread-pool operations.
 pub(super) const MAX_THREAD_POOL_OPS: usize = 64;
+
+impl Drop for ThreadPoolBackend {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+}
 
 impl ThreadPoolBackend {
     pub(super) fn new() -> Self {
@@ -88,6 +98,7 @@ impl ThreadPoolBackend {
             sender,
             receiver,
             in_flight: 0,
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -97,6 +108,7 @@ impl ThreadPoolBackend {
             return Err("async I/O: too many concurrent operations (max 64)".into());
         }
         let sender = self.sender.clone();
+        let shutdown = self.shutdown.clone();
         self.in_flight += 1;
         std::thread::spawn(move || {
             let (result_code, data) = match op {
@@ -188,26 +200,59 @@ impl ThreadPoolBackend {
                     }
                 }
                 PoolOp::Accept { fd } => {
-                    let mut addr_storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
-                    let mut addr_len: libc::socklen_t =
-                        std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
-                    let new_fd = unsafe {
-                        libc::accept(
+                    // Poll-then-accept loop: poll for readability with a
+                    // timeout so the thread can exit when the listener fd
+                    // is closed or the pool is shut down. Without this,
+                    // accept() blocks indefinitely on macOS even after the
+                    // fd is closed from another thread.
+                    loop {
+                        if shutdown.load(Ordering::Relaxed) {
+                            break (-libc::ECANCELED, Vec::new());
+                        }
+                        let mut pfd = libc::pollfd {
                             fd,
-                            &mut addr_storage as *mut _ as *mut libc::sockaddr,
-                            &mut addr_len,
-                        )
-                    };
-                    if new_fd < 0 {
-                        (
-                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
-                            Vec::new(),
-                        )
-                    } else {
+                            events: libc::POLLIN,
+                            revents: 0,
+                        };
+                        let poll_ret = unsafe { libc::poll(&mut pfd, 1, 100) };
+                        if poll_ret < 0 {
+                            break (
+                                -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                                Vec::new(),
+                            );
+                        }
+                        if poll_ret == 0 {
+                            // Timeout — check shutdown flag and fd validity
+                            if shutdown.load(Ordering::Relaxed) {
+                                break (-libc::ECANCELED, Vec::new());
+                            }
+                            let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+                            if unsafe { libc::fstat(fd, &mut stat) } < 0 {
+                                break (-libc::EBADF, Vec::new());
+                            }
+                            continue;
+                        }
+                        // fd is readable — do the accept
+                        let mut addr_storage: libc::sockaddr_storage =
+                            unsafe { std::mem::zeroed() };
+                        let mut addr_len: libc::socklen_t =
+                            std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
+                        let new_fd = unsafe {
+                            libc::accept(
+                                fd,
+                                &mut addr_storage as *mut _ as *mut libc::sockaddr,
+                                &mut addr_len,
+                            )
+                        };
+                        if new_fd < 0 {
+                            break (
+                                -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                                Vec::new(),
+                            );
+                        }
                         unsafe {
                             libc::fcntl(new_fd, libc::F_SETFD, libc::FD_CLOEXEC);
                         }
-                        // Encode addr_len + addr_storage as bytes for completion processing
                         let mut result_data = Vec::new();
                         result_data.extend_from_slice(&addr_len.to_le_bytes());
                         let addr_bytes = unsafe {
@@ -217,7 +262,7 @@ impl ThreadPoolBackend {
                             )
                         };
                         result_data.extend_from_slice(addr_bytes);
-                        (new_fd, result_data)
+                        break (new_fd, result_data);
                     }
                 }
                 PoolOp::ConnectTcp { addr } => match std::net::TcpStream::connect(&addr) {
@@ -374,7 +419,12 @@ impl ThreadPoolBackend {
                 }
                 PoolOp::Open { path, flags, mode } => {
                     let fd = unsafe {
-                        libc::openat(libc::AT_FDCWD, path.as_ptr(), flags, mode as libc::mode_t)
+                        libc::openat(
+                            libc::AT_FDCWD,
+                            path.as_ptr(),
+                            flags,
+                            libc::c_uint::from(mode as libc::mode_t),
+                        )
                     };
                     if fd < 0 {
                         (

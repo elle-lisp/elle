@@ -1,9 +1,10 @@
+(elle/epoch 6)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
 # All tests run within a single connection to avoid parallel flushdb races.
 
-(def redis ((import-file "lib/redis.lisp")))
+(def redis ((import "redis")))
 
 # RESP self-tests (no Redis needed)
 (println "Running RESP self-tests...")

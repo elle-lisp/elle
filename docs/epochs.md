@@ -213,3 +213,28 @@ The old `stream/` names remain as aliases.
 
 `elle rewrite` now updates the `(elle/epoch N)` tag to the current epoch
 instead of stripping it.
+
+### Epoch 6 — smart module resolution (import, import-native)
+
+Introduces `import` (bare-name module resolution via `ELLE_PATH`) and
+`import-native` (native plugin resolution). `import-file` remains
+available for exact-path imports.
+
+| Primitive | Purpose | Example |
+|-----------|---------|---------|
+| `import` | Resolve Elle modules by name | `(import "http")` |
+| `import-native` | Resolve native plugins by name | `(import-native "regex")` |
+| `import-file` | Exact filesystem path | `(import-file "tests/modules/test.lisp")` |
+
+`elle rewrite` migrates old `import-file` calls:
+
+| Old | New |
+|-----|-----|
+| `(import-file "target/release/libelle_regex.so")` | `(import-native "regex")` |
+| `(import-file "lib/http.lisp")` | `(import "http")` |
+| `(import-file "./lib/http.lisp")` | `(import "http")` |
+
+Environment variables:
+- `ELLE_HOME` — Elle installation root (auto-detected from binary path)
+- `ELLE_PATH` — colon-separated search directories (defaults to
+  `$ELLE_HOME/lib:$ELLE_HOME/target/{self}:$ELLE_HOME/target/{other}`)

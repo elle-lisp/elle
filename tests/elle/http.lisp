@@ -1,9 +1,10 @@
+(elle/epoch 6)
 # HTTP module tests
 #
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
 # are tested via (http:test) which runs sanity checks inside the module.
 
-(def http ((import-file "lib/http.lisp")))
+(def http ((import "http")))
 
 # ============================================================================
 # Internal wire-format sanity checks

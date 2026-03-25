@@ -193,8 +193,11 @@ Top-level FFI state. Holds `libraries: HashMap<u32, LibraryHandle>` and
    Elle arrays map to C structs (positional fields) and C arrays (uniform
    elements). Field count must match exactly.
 
-9. **Platform-guarded loading.** `loader.rs` uses `#[cfg(target_os = "linux")]`
-   guards. Non-Linux platforms get stub implementations that return errors.
+9. **Platform-guarded loading.** `loader.rs` uses `#[cfg(unix)]` guards.
+   Supports Linux (.so) and macOS (.dylib). Non-Unix platforms get stubs.
+   The module resolver (`src/resolve.rs`) generates platform-appropriate
+   candidate filenames (`libelle_foo.so` on Linux, `libelle_foo.dylib` on
+   macOS) so that `(import "foo")` finds the right plugin on any platform.
 
 ## Dependents
 

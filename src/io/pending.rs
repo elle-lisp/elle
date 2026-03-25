@@ -74,6 +74,7 @@ impl PendingOp {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn buffer_handle_mut(&mut self) -> &mut BufferHandle {
         match self {
             PendingOp::Port { buffer_handle, .. } => buffer_handle,

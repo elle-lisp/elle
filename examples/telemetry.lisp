@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # A small bookstore API that tracks its own metrics.
@@ -15,7 +16,7 @@
 #
 # Run:  elle examples/telemetry.lisp
 
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def telemetry ((import "telemetry")))
 
 # ── The meter ────────────────────────────────────────────────────────
 

@@ -101,7 +101,7 @@ pub(crate) fn cwd() -> Result<String, String> {
 
 /// Compute absolute path: join with CWD if relative, then normalize.
 /// Does not require path to exist.
-pub(crate) fn absolute(path: &str) -> Result<String, String> {
+pub fn absolute(path: &str) -> Result<String, String> {
     if is_absolute(path) {
         Ok(normalize(path))
     } else {

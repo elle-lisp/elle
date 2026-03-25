@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tests/elle/aws.lisp — Elle-native AWS client test
 ##
 ## Requires AWS credentials in env:
@@ -8,14 +9,14 @@
 ##     ./target/debug/elle tests/elle/aws.lisp
 
 # Load plugins
-(def crypto (import-file "target/debug/libelle_crypto.so"))
-(def jiff   (import-file "target/debug/libelle_jiff.so"))
-(def tls-p  (import-file "target/debug/libelle_tls.so"))
-(def tls    ((import-file "lib/tls.lisp") tls-p))
+(def crypto (import-native "crypto"))
+(def jiff   (import-native "jiff"))
+(def tls-p  (import-native "tls"))
+(def tls    ((import "tls") tls-p))
 
 # Load aws module + generated s3 layer
-(def aws ((import-file "lib/aws.lisp") crypto jiff tls))
-(def s3  ((import-file "lib/aws/s3.lisp") aws))
+(def aws ((import "aws") crypto jiff tls))
+(def s3  ((import "aws/s3") aws))
 
 (ev/run (fn []
 

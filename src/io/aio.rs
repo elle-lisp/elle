@@ -78,17 +78,30 @@ impl AsyncBackend {
         })
     }
 
-    #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
-        match io_uring::IoUring::new(256) {
-            Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
-            Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
-        }
-    }
+        // ELLE_IO=thread forces the thread pool backend on any platform.
+        // Useful for testing the thread pool path on Linux where io_uring
+        // is the default.
+        let force_threads = std::env::var("ELLE_IO")
+            .map(|v| v == "thread")
+            .unwrap_or(false);
 
-    #[cfg(not(target_os = "linux"))]
-    fn create_platform_backend() -> PlatformBackend {
-        PlatformBackend::ThreadPool(ThreadPoolBackend::new())
+        if force_threads {
+            return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            match io_uring::IoUring::new(256) {
+                Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
+                Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            PlatformBackend::ThreadPool(ThreadPoolBackend::new())
+        }
     }
 
     /// Submit an I/O request. Returns a submission ID.
@@ -160,9 +173,16 @@ impl AsyncBackend {
                             let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
                         }
                         PlatformBackend::ThreadPool(_) => {
-                            // Thread pool: remove pending entry. The blocking
-                            // syscall will get EBADF when the fd closes.
-                            inner.pending.remove(&op_id);
+                            // Thread pool: can't cancel in-flight syscalls, but
+                            // we must generate an error completion so the scheduler
+                            // cleans up its pending map and unblocks the pump loop.
+                            if let Some(pending_op) = inner.pending.remove(&op_id) {
+                                inner.buffer_pool.release(pending_op.buffer_handle());
+                                inner.completions.push_back(Completion {
+                                    id: op_id,
+                                    result: Err(error_val("io-error", "port closed".to_string())),
+                                });
+                            }
                         }
                     }
                 }
@@ -537,7 +557,11 @@ impl AsyncBackend {
 
     /// Submit a Connect operation. Connect creates a new port, so
     /// request.port is Value::NIL — we handle it separately.
-    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>) -> Result<u64, String> {
+    fn submit_connect(
+        &self,
+        addr: &ConnectAddr,
+        _timeout: Option<Duration>,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
@@ -558,7 +582,7 @@ impl AsyncBackend {
                     ring,
                     id,
                     addr,
-                    timeout,
+                    _timeout,
                     buffer_pool,
                     buf_handle,
                 ) {
@@ -674,7 +698,7 @@ impl AsyncBackend {
         mode: u32,
         direction: Direction,
         encoding: Encoding,
-        timeout: Option<Duration>,
+        _timeout: Option<Duration>,
     ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
@@ -701,7 +725,7 @@ impl AsyncBackend {
                     &c_path,
                     flags,
                     mode,
-                    timeout,
+                    _timeout,
                     buffer_pool,
                     buf_handle,
                 )?;
@@ -833,7 +857,7 @@ impl AsyncBackend {
 
         let AsyncBackendInner {
             ref mut platform,
-            ref mut network_pool,
+            network_pool: ref mut _network_pool,
             ref mut pending,
             ..
         } = *inner;
@@ -844,7 +868,7 @@ impl AsyncBackend {
             PlatformBackend::Uring(_) => {
                 // Even on io_uring platforms, tasks run on the network pool
                 // to avoid starving fd I/O ops on the main pool.
-                network_pool.submit(id, PoolOp::Task(closure))?;
+                _network_pool.submit(id, PoolOp::Task(closure))?;
             }
             PlatformBackend::ThreadPool(ref mut pool) => {
                 pool.submit(id, PoolOp::Task(closure))?;
@@ -1085,7 +1109,7 @@ impl AsyncBackend {
                                     ref mut connect_fd, ..
                                 } = pending_op
                                 {
-                                    if result_code > 0 {
+                                    if result_code >= 0 {
                                         *connect_fd = Some(result_code);
                                     }
                                 }
@@ -1163,7 +1187,16 @@ impl AsyncBackend {
                         data,
                     } in raw_completions
                     {
-                        if let Some(pending_op) = pending.remove(&id) {
+                        if let Some(mut pending_op) = pending.remove(&id) {
+                            // Thread pool Connect: stash fd in connect_fd
+                            if let PendingOp::Connect {
+                                ref mut connect_fd, ..
+                            } = pending_op
+                            {
+                                if result_code >= 0 {
+                                    *connect_fd = Some(result_code);
+                                }
+                            }
                             let buf_handle = pending_op.buffer_handle();
                             let c = completion::process_raw_completion(
                                 id,
@@ -1250,7 +1283,17 @@ impl AsyncBackendInner {
                     data,
                 } in raw
                 {
-                    if let Some(pending) = self.pending.remove(&id) {
+                    if let Some(mut pending) = self.pending.remove(&id) {
+                        // Thread pool Connect: stash fd in connect_fd
+                        // (same logic as drain_network_completions).
+                        if let PendingOp::Connect {
+                            ref mut connect_fd, ..
+                        } = pending
+                        {
+                            if result_code >= 0 {
+                                *connect_fd = Some(result_code);
+                            }
+                        }
                         let buf_handle = pending.buffer_handle();
                         let c = completion::process_raw_completion(
                             id,
@@ -1287,7 +1330,7 @@ impl AsyncBackendInner {
                     ref mut connect_fd, ..
                 } = pending
                 {
-                    if result_code > 0 {
+                    if result_code >= 0 {
                         *connect_fd = Some(result_code);
                     }
                 }

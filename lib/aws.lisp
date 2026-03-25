@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## lib/aws.lisp — Elle-native AWS client
 
 (var sigv4-mod nil)
@@ -107,7 +108,7 @@
 
 (fn [crypto jiff tls-module]
   (def tls tls-module)
-  (assign sigv4-mod ((import-file "lib/aws/sigv4.lisp") crypto jiff))
+  (assign sigv4-mod ((import "aws/sigv4") crypto jiff))
 
   {:request (fn [service method path & args]
     (aws-request-impl tls service method path (or (first args) {})))})

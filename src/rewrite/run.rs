@@ -82,12 +82,15 @@ pub fn run(args: &[String]) -> i32 {
 
         match rewrite_file(&source, file_path) {
             Ok(None) => {} // no changes
-            Ok(Some((result, edit_count))) => {
+            Ok(Some((result, edit_count, details))) => {
                 any_changes = true;
                 if check {
                     println!("{}: {} edit(s) needed", file_path, edit_count);
                 } else if dry_run {
                     println!("{}: {} edit(s) would be applied", file_path, edit_count);
+                    for detail in &details {
+                        println!("  {}", detail);
+                    }
                 } else {
                     if let Err(e) = std::fs::write(file_path, &result) {
                         eprintln!("Error writing {}: {}", file_path, e);
@@ -116,8 +119,11 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// Rewrite a single file's source. Returns `Ok(None)` if no changes needed,
-/// `Ok(Some((new_source, edit_count)))` if changes were made.
-fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>, String> {
+/// `Ok(Some((new_source, edit_count, details)))` if changes were made.
+fn rewrite_file(
+    source: &str,
+    file_path: &str,
+) -> Result<Option<(String, usize, Vec<String>)>, String> {
     // Detect epoch
     let epoch_info = detect_epoch_in_source(source)?;
 
@@ -156,20 +162,25 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         Some(RenameSymbol::new("epoch-migration", owned))
     });
 
+    // Collect import normalization edits (whole-form rewrites of import-file paths)
+    let import_edits = collect_import_edits(source)?;
+
     // Collect rename edits (token-level)
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
     let mut edits = collect_edits(source, &rules)?;
 
-    // Filter out rename edits that fall within replace edit spans,
+    // Filter out rename edits that fall within replace or import edit spans,
     // then merge the two sets.
-    if !replace_edits.is_empty() {
+    let overlay_edits: Vec<&Edit> = replace_edits.iter().chain(import_edits.iter()).collect();
+    if !overlay_edits.is_empty() {
         edits.retain(|edit| {
-            !replace_edits.iter().any(|re| {
+            !overlay_edits.iter().any(|re| {
                 edit.byte_offset >= re.byte_offset
                     && edit.byte_offset + edit.byte_len <= re.byte_offset + re.byte_len
             })
         });
         edits.extend(replace_edits);
+        edits.extend(import_edits);
     }
 
     // Replace old (elle/epoch N) with current epoch, or add it if absent
@@ -192,9 +203,117 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         return Ok(None);
     }
 
+    // Build human-readable descriptions of edits (excluding epoch tag updates)
+    let details: Vec<String> = edits
+        .iter()
+        .filter(|e| !e.replacement.starts_with("(elle/epoch"))
+        .map(|e| {
+            let old = &source[e.byte_offset..e.byte_offset + e.byte_len];
+            // Truncate long strings for readability
+            let old_display = if old.len() > 60 {
+                format!("{}...", &old[..57])
+            } else {
+                old.to_string()
+            };
+            format!("{} → {}", old_display, e.replacement)
+        })
+        .collect();
+
     let edit_count = edits.len();
     let result = apply_edits(source, &mut edits)?;
-    Ok(Some((result, edit_count)))
+    Ok(Some((result, edit_count, details)))
+}
+
+/// Result of normalizing an import-file path.
+enum ImportNorm {
+    /// Elle source module: `(import "name")`
+    Source(String),
+    /// Native plugin: `(import-native "name")`
+    Native(String),
+}
+
+/// Extract a bare module name from an import-file path.
+///
+/// Recognizes three patterns:
+/// - `target/{release,debug}/libelle_FOO.{so,dylib}` → Native(FOO)
+/// - `lib/PATH.{lisp,elle}` → Source(PATH)
+/// - `./lib/PATH.{lisp,elle}` → Source(PATH)
+///
+/// Returns `None` if the path doesn't match any pattern.
+fn normalize_import_path(path: &str) -> Option<ImportNorm> {
+    // Pattern 1: target/{release,debug}/libelle_FOO.{so,dylib}
+    let stripped = path
+        .strip_prefix("target/release/")
+        .or_else(|| path.strip_prefix("target/debug/"));
+    if let Some(filename) = stripped {
+        if let Some(name) = filename
+            .strip_prefix("libelle_")
+            .and_then(|s| s.strip_suffix(".so").or_else(|| s.strip_suffix(".dylib")))
+        {
+            return Some(ImportNorm::Native(name.to_string()));
+        }
+    }
+
+    // Pattern 2/3: [./]lib/PATH.{lisp,elle}
+    let stripped = path
+        .strip_prefix("./lib/")
+        .or_else(|| path.strip_prefix("lib/"));
+    if let Some(rest) = stripped {
+        if let Some(name) = rest
+            .strip_suffix(".lisp")
+            .or_else(|| rest.strip_suffix(".elle"))
+        {
+            return Some(ImportNorm::Source(name.to_string()));
+        }
+    }
+
+    None
+}
+
+/// Scan source for `(import-file STRING)` calls and produce edits that
+/// rewrite them to `(import "bare-name")` when the path matches a known
+/// pattern. Non-matching paths are left for the rename rule to handle.
+fn collect_import_edits(source: &str) -> Result<Vec<Edit>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        // Match: LeftParen, Symbol("import-file"), String(path), RightParen
+        if i + 3 < tokens.len()
+            && matches!(tokens[i].0, Token::LeftParen)
+            && matches!(tokens[i + 1].0, Token::Symbol("import-file"))
+            && matches!(tokens[i + 3].0, Token::RightParen)
+        {
+            if let Token::String(path) = &tokens[i + 2].0 {
+                if let Some(norm) = normalize_import_path(path) {
+                    let form_start = tokens[i].1;
+                    let form_end = tokens[i + 3].1 + tokens[i + 3].2;
+                    let replacement = match norm {
+                        ImportNorm::Source(name) => format!("(import \"{}\")", name),
+                        ImportNorm::Native(name) => format!("(import-native \"{}\")", name),
+                    };
+                    edits.push(Edit {
+                        byte_offset: form_start,
+                        byte_len: form_end - form_start,
+                        replacement,
+                    });
+                    i += 4;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    Ok(edits)
 }
 
 /// Scan source for removed symbols and return an error listing them.

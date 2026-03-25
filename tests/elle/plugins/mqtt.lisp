@@ -1,8 +1,9 @@
+(elle/epoch 6)
 ## MQTT plugin integration tests
 ## Tests the mqtt plugin (.so loaded via import-file)
 
 ## Try to load the MQTT plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_mqtt.so")))
+(def [ok? plugin] (protect (import-native "mqtt")))
 (when (not ok?)
   (print "SKIP: mqtt plugin not built\n")
   (exit 0))

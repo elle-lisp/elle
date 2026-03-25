@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # Port I/O edge cases: zero-length reads/writes, negative counts, etc.
@@ -93,7 +94,7 @@
 # ── HTTP empty body response ────────────────────────────────────────
 
 # 7. HTTP response with Content-Length: 0 → no hang
-(def http ((import-file "./lib/http.lisp")))
+(def http ((import "http")))
 (def received @[])
 (defn handler [request]
   (push received request:body)

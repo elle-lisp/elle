@@ -133,6 +133,22 @@ jobs:
       - name: Run examples and Elle script tests
         run: make smoke
 
+  tests-macos:
+    name: macOS Build & Smoke
+    needs: changes
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel and coreutils
+        run: brew install parallel coreutils
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Run examples and Elle script tests
+        run: make smoke
+
   plugin-tests:
     name: Plugin Tests
     needs: [changes, build-plugins]
@@ -172,7 +188,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, tests-macos, plugin-tests]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -190,6 +206,9 @@ jobs:
         run: exit 1
       - name: Check tests
         if: needs.tests.result == 'failure'
+        run: exit 1
+      - name: Check macOS tests
+        if: needs.tests-macos.result == 'failure'
         run: exit 1
       - name: Check plugin tests
         if: needs.plugin-tests.result == 'failure'

@@ -9,7 +9,6 @@ use std::sync::Arc;
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
 use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
-use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -85,7 +84,9 @@ impl JitCompiler {
     ///    self_tag: u64, self_payload: u64) -> JitValue  (two I64s in rax:rdx)
     fn make_jit_signature(&self) -> Signature {
         let mut sig = self.module.make_signature();
-        sig.call_conv = CallConv::SystemV;
+        // Use the ISA's default calling convention (SystemV on x86_64-linux,
+        // AppleAarch64 on aarch64-apple-darwin, etc.)
+        sig.call_conv = self.module.isa().default_call_conv();
         sig.params.push(AbiParam::new(I64)); // env pointer (*const Value)
         sig.params.push(AbiParam::new(I64)); // args pointer (*const Value)
         sig.params.push(AbiParam::new(I64)); // nargs
