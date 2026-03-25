@@ -108,8 +108,14 @@ impl<'a> Lowerer<'a> {
                 );
                 let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
                 for expr in &exprs[..exprs.len() - 1] {
-                    if let HirKind::Destructure { pattern, .. } = &expr.kind {
-                        collect_destructure_bindings(pattern, &sentinel, &mut extended);
+                    match &expr.kind {
+                        HirKind::Destructure { pattern, .. } => {
+                            collect_destructure_bindings(pattern, &sentinel, &mut extended);
+                        }
+                        HirKind::Define { binding, value } => {
+                            extended.push((*binding, value));
+                        }
+                        _ => {}
                     }
                 }
                 self.result_is_safe(last, &extended)

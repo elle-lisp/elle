@@ -800,7 +800,18 @@ impl VM {
                 if result_bits.contains(SIG_ERROR) {
                     JitValue::nil()
                 } else {
-                    // Uncaught non-error signal (yield, etc.) — side-exit
+                    // Uncaught non-error signal (yield, I/O, etc.) — side-exit.
+                    // Create a FiberResume frame so that resume_suspended will
+                    // re-resume the child fiber after the signal is resolved.
+                    // Without this, the raw io-request value leaks through as
+                    // the call result instead of the resolved I/O value.
+                    let fiber_resume_frame = SuspendedFrame::FiberResume {
+                        handle: handle.clone(),
+                        fiber_value,
+                    };
+                    let mut frames = self.fiber.suspended.take().unwrap_or_default();
+                    frames.push(fiber_resume_frame);
+                    self.fiber.suspended = Some(frames);
                     YIELD_SENTINEL
                 }
             }
