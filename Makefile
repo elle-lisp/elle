@@ -80,20 +80,13 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # you only see the last few lines of output.
 
 # Per-pass skip lists: tests that fail in one mode can still run in the other.
-#   arena.lisp       — scope-alloc count assertions broken (needs fix)
-#   fiber_io_stress   — JIT io-request leak after many sequential reads
-#   streams.lisp     — same JIT io-request leak
-#   jit-rejections   — requires JIT active (tests rejection tracking)
-# arena.lisp        — scope-alloc counts assume private heap; all child
-#                     fibers use shared allocator now (revert pending)
 # jit-rejections    — requires JIT active (tests rejection tracking)
-ELLE_SKIP_VM  := -e arena.lisp -e jit-rejections.lisp
-ELLE_SKIP_JIT := -e arena.lisp
+ELLE_SKIP_VM  := -e jit-rejections.lisp
+ELLE_SKIP_JIT :=
 
 examples-vm:
 	@echo "=== examples (VM, JIT disabled) ==="
 	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' examples/*.lisp | \
-		grep -v allocator.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
@@ -101,7 +94,6 @@ examples-vm:
 examples-jit:
 	@echo "=== examples (JIT enabled) ==="
 	@printf '%s\n' examples/*.lisp | \
-		grep -v allocator.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: examples JIT pass (JIT was enabled)"; exit 1; }
@@ -119,7 +111,6 @@ smoke-vm: examples-vm
 smoke-jit: examples-jit
 	@echo "=== elle scripts (JIT enabled) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_JIT) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
