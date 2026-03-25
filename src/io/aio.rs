@@ -537,7 +537,11 @@ impl AsyncBackend {
 
     /// Submit a Connect operation. Connect creates a new port, so
     /// request.port is Value::NIL — we handle it separately.
-    fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>) -> Result<u64, String> {
+    fn submit_connect(
+        &self,
+        addr: &ConnectAddr,
+        _timeout: Option<Duration>,
+    ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
@@ -558,7 +562,7 @@ impl AsyncBackend {
                     ring,
                     id,
                     addr,
-                    timeout,
+                    _timeout,
                     buffer_pool,
                     buf_handle,
                 ) {
@@ -674,7 +678,7 @@ impl AsyncBackend {
         mode: u32,
         direction: Direction,
         encoding: Encoding,
-        timeout: Option<Duration>,
+        _timeout: Option<Duration>,
     ) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
@@ -701,7 +705,7 @@ impl AsyncBackend {
                     &c_path,
                     flags,
                     mode,
-                    timeout,
+                    _timeout,
                     buffer_pool,
                     buf_handle,
                 )?;
@@ -833,7 +837,7 @@ impl AsyncBackend {
 
         let AsyncBackendInner {
             ref mut platform,
-            ref mut network_pool,
+            network_pool: ref mut _network_pool,
             ref mut pending,
             ..
         } = *inner;
@@ -844,7 +848,7 @@ impl AsyncBackend {
             PlatformBackend::Uring(_) => {
                 // Even on io_uring platforms, tasks run on the network pool
                 // to avoid starving fd I/O ops on the main pool.
-                network_pool.submit(id, PoolOp::Task(closure))?;
+                _network_pool.submit(id, PoolOp::Task(closure))?;
             }
             PlatformBackend::ThreadPool(ref mut pool) => {
                 pool.submit(id, PoolOp::Task(closure))?;

@@ -374,7 +374,12 @@ impl ThreadPoolBackend {
                 }
                 PoolOp::Open { path, flags, mode } => {
                     let fd = unsafe {
-                        libc::openat(libc::AT_FDCWD, path.as_ptr(), flags, mode as libc::mode_t)
+                        libc::openat(
+                            libc::AT_FDCWD,
+                            path.as_ptr(),
+                            flags,
+                            libc::c_uint::from(mode as libc::mode_t),
+                        )
                     };
                     if fd < 0 {
                         (
