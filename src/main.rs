@@ -38,6 +38,7 @@ fn print_help() {
     println!("Environment:");
     println!("  ELLE_HOME             Elle installation root (auto-detected from binary)");
     println!("  ELLE_PATH             Colon-separated module search directories");
+    println!("  ELLE_IO=thread        Force thread pool I/O backend (skip io_uring)");
     println!("  ELLE_JIT=0            Disable JIT compilation");
     println!("  ELLE_JIT_THRESHOLD=N  JIT hotness threshold (default: 10)");
     println!("  ELLE_JIT_STATS=1      Print JIT compilation stats to stderr on exit\n");
@@ -508,9 +509,7 @@ fn main() {
         println!();
     }
 
-    // Explicit exit to avoid hanging on lingering thread pool threads.
-    // On macOS (no io_uring), I/O worker threads may outlive the scheduler;
-    // process::exit terminates them immediately. The orderly shutdown
-    // (scheduler pump drain, fiber completion) has already happened above.
-    std::process::exit(if had_errors { 1 } else { 0 });
+    if had_errors {
+        std::process::exit(1);
+    }
 }

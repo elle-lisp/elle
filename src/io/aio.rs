@@ -78,17 +78,30 @@ impl AsyncBackend {
         })
     }
 
-    #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
-        match io_uring::IoUring::new(256) {
-            Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
-            Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
-        }
-    }
+        // ELLE_IO=thread forces the thread pool backend on any platform.
+        // Useful for testing the thread pool path on Linux where io_uring
+        // is the default.
+        let force_threads = std::env::var("ELLE_IO")
+            .map(|v| v == "thread")
+            .unwrap_or(false);
 
-    #[cfg(not(target_os = "linux"))]
-    fn create_platform_backend() -> PlatformBackend {
-        PlatformBackend::ThreadPool(ThreadPoolBackend::new())
+        if force_threads {
+            return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            match io_uring::IoUring::new(256) {
+                Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
+                Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
+            }
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            PlatformBackend::ThreadPool(ThreadPoolBackend::new())
+        }
     }
 
     /// Submit an I/O request. Returns a submission ID.
@@ -160,9 +173,16 @@ impl AsyncBackend {
                             let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
                         }
                         PlatformBackend::ThreadPool(_) => {
-                            // Thread pool: remove pending entry. The blocking
-                            // syscall will get EBADF when the fd closes.
-                            inner.pending.remove(&op_id);
+                            // Thread pool: can't cancel in-flight syscalls, but
+                            // we must generate an error completion so the scheduler
+                            // cleans up its pending map and unblocks the pump loop.
+                            if let Some(pending_op) = inner.pending.remove(&op_id) {
+                                inner.buffer_pool.release(pending_op.buffer_handle());
+                                inner.completions.push_back(Completion {
+                                    id: op_id,
+                                    result: Err(error_val("io-error", "port closed".to_string())),
+                                });
+                            }
                         }
                     }
                 }
