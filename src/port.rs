@@ -215,6 +215,12 @@ impl Port {
         self.closed.get()
     }
 
+    /// Whether this port owns a file descriptor.
+    /// Stdio ports don't own their fd (fd is None from construction).
+    pub fn has_fd(&self) -> bool {
+        self.fd.borrow().is_some()
+    }
+
     /// The port kind.
     pub fn kind(&self) -> PortKind {
         self.kind

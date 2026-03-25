@@ -364,6 +364,8 @@ pub(super) fn process_raw_completion(
                     // produces a PendingOp::Port entry.
                     unreachable!("Resolve is portless; cannot reach PendingOp::Port")
                 }
+                // Close completion: port already closed in submit. Return nil.
+                IoOp::Close => Value::NIL,
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
                     if data.len() < 4 {

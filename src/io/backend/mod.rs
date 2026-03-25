@@ -203,6 +203,10 @@ impl SyncBackend {
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
                 ),
+                IoOp::Close => {
+                    port.close();
+                    (SIG_OK, Value::NIL)
+                }
             },
         }
     }
