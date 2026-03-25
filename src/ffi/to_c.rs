@@ -456,60 +456,115 @@ pub fn write_value_to_buffer(
         }
 
         TypeDesc::Struct(sd) => {
-            let arr = value.as_array_mut().ok_or_else(|| {
-                LError::ffi_type_error(
-                    "struct",
-                    format!("expected array, got {}", value.type_name()),
-                )
-            })?;
-            let elems = arr.borrow();
-            if elems.len() != sd.fields.len() {
-                return Err(LError::ffi_type_error(
-                    "struct",
-                    format!(
-                        "struct has {} fields, got {} values",
-                        sd.fields.len(),
-                        elems.len()
-                    ),
-                ));
-            }
             let (offsets, _) = sd.field_offsets().ok_or_else(|| {
                 LError::ffi_error("marshal", "cannot compute struct layout (contains void?)")
             })?;
-            let mut owned = Vec::new();
-            for (i, (field_desc, &field_offset)) in sd.fields.iter().zip(offsets.iter()).enumerate()
-            {
-                let field_owned =
-                    write_value_to_buffer(unsafe { ptr.add(field_offset) }, &elems[i], field_desc)?;
-                owned.extend(field_owned);
+
+            // Accept both mutable @[...] and immutable [...] arrays.
+            let write_fields = |elems: &[Value]| -> LResult<Vec<MarshalledArg>> {
+                if elems.len() != sd.fields.len() {
+                    return Err(LError::ffi_type_error(
+                        "struct",
+                        format!(
+                            "struct has {} fields, got {} values",
+                            sd.fields.len(),
+                            elems.len()
+                        ),
+                    ));
+                }
+                let mut owned = Vec::new();
+                for (i, (field_desc, &field_offset)) in
+                    sd.fields.iter().zip(offsets.iter()).enumerate()
+                {
+                    let field_owned = write_value_to_buffer(
+                        unsafe { ptr.add(field_offset) },
+                        &elems[i],
+                        field_desc,
+                    )?;
+                    owned.extend(field_owned);
+                }
+                Ok(owned)
+            };
+
+            if let Some(arr) = value.as_array_mut() {
+                let elems = arr.borrow();
+                write_fields(&elems)
+            } else if let Some(elems) = value.as_array() {
+                write_fields(elems)
+            } else {
+                Err(LError::ffi_type_error(
+                    "struct",
+                    format!("expected array, got {}", value.type_name()),
+                ))
             }
-            Ok(owned)
         }
 
         TypeDesc::Array(elem_desc, count) => {
-            let arr = value.as_array_mut().ok_or_else(|| {
-                LError::ffi_type_error(
-                    "array",
-                    format!("expected array, got {}", value.type_name()),
-                )
-            })?;
-            let elems = arr.borrow();
-            if elems.len() != *count {
-                return Err(LError::ffi_type_error(
-                    "array",
-                    format!("array has {} elements, got {} values", count, elems.len()),
-                ));
-            }
+            // Accept mutable @[...], immutable [...] arrays, and bytes/\@bytes
+            // (for u8/i8 element types, bytes are written directly as a fast path).
             let elem_size = elem_desc
                 .size()
                 .ok_or_else(|| LError::ffi_error("marshal", "cannot compute array element size"))?;
-            let mut owned = Vec::new();
-            for (i, elem_val) in elems.iter().enumerate() {
-                let elem_owned =
-                    write_value_to_buffer(unsafe { ptr.add(i * elem_size) }, elem_val, elem_desc)?;
-                owned.extend(elem_owned);
+
+            // Fast path: bytes value for u8/i8 array — copy directly.
+            if matches!(
+                **elem_desc,
+                TypeDesc::U8 | TypeDesc::UChar | TypeDesc::I8 | TypeDesc::Char
+            ) {
+                if let Some(data) = value.as_bytes() {
+                    if data.len() != *count {
+                        return Err(LError::ffi_type_error(
+                            "array",
+                            format!("array has {} elements, got {} bytes", count, data.len()),
+                        ));
+                    }
+                    unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len()) };
+                    return Ok(Vec::new());
+                }
+                if let Some(cell) = value.as_bytes_mut() {
+                    let data = cell.borrow();
+                    if data.len() != *count {
+                        return Err(LError::ffi_type_error(
+                            "array",
+                            format!("array has {} elements, got {} bytes", count, data.len()),
+                        ));
+                    }
+                    unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len()) };
+                    return Ok(Vec::new());
+                }
             }
-            Ok(owned)
+
+            // General path: array values.
+            let write_elems = |elems: &[Value]| -> LResult<Vec<MarshalledArg>> {
+                if elems.len() != *count {
+                    return Err(LError::ffi_type_error(
+                        "array",
+                        format!("array has {} elements, got {} values", count, elems.len()),
+                    ));
+                }
+                let mut owned = Vec::new();
+                for (i, elem_val) in elems.iter().enumerate() {
+                    let elem_owned = write_value_to_buffer(
+                        unsafe { ptr.add(i * elem_size) },
+                        elem_val,
+                        elem_desc,
+                    )?;
+                    owned.extend(elem_owned);
+                }
+                Ok(owned)
+            };
+
+            if let Some(arr) = value.as_array_mut() {
+                let elems = arr.borrow();
+                write_elems(&elems)
+            } else if let Some(elems) = value.as_array() {
+                write_elems(elems)
+            } else {
+                Err(LError::ffi_type_error(
+                    "array",
+                    format!("expected array or bytes, got {}", value.type_name()),
+                ))
+            }
         }
     }
 }
