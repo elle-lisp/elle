@@ -144,8 +144,14 @@ impl FiberHeap {
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         // When a shared allocator is installed (yielding child fiber),
-        // route ALL allocations to it.
+        // route ALL allocations to it.  Track the count locally so that
+        // arena/count reflects allocations made by this fiber even though
+        // the storage lives on the parent's shared allocator.
         if !self.shared_alloc.is_null() {
+            self.alloc_count += 1;
+            if self.alloc_count > self.peak_alloc_count {
+                self.peak_alloc_count = self.alloc_count;
+            }
             return unsafe { &mut *self.shared_alloc }.alloc(obj);
         }
 

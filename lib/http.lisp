@@ -266,7 +266,7 @@
    sends connection: close. Each request is read, passed to handler,
    and the response is written. Errors in handler produce a 500 response.
    on-error is called with (request error) when the handler fails."
-  (defer (port/close conn)
+  (defer (protect (port/close conn))
     (forever
       (let [[request (protect (read-request conn))]]
         # Read failure or EOF — connection done
