@@ -21,6 +21,8 @@ use super::Value;
 pub struct ArenaMark {
     position: usize,
     dtor_len: usize,
+    /// Shared-allocator count at mark time, so visible_len() restores correctly.
+    shared_alloc_count: usize,
     /// Length of the active custom allocator's `custom_ptrs` at mark time.
     /// Zero if no custom allocator is active.
     ///
@@ -46,10 +48,12 @@ impl ArenaMark {
         dtor_len: usize,
         custom_ptrs_len: usize,
         root_allocs_len: usize,
+        shared_alloc_count: usize,
     ) -> Self {
         ArenaMark {
             position,
             dtor_len,
+            shared_alloc_count,
             custom_ptrs_len,
             root_allocs_len,
         }
@@ -57,6 +61,10 @@ impl ArenaMark {
 
     pub(crate) fn position(&self) -> usize {
         self.position
+    }
+
+    pub(crate) fn shared_alloc_count(&self) -> usize {
+        self.shared_alloc_count
     }
 
     pub(crate) fn dtor_len(&self) -> usize {

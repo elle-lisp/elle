@@ -220,6 +220,13 @@ impl<'a> Lowerer<'a> {
         // Propagate inferred signal to LIR function
         self.current_func.signal = inferred_signal;
 
+        // Compute escape analysis flags for fiber shared-alloc decisions.
+        // Empty scope_bindings: at the lambda boundary, there are no
+        // let/letrec bindings in scope — captures come from the parent.
+        self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
+        self.current_func.has_outward_heap_set =
+            self.body_contains_dangerous_outward_set(body, &[]);
+
         let func = std::mem::replace(&mut self.current_func, saved_func);
 
         // Restore state

@@ -411,7 +411,7 @@ impl VM {
                     let mut fields = BTreeMap::new();
                     fields.insert(
                         TableKey::Keyword("object-count".to_string()),
-                        Value::int(heap.len() as i64),
+                        Value::int(heap.visible_len() as i64),
                     );
                     fields.insert(
                         TableKey::Keyword("peak-count".to_string()),
@@ -560,11 +560,11 @@ impl VM {
             }
         };
 
-        // Snapshot count before
+        // Snapshot count before (visible_len includes shared_alloc)
         let before = {
             let heap_ptr = crate::value::fiberheap::current_heap_ptr();
             debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
-            unsafe { (*heap_ptr).len() }
+            unsafe { (*heap_ptr).visible_len() }
         };
 
         // Build a proper env (captures + local slots) for the thunk.
@@ -595,10 +595,10 @@ impl VM {
             .map(|(_, v)| v)
             .unwrap_or(Value::NIL);
 
-        // Snapshot count after
+        // Snapshot count after (visible_len includes shared_alloc)
         let after = {
             let heap_ptr = crate::value::fiberheap::current_heap_ptr();
-            unsafe { (*heap_ptr).len() }
+            unsafe { (*heap_ptr).visible_len() }
         };
 
         let net = (after as i64) - (before as i64);

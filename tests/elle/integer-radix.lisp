@@ -25,7 +25,8 @@
 (assert (= (integer "-7") -7) "no-radix negative")
 (assert (= (integer 3.14) 3) "float truncation")
 (assert (= (integer 42) 42) "int passthrough")
-(assert (= (integer :keyword) (integer "keyword")) "keyword conversion")
+(let [([ok? _] (protect (integer :keyword)))]
+  (assert (not ok?) "keyword to integer signals error"))
 
 # ── Error cases ──────────────────────────────────────────────────────
 

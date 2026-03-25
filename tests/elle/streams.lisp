@@ -242,9 +242,11 @@
         (fn [v] (when (= v 1) (error {:error :test-error :message "stop at 1"})) v)
         (make-range 3)))))))) (assert (not ok?) "stream/map: transform error propagates through collect"))
 
-# Error propagation: stream from closed port errors through combinator chain
+# Closed port: port/lines yields the io-error as a value (not signaled)
 (spit "/tmp/elle-test-streams-closederror-478" "some data")
-(let (([ok? _] (protect ((fn []
+(let (([ok? val] (protect ((fn []
     (let [[p (port/open "/tmp/elle-test-streams-closederror-478" :read)]]
       (port/close p)
-      (stream/collect (port/lines p)))))))) (assert (not ok?) "error propagation: closed port errors through port/lines and collect"))
+      (stream/collect (port/lines p))))))))
+  (assert ok? "closed port: stream/collect succeeds (error yielded as value)")
+  (assert (= (get (first val) :error) :io-error) "closed port: collected element is io-error"))

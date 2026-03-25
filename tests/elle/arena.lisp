@@ -629,19 +629,17 @@
 # At root (no scope), :active-allocator is :slab.
 (assert (= (get (arena/stats) :active-allocator) :slab) "active-allocator is :slab at root")
 
-# test_root_alloc_tracked
-# After allocations in root context, :root-live-count and :root-alloc-count increase.
-# Note: arena/stats itself allocates cons cells (SIG_QUERY message), so we can only
-# assert that the counts increase, not the exact delta.
+# test_alloc_tracked
+# After allocations, :object-count increases. Under the async scheduler,
+# allocations may route through a shared allocator (not the root slab),
+# so we check :object-count (which includes shared alloc) rather than
+# :root-live-count (which only tracks root slab slots).
 (let* ((before-s (arena/stats))
-       (before-live (get before-s :root-live-count))
-       (before-allocs (get before-s :root-alloc-count))
-       (_ (cons 1 2))         # allocates one Cons in root context
+       (before-count (get before-s :object-count))
+       (_ (cons 1 2))         # allocates one Cons
        (after-s (arena/stats))
-       (after-live (get after-s :root-live-count))
-       (after-allocs (get after-s :root-alloc-count)))
-  (assert (> after-live before-live) ":root-live-count increases after root allocations")
-  (assert (> after-allocs before-allocs) ":root-alloc-count increases after root allocations"))
+       (after-count (get after-s :object-count)))
+  (assert (> after-count before-count) ":object-count increases after allocation"))
 
 # test_create_shared_allocator_tracked
 # Resuming a yielding fiber creates a shared allocator: :shared-count increases.

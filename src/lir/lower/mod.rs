@@ -230,6 +230,12 @@ impl<'a> Lowerer<'a> {
         // Propagate signal from HIR to top-level LIR function
         self.current_func.signal = hir.signal;
 
+        // Compute escape analysis flags for fiber shared-alloc decisions.
+        // Covers closures created from top-level `defn` forms passed to
+        // `fiber/new` as variables.
+        self.current_func.result_is_immediate = self.result_is_safe(hir, &[]);
+        self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
+
         Ok(std::mem::replace(
             &mut self.current_func,
             LirFunction::new(Arity::Exact(0)),
@@ -440,31 +446,37 @@ impl<'a> Lowerer<'a> {
             return false;
         }
 
+        // Collect Define bindings from the block body. Although blocks
+        // don't introduce let-style bindings, they can contain def/var
+        // statements that create bindings whose values are heap-allocated
+        // inside the scope. These must be tracked so result_is_safe
+        // doesn't treat them as pre-scope outer bindings.
+        let scope_bindings: Vec<(Binding, &Hir)> = body
+            .iter()
+            .filter_map(|e| match &e.kind {
+                HirKind::Define { binding, value } => Some((*binding, value.as_ref())),
+                _ => None,
+            })
+            .collect();
+
         // B2: result is immediate (empty body → nil → safe)
-        // Blocks have no bindings, so scope_bindings is empty — any Var
-        // references something from outside and is safe to return.
         if let Some(last) = body.last() {
-            if !self.result_is_safe(last, &[]) {
+            if !self.result_is_safe(last, &scope_bindings) {
                 self.scope_stats.rejected_unsafe_result += 1;
                 return false;
             }
         }
 
         // Condition 3: all break values targeting this block are safe immediates.
-        // Pass empty scope_bindings — blocks have no bindings of their own,
-        // but `all_break_values_safe` extends scope_bindings as it recurses
-        // into nested let/letrec nodes, so break values referencing inner
-        // let bindings with heap inits are correctly rejected.
-        if !self.all_break_values_safe(body, *block_id, &[]) {
+        if !self.all_break_values_safe(body, *block_id, &scope_bindings) {
             self.scope_stats.rejected_break += 1;
             return false;
         }
 
-        // Condition 4: no dangerous outward mutation (blocks have no own bindings,
-        // so any set is outward — but harmless if value is immediate)
+        // Condition 4: no dangerous outward mutation
         if body
             .iter()
-            .any(|e| self.body_contains_dangerous_outward_set(e, &[]))
+            .any(|e| self.body_contains_dangerous_outward_set(e, &scope_bindings))
         {
             self.scope_stats.rejected_outward_set += 1;
             return false;
