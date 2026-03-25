@@ -30,7 +30,10 @@
 # Test 4: unjoined errored fiber crashes the process
 # We write a helper script and run it as a subprocess.
 # Use sys/env to find the binary path, or fall back to the build output.
-(let* [[elle  (or (get (sys/env) "ELLE") "./target/debug/elle")]
+(let* [[elle  (or (get (sys/env) "ELLE")
+                    (if (file-exists? "./target/release/elle")
+                      "./target/release/elle"
+                      "./target/debug/elle"))]
        [tmp "/tmp/elle-unjoined-error-test.lisp"]
        [p   (port/open tmp :write)]]
   (port/write p (bytes "(ev/spawn (fn [] (error {:error :boom})))\n(ev/sleep 0.01)\n"))
@@ -42,7 +45,10 @@
 (println "  unjoined error crashes process: ok")
 
 # Test 5: successful unjoined fiber does NOT crash
-(let* [[elle  (or (get (sys/env) "ELLE") "./target/debug/elle")]
+(let* [[elle  (or (get (sys/env) "ELLE")
+                    (if (file-exists? "./target/release/elle")
+                      "./target/release/elle"
+                      "./target/debug/elle"))]
        [tmp "/tmp/elle-unjoined-ok-test.lisp"]
        [p   (port/open tmp :write)]]
   (port/write p (bytes "(ev/spawn (fn [] 42))\n(ev/sleep 0.01)\n"))
