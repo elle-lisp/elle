@@ -36,8 +36,9 @@ fn print_help() {
     println!("  -h, --help    Show this help");
     println!("  -             Read from stdin\n");
     println!("Environment:");
+    println!("  ELLE_JIT=0            Disable JIT compilation");
     println!("  ELLE_JIT_THRESHOLD=N  JIT hotness threshold (default: 10)");
-    println!("  ELLE_JIT_STATS=1     Print JIT compilation stats to stderr on exit\n");
+    println!("  ELLE_JIT_STATS=1      Print JIT compilation stats to stderr on exit\n");
     print!("{}", elle::primitives::help_text());
 }
 

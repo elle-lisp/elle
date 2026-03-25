@@ -86,7 +86,7 @@ ELLE_SKIP_JIT :=
 
 examples-vm:
 	@echo "=== examples (VM, JIT disabled) ==="
-	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' examples/*.lisp | \
+	@export ELLE_JIT=0 &&printf '%s\n' examples/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
@@ -102,7 +102,7 @@ examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
 
 smoke-vm: examples-vm
 	@echo "=== elle scripts (VM, JIT disabled) ==="
-	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' tests/elle/*.lisp | \
+	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
@@ -120,7 +120,7 @@ smoke: smoke-vm smoke-jit  ## Run examples + elle scripts (VM then JIT) + docgen
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)
 	@echo "=== plugin tests (VM, JIT disabled) ==="
-	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' tests/elle/plugins/*.lisp | \
+	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/plugins/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: plugin tests VM-only pass (JIT was disabled)"; exit 1; }

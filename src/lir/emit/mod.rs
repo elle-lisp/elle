@@ -335,6 +335,8 @@ impl Emitter {
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
+                    result_is_immediate: func.result_is_immediate,
+                    has_outward_heap_set: func.has_outward_heap_set,
                 };
                 let closure = Closure {
                     template: Rc::new(template),

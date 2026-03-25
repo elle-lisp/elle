@@ -80,13 +80,17 @@ impl VM {
         // Initialize active_allocator now that the heap is in its stable Box.
         self.fiber.heap.init_active_allocator();
 
-        // 3b. Child fibers use their own private FiberHeap.
-        // Scope marks (RegionEnter/RegionExit) free objects on the private heap.
-        // NOTE: shared allocator was previously forced for all child fibers to
-        // prevent use-after-free when Values escape the child (e.g., closures
-        // sharing a ClosureTemplate with the parent). That workaround is reverted
-        // here to restore scope allocation; the underlying escape bugs need to be
-        // fixed properly.
+        // 3b. Install shared allocator when escape analysis indicates the fiber
+        // body may produce heap values that escape to the parent:
+        // - result is not provably immediate (return value could be heap)
+        // - body may suspend (yielded values escape)
+        // - body has outward set of heap values (captured mutation)
+        let tmpl = &self.fiber.closure.template;
+        if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
+            let parent_heap: &mut crate::value::FiberHeap = &mut child_fiber.heap;
+            let ptr = parent_heap.get_or_create_shared_allocator();
+            self.fiber.heap.set_shared_alloc(ptr);
+        }
 
         // 4. Execute the closure
         let bits = execute(self);
