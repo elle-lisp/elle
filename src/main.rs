@@ -508,7 +508,9 @@ fn main() {
         println!();
     }
 
-    if had_errors {
-        std::process::exit(1);
-    }
+    // Explicit exit to avoid hanging on lingering thread pool threads.
+    // On macOS (no io_uring), I/O worker threads may outlive the scheduler;
+    // process::exit terminates them immediately. The orderly shutdown
+    // (scheduler pump drain, fiber completion) has already happened above.
+    std::process::exit(if had_errors { 1 } else { 0 });
 }
