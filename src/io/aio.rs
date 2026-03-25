@@ -1089,7 +1089,7 @@ impl AsyncBackend {
                                     ref mut connect_fd, ..
                                 } = pending_op
                                 {
-                                    if result_code > 0 {
+                                    if result_code >= 0 {
                                         *connect_fd = Some(result_code);
                                     }
                                 }
@@ -1167,7 +1167,16 @@ impl AsyncBackend {
                         data,
                     } in raw_completions
                     {
-                        if let Some(pending_op) = pending.remove(&id) {
+                        if let Some(mut pending_op) = pending.remove(&id) {
+                            // Thread pool Connect: stash fd in connect_fd
+                            if let PendingOp::Connect {
+                                ref mut connect_fd, ..
+                            } = pending_op
+                            {
+                                if result_code >= 0 {
+                                    *connect_fd = Some(result_code);
+                                }
+                            }
                             let buf_handle = pending_op.buffer_handle();
                             let c = completion::process_raw_completion(
                                 id,
@@ -1254,7 +1263,17 @@ impl AsyncBackendInner {
                     data,
                 } in raw
                 {
-                    if let Some(pending) = self.pending.remove(&id) {
+                    if let Some(mut pending) = self.pending.remove(&id) {
+                        // Thread pool Connect: stash fd in connect_fd
+                        // (same logic as drain_network_completions).
+                        if let PendingOp::Connect {
+                            ref mut connect_fd, ..
+                        } = pending
+                        {
+                            if result_code >= 0 {
+                                *connect_fd = Some(result_code);
+                            }
+                        }
                         let buf_handle = pending.buffer_handle();
                         let c = completion::process_raw_completion(
                             id,
@@ -1291,7 +1310,7 @@ impl AsyncBackendInner {
                     ref mut connect_fd, ..
                 } = pending
                 {
-                    if result_code > 0 {
+                    if result_code >= 0 {
                         *connect_fd = Some(result_code);
                     }
                 }
