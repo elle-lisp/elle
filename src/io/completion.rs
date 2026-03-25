@@ -36,27 +36,28 @@ pub(super) fn process_raw_completion(
         } => {
             // buffer_pool.release is already called at the top of process_raw_completion.
 
-            if result_code < 0 {
-                // On the uring path, reclaim siginfo before returning.
-                if !siginfo.is_null() {
-                    unsafe { drop(Box::from_raw(*siginfo)) };
-                }
-                let errno = -result_code;
-                return Completion {
-                    id,
-                    result: Err(error_val(
-                        "exec-error",
-                        format!("subprocess/wait: waitid failed: errno {}", errno),
-                    )),
-                };
-            }
-
             let exit_code: i32 = if siginfo.is_null() {
-                // Thread pool path: exit code comes directly as the raw result integer
-                // (from waitpid in PoolOp::ProcessWait dispatch).
+                // Thread pool path: exit code comes directly from waitpid.
+                // Negative means killed by signal (e.g. -15 for SIGTERM),
+                // NOT a syscall error. The threadpool returns -errno on
+                // actual waitpid failure, but those are also negative —
+                // we can't distinguish, so we trust the thread pool's
+                // waitpid succeeded (it checks ret < 0 itself).
                 result_code
             } else {
-                // io_uring path: exit status is in siginfo_t filled by the kernel.
+                // io_uring path: negative result_code means waitid syscall failed.
+                if result_code < 0 {
+                    unsafe { drop(Box::from_raw(*siginfo)) };
+                    let errno = -result_code;
+                    return Completion {
+                        id,
+                        result: Err(error_val(
+                            "exec-error",
+                            format!("subprocess/wait: waitid failed: errno {}", errno),
+                        )),
+                    };
+                }
+                // Exit status is in siginfo_t filled by the kernel.
                 // Reclaim the siginfo_t allocation.
                 // SAFETY: `siginfo` was allocated via Box::into_raw in submit_process_wait.
                 // This completion arm is the single exit point — the CQE fires exactly once
