@@ -445,8 +445,7 @@ mod tests {
         // Read struct back
         let read_result = prim_ffi_read(&[ptr, struct_type]);
         assert_eq!(read_result.0, SIG_OK);
-        let arr = read_result.1.as_array_mut().unwrap();
-        let arr = arr.borrow();
+        let arr = read_result.1.as_array().unwrap();
         assert_eq!(arr[0].as_int(), Some(42));
         assert!((arr[1].as_float().unwrap() - test_float).abs() < 1e-10);
 

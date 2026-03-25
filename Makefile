@@ -21,6 +21,7 @@ PLUGINS := \
     git \
     glob \
     jiff \
+    mqtt \
     msgpack \
     oxigraph \
     polars \
