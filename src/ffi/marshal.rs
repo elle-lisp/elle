@@ -354,10 +354,9 @@ mod tests {
             .unwrap();
         }
 
-        // Read back
+        // Read back — returns immutable array
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array_mut().unwrap();
-        let result_elems = result_arr.borrow();
+        let result_elems = result.as_array().unwrap();
         assert_eq!(result_elems[0].as_int(), Some(42));
         assert!((result_elems[1].as_float().unwrap() - 1.5).abs() < 1e-10);
         assert_eq!(result_elems[2].as_int(), Some(-100));
@@ -389,9 +388,9 @@ mod tests {
             .unwrap();
         }
 
+        // i32 array → returns immutable array (not bytes, since element type is i32)
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array_mut().unwrap();
-        let result_elems = result_arr.borrow();
+        let result_elems = result.as_array().unwrap();
         assert_eq!(result_elems.len(), 4);
         assert_eq!(result_elems[0].as_int(), Some(10));
         assert_eq!(result_elems[1].as_int(), Some(20));
@@ -464,12 +463,10 @@ mod tests {
         }
 
         let result = read_value_from_buffer(buf.as_mut_ptr(), &desc).unwrap();
-        let result_arr = result.as_array_mut().unwrap();
-        let result_elems = result_arr.borrow();
+        let result_elems = result.as_array().unwrap();
         assert_eq!(result_elems[0].as_int(), Some(123456));
 
-        let inner_result = result_elems[1].as_array_mut().unwrap();
-        let inner_elems = inner_result.borrow();
+        let inner_elems = result_elems[1].as_array().unwrap();
         assert_eq!(inner_elems[0].as_int(), Some(7));
         assert_eq!(inner_elems[1].as_int(), Some(999));
     }

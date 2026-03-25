@@ -41,8 +41,10 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `uuid/` | UUID generation and parsing | `uuid/v4`, `uuid/v5`, `uuid/parse`, `uuid/nil`, `uuid/version` |
 | `xml/` | XML parsing and serialization | `xml/parse`, `xml/emit`, `xml/reader-new`, `xml/next-event`, `xml/reader-close` |
 | `yaml/` | YAML parsing and serialization | `yaml/parse`, `yaml/parse-all`, `yaml/encode` |
+| `mqtt/` | MQTT packet codec (state-machine pattern) | `mqtt/state`, `mqtt/encode-connect`, `mqtt/encode-publish`, `mqtt/encode-subscribe`, `mqtt/encode-unsubscribe`, `mqtt/encode-ping`, `mqtt/encode-disconnect`, `mqtt/encode-puback`, `mqtt/feed`, `mqtt/poll`, `mqtt/poll-all`, `mqtt/next-packet-id`, `mqtt/connected?`, `mqtt/keep-alive` |
 | `polars/` | Polars DataFrames (eager + lazy) | `polars/df`, `polars/read-csv`, `polars/write-csv`, `polars/select`, `polars/sort`, `polars/lazy`, `polars/lfilter`, `polars/lgroupby`, `polars/collect` |
 | `protobuf/` | Protocol Buffers encode/decode/introspect | `protobuf/schema`, `protobuf/schema-bytes`, `protobuf/encode`, `protobuf/decode`, `protobuf/messages`, `protobuf/fields`, `protobuf/enums` |
+
 
 ## Building plugins
 
@@ -141,6 +143,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `csv/` | CSV parsing and serialization |
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
+| `mqtt/` | MQTT packet codec (state-machine, no I/O) |
 | `oxigraph/` | RDF quad store with SPARQL query and update |
 | `random/` | Random number generation (migrated to `rand` 0.9; includes distributions and CSPRNG) |
 | `regex/` | Regular expression matching and replacement |
@@ -153,5 +156,6 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `uuid/` | UUID generation and parsing (v4, v5, parse, nil, version) |
 | `xml/` | XML parsing and serialization (DOM and streaming APIs) |
 | `yaml/` | YAML parsing and serialization |
+
 | `polars/` | Polars DataFrame operations (eager and lazy APIs) |
 | `protobuf/` | Protocol Buffers encoding, decoding, and introspection |
