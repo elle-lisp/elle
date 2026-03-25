@@ -411,7 +411,7 @@ impl VM {
                     let mut fields = BTreeMap::new();
                     fields.insert(
                         TableKey::Keyword("object-count".to_string()),
-                        Value::int(heap.len() as i64),
+                        Value::int(heap.visible_len() as i64),
                     );
                     fields.insert(
                         TableKey::Keyword("peak-count".to_string()),
