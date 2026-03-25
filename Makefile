@@ -1,4 +1,5 @@
-.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help
+.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help \
+       examples-vm examples-jit smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit
 
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
@@ -69,27 +70,78 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # ── Test ────────────────────────────────────────────────────────────
 
 # Approximate runtimes (for guidance — vary by machine):
-#   make smoke    ~15s  examples + elle scripts (parallel, debug build)
-#   make test     ~2min smoke + rust unit tests (PROPTEST_CASES=4)
+#   make smoke    ~30s  examples + elle scripts, VM then JIT (parallel, debug build)
+#   make test     ~3min smoke + rust unit tests (PROPTEST_CASES=4)
 #   cargo test    ~30min full suite (unit + integration + property)
+#
+# Every Elle test target runs twice: first with JIT disabled (VM-only),
+# then with default JIT. This catches bugs that only manifest in one mode.
+# On failure the banner tells you which pass broke — capture it even if
+# you only see the last few lines of output.
 
-examples:  ## Run all examples
+# Per-pass skip lists: tests that fail in one mode can still run in the other.
+#   arena.lisp       — scope-alloc count assertions broken (needs fix)
+#   fiber_io_stress   — JIT io-request leak after many sequential reads
+#   streams.lisp     — same JIT io-request leak
+#   jit-rejections   — requires JIT active (tests rejection tracking)
+# arena.lisp        — scope-alloc counts assume private heap; all child
+#                     fibers use shared allocator now (revert pending)
+# jit-rejections    — requires JIT active (tests rejection tracking)
+ELLE_SKIP_VM  := -e arena.lisp -e jit-rejections.lisp
+ELLE_SKIP_JIT := -e arena.lisp
+
+examples-vm:
+	@echo "=== examples (VM, JIT disabled) ==="
+	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' examples/*.lisp | \
+		grep -v allocator.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
+
+examples-jit:
+	@echo "=== examples (JIT enabled) ==="
 	@printf '%s\n' examples/*.lisp | \
 		grep -v allocator.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}'
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: examples JIT pass (JIT was enabled)"; exit 1; }
 
-smoke: examples  ## Run examples, elle scripts, and docgen
-	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v -e arena.lisp -e fiber_io_stress.lisp -e jit-rejections.lisp -e streams.lisp -e redis.lisp | \
+examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
+
+smoke-vm: examples-vm
+	@echo "=== elle scripts (VM, JIT disabled) ==="
+	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}'
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
+
+smoke-jit: examples-jit
+	@echo "=== elle scripts (JIT enabled) ==="
+	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_JIT) | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
+
+smoke: smoke-vm smoke-jit  ## Run examples + elle scripts (VM then JIT) + docgen
 	$(ELLE) demos/docgen/generate.lisp
 
-plugin-tests:  ## Run plugin tests
+plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)
+	@echo "=== plugin tests (VM, JIT disabled) ==="
+	@export ELLE_JIT_THRESHOLD=999999 && printf '%s\n' tests/elle/plugins/*.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: plugin tests VM-only pass (JIT was disabled)"; exit 1; }
+
+plugin-tests-jit:  ## Run plugin tests (JIT enabled)
+	@echo "=== plugin tests (JIT enabled) ==="
 	@printf '%s\n' tests/elle/plugins/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}'
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: plugin tests JIT pass (JIT was enabled)"; exit 1; }
+
+plugin-tests: plugin-tests-vm plugin-tests-jit  ## Run plugin tests (VM then JIT)
 
 test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build -p elle-git
