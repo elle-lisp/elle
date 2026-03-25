@@ -35,7 +35,8 @@
 ## If we can't reach example.com:443, skip the network-dependent tests.
 
 (def has-network
-  (let [[[ok? _] (protect (tls:connect "example.com" 443))]]
+  (let [[[ok? result] (protect (ev/timeout 5 (fn [] (tls:connect "example.com" 443))))]]
+    (when ok? (tls:close result))
     ok?))
 
 (when has-network
