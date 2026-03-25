@@ -4,13 +4,14 @@
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
   ELLE    ?= ./target/release/elle
+  TIMEOUT ?= 60s
 else
   JOBS    ?= 16
   ELLE    ?= ./target/debug/elle
+  TIMEOUT ?= 30s
   examples: dev
   plugin-tests: plugins
 endif
-TIMEOUT ?= 30s
 
 PLUGINS := \
     arrow \
