@@ -80,28 +80,13 @@ impl VM {
         // Initialize active_allocator now that the heap is in its stable Box.
         self.fiber.heap.init_active_allocator();
 
-        // 3b. Provide shared allocator to child (for yielding or I/O fibers).
-        //     After the swap: self.fiber is child, child_fiber is parent.
-        //     Two cases:
-        //     (a) Parent already has shared_alloc → propagate down the chain.
-        //     (c) Parent has no shared_alloc → create on parent's heap.
-        //         After issue-525, saved_heap is never null (root always has FiberHeap),
-        //         so root→child transitions use this path too.
-        // All child fibers get a shared allocator so that heap objects
-        // allocated during child execution live on the parent's heap.
-        // Without this, Values that escape the child (e.g., closures
-        // sharing a ClosureTemplate with the parent) would be freed
-        // when the child's FiberHeap is torn down.
-        {
-            let shared_ptr = if !child_fiber.heap.shared_alloc().is_null() {
-                // Parent has shared_alloc from its own parent — propagate
-                child_fiber.heap.shared_alloc()
-            } else {
-                // Reuse existing or create shared allocator on parent's heap.
-                child_fiber.heap.get_or_create_shared_allocator()
-            };
-            self.fiber.heap.set_shared_alloc(shared_ptr);
-        }
+        // 3b. Child fibers use their own private FiberHeap.
+        // Scope marks (RegionEnter/RegionExit) free objects on the private heap.
+        // NOTE: shared allocator was previously forced for all child fibers to
+        // prevent use-after-free when Values escape the child (e.g., closures
+        // sharing a ClosureTemplate with the parent). That workaround is reverted
+        // here to restore scope allocation; the underlying escape bugs need to be
+        // fixed properly.
 
         // 4. Execute the closure
         let bits = execute(self);
