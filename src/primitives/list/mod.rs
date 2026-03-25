@@ -13,7 +13,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 // Re-export advanced functions for use in PRIMITIVES array
 pub(crate) use advanced::{
-    prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_take,
+    prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_second,
+    prim_take,
 };
 
 thread_local! {
@@ -102,12 +103,29 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
             (SIG_OK, borrowed[0])
         };
     }
-    // String — first grapheme cluster
+    // String / @String — first grapheme cluster
     if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next() {
         Some(g) => (SIG_OK, Value::string(g)),
         None => (SIG_OK, Value::NIL),
     }) {
         return result;
+    }
+    // Bytes
+    if let Some(b) = args[0].as_bytes() {
+        return if b.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(b[0] as i64))
+        };
+    }
+    // @Bytes
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(borrowed[0] as i64))
+        };
     }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
@@ -122,10 +140,7 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         SIG_ERROR,
         error_val(
             "type-error",
-            format!(
-                "first: expected sequence (list, array, or string), got {}",
-                args[0].type_name()
-            ),
+            format!("first: expected sequence, got {}", args[0].type_name()),
         ),
     )
 }
@@ -583,10 +598,21 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_last,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Get the last element of a list",
-        params: &["list"],
+        doc: "Get the last element of a sequence (list, array, @array, string). Returns nil for empty sequences.",
+        params: &["sequence"],
         category: "list",
-        example: "(last (list 1 2 3))",
+        example: "(last [1 2 3])",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "second",
+        func: prim_second,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Get the second element of a sequence (list, array, @array, string). Returns nil if fewer than 2 elements.",
+        params: &["sequence"],
+        category: "list",
+        example: "(second [1 2 3])",
         aliases: &[],
     },
     PrimitiveDef {

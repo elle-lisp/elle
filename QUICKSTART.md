@@ -371,7 +371,7 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 ```lisp
 (list 1 2 3)
 (cons 1 (list 2 3))
-(first lst)   (rest lst)   (last lst)
+(first lst)   (second lst)   (rest lst)   (last lst)
 (length lst)
 (append lst1 lst2)
 (reverse lst)

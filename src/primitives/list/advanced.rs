@@ -570,7 +570,7 @@ pub(crate) fn prim_reverse(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(vec))
 }
 
-/// Get the last element of a list
+/// Get the last element of a sequence (list, array, @array, string)
 pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -581,21 +581,141 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
+    // Cons cell — walk to the last element
+    if args[0].as_cons().is_some() || args[0].is_empty_list() {
+        let vec = match args[0].list_to_vec() {
+            Ok(v) => v,
+            Err(e) => return (SIG_ERROR, error_val("type-error", format!("last: {}", e))),
+        };
+        return match vec.last().cloned() {
+            Some(v) => (SIG_OK, v),
+            None => (SIG_OK, Value::NIL),
+        };
+    }
+    // Array
+    if let Some(elems) = args[0].as_array() {
+        return if elems.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, elems[elems.len() - 1])
+        };
+    }
+    // @Array
+    if let Some(arr) = args[0].as_array_mut() {
+        let borrowed = arr.borrow();
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, borrowed[borrowed.len() - 1])
+        };
+    }
+    // String / @String — last grapheme cluster
+    if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next_back() {
+        Some(g) => (SIG_OK, Value::string(g)),
+        None => (SIG_OK, Value::NIL),
+    }) {
+        return result;
+    }
+    // Bytes
+    if let Some(b) = args[0].as_bytes() {
+        return if b.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(b[b.len() - 1] as i64))
+        };
+    }
+    // @Bytes
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.is_empty() {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(borrowed[borrowed.len() - 1] as i64))
+        };
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("last: expected sequence, got {}", args[0].type_name()),
+        ),
+    )
+}
 
-    let vec = match args[0].list_to_vec() {
-        Ok(v) => v,
-        Err(e) => return (SIG_ERROR, error_val("type-error", format!("last: {}", e))),
-    };
-    match vec.last().cloned() {
-        Some(v) => (SIG_OK, v),
-        None => (
+/// Get the second element of a sequence (list, array, @array, string)
+pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
             SIG_ERROR,
             error_val(
-                "argument-error",
-                "last: cannot get last of empty list".to_string(),
+                "arity-error",
+                format!("second: expected 1 argument, got {}", args.len()),
             ),
-        ),
+        );
     }
+    // Cons cell
+    if let Some(cons) = args[0].as_cons() {
+        if let Some(inner) = cons.rest.as_cons() {
+            return (SIG_OK, inner.first);
+        }
+        return (SIG_OK, Value::NIL);
+    }
+    // Empty list
+    if args[0].is_empty_list() {
+        return (SIG_OK, Value::NIL);
+    }
+    // Array
+    if let Some(elems) = args[0].as_array() {
+        return if elems.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, elems[1])
+        };
+    }
+    // @Array
+    if let Some(arr) = args[0].as_array_mut() {
+        let borrowed = arr.borrow();
+        return if borrowed.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, borrowed[1])
+        };
+    }
+    // String / @String — second grapheme cluster
+    if let Some(result) = args[0].with_string(|s| {
+        let mut iter = s.graphemes(true);
+        iter.next(); // skip first
+        match iter.next() {
+            Some(g) => (SIG_OK, Value::string(g)),
+            None => (SIG_OK, Value::NIL),
+        }
+    }) {
+        return result;
+    }
+    // Bytes
+    if let Some(b) = args[0].as_bytes() {
+        return if b.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(b[1] as i64))
+        };
+    }
+    // @Bytes
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.len() < 2 {
+            (SIG_OK, Value::NIL)
+        } else {
+            (SIG_OK, Value::int(borrowed[1] as i64))
+        };
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("second: expected sequence, got {}", args[0].type_name()),
+        ),
+    )
 }
 
 /// Get all elements of a list except the last
