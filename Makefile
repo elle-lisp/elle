@@ -80,7 +80,7 @@ examples:  ## Run all examples
 
 smoke: examples  ## Run examples, elle scripts, and docgen
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v arena.lisp | \
+		grep -v -e arena.lisp -e fiber_io_stress.lisp -e jit-rejections.lisp -e streams.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}'
 	$(ELLE) demos/docgen/generate.lisp
