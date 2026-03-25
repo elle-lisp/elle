@@ -52,7 +52,7 @@
 (def point-val (ffi/read p point-type))
 (print "  struct:    ")
 (println point-val)
-(assert (= point-val @[1.5 2.5]) "ffi/struct read-back")
+(assert (= point-val [1.5 2.5]) "ffi/struct read-back")
 (ffi/free p)
 
 
@@ -83,7 +83,7 @@
 (def sorted (ffi/read arr (ffi/array :i32 5)))
 (print "  sorted:    ")
 (println sorted)
-(assert (= sorted @[1 2 3 4 5]) "qsort should sort ascending")
+(assert (= sorted [1 2 3 4 5]) "qsort should sort ascending")
 
 (ffi/callback-free cmp)
 (ffi/free arr)

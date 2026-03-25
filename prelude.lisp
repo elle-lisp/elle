@@ -91,6 +91,11 @@
 (defmacro unless (test & body)
   `(if ,test nil (begin ,;body)))
 
+## default - supply a default value for a &named parameter
+## (default x 42) shadows x with (or x 42), so nil becomes 42.
+(defmacro default (name value)
+  `(def ,name (or ,name ,value)))
+
 ## error - signal a fiber error
 ## (error) => (emit 1 nil)
 ## (error value) => (emit 1 value)

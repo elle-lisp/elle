@@ -417,8 +417,7 @@ proptest! {
         // Compare field by field
         let original = val.as_array_mut().unwrap();
         let original = original.borrow();
-        let result = read.1.as_array_mut().unwrap();
-        let result = result.borrow();
+        let result = read.1.as_array().unwrap();
         prop_assert_eq!(original.len(), result.len(), "field count mismatch");
 
         for (i, (field_desc, (orig, res))) in sd
@@ -704,22 +703,38 @@ proptest! {
         let read = prim_ffi_read(&[ptr, type_val]);
         prop_assert_eq!(read.0, SIG_OK, "read failed");
 
-        let result = read.1.as_array_mut().unwrap();
-        let result = result.borrow();
-        prop_assert_eq!(result.len(), count, "element count mismatch");
-
-        for (i, (orig, res)) in vals.iter().zip(result.iter()).enumerate() {
-            if matches!(elem_desc, TypeDesc::Double) {
-                let orig_f = orig.as_float().unwrap();
-                let res_f = res.as_float().unwrap();
+        // u8/i8 arrays return bytes; other element types return immutable arrays.
+        if matches!(
+            elem_desc,
+            TypeDesc::U8 | TypeDesc::UChar | TypeDesc::I8 | TypeDesc::Char
+        ) {
+            let data = read.1.as_bytes().expect("u8 array should return bytes");
+            prop_assert_eq!(data.len(), count, "bytes length mismatch");
+            for (i, (orig, &res)) in vals.iter().zip(data.iter()).enumerate() {
                 prop_assert_eq!(
-                    orig_f.to_bits(),
-                    res_f.to_bits(),
-                    "double element {} mismatch",
+                    orig.as_int(),
+                    Some(res as i64),
+                    "byte element {} mismatch",
                     i
                 );
-            } else {
-                prop_assert_eq!(orig.as_int(), res.as_int(), "element {} mismatch", i);
+            }
+        } else {
+            let result = read.1.as_array().expect("non-u8 array should return immutable array");
+            prop_assert_eq!(result.len(), count, "element count mismatch");
+
+            for (i, (orig, res)) in vals.iter().zip(result.iter()).enumerate() {
+                if matches!(elem_desc, TypeDesc::Double) {
+                    let orig_f = orig.as_float().unwrap();
+                    let res_f = res.as_float().unwrap();
+                    prop_assert_eq!(
+                        orig_f.to_bits(),
+                        res_f.to_bits(),
+                        "double element {} mismatch",
+                        i
+                    );
+                } else {
+                    prop_assert_eq!(orig.as_int(), res.as_int(), "element {} mismatch", i);
+                }
             }
         }
 
