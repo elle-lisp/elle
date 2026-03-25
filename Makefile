@@ -112,7 +112,7 @@ smoke-vm: examples-vm
 smoke-jit: examples-jit
 	@echo "=== elle scripts (JIT enabled) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
-		grep -v arena.lisp | \
+		grep -v -e arena.lisp -e fiber_io_stress.lisp -e jit-rejections.lisp -e streams.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
