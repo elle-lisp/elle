@@ -27,6 +27,9 @@ impl VM {
         args: &[Value],
         func: Value,
     ) -> Option<Option<SignalBits>> {
+        if !self.jit_enabled {
+            return None;
+        }
         let bytecode_ptr = closure.template.bytecode.as_ptr();
         let is_hot = self.record_closure_call(bytecode_ptr);
 

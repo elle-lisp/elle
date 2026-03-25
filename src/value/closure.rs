@@ -53,6 +53,12 @@ pub struct ClosureTemplate {
     pub vararg_kind: crate::hir::VarargKind,
     /// Optional name of this closure (for debugging/stack traces).
     pub name: Option<Rc<str>>,
+    /// True when the body's final expression is provably not a heap pointer.
+    /// Used by fiber resume to decide whether shared allocation is needed.
+    pub result_is_immediate: bool,
+    /// True when the body contains `set!` to a captured binding with a
+    /// potentially heap-allocated value. Used by fiber resume.
+    pub has_outward_heap_set: bool,
 }
 
 /// Closure with captured environment
@@ -157,6 +163,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         })
     }
 
@@ -191,6 +199,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         let closure = Closure {
             template,
@@ -217,6 +227,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         let closure2 = Closure {
             template: template2,
@@ -243,6 +255,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         let closure3 = Closure {
             template: template3,

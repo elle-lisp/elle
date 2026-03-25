@@ -230,6 +230,12 @@ impl<'a> Lowerer<'a> {
         // Propagate signal from HIR to top-level LIR function
         self.current_func.signal = hir.signal;
 
+        // Compute escape analysis flags for fiber shared-alloc decisions.
+        // Covers closures created from top-level `defn` forms passed to
+        // `fiber/new` as variables.
+        self.current_func.result_is_immediate = self.result_is_safe(hir, &[]);
+        self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
+
         Ok(std::mem::replace(
             &mut self.current_func,
             LirFunction::new(Arity::Exact(0)),
