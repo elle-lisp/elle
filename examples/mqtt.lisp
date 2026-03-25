@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # MQTT — packet codec demonstration
@@ -9,7 +10,7 @@
 #
 # No broker needed — this exercises the codec in isolation.
 
-(def [ok? plugin] (protect (import-file "target/release/libelle_mqtt.so")))
+(def [ok? plugin] (protect (import-native "mqtt")))
 (when (not ok?)
   (println "SKIP: mqtt plugin not built")
   (exit 0))

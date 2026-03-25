@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## Advanced Runtime Features and Pattern Matching Tests
 ##
 ## Migrated from tests/integration/advanced.rs
@@ -11,7 +12,7 @@
 
 # import-file tests
 (assert (fn () (import-file "tests/modules/test.lisp")) "import-file with valid file succeeds")
-(let (([ok? _] (protect ((fn () (import-file "./lib/nonexistent.lisp")))))) (assert (not ok?) "import-file with non-existent relative path fails"))
+(let (([ok? _] (protect ((fn () (import "nonexistent")))))) (assert (not ok?) "import-file with non-existent relative path fails"))
 (let (([ok? _] (protect ((fn () (import-file "/absolute/nonexistent.lisp")))))) (assert (not ok?) "import-file with non-existent absolute path fails"))
 
 # spawn and thread-id tests

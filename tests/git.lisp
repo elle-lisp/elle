@@ -1,8 +1,8 @@
-(elle/epoch 1)
+(elle/epoch 6)
 # elle-git integration tests
 # Requires: libelle_git.so built at target/release/libelle_git.so
 
-(import-file "target/release/libelle_git.so")
+(import-native "git")
 
 (let ((tmp (string/concat "/tmp/elle-git-test-" (number->string (integer (clock/realtime))))))
 

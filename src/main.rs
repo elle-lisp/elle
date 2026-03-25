@@ -36,6 +36,8 @@ fn print_help() {
     println!("  -h, --help    Show this help");
     println!("  -             Read from stdin\n");
     println!("Environment:");
+    println!("  ELLE_HOME             Elle installation root (auto-detected from binary)");
+    println!("  ELLE_PATH             Colon-separated module search directories");
     println!("  ELLE_JIT=0            Disable JIT compilation");
     println!("  ELLE_JIT_THRESHOLD=N  JIT hotness threshold (default: 10)");
     println!("  ELLE_JIT_STATS=1      Print JIT compilation stats to stderr on exit\n");
@@ -96,7 +98,12 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
         contents = contents.lines().skip(1).collect::<Vec<_>>().join("\n");
     }
 
-    run_source(&contents, filename, vm, symbols)
+    // Push source file for relative import resolution
+    vm.source_file_stack
+        .push(elle::path::absolute(filename).unwrap_or_else(|_| filename.to_string()));
+    let result = run_source(&contents, filename, vm, symbols);
+    vm.source_file_stack.pop();
+    result
 }
 
 /// Run Elle source code from a string.

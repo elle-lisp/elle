@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # tests/elle/telemetry.lisp — Unit tests for lib/telemetry.lisp
@@ -6,7 +7,7 @@
 # metric aggregation, and new v0.2 features without a running collector.
 # Run: elle tests/elle/telemetry.lisp
 
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def telemetry ((import "telemetry")))
 
 (println "=== telemetry: attribute encoding ===")
 

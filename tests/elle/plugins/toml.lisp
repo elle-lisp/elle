@@ -1,8 +1,9 @@
+(elle/epoch 6)
 
 ## TOML plugin integration tests
 
 ## Try to load the toml plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_toml.so")))
+(def [ok? plugin] (protect (import-native "toml")))
 (when (not ok?)
   (print "SKIP: toml plugin not built\n")
   (exit 0))

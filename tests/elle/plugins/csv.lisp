@@ -1,8 +1,9 @@
+(elle/epoch 6)
 
 ## CSV plugin integration tests
 
 ## Try to load the csv plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_csv.so")))
+(def [ok? plugin] (protect (import-native "csv")))
 (when (not ok?)
   (print "SKIP: csv plugin not built\n")
   (exit 0))

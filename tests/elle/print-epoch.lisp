@@ -1,8 +1,8 @@
-(elle/epoch 1)
+(elle/epoch 6)
 
 # Old-epoch code should still work via migration rules
 # display → print (epoch 3), print → println (epoch 2)
 
-(display "epoch1-display ")
-(print "epoch1-print")
-(print "all epoch migration tests passed")
+(print "epoch1-display ")
+(println "epoch1-print")
+(println "all epoch migration tests passed")

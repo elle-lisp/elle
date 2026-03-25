@@ -1,3 +1,4 @@
+(elle/epoch 6)
 
 ## ZMQ FFI library integration tests
 ## Tests lib/zmq.lisp (FFI bindings to system libzmq)
@@ -10,7 +11,7 @@
     (println "zmq tests skipped: libzmq.so not found")
     (sys/exit 0)))
 
-(def zmq (import-file "lib/zmq.lisp"))
+(def zmq (import "zmq"))
 
 ## ── Context creation ─────────────────────────────────────────────
 

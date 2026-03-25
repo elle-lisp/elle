@@ -1,3 +1,4 @@
+(elle/epoch 6)
 
 ## Glob plugin integration tests
 ## Tests the glob plugin (.so loaded via import-file)
@@ -8,7 +9,7 @@
 ## import-file to access plugin functions.
 
 ## Try to load the glob plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_glob.so")))
+(def [ok? plugin] (protect (import-native "glob")))
 (when (not ok?)
   (print "SKIP: glob plugin not built\n")
   (exit 0))

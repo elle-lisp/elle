@@ -1,7 +1,8 @@
+(elle/epoch 6)
 
 ## UUID plugin integration tests
 
-(def [ok? plugin] (protect (import-file "target/release/libelle_uuid.so")))
+(def [ok? plugin] (protect (import-native "uuid")))
 (when (not ok?)
   (print "SKIP: uuid plugin not built\n")
   (exit 0))

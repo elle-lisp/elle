@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # ZMQ — request/reply echo server and client
@@ -14,7 +15,7 @@
     (println "SKIP: libzmq.so not found")
     (sys/exit 0)))
 
-(def zmq (import-file "lib/zmq.lisp"))
+(def zmq (import "zmq"))
 
 (def ctx (zmq:context))
 

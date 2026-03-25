@@ -1,7 +1,8 @@
+(elle/epoch 6)
 
 ## MessagePack plugin integration tests
 
-(def [ok? plugin] (protect (import-file "target/release/libelle_msgpack.so")))
+(def [ok? plugin] (protect (import-native "msgpack")))
 (when (not ok?)
   (print "SKIP: msgpack plugin not built\n")
   (exit 0))

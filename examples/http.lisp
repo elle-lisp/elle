@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # HTTP — server and client in a single event loop
@@ -13,7 +14,7 @@
 # The server accepts connections and routes requests.  The client exercises
 # keep-alive (two requests on one TCP connection) then one-shot mode.
 
-(def http ((import-file "./lib/http.lisp")))
+(def http ((import "http")))
 
 
 # ── URL parsing (pure, no I/O) ──────────────────────────────────────────────

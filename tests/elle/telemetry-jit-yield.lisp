@@ -1,3 +1,4 @@
+(elle/epoch 6)
 #!/usr/bin/env elle
 
 # tests/elle/telemetry-jit-yield.lisp
@@ -17,8 +18,8 @@
 # Fixed by saving/restoring current_func_num_locals in emit_nested_function.
 # This test calls a yielding closure >10 times to exercise the JIT path.
 
-(def http ((import-file "./lib/http.lisp")))
-(def telemetry ((import-file "lib/telemetry.lisp")))
+(def http ((import "http")))
+(def telemetry ((import "telemetry")))
 
 (def received @[])
 

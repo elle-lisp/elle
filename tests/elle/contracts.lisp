@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tests/elle/contracts.lisp — Tests for lib/contract.lisp
 ## Chunk 1: validators, combinators, validate
 
@@ -7,7 +8,7 @@
       :check check :v/and v/and :v/or v/or
       :v/oneof v/oneof :v/optional v/optional
       :v/arrayof v/arrayof :v/mapof v/mapof}
-  ((import-file "lib/contract.lisp")))
+  ((import "contract")))
 
 # ============================================================================
 # Test 1-4: Predicate validator

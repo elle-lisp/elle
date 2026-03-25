@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## TLS library integration tests — Chunk 4: handshake only
 ##
 ## Requires network access (connects to example.com:443).
@@ -14,10 +15,10 @@
 
 ## Try release build first, fall back to debug.
 (def [ok? tls-plugin]
-  (let [[[ok? r] (protect (import-file "target/release/libelle_tls.so"))]]
+  (let [[[ok? r] (protect (import-native "tls"))]]
     (if ok?
       [ok? r]
-      (protect (import-file "target/debug/libelle_tls.so")))))
+      (protect (import-native "tls")))))
 
 (when (not ok?)
   (print "SKIP: elle-tls plugin not built (run: cargo build -p elle-tls)\n")
@@ -29,7 +30,7 @@
 
 ## Load the TLS stdlib, passing the plugin struct so it can close over
 ## the plugin primitives.
-(def tls ((import-file "lib/tls.lisp") tls-plugin))
+(def tls ((import "tls") tls-plugin))
 
 ## ── Probe network access ──────────────────────────────────────────────────
 ## If we can't reach example.com:443, skip the network-dependent tests.

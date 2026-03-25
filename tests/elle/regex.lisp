@@ -1,3 +1,4 @@
+(elle/epoch 6)
 
 ## Regex plugin integration tests
 ## Tests the regex plugin (.so loaded via import-file)
@@ -9,7 +10,7 @@
 ## import-file to access plugin functions.
 
 ## Try to load the regex plugin. If it fails, exit cleanly.
-(def [ok? plugin] (protect (import-file "target/release/libelle_regex.so")))
+(def [ok? plugin] (protect (import-native "regex")))
 (when (not ok?)
   (print "SKIP: regex plugin not built\n")
   (exit 0))

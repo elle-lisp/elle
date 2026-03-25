@@ -1,7 +1,8 @@
+(elle/epoch 6)
 ## tree-sitter plugin integration tests
 
 ## Try to load the plugin. If it fails, exit cleanly.
-(def [ok? ts] (protect (import-file "target/release/libelle_tree_sitter.so")))
+(def [ok? ts] (protect (import-native "tree_sitter")))
 (when (not ok?)
   (print "SKIP: tree-sitter plugin not built\n")
   (exit 0))

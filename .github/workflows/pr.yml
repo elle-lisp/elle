@@ -67,13 +67,14 @@ jobs:
         run: make check-plugin-list
 
   build-plugins:
-    name: Build Plugin (${{ matrix.plugin }})
+    name: Build Plugin (${{ matrix.os == 'macos-latest' && 'macOS' || 'Linux' }}/${{ matrix.plugin }})
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     if: needs.changes.outputs.source == 'true'
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         plugin:
           - arrow
           - base64
@@ -105,14 +106,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: plugin-${{ matrix.plugin }}
+          shared-key: plugin-${{ matrix.os }}-${{ matrix.plugin }}
       - name: Build plugin
         run: cargo build --release -p elle-${{ matrix.plugin }}
-      - name: Upload plugin .so
+      - name: Upload plugin (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
-          name: plugin-${{ matrix.plugin }}
+          name: plugin-linux-${{ matrix.plugin }}
           path: target/release/libelle_${{ matrix.plugin }}.so
+          retention-days: 1
+      - name: Upload plugin (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-macos-${{ matrix.plugin }}
+          path: target/release/libelle_${{ matrix.plugin }}.dylib
           retention-days: 1
 
   tests:
@@ -133,8 +142,24 @@ jobs:
       - name: Run examples and Elle script tests
         run: make smoke
 
+  tests-macos:
+    name: macOS Build & Smoke
+    needs: changes
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel
+        run: brew install parallel
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Run examples and Elle script tests
+        run: make smoke
+
   plugin-tests:
-    name: Plugin Tests
+    name: Plugin Tests (Linux)
     needs: [changes, build-plugins]
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
@@ -147,7 +172,29 @@ jobs:
       - name: Download all plugin artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: plugin-*
+          pattern: plugin-linux-*
+          path: target/release/
+          merge-multiple: true
+      - name: Run plugin tests
+        run: make plugin-tests
+
+  plugin-tests-macos:
+    name: Plugin Tests (macOS)
+    needs: [changes, build-plugins]
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GNU parallel
+        run: brew install parallel
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Download all plugin artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: plugin-macos-*
           path: target/release/
           merge-multiple: true
       - name: Run plugin tests
@@ -172,7 +219,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, tests-macos, plugin-tests, plugin-tests-macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -191,8 +238,14 @@ jobs:
       - name: Check tests
         if: needs.tests.result == 'failure'
         run: exit 1
+      - name: Check macOS tests
+        if: needs.tests-macos.result == 'failure'
+        run: exit 1
       - name: Check plugin tests
         if: needs.plugin-tests.result == 'failure'
+        run: exit 1
+      - name: Check macOS plugin tests
+        if: needs.plugin-tests-macos.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'

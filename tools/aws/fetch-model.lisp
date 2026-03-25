@@ -1,10 +1,11 @@
+(elle/epoch 6)
 ## tools/aws/fetch-model.lisp — Download AWS Smithy models via HTTPS
 ##
 ## Usage:
 ##   elle tools/aws/fetch-model.lisp -- s3 dynamodb lambda
 
-(def tls-p  (import-file "target/debug/libelle_tls.so"))
-(def tls    ((import-file "lib/tls.lisp") tls-p))
+(def tls-p  (import-native "tls"))
+(def tls    ((import "tls") tls-p))
 
 (defn https-get [host path]
   "GET an HTTPS resource, return body as bytes."

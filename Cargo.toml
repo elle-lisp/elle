@@ -53,7 +53,7 @@ camino = "1.2"
 path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 
-# Async I/O (Linux io_uring)
+[target.'cfg(target_os = "linux")'.dependencies]
 io-uring = "0.7"
 
 # JIT compilation

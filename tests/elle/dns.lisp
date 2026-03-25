@@ -1,8 +1,9 @@
+(elle/epoch 6)
 ## DNS client tests
 ##
 ## Tests the wire-format codec and pure helpers from lib/dns.lisp.
 
-(def dns ((import-file "lib/dns.lisp")))
+(def dns ((import "dns")))
 
 # ============================================================================
 # Internal wire-format tests (pure, no network)

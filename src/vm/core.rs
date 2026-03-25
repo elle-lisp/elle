@@ -89,6 +89,11 @@ pub struct VM {
     /// before it becomes a JIT compilation candidate.
     /// Initialized from `ELLE_JIT_THRESHOLD` env var, defaulting to 10.
     pub jit_hotness_threshold: usize,
+    /// Stack of source file paths currently being executed.
+    /// Pushed when entering a file (import or main), popped on exit.
+    /// The top of the stack is the "current file" — used by `import`
+    /// to resolve relative (`./`) specifiers.
+    pub source_file_stack: Vec<String>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -159,6 +164,7 @@ impl VM {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(10),
+            source_file_stack: Vec::new(),
         }
     }
 
@@ -186,6 +192,7 @@ impl VM {
         self.jit_rejections.clear();
         self.location_map = LocationMap::new();
         self.loading_modules.clear();
+        self.source_file_stack.clear();
     }
 
     /// Set the location map for mapping bytecode instructions to source locations
