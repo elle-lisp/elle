@@ -239,16 +239,14 @@
 (defn read-request [conn]
   "Read a complete HTTP request from a connection port.
    Returns {:method :path :version :headers :body}, or nil on EOF."
-  (let [[req-line (read-request-line conn)]]
-    (if (nil? req-line)
-      nil
-      (let* [[headers (read-headers conn)]
-             [body (read-body conn headers)]]
-        {:method req-line:method
-         :path req-line:path
-         :version req-line:version
-         :headers headers
-         :body body}))))
+  (when-let [[req-line (read-request-line conn)]]
+    (let* [[headers (read-headers conn)]
+           [body (read-body conn headers)]]
+      {:method req-line:method
+       :path req-line:path
+       :version req-line:version
+       :headers headers
+       :body body})))
 
 (defn write-response [conn response]
   "Write a complete HTTP response to a connection port and flush.
@@ -268,22 +266,19 @@
    on-error is called with (request error) when the handler fails."
   (defer (protect (port/close conn))
     (forever
-      (let [[request (protect (read-request conn))]]
-        # Read failure or EOF — connection done
-        (unless (get request 0) (break nil))
-        (let [[req (get request 1)]]
-          (when (nil? req) (break nil))
-          (let* [[[ok? val] (protect (handler req))]
-                 [response (if ok?
-                             val
-                             (begin
-                               (when on-error (on-error req val))
-                               (http-respond 500 "Internal Server Error")))]]
-            (write-response conn response)
-            # Close if client or our response says so
-            (when (or (wants-close? req:headers)
-                      (wants-close? response:headers))
-              (break nil))))))))
+      (let [[[ok? req] (protect (read-request conn))]]
+        (unless ok? (break))
+        (when (nil? req) (break))
+        (let* [[[ok? val] (protect (handler req))]
+               [response (if ok?
+                           val
+                           (begin
+                             (when on-error (on-error req val))
+                             (http-respond 500 "Internal Server Error")))]]
+          (write-response conn response)
+          (when (or (wants-close? req:headers)
+                    (wants-close? response:headers))
+            (break)))))))
 
 (defn default-on-error [request err]
   "Default error handler: print to stderr."
@@ -294,15 +289,14 @@
 (defn http-serve [listener handler &named on-error]
   "Accept connections on listener and handle them with keep-alive.
    Each connection runs in its own fiber via ev/spawn.
-   Must be called inside an ev/run or equivalent scheduler context.
    Exits cleanly when the listener is closed.
    handler: (fn [request]) -> response
    :on-error: (fn [request error]) -> nil (default: print to stderr)"
-  (let [[err-fn (or on-error default-on-error)]]
-    (forever
-      (let [[[ok? conn] (protect (tcp/accept listener))]]
-        (unless ok? (break nil))
-        (ev/spawn (fn [] (connection-loop conn handler err-fn)))))))
+  (default on-error default-on-error)
+  (forever
+    (let [[[ok? conn] (protect (tcp/accept listener))]]
+      (unless ok? (break))
+      (ev/spawn (fn [] (connection-loop conn handler on-error))))))
 
 # ============================================================================
 # Exports

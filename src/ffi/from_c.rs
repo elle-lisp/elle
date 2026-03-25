@@ -98,20 +98,31 @@ pub(crate) fn read_value_from_buffer(ptr: *const u8, desc: &TypeDesc) -> LResult
                     read_value_from_buffer(unsafe { ptr.add(field_offset) }, field_desc)?;
                 values.push(field_val);
             }
-            Ok(Value::array_mut(values))
+            Ok(Value::array(values))
         }
 
         TypeDesc::Array(elem_desc, count) => {
             let elem_size = elem_desc.size().ok_or_else(|| {
                 LError::ffi_error("marshal", "cannot compute array element size for read")
             })?;
+
+            // Fast path: u8/i8 arrays return bytes directly.
+            if matches!(
+                **elem_desc,
+                TypeDesc::U8 | TypeDesc::UChar | TypeDesc::I8 | TypeDesc::Char
+            ) {
+                let mut data = vec![0u8; *count];
+                unsafe { std::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), *count) };
+                return Ok(Value::bytes(data));
+            }
+
             let mut values = Vec::with_capacity(*count);
             for i in 0..*count {
                 let elem_val =
                     read_value_from_buffer(unsafe { ptr.add(i * elem_size) }, elem_desc)?;
                 values.push(elem_val);
             }
-            Ok(Value::array_mut(values))
+            Ok(Value::array(values))
         }
     }
 }
