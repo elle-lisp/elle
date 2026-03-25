@@ -64,11 +64,11 @@
 # Returns [completed-fiber remaining-fibers].
 (let ([fast (ev/spawn (fn [] :fast))]
       [slow (ev/spawn (fn [] (ev/sleep 10) :slow))])
-  (let (([done rest] (ev/select [fast slow])))
+  (let (([done remaining] (ev/select [fast slow])))
     (print "  select winner: ") (println (ev/join done))
     (assert (= (ev/join done) :fast) "fast fiber wins")
-    (assert (= 1 (length rest)) "one loser remains")
-    (each f in rest (ev/abort f))))
+    (assert (= 1 (length remaining)) "one loser remains")
+    (each f in remaining (ev/abort f))))
 
 
 # ========================================
@@ -102,10 +102,13 @@
 # ========================================
 
 # Abort a sleeping fiber; defer blocks run.
+# Yield first (ev/sleep 0) to let the spawned fiber start — a :new fiber
+# has no defer blocks to run, so abort sets :error directly.
 (let* ([cleaned @[false]]
        [f (ev/spawn (fn []
              (defer (put cleaned 0 true)
                (ev/sleep 100))))])
+  (ev/sleep 0)
   (ev/abort f)
   (assert (= :error (fiber/status f)) "aborted fiber is :error")
   (assert (get cleaned 0) "defer block ran during abort"))

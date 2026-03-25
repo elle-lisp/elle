@@ -344,11 +344,11 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
         };
     }
 
-    // @bytes (mutable): UTF-8 decode to mutable @string
+    // @bytes (mutable): UTF-8 decode to immutable string
     if let Some(blob_ref) = val.as_bytes_mut() {
         let borrowed = blob_ref.borrow();
         return match std::str::from_utf8(&borrowed) {
-            Ok(s) => (SIG_OK, Value::string_mut(s.as_bytes().to_vec())),
+            Ok(s) => (SIG_OK, Value::string(s)),
             Err(e) => (
                 SIG_ERROR,
                 error_val("encoding-error", format!("string: invalid UTF-8: {}", e)),
