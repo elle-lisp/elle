@@ -57,12 +57,18 @@ pathdiff = { version = "0.2", features = ["camino"] }
 io-uring = "0.7"
 
 # JIT compilation
-cranelift-codegen = "0.116"
-cranelift-frontend = "0.116"
-cranelift-module = "0.116"
-cranelift-jit = "0.116"
-cranelift-native = "0.116"
-target-lexicon = "0.13"
+[dependencies.cranelift-codegen]
+version = "0.116"
+[dependencies.cranelift-frontend]
+version = "0.116"
+[dependencies.cranelift-module]
+version = "0.116"
+[dependencies.cranelift-jit]
+version = "0.116"
+[dependencies.cranelift-native]
+version = "0.116"
+[dependencies.target-lexicon]
+version = "0.13"
 
 [dev-dependencies]
 criterion = "0.5"
