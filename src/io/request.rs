@@ -132,6 +132,10 @@ pub(crate) enum IoOp {
     /// Portless — always dispatched to the thread pool.
     /// Returns an array of IP address strings.
     Resolve { hostname: String },
+    /// Close a port: cancel pending I/O ops on its fd, then close the fd.
+    /// The scheduler handles the cancel-then-close sequence so that
+    /// io_uring operations are properly cancelled before the fd is dropped.
+    Close,
 }
 
 /// Address for connect operations.

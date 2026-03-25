@@ -118,6 +118,10 @@ pub struct FiberHeap {
     /// Replaces the global `ALLOC_ERROR` thread-local — making it per-heap
     /// prevents cross-fiber confusion and eliminates a thread-local.
     alloc_error: Option<(usize, usize)>,
+    /// Count of allocations routed through the shared allocator (not owned
+    /// by this heap).  Kept separate from `alloc_count` so that mark/release
+    /// scoping is not affected.  `visible_len()` returns the sum.
+    shared_alloc_count: usize,
 }
 
 impl FiberHeap {
@@ -136,6 +140,7 @@ impl FiberHeap {
             custom_alloc_stack: Vec::new(),
             object_limit: None,
             alloc_error: None,
+            shared_alloc_count: 0,
         }
     }
 
@@ -144,8 +149,11 @@ impl FiberHeap {
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         // When a shared allocator is installed (yielding child fiber),
-        // route ALL allocations to it.
+        // route ALL allocations to it.  Track shared_alloc_count separately
+        // so arena/count (via visible_len()) reports correct values while
+        // mark/release scoping remains unaffected.
         if !self.shared_alloc.is_null() {
+            self.shared_alloc_count += 1;
             return unsafe { &mut *self.shared_alloc }.alloc(obj);
         }
 
@@ -208,6 +216,7 @@ impl FiberHeap {
             self.dtors.len(),
             custom_ptrs_len,
             self.root_allocs.len(),
+            self.shared_alloc_count,
         )
     }
 
@@ -237,6 +246,7 @@ impl FiberHeap {
         }
 
         self.alloc_count = mark.position();
+        self.shared_alloc_count = mark.shared_alloc_count();
     }
 
     /// Run destructors in reverse order from `self.dtors[start..]`.
@@ -288,9 +298,15 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_before - self.dtors.len();
     }
 
-    /// Total number of objects allocated since last clear/release.
+    /// Private heap object count (used by mark/release scoping).
     pub fn len(&self) -> usize {
         self.alloc_count
+    }
+
+    /// Total allocations visible to this fiber, including objects routed
+    /// to the parent's shared allocator.  Used by arena/count.
+    pub fn visible_len(&self) -> usize {
+        self.alloc_count + self.shared_alloc_count
     }
 
     pub fn is_empty(&self) -> bool {
@@ -429,6 +445,7 @@ impl FiberHeap {
     /// Returns a raw pointer to the shared allocator. The `Box` in the Vec
     /// provides pointer stability — the pointer remains valid even if the
     /// Vec grows (Box stores the data on the heap, Vec stores the Box pointer).
+    #[allow(dead_code)]
     pub(crate) fn create_shared_allocator(
         &mut self,
     ) -> *mut crate::value::shared_alloc::SharedAllocator {
@@ -455,6 +472,7 @@ impl FiberHeap {
     }
 
     /// Current shared allocator pointer. Returns null if none is set.
+    #[allow(dead_code)]
     pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc
     }

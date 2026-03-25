@@ -81,6 +81,10 @@ pub struct VM {
     /// in REPL mode. Set by `main.rs` at the same point as `user_args`.
     /// Read by `sys/argv`. Empty string means REPL mode.
     pub source_arg: String,
+    /// Whether JIT compilation is enabled.
+    /// Controlled by `ELLE_JIT` env var: `0` disables, any other value enables.
+    /// Defaults to `true`.
+    pub jit_enabled: bool,
     /// JIT hotness threshold: a closure must be called this many times
     /// before it becomes a JIT compilation candidate.
     /// Initialized from `ELLE_JIT_THRESHOLD` env var, defaulting to 10.
@@ -114,6 +118,8 @@ fn root_closure() -> Rc<Closure> {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
         squelch_mask: 0,
@@ -148,6 +154,7 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
+            jit_enabled: std::env::var("ELLE_JIT").map(|v| v != "0").unwrap_or(true),
             jit_hotness_threshold: std::env::var("ELLE_JIT_THRESHOLD")
                 .ok()
                 .and_then(|s| s.parse().ok())

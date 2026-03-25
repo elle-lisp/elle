@@ -72,6 +72,12 @@ pub struct LirFunction {
     /// Only populated for functions where `signal.may_suspend()`.
     /// Indexed by call instruction order (0, 1, 2, ...).
     pub call_sites: Vec<CallSiteInfo>,
+    /// True when the body's final expression is provably not a heap pointer.
+    /// Used by fiber resume to decide whether shared allocation is needed.
+    pub result_is_immediate: bool,
+    /// True when the body contains `set!` to a captured binding with a
+    /// potentially heap-allocated value. Used by fiber resume.
+    pub has_outward_heap_set: bool,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -138,6 +144,8 @@ impl LirFunction {
             num_params,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         }
     }
 }

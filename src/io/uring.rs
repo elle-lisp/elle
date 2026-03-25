@@ -737,10 +737,11 @@ pub(super) fn drain_cqes(
                 }
             }
 
-            // Read short-read re-submission: on TCP sockets, a single read()
-            // can return fewer bytes than requested. Buffer partial data and
-            // resubmit for the remainder. Only applies to stream sockets —
-            // regular files return short at EOF, which is normal completion.
+            // Read short-read re-submission: regular files may return short
+            // reads before EOF (rare but POSIX-legal). Buffer partial data
+            // and resubmit for the remainder. Stream sockets (TCP, Unix)
+            // are excluded — port/read returns "up to N bytes" per POSIX
+            // semantics, so a short read is a normal completion.
             if let PendingOp::Port {
                 op: IoOp::Read { count },
                 ref port_key,
@@ -752,7 +753,7 @@ pub(super) fn drain_cqes(
                     .as_external::<Port>()
                     .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))
                     .unwrap_or(false);
-                if is_stream && result_code > 0 {
+                if !is_stream && result_code > 0 {
                     let got = result_code as usize;
                     let state = fd_states
                         .entry(port_key.clone())

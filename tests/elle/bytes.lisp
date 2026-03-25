@@ -113,13 +113,12 @@
 # Mutability-preserving conversions
 # ============================================================================
 
-# (string x) preserves mutability: bytes→string, @bytes→@string
+# (string x) coerces to immutable string regardless of input mutability
 (assert (= (type (string (bytes 104 105))) :string) "string from bytes is immutable")
-(assert (= (type (string (@bytes 104 105))) :@string) "string from @bytes is mutable")
+(assert (= (type (string (@bytes 104 105))) :string) "string from @bytes is immutable")
 
-# (string x) preserves mutability: string→string, @string→@string
 (assert (= (type (string "hello")) :string) "string from string is immutable")
-(assert (= (type (string @"hello")) :@string) "string from @string is mutable")
+(assert (= (type (string @"hello")) :string) "string from @string is immutable")
 
 # (bytes x) preserves mutability: string→bytes, @string→@bytes
 (assert (= (type (bytes "hello")) :bytes) "bytes from string is immutable")

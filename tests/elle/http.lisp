@@ -84,9 +84,40 @@
   (assert (not ok?) "http:get connection refused signals error"))
 
 # ============================================================================
-# Server + Client integration
+# Server + Client integration (local loopback)
 # ============================================================================
-# Deferred: requires ev/run cancellation so http:serve exits cleanly
-# when the listener is closed. See pending.md Phase 2/3.
+
+# Bind to ephemeral port on loopback
+(def listener (tcp/listen "127.0.0.1" 0))
+(def server-addr (port/path listener))
+(def server-port
+  (let [[parts (string/split server-addr ":")]]
+    (int (get parts (- (length parts) 1)))))
+
+# Simple handler: echo request method and path as the body
+(defn test-handler [req]
+  (http:respond 200 (string req:method " " req:path)))
+
+# Spawn server
+(def server-fiber
+  (ev/spawn (fn [] (http:serve listener test-handler))))
+
+# Test 1: GET request
+(let [[resp (http:get (string "http://127.0.0.1:" server-port "/hello"))]]
+  (assert (= resp:status 200) "loopback GET: status 200")
+  (assert (= resp:body "GET /hello") "loopback GET: body echoes method+path"))
+
+# Test 2: POST request with body
+(let [[resp (http:post (string "http://127.0.0.1:" server-port "/submit") "payload")]]
+  (assert (= resp:status 200) "loopback POST: status 200")
+  (assert (= resp:body "POST /submit") "loopback POST: body echoes method+path"))
+
+# Test 3: Custom headers round-trip
+(let [[resp (http:get (string "http://127.0.0.1:" server-port "/")
+              :headers {:x-test "custom-value"})]]
+  (assert (= resp:status 200) "loopback custom header: status 200"))
+
+# Shut down: closing the listener cancels the pending accept, server exits
+(port/close listener)
 
 (println "all http tests passed")

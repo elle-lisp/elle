@@ -453,6 +453,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         Rc::new(Closure {
             template,
@@ -555,6 +557,8 @@ mod tests {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
 
         let closure = Rc::new(Closure {

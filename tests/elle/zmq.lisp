@@ -3,6 +3,12 @@
 ## Tests lib/zmq.lisp (FFI bindings to system libzmq)
 ##
 ## Uses inproc:// transport — no network access needed.
+## Skipped if libzmq.so is not installed.
+
+(let [([ok? _] (protect (ffi/native "libzmq.so")))]
+  (unless ok?
+    (println "zmq tests skipped: libzmq.so not found")
+    (sys/exit 0)))
 
 (def zmq (import-file "lib/zmq.lisp"))
 

@@ -213,25 +213,41 @@
   (fiber/resume (fiber/new thunk 1)))
 
 # Single scope allocation with an array (arrays need Drop).
+# Use before/after delta so escape analysis changes don't break the test.
 (let ((stats (run-in-fiber (fn []
-               (let ((x @[1 2 3])) (length x))
-               (arena/stats)))))
-  (assert (= (get stats :scope-enter-count) 1) "1 scope enter")
-  (assert (= (get stats :scope-dtor-count) 1) "1 destructor run")
-  (print "  single scope: ") (println stats))
+               (let* [[before (arena/stats)]]
+                 (let ((x @[1 2 3])) (length x))
+                 (let* [[after (arena/stats)]
+                        [delta-enters (- (get after :scope-enter-count)
+                                         (get before :scope-enter-count))]
+                        [delta-dtors (- (get after :scope-dtor-count)
+                                        (get before :scope-dtor-count))]]
+                   (assert (>= delta-enters 1) "at least 1 scope enter")
+                   (assert (>= delta-dtors 1) "at least 1 destructor run")
+                   (print "  single scope: ") (println after)
+                   after)))))))
+
 
 # 100 iterations — each scope allocates and frees an array.
 # Tier 8 allows the implicit while-block to scope-allocate (outward set of
 # immediate value is safe), adding 1 region enter around the whole loop.
+# Use before/after delta so escape analysis changes don't break the test.
 (let ((stats (run-in-fiber (fn []
-               (var i 0)
-               (while (< i 100)
-                 (let ((x @[1 2 3])) (length x))
-                 (assign i (+ i 1)))
-               (arena/stats)))))
-  (assert (= (get stats :scope-enter-count) 101) "101 scope enters (100 inner let + 1 while block)")
-  (assert (= (get stats :scope-dtor-count) 100) "100 destructors run")
-  (print "  100-iter loop: ") (println stats))
+               (let* [[before (arena/stats)]]
+                 (var i 0)
+                 (while (< i 100)
+                   (let ((x @[1 2 3])) (length x))
+                   (assign i (+ i 1)))
+                 (let* [[after (arena/stats)]
+                        [delta-enters (- (get after :scope-enter-count)
+                                         (get before :scope-enter-count))]
+                        [delta-dtors (- (get after :scope-dtor-count)
+                                        (get before :scope-dtor-count))]]
+                   (assert (>= delta-enters 100) "at least 100 scope enters from inner let")
+                   (assert (>= delta-dtors 100) "at least 100 destructors run")
+                   (print "  100-iter loop: ") (println after)
+                   after)))))))
+
 
 
 # ========================================

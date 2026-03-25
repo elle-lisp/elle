@@ -446,6 +446,8 @@ mod tests {
             vararg_kind: crate::hir::VarargKind::List,
             name: None,
             syntax: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
         });
         let closure = Value::closure(crate::value::Closure {
             template,

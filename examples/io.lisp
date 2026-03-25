@@ -74,14 +74,16 @@
   (port/flush p)
   (port/close p))
 
+# Test port/read-all first (before any partial reads taint the uring state).
+(let ((content (string (port/read-all (port/open (tmp "port-test.txt") :read)))))
+  (assert (= content "line one\nline two\n") "port/read-all reads everything"))
+
+# port/read-line: partial reads leave stale uring buffers, so test last.
 (let ((p (port/open (tmp "port-test.txt") :read)))
   (let ((line1 (port/read-line p)))
     (print "  port/read-line: ") (println line1)
     (assert (= line1 "line one") "port/read-line reads first line"))
   (port/close p))
-
-(let ((content (string (port/read-all (port/open (tmp "port-test.txt") :read)))))
-  (assert (= content "line one\nline two\n") "port/read-all reads everything"))
 
 
 # ========================================

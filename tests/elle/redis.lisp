@@ -1,18 +1,14 @@
-## tests/elle/redis.lisp — Redis integration tests
-##
-## Requires a live Redis on 127.0.0.1:6379.
-## Excluded from `make test`. Run manually:
-##   ./target/debug/elle tests/elle/redis.lisp
+# tests/elle/redis.lisp — Redis integration tests
+#
+# Requires a live Redis on 127.0.0.1:6379.
+# All tests run within a single connection to avoid parallel flushdb races.
 
 (def redis ((import-file "lib/redis.lisp")))
 
-# ── RESP self-tests (no Redis needed) ──────────────────────────────────────
-
+# RESP self-tests (no Redis needed)
 (println "Running RESP self-tests...")
 (redis:test)
 (println "RESP self-tests passed.")
-
-# ── Integration tests (need live Redis) ────────────────────────────────────
 
 # Skip if Redis is not reachable
 (let [[[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]]
@@ -25,15 +21,16 @@
 (redis:with "127.0.0.1" 6379
   (fn []
 
-    # Ping
+    # ================================================================
+    # 1. Integration tests
+    # ================================================================
+
     (assert (= (redis:ping) "PONG") "ping")
     (println "  ping: ok")
 
-    # Echo
     (assert (= (redis:echo "hello") "hello") "echo")
     (println "  echo: ok")
 
-    # Flush for clean slate
     (redis:flushdb)
 
     # ── String commands ─────────────────────────────────────────────
@@ -42,31 +39,26 @@
     (assert (= (redis:get "test:k1") "v1") "get")
     (assert (nil? (redis:get "test:nonexistent")) "get nil")
 
-    # SET with NX
     (assert (= (redis:set "test:nx" "first" :nx true) true) "set nx first")
     (assert (= (redis:get "test:nx") "first") "get nx first")
 
-    # INCR / DECR
     (redis:set "test:counter" "10")
     (assert (= (redis:incr "test:counter") 11) "incr")
     (assert (= (redis:decr "test:counter") 10) "decr")
     (assert (= (redis:incrby "test:counter" 5) 15) "incrby")
     (assert (= (redis:decrby "test:counter" 3) 12) "decrby")
 
-    # APPEND / STRLEN
     (redis:set "test:str" "hello")
     (redis:append "test:str" " world")
     (assert (= (redis:get "test:str") "hello world") "append")
     (assert (= (redis:strlen "test:str") 11) "strlen")
 
-    # MSET / MGET
     (redis:mset "test:m1" "a" "test:m2" "b")
     (let [[vals (redis:mget "test:m1" "test:m2" "test:nonexistent")]]
       (assert (= (get vals 0) "a") "mget 0")
       (assert (= (get vals 1) "b") "mget 1")
       (assert (nil? (get vals 2)) "mget nil"))
 
-    # SETNX
     (assert (= (redis:setnx "test:setnx" "val") true) "setnx new")
     (assert (= (redis:setnx "test:setnx" "val2") false) "setnx exists")
 
@@ -202,7 +194,57 @@
       (assert (> sz 0) "dbsize"))
     (println "  dbsize: ok")
 
+    # ================================================================
+    # 2. Stress tests
+    # ================================================================
+
+    (redis:flushdb)
+
+    # 100 PINGs
+    (var i 0)
+    (while (< i 100)
+      (assert (= (redis:ping) "PONG")
+        (concat "ping failed at " (string i)))
+      (assign i (+ i 1)))
+    (println "  100 pings: ok")
+
+    # 50 SET/GET pairs
+    (assign i 0)
+    (while (< i 50)
+      (let [[key (concat "test:sg:" (string i))]
+            [val (concat "value-" (string i))]]
+        (assert (= (redis:set key val) true)
+          (concat "set failed at " (string i)))
+        (assert (= (redis:get key) val)
+          (concat "get failed at " (string i))))
+      (assign i (+ i 1)))
+    (println "  50 set/get pairs: ok")
+
+    # Mixed response types
+    (redis:flushdb)
+    (redis:set "test:k1" "v1")
+    (redis:get "test:k1")
+    (redis:get "test:nonexistent")
+    (redis:set "test:nx" "first" :nx true)
+    (redis:get "test:nx")
+    (redis:set "test:counter" "10")
+    (redis:incr "test:counter")
+    (redis:decr "test:counter")
+    (redis:incrby "test:counter" 5)
+    (redis:decrby "test:counter" 3)
+    (redis:set "test:str" "hello")
+    (redis:append "test:str" " world")
+    (redis:get "test:str")
+    (redis:strlen "test:str")
+    (redis:mset "test:m1" "a" "test:m2" "b")
+    (redis:mget "test:m1" "test:m2" "test:nonexistent")
+    (redis:setnx "test:setnx" "val")
+    (redis:setnx "test:setnx" "val2")
+    (assert (= (redis:exists "test:k1") true) "stress exists true")
+    (assert (= (redis:exists "test:nonexistent") false) "stress exists false")
+    (println "  mixed commands: ok")
+
     # ── Cleanup ─────────────────────────────────────────────────────
 
     (redis:flushdb)
-    (println "All integration tests passed.")))
+    (println "redis: all tests passed")))

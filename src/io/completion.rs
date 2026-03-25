@@ -251,6 +251,24 @@ pub(super) fn process_raw_completion(
                     };
                 }
 
+                // For Read: return accumulated buffer on EOF (short-read
+                // resubmission buffered partial data before hitting EOF).
+                if matches!(op, IoOp::Read { .. }) && !state.buffer.is_empty() {
+                    let partial: Vec<u8> = state.buffer.drain(..).collect();
+                    if let Some(p) = port.as_external::<Port>() {
+                        return Completion {
+                            id,
+                            result: Ok(match p.encoding() {
+                                Encoding::Text => {
+                                    let s = String::from_utf8_lossy(&partial);
+                                    Value::string(s.as_ref())
+                                }
+                                Encoding::Binary => Value::bytes(partial),
+                            }),
+                        };
+                    }
+                }
+
                 // For ReadAll: return accumulated buffer on EOF.
                 if matches!(op, IoOp::ReadAll) && !state.buffer.is_empty() {
                     let all: Vec<u8> = state.buffer.drain(..).collect();
@@ -364,6 +382,8 @@ pub(super) fn process_raw_completion(
                     // produces a PendingOp::Port entry.
                     unreachable!("Resolve is portless; cannot reach PendingOp::Port")
                 }
+                // Close completion: port already closed in submit. Return nil.
+                IoOp::Close => Value::NIL,
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
                     if data.len() < 4 {
