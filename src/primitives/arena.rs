@@ -23,7 +23,7 @@ pub(crate) fn prim_arena_count(args: &[Value]) -> (SignalBits, Value) {
     }
     let heap_ptr = crate::value::fiberheap::current_heap_ptr();
     debug_assert!(!heap_ptr.is_null(), "root heap must always be installed");
-    let count = unsafe { (*heap_ptr).len() };
+    let count = unsafe { (*heap_ptr).visible_len() };
     (SIG_OK, Value::int(count as i64))
 }
 
@@ -240,6 +240,7 @@ pub(crate) fn prim_arena_reset(args: &[Value]) -> (SignalBits, Value) {
             mark.dtor_len(),
             mark.custom_ptrs_len(),
             mark.root_allocs_len(),
+            mark.shared_alloc_count(),
         );
         unsafe { (*heap_ptr).release(m) };
     }

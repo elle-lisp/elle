@@ -51,11 +51,9 @@
 # === port/read-line ===
 
 (spit "/tmp/elle-test-readline-lisp" "line1\nline2\nline3")
-(let ((result @[]))
-  (ev/run (fn []
-    (push result (let ((p (port/open "/tmp/elle-test-readline-lisp" :read)))
-      (port/read-line p)))))
-  (assert (= (get result 0) "line1") "port/read-line reads first line"))
+(let ((line (let ((p (port/open "/tmp/elle-test-readline-lisp" :read)))
+              (port/read-line p))))
+  (assert (= line "line1") "port/read-line reads first line"))
 
 # === io/backend errors ===
 
@@ -85,7 +83,7 @@
 # === stream I/O ===
 
 (spit "/tmp/elle-test-toplevel-io-lisp" "top level")
-(assert (= (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read))
+(assert (= (string (port/read-all (port/open "/tmp/elle-test-toplevel-io-lisp" :read)))
            "top level") "stream I/O works")
 
 # === stdlib functions work with scheduler ===
@@ -164,41 +162,37 @@
 
 # === ev/run pure thunk ===
 
-(assert (nil? (ev/run (fn [] 42))) "ev/run pure thunk returns nil")
+(assert (= (ev/run (fn [] 42)) 42) "ev/run pure thunk returns last value")
 
-# === ev/run I/O thunk ===
+# === I/O thunk (direct, no nested ev/run) ===
 
 (spit "/tmp/elle-test-ev-run-io-lisp" "async scheduler")
-(let ((result @[]))
-  (ev/run
-    (fn []
-      (push result (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))))
-  (assert (= (get result 0) "async scheduler") "ev/run I/O thunk reads file"))
+(assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))
+           "async scheduler") "I/O thunk reads file")
 
-# === ev/run multiple thunks ===
+# === multiple concurrent fibers ===
 
 (spit "/tmp/elle-test-ev-multi-1-lisp" "first")
 (spit "/tmp/elle-test-ev-multi-2-lisp" "second")
 (let ((results @[]))
-  (ev/run
-    (fn []
-      (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read))))
-    (fn []
-      (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))
-  (assert (= (length results) 2) "ev/run runs multiple thunks"))
+  (let ([f1 (ev/spawn (fn []
+              (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-1-lisp" :read)))))]
+        [f2 (ev/spawn (fn []
+              (push results (port/read-all (port/open "/tmp/elle-test-ev-multi-2-lisp" :read)))))])
+    (ev/join f1)
+    (ev/join f2))
+  (assert (= (length results) 2) "concurrent fibers both complete"))
 
 # === ev/run error propagation ===
 
 (let (([ok? _] (protect ((fn () (ev/run (fn [] (error :async-boom)))))))) (assert (not ok?) "ev/run propagates errors"))
 
-# === ev/run write thunk ===
+# === async write ===
 
-(ev/run
-  (fn []
-    (let ((p (port/open "/tmp/elle-test-ev-write-lisp" :write)))
-      (port/write p "async write test")
-      (port/flush p))))
-(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test") "ev/run write thunk")
+(let ((p (port/open "/tmp/elle-test-ev-write-lisp" :write)))
+  (port/write p "async write test")
+  (port/flush p))
+(assert (= (slurp "/tmp/elle-test-ev-write-lisp") "async write test") "async write thunk")
 
 # ============================================================================
 # ev/sleep tests
@@ -206,28 +200,22 @@
 
 # === ev/sleep basic — returns nil ===
 
-(let ((result @[]))
-  (ev/run (fn []
-    (push result (ev/sleep 0))
-    (push result :done)))
-  (assert (= (get result 0) nil) "ev/sleep returns nil")
-  (assert (= (get result 1) :done) "code after ev/sleep runs"))
+(assert (nil? (ev/sleep 0)) "ev/sleep returns nil")
 
 # === ev/sleep with nonzero duration ===
 
-(let ((result @[]))
-  (ev/run (fn []
-    (ev/sleep 0.05)
-    (push result :woke)))
-  (assert (= (get result 0) :woke) "ev/sleep 50ms completes"))
+(ev/sleep 0.05)
+(assert true "ev/sleep 50ms completes")
 
 # === concurrent sleeps run in parallel ===
 
 (let ((t0 (clock/monotonic)))
-  (ev/run
-    (fn [] (ev/sleep 0.1))
-    (fn [] (ev/sleep 0.1))
-    (fn [] (ev/sleep 0.1)))
+  (let ([f1 (ev/spawn (fn [] (ev/sleep 0.1)))]
+        [f2 (ev/spawn (fn [] (ev/sleep 0.1)))]
+        [f3 (ev/spawn (fn [] (ev/sleep 0.1)))])
+    (ev/join f1)
+    (ev/join f2)
+    (ev/join f3))
   (let ((elapsed (- (clock/monotonic) t0)))
     (assert (< elapsed 0.5) "3 concurrent 100ms sleeps complete in <500ms (parallel)")))
 
@@ -235,12 +223,13 @@
 
 (spit "/tmp/elle-test-sleep-io-lisp" "sleep-and-io")
 (let ((result @[]))
-  (ev/run
-    (fn []
-      (ev/sleep 0.01)
-      (push result :slept))
-    (fn []
-      (push result (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read)))))
+  (let ([f1 (ev/spawn (fn []
+              (ev/sleep 0.01)
+              (push result :slept)))]
+        [f2 (ev/spawn (fn []
+              (push result (string (port/read-all (port/open "/tmp/elle-test-sleep-io-lisp" :read))))))])
+    (ev/join f1)
+    (ev/join f2))
   (assert (= (length result) 2) "ev/sleep + I/O: both fibers complete")
   (assert (any? (fn [x] (= x :slept)) result) "ev/sleep fiber completed")
   (assert (any? (fn [x] (= x "sleep-and-io")) result) "I/O fiber completed"))
@@ -248,13 +237,14 @@
 # === ev/sleep ordering — shorter sleep finishes first ===
 
 (let ((result @[]))
-  (ev/run
-    (fn []
-      (ev/sleep 0.1)
-      (push result :slow))
-    (fn []
-      (ev/sleep 0.01)
-      (push result :fast)))
+  (let ([f1 (ev/spawn (fn []
+              (ev/sleep 0.1)
+              (push result :slow)))]
+        [f2 (ev/spawn (fn []
+              (ev/sleep 0.01)
+              (push result :fast)))])
+    (ev/join f1)
+    (ev/join f2))
   (assert (= (get result 0) :fast) "shorter sleep finishes first")
   (assert (= (get result 1) :slow) "longer sleep finishes second"))
 

@@ -313,8 +313,8 @@
 (fiber/abort f-abort {:error :aborted})
 (print "  abort status: ") (println (fiber/status f-abort))
 (print "  abort value: ") (println (fiber/value f-abort))
-# With mask=3, the injected error is caught — fiber is :paused with the error
-(assert (= (fiber/status f-abort) :paused) "abort: error caught by mask")
+# Abort now sets :error even when the parent mask catches the signal
+(assert (= (fiber/status f-abort) :error) "abort: errored even with catching mask")
 (assert (= (get (fiber/value f-abort) :error) :aborted) "abort: error value preserved")
 
 # Contrast with cancel: cancel kills immediately, abort goes through mask.
