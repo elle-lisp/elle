@@ -377,8 +377,14 @@ impl<'a> Lowerer<'a> {
             return false;
         }
 
-        // Condition 2: no suspension
-        if body.signal.may_suspend() {
+        // Condition 2: no suspension in body or binding inits.
+        // Binding init expressions are evaluated inside the region, so
+        // allocations made by callees during a binding init are freed by
+        // RegionExit. If a binding init suspends, the caller's body may
+        // later create heap objects that escape via side effects (e.g. put
+        // to an external mutable struct), and RegionExit would free them
+        // while they're still referenced externally.
+        if body.signal.may_suspend() || bindings.iter().any(|(_, init)| init.signal.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
             return false;
         }

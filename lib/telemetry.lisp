@@ -226,7 +226,7 @@
 (defn encode-histogram-datapoints [snapshot boundaries start-nanos]
   "Encode histogram data points from pre-computed bucket counts."
   (let [[result @[]]]
-    (each [_ agg] in (pairs snapshot)
+    (each [key agg] in (pairs snapshot)
       (push result
         {"attributes"        (encode-attributes agg:attrs)
          "startTimeUnixNano" (string start-nanos)
@@ -367,7 +367,7 @@
     (let [[interval meter:interval]]
       (forever
         (ev/sleep interval)
-        (let [[[ok? _] (protect (do-export meter))]]
+        (let [[[ok? err] (protect (do-export meter))]]
           (unless ok?
             (eprintln "telemetry: background export error")))
         (when meter:shutdown?
@@ -480,15 +480,12 @@
 
 (defn telemetry-time [histogram thunk &named attributes]
   "Execute thunk and record its duration in a histogram instrument.
-   Returns the thunk's result.
-   Uses var/assign to work around the let*-ffi-signature bug (#673):
-   let* + yield + &named + large captured env from import corrupts
-   upvalue types after resume. See tests/elle/letstar-yield.lisp."
-  (var start (clock/monotonic))
-  (var result (thunk))
-  (var elapsed (- (clock/monotonic) start))
-  (telemetry-record histogram elapsed :attributes attributes)
-  result)
+   Returns the thunk's result."
+  (let* [[start (clock/monotonic)]
+         [result (thunk)]
+         [elapsed (- (clock/monotonic) start)]]
+    (telemetry-record histogram elapsed :attributes attributes)
+    result))
 
 # ============================================================================
 # Exports

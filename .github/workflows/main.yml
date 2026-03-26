@@ -78,6 +78,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install GNU parallel and Redis
         run: |
+          sudo apt-get update
           sudo apt-get install -y parallel redis-server
           sudo systemctl start redis-server
       - name: Build release binary
@@ -114,7 +115,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install graphviz
-        run: sudo apt-get install -y graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
       - name: Build Elle
         run: cargo build --release
       - name: Generate pipeline diagram
