@@ -6,9 +6,9 @@
 //! All functions use the C calling convention and operate on (tag, payload)
 //! pairs representing 16-byte Values.
 //!
-//! `JitValue` with `#[repr(C)]` is FFI-compatible on SystemV x86-64:
-//! a two-field struct of u64s is returned in rax:rdx, matching Cranelift's
-//! two-I64 return convention.
+//! `JitValue` with `#[repr(C)]` is FFI-compatible on all Cranelift targets:
+//! a two-field struct of u64s is returned in a register pair (rax:rdx on
+//! x86-64, x0:x1 on aarch64), matching Cranelift's two-I64 return convention.
 
 use crate::jit::value::JitValue;
 use crate::value::repr::TAG_INT;

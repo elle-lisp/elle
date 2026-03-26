@@ -2,8 +2,8 @@
 //!
 //! `JitValue` replaces the `(u64, u64)` tuple return type used by all
 //! `extern "C"` JIT helpers. With `#[repr(C)]`, the two-field struct is
-//! returned in rax:rdx on SystemV x86-64, which matches Cranelift's
-//! two-I64 return convention.
+//! returned in a register pair (rax:rdx on x86-64, x0:x1 on aarch64),
+//! matching Cranelift's two-I64 return convention.
 
 /// A JIT Value represented as (tag, payload) with guaranteed C ABI layout.
 /// Used as the return type for all JIT runtime helpers.

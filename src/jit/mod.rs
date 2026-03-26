@@ -7,7 +7,7 @@
 //! ## Architecture
 //!
 //! ```text
-//! LirFunction -> JitCompiler -> Cranelift IR -> Native x86_64 code -> JitCode
+//! LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 //! ```
 //!
 //! ## Calling Convention
