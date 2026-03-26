@@ -234,6 +234,20 @@ impl<'a> Lowerer<'a> {
         self.immediate_primitives.contains(&sym)
     }
 
+    /// Check if a function call is to a known built-in primitive.
+    /// Built-in primitives do not internally create heap objects that
+    /// escape to external mutable structures — they only produce return
+    /// values and/or mutate their arguments (caught separately).
+    fn callee_is_primitive(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        if let Some(val) = self.immutable_values.get(binding) {
+            return val.is_native_fn();
+        }
+        false
+    }
+
     /// Check if a HIR body contains any dangerous `set!` to a binding
     /// outside the scope.
     ///
@@ -323,20 +337,28 @@ impl<'a> Lowerer<'a> {
                 .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
             HirKind::Call { func, args, .. } => {
-                // Conservatively treat any call to a non-intrinsic function as
-                // a potential outward escape. The callee may internally allocate
-                // heap objects and store them in external mutable structures
-                // (e.g. via `put` to an outer @struct), even when all arguments
-                // are immediates. Without interprocedural analysis, we cannot
-                // determine that a callee is side-effect-free with respect to
-                // heap allocation.
-                //
-                // Exception: calls that `call_result_is_safe` approves are to
-                // known intrinsics or immediate-returning primitives. These are
-                // pure functions that neither retain arguments nor allocate
-                // heap objects that escape to external state.
-                if !self.call_result_is_safe(func, args) {
-                    return true;
+                let callee_is_safe = self.call_result_is_safe(func, args);
+                if !callee_is_safe {
+                    // Check 1: any non-safe callee receiving a heap-allocated
+                    // scope-local argument may store it externally (e.g. push
+                    // into an outer @array).
+                    if args
+                        .iter()
+                        .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                    {
+                        return true;
+                    }
+                    // Check 2: user-defined functions (non-primitives) may
+                    // internally allocate heap objects and store them in
+                    // external mutable structures (e.g. via put to an outer
+                    // @struct). Built-in primitives are safe — they only
+                    // produce return values and/or mutate their arguments
+                    // (caught by check 1). Without interprocedural analysis,
+                    // any call to a non-primitive is conservatively treated
+                    // as a potential outward escape.
+                    if !self.callee_is_primitive(func) {
+                        return true;
+                    }
                 }
                 self.walk_for_outward_set(func, scope_bindings)
                     || args
