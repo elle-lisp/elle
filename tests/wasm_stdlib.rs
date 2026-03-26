@@ -71,16 +71,14 @@ fn run_stdlib_first_100_lines() {
     }
 }
 
+/// Test that stdlib + user code works together.
 #[test]
-fn run_stdlib_first_200_lines() {
-    let source: String = STDLIB.lines().take(200).collect::<Vec<_>>().join("\n");
-    let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(&source, &mut symbols, "<stdlib>").unwrap();
-    let result = elle::wasm::emit::emit_module(&lir);
-    let engine = elle::wasm::store::create_engine().unwrap();
-    match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
-        Ok(_) => eprintln!("first 200 lines: WASM valid"),
-        Err(e) => panic!("first 200 lines WASM invalid: {}", e),
+fn stdlib_with_map() {
+    // Compile stdlib + user code together
+    let source = format!("{}\n(map (fn [x] (+ x 1)) (list 1 2 3))", STDLIB);
+    match elle::wasm::eval_wasm(&source, "<test>") {
+        Ok(v) => assert_eq!(format!("{}", v), "(2 3 4)"),
+        Err(e) => panic!("stdlib+map failed: {}", e),
     }
 }
 
@@ -105,7 +103,11 @@ fn run_stdlib_on_wasm() {
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
         Ok(_) => eprintln!("WASM module compiled successfully"),
         Err(e) => {
-            panic!("WASM compilation failed:\n{}", e);
+            // Dump WASM for inspection
+            let mut f = std::fs::File::create("/tmp/stdlib_test.wasm").unwrap();
+            std::io::Write::write_all(&mut f, &result.wasm_bytes).unwrap();
+            eprintln!("Wrote WASM to /tmp/stdlib_test.wasm");
+            panic!("WASM compilation failed:\n{:#}", e);
         }
     }
 }

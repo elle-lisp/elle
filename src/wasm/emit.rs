@@ -16,7 +16,7 @@ use crate::lir::{BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, Term
 use crate::value::keyword::intern_keyword;
 use crate::value::repr::*;
 use crate::value::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use wasm_encoder::*;
 
 /// Result of WASM emission: module bytes + constant pool.
@@ -73,7 +73,6 @@ const OP_ARRAY_REF_OR_NIL: i32 = 19;
 struct WasmEmitter {
     label_to_idx: HashMap<Label, usize>,
     num_regs: u32,
-    emitted: HashSet<Label>,
     /// Heap constants collected during emission.
     const_pool: Vec<Value>,
     /// Maps nested LirFunction pointer → table index.
@@ -90,7 +89,6 @@ impl WasmEmitter {
         WasmEmitter {
             label_to_idx: HashMap::new(),
             num_regs: 0,
-            emitted: HashSet::new(),
             const_pool: Vec::new(),
             closure_table_idx: HashMap::new(),
             local_offset: 0,
@@ -241,149 +239,204 @@ impl WasmEmitter {
 
     fn emit_function(&mut self, func: &LirFunction) -> Function {
         self.label_to_idx.clear();
-        self.emitted.clear();
         for (idx, block) in func.blocks.iter().enumerate() {
             self.label_to_idx.insert(block.label, idx);
         }
 
         self.num_regs = func.num_regs;
         self.local_offset = 0;
-        // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal_scratch (2N+1)
+        // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal/state (2N+1)
         self.signal_local = func.num_regs * 2 + 1;
 
         let mut f = Function::new([
             (func.num_regs, ValType::I64), // tags
             (func.num_regs, ValType::I64), // payloads
             (1, ValType::I32),             // env_ptr
-            (1, ValType::I32),             // signal_scratch
+            (1, ValType::I32),             // signal/state scratch
         ]);
 
-        self.emit_block_tree(&mut f, func.entry, func);
+        self.emit_cfg(&mut f, func);
 
         f.instruction(&Instruction::End);
         f
     }
 
-    fn emit_block_tree(&mut self, f: &mut Function, label: Label, func: &LirFunction) {
-        if self.emitted.contains(&label) {
+    /// Emit a control flow graph using loop + br_table dispatch.
+    ///
+    /// Each LIR basic block becomes a case in a br_table. A `$state` local
+    /// tracks which block to execute next. Return terminators break out of
+    /// the loop. Jump and Branch terminators set `$state` and continue.
+    ///
+    /// This handles any CFG topology (including cond's deeply nested
+    /// if/else patterns) without needing merge-point analysis.
+    fn emit_cfg(&mut self, f: &mut Function, func: &LirFunction) {
+        let num_blocks = func.blocks.len();
+        if num_blocks == 0 {
+            f.instruction(&Instruction::I64Const(TAG_NIL as i64));
+            f.instruction(&Instruction::I64Const(0));
             return;
         }
-        self.emitted.insert(label);
 
-        let idx = self.label_to_idx[&label];
-        let block = &func.blocks[idx];
-
-        for spanned in &block.instructions {
-            self.emit_instr(f, &spanned.instr);
-        }
-
-        match &block.terminator.terminator {
-            Terminator::Return(reg) => {
-                f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
-                f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
-                f.instruction(&Instruction::Return);
+        // Single block: no loop needed
+        if num_blocks == 1 {
+            let block = &func.blocks[0];
+            for spanned in &block.instructions {
+                self.emit_instr(f, &spanned.instr);
             }
-            Terminator::Unreachable => {
-                f.instruction(&Instruction::Unreachable);
-            }
-            Terminator::Jump(target) => {
-                self.emit_block_tree(f, *target, func);
-            }
-            Terminator::Branch {
-                cond,
-                then_label,
-                else_label,
-            } => {
-                self.emit_branch(f, *cond, *then_label, *else_label, func);
-            }
-            Terminator::Yield { .. } => {
-                f.instruction(&Instruction::Unreachable);
-            }
-        }
-    }
-
-    fn emit_branch(
-        &mut self,
-        f: &mut Function,
-        cond: Reg,
-        then_label: Label,
-        else_label: Label,
-        func: &LirFunction,
-    ) {
-        // Truthiness: !(tag == TAG_NIL || tag == TAG_FALSE)
-        f.instruction(&Instruction::LocalGet(self.tag_local(cond)));
-        f.instruction(&Instruction::I64Const(TAG_FALSE as i64));
-        f.instruction(&Instruction::I64Ne);
-        f.instruction(&Instruction::LocalGet(self.tag_local(cond)));
-        f.instruction(&Instruction::I64Const(TAG_NIL as i64));
-        f.instruction(&Instruction::I64Ne);
-        f.instruction(&Instruction::I32And);
-
-        let merge = find_merge_label(func, then_label, else_label, &self.label_to_idx);
-
-        f.instruction(&Instruction::If(BlockType::Empty));
-        self.emit_branch_arm(f, then_label, merge, func);
-        f.instruction(&Instruction::Else);
-        self.emit_branch_arm(f, else_label, merge, func);
-        f.instruction(&Instruction::End);
-
-        if let Some(merge) = merge {
-            self.emit_block_tree(f, merge, func);
-        }
-    }
-
-    fn emit_branch_arm(
-        &mut self,
-        f: &mut Function,
-        label: Label,
-        merge: Option<Label>,
-        func: &LirFunction,
-    ) {
-        if self.emitted.contains(&label) {
+            self.emit_terminator_return(f, &block.terminator.terminator);
             return;
         }
-        self.emitted.insert(label);
 
-        let idx = self.label_to_idx[&label];
-        let block = &func.blocks[idx];
+        // State local: reuse signal_local as state (i32).
+        // We'll use a separate local for state to avoid conflicts.
+        // State local is at self.local_offset + 2*num_regs + 1 for closures,
+        // or 2*num_regs + 1 for entry. But signal_local is already there.
+        // Add another i32 local for state... actually signal_local IS an i32.
+        // Let's just use signal_local as the state variable (it's only used
+        // transiently during call emission, and the loop dispatch doesn't
+        // overlap with those uses).
+        let state_local = self.signal_local;
 
-        for spanned in &block.instructions {
-            self.emit_instr(f, &spanned.instr);
+        // Initialize state to entry block index
+        let entry_idx = self.label_to_idx[&func.entry] as i32;
+        f.instruction(&Instruction::I32Const(entry_idx));
+        f.instruction(&Instruction::LocalSet(state_local));
+
+        // Outer block for return (br 0 from inside loop = break to after block)
+        // loop $dispatch
+        //   block $b0
+        //     block $b1
+        //       ...
+        //         block $bN
+        //           br_table $b0 $b1 ... $bN (local.get $state)
+        //         end  ;; $bN
+        //       ...
+        //     end  ;; $b1
+        //   end  ;; $b0
+        //   ;; block 0 code here (br_table jumps to $b0 which is the outermost block
+        //   ;;   so after its `end` we fall through to block 0's code)
+        //   ... set state, br $dispatch ...
+        // end  ;; loop
+
+        // Structure: block { loop { block*N { br_table } code_N; code_N-1; ... code_0; br loop } }
+
+        // The br_table maps index i to block depth. Block depth 0 = innermost,
+        // N-1 = outermost of the nested blocks. After landing at block i's end,
+        // execution falls through to block i's code.
+
+        // Loop for dispatch. All exits use `return`.
+        f.instruction(&Instruction::Loop(BlockType::Empty));
+
+        // Nested blocks for br_table targets (innermost = highest index)
+        for _ in 0..num_blocks {
+            f.instruction(&Instruction::Block(BlockType::Empty));
         }
 
-        match &block.terminator.terminator {
-            Terminator::Jump(target) if merge == Some(*target) => {}
-            Terminator::Jump(target) => {
-                self.emit_branch_arm(f, *target, merge, func);
-            }
-            Terminator::Return(reg) => {
-                f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
-                f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
-                f.instruction(&Instruction::Return);
-            }
-            Terminator::Branch {
-                cond,
-                then_label,
-                else_label,
-            } => {
-                let sub_merge =
-                    find_merge_label(func, *then_label, *else_label, &self.label_to_idx);
+        // br_table dispatch
+        f.instruction(&Instruction::LocalGet(state_local));
+        // Targets: block 0 is outermost (depth = num_blocks - 1),
+        // block N-1 is innermost (depth = 0).
+        // br_table target for state=i should jump to depth (num_blocks - 1 - i).
+        let targets: Vec<u32> = (0..num_blocks as u32)
+            .map(|i| num_blocks as u32 - 1 - i)
+            .collect();
+        // Default target = first block
+        f.instruction(&Instruction::BrTable(targets.clone().into(), targets[0]));
 
-                self.emit_truthiness_check(f, *cond);
-                f.instruction(&Instruction::If(BlockType::Empty));
-                self.emit_branch_arm(f, *then_label, sub_merge, func);
-                f.instruction(&Instruction::Else);
-                self.emit_branch_arm(f, *else_label, sub_merge, func);
-                f.instruction(&Instruction::End);
+        // After br_table, emit blocks in reverse order (innermost end first)
+        // Block N-1's code comes right after the innermost block's end
+        for block_idx in (0..num_blocks).rev() {
+            f.instruction(&Instruction::End); // close the block
 
-                if let Some(sm) = sub_merge {
-                    self.emit_branch_arm(f, sm, merge, func);
+            let block = &func.blocks[block_idx];
+
+            // Emit instructions
+            for spanned in &block.instructions {
+                self.emit_instr(f, &spanned.instr);
+            }
+
+            // Emit terminator
+            match &block.terminator.terminator {
+                Terminator::Return(reg) => {
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
+                    // Store into the outer result blocks and break out
+                    // br 1 goes to the inner result block, br 2 to the outer
+                    // We need to break out of the loop (depth: num_blocks - block_idx + loop_depth)
+                    // Actually: the structure is:
+                    //   block(result i64) $ret_tag    depth from here: varies
+                    //     block(result i64) $ret_pay
+                    //       loop $dispatch
+                    //         block*N
+                    //         ...
+                    //         code
+                    // From code position, depths are:
+                    //   0 = previous block's block
+                    //   ... up to num_blocks-1-block_idx = our block
+                    //   num_blocks - block_idx = loop
+                    //   num_blocks - block_idx + 1 = $ret_pay
+                    //   num_blocks - block_idx + 2 = $ret_tag
+                    // We want to br to $ret_pay with payload, then that falls through to ret_tag
+                    // Actually, multi-value br doesn't work like that.
+
+                    // Simpler: just use `return` instruction which works from anywhere.
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
+                    f.instruction(&Instruction::Return);
+                }
+                Terminator::Jump(target) => {
+                    let target_idx = self.label_to_idx[target] as i32;
+                    f.instruction(&Instruction::I32Const(target_idx));
+                    f.instruction(&Instruction::LocalSet(state_local));
+                    // br to loop: depth = (remaining blocks below us) + 1 (for loop)
+                    let loop_depth = block_idx as u32;
+                    f.instruction(&Instruction::Br(loop_depth));
+                }
+                Terminator::Branch {
+                    cond,
+                    then_label,
+                    else_label,
+                } => {
+                    let then_idx = self.label_to_idx[then_label] as i32;
+                    let else_idx = self.label_to_idx[else_label] as i32;
+
+                    self.emit_truthiness_check(f, *cond);
+                    f.instruction(&Instruction::If(BlockType::Empty));
+                    f.instruction(&Instruction::I32Const(then_idx));
+                    f.instruction(&Instruction::LocalSet(state_local));
+                    f.instruction(&Instruction::Else);
+                    f.instruction(&Instruction::I32Const(else_idx));
+                    f.instruction(&Instruction::LocalSet(state_local));
+                    f.instruction(&Instruction::End);
+
+                    let loop_depth = block_idx as u32;
+                    f.instruction(&Instruction::Br(loop_depth));
+                }
+                Terminator::Unreachable => {
+                    f.instruction(&Instruction::Unreachable);
+                }
+                Terminator::Yield { .. } => {
+                    f.instruction(&Instruction::Unreachable);
                 }
             }
+        }
+
+        f.instruction(&Instruction::End); // loop
+                                          // Unreachable — all paths through the loop use `return`
+        f.instruction(&Instruction::Unreachable);
+    }
+
+    /// Emit a terminator that produces the function's return values.
+    /// Used for single-block functions that don't need the loop dispatch.
+    fn emit_terminator_return(&self, f: &mut Function, term: &Terminator) {
+        match term {
+            Terminator::Return(reg) => {
+                f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
+                f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
+            }
             Terminator::Unreachable => {
                 f.instruction(&Instruction::Unreachable);
             }
-            Terminator::Yield { .. } => {
+            _ => {
+                // Shouldn't happen for single-block functions
                 f.instruction(&Instruction::Unreachable);
             }
         }
@@ -1040,7 +1093,6 @@ impl WasmEmitter {
     /// which read from env_ptr.
     fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
         self.label_to_idx.clear();
-        self.emitted.clear();
         for (idx, block) in func.blocks.iter().enumerate() {
             self.label_to_idx.insert(block.label, idx);
         }
@@ -1056,7 +1108,7 @@ impl WasmEmitter {
             (1, ValType::I32),             // signal_scratch
         ]);
 
-        self.emit_block_tree(&mut f, func.entry, func);
+        self.emit_cfg(&mut f, func);
 
         f.instruction(&Instruction::End);
         f
@@ -1094,56 +1146,5 @@ fn collect_nested_functions<'a>(func: &'a LirFunction, out: &mut Vec<&'a LirFunc
                 collect_nested_functions(nested, out);
             }
         }
-    }
-}
-
-fn ultimate_jump_target(
-    func: &LirFunction,
-    start: Label,
-    label_to_idx: &HashMap<Label, usize>,
-) -> Option<Label> {
-    let mut current = start;
-    for _ in 0..20 {
-        let idx = label_to_idx[&current];
-        match &func.blocks[idx].terminator.terminator {
-            Terminator::Jump(target) => {
-                if !func.blocks[idx].instructions.is_empty() || current == start {
-                    return Some(*target);
-                }
-                current = *target;
-            }
-            Terminator::Branch {
-                then_label,
-                else_label,
-                ..
-            } => {
-                if let Some(merge) = find_merge_label(func, *then_label, *else_label, label_to_idx)
-                {
-                    let merge_idx = label_to_idx[&merge];
-                    match &func.blocks[merge_idx].terminator.terminator {
-                        Terminator::Jump(target) => return Some(*target),
-                        _ => return None,
-                    }
-                }
-                return None;
-            }
-            _ => return None,
-        }
-    }
-    None
-}
-
-fn find_merge_label(
-    func: &LirFunction,
-    then_label: Label,
-    else_label: Label,
-    label_to_idx: &HashMap<Label, usize>,
-) -> Option<Label> {
-    let then_target = ultimate_jump_target(func, then_label, label_to_idx);
-    let else_target = ultimate_jump_target(func, else_label, label_to_idx);
-    if then_target.is_some() && then_target == else_target {
-        then_target
-    } else {
-        None
     }
 }

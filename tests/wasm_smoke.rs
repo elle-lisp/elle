@@ -158,6 +158,14 @@ fn test_multi_arg_lambda() {
     assert_eq!(eval("((fn [a b c] (+ a (+ b c))) 1 2 3)"), "6");
 }
 
+#[test]
+fn test_cond() {
+    assert_eq!(
+        eval("(defn classify [x]\n  (cond\n    ((< x 0) :negative)\n    ((= x 0) :zero)\n    (true :positive)))\n(classify 5)"),
+        ":positive"
+    );
+}
+
 // --- Phase 1: strings + error handling ---
 
 #[test]
