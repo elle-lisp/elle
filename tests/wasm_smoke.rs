@@ -187,6 +187,28 @@ fn test_recursive_factorial() {
 }
 
 #[test]
+fn test_closure_with_if() {
+    // Closure body contains if/else — tests branch emission in closure context
+    assert_eq!(eval("(defn abs [x] (if (< x 0) (- 0 x) x))\n(abs -5)"), "5");
+}
+
+#[test]
+fn test_closure_with_let_and_if() {
+    assert_eq!(
+        eval("(defn clamp [x lo hi] (if (< x lo) lo (if (> x hi) hi x)))\n(clamp 15 0 10)"),
+        "10"
+    );
+}
+
+#[test]
+fn test_mutual_recursion() {
+    assert_eq!(
+        eval("(defn even? [n] (if (= n 0) true (odd? (- n 1))))\n(defn odd? [n] (if (= n 0) false (even? (- n 1))))\n(even? 10)"),
+        "true"
+    );
+}
+
+#[test]
 fn test_recursive_sum() {
     assert_eq!(
         eval("(defn sum [n] (if (<= n 0) 0 (+ n (sum (- n 1)))))\n(sum 10)"),

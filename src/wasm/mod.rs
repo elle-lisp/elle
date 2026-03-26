@@ -26,8 +26,12 @@ use crate::value::Value;
 /// Full pipeline: source → reader → expander → analyzer → HIR → LIR → WASM → Wasmtime.
 /// Used for testing and as the `ELLE_WASM=1` entry point.
 pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
-    let mut symbols = crate::symbol::SymbolTable::new();
-    crate::primitives::intern_primitive_names(&mut symbols);
+    let mut vm = crate::vm::VM::new();
+    let mut symbols = Box::new(crate::symbol::SymbolTable::new());
+    crate::primitives::register_primitives(&mut vm, &mut symbols);
+    let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
+    crate::context::set_symbol_table(sym_ptr);
+    crate::primitives::set_length_symbol_table(sym_ptr);
 
     // Compile source → LIR (file mode = letrec for mutual recursion)
     let lir_func = crate::pipeline::compile_file_to_lir(source, &mut symbols, source_name)?;
