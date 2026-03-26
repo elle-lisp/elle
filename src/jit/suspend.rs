@@ -62,12 +62,35 @@ pub extern "C" fn elle_jit_yield(
     // Build the env: captures + locals (params + locally-defined).
     // The interpreter's LoadUpvalue/StoreUpvalue access env[idx] for all
     // variables: captures, params, and locally-defined.
+    //
+    // The JIT auto-unwraps LBox cells in registers, so spilled values for
+    // mutable-captured locals are raw (unwrapped). We must re-wrap them
+    // in LBox cells so the interpreter's LoadUpvalue → LoadLBox sequence
+    // finds the expected cell type.
     let num_captures = closure.env.len();
+    let num_params = closure.template.num_params;
+    let lbox_params_mask = closure.template.lbox_params_mask;
+    let lbox_locals_mask = closure.template.lbox_locals_mask;
     let mut env = Vec::with_capacity(num_captures + num_locals);
     env.extend(closure.env.iter().copied());
     for i in 0..num_locals {
         let v = unsafe { *spilled_values.add(i) };
-        env.push(v);
+        if i < num_params {
+            // Parameter slot — check lbox_params_mask
+            if (i as u64) < 64 && (lbox_params_mask & (1 << i)) != 0 {
+                env.push(Value::local_lbox(v));
+            } else {
+                env.push(v);
+            }
+        } else {
+            // Locally-defined variable — check lbox_locals_mask
+            let local_offset = i - num_params;
+            if local_offset < 64 && (lbox_locals_mask & (1 << local_offset)) != 0 {
+                env.push(Value::local_lbox(v));
+            } else {
+                env.push(v);
+            }
+        }
     }
     let env = std::rc::Rc::new(env);
 
@@ -149,12 +172,32 @@ pub extern "C" fn elle_jit_yield_through_call(
     // The interpreter's LoadUpvalue/StoreUpvalue access env[idx] for all
     // variables: captures, params, and locally-defined. The JIT stores
     // captures in closure.env and params/locals in the spill buffer.
+    //
+    // Re-wrap LBox cells: the JIT auto-unwraps mutable-captured locals,
+    // so spilled values are raw. The interpreter expects LBox cells at
+    // these env positions for LoadUpvalue → LoadLBox to work correctly.
     let num_captures = closure.env.len();
+    let num_params = closure.template.num_params;
+    let lbox_params_mask = closure.template.lbox_params_mask;
+    let lbox_locals_mask = closure.template.lbox_locals_mask;
     let mut env = Vec::with_capacity(num_captures + num_locals);
     env.extend(closure.env.iter().copied());
     for i in 0..num_locals {
         let v = unsafe { *spilled_values.add(i) };
-        env.push(v);
+        if i < num_params {
+            if (i as u64) < 64 && (lbox_params_mask & (1 << i)) != 0 {
+                env.push(Value::local_lbox(v));
+            } else {
+                env.push(v);
+            }
+        } else {
+            let local_offset = i - num_params;
+            if local_offset < 64 && (lbox_locals_mask & (1 << local_offset)) != 0 {
+                env.push(Value::local_lbox(v));
+            } else {
+                env.push(v);
+            }
+        }
     }
     let env = std::rc::Rc::new(env);
 
@@ -242,6 +285,65 @@ mod tests {
             signal: Signal::yields(),
             lbox_params_mask: 0,
             lbox_locals_mask: 0,
+            symbol_names: Rc::new(HashMap::new()),
+            location_map: Rc::new(crate::error::LocationMap::new()),
+            jit_code: None,
+            lir_function: None,
+            doc: None,
+            syntax: None,
+            vararg_kind: crate::hir::VarargKind::List,
+            name: None,
+            result_is_immediate: false,
+            has_outward_heap_set: false,
+        });
+
+        let closure = crate::value::Closure {
+            template: template.clone(),
+            env,
+            squelch_mask: 0,
+        };
+
+        let bytecode_ptr = template.bytecode.as_ptr();
+        let closure_val = Value::closure(closure);
+
+        let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
+
+        let mut vm = crate::vm::VM::new();
+        vm.jit_cache.insert(bytecode_ptr, jit_code);
+
+        (vm, closure_val)
+    }
+
+    /// Set up a VM + Closure + JitCode with LBox masks for yield tests.
+    fn setup_yield_test_with_lbox(
+        bytecode: Vec<u8>,
+        constants: Vec<Value>,
+        env: Vec<Value>,
+        yield_points: Vec<YieldPointMeta>,
+        num_params: usize,
+        lbox_params_mask: u64,
+        lbox_locals_mask: u64,
+    ) -> (crate::vm::VM, Value) {
+        use crate::signals::Signal;
+        use crate::value::types::Arity;
+        use crate::value::ClosureTemplate;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+
+        let bytecode = Rc::new(bytecode);
+        let constants = Rc::new(constants);
+        let env = Rc::new(env);
+
+        let template = Rc::new(ClosureTemplate {
+            bytecode: bytecode.clone(),
+            arity: Arity::Exact(num_params),
+            num_locals: 0,
+            num_captures: 0,
+            num_params,
+            constants,
+            signal: Signal::yields(),
+            lbox_params_mask,
+            lbox_locals_mask,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             jit_code: None,
@@ -566,5 +668,78 @@ mod tests {
         assert_eq!(frame.stack[1].as_bool(), Some(true));
         assert_eq!(frame.stack[2].as_float(), Some(1.5));
         assert!(frame.stack[3].is_empty_list());
+    }
+
+    #[test]
+    fn test_jit_yield_rewraps_lbox_locals() {
+        // 2 params (param 1 is lbox-wrapped), 2 locally-defined (local 0 is lbox-wrapped)
+        // lbox_params_mask = 0b10 (param index 1)
+        // lbox_locals_mask = 0b01 (local index 0)
+        let yield_meta = YieldPointMeta {
+            resume_ip: 50,
+            num_spilled: 1, // 1 operand
+            num_locals: 4,  // 2 params + 2 locals
+        };
+
+        let (mut vm, closure_val) = setup_yield_test_with_lbox(
+            vec![0xBB; 10],
+            vec![],
+            vec![], // no captures
+            vec![yield_meta],
+            2,    // num_params
+            0b10, // lbox_params_mask: param 1 is mutable-captured
+            0b01, // lbox_locals_mask: local 0 is mutable-captured
+        );
+
+        // Spilled: [param0=10, param1=20, local0=30, local1=40, op0=50]
+        // JIT spills raw (unwrapped) values for all slots.
+        let spilled: Vec<Value> = vec![
+            Value::int(10),
+            Value::int(20),
+            Value::int(30),
+            Value::int(40),
+            Value::int(50),
+        ];
+
+        elle_jit_yield(
+            Value::int(0).tag,
+            Value::int(0).payload,
+            spilled.as_ptr(),
+            0,
+            &mut vm as *mut crate::vm::VM as *mut () as u64,
+            closure_val.tag,
+            closure_val.payload,
+        );
+
+        let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
+        assert_eq!(frame.env.len(), 4); // 0 captures + 4 locals
+
+        // env[0] = param 0: NOT lbox-wrapped → raw int
+        assert_eq!(frame.env[0].as_int(), Some(10));
+
+        // env[1] = param 1: lbox-wrapped → LBox cell containing int(20)
+        assert!(
+            frame.env[1].is_local_lbox(),
+            "param 1 should be re-wrapped as LBox"
+        );
+        assert_eq!(frame.env[1].as_lbox().unwrap().borrow().as_int(), Some(20));
+
+        // env[2] = local 0: lbox-wrapped → LBox cell containing int(30)
+        assert!(
+            frame.env[2].is_local_lbox(),
+            "local 0 should be re-wrapped as LBox"
+        );
+        assert_eq!(frame.env[2].as_lbox().unwrap().borrow().as_int(), Some(30));
+
+        // env[3] = local 1: NOT lbox-wrapped → raw int
+        assert_eq!(frame.env[3].as_int(), Some(40));
+
+        // Stack should contain raw values (LoadLocal doesn't go through LBox)
+        assert_eq!(frame.stack.len(), 5);
+        assert_eq!(frame.stack[0].as_int(), Some(10));
+        assert_eq!(frame.stack[1].as_int(), Some(20));
+        assert_eq!(frame.stack[2].as_int(), Some(30));
+        assert_eq!(frame.stack[3].as_int(), Some(40));
+        assert_eq!(frame.stack[4].as_int(), Some(50));
     }
 }

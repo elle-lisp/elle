@@ -323,23 +323,19 @@ impl<'a> Lowerer<'a> {
                 .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
             HirKind::Call { func, args, .. } => {
-                // Conservatively treat any call to an unknown function that
-                // receives a non-immediate scope-local value as a potential
-                // outward escape. The callee may store the argument into outer
-                // state (e.g. push into an outer @array). We have no
-                // interprocedural call graph.
+                // Conservatively treat any call to a non-intrinsic function as
+                // a potential outward escape. The callee may internally allocate
+                // heap objects and store them in external mutable structures
+                // (e.g. via `put` to an outer @struct), even when all arguments
+                // are immediates. Without interprocedural analysis, we cannot
+                // determine that a callee is side-effect-free with respect to
+                // heap allocation.
                 //
                 // Exception: calls that `call_result_is_safe` approves are to
                 // known intrinsics or immediate-returning primitives. These are
-                // pure functions that do not retain their arguments — passing a
-                // scope-local heap value to `length`, `empty?`, `fiber?`, etc.
-                // does not cause it to escape into outer state.
-                let callee_is_safe = self.call_result_is_safe(func, args);
-                if !callee_is_safe
-                    && args
-                        .iter()
-                        .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
-                {
+                // pure functions that neither retain arguments nor allocate
+                // heap objects that escape to external state.
+                if !self.call_result_is_safe(func, args) {
                     return true;
                 }
                 self.walk_for_outward_set(func, scope_bindings)
