@@ -172,9 +172,29 @@ jobs:
       - name: Run property tests
         run: "cargo test --test lib property::"
 
+  aarch64:
+    name: AArch64 Build & Smoke
+    needs: changes
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64
+      - name: Install GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Run smoke tests
+        run: make smoke
+
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests, aarch64]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -195,6 +215,9 @@ jobs:
         run: exit 1
       - name: Check plugin tests
         if: needs.plugin-tests.result == 'failure'
+        run: exit 1
+      - name: Check aarch64
+        if: needs.aarch64.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'
