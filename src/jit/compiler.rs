@@ -1,7 +1,7 @@
 //! JIT compiler: LirFunction -> Cranelift IR -> Native code
 //!
 //! This module translates LIR (Low-level Intermediate Representation) to
-//! Cranelift IR, then compiles to native x86_64 code.
+//! Cranelift IR, then compiles to native code (x86_64, aarch64).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -82,7 +82,7 @@ impl JitCompiler {
 
     /// Build the standard JIT function signature.
     /// fn(env: *const Value, args: *const Value, nargs: u32, vm: *mut VM,
-    ///    self_tag: u64, self_payload: u64) -> JitValue  (two I64s in rax:rdx)
+    ///    self_tag: u64, self_payload: u64) -> JitValue  (two I64s)
     fn make_jit_signature(&self) -> Signature {
         let mut sig = self.module.make_signature();
         sig.call_conv = CallConv::SystemV;

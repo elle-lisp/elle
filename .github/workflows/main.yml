@@ -94,6 +94,22 @@ jobs:
       - name: Run plugin tests
         run: make plugin-tests
 
+  aarch64:
+    name: AArch64 Build & Smoke
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64
+      - name: Install GNU parallel
+        run: sudo apt-get install -y parallel
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Run smoke tests
+        run: make smoke
+
   audit:
     name: Dependency Audit
     runs-on: ubuntu-latest
