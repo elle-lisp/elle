@@ -110,7 +110,188 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
+    // rt_data_op(op: i32, args_ptr: i32, nargs: i32) -> (tag: i64, payload: i64, signal: i32)
+    linker.func_wrap(
+        "elle",
+        "rt_data_op",
+        |mut caller: Caller<'_, ElleHost>, op: i32, args_ptr: i32, nargs: i32| -> (i64, i64, i32) {
+            let args = read_args_from_memory(&mut caller, args_ptr, nargs);
+            let (bits, result) = dispatch_data_op(op, &args);
+            let (tag, payload) = caller.data_mut().value_to_wasm(result);
+            (tag, payload, bits.0 as i32)
+        },
+    )?;
+
     Ok(linker)
+}
+
+/// Dispatch a data operation by opcode.
+fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::SignalBits, Value) {
+    use crate::value::fiber::{SIG_ERROR, SIG_OK};
+    use crate::value::heap::TableKey;
+
+    let err = |kind: &str, msg: &str| (SIG_ERROR, crate::value::error_val(kind, msg));
+
+    match op {
+        0 => (SIG_OK, Value::cons(args[0], args[1])), // OP_CONS
+        1 => match args[0].as_cons() {
+            // OP_CAR
+            Some(c) => (SIG_OK, c.first),
+            None => (SIG_OK, Value::NIL),
+        },
+        2 => match args[0].as_cons() {
+            // OP_CDR
+            Some(c) => (SIG_OK, c.rest),
+            None => (SIG_OK, Value::NIL),
+        },
+        3 => match args[0].as_cons() {
+            // OP_CAR_DESTRUCTURE
+            Some(c) => (SIG_OK, c.first),
+            None => err("type-error", "car: not a pair"),
+        },
+        4 => match args[0].as_cons() {
+            // OP_CDR_DESTRUCTURE
+            Some(c) => (SIG_OK, c.rest),
+            None => err("type-error", "cdr: not a pair"),
+        },
+        5 => match args[0].as_cons() {
+            // OP_CAR_OR_NIL
+            Some(c) => (SIG_OK, c.first),
+            None => (SIG_OK, Value::NIL),
+        },
+        6 => match args[0].as_cons() {
+            // OP_CDR_OR_NIL
+            Some(c) => (SIG_OK, c.rest),
+            None => (SIG_OK, Value::EMPTY_LIST),
+        },
+        7 => (SIG_OK, Value::array_mut(args.to_vec())), // OP_MAKE_ARRAY
+        8 => (SIG_OK, Value::local_lbox(args[0])),      // OP_MAKE_LBOX
+        9 => {
+            // OP_LOAD_LBOX
+            match args[0].as_lbox() {
+                Some(cell) => (SIG_OK, *cell.borrow()),
+                None => (SIG_OK, args[0]),
+            }
+        }
+        10 => {
+            // OP_STORE_LBOX
+            if let Some(cell) = args[0].as_lbox() {
+                *cell.borrow_mut() = args[1];
+            }
+            (SIG_OK, Value::NIL)
+        }
+        11 => (SIG_OK, Value::NIL), // OP_MAKE_STRING (stub)
+        12 => {
+            // OP_ARRAY_REF_DESTRUCTURE
+            let index = args[1].payload as usize;
+            if let Some(arr) = args[0].as_array_mut() {
+                let b = arr.borrow();
+                if index < b.len() {
+                    (SIG_OK, b[index])
+                } else {
+                    err("index-error", "array ref: out of bounds")
+                }
+            } else if let Some(arr) = args[0].as_array() {
+                if index < arr.len() {
+                    (SIG_OK, arr[index])
+                } else {
+                    err("index-error", "array ref: out of bounds")
+                }
+            } else {
+                err("type-error", "array ref: not an array")
+            }
+        }
+        13 => {
+            // OP_ARRAY_SLICE_FROM
+            let index = args[1].payload as usize;
+            if let Some(arr) = args[0].as_array_mut() {
+                let b = arr.borrow();
+                (SIG_OK, Value::array_mut(b[index.min(b.len())..].to_vec()))
+            } else if let Some(arr) = args[0].as_array() {
+                (
+                    SIG_OK,
+                    Value::array_mut(arr[index.min(arr.len())..].to_vec()),
+                )
+            } else {
+                (SIG_OK, Value::array_mut(vec![]))
+            }
+        }
+        14 => {
+            // OP_STRUCT_GET_OR_NIL
+            if let Some(s) = args[0].as_struct() {
+                let key = match TableKey::from_value(&args[1]) {
+                    Some(k) => k,
+                    None => return (SIG_OK, Value::NIL),
+                };
+                (SIG_OK, s.get(&key).copied().unwrap_or(Value::NIL))
+            } else if let Some(s) = args[0].as_struct_mut() {
+                let key = match TableKey::from_value(&args[1]) {
+                    Some(k) => k,
+                    None => return (SIG_OK, Value::NIL),
+                };
+                (SIG_OK, s.borrow().get(&key).copied().unwrap_or(Value::NIL))
+            } else {
+                (SIG_OK, Value::NIL)
+            }
+        }
+        15 => {
+            // OP_STRUCT_GET_DESTRUCTURE
+            if let Some(s) = args[0].as_struct() {
+                let key = match TableKey::from_value(&args[1]) {
+                    Some(k) => k,
+                    None => return (SIG_OK, Value::NIL),
+                };
+                match s.get(&key) {
+                    Some(v) => (SIG_OK, *v),
+                    None => err("key-error", "struct get: key not found"),
+                }
+            } else {
+                err("type-error", "struct get: not a struct")
+            }
+        }
+        16 => {
+            // OP_ARRAY_EXTEND
+            if let Some(arr) = args[0].as_array_mut() {
+                if let Some(src) = args[1].as_array_mut() {
+                    arr.borrow_mut().extend_from_slice(&src.borrow());
+                } else if let Some(src) = args[1].as_array() {
+                    arr.borrow_mut().extend_from_slice(src);
+                }
+            }
+            (SIG_OK, args[0])
+        }
+        17 => {
+            // OP_ARRAY_PUSH
+            if let Some(arr) = args[0].as_array_mut() {
+                arr.borrow_mut().push(args[1]);
+            }
+            (SIG_OK, args[0])
+        }
+        18 => {
+            // OP_ARRAY_LEN
+            let len = if let Some(arr) = args[0].as_array_mut() {
+                arr.borrow().len()
+            } else if let Some(arr) = args[0].as_array() {
+                arr.len()
+            } else {
+                0
+            };
+            (SIG_OK, Value::int(len as i64))
+        }
+        19 => {
+            // OP_ARRAY_REF_OR_NIL
+            let index = args[1].payload as usize;
+            if let Some(arr) = args[0].as_array_mut() {
+                let b = arr.borrow();
+                (SIG_OK, b.get(index).copied().unwrap_or(Value::NIL))
+            } else if let Some(arr) = args[0].as_array() {
+                (SIG_OK, arr.get(index).copied().unwrap_or(Value::NIL))
+            } else {
+                (SIG_OK, Value::NIL)
+            }
+        }
+        _ => err("internal-error", &format!("rt_data_op: unknown op {op}")),
+    }
 }
 
 /// Read args from linear memory as Vec<Value>.

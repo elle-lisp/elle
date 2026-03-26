@@ -110,3 +110,31 @@ fn test_call_empty() {
     assert_eq!(eval("(empty? ())"), "true");
     assert_eq!(eval("(empty? (list 1))"), "false");
 }
+
+// --- Phase 1: data operations ---
+
+#[test]
+fn test_array_literal() {
+    assert_eq!(eval("[1 2 3]"), "[1 2 3]");
+}
+
+#[test]
+fn test_first_rest() {
+    assert_eq!(eval("(first (cons 1 2))"), "1");
+    assert_eq!(eval("(rest (cons 1 2))"), "2");
+}
+
+#[test]
+fn test_struct_access() {
+    assert_eq!(eval("(get {:x 1 :y 2} :x)"), "1");
+}
+
+// These need MakeClosure (Phase 1 last item):
+// test_map_over_list: (map (fn [x] (+ x 1)) (list 1 2 3))
+// test_filter: (filter (fn [x] (> x 2)) (list 1 2 3 4))
+// test_fold: (fold + 0 (list 1 2 3 4))
+
+#[test]
+fn test_let_with_if() {
+    assert_eq!(eval("(let* [[x (if true 10 20)]] (+ x 5))"), "15");
+}

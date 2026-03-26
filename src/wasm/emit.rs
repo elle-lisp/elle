@@ -39,12 +39,35 @@ pub fn emit_module(func: &LirFunction) -> EmitResult {
 const _FN_CALL_PRIMITIVE: u32 = 0;
 const FN_RT_CALL: u32 = 1;
 const FN_RT_LOAD_CONST: u32 = 2;
+const FN_RT_DATA_OP: u32 = 3;
 
 // First non-imported function index
-const FN_ENTRY: u32 = 3;
+const FN_ENTRY: u32 = 4;
 
 // Linear memory layout
 const ARGS_BASE: i32 = 256; // Args buffer starts at byte 256
+
+// Data operation codes for rt_data_op
+const OP_CONS: i32 = 0;
+const OP_CAR: i32 = 1;
+const OP_CDR: i32 = 2;
+const OP_CAR_DESTRUCTURE: i32 = 3;
+const OP_CDR_DESTRUCTURE: i32 = 4;
+const OP_CAR_OR_NIL: i32 = 5;
+const OP_CDR_OR_NIL: i32 = 6;
+const OP_MAKE_ARRAY: i32 = 7;
+const OP_MAKE_LBOX: i32 = 8;
+const OP_LOAD_LBOX: i32 = 9;
+const OP_STORE_LBOX: i32 = 10;
+const _OP_MAKE_STRING: i32 = 11;
+const OP_ARRAY_REF_DESTRUCTURE: i32 = 12;
+const OP_ARRAY_SLICE_FROM: i32 = 13;
+const OP_STRUCT_GET_OR_NIL: i32 = 14;
+const OP_STRUCT_GET_DESTRUCTURE: i32 = 15;
+const OP_ARRAY_EXTEND: i32 = 16;
+const OP_ARRAY_PUSH: i32 = 17;
+const OP_ARRAY_LEN: i32 = 18;
+const OP_ARRAY_REF_OR_NIL: i32 = 19;
 
 struct WasmEmitter {
     label_to_idx: HashMap<Label, usize>,
@@ -91,13 +114,19 @@ impl WasmEmitter {
         types
             .ty()
             .function([ValType::I32], [ValType::I64, ValType::I64]);
+        // Type 4: rt_data_op(op, args_ptr, nargs) -> (tag, payload, signal)
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I32],
+        );
         module.section(&types);
 
         // Import section
         let mut imports = ImportSection::new();
-        imports.import("elle", "call_primitive", EntityType::Function(1)); // FN_CALL_PRIMITIVE
-        imports.import("elle", "rt_call", EntityType::Function(2)); // FN_RT_CALL
-        imports.import("elle", "rt_load_const", EntityType::Function(3)); // FN_RT_LOAD_CONST
+        imports.import("elle", "call_primitive", EntityType::Function(1));
+        imports.import("elle", "rt_call", EntityType::Function(2));
+        imports.import("elle", "rt_load_const", EntityType::Function(3));
+        imports.import("elle", "rt_data_op", EntityType::Function(4));
         module.section(&imports);
 
         // Function section
@@ -337,14 +366,96 @@ impl WasmEmitter {
                 f.instruction(&Instruction::Return);
             }
             LirInstr::RegionEnter | LirInstr::RegionExit => {}
+
+            // --- Data operations via rt_data_op ---
+            LirInstr::Cons { dst, head, tail } => {
+                self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
+            }
+            LirInstr::Car { dst, pair } => {
+                self.emit_data_op1(f, *dst, OP_CAR, *pair);
+            }
+            LirInstr::Cdr { dst, pair } => {
+                self.emit_data_op1(f, *dst, OP_CDR, *pair);
+            }
+            LirInstr::CarDestructure { dst, src } => {
+                self.emit_data_op1(f, *dst, OP_CAR_DESTRUCTURE, *src);
+            }
+            LirInstr::CdrDestructure { dst, src } => {
+                self.emit_data_op1(f, *dst, OP_CDR_DESTRUCTURE, *src);
+            }
+            LirInstr::CarOrNil { dst, src } => {
+                self.emit_data_op1(f, *dst, OP_CAR_OR_NIL, *src);
+            }
+            LirInstr::CdrOrNil { dst, src } => {
+                self.emit_data_op1(f, *dst, OP_CDR_OR_NIL, *src);
+            }
+            LirInstr::MakeArrayMut { dst, elements } => {
+                self.emit_data_op_n(f, *dst, OP_MAKE_ARRAY, elements);
+            }
             LirInstr::ArrayMutLen { dst, src } => {
-                // Dispatch to host — length is a primitive operation on heap objects.
-                // For now, stub as nil.
+                self.emit_data_op1(f, *dst, OP_ARRAY_LEN, *src);
+            }
+            LirInstr::ArrayMutRefDestructure { dst, src, index } => {
+                // Pack index as an int value in the second arg slot
+                self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_DESTRUCTURE, *src, *index as i64);
+            }
+            LirInstr::ArrayMutSliceFrom { dst, src, index } => {
+                self.emit_data_op1_imm(f, *dst, OP_ARRAY_SLICE_FROM, *src, *index as i64);
+            }
+            LirInstr::ArrayMutRefOrNil { dst, src, index } => {
+                self.emit_data_op1_imm(f, *dst, OP_ARRAY_REF_OR_NIL, *src, *index as i64);
+            }
+            LirInstr::StructGetOrNil { dst, src, key } => {
+                self.emit_struct_get(f, *dst, OP_STRUCT_GET_OR_NIL, *src, key);
+            }
+            LirInstr::StructGetDestructure { dst, src, key } => {
+                self.emit_struct_get(f, *dst, OP_STRUCT_GET_DESTRUCTURE, *src, key);
+            }
+            LirInstr::ArrayMutExtend { dst, array, source } => {
+                self.emit_data_op2(f, *dst, OP_ARRAY_EXTEND, *array, *source);
+            }
+            LirInstr::ArrayMutPush { dst, array, value } => {
+                self.emit_data_op2(f, *dst, OP_ARRAY_PUSH, *array, *value);
+            }
+            LirInstr::MakeLBox { dst, value } => {
+                self.emit_data_op1(f, *dst, OP_MAKE_LBOX, *value);
+            }
+            LirInstr::LoadLBox { dst, cell } => {
+                self.emit_data_op1(f, *dst, OP_LOAD_LBOX, *cell);
+            }
+            LirInstr::StoreLBox { cell, value } => {
+                // StoreLBox doesn't produce a result — use cell as dst (ignored)
+                self.emit_data_op2(f, *cell, OP_STORE_LBOX, *cell, *value);
+            }
+            LirInstr::CallArrayMut { dst, func, args } => {
+                // Call with args from an array register — write the func and array
+                // to memory, host unpacks the array
+                self.emit_call_array(f, *dst, *func, *args);
+            }
+            LirInstr::TailCallArrayMut { func, args } => {
+                let dst = Reg(0);
+                self.emit_call_array(f, dst, *func, *args);
+                f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+                f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+                f.instruction(&Instruction::Return);
+            }
+            LirInstr::Eval { dst, expr, env } => {
+                // For now, stub eval as nil
                 self.set_nil(f, *dst);
-                let _ = src;
+                let _ = (expr, env);
+            }
+            LirInstr::LoadResumeValue { dst } => {
+                // Phase 2: stack switching
+                self.set_nil(f, *dst);
+            }
+            LirInstr::PushParamFrame { .. }
+            | LirInstr::PopParamFrame
+            | LirInstr::CheckSignalBound { .. }
+            | LirInstr::StructRest { .. } => {
+                // TODO: implement via host functions
             }
             _ => {
-                // Unimplemented — no-op stub.
+                // Remaining instructions — no-op stub
             }
         }
     }
@@ -404,6 +515,148 @@ impl WasmEmitter {
         f.instruction(&Instruction::Drop); // drop signal_bits for now
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// Emit CallArrayMut: call a function with args from an array value.
+    fn emit_call_array(&self, f: &mut Function, dst: Reg, func: Reg, args_array: Reg) {
+        // Write func and args_array to memory as 2 args, then use rt_data_op
+        // to unpack the array and call. Actually, simpler: just call rt_call
+        // with func + array contents. But we don't know the array length at
+        // compile time. Route through rt_call with a special nargs=-1 protocol
+        // to mean "args_array is the second value, unpack it."
+        //
+        // For now: write [func, args_array] to memory, call rt_call with
+        // nargs = -1 to signal "unpack array".
+        self.write_val_to_mem(f, func, 0);
+        self.write_val_to_mem(f, args_array, 1);
+        f.instruction(&Instruction::LocalGet(self.tag_local(func)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(func)));
+        f.instruction(&Instruction::I32Const(ARGS_BASE)); // points to args_array
+        f.instruction(&Instruction::I32Const(-1)); // nargs = -1 means "unpack array at args_ptr"
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Call(FN_RT_CALL));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    // --- Data operation helpers ---
+
+    /// 1-arg data op: write arg to memory, call rt_data_op, store result.
+    fn emit_data_op1(&self, f: &mut Function, dst: Reg, op: i32, src: Reg) {
+        self.write_val_to_mem(f, src, 0);
+        f.instruction(&Instruction::I32Const(op));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(1));
+        f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+        f.instruction(&Instruction::Drop); // signal
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// 1-arg data op with an immediate second argument (e.g., array index).
+    fn emit_data_op1_imm(&self, f: &mut Function, dst: Reg, op: i32, src: Reg, imm: i64) {
+        self.write_val_to_mem(f, src, 0);
+        // Write the immediate as a TAG_INT value in slot 1
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I64Const(TAG_INT as i64));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset: 16,
+            align: 3,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I64Const(imm));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset: 24,
+            align: 3,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(op));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(2));
+        f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// 2-arg data op.
+    fn emit_data_op2(&self, f: &mut Function, dst: Reg, op: i32, a: Reg, b: Reg) {
+        self.write_val_to_mem(f, a, 0);
+        self.write_val_to_mem(f, b, 1);
+        f.instruction(&Instruction::I32Const(op));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(2));
+        f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// N-arg data op (for MakeArrayMut etc).
+    fn emit_data_op_n(&self, f: &mut Function, dst: Reg, op: i32, regs: &[Reg]) {
+        for (i, reg) in regs.iter().enumerate() {
+            self.write_val_to_mem(f, *reg, i);
+        }
+        f.instruction(&Instruction::I32Const(op));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(regs.len() as i32));
+        f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// Struct get with a constant key (keyword or symbol from LirConst).
+    fn emit_struct_get(&mut self, f: &mut Function, dst: Reg, op: i32, src: Reg, key: &LirConst) {
+        self.write_val_to_mem(f, src, 0);
+        // Write key as Value in slot 1
+        let (tag, payload) = match key {
+            LirConst::Keyword(name) => (TAG_KEYWORD as i64, intern_keyword(name) as i64),
+            LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
+            _ => (TAG_NIL as i64, 0),
+        };
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I64Const(tag));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset: 16,
+            align: 3,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I64Const(payload));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset: 24,
+            align: 3,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(op));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(2));
+        f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
+    /// Write a register's value to linear memory at ARGS_BASE + slot*16.
+    fn write_val_to_mem(&self, f: &mut Function, reg: Reg, slot: usize) {
+        let offset = (slot * 16) as u64;
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::LocalGet(self.tag_local(reg)));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset,
+            align: 3,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::LocalGet(self.pay_local(reg)));
+        f.instruction(&Instruction::I64Store(MemArg {
+            offset: offset + 8,
+            align: 3,
+            memory_index: 0,
+        }));
     }
 
     fn emit_const(&self, f: &mut Function, dst: Reg, value: &LirConst) {
