@@ -60,6 +60,9 @@ pub struct ClosureTemplate {
     /// True when the body contains `set!` to a captured binding with a
     /// potentially heap-allocated value. Used by fiber resume.
     pub has_outward_heap_set: bool,
+    /// WASM function table index (if compiled to WASM backend).
+    /// When set, rt_call dispatches to this WASM function instead of bytecode.
+    pub wasm_func_idx: Option<u32>,
 }
 
 /// Closure with captured environment
@@ -168,6 +171,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         })
     }
 
@@ -204,6 +208,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         });
         let closure = Closure {
             template,
@@ -232,6 +237,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         });
         let closure2 = Closure {
             template: template2,
@@ -260,6 +266,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         });
         let closure3 = Closure {
             template: template3,

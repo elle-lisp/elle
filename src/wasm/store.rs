@@ -70,22 +70,30 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
 
             // Dispatch based on function type
             if func_val.is_native_fn() {
-                // NativeFn: extract function pointer, call directly
                 let native_fn = func_val.as_native_fn().expect("rt_call: expected NativeFn");
                 let (bits, result) = native_fn(&args);
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
                 (tag, payload, bits.0 as i32)
+            } else if let Some(closure) = func_val.as_closure() {
+                if let Some(wasm_idx) = closure.template.wasm_func_idx {
+                    // WASM closure: build env in linear memory and call
+                    call_wasm_closure(&mut caller, closure, wasm_idx, &args)
+                } else {
+                    // Bytecode closure — not supported in WASM backend
+                    let err = crate::value::error_val(
+                        "internal-error",
+                        "rt_call: bytecode closure in WASM backend",
+                    );
+                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
+                    (tag, payload, 1)
+                }
             } else {
-                // For now, unsupported function type → error
                 let err = crate::value::error_val(
                     "type-error",
-                    format!(
-                        "rt_call: cannot call value of type {}",
-                        func_val.type_name()
-                    ),
+                    format!("rt_call: cannot call {}", func_val.type_name()),
                 );
                 let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                (tag, payload, 1) // SIG_ERROR = 1
+                (tag, payload, 1)
             }
         },
     )?;
@@ -110,6 +118,93 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
+    // rt_make_closure(table_idx: i32, captures_ptr: i32, metadata_ptr: i32) -> (tag: i64, payload: i64)
+    linker.func_wrap(
+        "elle",
+        "rt_make_closure",
+        |mut caller: Caller<'_, ElleHost>,
+         table_idx: i32,
+         captures_ptr: i32,
+         metadata_ptr: i32|
+         -> (i64, i64) {
+            // Read metadata from linear memory
+            let memory = caller
+                .get_export("__elle_memory")
+                .and_then(|e| e.into_memory())
+                .expect("rt_make_closure: no memory");
+            let data = memory.data(&caller);
+            let read_i64 = |offset: usize| -> i64 {
+                i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
+            };
+            let mp = metadata_ptr as usize;
+            let num_captures = read_i64(mp) as u16;
+            let num_params = read_i64(mp + 8) as usize;
+            let num_locals = read_i64(mp + 16) as usize;
+            let arity_kind = read_i64(mp + 24);
+            let arity_count = read_i64(mp + 32) as usize;
+            let lbox_params_mask = read_i64(mp + 40) as u64;
+            let lbox_locals_mask = read_i64(mp + 48) as u64;
+            let signal_bits = read_i64(mp + 56) as u32;
+
+            // Read captures from linear memory
+            let mut captures = Vec::with_capacity(num_captures as usize);
+            for i in 0..num_captures as usize {
+                let offset = captures_ptr as usize + i * 16;
+                let tag = read_i64(offset) as u64;
+                let payload = read_i64(offset + 8) as u64;
+                let value = if tag < TAG_HEAP_START {
+                    Value { tag, payload }
+                } else {
+                    caller.data().handles.get(payload)
+                };
+                captures.push(value);
+            }
+
+            let arity = match arity_kind {
+                0 => crate::value::types::Arity::Exact(arity_count),
+                1 => crate::value::types::Arity::AtLeast(arity_count),
+                _ => crate::value::types::Arity::Exact(arity_count),
+            };
+
+            // Create a ClosureTemplate with wasm_func_idx
+            let template = std::rc::Rc::new(crate::value::closure::ClosureTemplate {
+                bytecode: std::rc::Rc::new(vec![]),
+                arity,
+                num_locals,
+                num_captures: num_captures as usize,
+                num_params,
+                constants: std::rc::Rc::new(vec![]),
+                signal: crate::signals::Signal {
+                    bits: crate::value::fiber::SignalBits(signal_bits),
+                    propagates: 0,
+                },
+                lbox_params_mask,
+                lbox_locals_mask,
+                symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
+                location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
+                jit_code: None,
+                lir_function: None,
+                doc: None,
+                syntax: None,
+                vararg_kind: crate::hir::VarargKind::List,
+                name: None,
+                result_is_immediate: false,
+                has_outward_heap_set: false,
+                wasm_func_idx: Some(table_idx as u32),
+            });
+
+            let closure = crate::value::closure::Closure {
+                template,
+                env: std::rc::Rc::new(captures),
+                squelch_mask: 0,
+            };
+
+            let value = Value::closure(closure);
+            let (tag, payload) = caller.data_mut().value_to_wasm(value);
+            (tag, payload)
+        },
+    )?;
+
     // rt_data_op(op: i32, args_ptr: i32, nargs: i32) -> (tag: i64, payload: i64, signal: i32)
     linker.func_wrap(
         "elle",
@@ -123,6 +218,125 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
     )?;
 
     Ok(linker)
+}
+
+/// Call a WASM closure: build env in linear memory and invoke via table.
+fn call_wasm_closure(
+    caller: &mut Caller<'_, ElleHost>,
+    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    wasm_idx: u32,
+    args: &[Value],
+) -> (i64, i64, i32) {
+    use crate::value::fiber::SIG_OK;
+
+    let template = &closure.template;
+    let num_captures = template.num_captures;
+    let num_params = template.num_params;
+    let num_locals = template.num_locals;
+    let lbox_params_mask = template.lbox_params_mask;
+    let lbox_locals_mask = template.lbox_locals_mask;
+
+    // Build env in linear memory at ENV_BASE (4096).
+    // Layout: [captures...][params...][local_slots...]
+    // Each slot is 16 bytes (tag: i64, payload: i64).
+    const ENV_BASE: usize = 4096;
+
+    let memory = caller
+        .get_export("__elle_memory")
+        .and_then(|e| e.into_memory())
+        .expect("call_wasm_closure: no memory");
+
+    // Write captures from closure.env (converting heap values to handles)
+    for (i, val) in closure.env.iter().enumerate() {
+        let (tag, payload) = caller.data_mut().value_to_wasm(*val);
+        let offset = ENV_BASE + i * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Write params (args) with optional LBox wrapping.
+    // For params that need LBox wrapping, create an LBox and write the handle.
+    for (i, arg) in args.iter().enumerate().take(num_params) {
+        let val = if lbox_params_mask & (1u64 << i) != 0 {
+            Value::local_lbox(*arg)
+        } else {
+            *arg
+        };
+        let (tag, payload) = caller.data_mut().value_to_wasm(val);
+        let offset = ENV_BASE + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Write nil for remaining params (optional args not provided)
+    for i in args.len()..num_params {
+        let val = if lbox_params_mask & (1u64 << i) != 0 {
+            Value::local_lbox(Value::NIL)
+        } else {
+            Value::NIL
+        };
+        let (tag, payload) = caller.data_mut().value_to_wasm(val);
+        let offset = ENV_BASE + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Write nil/LBox(nil) for remaining local slots (after params).
+    // num_locals = total non-capture slots (params + locally-defined variables).
+    // We already wrote num_params slots above. The rest are locally-defined.
+    let extra_locals = num_locals.saturating_sub(num_params);
+    for i in 0..extra_locals {
+        let val = if lbox_locals_mask & (1u64 << i) != 0 {
+            Value::local_lbox(Value::NIL)
+        } else {
+            Value::NIL
+        };
+        let (tag, payload) = caller.data_mut().value_to_wasm(val);
+        let offset = ENV_BASE + (num_captures + num_params + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Look up the WASM function in the table and call it
+    let table = caller
+        .get_export("__elle_table")
+        .and_then(|e| e.into_table())
+        .expect("call_wasm_closure: no table");
+    let func_ref = table
+        .get(&mut *caller, wasm_idx as u64)
+        .expect("call_wasm_closure: table index out of bounds");
+    let func = func_ref
+        .unwrap_func()
+        .expect("call_wasm_closure: table entry is not a function");
+
+    let mut results = [Val::I64(0), Val::I64(0)];
+    let call_result = func.call(
+        &mut *caller,
+        &[
+            Val::I32(ENV_BASE as i32),
+            Val::I32(0), // args_ptr unused
+            Val::I32(0), // nargs unused
+            Val::I32(0), // ctx
+        ],
+        &mut results,
+    );
+
+    match call_result {
+        Ok(()) => {
+            let tag = results[0].unwrap_i64();
+            let payload = results[1].unwrap_i64();
+            (tag, payload, SIG_OK.0 as i32)
+        }
+        Err(e) => {
+            let err = crate::value::error_val("exec-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            (tag, payload, 1)
+        }
+    }
 }
 
 /// Dispatch a data operation by opcode.

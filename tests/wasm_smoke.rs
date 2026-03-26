@@ -129,10 +129,34 @@ fn test_struct_access() {
     assert_eq!(eval("(get {:x 1 :y 2} :x)"), "1");
 }
 
-// These need MakeClosure (Phase 1 last item):
-// test_map_over_list: (map (fn [x] (+ x 1)) (list 1 2 3))
-// test_filter: (filter (fn [x] (> x 2)) (list 1 2 3 4))
-// test_fold: (fold + 0 (list 1 2 3 4))
+// --- Phase 1: closures ---
+
+#[test]
+fn test_lambda_call() {
+    assert_eq!(eval("((fn [x] (+ x 1)) 42)"), "43");
+}
+
+#[test]
+fn test_let_lambda() {
+    assert_eq!(eval("(let* [[f (fn [x] (+ x 1))]] (f 42))"), "43");
+}
+
+#[test]
+fn test_closure_capture() {
+    // Closure captures a value from outer scope
+    assert_eq!(eval("(let* [[x 10]] ((fn [y] (+ x y)) 5))"), "15");
+}
+
+#[test]
+fn test_higher_order() {
+    // Pass a primitive as an argument
+    assert_eq!(eval("((fn [f x y] (f x y)) + 3 4)"), "7");
+}
+
+#[test]
+fn test_multi_arg_lambda() {
+    assert_eq!(eval("((fn [a b c] (+ a (+ b c))) 1 2 3)"), "6");
+}
 
 #[test]
 fn test_let_with_if() {

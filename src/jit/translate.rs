@@ -635,6 +635,7 @@ impl<'a> FunctionTranslator<'a> {
                     name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
+                    wasm_func_idx: None,
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),

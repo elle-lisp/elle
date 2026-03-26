@@ -40,9 +40,10 @@ const _FN_CALL_PRIMITIVE: u32 = 0;
 const FN_RT_CALL: u32 = 1;
 const FN_RT_LOAD_CONST: u32 = 2;
 const FN_RT_DATA_OP: u32 = 3;
+const FN_RT_MAKE_CLOSURE: u32 = 4;
 
 // First non-imported function index
-const FN_ENTRY: u32 = 4;
+const FN_ENTRY: u32 = 5;
 
 // Linear memory layout
 const ARGS_BASE: i32 = 256; // Args buffer starts at byte 256
@@ -75,6 +76,11 @@ struct WasmEmitter {
     emitted: HashSet<Label>,
     /// Heap constants collected during emission.
     const_pool: Vec<Value>,
+    /// Maps nested LirFunction pointer → table index.
+    /// Populated during collect_nested_functions, used by MakeClosure emission.
+    closure_table_idx: HashMap<*const LirFunction, u32>,
+    /// Offset for register locals (0 for entry, 4 for closures with params).
+    local_offset: u32,
 }
 
 impl WasmEmitter {
@@ -84,10 +90,25 @@ impl WasmEmitter {
             num_regs: 0,
             emitted: HashSet::new(),
             const_pool: Vec::new(),
+            closure_table_idx: HashMap::new(),
+            local_offset: 0,
         }
     }
 
     fn emit_module(&mut self, func: &LirFunction) -> EmitResult {
+        // Phase 1: collect all nested LirFunctions by walking MakeClosure instructions.
+        // Each gets a table index. The entry function is NOT in the table.
+        let mut nested_funcs: Vec<&LirFunction> = Vec::new();
+        collect_nested_functions(func, &mut nested_funcs);
+        let num_closures = nested_funcs.len() as u32;
+
+        // Build pointer → table index map for MakeClosure emission
+        self.closure_table_idx.clear();
+        for (i, nf) in nested_funcs.iter().enumerate() {
+            self.closure_table_idx
+                .insert(*nf as *const LirFunction, i as u32);
+        }
+
         let mut module = Module::new();
 
         // Type section
@@ -119,20 +140,47 @@ impl WasmEmitter {
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I32],
         );
+        // Type 5: closure function (env_ptr, args_ptr, nargs, ctx) -> (tag, payload)
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64],
+        );
+        // Type 6: rt_make_closure(table_idx, captures_ptr, metadata_ptr) -> (tag, payload)
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64],
+        );
         module.section(&types);
 
-        // Import section
+        // Import section (function indices 0–4)
         let mut imports = ImportSection::new();
         imports.import("elle", "call_primitive", EntityType::Function(1));
         imports.import("elle", "rt_call", EntityType::Function(2));
         imports.import("elle", "rt_load_const", EntityType::Function(3));
         imports.import("elle", "rt_data_op", EntityType::Function(4));
+        imports.import("elle", "rt_make_closure", EntityType::Function(6));
         module.section(&imports);
 
-        // Function section
+        // Function section: entry (type 0) + closures (type 5 each)
         let mut functions = FunctionSection::new();
-        functions.function(0); // entry function: type 0
+        functions.function(0); // entry function
+        for _ in 0..num_closures {
+            functions.function(5); // closure function
+        }
         module.section(&functions);
+
+        // Table section: funcref table for closure indirect calls
+        if num_closures > 0 {
+            let mut tables = TableSection::new();
+            tables.table(TableType {
+                element_type: RefType::FUNCREF,
+                minimum: num_closures as u64,
+                maximum: Some(num_closures as u64),
+                shared: false,
+                table64: false,
+            });
+            module.section(&tables);
+        }
 
         // Memory section
         let mut memories = MemorySection::new();
@@ -149,12 +197,37 @@ impl WasmEmitter {
         let mut exports = ExportSection::new();
         exports.export("__elle_entry", ExportKind::Func, FN_ENTRY);
         exports.export("__elle_memory", ExportKind::Memory, 0);
+        if num_closures > 0 {
+            exports.export("__elle_table", ExportKind::Table, 0);
+        }
         module.section(&exports);
 
-        // Code section
-        let body = self.emit_function(func);
+        // Element section: initialize table with closure function refs
+        if num_closures > 0 {
+            let mut elements = ElementSection::new();
+            // Table index 0, offset 0, function indices starting at FN_ENTRY + 1
+            let func_indices: Vec<u32> = (0..num_closures).map(|i| FN_ENTRY + 1 + i).collect();
+            elements.active(
+                Some(0),
+                &ConstExpr::i32_const(0),
+                Elements::Functions(func_indices.into()),
+            );
+            module.section(&elements);
+        }
+
+        // Code section: emit entry function + all closure functions
         let mut code = CodeSection::new();
-        code.function(&body);
+
+        // Entry function body
+        let entry_body = self.emit_function(func);
+        code.function(&entry_body);
+
+        // Closure function bodies
+        for nested in &nested_funcs {
+            let closure_body = self.emit_closure_function(nested);
+            code.function(&closure_body);
+        }
+
         module.section(&code);
 
         EmitResult {
@@ -171,6 +244,7 @@ impl WasmEmitter {
         }
 
         self.num_regs = func.num_regs;
+        self.local_offset = 0; // entry function: no params
 
         let mut f = Function::new([
             (func.num_regs, ValType::I64), // tags: locals [0, num_regs)
@@ -538,14 +612,75 @@ impl WasmEmitter {
                 // Phase 2: stack switching
                 self.set_nil(f, *dst);
             }
+            LirInstr::MakeClosure {
+                dst,
+                func: nested,
+                captures,
+            } => {
+                let table_idx = self
+                    .closure_table_idx
+                    .get(&(&**nested as *const LirFunction))
+                    .copied()
+                    .expect("MakeClosure: nested function not found in table");
+
+                // Write captures to linear memory at ARGS_BASE
+                for (i, cap) in captures.iter().enumerate() {
+                    self.write_val_to_mem(f, *cap, i);
+                }
+
+                // Write metadata to linear memory after captures.
+                // Metadata layout (starting at ARGS_BASE + captures.len()*16):
+                //   [0]: num_captures (i64)
+                //   [1]: num_params (i64)
+                //   [2]: num_locals (i64)
+                //   [3]: arity_kind (i64: 0=Exact, 1=AtLeast, 2=Range)
+                //   [4]: arity_count (i64)
+                //   [5]: lbox_params_mask (i64)
+                //   [6]: lbox_locals_mask (i64)
+                //   [7]: signal_bits (i64)
+                let meta_base = ARGS_BASE + (captures.len() as i32) * 16;
+                let meta_vals: [i64; 8] = [
+                    nested.num_captures as i64,
+                    nested.num_params as i64,
+                    nested.num_locals as i64,
+                    match nested.arity {
+                        crate::value::types::Arity::Exact(_) => 0,
+                        crate::value::types::Arity::AtLeast(_) => 1,
+                        crate::value::types::Arity::Range(_, _) => 2,
+                    },
+                    match nested.arity {
+                        crate::value::types::Arity::Exact(n) => n as i64,
+                        crate::value::types::Arity::AtLeast(n) => n as i64,
+                        crate::value::types::Arity::Range(min, _) => min as i64,
+                    },
+                    nested.lbox_params_mask as i64,
+                    nested.lbox_locals_mask as i64,
+                    nested.signal.bits.0 as i64,
+                ];
+                for (i, val) in meta_vals.iter().enumerate() {
+                    f.instruction(&Instruction::I32Const(meta_base));
+                    f.instruction(&Instruction::I64Const(*val));
+                    f.instruction(&Instruction::I64Store(MemArg {
+                        offset: (i * 8) as u64,
+                        align: 3,
+                        memory_index: 0,
+                    }));
+                }
+
+                // Call rt_make_closure(table_idx, captures_ptr, metadata_ptr)
+                f.instruction(&Instruction::I32Const(table_idx as i32));
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::I32Const(meta_base));
+                f.instruction(&Instruction::Call(FN_RT_MAKE_CLOSURE));
+                // Returns (tag, payload)
+                f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+                f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+            }
             LirInstr::PushParamFrame { .. }
             | LirInstr::PopParamFrame
             | LirInstr::CheckSignalBound { .. }
             | LirInstr::StructRest { .. } => {
                 // TODO: implement via host functions
-            }
-            _ => {
-                // Remaining instructions — no-op stub
             }
         }
     }
@@ -865,17 +1000,78 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
     }
 
-    /// WASM local index for the env pointer (i32).
+    /// Emit a closure function body.
+    ///
+    /// Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, pay: i64)`
+    ///
+    /// WASM local layout:
+    /// - 0: env_ptr (param) — points to linear memory with captures + params + locals
+    /// - 1: args_ptr (param) — unused (host pre-builds full env)
+    /// - 2: nargs (param) — unused
+    /// - 3: ctx (param) — fiber context
+    /// - 4..4+N: tag locals (register tags)
+    /// - 4+N..4+2N: payload locals (register payloads)
+    ///
+    /// The host builds the env in linear memory before calling:
+    ///   env[0..num_captures] = captured upvalues
+    ///   env[num_captures..num_captures+num_params] = args (LBox-wrapped if needed)
+    ///   env[num_captures+num_params..] = nil/LBox(nil) for local slots
+    ///
+    /// All variable access (params, captures, locals) goes through LoadCapture/LoadLocal
+    /// which read from env_ptr.
+    fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
+        self.label_to_idx.clear();
+        self.emitted.clear();
+        for (idx, block) in func.blocks.iter().enumerate() {
+            self.label_to_idx.insert(block.label, idx);
+        }
+
+        self.num_regs = func.num_regs;
+        self.local_offset = 4; // params take locals 0-3
+
+        let mut f = Function::new([
+            (func.num_regs, ValType::I64), // tags
+            (func.num_regs, ValType::I64), // payloads
+        ]);
+
+        self.emit_block_tree(&mut f, func.entry, func);
+
+        f.instruction(&Instruction::End);
+        f
+    }
+
+    /// WASM local index for the env pointer.
+    /// Entry function: local at 2*num_regs (declared as additional local).
+    /// Closure function: param 0 (WASM local 0).
     fn env_local(&self) -> u32 {
-        self.num_regs * 2
+        if self.local_offset == 0 {
+            // Entry function: env_ptr is the last declared local
+            self.num_regs * 2
+        } else {
+            // Closure function: env_ptr is param 0
+            0
+        }
     }
 
     fn tag_local(&self, reg: Reg) -> u32 {
-        reg.0
+        self.local_offset + reg.0
     }
 
     fn pay_local(&self, reg: Reg) -> u32 {
-        reg.0 + self.num_regs
+        self.local_offset + reg.0 + self.num_regs
+    }
+}
+
+/// Recursively collect all nested LirFunctions from MakeClosure instructions.
+fn collect_nested_functions<'a>(func: &'a LirFunction, out: &mut Vec<&'a LirFunction>) {
+    for block in &func.blocks {
+        for spanned in &block.instructions {
+            if let LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
+                out.push(nested);
+                // Recurse into the nested function's own closures
+                collect_nested_functions(nested, out);
+            }
+        }
     }
 }
 
