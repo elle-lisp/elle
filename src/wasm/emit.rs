@@ -173,8 +173,9 @@ impl WasmEmitter {
         self.num_regs = func.num_regs;
 
         let mut f = Function::new([
-            (func.num_regs, ValType::I64), // tags
-            (func.num_regs, ValType::I64), // payloads
+            (func.num_regs, ValType::I64), // tags: locals [0, num_regs)
+            (func.num_regs, ValType::I64), // payloads: locals [num_regs, 2*num_regs)
+            (1, ValType::I32),             // env_ptr: local 2*num_regs
         ]);
 
         self.emit_block_tree(&mut f, func.entry, func);
@@ -352,6 +353,95 @@ impl WasmEmitter {
             LirInstr::StoreLocal { slot, src } => {
                 let dst = Reg(*slot as u32);
                 self.copy_reg(f, *src, dst);
+            }
+            LirInstr::LoadCapture { dst, index } => {
+                // Load from closure env, auto-unwrap LBox.
+                // env_ptr + index*16 → (tag, payload)
+                let offset = (*index as u64) * 16;
+                // Load tag
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+                // Load payload
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset: offset + 8,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+                // Auto-unwrap LBox: if tag == TAG_LBOX, call rt_data_op(OP_LOAD_LBOX)
+                f.instruction(&Instruction::LocalGet(self.tag_local(*dst)));
+                f.instruction(&Instruction::I64Const(TAG_LBOX as i64));
+                f.instruction(&Instruction::I64Eq);
+                f.instruction(&Instruction::If(BlockType::Empty));
+                self.emit_data_op1(f, *dst, OP_LOAD_LBOX, *dst);
+                f.instruction(&Instruction::End);
+            }
+            LirInstr::LoadCaptureRaw { dst, index } => {
+                // Load from closure env WITHOUT unwrapping LBox.
+                let offset = (*index as u64) * 16;
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset: offset + 8,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+            }
+            LirInstr::StoreCapture { index, src } => {
+                // Store into a captured LBox cell.
+                // First load the cell from env, then call rt_data_op(OP_STORE_LBOX).
+                let offset = (*index as u64) * 16;
+                // Load the cell (tag, payload) into temp — reuse src's locals
+                // Actually, we need to read the cell handle from env, then
+                // call store_lbox with (cell, new_value).
+                // Write cell to args[0]
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::I64Store(MemArg {
+                    offset: 0,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::LocalGet(self.env_local()));
+                f.instruction(&Instruction::I64Load(MemArg {
+                    offset: offset + 8,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                f.instruction(&Instruction::I64Store(MemArg {
+                    offset: 8,
+                    align: 3,
+                    memory_index: 0,
+                }));
+                // Write new value to args[1]
+                self.write_val_to_mem(f, *src, 1);
+                // Call OP_STORE_LBOX
+                f.instruction(&Instruction::I32Const(OP_STORE_LBOX));
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::I32Const(2));
+                f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+                f.instruction(&Instruction::Drop); // signal
+                f.instruction(&Instruction::Drop); // payload
+                f.instruction(&Instruction::Drop); // tag
             }
             LirInstr::Call { dst, func, args } => {
                 self.emit_call(f, *dst, *func, args);
@@ -773,6 +863,11 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
         f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+    }
+
+    /// WASM local index for the env pointer (i32).
+    fn env_local(&self) -> u32 {
+        self.num_regs * 2
     }
 
     fn tag_local(&self, reg: Reg) -> u32 {
