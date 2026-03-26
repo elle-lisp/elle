@@ -14,6 +14,7 @@ Dynamically-loaded Rust libraries that extend Elle with additional primitives. P
 | [`crypto/`](crypto/) | Cryptographic hashing | `sha256`, `hmac-sha256`, `sha512`, etc. |
 | [`git/`](git/) | Git repository access via git2 | `git/open`, `git/init`, `git/clone`, `git/head`, `git/log`, `git/diff` |
 | [`glob/`](glob/) | Filesystem pattern matching | `glob/match`, `glob/glob` |
+| [`hash/`](hash/) | Universal hashing | `hash/md5`, `hash/sha256`, `hash/blake3`, `hash/crc32`, `hash/new`, `hash/update`, `hash/finalize` |
 | [`jiff/`](jiff/) | Date, time, and duration arithmetic | `date/year`, `date/month`, `date/day`, `date/weekday` |
 | [`msgpack/`](msgpack/) | MessagePack serialization | `msgpack/encode`, `msgpack/decode`, `msgpack/valid?`, `msgpack/encode-tagged`, `msgpack/decode-tagged` |
 | [`oxigraph/`](oxigraph/) | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |

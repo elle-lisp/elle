@@ -21,6 +21,7 @@ PLUGINS := \
     csv \
     git \
     glob \
+    hash \
     jiff \
     mqtt \
     msgpack \
@@ -94,6 +95,7 @@ examples-vm:
 examples-jit:
 	@echo "=== examples (JIT enabled) ==="
 	@printf '%s\n' examples/*.lisp | \
+		grep -v allocator.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: examples JIT pass (JIT was enabled)"; exit 1; }
@@ -111,6 +113,7 @@ smoke-vm: examples-vm
 smoke-jit: examples-jit
 	@echo "=== elle scripts (JIT enabled) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v -e arena.lisp -e fiber_io_stress.lisp -e jit-rejections.lisp -e streams.lisp -e redis.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }

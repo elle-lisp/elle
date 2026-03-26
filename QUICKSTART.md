@@ -992,6 +992,43 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 ((get sqlite :close) db)
 ```
 
+#### `elle-hash` — Universal hashing
+
+```lisp
+(def hash (import "target/release/libelle_hash.so"))
+# Keys: :md5 :sha1 :sha224 :sha256 :sha384 :sha512 :sha512-224 :sha512-256
+#       :sha3-224 :sha3-256 :sha3-384 :sha3-512
+#       :blake2b-512 :blake2s-256 :blake3 :blake3-keyed :blake3-derive
+#       :crc32 :xxh32 :xxh64 :xxh128
+
+(bytes->hex (hash:sha256 "hello"))
+# => "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+(bytes->hex (hash:blake3 "hello"))
+# => "ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f"
+
+(hash:crc32 "hello")
+# => 907060870
+
+(hash:xxh64 "hello")
+# => integer
+
+# Streaming (incremental) hashing
+(let* [[ctx (hash:new :sha256)]]
+  (hash:update ctx "hel")
+  (hash:update ctx "lo")
+  (bytes->hex (hash:finalize ctx)))
+# => same as (bytes->hex (hash:sha256 "hello"))
+
+# Compose with stream/fold and port/chunks
+(let* [[ctx (stream/fold hash:update (hash:new :sha256) (port/chunks port 8192))]]
+  (hash:finalize ctx))
+
+# Or use the convenience wrapper (lib/hash.lisp)
+(def h ((import-file "lib/hash.lisp") hash))
+(bytes->hex (h:file :sha256 "bigfile.bin"))
+```
+
 #### `elle-selkie` — Mermaid diagram rendering
 
 ```lisp
