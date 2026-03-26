@@ -158,6 +158,23 @@ fn test_multi_arg_lambda() {
     assert_eq!(eval("((fn [a b c] (+ a (+ b c))) 1 2 3)"), "6");
 }
 
+// --- Phase 1: strings + error handling ---
+
+#[test]
+fn test_string_literal() {
+    assert_eq!(eval("\"hello\""), "hello");
+}
+
+#[test]
+fn test_string_concat() {
+    assert_eq!(eval("(string \"hello\" \" \" \"world\")"), "hello world");
+}
+
+#[test]
+fn test_string_size() {
+    assert_eq!(eval("(string/size-of \"hello\")"), "5");
+}
+
 #[test]
 fn test_let_with_if() {
     assert_eq!(eval("(let* [[x (if true 10 20)]] (+ x 5))"), "15");

@@ -81,6 +81,8 @@ struct WasmEmitter {
     closure_table_idx: HashMap<*const LirFunction, u32>,
     /// Offset for register locals (0 for entry, 4 for closures with params).
     local_offset: u32,
+    /// WASM local index for signal scratch (i32).
+    signal_local: u32,
 }
 
 impl WasmEmitter {
@@ -92,6 +94,7 @@ impl WasmEmitter {
             const_pool: Vec::new(),
             closure_table_idx: HashMap::new(),
             local_offset: 0,
+            signal_local: 0,
         }
     }
 
@@ -244,12 +247,15 @@ impl WasmEmitter {
         }
 
         self.num_regs = func.num_regs;
-        self.local_offset = 0; // entry function: no params
+        self.local_offset = 0;
+        // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal_scratch (2N+1)
+        self.signal_local = func.num_regs * 2 + 1;
 
         let mut f = Function::new([
-            (func.num_regs, ValType::I64), // tags: locals [0, num_regs)
-            (func.num_regs, ValType::I64), // payloads: locals [num_regs, 2*num_regs)
-            (1, ValType::I32),             // env_ptr: local 2*num_regs
+            (func.num_regs, ValType::I64), // tags
+            (func.num_regs, ValType::I64), // payloads
+            (1, ValType::I32),             // env_ptr
+            (1, ValType::I32),             // signal_scratch
         ]);
 
         self.emit_block_tree(&mut f, func.entry, func);
@@ -513,7 +519,7 @@ impl WasmEmitter {
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
                 f.instruction(&Instruction::I32Const(2));
                 f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-                f.instruction(&Instruction::Drop); // signal
+                f.instruction(&Instruction::Drop); // signal (store_lbox can't fail)
                 f.instruction(&Instruction::Drop); // payload
                 f.instruction(&Instruction::Drop); // tag
             }
@@ -736,10 +742,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(args.len() as i32));
         f.instruction(&Instruction::I32Const(0)); // ctx = 0 for now
         f.instruction(&Instruction::Call(FN_RT_CALL));
-        // Stack: [tag: i64, payload: i64, signal: i32]
-        f.instruction(&Instruction::Drop); // drop signal_bits for now
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// Emit CallArrayMut: call a function with args from an array value.
@@ -760,12 +763,24 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(-1)); // nargs = -1 means "unpack array at args_ptr"
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Call(FN_RT_CALL));
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     // --- Data operation helpers ---
+
+    /// Store result from a host call that returns (tag, payload, signal).
+    /// Signal is on top of stack. Checks signal and returns on error.
+    fn store_result_with_signal(&self, f: &mut Function, dst: Reg) {
+        f.instruction(&Instruction::LocalSet(self.signal_local));
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::If(BlockType::Empty));
+        f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+    }
 
     /// 1-arg data op: write arg to memory, call rt_data_op, store result.
     fn emit_data_op1(&self, f: &mut Function, dst: Reg, op: i32, src: Reg) {
@@ -774,9 +789,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(1));
         f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-        f.instruction(&Instruction::Drop); // signal
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// 1-arg data op with an immediate second argument (e.g., array index).
@@ -801,9 +814,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(2));
         f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// 2-arg data op.
@@ -814,9 +825,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(2));
         f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// N-arg data op (for MakeArrayMut etc).
@@ -828,9 +837,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(regs.len() as i32));
         f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// Struct get with a constant key (keyword or symbol from LirConst).
@@ -860,9 +867,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(2));
         f.instruction(&Instruction::Call(FN_RT_DATA_OP));
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+        self.store_result_with_signal(f, dst);
     }
 
     /// Write a register's value to linear memory at ARGS_BASE + slot*16.
@@ -884,22 +889,36 @@ impl WasmEmitter {
         }));
     }
 
-    fn emit_const(&self, f: &mut Function, dst: Reg, value: &LirConst) {
-        let (tag, payload) = match value {
-            LirConst::Nil => (TAG_NIL as i64, 0i64),
-            LirConst::EmptyList => (TAG_EMPTY_LIST as i64, 0),
-            LirConst::Bool(true) => (TAG_TRUE as i64, 0),
-            LirConst::Bool(false) => (TAG_FALSE as i64, 0),
-            LirConst::Int(n) => (TAG_INT as i64, *n),
-            LirConst::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
-            LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
-            LirConst::Keyword(name) => (TAG_KEYWORD as i64, intern_keyword(name) as i64),
-            LirConst::String(_) => (TAG_NIL as i64, 0), // stub
-        };
-        f.instruction(&Instruction::I64Const(tag));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-        f.instruction(&Instruction::I64Const(payload));
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+    fn emit_const(&mut self, f: &mut Function, dst: Reg, value: &LirConst) {
+        match value {
+            LirConst::String(s) => {
+                // String is a heap value — add to constant pool and load via host
+                let str_val = Value::string(s.clone());
+                let idx = self.const_pool.len() as i32;
+                self.const_pool.push(str_val);
+                f.instruction(&Instruction::I32Const(idx));
+                f.instruction(&Instruction::Call(FN_RT_LOAD_CONST));
+                f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+                f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+            }
+            _ => {
+                let (tag, payload) = match value {
+                    LirConst::Nil => (TAG_NIL as i64, 0i64),
+                    LirConst::EmptyList => (TAG_EMPTY_LIST as i64, 0),
+                    LirConst::Bool(true) => (TAG_TRUE as i64, 0),
+                    LirConst::Bool(false) => (TAG_FALSE as i64, 0),
+                    LirConst::Int(n) => (TAG_INT as i64, *n),
+                    LirConst::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
+                    LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
+                    LirConst::Keyword(name) => (TAG_KEYWORD as i64, intern_keyword(name) as i64),
+                    LirConst::String(_) => unreachable!(),
+                };
+                f.instruction(&Instruction::I64Const(tag));
+                f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+                f.instruction(&Instruction::I64Const(payload));
+                f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+            }
+        }
     }
 
     fn emit_binop(&self, f: &mut Function, dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) {
@@ -1027,11 +1046,14 @@ impl WasmEmitter {
         }
 
         self.num_regs = func.num_regs;
-        self.local_offset = 4; // params take locals 0-3
+        self.local_offset = 4;
+        // Params: 0-3. Additional locals: tags [4,4+N), payloads [4+N,4+2N), signal (4+2N)
+        self.signal_local = 4 + func.num_regs * 2;
 
         let mut f = Function::new([
             (func.num_regs, ValType::I64), // tags
             (func.num_regs, ValType::I64), // payloads
+            (1, ValType::I32),             // signal_scratch
         ]);
 
         self.emit_block_tree(&mut f, func.entry, func);
