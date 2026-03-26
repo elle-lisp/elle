@@ -83,6 +83,7 @@ jobs:
           - csv
           - git
           - glob
+          - hash
           - jiff
           - msgpack
           - oxigraph

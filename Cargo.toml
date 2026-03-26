@@ -9,6 +9,7 @@ members = [
     "plugins/csv",
     "plugins/git",
     "plugins/glob",
+    "plugins/hash",
     "plugins/jiff",
     "plugins/mqtt",
     "plugins/msgpack",

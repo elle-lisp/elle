@@ -587,6 +587,7 @@ Exactly two values are falsy. Everything else is truthy.
   | `csv` | CSV reading and writing |
   | `git` | Git repository operations |
   | `glob` | Filesystem glob patterns |
+  | `hash` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
   | `jiff` | Date, time, and duration arithmetic |
   | `msgpack` | MessagePack serialization |
   | `oxigraph` | RDF graph database (SPARQL) |
