@@ -538,13 +538,11 @@ mod tests {
         assert_eq!(alloc.0, SIG_OK);
         let buf = alloc.1;
 
-        // (1i64 << 47) - 1 == MAX_PTR. Any non-zero address plus this value
-        // exceeds MAX_PTR, triggering the range check.
-        const INT_MAX: i64 = (1i64 << 47) - 1;
-        let result = prim_ptr_add(&[buf, Value::int(INT_MAX)]);
+        // i64::MAX added to any non-zero address overflows checked_add.
+        let result = prim_ptr_add(&[buf, Value::int(i64::MAX)]);
         assert_eq!(result.0, SIG_ERROR);
-        // We expect argument-error (range exceeded), not overflow-error
-        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+        // Overflow in checked_add triggers overflow-error.
+        assert_eq!(error_kind(&result.1).as_deref(), Some("overflow-error"));
 
         prim_ffi_free(&[buf]);
     }

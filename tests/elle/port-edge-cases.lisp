@@ -90,9 +90,33 @@
   (port/close p))
 (println "  6. ok")
 
+# ── port/read-all edge cases ──────────────────────────────────────
+
+# 7. port/read-all on empty file → empty string, not nil
+(println "  7. port/read-all on empty file...")
+(spit "/tmp/elle-port-edge-empty2" "")
+(let [[p (port/open "/tmp/elle-port-edge-empty2" :read)]]
+  (let [[result (port/read-all p)]]
+    (assert (not (nil? result)) "read-all on empty file is not nil")
+    (assert (string? result) "read-all on empty file is string")
+    (assert (= result "") "read-all on empty file is empty string"))
+  (port/close p))
+(println "  7. ok")
+
+# 8. port/read-all on empty file (binary) → empty bytes, not nil
+(println "  8. port/read-all on empty file (binary)...")
+(spit "/tmp/elle-port-edge-empty3" "")
+(let [[p (port/open-bytes "/tmp/elle-port-edge-empty3" :read)]]
+  (let [[result (port/read-all p)]]
+    (assert (not (nil? result)) "read-all binary on empty file is not nil")
+    (assert (bytes? result) "read-all binary on empty file is bytes")
+    (assert (= (length result) 0) "read-all binary on empty file is empty"))
+  (port/close p))
+(println "  8. ok")
+
 # ── HTTP empty body response ────────────────────────────────────────
 
-# 7. HTTP response with Content-Length: 0 → no hang
+# 9. HTTP response with Content-Length: 0 → no hang
 (def http ((import-file "./lib/http.lisp")))
 (def received @[])
 (defn handler [request]
@@ -104,11 +128,11 @@
 (def http-url (string "http://127.0.0.1:" http-port "/test"))
 (def http-server (ev/spawn (fn [] (http:serve http-listener handler))))
 
-(println "  7. HTTP empty body response...")
+(println "  9. HTTP empty body response...")
 (let [[r (http:post http-url "payload")]]
   (assert (= r:status 200) "HTTP 200 with empty body")
   (assert (= r:body "") "body is empty string"))
-(println "  7. ok")
+(println "  9. ok")
 
 (ev/abort http-server)
 (port/close http-listener)

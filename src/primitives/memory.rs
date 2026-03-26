@@ -617,8 +617,7 @@ pub fn prim_ptr_add(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    // Use checked_add on i64 to detect overflow. Two valid 47-bit addresses
-    // can produce a sum that overflows i64 when the offset is extreme.
+    // Use checked_add on i64 to detect overflow.
     let result = match (addr as i64).checked_add(offset) {
         Some(n) => n,
         None => {
@@ -642,10 +641,8 @@ pub fn prim_ptr_add(args: &[Value]) -> (SignalBits, Value) {
             error_val("argument-error", "ptr/add: result is null pointer"),
         );
     }
-    // Value::pointer asserts addr fits in 47 bits. Validate here so we
-    // return an error instead of panicking.
-    const MAX_PTR: u64 = (1u64 << 47) - 1;
-    if result_u64 > MAX_PTR {
+    // Validate the result fits in a usize (platform pointer width).
+    if result_u64 > usize::MAX as u64 {
         return (
             SIG_ERROR,
             error_val(
@@ -679,10 +676,8 @@ pub fn prim_ptr_diff(args: &[Value]) -> (SignalBits, Value) {
         Ok(a) => a,
         Err(e) => return e,
     };
-    // Both addresses are at most 47-bit usize values. The difference of two
-    // 47-bit unsigned values always fits in i64 on a 64-bit platform
-    // (range: -(2^47-1) to 2^47-1). wrapping_sub is used for correctness
-    // and defense against future encoding changes.
+    // wrapping_sub handles the full usize range; result fits in i64 for
+    // any realistic user-space address pair.
     let diff = (addr_a as i64).wrapping_sub(addr_b as i64);
     (SIG_OK, Value::int(diff))
 }
@@ -705,15 +700,14 @@ pub fn prim_ptr_to_int(args: &[Value]) -> (SignalBits, Value) {
         Ok(a) => a,
         Err(e) => return e,
     };
-    // addr <= (1u64 << 47) - 1 == i64::MAX >> 16, fits in INT_MAX
+    // User-space addresses fit comfortably in i64 on 64-bit platforms.
     (SIG_OK, Value::int(addr as i64))
 }
 
 /// `(ptr/from-int integer)` — Construct a raw C pointer from an integer address.
 ///
 /// Returns `nil` if the address is 0 (consistent with `Value::pointer(0) == NIL`).
-/// Validates that the address fits in 47 bits BEFORE calling `Value::pointer`,
-/// which contains an `assert!` (not `debug_assert!`) that would panic otherwise.
+/// Validates the address fits in a usize before calling `Value::pointer`.
 pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -749,10 +743,8 @@ pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     let addr = n as u64;
-    // Must validate before calling Value::pointer — it asserts (not debug_asserts)
-    // that the address fits in 47 bits. Exceeding this would panic.
-    const MAX_PTR: u64 = (1u64 << 47) - 1;
-    if addr > MAX_PTR {
+    // Validate the address fits in a usize (platform pointer width).
+    if addr > usize::MAX as u64 {
         return (
             SIG_ERROR,
             error_val(

@@ -269,12 +269,21 @@ pub(super) fn process_raw_completion(
                     }
                 }
 
-                // For ReadAll: return accumulated buffer on EOF.
-                if matches!(op, IoOp::ReadAll) && !state.buffer.is_empty() {
+                // For ReadAll: return accumulated buffer on EOF
+                // (empty bytes/string for empty files, not nil).
+                if matches!(op, IoOp::ReadAll) {
                     let all: Vec<u8> = state.buffer.drain(..).collect();
+                    let value = if let Some(p) = port.as_external::<Port>() {
+                        match p.encoding() {
+                            Encoding::Text => Value::string(String::from_utf8_lossy(&all).as_ref()),
+                            Encoding::Binary => Value::bytes(all),
+                        }
+                    } else {
+                        Value::bytes(all)
+                    };
                     return Completion {
                         id,
-                        result: Ok(Value::bytes(all)),
+                        result: Ok(value),
                     };
                 }
 
