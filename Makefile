@@ -21,6 +21,7 @@ PLUGINS := \
     csv \
     git \
     glob \
+    hash \
     jiff \
     mqtt \
     msgpack \

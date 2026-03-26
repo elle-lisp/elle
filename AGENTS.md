@@ -101,6 +101,7 @@ bytecode. Error messages include file:line:col information.
     `elle-compress` (gzip, deflate, and zstd compression), `elle-crypto`,
     `elle-csv` (CSV parsing and serialization),
     `elle-git` (Git repository operations), `elle-glob`,
+    `elle-hash` (universal hashing: MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash),
     `elle-jiff` (date/time via jiff), `elle-msgpack` (MessagePack binary serialization),
     `elle-oxigraph` (RDF/SPARQL), `elle-polars` (Polars DataFrames with eager and lazy APIs),
     `elle-protobuf` (Protocol Buffers encode/decode/introspect),

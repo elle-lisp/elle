@@ -30,6 +30,7 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 | `csv/` | CSV parsing and serialization | `csv/parse`, `csv/parse-rows`, `csv/write`, `csv/write-rows` |
 | `crypto/` | Cryptographic hashing | `sha256`, `hmac-sha256` |
 | `glob/` | Filesystem globbing | `glob/match`, `glob/glob` |
+| `hash/` | Universal hashing | `hash/md5`, `hash/sha256`, `hash/blake3`, `hash/crc32`, `hash/xxh64`, `hash/new`, `hash/update`, `hash/finalize` |
 | `oxigraph/` | RDF quad store + SPARQL | `oxigraph/store-new`, `oxigraph/store-open`, `oxigraph/insert`, `oxigraph/remove`, `oxigraph/contains`, `oxigraph/quads`, `oxigraph/query`, `oxigraph/update`, `oxigraph/load`, `oxigraph/dump`, `oxigraph/iri`, `oxigraph/literal`, `oxigraph/blank-node` |
 | `random/` | Random number generation | `random/int`, `random/float`, `random/bool`, `random/bytes`, `random/shuffle`, `random/choice`, `random/seed`, `random/normal`, `random/exponential`, `random/weighted`, `random/csprng-bytes`, `random/csprng-seed`, `random/sample` |
 | `regex/` | Regular expressions | `regex/match`, `regex/split`, `regex/replace` |
@@ -143,6 +144,7 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
 | `csv/` | CSV parsing and serialization |
 | `crypto/` | SHA256 and HMAC-SHA256 hashing |
 | `glob/` | Filesystem pattern matching |
+| `hash/` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
 | `mqtt/` | MQTT packet codec (state-machine, no I/O) |
 | `oxigraph/` | RDF quad store with SPARQL query and update |
 | `random/` | Random number generation (migrated to `rand` 0.9; includes distributions and CSPRNG) |
