@@ -11,6 +11,48 @@ use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use std::collections::HashSet;
 
+/// Compile source code to LIR (for the WASM backend).
+///
+/// Runs phases 1-4 (parse, expand, analyze, lower) and returns the
+/// LirFunction before bytecode emission.
+pub fn compile_to_lir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<crate::lir::LirFunction, String> {
+    intern_primitive_names(symbols);
+
+    let syntax = read_syntax(source, source_name)?;
+
+    let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
+    let macro_vm = unsafe { &mut *macro_vm_ptr };
+    let expanded = expander.expand(syntax, symbols, macro_vm)?;
+
+    let mut arena = crate::hir::BindingArena::new();
+    let mut analyzer = crate::hir::Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
+    analyzer.bind_primitives(&meta);
+    let mut analysis = analyzer.analyze(&expanded)?;
+    let prim_values = analyzer.primitive_values().clone();
+    drop(analyzer);
+
+    mark_tail_calls(&mut analysis.hir);
+
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let symbol_names = symbols.all_names();
+    let mut lowerer = Lowerer::new(&arena)
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims)
+        .with_primitive_values(prim_values)
+        .with_symbol_names(symbol_names);
+    lowerer.lower(&analysis.hir)
+}
+
 /// Compile source code to bytecode.
 ///
 /// Creates an internal VM for macro expansion. Macro side effects

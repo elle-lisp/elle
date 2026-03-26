@@ -62,6 +62,7 @@ pub mod symbols;
 pub mod syntax;
 pub mod value;
 pub mod vm;
+pub mod wasm;
 
 pub use compiler::Bytecode;
 pub use error::SourceLoc;

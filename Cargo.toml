@@ -68,6 +68,10 @@ cranelift-jit = "0.116"
 cranelift-native = "0.116"
 target-lexicon = "0.13"
 
+# WASM backend (feature-gated behind ELLE_WASM=1)
+wasmtime = "43"
+wasm-encoder = "0.245"
+
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
