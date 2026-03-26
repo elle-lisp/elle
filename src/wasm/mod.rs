@@ -32,13 +32,13 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
     // Compile source → LIR
     let lir_func = crate::pipeline::compile_to_lir(source, &mut symbols, source_name)?;
 
-    // LIR → WASM bytes
-    let wasm_bytes = emit::emit_module(&lir_func);
+    // LIR → WASM bytes + constant pool
+    let result = emit::emit_module(&lir_func);
 
     // Run on Wasmtime
     let engine = store::create_engine().map_err(|e| e.to_string())?;
-    let mut wasm_store = store::create_store(&engine);
+    let mut wasm_store = store::create_store(&engine, result.const_pool);
     let linker = store::create_linker(&engine).map_err(|e| e.to_string())?;
-    let module = store::compile_module(&engine, &wasm_bytes).map_err(|e| e.to_string())?;
+    let module = store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
     store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string())
 }

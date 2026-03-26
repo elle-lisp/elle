@@ -24,6 +24,9 @@ pub struct ElleHost {
     /// Flattened primitive dispatch table.
     /// Index = prim_id, value = &'static PrimitiveDef.
     pub primitives: Vec<&'static PrimitiveDef>,
+    /// Constant pool for heap values referenced by the WASM module.
+    /// Populated by create_store from the EmitResult.
+    pub const_pool: Vec<Value>,
 }
 
 impl ElleHost {
@@ -32,6 +35,7 @@ impl ElleHost {
         ElleHost {
             handles: HandleTable::new(),
             primitives,
+            const_pool: Vec::new(),
         }
     }
 }

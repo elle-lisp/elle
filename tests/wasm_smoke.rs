@@ -81,3 +81,32 @@ fn test_if_with_comparison() {
 fn test_nested_if() {
     assert_eq!(eval("(if true (if false 10 20) 30)"), "20");
 }
+
+// --- Phase 1: function calls (primitives) ---
+
+#[test]
+fn test_call_length() {
+    assert_eq!(eval("(length [1 2 3])"), "3");
+}
+
+#[test]
+fn test_call_cons() {
+    assert_eq!(eval("(cons 1 (list 2 3))"), "(1 2 3)");
+}
+
+#[test]
+fn test_call_not() {
+    // `not` is a UnaryOp intrinsic, but explicit call still works
+    assert_eq!(eval("(not false)"), "true");
+}
+
+#[test]
+fn test_call_type() {
+    assert_eq!(eval("(type 42)"), ":integer");
+}
+
+#[test]
+fn test_call_empty() {
+    assert_eq!(eval("(empty? ())"), "true");
+    assert_eq!(eval("(empty? (list 1))"), "false");
+}
