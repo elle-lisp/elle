@@ -175,6 +175,25 @@ fn test_string_size() {
     assert_eq!(eval("(string/size-of \"hello\")"), "5");
 }
 
+// --- Phase 1: recursion ---
+
+#[test]
+fn test_recursive_factorial() {
+    // defn at top-level uses letrec, enabling recursion
+    assert_eq!(
+        eval("(defn fact [n] (if (<= n 1) 1 (* n (fact (- n 1)))))\n(fact 5)"),
+        "120"
+    );
+}
+
+#[test]
+fn test_recursive_sum() {
+    assert_eq!(
+        eval("(defn sum [n] (if (<= n 0) 0 (+ n (sum (- n 1)))))\n(sum 10)"),
+        "55"
+    );
+}
+
 #[test]
 fn test_let_with_if() {
     assert_eq!(eval("(let* [[x (if true 10 20)]] (+ x 5))"), "15");

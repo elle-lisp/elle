@@ -29,8 +29,8 @@ pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
     let mut symbols = crate::symbol::SymbolTable::new();
     crate::primitives::intern_primitive_names(&mut symbols);
 
-    // Compile source → LIR
-    let lir_func = crate::pipeline::compile_to_lir(source, &mut symbols, source_name)?;
+    // Compile source → LIR (file mode = letrec for mutual recursion)
+    let lir_func = crate::pipeline::compile_file_to_lir(source, &mut symbols, source_name)?;
 
     // LIR → WASM bytes + constant pool
     let result = emit::emit_module(&lir_func);

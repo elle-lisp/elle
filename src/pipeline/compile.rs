@@ -136,6 +136,65 @@ pub(super) fn classify_form(syntax: &Syntax) -> FileForm<'_> {
     FileForm::Expr(syntax)
 }
 
+/// Compile a file to LIR as a single synthetic letrec (for WASM backend).
+pub fn compile_file_to_lir(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<crate::lir::LirFunction, String> {
+    intern_primitive_names(symbols);
+
+    let mut syntaxes = read_syntax_all_for(source, source_name)?;
+
+    let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
+    if let Some(epoch) = source_epoch {
+        crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+    }
+
+    let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
+    let macro_vm = unsafe { &mut *macro_vm_ptr };
+
+    let mut expanded_forms = Vec::new();
+    for syntax in syntaxes {
+        let expanded = expander.expand(syntax, symbols, macro_vm)?;
+        expanded_forms.push(expanded);
+    }
+
+    let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
+
+    let span = if expanded_forms.is_empty() {
+        Span::synthetic()
+    } else {
+        expanded_forms[0]
+            .span
+            .merge(&expanded_forms[expanded_forms.len() - 1].span)
+    };
+
+    let mut arena = BindingArena::new();
+    let mut analyzer = Analyzer::new_with_primitives(
+        symbols,
+        &mut arena,
+        meta.signals.clone(),
+        meta.arities.clone(),
+    );
+    analyzer.bind_primitives(&meta);
+    let mut hir = analyzer.analyze_file_letrec(forms, span)?;
+    let prim_values = analyzer.primitive_values().clone();
+    drop(analyzer);
+
+    mark_tail_calls(&mut hir);
+
+    let intrinsics = crate::lir::intrinsics::build_intrinsics(symbols);
+    let imm_prims = crate::lir::intrinsics::build_immediate_primitives(symbols);
+    let symbol_names = symbols.all_names();
+    let mut lowerer = Lowerer::new(&arena)
+        .with_intrinsics(intrinsics)
+        .with_immediate_primitives(imm_prims)
+        .with_primitive_values(prim_values)
+        .with_symbol_names(symbol_names);
+    lowerer.lower(&hir)
+}
+
 /// Compile a file as a single synthetic letrec.
 ///
 /// All top-level forms are analyzed together, enabling mutual recursion.
