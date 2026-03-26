@@ -2,6 +2,9 @@
 
 (def agent ((import-file "lib/agent.lisp")))
 
+# Resolve the elle binary — ELLE_BIN from Makefile, fallback to "elle"
+(def elle-bin (or (sys/env "ELLE_BIN") "elle"))
+
 
 # ── build-args: flag adjacency helper ──────────────────────────────────────
 
@@ -103,7 +106,7 @@
 
 # stream/collect to consume the stream
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" mock-script]})]
+                                    :command [elle-bin mock-script]})]
        [chunks (stream/collect (agent:send handle "ignored"))]]
 
   (assert (= (length chunks) 3) "send claude: got 3 chunks (system skipped)")
@@ -135,7 +138,7 @@
     "(println (json/serialize {\"type\" \"step_finish\" \"part\" {\"cost\" 0.03 \"tokens\" {:input 50 :output 25}}}))\n"))
 
 (let* [[handle (agent:make-handle {:backend :opencode
-                                    :command ["elle" oc-mock]})]
+                                    :command [elle-bin oc-mock]})]
        [chunks (stream/collect (agent:send handle "ignored"))]]
 
   (assert (= (length chunks) 2) "send opencode: got 2 chunks (step_start skipped)")
@@ -154,7 +157,7 @@
 
 # stream/for-each — the primary use case
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" mock-script]})]
+                                    :command [elle-bin mock-script]})]
        [texts @[]]]
   (stream/for-each
     (fn [chunk]
@@ -167,7 +170,7 @@
 
 # stream/filter + stream/collect
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" mock-script]})]
+                                    :command [elle-bin mock-script]})]
        [results (stream/collect
                   (stream/filter
                     (fn [c] (= c:type :result))
@@ -179,7 +182,7 @@
 # ── multi-turn: session continuation ────────────────────────────────────────
 
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" mock-script]})]]
+                                    :command [elle-bin mock-script]})]]
   # First turn
   (stream/for-each (fn [_] nil) (agent:send handle "first turn"))
   (assert (= handle:session-id "sess-abc") "multi-turn: session-id set after first")
@@ -195,7 +198,7 @@
 (file/write fail-script "(sys/exit 1)\n")
 
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" fail-script]})]
+                                    :command [elle-bin fail-script]})]
        [[ok? err] (protect (stream/collect (agent:send handle "should fail")))]]
   (assert (not ok?) "send fail: errors on nonzero exit")
   (assert (= err:error :agent-error) "send fail: error is :agent-error"))
@@ -213,7 +216,7 @@
     "(println (json/serialize {\"type\" \"result\" \"result\" \"ok\" \"total_cost_usd\" 0.01 \"session_id\" \"s2\" \"usage\" {\"input_tokens\" 1 \"output_tokens\" 1}}))\n"))
 
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" stderr-mock]})]
+                                    :command [elle-bin stderr-mock]})]
        [chunks  (stream/collect (agent:send handle "x"))]
        [texts   (filter (fn [c] (= c:type :text)) chunks)]]
   (assert (> (length texts) 0) "stderr: got text chunks")
@@ -233,7 +236,7 @@
     "(println (json/serialize {\"type\" \"result\" \"result\" \"done\" \"total_cost_usd\" 0.02 \"session_id\" \"s3\" \"usage\" {\"input_tokens\" 10 \"output_tokens\" 5}}))\n"))
 
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" tool-mock]})]
+                                    :command [elle-bin tool-mock]})]
        [chunks (stream/collect (agent:send handle "x"))]]
   (let* [[tool-uses  (filter (fn [c] (= c:type :tool-use)) chunks)]
          [tool-input (filter (fn [c] (= c:type :tool-input)) chunks)]
@@ -250,7 +253,7 @@
 # ── send-collect ────────────────────────────────────────────────────────────
 
 (let* [[handle (agent:make-handle {:backend :claude
-                                    :command ["elle" mock-script]})]
+                                    :command [elle-bin mock-script]})]
        [result (agent:send-collect handle "x")]]
   (assert (= result:text "hello world") "send-collect: concatenated text")
   (assert (= result:cost 0.05) "send-collect: cost preserved")
@@ -260,7 +263,7 @@
 # ── total-cost accumulation ─────────────────────────────────────────────────
 
 (let [[handle (agent:make-handle {:backend :claude
-                                   :command ["elle" mock-script]})]]
+                                   :command [elle-bin mock-script]})]]
   (assert (= handle:total-cost 0) "total-cost: starts at 0")
   (stream/for-each (fn [_] nil) (agent:send handle "turn 1"))
   (assert (= handle:total-cost 0.05) "total-cost: after turn 1")
@@ -278,7 +281,7 @@
     "(time/sleep 60)\n"))
 
 (let [[handle (agent:make-handle {:backend :claude
-                                   :command ["elle" slow-mock]})]]
+                                   :command [elle-bin slow-mock]})]]
   # Consume one chunk — proc should be set, then kill
   (let [[co (agent:send handle "x")]]
     (coro/resume co)
@@ -292,7 +295,7 @@
 # ── proc cleared after normal send ──────────────────────────────────────────
 
 (let [[handle (agent:make-handle {:backend :claude
-                                   :command ["elle" mock-script]})]]
+                                   :command [elle-bin mock-script]})]]
   (stream/for-each (fn [_] nil) (agent:send handle "x"))
   (assert (nil? handle:proc) "proc: cleared after normal completion"))
 

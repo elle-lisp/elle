@@ -92,6 +92,8 @@ ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 # (eval = dynamic compilation)
 WASM_SKIP := -e eval.lisp
 
+export ELLE_BIN := $(ELLE)
+
 smoke-vm:
 	@echo "=== elle scripts (VM, JIT disabled) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
