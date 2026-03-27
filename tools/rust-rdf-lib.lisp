@@ -1,4 +1,4 @@
-## lib/rust-rdf.lisp — RDF triple generation for Rust source
+## tools/rust-rdf-lib.lisp — RDF triple generation for Rust source
 ##
 ## Parses .rs files with the syn plugin and emits N-Triples for functions,
 ## structs, enums, traits, and call edges. Also extracts PRIMITIVES tables
@@ -6,7 +6,7 @@
 ##
 ## Usage:
 ##   (def syn (import "target/release/libelle_syn.so"))
-##   (def rust-rdf ((import "lib/rust-rdf.lisp") syn))
+##   (def rust-rdf ((import "tools/rust-rdf-lib.lisp") syn))
 ##   (def triples (rust-rdf:file "src/main.rs"))
 ##   (def links   (rust-rdf:primitive-links "src/primitives/io.rs"))
 

@@ -35,7 +35,7 @@
 (def glob-plugin (import "target/release/libelle_glob.so"))
 (def portrait-lib ((import "lib/portrait.lisp")))
 (def rdf ((import "lib/rdf.lisp")))
-(def rust-rdf ((import "lib/rust-rdf.lisp") syn))
+(def rust-rdf ((import "tools/rust-rdf-lib.lisp") syn))
 
 # ── Watch plugin (optional) ──────────────────────────────────────────────
 
