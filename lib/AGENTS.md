@@ -16,7 +16,7 @@ depend on other modules or plugins take them as arguments.
 | `aws/` | AWS service modules (generated) + SigV4 signing — see [`aws/AGENTS.md`](aws/AGENTS.md) |
 | `contract.lisp` | Compositional validation for function boundaries |
 | `lua.lisp` | Lua standard library compatibility prelude |
-| `process.lisp` | Erlang-style processes + GenServer, Agent, Supervisor |
+| `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
 
 ---
 
@@ -318,13 +318,13 @@ echo '((import-file "lib/redis.lisp"):test)' | ./target/debug/elle
 # lib/process
 
 Agent guide for `lib/process.lisp` — Erlang-style processes with GenServer,
-Agent, and Supervisor.
+Actor, and Supervisor.
 
 ## Purpose
 
 Cooperative multitasking with message passing, links, monitors, timers, and
 named process registration. Built on fibers with fuel-based preemption.
-GenServer/Agent/Supervisor are OTP-like abstractions layered on top.
+GenServer/Actor/Supervisor are OTP-like abstractions layered on top.
 
 ## Exported functions
 
