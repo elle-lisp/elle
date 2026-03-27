@@ -51,15 +51,12 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     let full_source;
     let compile_source = if with_stdlib {
-        // Wrap user source in parameterize for I/O backend, inside a
-        // self-calling lambda to create a function scope.  Without the
-        // lambda, top-level `def` forms in user code leak into the
-        // file-level letrec scope and corrupt Pass 3 fixpoint
-        // re-analysis of stdlib lambdas.
-        full_source = format!(
-            "{}\n(parameterize [(*io-backend* (io/backend :async))]\n((fn ()\n{}\n)))",
-            STDLIB, source
-        );
+        // Concatenate stdlib + user source as peer top-level forms.
+        // No source-level wrapping — the IO backend falls back to
+        // SyncBackend in maybe_execute_io when no *io-backend*
+        // parameter is bound. Host-side parameter setup (Phase 2)
+        // will replace the fallback.
+        full_source = format!("{}\n{}", STDLIB, source);
         full_source.as_str()
     } else {
         source
