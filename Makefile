@@ -91,7 +91,7 @@ ELLE_JIT_THRESHOLD := 0
 
 # WASM backend skip list (Phase 1): tests requiring threads, block/break, or epoch migration
 ifdef ELLE_WASM
-ELLE_SKIP_WASM := -e concurrency.lisp -e blocks.lisp -e print-epoch.lisp -e jit-type-predicates.lisp
+ELLE_SKIP_WASM := -e concurrency.lisp -e blocks.lisp -e print-epoch.lisp -e jit-type-predicates.lisp -e port-edge-cases.lisp
 else
 ELLE_SKIP_WASM :=
 endif

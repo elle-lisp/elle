@@ -88,6 +88,8 @@ struct WasmEmitter {
     local_offset: u32,
     /// WASM local index for signal scratch (i32).
     signal_local: u32,
+    /// Number of stack-local slots (non-LBox let-bound variables in closures).
+    num_stack_locals: u32,
 }
 
 impl WasmEmitter {
@@ -100,6 +102,7 @@ impl WasmEmitter {
             closure_table_idx: HashMap::new(),
             local_offset: 0,
             signal_local: 0,
+            num_stack_locals: 0,
         }
     }
 
@@ -514,12 +517,30 @@ impl WasmEmitter {
             LirInstr::IsSet { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET),
             LirInstr::IsSetMut { dst, src } => self.emit_tag_check(f, *dst, *src, TAG_SET_MUT),
             LirInstr::LoadLocal { dst, slot } => {
-                let src = Reg(*slot as u32);
-                self.copy_reg(f, src, *dst);
+                if self.is_closure {
+                    // Read from dedicated local-slot WASM locals
+                    f.instruction(&Instruction::LocalGet(self.local_slot_tag(*slot)));
+                    f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+                    f.instruction(&Instruction::LocalGet(self.local_slot_pay(*slot)));
+                    f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+                } else {
+                    // Entry function: locals share the register space
+                    let src = Reg(*slot as u32);
+                    self.copy_reg(f, src, *dst);
+                }
             }
             LirInstr::StoreLocal { slot, src } => {
-                let dst = Reg(*slot as u32);
-                self.copy_reg(f, *src, dst);
+                if self.is_closure {
+                    // Write to dedicated local-slot WASM locals
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*src)));
+                    f.instruction(&Instruction::LocalSet(self.local_slot_tag(*slot)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*src)));
+                    f.instruction(&Instruction::LocalSet(self.local_slot_pay(*slot)));
+                } else {
+                    // Entry function: locals share the register space
+                    let dst = Reg(*slot as u32);
+                    self.copy_reg(f, *src, dst);
+                }
             }
             LirInstr::LoadCapture { dst, index } => {
                 // Load from closure env, auto-unwrap LBox.
@@ -1236,20 +1257,21 @@ impl WasmEmitter {
     /// Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, pay: i64)`
     ///
     /// WASM local layout:
-    /// - 0: env_ptr (param) — points to linear memory with captures + params + locals
-    /// - 1: args_ptr (param) — unused (host pre-builds full env)
+    /// - 0: env_ptr (param)
+    /// - 1: args_ptr (param) — unused
     /// - 2: nargs (param) — unused
-    /// - 3: ctx (param) — fiber context
-    /// - 4..4+N: tag locals (register tags)
-    /// - 4+N..4+2N: payload locals (register payloads)
+    /// - 3: ctx (param)
+    /// - 4..4+N: register tags (computation intermediates)
+    /// - 4+N..4+2N: register payloads
+    /// - 4+2N..4+2N+M: local slot tags (non-LBox let-bound variables)
+    /// - 4+2N+M..4+2N+2M: local slot payloads
+    /// - 4+2N+2M: signal scratch (i32)
+    /// - 4+2N+2M+1..+3: tail call temps (i32)
     ///
-    /// The host builds the env in linear memory before calling:
-    ///   env[0..num_captures] = captured upvalues
-    ///   env[num_captures..num_captures+num_params] = args (LBox-wrapped if needed)
-    ///   env[num_captures+num_params..] = nil/LBox(nil) for local slots
-    ///
-    /// All variable access (params, captures, locals) goes through LoadCapture/LoadLocal
-    /// which read from env_ptr.
+    /// Three address spaces:
+    /// - Env (linear memory at env_ptr): captures, params, LBox locals
+    /// - Local slots (WASM locals): non-LBox let-bound variables
+    /// - Registers (WASM locals): computation intermediates
     fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
         self.label_to_idx.clear();
         for (idx, block) in func.blocks.iter().enumerate() {
@@ -1259,13 +1281,19 @@ impl WasmEmitter {
         self.num_regs = func.num_regs;
         self.local_offset = 4;
         self.is_closure = true;
-        // Params: 0-3. Additional locals: tags [4,4+N), payloads [4+N,4+2N), signal (4+2N)
-        self.signal_local = 4 + func.num_regs * 2;
+        self.num_stack_locals = func.num_locals as u32;
+
+        // Layout: params(4) + reg_tags(N) + reg_pays(N) + local_tags(M) + local_pays(M) + i32s(4)
+        let n = func.num_regs;
+        let m = self.num_stack_locals;
+        self.signal_local = 4 + 2 * n + 2 * m;
 
         let mut f = Function::new([
-            (func.num_regs, ValType::I64), // tags
-            (func.num_regs, ValType::I64), // payloads
-            (4, ValType::I32),             // signal_scratch + 3 tail call temps
+            (n, ValType::I64), // register tags
+            (n, ValType::I64), // register payloads
+            (m, ValType::I64), // local slot tags
+            (m, ValType::I64), // local slot payloads
+            (4, ValType::I32), // signal_scratch + 3 tail call temps
         ]);
 
         self.emit_cfg(&mut f, func);
@@ -1293,6 +1321,17 @@ impl WasmEmitter {
 
     fn pay_local(&self, reg: Reg) -> u32 {
         self.local_offset + reg.0 + self.num_regs
+    }
+
+    /// WASM local index for a stack-local variable's tag.
+    /// Local slots live after the register bank: offset + 2*num_regs + slot.
+    fn local_slot_tag(&self, slot: u16) -> u32 {
+        self.local_offset + 2 * self.num_regs + slot as u32
+    }
+
+    /// WASM local index for a stack-local variable's payload.
+    fn local_slot_pay(&self, slot: u16) -> u32 {
+        self.local_offset + 2 * self.num_regs + self.num_stack_locals + slot as u32
     }
 }
 

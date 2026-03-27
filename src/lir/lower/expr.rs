@@ -209,15 +209,15 @@ impl<'a> Lowerer<'a> {
             for binding in bindings_to_preallocate {
                 // Allocate slot now so captures can find it
                 if !self.binding_to_slot.contains_key(&binding) {
+                    let needs_lbox = self.arena.get(binding).needs_lbox();
                     let slot = self.allocate_slot(binding);
 
-                    // Inside lambdas, local variables are part of the closure environment
-                    if self.in_lambda {
+                    // Inside lambdas, only LBox locals live in the closure
+                    // environment (LoadCapture/StoreCapture). Non-LBox locals
+                    // use fast local storage (LoadLocal/StoreLocal).
+                    if self.in_lambda && needs_lbox {
                         self.upvalue_bindings.insert(binding);
                     }
-
-                    // Check if this binding needs a cell
-                    let needs_lbox = self.arena.get(binding).needs_lbox();
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables
