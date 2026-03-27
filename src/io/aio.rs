@@ -1090,7 +1090,7 @@ impl AsyncBackend {
                                     }
                                 }
                                 let bh = pending_op.buffer_handle();
-                                match completion::process_raw_completion(
+                                let c = completion::process_raw_completion(
                                     cid,
                                     result_code,
                                     data,
@@ -1098,38 +1098,8 @@ impl AsyncBackend {
                                     fd_states,
                                     buffer_pool,
                                     bh,
-                                ) {
-                                    Some(c) => completions.push_back(c),
-                                    None => {
-                                        // Short read — resubmit via network pool.
-                                        if let PendingOp::Port {
-                                            op: IoOp::Read { count },
-                                            ref port_key,
-                                            ..
-                                        } = pending_op
-                                        {
-                                            let fd = match port_key {
-                                                PortKey::Fd(raw) => *raw,
-                                                PortKey::Stdout => 1,
-                                                PortKey::Stderr => 2,
-                                                PortKey::Stdin => unreachable!(),
-                                            };
-                                            let buffered = fd_states
-                                                .get(port_key)
-                                                .map(|s| s.buffer.len())
-                                                .unwrap_or(0);
-                                            let remaining = count - buffered;
-                                            let _ = network_pool.submit(
-                                                cid,
-                                                PoolOp::Read {
-                                                    fd,
-                                                    size: remaining,
-                                                },
-                                            );
-                                            pending.insert(cid, pending_op);
-                                        }
-                                    }
-                                }
+                                );
+                                completions.push_back(c);
                             }
                         }
                     } else {
@@ -1195,7 +1165,7 @@ impl AsyncBackend {
                     {
                         if let Some(pending_op) = pending.remove(&id) {
                             let buf_handle = pending_op.buffer_handle();
-                            match completion::process_raw_completion(
+                            let c = completion::process_raw_completion(
                                 id,
                                 result_code,
                                 data,
@@ -1203,38 +1173,8 @@ impl AsyncBackend {
                                 fd_states,
                                 buffer_pool,
                                 buf_handle,
-                            ) {
-                                Some(c) => completions.push_back(c),
-                                None => {
-                                    // Short read — resubmit for remaining bytes.
-                                    if let PendingOp::Port {
-                                        op: IoOp::Read { count },
-                                        ref port_key,
-                                        ..
-                                    } = pending_op
-                                    {
-                                        let fd = match port_key {
-                                            PortKey::Fd(raw) => *raw,
-                                            PortKey::Stdout => 1,
-                                            PortKey::Stderr => 2,
-                                            PortKey::Stdin => unreachable!(),
-                                        };
-                                        let buffered = fd_states
-                                            .get(port_key)
-                                            .map(|s| s.buffer.len())
-                                            .unwrap_or(0);
-                                        let remaining = count - buffered;
-                                        let _ = pool.submit(
-                                            id,
-                                            PoolOp::Read {
-                                                fd,
-                                                size: remaining,
-                                            },
-                                        );
-                                        pending.insert(id, pending_op);
-                                    }
-                                }
-                            }
+                            );
+                            completions.push_back(c);
                         }
                     }
                 }
@@ -1310,49 +1250,18 @@ impl AsyncBackendInner {
                     data,
                 } in raw
                 {
-                    if let Some(pending_op) = self.pending.remove(&id) {
-                        let buf_handle = pending_op.buffer_handle();
-                        match completion::process_raw_completion(
+                    if let Some(pending) = self.pending.remove(&id) {
+                        let buf_handle = pending.buffer_handle();
+                        let c = completion::process_raw_completion(
                             id,
                             result_code,
                             data,
-                            &pending_op,
+                            &pending,
                             &mut self.fd_states,
                             &mut self.buffer_pool,
                             buf_handle,
-                        ) {
-                            Some(c) => self.completions.push_back(c),
-                            None => {
-                                // Short read — resubmit for remaining bytes.
-                                if let PendingOp::Port {
-                                    op: IoOp::Read { count },
-                                    ref port_key,
-                                    ..
-                                } = pending_op
-                                {
-                                    let fd = match port_key {
-                                        PortKey::Fd(raw) => *raw,
-                                        PortKey::Stdout => 1,
-                                        PortKey::Stderr => 2,
-                                        PortKey::Stdin => unreachable!(),
-                                    };
-                                    let buffered = self
-                                        .fd_states
-                                        .get(port_key)
-                                        .map(|s| s.buffer.len())
-                                        .unwrap_or(0);
-                                    let remaining = count - buffered;
-                                    let _ = pool.submit(
-                                        id,
-                                        PoolOp::Read {
-                                            fd,
-                                            size: remaining,
-                                        },
-                                    );
-                                    self.pending.insert(id, pending_op);
-                                }
-                            }
-                        }
+                        );
+                        self.completions.push_back(c);
                     }
                 }
             }
@@ -1383,7 +1292,7 @@ impl AsyncBackendInner {
                     }
                 }
                 let buf_handle = pending.buffer_handle();
-                match completion::process_raw_completion(
+                let c = completion::process_raw_completion(
                     id,
                     result_code,
                     data,
@@ -1391,39 +1300,8 @@ impl AsyncBackendInner {
                     &mut self.fd_states,
                     &mut self.buffer_pool,
                     buf_handle,
-                ) {
-                    Some(c) => self.completions.push_back(c),
-                    None => {
-                        // Short read — resubmit for remaining bytes.
-                        if let PendingOp::Port {
-                            op: IoOp::Read { count },
-                            ref port_key,
-                            ..
-                        } = pending
-                        {
-                            let fd = match port_key {
-                                PortKey::Fd(raw) => *raw,
-                                PortKey::Stdout => 1,
-                                PortKey::Stderr => 2,
-                                PortKey::Stdin => unreachable!(),
-                            };
-                            let buffered = self
-                                .fd_states
-                                .get(port_key)
-                                .map(|s| s.buffer.len())
-                                .unwrap_or(0);
-                            let remaining = count - buffered;
-                            let _ = self.network_pool.submit(
-                                id,
-                                PoolOp::Read {
-                                    fd,
-                                    size: remaining,
-                                },
-                            );
-                            self.pending.insert(id, pending);
-                        }
-                    }
-                }
+                );
+                self.completions.push_back(c);
             }
         }
     }

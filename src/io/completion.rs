@@ -16,9 +16,6 @@ fn errno_message(errno: i32) -> String {
     std::io::Error::from_raw_os_error(errno).to_string()
 }
 
-/// Process a raw I/O completion. Returns `None` for short reads on
-/// `IoOp::Read { count }` — the caller must resubmit the read for the
-/// remaining bytes (partial data is buffered in `fd_states`).
 pub(super) fn process_raw_completion(
     id: u64,
     result_code: i32,
@@ -27,7 +24,7 @@ pub(super) fn process_raw_completion(
     fd_states: &mut HashMap<PortKey, FdState>,
     buffer_pool: &mut BufferPool,
     buf_handle: BufferHandle,
-) -> Option<Completion> {
+) -> Completion {
     // Release the buffer back to the pool
     buffer_pool.release(buf_handle);
 
@@ -45,13 +42,13 @@ pub(super) fn process_raw_completion(
                     unsafe { drop(Box::from_raw(*siginfo)) };
                 }
                 let errno = -result_code;
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Err(error_val(
                         "exec-error",
                         format!("subprocess/wait: waitid failed: errno {}", errno),
                     )),
-                });
+                };
             }
 
             let exit_code: i32 = if siginfo.is_null() {
@@ -89,18 +86,18 @@ pub(super) fn process_raw_completion(
                 *state = crate::io::request::ProcessState::Exited(exit_code);
             }
 
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(Value::int(exit_code as i64)),
-            })
+            }
         }
         PendingOp::Sleep { .. } => {
             // Sleep completes with -ETIME (62) on io_uring, or 0 on thread pool.
             // Both are success for a timer.
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(Value::NIL),
-            })
+            }
         }
         PendingOp::Open {
             path,
@@ -118,19 +115,19 @@ pub(super) fn process_raw_completion(
                     format!("port/open: {}: {}", path, os_err)
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Err(error_val(error_type, msg)),
-                });
+                };
             }
             // SAFETY: result_code is a valid fd returned by the kernel (>= 0).
             // No fallible operations between here and OwnedFd::from_raw_fd.
             let fd = unsafe { OwnedFd::from_raw_fd(result_code) };
             let port = Port::new_file(fd, *direction, *encoding, path.clone());
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(Value::external("port", port)),
-            })
+            }
         }
         PendingOp::Connect {
             addr, connect_fd, ..
@@ -144,10 +141,10 @@ pub(super) fn process_raw_completion(
                     format!("I/O error: {}", errno_message(errno))
                 };
                 let error_type = if is_timeout { "timeout" } else { "io-error" };
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Err(error_val(error_type, msg)),
-                });
+                };
             }
             // Connect: fd and address come from PendingOp (set at submission time).
             // io_uring: connect_fd = pre-created socket, result_code = 0.
@@ -164,23 +161,23 @@ pub(super) fn process_raw_completion(
                 ConnectAddr::Tcp { .. } => Port::new_tcp_stream(fd, peer_addr),
                 ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
             };
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(Value::external("port", new_port)),
-            })
+            }
         }
         PendingOp::Task { .. } => {
             if result_code < 0 {
                 let msg = String::from_utf8_lossy(&data).to_string();
-                Some(Completion {
+                Completion {
                     id,
                     result: Err(error_val("task-error", msg)),
-                })
+                }
             } else {
-                Some(Completion {
+                Completion {
                     id,
                     result: Ok(Value::bytes(data)),
-                })
+                }
             }
         }
         PendingOp::Resolve { .. } => {
@@ -190,10 +187,10 @@ pub(super) fn process_raw_completion(
                 } else {
                     String::from_utf8_lossy(&data).to_string()
                 };
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Err(error_val("dns-error", msg)),
-                });
+                };
             }
             // data contains newline-separated IP address strings.
             let ips_str = String::from_utf8_lossy(&data);
@@ -202,10 +199,10 @@ pub(super) fn process_raw_completion(
                 .filter(|s| !s.is_empty())
                 .map(Value::string)
                 .collect();
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(Value::array(ips)),
-            })
+            }
         }
         PendingOp::Port {
             op,
@@ -228,10 +225,10 @@ pub(super) fn process_raw_completion(
                     .entry(port_key.clone())
                     .or_insert_with(FdState::new);
                 state.status = FdStatus::Error(msg.clone());
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Err(error_val(error_type, msg)),
-                });
+                };
             }
 
             if result_code == 0 && matches!(op, IoOp::ReadLine | IoOp::Read { .. } | IoOp::ReadAll)
@@ -248,10 +245,10 @@ pub(super) fn process_raw_completion(
                     let remainder: Vec<u8> = state.buffer.drain(..).collect();
                     let s = String::from_utf8_lossy(&remainder);
                     let trimmed = s.trim_end_matches('\n').trim_end_matches('\r');
-                    return Some(Completion {
+                    return Completion {
                         id,
                         result: Ok(Value::string(trimmed)),
-                    });
+                    };
                 }
 
                 // For Read: return accumulated buffer on EOF (short-read
@@ -259,7 +256,7 @@ pub(super) fn process_raw_completion(
                 if matches!(op, IoOp::Read { .. }) && !state.buffer.is_empty() {
                     let partial: Vec<u8> = state.buffer.drain(..).collect();
                     if let Some(p) = port.as_external::<Port>() {
-                        return Some(Completion {
+                        return Completion {
                             id,
                             result: Ok(match p.encoding() {
                                 Encoding::Text => {
@@ -268,7 +265,7 @@ pub(super) fn process_raw_completion(
                                 }
                                 Encoding::Binary => Value::bytes(partial),
                             }),
-                        });
+                        };
                     }
                 }
 
@@ -284,16 +281,16 @@ pub(super) fn process_raw_completion(
                     } else {
                         Value::bytes(all)
                     };
-                    return Some(Completion {
+                    return Completion {
                         id,
                         result: Ok(value),
-                    });
+                    };
                 }
 
-                return Some(Completion {
+                return Completion {
                     id,
                     result: Ok(Value::NIL),
-                });
+                };
             }
 
             // Success
@@ -318,45 +315,11 @@ pub(super) fn process_raw_completion(
                         Value::string(trimmed)
                     }
                 }
-                IoOp::Read { count } => {
+                IoOp::Read { .. } | IoOp::ReadAll => {
                     // Prepend any bytes left in the fd_state buffer from a
                     // previous over-read (e.g. ReadLine read past the line
                     // boundary). The submit path reduced the kernel read count
                     // by this amount so the total equals the requested count.
-                    let state = fd_states
-                        .entry(port_key.clone())
-                        .or_insert_with(FdState::new);
-                    let combined = if !state.buffer.is_empty() {
-                        let mut buf: Vec<u8> = state.buffer.drain(..).collect();
-                        buf.extend_from_slice(&data);
-                        buf
-                    } else {
-                        data
-                    };
-
-                    // Short-read detection: if we got fewer bytes than
-                    // requested and it's not EOF (result_code > 0), buffer
-                    // the partial data and return None so the caller
-                    // resubmits for the remaining bytes.
-                    if combined.len() < *count {
-                        state.buffer.extend_from_slice(&combined);
-                        return None;
-                    }
-
-                    if let Some(p) = port.as_external::<Port>() {
-                        match p.encoding() {
-                            Encoding::Text => {
-                                let s = String::from_utf8_lossy(&combined);
-                                Value::string(s.as_ref())
-                            }
-                            Encoding::Binary => Value::bytes(combined),
-                        }
-                    } else {
-                        Value::string(String::from_utf8_lossy(&combined).as_ref())
-                    }
-                }
-                IoOp::ReadAll => {
-                    // Prepend any bytes left in the fd_state buffer.
                     let state = fd_states
                         .entry(port_key.clone())
                         .or_insert_with(FdState::new);
@@ -391,10 +354,10 @@ pub(super) fn process_raw_completion(
                         Some(PortKind::TcpListener) => Port::new_tcp_stream(fd, peer_addr),
                         Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
                         _ => {
-                            return Some(Completion {
+                            return Completion {
                                 id,
                                 result: Err(error_val("io-error", "invalid listener kind")),
-                            });
+                            };
                         }
                     };
                     Value::external("port", new_port)
@@ -433,19 +396,19 @@ pub(super) fn process_raw_completion(
                 IoOp::RecvFrom { .. } => {
                     // RecvFrom: data format is addr_len (4 bytes LE) + sockaddr_storage + payload
                     if data.len() < 4 {
-                        return Some(Completion {
+                        return Completion {
                             id,
                             result: Err(error_val("io-error", "invalid recvfrom data")),
-                        });
+                        };
                     }
                     let addr_len =
                         u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as libc::socklen_t;
                     let addr_offset = 4 + std::mem::size_of::<libc::sockaddr_storage>();
                     if data.len() < addr_offset {
-                        return Some(Completion {
+                        return Completion {
                             id,
                             result: Err(error_val("io-error", "invalid recvfrom data")),
-                        });
+                        };
                     }
                     let addr_bytes = &data[4..4 + std::mem::size_of::<libc::sockaddr_storage>()];
                     let addr_storage = unsafe {
@@ -469,10 +432,10 @@ pub(super) fn process_raw_completion(
                     Value::struct_from(fields)
                 }
             };
-            Some(Completion {
+            Completion {
                 id,
                 result: Ok(value),
-            })
+            }
         }
     }
 }
