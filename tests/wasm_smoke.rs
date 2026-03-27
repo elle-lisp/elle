@@ -329,3 +329,58 @@ fn test_dump_closure_let_lir() {
         }
     }
 }
+
+// --- Tail calls ---
+
+#[test]
+fn test_tail_call_deep_recursion() {
+    // 100K iterations — would overflow without tail calls
+    assert_eq!(
+        eval("(letrec ([f (fn [n] (if (= n 0) 42 (f (- n 1))))]) (f 100000))"),
+        "42"
+    );
+}
+
+#[test]
+fn test_tail_call_mutual_recursion() {
+    assert_eq!(
+        eval(
+            "(letrec ([even (fn [n] (if (= n 0) true (odd (- n 1))))]
+                      [odd  (fn [n] (if (= n 0) false (even (- n 1))))])
+               (even 10000))"
+        ),
+        "true"
+    );
+}
+
+#[test]
+fn test_tail_call_accumulator() {
+    assert_eq!(
+        eval(
+            "(letrec ([sum (fn [n acc] (if (= n 0) acc (sum (- n 1) (+ acc n))))]) (sum 10000 0))"
+        ),
+        "50005000"
+    );
+}
+
+// --- Float arithmetic ---
+
+#[test]
+fn test_float_division() {
+    assert_eq!(eval("(/ 7.0 2)"), "3.5");
+}
+
+#[test]
+fn test_float_addition() {
+    assert_eq!(eval("(+ 1.5 2.5)"), "4");
+}
+
+#[test]
+fn test_int_float_promotion() {
+    assert_eq!(eval("(+ 1 2.5)"), "3.5");
+}
+
+#[test]
+fn test_float_comparison() {
+    assert_eq!(eval("(> 3.14 2.71)"), "true");
+}
