@@ -120,11 +120,21 @@
 (defn read-body [port headers]
   "Read request/response body based on Content-Length header.
    Returns body string, or nil if Content-Length is absent.
-   Returns empty string for Content-Length: 0 without issuing I/O."
-  (let [[cl headers:content-length]]
-    (when cl
-      (let [[n (integer cl)]]
-        (if (= n 0) "" (string (port/read port n)))))))
+   Loops on short reads to handle large responses over TCP."
+  (when headers:content-length
+    (var n (integer headers:content-length))
+    (if (= n 0)
+      ""
+      (begin
+        (var buf (@bytes))
+        (while (pos? n)
+          (let [[chunk (port/read port n)]]
+            (when (nil? chunk)
+              (error {:error :http-error :message "unexpected EOF reading HTTP body"}))
+            (let [[b (if (bytes? chunk) chunk (bytes chunk))]]
+              (append buf b)
+              (assign n (- n (length b))))))
+        (string (freeze buf))))))
 
 # ============================================================================
 # Reason phrases

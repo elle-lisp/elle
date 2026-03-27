@@ -594,12 +594,15 @@ pub(crate) fn prim_string_size_of(args: &[Value]) -> (SignalBits, Value) {
     if let Some(byte_len) = args[0].with_string(|s| s.len()) {
         return (SIG_OK, Value::int(byte_len as i64));
     }
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        return (SIG_OK, Value::int(buf_ref.borrow().len() as i64));
+    }
     (
         SIG_ERROR,
         error_val(
             "type-error",
             format!(
-                "string/size-of: expected string, got {}",
+                "string/size-of: expected string or @string, got {}",
                 args[0].type_name()
             ),
         ),

@@ -442,7 +442,7 @@
 (let (([ok? _] (protect ((fn () (eval '(append))))))) (assert (not ok?) "append wrong arity no args"))
 (let (([ok? _] (protect ((fn () (eval '(append @[1 2]))))))) (assert (not ok?) "append wrong arity one arg"))
 (let (([ok? _] (protect ((fn () (eval '(append @[1 2] @[3 4] @[5 6]))))))) (assert (not ok?) "append wrong arity too many args"))
-(let (([ok? _] (protect ((fn () (append @[1 2] [3 4])))))) (assert (not ok?) "append mismatched types error"))
+(assert (= (append @[1 2] [3 4]) @[1 2 3 4]) "append @array + array (cross-mutability)")
 (let (([ok? _] (protect ((fn () (append 42 99)))))) (assert (not ok?) "append unsupported type error"))
 
 ## === concat - @arrays ===
