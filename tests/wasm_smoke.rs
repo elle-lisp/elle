@@ -228,3 +228,104 @@ fn test_recursive_sum() {
 fn test_let_with_if() {
     assert_eq!(eval("(let* [[x (if true 10 20)]] (+ x 5))"), "15");
 }
+
+// --- Nested closure calls (env stack regression) ---
+
+#[test]
+fn test_higher_order_with_capture() {
+    // apply-twice captures a letrec binding (itself) and calls f, which
+    // overwrites the env. After f returns, the recursive LoadCapture must
+    // still read the correct self-reference.
+    assert_eq!(
+        eval("(defn apply-twice [f x] (f (f x)))\n(apply-twice (fn [n] (+ n 1)) 0)"),
+        "2"
+    );
+}
+
+#[test]
+fn test_map_over_list() {
+    // map recurses and calls the user closure at each step — the classic
+    // env-stack-corruption pattern that motivated the stack allocator.
+    assert_eq!(
+        eval(concat!(
+            "(defn map [f lst]\n",
+            "  (if (empty? lst) ()\n",
+            "    (cons (f (first lst)) (map f (rest lst)))))\n",
+            "(map (fn [x] (* x x)) (list 1 2 3))"
+        )),
+        "(1 4 9)"
+    );
+}
+
+#[test]
+fn test_capture_read_after_nested_call() {
+    // g captures both f and h. It calls f (overwriting env), then must
+    // still read h from its capture slot.
+    assert_eq!(
+        eval(concat!(
+            "(defn f [x] (+ x 10))\n",
+            "(defn h [x] (* x 2))\n",
+            "(defn g [x] (h (f x)))\n",
+            "(g 5)"
+        )),
+        "30"
+    );
+}
+
+#[test]
+fn test_closure_let_binding() {
+    // Simpler: lambda called immediately
+    assert_eq!(eval("((fn [] (let* [[x 42]] x)))"), "42");
+}
+
+#[test]
+fn test_closure_let_with_call() {
+    assert_eq!(eval("((fn [a] (let* [[b (+ a 10)]] b)) 5)"), "15");
+}
+
+#[test]
+fn test_closure_let_defn() {
+    assert_eq!(eval("(defn f [] (let* [[x 42]] x))\n(f)"), "42");
+}
+
+#[test]
+fn test_dump_closure_let_lir() {
+    let mut vm = elle::VM::new();
+    let mut symbols = Box::new(elle::SymbolTable::new());
+    elle::register_primitives(&mut vm, &mut symbols);
+    let sym_ptr: *mut elle::SymbolTable = &mut *symbols;
+    elle::context::set_symbol_table(sym_ptr);
+    elle::primitives::set_length_symbol_table(sym_ptr);
+    let lir =
+        elle::pipeline::compile_file_to_lir("((fn [] (let* [[x 42]] x)))", &mut symbols, "<test>")
+            .unwrap();
+    eprintln!(
+        "Entry: num_regs={} num_locals={} num_captures={} num_params={}",
+        lir.num_regs, lir.num_locals, lir.num_captures, lir.num_params
+    );
+    for block in &lir.blocks {
+        eprintln!("Block {:?}:", block.label);
+        for si in &block.instructions {
+            eprintln!("  {:?}", si.instr);
+        }
+        eprintln!("  term: {:?}", block.terminator);
+    }
+    // Find nested closures
+    for block in &lir.blocks {
+        for si in &block.instructions {
+            if let elle::lir::LirInstr::MakeClosure { func, .. } = &si.instr {
+                eprintln!(
+                    "\nClosure: num_regs={} num_locals={} num_captures={} num_params={}",
+                    func.num_regs, func.num_locals, func.num_captures, func.num_params
+                );
+                for b in &func.blocks {
+                    eprintln!("  Block {:?}:", b.label);
+                    for s in &b.instructions {
+                        eprintln!("    {:?}", s.instr);
+                    }
+                    eprintln!("    term: {:?}", b.terminator);
+                }
+            }
+        }
+    }
+}

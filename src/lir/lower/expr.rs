@@ -105,9 +105,9 @@ impl<'a> Lowerer<'a> {
 
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
-                // In a lambda, captures, parameters, and locally-defined variables are accessed via LoadCapture
-                // Note: LoadCapture (which emits LoadUpvalue) auto-unwraps LocalCell,
-                // so we don't need to emit LoadLBox for captured variables
+                // LBox-wrapped locals, captures, and parameters use LoadCapture
+                // which auto-unwraps LocalCell. Plain locals fall through to
+                // the LoadLocal path below.
                 self.emit(LirInstr::LoadCapture { dst, index: slot });
                 Ok(dst)
             } else {

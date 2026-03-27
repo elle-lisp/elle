@@ -19,22 +19,21 @@ impl<'a> Lowerer<'a> {
             let init_reg = self.lower_expr(init)?;
             let slot = self.allocate_slot(*binding);
 
-            // Inside lambdas, let-bound variables live in the closure
-            // environment and must be accessed via LoadCapture/StoreCapture
-            if self.in_lambda {
-                self.upvalue_bindings.insert(*binding);
-            }
-
             // Check if this binding needs to be wrapped in a cell
             let needs_lbox = self.arena.get(*binding).needs_lbox();
 
-            if self.in_lambda {
-                // Inside a lambda, use closure environment via StoreCapture.
-                // The VM's Call handler already creates LocalCell(NIL) slots
-                // for locally-defined variables, so we don't need MakeLBox here.
-                // StoreCapture handles updating cells automatically.
+            // Inside lambdas, only LBox-wrapped locals need upvalue treatment
+            // (StoreCapture assumes LBox indirection). Plain let bindings use
+            // StoreLocal — the slot index from allocate_slot is valid for both.
+            if self.in_lambda && needs_lbox {
+                self.upvalue_bindings.insert(*binding);
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
+                    src: init_reg,
+                });
+            } else if self.in_lambda {
+                self.emit(LirInstr::StoreLocal {
+                    slot,
                     src: init_reg,
                 });
             } else {
@@ -79,23 +78,17 @@ impl<'a> Lowerer<'a> {
             let nil_reg = self.emit_const(LirConst::Nil)?;
             let slot = self.allocate_slot(*binding);
 
-            // Inside lambdas, letrec-bound variables live in the closure
-            // environment and must be accessed via LoadCapture/StoreCapture
-            if self.in_lambda {
-                self.upvalue_bindings.insert(*binding);
-            }
-
             // Check if this binding needs to be wrapped in a cell
             let needs_lbox = self.arena.get(*binding).needs_lbox();
 
-            if self.in_lambda {
-                // Inside a lambda, the VM's Call handler already creates
-                // LocalCell(NIL) slots. No need to initialize here.
-                // StoreCapture will update the cell contents.
+            if self.in_lambda && needs_lbox {
+                self.upvalue_bindings.insert(*binding);
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
                     src: nil_reg,
                 });
+            } else if self.in_lambda {
+                self.emit(LirInstr::StoreLocal { slot, src: nil_reg });
             } else if needs_lbox {
                 let cell_reg = self.fresh_reg();
                 self.emit(LirInstr::MakeLBox {
@@ -118,10 +111,16 @@ impl<'a> Lowerer<'a> {
             // Check if this binding needs cell update
             let needs_lbox = self.arena.get(*binding).needs_lbox();
 
-            if self.in_lambda {
-                // Inside a lambda, StoreCapture handles cell update
+            let is_upvalue = self.upvalue_bindings.contains(binding);
+
+            if self.in_lambda && is_upvalue {
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
+                    src: init_reg,
+                });
+            } else if self.in_lambda {
+                self.emit(LirInstr::StoreLocal {
+                    slot,
                     src: init_reg,
                 });
             } else if needs_lbox {
@@ -159,20 +158,18 @@ impl<'a> Lowerer<'a> {
             self.allocate_slot(binding)
         };
 
-        // Inside lambdas, local variables are part of the closure environment
-        if self.in_lambda {
-            self.upvalue_bindings.insert(binding);
-        }
-
         // Check if this binding needs to be wrapped in a cell
         let needs_lbox = self.arena.get(binding).needs_lbox();
+
+        // Only LBox-wrapped locals need upvalue treatment inside lambdas
+        if self.in_lambda && needs_lbox {
+            self.upvalue_bindings.insert(binding);
+        }
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
 
-        if self.in_lambda {
-            // Inside a lambda, use closure environment via StoreCapture
-            // StoreCapture handles cells automatically
+        if self.in_lambda && needs_lbox {
             self.emit(LirInstr::StoreCapture {
                 index: slot,
                 src: value_reg,
@@ -182,6 +179,14 @@ impl<'a> Lowerer<'a> {
                 dst: result,
                 index: slot,
             });
+            Ok(result)
+        } else if self.in_lambda {
+            self.emit(LirInstr::StoreLocal {
+                slot,
+                src: value_reg,
+            });
+            let result = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal { dst: result, slot });
             Ok(result)
         } else if needs_lbox {
             // The cell was already created in the Begin pre-pass
@@ -647,31 +652,35 @@ impl<'a> Lowerer<'a> {
             self.allocate_slot(binding)
         };
 
-        if self.in_lambda {
+        let needs_lbox = self.arena.get(binding).needs_lbox();
+
+        if self.in_lambda && needs_lbox {
             self.upvalue_bindings.insert(binding);
             self.emit(LirInstr::StoreCapture {
                 index: slot,
                 src: value_reg,
             });
+        } else if self.in_lambda {
+            self.emit(LirInstr::StoreLocal {
+                slot,
+                src: value_reg,
+            });
+        } else if needs_lbox {
+            // cell was already created in Begin pre-pass
+            let cell_reg = self.fresh_reg();
+            self.emit(LirInstr::LoadLocal {
+                dst: cell_reg,
+                slot,
+            });
+            self.emit(LirInstr::StoreLBox {
+                cell: cell_reg,
+                value: value_reg,
+            });
         } else {
-            let needs_lbox = self.arena.get(binding).needs_lbox();
-            if needs_lbox {
-                // cell was already created in Begin pre-pass
-                let cell_reg = self.fresh_reg();
-                self.emit(LirInstr::LoadLocal {
-                    dst: cell_reg,
-                    slot,
-                });
-                self.emit(LirInstr::StoreLBox {
-                    cell: cell_reg,
-                    value: value_reg,
-                });
-            } else {
-                self.emit(LirInstr::StoreLocal {
-                    slot,
-                    src: value_reg,
-                });
-            }
+            self.emit(LirInstr::StoreLocal {
+                slot,
+                src: value_reg,
+            });
         }
         Ok(value_reg)
     }

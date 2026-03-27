@@ -41,9 +41,12 @@ const FN_RT_CALL: u32 = 1;
 const FN_RT_LOAD_CONST: u32 = 2;
 const FN_RT_DATA_OP: u32 = 3;
 const FN_RT_MAKE_CLOSURE: u32 = 4;
+const FN_RT_PUSH_PARAM: u32 = 5;
+const FN_RT_POP_PARAM: u32 = 6;
+const FN_RT_PREPARE_TAIL_CALL: u32 = 7;
 
 // First non-imported function index
-const FN_ENTRY: u32 = 5;
+const FN_ENTRY: u32 = 8;
 
 // Linear memory layout
 const ARGS_BASE: i32 = 256; // Args buffer starts at byte 256
@@ -69,10 +72,13 @@ const OP_ARRAY_EXTEND: i32 = 16;
 const OP_ARRAY_PUSH: i32 = 17;
 const OP_ARRAY_LEN: i32 = 18;
 const OP_ARRAY_REF_OR_NIL: i32 = 19;
+const OP_STRUCT_REST: i32 = 20;
 
 struct WasmEmitter {
     label_to_idx: HashMap<Label, usize>,
     num_regs: u32,
+    /// Whether we're currently emitting a closure function (vs entry).
+    is_closure: bool,
     /// Heap constants collected during emission.
     const_pool: Vec<Value>,
     /// Maps nested LirFunction pointer → table index.
@@ -89,6 +95,7 @@ impl WasmEmitter {
         WasmEmitter {
             label_to_idx: HashMap::new(),
             num_regs: 0,
+            is_closure: false,
             const_pool: Vec::new(),
             closure_table_idx: HashMap::new(),
             local_offset: 0,
@@ -151,15 +158,41 @@ impl WasmEmitter {
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64],
         );
+        // Type 7: rt_push_param(args_ptr, npairs) -> ()
+        types.ty().function([ValType::I32, ValType::I32], []);
+        // Type 8: rt_pop_param() -> ()
+        types.ty().function([], []);
+        // Type 9: rt_prepare_tail_call(func_tag, func_payload, args_ptr, nargs, env_ptr)
+        //   -> (env_ptr, table_idx, is_wasm, tag, payload, signal)
+        types.ty().function(
+            [
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            [
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+            ],
+        );
         module.section(&types);
 
-        // Import section (function indices 0–4)
+        // Import section (function indices 0–7)
         let mut imports = ImportSection::new();
         imports.import("elle", "call_primitive", EntityType::Function(1));
         imports.import("elle", "rt_call", EntityType::Function(2));
         imports.import("elle", "rt_load_const", EntityType::Function(3));
         imports.import("elle", "rt_data_op", EntityType::Function(4));
         imports.import("elle", "rt_make_closure", EntityType::Function(6));
+        imports.import("elle", "rt_push_param", EntityType::Function(7));
+        imports.import("elle", "rt_pop_param", EntityType::Function(8));
+        imports.import("elle", "rt_prepare_tail_call", EntityType::Function(9));
         module.section(&imports);
 
         // Function section: entry (type 0) + closures (type 5 each)
@@ -245,6 +278,7 @@ impl WasmEmitter {
 
         self.num_regs = func.num_regs;
         self.local_offset = 0;
+        self.is_closure = false;
         // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal/state (2N+1)
         self.signal_local = func.num_regs * 2 + 1;
 
@@ -580,13 +614,26 @@ impl WasmEmitter {
                 self.emit_call(f, *dst, *func, args);
             }
             LirInstr::TailCall { func, args } => {
-                // For now, emit as regular call + return.
-                // TODO: use return_call_indirect for WASM tail calls
-                let dst = Reg(0); // reuse reg 0 as temp
-                self.emit_call(f, dst, *func, args);
-                f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
-                f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-                f.instruction(&Instruction::Return);
+                if !self.is_closure {
+                    // Entry function: no env_ptr, use regular call + return
+                    let dst = Reg(0);
+                    self.emit_call(f, dst, *func, args);
+                    f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+                    f.instruction(&Instruction::Return);
+                } else {
+                    // Closure: write args, call rt_prepare_tail_call, dispatch
+                    for (i, arg) in args.iter().enumerate() {
+                        self.write_val_to_mem(f, *arg, i);
+                    }
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*func)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*func)));
+                    f.instruction(&Instruction::I32Const(ARGS_BASE));
+                    f.instruction(&Instruction::I32Const(args.len() as i32));
+                    f.instruction(&Instruction::LocalGet(self.env_local()));
+                    f.instruction(&Instruction::Call(FN_RT_PREPARE_TAIL_CALL));
+                    self.emit_tail_call_dispatch(f);
+                }
             }
             LirInstr::RegionEnter | LirInstr::RegionExit => {}
 
@@ -656,11 +703,24 @@ impl WasmEmitter {
                 self.emit_call_array(f, *dst, *func, *args);
             }
             LirInstr::TailCallArrayMut { func, args } => {
-                let dst = Reg(0);
-                self.emit_call_array(f, dst, *func, *args);
-                f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
-                f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-                f.instruction(&Instruction::Return);
+                if !self.is_closure {
+                    // Entry function: use regular call + return
+                    let dst = Reg(0);
+                    self.emit_call_array(f, dst, *func, *args);
+                    f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+                    f.instruction(&Instruction::Return);
+                } else {
+                    // Closure: write array arg, call rt_prepare_tail_call with nargs=-1
+                    self.write_val_to_mem(f, *args, 1);
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*func)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*func)));
+                    f.instruction(&Instruction::I32Const(ARGS_BASE));
+                    f.instruction(&Instruction::I32Const(-1)); // nargs=-1: unpack array
+                    f.instruction(&Instruction::LocalGet(self.env_local()));
+                    f.instruction(&Instruction::Call(FN_RT_PREPARE_TAIL_CALL));
+                    self.emit_tail_call_dispatch(f);
+                }
             }
             LirInstr::Eval { dst, expr, env } => {
                 // For now, stub eval as nil
@@ -735,11 +795,59 @@ impl WasmEmitter {
                 f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
                 f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
             }
-            LirInstr::PushParamFrame { .. }
-            | LirInstr::PopParamFrame
-            | LirInstr::CheckSignalBound { .. }
-            | LirInstr::StructRest { .. } => {
-                // TODO: implement via host functions
+            LirInstr::PushParamFrame { pairs } => {
+                // Write (param_tag, param_payload, value_tag, value_payload)
+                // for each pair to ARGS_BASE, then call rt_push_param.
+                for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
+                    self.write_val_to_mem_offset(f, *param_reg, ARGS_BASE + (i as i32) * 32);
+                    self.write_val_to_mem_offset(f, *val_reg, ARGS_BASE + (i as i32) * 32 + 16);
+                }
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::I32Const(pairs.len() as i32));
+                f.instruction(&Instruction::Call(FN_RT_PUSH_PARAM));
+            }
+            LirInstr::PopParamFrame => {
+                f.instruction(&Instruction::Call(FN_RT_POP_PARAM));
+            }
+            LirInstr::CheckSignalBound { .. } => {
+                // Compile-time validation — no-op at runtime.
+            }
+            LirInstr::StructRest {
+                dst,
+                src,
+                exclude_keys,
+            } => {
+                // Write src struct as arg[0], exclude keys as arg[1..n].
+                self.write_val_to_mem(f, *src, 0);
+                for (i, key) in exclude_keys.iter().enumerate() {
+                    let (tag, payload) = match key {
+                        LirConst::Keyword(name) => {
+                            (TAG_KEYWORD as i64, intern_keyword(name) as i64)
+                        }
+                        LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
+                        _ => (TAG_NIL as i64, 0),
+                    };
+                    let offset = ((i + 1) * 16) as u64;
+                    f.instruction(&Instruction::I32Const(ARGS_BASE));
+                    f.instruction(&Instruction::I64Const(tag));
+                    f.instruction(&Instruction::I64Store(MemArg {
+                        offset,
+                        align: 3,
+                        memory_index: 0,
+                    }));
+                    f.instruction(&Instruction::I32Const(ARGS_BASE));
+                    f.instruction(&Instruction::I64Const(payload));
+                    f.instruction(&Instruction::I64Store(MemArg {
+                        offset: offset + 8,
+                        align: 3,
+                        memory_index: 0,
+                    }));
+                }
+                f.instruction(&Instruction::I32Const(OP_STRUCT_REST));
+                f.instruction(&Instruction::I32Const(ARGS_BASE));
+                f.instruction(&Instruction::I32Const(1 + exclude_keys.len() as i32));
+                f.instruction(&Instruction::Call(FN_RT_DATA_OP));
+                self.store_result_with_signal(f, *dst);
             }
         }
     }
@@ -835,6 +943,53 @@ impl WasmEmitter {
         f.instruction(&Instruction::End);
     }
 
+    /// Emit the dispatch logic after `rt_prepare_tail_call` returns.
+    ///
+    /// Stack on entry: `(env_ptr: i32, table_idx: i32, is_wasm: i32, tag: i64, payload: i64, signal: i32)`
+    /// If is_wasm: `return_call_indirect` replaces the current frame.
+    /// Otherwise: return (tag, payload) — the NativeFn/Parameter result.
+    fn emit_tail_call_dispatch(&self, f: &mut Function) {
+        // Temp locals for the 6 return values
+        let tc_signal = self.signal_local;
+        let tc_payload = self.pay_local(Reg(0));
+        let tc_tag = self.tag_local(Reg(0));
+        let tc_is_wasm = self.signal_local + 1;
+        let tc_table_idx = self.signal_local + 2;
+        let tc_env_ptr = self.signal_local + 3;
+
+        // Pop results (WASM stack order: last return value on top)
+        f.instruction(&Instruction::LocalSet(tc_signal)); // i32
+        f.instruction(&Instruction::LocalSet(tc_payload)); // i64
+        f.instruction(&Instruction::LocalSet(tc_tag)); // i64
+        f.instruction(&Instruction::LocalSet(tc_is_wasm)); // i32
+        f.instruction(&Instruction::LocalSet(tc_table_idx)); // i32
+        f.instruction(&Instruction::LocalSet(tc_env_ptr)); // i32
+
+        // Dispatch based on is_wasm
+        f.instruction(&Instruction::LocalGet(tc_is_wasm));
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            // WASM closure: return_call_indirect replaces this frame
+            f.instruction(&Instruction::LocalGet(tc_env_ptr));
+            f.instruction(&Instruction::I32Const(0)); // args_ptr unused
+            f.instruction(&Instruction::I32Const(0)); // nargs unused
+            f.instruction(&Instruction::I32Const(0)); // ctx
+            f.instruction(&Instruction::LocalGet(tc_table_idx));
+            f.instruction(&Instruction::ReturnCallIndirect {
+                type_index: 5,
+                table_index: 0,
+            });
+        }
+        f.instruction(&Instruction::Else);
+        {
+            // NativeFn/Parameter result: return (tag, payload)
+            f.instruction(&Instruction::LocalGet(tc_tag));
+            f.instruction(&Instruction::LocalGet(tc_payload));
+            f.instruction(&Instruction::Return);
+        }
+        f.instruction(&Instruction::End);
+    }
+
     /// 1-arg data op: write arg to memory, call rt_data_op, store result.
     fn emit_data_op1(&self, f: &mut Function, dst: Reg, op: i32, src: Reg) {
         self.write_val_to_mem(f, src, 0);
@@ -925,18 +1080,22 @@ impl WasmEmitter {
 
     /// Write a register's value to linear memory at ARGS_BASE + slot*16.
     fn write_val_to_mem(&self, f: &mut Function, reg: Reg, slot: usize) {
-        let offset = (slot * 16) as u64;
-        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        self.write_val_to_mem_offset(f, reg, ARGS_BASE + (slot as i32) * 16);
+    }
+
+    /// Write a register's value to linear memory at an absolute byte offset.
+    fn write_val_to_mem_offset(&self, f: &mut Function, reg: Reg, base: i32) {
+        f.instruction(&Instruction::I32Const(base));
         f.instruction(&Instruction::LocalGet(self.tag_local(reg)));
         f.instruction(&Instruction::I64Store(MemArg {
-            offset,
+            offset: 0,
             align: 3,
             memory_index: 0,
         }));
-        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(base));
         f.instruction(&Instruction::LocalGet(self.pay_local(reg)));
         f.instruction(&Instruction::I64Store(MemArg {
-            offset: offset + 8,
+            offset: 8,
             align: 3,
             memory_index: 0,
         }));
@@ -1099,13 +1258,14 @@ impl WasmEmitter {
 
         self.num_regs = func.num_regs;
         self.local_offset = 4;
+        self.is_closure = true;
         // Params: 0-3. Additional locals: tags [4,4+N), payloads [4+N,4+2N), signal (4+2N)
         self.signal_local = 4 + func.num_regs * 2;
 
         let mut f = Function::new([
             (func.num_regs, ValType::I64), // tags
             (func.num_regs, ValType::I64), // payloads
-            (1, ValType::I32),             // signal_scratch
+            (4, ValType::I32),             // signal_scratch + 3 tail call temps
         ]);
 
         self.emit_cfg(&mut f, func);

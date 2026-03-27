@@ -89,10 +89,33 @@ ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT :=
 ELLE_JIT_THRESHOLD := 0
 
-smoke-vm:
+# WASM backend skip list (Phase 1): tests requiring threads, block/break, or epoch migration
+ifdef ELLE_WASM
+ELLE_SKIP_WASM := -e concurrency.lisp -e blocks.lisp -e print-epoch.lisp -e jit-type-predicates.lisp
+else
+ELLE_SKIP_WASM :=
+endif
+
+examples-vm:
+	@echo "=== examples (VM, JIT disabled) ==="
+	@export ELLE_JIT=0 &&printf '%s\n' examples/*.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
+
+examples-jit:
+	@echo "=== examples (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
+	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' examples/*.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=1)"; exit 1; }
+
+examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
+
+smoke-vm: examples-vm
 	@echo "=== elle scripts (VM, JIT disabled) ==="
 	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_VM) | \
+		grep -v $(ELLE_SKIP_VM) $(ELLE_SKIP_WASM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
@@ -100,9 +123,10 @@ smoke-vm:
 smoke-jit:
 	@echo "=== elle scripts (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
 	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_JIT) $(ELLE_SKIP_WASM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
+		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="

@@ -68,7 +68,12 @@ memory where all variable access happens via `LoadCapture`/`StoreCapture`.
 | Region | Offset | Purpose |
 |--------|--------|---------|
 | Args buffer | 256 (ARGS_BASE) | Call args + data op args |
-| Env buffer | 4096 (ENV_BASE) | Closure env for `call_wasm_closure` |
+| Env stack | 4096+ (ENV_STACK_BASE) | Closure envs for `call_wasm_closure` |
+
+The env region uses a **stack allocator** (`ElleHost::env_stack_ptr`). Each
+`call_wasm_closure` bumps the pointer forward by the env size; on return it
+restores. This prevents nested closure calls from overwriting each other's
+environments. Memory is grown automatically if the stack exceeds one page.
 
 ## WASM local layout
 
@@ -80,7 +85,7 @@ Closure function (params 0-3): `[tags: i64 * N] [payloads: i64 * N] [signal/stat
 Register mapping: `tag_local(Reg(i)) = offset + i`, `pay_local(Reg(i)) = offset + N + i`
 where offset = 0 for entry, 4 for closures.
 
-## What works (37 tests)
+## What works (40 tests)
 
 - All LIR instructions except Eval, PushParamFrame, PopParamFrame, CheckSignalBound, StructRest
 - Constants (int, float, bool, nil, empty_list, symbol, keyword, string)
@@ -88,35 +93,13 @@ where offset = 0 for entry, 4 for closures.
 - Control flow: if/else (nested, cond), let*, defn, letrec
 - All 331 primitives via rt_call
 - Closures: creation, calling, capture, higher-order, recursion, mutual recursion
+- Nested closure calls with captures (env stack allocator)
 - Data: cons, car, cdr, arrays, structs, destructuring, lbox
 - Strings via constant pool
 - Signal propagation (error early-return after host calls)
-- stdlib.lisp compiles to 638KB WASM and runs
+- stdlib.lisp compiles to 638KB WASM and runs; stdlib exports callable
 
 ## Known issues
-
-### Stdlib export initialization (the one blocker)
-
-stdlib.lisp compiles and runs, but calling the returned exports closure
-fails with "rt_call: cannot call integer". The issue: letrec forward
-references use LBox cells. When `call_wasm_closure` builds the env in
-linear memory, it copies the Closure's `env` (captured values) directly.
-But for letrec, these captures include LBox cells that were initialized
-*after* the closure was created — the LBox cell has been updated on the
-host side, but `call_wasm_closure` copies the env from `closure.env`
-which still holds the original LBox handle.
-
-The fix: `call_wasm_closure` should write the LBox *handle* to linear
-memory (not the dereferenced value), and `LoadCapture` in WASM already
-auto-unwraps LBox via `rt_data_op(OP_LOAD_LBOX)`. The issue is that
-`call_wasm_closure` currently writes captures using `value_to_wasm()`
-which gives the handle for the LBox itself — but the WASM LoadCapture
-code only unwraps if the tag is `TAG_LBOX`. Need to verify the tag is
-correctly written.
-
-**To debug:** dump the env contents in `call_wasm_closure` for the
-stdlib exports closure call. Check whether LBox cells are being written
-with their TAG_LBOX tag or if they're being dereferenced prematurely.
 
 ### Missing features (not blockers for Phase 1)
 
