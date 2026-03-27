@@ -337,15 +337,8 @@ pub(super) fn process_raw_completion(
                     // Short-read detection: if we got fewer bytes than
                     // requested and it's not EOF (result_code > 0), buffer
                     // the partial data and return None so the caller
-                    // resubmits for the remaining bytes.  Stream sockets
-                    // (TCP, Unix) are excluded — port/read returns "up to N
-                    // bytes" per POSIX semantics.
-                    let is_stream = port
-                        .as_external::<Port>()
-                        .map(|p| matches!(p.kind(), PortKind::TcpStream | PortKind::UnixStream))
-                        .unwrap_or(false);
-                    if !is_stream && combined.len() < *count {
-                        // Buffer partial data for the next round.
+                    // resubmits for the remaining bytes.
+                    if combined.len() < *count {
                         state.buffer.extend_from_slice(&combined);
                         return None;
                     }
