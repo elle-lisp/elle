@@ -320,34 +320,35 @@ impl SyncBackend {
                 }
             }
             FdStatus::Open => {
-                // Read up to count bytes total
-                let need = count - state.buffer.len();
-                let mut tmp = vec![0u8; need];
-                match Self::read_from_port(port, &mut tmp) {
-                    Ok(0) => {
-                        state.status = FdStatus::Eof;
-                        if state.buffer.is_empty() {
-                            (SIG_OK, Value::NIL)
-                        } else {
-                            let data: Vec<u8> = state.buffer.drain(..).collect();
-                            Self::bytes_to_value(port, data)
+                // Read exactly count bytes, looping on short reads
+                // (TCP sockets and pipes may return fewer bytes than requested)
+                while state.buffer.len() < count {
+                    let need = count - state.buffer.len();
+                    let mut tmp = vec![0u8; need];
+                    match Self::read_from_port(port, &mut tmp) {
+                        Ok(0) => {
+                            state.status = FdStatus::Eof;
+                            break;
+                        }
+                        Ok(n) => {
+                            state.buffer.extend_from_slice(&tmp[..n]);
+                        }
+                        Err(e) => {
+                            state.status = FdStatus::Error(e.to_string());
+                            break;
                         }
                     }
-                    Ok(n) => {
-                        state.buffer.extend_from_slice(&tmp[..n]);
-                        let take = count.min(state.buffer.len());
-                        let data: Vec<u8> = state.buffer.drain(..take).collect();
-                        Self::bytes_to_value(port, data)
+                }
+                if state.buffer.is_empty() {
+                    match &state.status {
+                        FdStatus::Eof => (SIG_OK, Value::NIL),
+                        FdStatus::Error(msg) => (SIG_ERROR, error_val("io-error", msg.clone())),
+                        FdStatus::Open => (SIG_OK, Value::NIL), // shouldn't happen
                     }
-                    Err(e) => {
-                        state.status = FdStatus::Error(e.to_string());
-                        if state.buffer.is_empty() {
-                            (SIG_ERROR, error_val("io-error", e.to_string()))
-                        } else {
-                            let data: Vec<u8> = state.buffer.drain(..).collect();
-                            Self::bytes_to_value(port, data)
-                        }
-                    }
+                } else {
+                    let take = count.min(state.buffer.len());
+                    let data: Vec<u8> = state.buffer.drain(..take).collect();
+                    Self::bytes_to_value(port, data)
                 }
             }
         }

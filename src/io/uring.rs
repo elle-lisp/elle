@@ -801,7 +801,7 @@ pub(super) fn drain_cqes(
                 }
             }
 
-            let completion = process_raw_completion(
+            match process_raw_completion(
                 id,
                 result_code,
                 data,
@@ -809,8 +809,29 @@ pub(super) fn drain_cqes(
                 fd_states,
                 buffer_pool,
                 buf_handle,
-            );
-            completions.push_back(completion);
+            ) {
+                Some(completion) => completions.push_back(completion),
+                None => {
+                    // Short read detected inside process_raw_completion —
+                    // resubmit for the remaining bytes via io_uring.
+                    if let PendingOp::Port {
+                        op: IoOp::Read { count },
+                        ref port_key,
+                        ..
+                    } = pending_op
+                    {
+                        let fd = match port_key {
+                            PortKey::Fd(raw) => *raw,
+                            PortKey::Stdout => 1,
+                            PortKey::Stderr => 2,
+                            PortKey::Stdin => unreachable!(),
+                        };
+                        let buffered = fd_states.get(port_key).map(|s| s.buffer.len()).unwrap_or(0);
+                        let remaining = count - buffered;
+                        read_resubmits.push((id, fd, remaining, pending_op));
+                    }
+                }
+            }
         }
     }
 
