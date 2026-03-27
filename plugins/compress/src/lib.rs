@@ -1,10 +1,10 @@
-//! Elle compress plugin — gzip, deflate, and zstd compression via flate2 and zstd.
+//! Elle compress plugin — gzip, zlib, deflate, and zstd compression via flate2 and zstd.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
 
-use flate2::read::{DeflateDecoder, GzDecoder};
-use flate2::write::{DeflateEncoder, GzEncoder};
+use flate2::read::{DeflateDecoder, GzDecoder, ZlibDecoder};
+use flate2::write::{DeflateEncoder, GzEncoder, ZlibEncoder};
 use flate2::Compression;
 
 use elle::plugin::PluginContext;
@@ -235,6 +235,68 @@ fn prim_inflate(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+fn prim_zlib(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "compress/zlib: expected 1 or 2 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    let data = match extract_byte_data(&args[0], "compress/zlib", "data") {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+    let level = match extract_level(args, "compress/zlib", 0..=9, 6) {
+        Ok(l) => l,
+        Err(e) => return e,
+    };
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(level));
+    if let Err(e) = enc.write_all(&data) {
+        return (
+            SIG_ERROR,
+            error_val("compress-error", format!("compress/zlib: {}", e)),
+        );
+    }
+    match enc.finish() {
+        Ok(out) => (SIG_OK, Value::bytes(out)),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("compress-error", format!("compress/zlib: {}", e)),
+        ),
+    }
+}
+
+fn prim_unzlib(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("compress/unzlib: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let data = match extract_byte_data(&args[0], "compress/unzlib", "data") {
+        Ok(d) => d,
+        Err(e) => return e,
+    };
+    let mut dec = ZlibDecoder::new(&data[..]);
+    let mut out = Vec::new();
+    match dec.read_to_end(&mut out) {
+        Ok(_) => (SIG_OK, Value::bytes(out)),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("compress-error", format!("compress/unzlib: {}", e)),
+        ),
+    }
+}
+
 fn prim_zstd(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
@@ -335,6 +397,28 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         params: &["data"],
         category: "compress",
         example: r#"(compress/inflate compressed-bytes)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "compress/zlib",
+        func: prim_zlib,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Zlib-compress data. Optional compression level (0–9, default 6). Returns bytes.",
+        params: &["data", "level"],
+        category: "compress",
+        example: r#"(compress/zlib "hello")"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "compress/unzlib",
+        func: prim_unzlib,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Zlib-decompress data. Returns bytes.",
+        params: &["data"],
+        category: "compress",
+        example: r#"(compress/unzlib compressed-bytes)"#,
         aliases: &[],
     },
     PrimitiveDef {
