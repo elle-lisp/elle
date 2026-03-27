@@ -10,16 +10,18 @@
 (def do-glob (get glob-plugin :glob))
 
 (def syn-plugin (import "target/release/libelle_syn.so"))
-(def syn-parse-file    (get syn-plugin :parse-file))
-(def syn-items         (get syn-plugin :items))
-(def syn-item-kind     (get syn-plugin :item-kind))
-(def syn-item-name     (get syn-plugin :item-name))
-(def syn-fn-info       (get syn-plugin :fn-info))
-(def syn-struct-fields (get syn-plugin :struct-fields))
-(def syn-enum-variants (get syn-plugin :enum-variants))
-(def syn-visibility    (get syn-plugin :visibility))
-(def syn-attributes    (get syn-plugin :attributes))
-(def syn-to-string     (get syn-plugin :to-string))
+(def syn-parse-file     (get syn-plugin :parse-file))
+(def syn-items          (get syn-plugin :items))
+(def syn-item-kind      (get syn-plugin :item-kind))
+(def syn-item-name      (get syn-plugin :item-name))
+(def syn-fn-info        (get syn-plugin :fn-info))
+(def syn-fn-calls       (get syn-plugin :fn-calls))
+(def syn-primitive-defs (get syn-plugin :primitive-defs))
+(def syn-struct-fields  (get syn-plugin :struct-fields))
+(def syn-enum-variants  (get syn-plugin :enum-variants))
+(def syn-visibility     (get syn-plugin :visibility))
+(def syn-attributes     (get syn-plugin :attributes))
+(def syn-to-string      (get syn-plugin :to-string))
 
 (def ox (import "target/release/libelle_oxigraph.so"))
 
@@ -189,7 +191,14 @@
                   (when (get info :unsafe?)
                     (nt-triple buf subj (nt-iri (string/format "{}:unsafe" ns)) (nt-lit "true")))
                   (emit-vis subj item)
-                  (emit-attrs subj item))
+                  (emit-attrs subj item)
+                  # Emit call edges from function body.
+                  (let [[[ok? calls] (protect (syn-fn-calls item))]]
+                    (when ok?
+                      (each callee in calls
+                        (nt-triple buf subj
+                                   (nt-iri (string/format "{}:calls" ns))
+                                   (rust-subj "fn" callee))))))
 
                 :struct
                 (let* [[info (syn-struct-fields item)]
@@ -231,6 +240,26 @@
                   (nt-triple buf subj (nt-iri (string/format "{}:path" ns)) (nt-lit path))
                   (nt-triple buf subj (nt-iri (string/format "{}:file" ns)) (nt-lit file))
                   (emit-vis subj item))
+
+                :const
+                (begin
+                  (emit-named "Const" item)
+                  # Extract primitive name→func mappings from PRIMITIVES tables.
+                  (when (= (syn-item-name item) "PRIMITIVES")
+                    (let [[[ok? defs] (protect (syn-primitive-defs item))]]
+                      (when ok?
+                        (each def in defs
+                          (var elle-name (get def :name))
+                          (var rust-fn   (get def :func))
+                          (nt-triple buf
+                                     (nt-iri (string/format "urn:elle:fn:{}" (nt-encode elle-name)))
+                                     (nt-iri "urn:elle:implemented-by")
+                                     (rust-subj "fn" rust-fn))
+                          (nt-triple buf
+                                     (rust-subj "fn" rust-fn)
+                                     (nt-iri (string/format "{}:implements" ns))
+                                     (nt-iri (string/format "urn:elle:fn:{}" (nt-encode elle-name)))))))))
+
                 nil))))))))
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -259,6 +288,11 @@
 
 (eprintln "loading Rust triples...")
 (ox:load store rust-triples :ntriples)
+(eprintln "  done")
+
+# Flush to disk so data survives process exit.
+(eprintln "flushing store...")
+(ox:store-flush store)
 (eprintln "  done")
 
 # Verify

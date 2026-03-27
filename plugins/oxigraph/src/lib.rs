@@ -17,6 +17,34 @@ use oxigraph::sparql::QueryResults;
 use oxigraph::store::Store;
 
 // ---------------------------------------------------------------------------
+// fd save/restore (RocksDB redirects stdio)
+// ---------------------------------------------------------------------------
+
+mod fd_ops {
+    extern "C" {
+        pub fn dup(fd: i32) -> i32;
+        pub fn dup2(oldfd: i32, newfd: i32) -> i32;
+        pub fn close(fd: i32) -> i32;
+    }
+}
+
+fn save_fd(fd: i32) -> Option<i32> {
+    let ret = unsafe { fd_ops::dup(fd) };
+    if ret >= 0 {
+        Some(ret)
+    } else {
+        None
+    }
+}
+
+fn restore_fd(saved: i32, target: i32) {
+    unsafe {
+        fd_ops::dup2(saved, target);
+        fd_ops::close(saved);
+    };
+}
+
+// ---------------------------------------------------------------------------
 // Plugin entry point
 // ---------------------------------------------------------------------------
 
@@ -293,7 +321,19 @@ fn prim_store_open(args: &[Value]) -> (SignalBits, Value) {
             );
         }
     };
-    match Store::open(&path) {
+    // RocksDB redirects stderr (and sometimes stdout) for its internal
+    // logging. Save and restore the file descriptors around Store::open
+    // so the caller's stdio remains intact.
+    let saved_stdout = save_fd(1);
+    let saved_stderr = save_fd(2);
+    let result = Store::open(&path);
+    if let Some(fd) = saved_stdout {
+        restore_fd(fd, 1);
+    }
+    if let Some(fd) = saved_stderr {
+        restore_fd(fd, 2);
+    }
+    match result {
         Ok(store) => (SIG_OK, Value::external("oxigraph/store", store)),
         Err(e) => oxigraph_err("oxigraph/store-open", e),
     }
@@ -821,6 +861,17 @@ fn prim_dump(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+fn prim_store_flush(args: &[Value]) -> (SignalBits, Value) {
+    let store = match get_store(args, "oxigraph/store-flush") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    match store.flush() {
+        Ok(()) => (SIG_OK, Value::NIL),
+        Err(e) => oxigraph_err("oxigraph/store-flush", e),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Registration table
 // ---------------------------------------------------------------------------
@@ -968,6 +1019,17 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         params: &["store", "format"],
         category: "oxigraph",
         example: "(oxigraph/dump store :nquads)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "oxigraph/store-flush",
+        func: prim_store_flush,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Flush pending writes to disk. Call after load/insert/update on persistent stores.",
+        params: &["store"],
+        category: "oxigraph",
+        example: "(oxigraph/store-flush store)",
         aliases: &[],
     },
 ];
