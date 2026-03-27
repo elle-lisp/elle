@@ -110,4 +110,4 @@
   (assign sigv4-mod ((import-file "lib/aws/sigv4.lisp") crypto jiff))
 
   {:request (fn [service method path & args]
-    (aws-request-impl tls service method path (or (first args) {})))})
+    (aws-request-impl tls service method path (or (get args 0) {})))})

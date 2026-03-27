@@ -89,5 +89,7 @@
 # ============================================================================
 
 (let (([ok? _] (protect ((fn () (slice 42 0 1)))))) (assert (not ok?) "slice on non-sequence errors"))
-(let (([ok? _] (protect ((fn () (slice [1 2 3] -1 2)))))) (assert (not ok?) "slice negative start errors"))
-(let (([ok? _] (protect ((fn () (slice [1 2 3] 0 -1)))))) (assert (not ok?) "slice negative end errors"))
+(assert (= (slice [1 2 3] -1 3) [3]) "slice negative start resolves")
+(assert (= (slice [1 2 3] 0 -1) [1 2]) "slice negative end resolves")
+(assert (= (slice [1 2 3] -2 -1) [2]) "slice both negative")
+(assert (= (slice "hello" -3 -1) "ll") "slice string negative")

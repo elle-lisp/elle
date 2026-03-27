@@ -260,6 +260,31 @@ pub(crate) fn prim_is_fn(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// Check if value is callable (function, collection, or parameter)
+pub(crate) fn prim_is_callable(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val("arity-error", "callable?: expected 1 argument"),
+        );
+    }
+    let v = &args[0];
+    let callable = v.is_closure()
+        || v.is_native_fn()
+        || v.as_parameter().is_some()
+        || v.as_struct().is_some()
+        || v.as_struct_mut().is_some()
+        || v.as_array().is_some()
+        || v.as_array_mut().is_some()
+        || v.as_set().is_some()
+        || v.as_set_mut().is_some()
+        || v.is_string()
+        || v.is_string_mut()
+        || v.is_bytes()
+        || v.is_bytes_mut();
+    (SIG_OK, Value::bool(callable))
+}
+
 /// Check if value is a native (built-in) function
 pub(crate) fn prim_is_native_fn(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -600,6 +625,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["x"],
         category: "types",
         example: "(fn? +) #=> true\n(fn? (fn [x] x)) #=> true\n(fn? 42) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "callable?",
+        func: prim_is_callable,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if value can be called: closures, native functions, parameters, structs, arrays, sets, strings, and bytes.",
+        params: &["x"],
+        category: "types",
+        example: "(callable? +) #=> true\n(callable? {:a 1}) #=> true\n(callable? |1 2|) #=> true\n(callable? [1 2]) #=> true\n(callable? 42) #=> false",
         aliases: &[],
     },
     PrimitiveDef {

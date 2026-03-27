@@ -1248,7 +1248,7 @@
 (defn ev/shutdown [& args]
   "Shut down the current event loop. Optional timeout-ms (default 0) gives
    fibers time to clean up before being hard-killed."
-  (let [[timeout-ms (or (first args) 0)]
+  (let [[timeout-ms (or (get args 0) 0)]
         [shutdown-fn (*shutdown*)]]
     (when (nil? shutdown-fn)
       (error {:error :state-error :message "ev/shutdown: not inside an event loop"}))

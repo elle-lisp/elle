@@ -306,19 +306,10 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let index = match args[1].as_int() {
-        Some(i) => {
-            if i < 0 {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        "insert: index must be non-negative".to_string(),
-                    ),
-                );
-            }
-            i as usize
-        }
+    use crate::primitives::access::resolve_index;
+
+    let raw_index = match args[1].as_int() {
+        Some(i) => i,
         None => {
             return (
                 SIG_ERROR,
@@ -332,11 +323,32 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
-        if index > vec.len() {
-            vec.push(args[2]);
-        } else {
-            vec.insert(index, args[2]);
-        }
+        // insert allows index == len (append), so try resolve_index first,
+        // then also accept len exactly for non-negative raw_index
+        let index = match resolve_index(raw_index, vec.len()) {
+            Some(i) => i,
+            None => {
+                // Allow index == len for append (only when non-negative or resolved == len)
+                if raw_index >= 0 && raw_index as usize <= vec.len() {
+                    raw_index as usize
+                } else if raw_index < 0 {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "argument-error",
+                            format!(
+                                "insert: index {} out of bounds (length {})",
+                                raw_index,
+                                vec.len()
+                            ),
+                        ),
+                    );
+                } else {
+                    vec.len() // clamp to append
+                }
+            }
+        };
+        vec.insert(index, args[2]);
         drop(vec);
         return (SIG_OK, args[0]);
     }
@@ -367,11 +379,29 @@ pub(crate) fn prim_insert(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let mut buf = buf_ref.borrow_mut();
-        if index > buf.len() {
-            buf.push(byte);
-        } else {
-            buf.insert(index, byte);
-        }
+        let index = match resolve_index(raw_index, buf.len()) {
+            Some(i) => i,
+            None => {
+                if raw_index >= 0 && raw_index as usize <= buf.len() {
+                    raw_index as usize
+                } else if raw_index < 0 {
+                    return (
+                        SIG_ERROR,
+                        error_val(
+                            "argument-error",
+                            format!(
+                                "insert: index {} out of bounds (length {})",
+                                raw_index,
+                                buf.len()
+                            ),
+                        ),
+                    );
+                } else {
+                    buf.len()
+                }
+            }
+        };
+        buf.insert(index, byte);
         drop(buf);
         return (SIG_OK, args[0]);
     }
@@ -400,19 +430,10 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let index = match args[1].as_int() {
-        Some(i) => {
-            if i < 0 {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        "remove: index must be non-negative".to_string(),
-                    ),
-                );
-            }
-            i as usize
-        }
+    use crate::primitives::access::resolve_index;
+
+    let raw_index = match args[1].as_int() {
+        Some(i) => i,
         None => {
             return (
                 SIG_ERROR,
@@ -454,9 +475,8 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(vec_ref) = args[0].as_array_mut() {
         let mut vec = vec_ref.borrow_mut();
-        let len = vec.len();
-        if index < len {
-            let remove_count = std::cmp::min(count, len - index);
+        if let Some(index) = resolve_index(raw_index, vec.len()) {
+            let remove_count = std::cmp::min(count, vec.len() - index);
             for _ in 0..remove_count {
                 vec.remove(index);
             }
@@ -467,9 +487,8 @@ pub(crate) fn prim_remove(args: &[Value]) -> (SignalBits, Value) {
 
     if let Some(buf_ref) = args[0].as_string_mut() {
         let mut buf = buf_ref.borrow_mut();
-        let len = buf.len();
-        if index < len {
-            let remove_count = std::cmp::min(count, len - index);
+        if let Some(index) = resolve_index(raw_index, buf.len()) {
+            let remove_count = std::cmp::min(count, buf.len() - index);
             for _ in 0..remove_count {
                 buf.remove(index);
             }

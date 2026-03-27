@@ -8,6 +8,39 @@ use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Resolve a possibly-negative index. Returns None if out of bounds.
+pub(crate) fn resolve_index(index: i64, len: usize) -> Option<usize> {
+    if index >= 0 {
+        let i = index as usize;
+        if i >= len {
+            None
+        } else {
+            Some(i)
+        }
+    } else {
+        let r = index + len as i64;
+        if r < 0 {
+            None
+        } else {
+            Some(r as usize)
+        }
+    }
+}
+
+/// Resolve a possibly-negative slice bound, clamping to [0, len].
+pub(crate) fn resolve_slice_index(index: i64, len: usize) -> usize {
+    if index >= 0 {
+        (index as usize).min(len)
+    } else {
+        let r = index + len as i64;
+        if r < 0 {
+            0
+        } else {
+            r as usize
+        }
+    }
+}
+
 /// Polymorphic get - works on arrays, @arrays, strings, @strings, and structs
 /// `(get collection key [default])`
 pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
@@ -41,10 +74,10 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let borrowed = vec_ref.borrow();
-        if index < 0 || index as usize >= borrowed.len() {
-            return (SIG_OK, default);
+        match resolve_index(index, borrowed.len()) {
+            Some(i) => return (SIG_OK, borrowed[i]),
+            None => return (SIG_OK, default),
         }
-        return (SIG_OK, borrowed[index as usize]);
     }
 
     // Array (immutable indexed collection)
@@ -64,10 +97,10 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        if index < 0 || index as usize >= elems.len() {
-            return (SIG_OK, default);
+        match resolve_index(index, elems.len()) {
+            Some(i) => return (SIG_OK, elems[i]),
+            None => return (SIG_OK, default),
         }
-        return (SIG_OK, elems[index as usize]);
     }
 
     // @string (mutable string — indexed by grapheme cluster position)
@@ -87,9 +120,6 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        if index < 0 {
-            return (SIG_OK, default);
-        }
         let borrowed = buf_ref.borrow();
         let s = match std::str::from_utf8(&borrowed) {
             Ok(s) => s,
@@ -103,11 +133,17 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        match s.graphemes(true).nth(index as usize) {
-            Some(g) => {
-                return (SIG_OK, Value::string(g));
+        if index >= 0 {
+            match s.graphemes(true).nth(index as usize) {
+                Some(g) => return (SIG_OK, Value::string(g)),
+                None => return (SIG_OK, default),
             }
-            None => return (SIG_OK, default),
+        } else {
+            let graphemes: Vec<&str> = s.graphemes(true).collect();
+            match resolve_index(index, graphemes.len()) {
+                Some(i) => return (SIG_OK, Value::string(graphemes[i])),
+                None => return (SIG_OK, default),
+            }
         }
     }
 
@@ -128,16 +164,18 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        if index < 0 || index as usize >= b.len() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("get: index {} out of bounds (length {})", index, b.len()),
-                ),
-            );
+        match resolve_index(index, b.len()) {
+            Some(i) => return (SIG_OK, Value::int(b[i] as i64)),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("get: index {} out of bounds (length {})", index, b.len()),
+                    ),
+                );
+            }
         }
-        return (SIG_OK, Value::int(b[index as usize] as i64));
     }
 
     // @bytes (mutable binary data — indexed by byte position)
@@ -158,20 +196,22 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let borrowed = blob_ref.borrow();
-        if index < 0 || index as usize >= borrowed.len() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!(
-                        "get: index {} out of bounds (length {})",
-                        index,
-                        borrowed.len()
+        match resolve_index(index, borrowed.len()) {
+            Some(i) => return (SIG_OK, Value::int(borrowed[i] as i64)),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!(
+                            "get: index {} out of bounds (length {})",
+                            index,
+                            borrowed.len()
+                        ),
                     ),
-                ),
-            );
+                );
+            }
         }
-        return (SIG_OK, Value::int(borrowed[index as usize] as i64));
     }
 
     // String (immutable grapheme cluster sequence)
@@ -193,12 +233,17 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                         )
                     }
                 };
-                if index < 0 {
-                    return (SIG_OK, default);
-                }
-                match s.graphemes(true).nth(index as usize) {
-                    Some(g) => (SIG_OK, Value::string(g)),
-                    None => (SIG_OK, default),
+                if index >= 0 {
+                    match s.graphemes(true).nth(index as usize) {
+                        Some(g) => (SIG_OK, Value::string(g)),
+                        None => (SIG_OK, default),
+                    }
+                } else {
+                    let graphemes: Vec<&str> = s.graphemes(true).collect();
+                    match resolve_index(index, graphemes.len()) {
+                        Some(i) => (SIG_OK, Value::string(graphemes[i])),
+                        None => (SIG_OK, default),
+                    }
                 }
             })
             .unwrap();
@@ -280,17 +325,31 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        if index < 0 {
-            return (SIG_OK, default);
-        }
+        // Compute list length for negative index resolution
+        let resolved = if index >= 0 {
+            index as usize
+        } else {
+            // Walk to compute length
+            let mut len = 0usize;
+            let mut cur = args[0];
+            while let Some(c) = cur.as_cons() {
+                len += 1;
+                cur = c.rest;
+            }
+            let r = index + len as i64;
+            if r < 0 {
+                return (SIG_OK, default);
+            }
+            r as usize
+        };
         let mut current = args[0];
-        let mut i = 0i64;
+        let mut i = 0usize;
         loop {
             if current.is_empty_list() || current.is_nil() {
                 return (SIG_OK, default);
             }
             if let Some(cons) = current.as_cons() {
-                if i == index {
+                if i == resolved {
                     return (SIG_OK, cons.first);
                 }
                 current = cons.rest;
@@ -393,22 +452,25 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let graphemes: Vec<&str> = s.graphemes(true).collect();
-        if index < 0 || index as usize >= graphemes.len() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!(
-                        "put: index {} out of bounds (length {})",
-                        index,
-                        graphemes.len()
+        let resolved = match resolve_index(index, graphemes.len()) {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!(
+                            "put: index {} out of bounds (length {})",
+                            index,
+                            graphemes.len()
+                        ),
                     ),
-                ),
-            );
-        }
+                );
+            }
+        };
         let mut result = String::new();
         for (i, g) in graphemes.iter().enumerate() {
-            if i == index as usize {
+            if i == resolved {
                 result.push_str(&replacement);
             } else {
                 result.push_str(g);
@@ -461,16 +523,19 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let len = blob_ref.borrow().len();
-        if index < 0 || (index as usize) >= len {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("put: index {} out of bounds (length {})", index, len),
-                ),
-            );
-        }
-        blob_ref.borrow_mut()[index as usize] = byte;
+        let resolved = match resolve_index(index, len) {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("put: index {} out of bounds (length {})", index, len),
+                    ),
+                );
+            }
+        };
+        blob_ref.borrow_mut()[resolved] = byte;
         return (SIG_OK, args[0]);
     }
 
@@ -492,16 +557,19 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
             }
         };
         let len = vec_ref.borrow().len();
-        if index < 0 || (index as usize) >= len {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("put: index {} out of bounds (length {})", index, len),
-                ),
-            );
-        }
-        vec_ref.borrow_mut()[index as usize] = args[2];
+        let resolved = match resolve_index(index, len) {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("put: index {} out of bounds (length {})", index, len),
+                    ),
+                );
+            }
+        };
+        vec_ref.borrow_mut()[resolved] = args[2];
         return (SIG_OK, args[0]); // Return the mutated array
     }
 
@@ -522,21 +590,24 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        if index < 0 || (index as usize) >= elems.len() {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!(
-                        "put: index {} out of bounds (length {})",
-                        index,
-                        elems.len()
+        let resolved = match resolve_index(index, elems.len()) {
+            Some(i) => i,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!(
+                            "put: index {} out of bounds (length {})",
+                            index,
+                            elems.len()
+                        ),
                     ),
-                ),
-            );
-        }
+                );
+            }
+        };
         let mut new_elems = elems.to_vec();
-        new_elems[index as usize] = args[2];
+        new_elems[resolved] = args[2];
         return (SIG_OK, Value::array(new_elems));
     }
 
@@ -575,22 +646,25 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                     }
                 };
                 let graphemes: Vec<&str> = s.graphemes(true).collect();
-                if index < 0 || index as usize >= graphemes.len() {
-                    return (
-                        SIG_ERROR,
-                        error_val(
-                            "argument-error",
-                            format!(
-                                "put: index {} out of bounds (length {})",
-                                index,
-                                graphemes.len()
+                let resolved = match resolve_index(index, graphemes.len()) {
+                    Some(i) => i,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "argument-error",
+                                format!(
+                                    "put: index {} out of bounds (length {})",
+                                    index,
+                                    graphemes.len()
+                                ),
                             ),
-                        ),
-                    );
-                }
+                        );
+                    }
+                };
                 let mut result = String::new();
                 for (i, g) in graphemes.iter().enumerate() {
-                    if i == index as usize {
+                    if i == resolved {
                         result.push_str(&replacement);
                     } else {
                         result.push_str(g);
