@@ -4,9 +4,9 @@ Executable programs that demonstrate Elle's features. Each file is a
 self-contained application — run it, read the output, read the source.
 
 ```bash
-cargo run -- examples/hello.lisp         # start here
-cargo run -- examples/basics.lisp        # then explore
-cargo test --test '*'                    # run them all
+./target/release/elle examples/hello.lisp   # start here
+./target/release/elle examples/basics.lisp  # then explore
+make smoke                                  # run them all
 ```
 
 ## Files

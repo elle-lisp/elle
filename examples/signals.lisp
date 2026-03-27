@@ -14,10 +14,7 @@
 # Signals are flow-control interrupts. They suspend execution and let the
 # caller decide how to respond. Restricting signals has nothing to do with
 # side-effects — a function can mutate state and still be silent.
-
-# ========================================
-# 1. Declaring user-defined signals
-# ========================================
+## ── Declaring user-defined signals ─────────────────────────────────
 
 # Declare four user-defined signal keywords.
 # Each becomes a named flow-control interrupt the caller can intercept.
@@ -25,10 +22,7 @@
 (signal :progress) # signals a progress update — caller can display or collect
 (signal :log)      # signals a log entry — caller decides whether to record it
 (signal :audit)    # signals an audit event — caller can log for compliance
-
-# ========================================
-# 2. Early termination with :abort
-# ========================================
+## ── Early termination with :abort ──────────────────────────────────
 
 # find-first scans a list and signals :abort the moment pred is satisfied.
 # The rest of the list is never visited — no wasted work.
@@ -55,10 +49,7 @@
 (print "  first even in [1 3 5 4 7 9]: ") # display prompt
 (println found)                                # print the found value
 (assert (= found 4) "abort: found first even, stopped early")
-
-# ========================================
-# 3. Progress reporting
-# ========================================
+## ── Progress reporting ─────────────────────────────────────────────
 
 # process-item squares each element and signals :progress after each one.
 # The caller drives the fiber and collects the updates.
@@ -99,10 +90,7 @@
 (assert (= (-> progress-log (get 4) (get :result)) 25) "progress: 5^2 = 25")
 (print "  progress log: ") # display prompt
 (println progress-log)         # print the log
-
-# ========================================
-# 4. Logging — caller decides what to do with log entries
-# ========================================
+## ── Logging — caller decides what to do with log entries ───────────
 
 # compute-with-log does a two-step calculation, signaling :log at each step.
 # The caller chooses whether to collect, display, or ignore the entries.
@@ -159,10 +147,7 @@
 (assert (= direct-result 20) "log: same result when logs ignored")
 (print "  direct result (logs ignored): ") # display prompt
 (println direct-result)                        # print the result
-
-# ========================================
-# 5. silence — protecting iteration from signaling callbacks
-# ========================================
+## ── silence — protecting iteration from signaling callbacks ────────
 
 # safe-map requires its callback to be silent.
 # If f could signal mid-iteration, the partially-built result list
@@ -179,7 +164,7 @@
   (* x x))  # pure arithmetic, no signals
 
 (def squares (safe-map square [1 2 3 4 5]))  # works fine
-(assert (= squares (list 1 4 9 16 25)) "safe-map: silent callback works")
+(assert (= squares [1 4 9 16 25]) "safe-map: silent callback works")
 (print "  squares: ") # display prompt
 (println squares)         # print the squares
 
@@ -222,7 +207,7 @@
 
 # safe-iterate accepts double because double has no :yield signal
 (def doubled-results (safe-iterate double [1 2 3]))
-(assert (= doubled-results (list 2 4 6)) "squelch: silent callback passes")
+(assert (= doubled-results [2 4 6]) "squelch: silent callback passes")
 (print "  doubled results: ")  # display prompt
 (println doubled-results)          # print the results
 
@@ -243,10 +228,7 @@
 (match err4:error
   (:signal-violation (print "  squelch: callback tried to yield — rejected\n"))
   (_ (error err4)))
-
-# ========================================
-# 6. silence — ensuring callbacks are silent
-# ========================================
+## ── silence — ensuring callbacks are silent ────────────────────────
 
 # run-pure requires its plugin to be silent — no signals at all.
 # This is the strongest guarantee: the plugin cannot interrupt execution.
@@ -283,10 +265,7 @@
 (match err:error
   (:signal-violation (print "  plugin: callback tried to yield — rejected by silence\n"))
   (_ (error err)))
-
-# ========================================
-# 7. Signal composition — combining bits
-# ========================================
+## ── Signal composition — combining bits ────────────────────────────
 
 # sensitive-op performs a sensitive operation and signals both :log and :audit
 # simultaneously — one emission, two bits set in the signal mask.

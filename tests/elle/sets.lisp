@@ -94,7 +94,7 @@
 # Mixed Immutable and Mutable Sets
 # ============================================================================
 
-(assert (not (= (set 1 2 3) @|1 2 3|)) "immutable and mutable sets are not equal")
+(assert (= (set 1 2 3) @|1 2 3|) "set = @set (cross-mutability equality)")
 
 (assert (set? (set 1 2 3)) "immutable set passes set? predicate")
 
@@ -209,13 +209,13 @@
 
 (assert (not (= @|1 2 3| @|1 2|)) "mutable sets with different elements are not equal")
 
-(assert (not (= (set 1 2 3) @|1 2 3|)) "immutable and mutable sets are not equal (different types)")
+(assert (= (set 1 2 3) @|1 2 3|) "set = @set (cross-mutability equality, different types)")
 
 (assert (= (set 1 2 3) (set 1 2 3)) "sets created with constructor are equal")
 
 (assert (= (set 1 2 3) (set 3 2 1)) "sets created with constructor are equal regardless of order")
 
-(assert (not (= (set 1 2 3) (@set 1 2 3))) "immutable and mutable sets from constructors are not equal")
+(assert (= (set 1 2 3) (@set 1 2 3)) "set = @set from constructors (cross-mutability equality)")
 
 # ============================================================================
 # Freezing on Insert

@@ -64,10 +64,7 @@ pub fn compile(
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
 
-    Ok(CompileResult {
-        bytecode,
-        warnings: Vec::new(),
-    })
+    Ok(CompileResult { bytecode })
 }
 
 /// Classify an expanded top-level form into a `FileForm`.
@@ -174,8 +171,5 @@ pub fn compile_file(
     let (mut bytecode, _, _) = emitter.emit(&lir_func);
     bytecode.signal = signal;
 
-    Ok(CompileResult {
-        bytecode,
-        warnings: Vec::new(),
-    })
+    Ok(CompileResult { bytecode })
 }

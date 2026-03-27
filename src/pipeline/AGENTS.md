@@ -23,7 +23,7 @@ Does NOT:
 
 | Function | Purpose |
 |----------|---------|
-| `compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a single expression to bytecode. Returns `CompileResult` with bytecode and warnings. |
+| `compile(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | Compile a single expression to bytecode. Returns `CompileResult` with bytecode. |
 | `compile_file(source: &str, symbols: &mut SymbolTable) -> Result<CompileResult, String>` | **PRIMARY FILE ENTRY POINT.** Compile a file as a single synthetic letrec. All top-level forms are analyzed together, enabling mutual recursion. Returns a single `CompileResult`. |
 | `analyze(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | Analyze a single expression to HIR (no bytecode). Used by linter and LSP. |
 | `analyze_file(source: &str, symbols: &mut SymbolTable, vm: &mut VM) -> Result<AnalyzeResult, String>` | **PRIMARY FILE ENTRY POINT.** Analyze a file as a single synthetic letrec (no bytecode). Used by linter and LSP for file-level analysis. |
@@ -108,8 +108,8 @@ Properties:
 ## Invariants
 
 1. **`compile` and `eval` are single-form entry points.** They parse a single
-    expression, expand it, analyze it, and compile/execute it. Used for REPL
-    and macro body evaluation.
+    expression, expand it, analyze it, and compile/execute it. Used for macro
+    body evaluation. The REPL uses `compile_file` for multi-form support.
 
 2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
     They parse all top-level forms, expand them, classify them, and analyze

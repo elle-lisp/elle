@@ -8,12 +8,7 @@
 #   fiber/clear-fuel   — remove the budget, restoring unlimited execution
 #   |:fuel| mask       — fibers that surface :fuel signals to the parent
 #   Round-robin scheduler — the motivating use case: time-sliced execution
-
-
-
-# ========================================
-# 1. Basic fuel exhaustion
-# ========================================
+## ── Basic fuel exhaustion ──────────────────────────────────────────
 
 # A fiber counting from 0 upward. With a small budget it runs partway,
 # then pauses on a :fuel signal so the caller can decide what to do next.
@@ -35,41 +30,33 @@
 
 # Set a small fuel budget — not enough to finish.
 (fiber/set-fuel f1 50)
-(print "  fuel before first resume: ") (println (fiber/fuel f1))
+(println "  fuel before first resume: " (fiber/fuel f1))
 (assert (= (fiber/fuel f1) 50) "fuel is 50 before resume")
 
 # Resume: runs until fuel is exhausted, then pauses.
 (fiber/resume f1)
-(print "  status after fuel exhaustion: ") (println (fiber/status f1))
+(println "  status after fuel exhaustion: " (fiber/status f1))
 (assert (= (fiber/status f1) :paused) "fiber pauses when fuel runs out")
 
 # After pausing on :fuel, the remaining budget is 0.
-(print "  fuel after exhaustion: ") (println (fiber/fuel f1))
+(println "  fuel after exhaustion: " (fiber/fuel f1))
 (assert (= (fiber/fuel f1) 0) "fuel reads 0 after exhaustion")
-
-
-# ========================================
-# 2. Refuel and resume to completion
-# ========================================
+## ── Refuel and resume to completion ────────────────────────────────
 
 # Refuel with a generous budget and let the fiber run to completion.
 (fiber/set-fuel f1 100000)
-(print "  fuel after refuel: ") (println (fiber/fuel f1))
+(println "  fuel after refuel: " (fiber/fuel f1))
 (assert (= (fiber/fuel f1) 100000) "fuel is 100000 after refuel")
 
 (fiber/resume f1)
-(print "  status after completion: ") (println (fiber/status f1))
+(println "  status after completion: " (fiber/status f1))
 (assert (= (fiber/status f1) :dead) "fiber reaches :dead after completion")
 
 # The return value (sum of 0..999 = 499500) is accessible via fiber/value.
 (def total (fiber/value f1))
-(print "  sum 0..999: ") (println total)
+(println "  sum 0..999: " total)
 (assert (= total 499500) "sum of 0..999 is 499500")
-
-
-# ========================================
-# 3. Unlimited fiber
-# ========================================
+## ── Unlimited fiber ────────────────────────────────────────────────
 
 # A fiber with no fuel limit runs to completion in a single resume.
 (def f2 (fiber/new
@@ -82,18 +69,14 @@
   |:fuel|))
 
 # fiber/fuel returns nil when no budget is set.
-(print "  fuel on unlimited fiber: ") (println (fiber/fuel f2))
+(println "  fuel on unlimited fiber: " (fiber/fuel f2))
 (assert (nil? (fiber/fuel f2)) "unlimited fiber has nil fuel")
 
 (fiber/resume f2)
-(print "  status after single resume: ") (println (fiber/status f2))
+(println "  status after single resume: " (fiber/status f2))
 (assert (= (fiber/status f2) :dead) "unlimited fiber runs to :dead in one resume")
 (assert (= (fiber/value f2) 4950) "sum 0..99 = 4950")
-
-
-# ========================================
-# 4. Round-robin scheduler
-# ========================================
+## ── Round-robin scheduler ──────────────────────────────────────────
 
 # The motivating use case: run N fibers concurrently, giving each a time
 # slice, cycling until all are done. Each fiber does independent work and
@@ -142,7 +125,7 @@
       (loop 1 0)))
   |:fuel|))
 
-(print "  running 3 fibers round-robin...") (println "")
+(println "  running 3 fibers round-robin..." "")
 
 # Simple round-robin: maintain an active list, give each fiber one slice per round.
 (var active @[sum-fiber squares-fiber doubles-fiber])
@@ -163,10 +146,10 @@
     (assign i (+ i 1)))
   (assign active next-active))
 
-(print "  completed in rounds: ") (println round-count)
-(print "  sum 1..70: ")         (println (get rr-results 0))
-(print "  sum of squares: ")    (println (get rr-results 1))
-(print "  sum of doubles: ")    (println (get rr-results 2))
+(println "  completed in rounds: " round-count)
+(println "  sum 1..70: " (get rr-results 0))
+(println "  sum of squares: " (get rr-results 1))
+(println "  sum of doubles: " (get rr-results 2))
 
 # All 3 fibers interleaved across exactly 2 scheduling rounds.
 (assert (= round-count 2) "3 fibers complete in 2 rounds with slice=50")
@@ -177,11 +160,7 @@
 (assert (= (fiber/status sum-fiber) :dead) "sum-fiber is :dead")
 (assert (= (fiber/status squares-fiber) :dead) "squares-fiber is :dead")
 (assert (= (fiber/status doubles-fiber) :dead) "doubles-fiber is :dead")
-
-
-# ========================================
-# 5. fiber/clear-fuel
-# ========================================
+## ── fiber/clear-fuel ───────────────────────────────────────────────
 
 # A paused fiber can have its fuel limit removed entirely.
 # After clear-fuel, the next resume runs to completion without interruption.
@@ -192,11 +171,11 @@
 
 # Remove the fuel limit — next resume runs all the way to :dead.
 (fiber/clear-fuel f3)
-(print "  fuel after clear-fuel: ") (println (fiber/fuel f3))
+(println "  fuel after clear-fuel: " (fiber/fuel f3))
 (assert (nil? (fiber/fuel f3)) "fuel is nil after clear-fuel")
 
 (fiber/resume f3)
-(print "  status after clear-fuel resume: ") (println (fiber/status f3))
+(println "  status after clear-fuel resume: " (fiber/status f3))
 (assert (= (fiber/status f3) :dead) "fiber runs to :dead after clear-fuel")
 
 # sum of 0..199 = 199*200/2 = 19900

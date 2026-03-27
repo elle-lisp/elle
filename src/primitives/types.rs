@@ -285,6 +285,19 @@ pub(crate) fn prim_is_mutable(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::bool(args[0].is_mutable()))
 }
 
+pub(crate) fn prim_is_immutable(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("immutable?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    (SIG_OK, Value::bool(!args[0].is_mutable()))
+}
+
 /// Check if value is numerically zero
 pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -304,6 +317,111 @@ pub(crate) fn prim_is_zero(args: &[Value]) -> (SignalBits, Value) {
         false
     };
     (SIG_OK, Value::bool(is_zero))
+}
+
+pub(crate) fn prim_is_nonzero(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("nonzero?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let is_nonzero = if let Some(i) = args[0].as_int() {
+        i != 0
+    } else if let Some(f) = args[0].as_float() {
+        f != 0.0
+    } else {
+        true
+    };
+    (SIG_OK, Value::bool(is_nonzero))
+}
+
+/// Check if value is NaN
+pub(crate) fn prim_is_nan(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("nan?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let is_nan = args[0].as_number().map(|n| n.is_nan()).unwrap_or(false);
+    (SIG_OK, Value::bool(is_nan))
+}
+
+/// Check if value is positive
+pub(crate) fn prim_is_pos(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("pos?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(i) = args[0].as_int() {
+        return (SIG_OK, Value::bool(i > 0));
+    }
+    if let Some(f) = args[0].as_number() {
+        return (SIG_OK, Value::bool(f > 0.0));
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("pos?: expected number, got {}", args[0].type_name()),
+        ),
+    )
+}
+
+/// Check if value is negative
+pub(crate) fn prim_is_neg(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("neg?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(i) = args[0].as_int() {
+        return (SIG_OK, Value::bool(i < 0));
+    }
+    if let Some(f) = args[0].as_number() {
+        return (SIG_OK, Value::bool(f < 0.0));
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("neg?: expected number, got {}", args[0].type_name()),
+        ),
+    )
+}
+
+/// Check if value is infinite
+pub(crate) fn prim_is_inf(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("inf?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let is_inf = args[0]
+        .as_number()
+        .map(|n| n.is_infinite())
+        .unwrap_or(false);
+    (SIG_OK, Value::bool(is_inf))
 }
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
@@ -507,6 +625,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
+        name: "immutable?",
+        func: prim_is_immutable,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is immutable (cannot be modified in-place).",
+        params: &["value"],
+        category: "predicate",
+        example: "(immutable? [1 2 3]) #=> true\n(immutable? @[1 2 3]) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "zero?",
         func: prim_is_zero,
         signal: Signal::errors(),
@@ -516,5 +645,60 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "predicate",
         example: "(zero? 0) #=> true\n(zero? 0.0) #=> true\n(zero? 1) #=> false",
         aliases: &[],
+    },
+    PrimitiveDef {
+        name: "nonzero?",
+        func: prim_is_nonzero,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is numerically nonzero.",
+        params: &["value"],
+        category: "predicate",
+        example: "(nonzero? 1) #=> true\n(nonzero? 0) #=> false\n(nonzero? 0.0) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "nan?",
+        func: prim_is_nan,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is NaN (not a number). Returns false for non-numbers.",
+        params: &["value"],
+        category: "predicate",
+        example: "(nan? (/ 0.0 0.0)) #=> true\n(nan? 1.0) #=> false\n(nan? 42) #=> false",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "pos?",
+        func: prim_is_pos,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if number is positive (greater than zero).",
+        params: &["value"],
+        category: "predicate",
+        example: "(pos? 1) #=> true\n(pos? 0) #=> false\n(pos? -1) #=> false",
+        aliases: &["positive?"],
+    },
+    PrimitiveDef {
+        name: "neg?",
+        func: prim_is_neg,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if number is negative (less than zero).",
+        params: &["value"],
+        category: "predicate",
+        example: "(neg? -1) #=> true\n(neg? 0) #=> false\n(neg? 1) #=> false",
+        aliases: &["negative?"],
+    },
+    PrimitiveDef {
+        name: "inf?",
+        func: prim_is_inf,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Check if value is infinite. Returns false for non-numbers.",
+        params: &["value"],
+        category: "predicate",
+        example: "(inf? (/ 1.0 0.0)) #=> true\n(inf? 1.0) #=> false\n(inf? 42) #=> false",
+        aliases: &["infinite?"],
     },
 ];

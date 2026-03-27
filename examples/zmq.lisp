@@ -31,10 +31,10 @@
     (let [[msg (concat "hello " (string i))]]
       (zmq:send req msg)
       (let [[received (zmq:recv-string rep)]]
-        (print "  server got: ") (println received)
+        (println "  server got: " received)
         (zmq:send rep (concat "echo: " received)))
       (let [[reply (zmq:recv-string req)]]
-        (print "  client got: ") (println reply))))
+        (println "  client got: " reply))))
 
   (zmq:close req)
   (zmq:close rep))
@@ -54,7 +54,7 @@
 
   (each _ in (range 3)
     (let [[msg (zmq:recv-string pull)]]
-      (print "  worker got: ") (println msg)))
+      (println "  worker got: " msg)))
 
   (zmq:close push)
   (zmq:close pull))
@@ -71,9 +71,9 @@
 
   (zmq:send-multipart req ["identity" "header" "body"])
   (let [[frames (zmq:recv-multipart rep)]]
-    (print "  received ") (print (length frames)) (println " frames:")
+    (println "  received " (length frames) " frames:")
     (each frame in frames
-      (print "    ") (println (string frame))))
+      (println "    " (string frame))))
 
   (zmq:close req)
   (zmq:close rep))

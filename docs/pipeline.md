@@ -32,7 +32,6 @@ Module: `src/pipeline/` (7 files, ~540 lines of implementation).
 ```rust
 pub struct CompileResult {
     pub bytecode: Bytecode,
-    pub warnings: Vec<String>,  // currently always empty
 }
 
 pub struct AnalyzeResult {
@@ -262,8 +261,9 @@ have their own VM.
 
 ## Known issues
 
-`CompileResult.warnings` is always empty (dead field). Single-form functions
+Single-form functions
 (`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
 a file compiled via `compile` instead of `compile_file` will treat all global
-calls as `Polymorphic`. The REPL uses `compile` (single-form), so REPL-defined
-functions don't get cross-form signal inference.
+calls as `Polymorphic`. The REPL uses `compile_file`, so multi-form input and
+cross-form signal inference work. However, definitions from previous inputs
+are not visible to signal inference in later inputs.

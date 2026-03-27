@@ -12,12 +12,7 @@
 #   let / let*           — destructuring with sequential dependencies
 #   Struct/@struct by-key  — extraction, missing keys, nested structs
 #   Match dispatch       — struct tag patterns for polymorphic data
-
-
-
-# ========================================
-# 1. Strict destructuring semantics
-# ========================================
+## ── Strict destructuring semantics ─────────────────────────────────
 
 # Destructuring errors on shape mismatch. Missing elements or keys → error.
 # Extra elements are silently ignored.
@@ -37,13 +32,9 @@
 # Array pattern on non-indexed value: error
 (let (([ok? _] (protect ((fn () (def [sn-i sn-j] "hello")))))) (assert (not ok?) "strict: string in array pattern => error"))
 
-(print "  strict:  (def (a b c) (list 10)) errors on missing element") (println "")
-(print "  strict:  (def (x y) 42) errors on wrong type") (println "")
-
-
-# ========================================
-# 2. Wildcard _ pattern
-# ========================================
+(println "  strict:  (def (a b c) (list 10)) errors on missing element" "")
+(println "  strict:  (def (x y) 42) errors on wrong type" "")
+## ── Wildcard _ pattern ─────────────────────────────────────────────
 
 # _ discards the matched value — no binding is created.
 (def (_ wc-mid _) (list 10 20 30))
@@ -62,13 +53,9 @@
 (def {:x _ :y wc-y} {:x 10 :y 20})
 (assert (= wc-y 20) "wildcard: struct skip value")
 
-(print "  (def (_ mid _) (list 10 20 30)) → mid=") (println wc-mid)
-(print "  (def ((_ inner) _) ...) → inner=") (println wc-inner)
-
-
-# ========================================
-# 3. List & rest
-# ========================================
+(println "  (def (_ mid _) (list 10 20 30)) → mid=" wc-mid)
+(println "  (def ((_ inner) _) ...) → inner=" wc-inner)
+## ── List & rest ────────────────────────────────────────────────────
 
 # & rest collects remaining list elements into a new list.
 (def (lr-head & lr-tail) (list 1 2 3 4))
@@ -85,14 +72,9 @@
 (def (_ & lr-skip) (list :discard :keep1 :keep2))
 (assert (= (first lr-skip) :keep1) "wildcard+rest: first of rest")
 
-(print "  (h & t) from (1 2 3 4)    → h=") (print lr-head)
-  (print " t=") (println lr-tail)
-(print "  (a b & r) from (1 2)      → r=") (println lr-empty)
-
-
-# ========================================
-# 4. Tuple/array & rest
-# ========================================
+(println "  (h & t) from (1 2 3 4)    → h=" lr-head " t=" lr-tail)
+(println "  (a b & r) from (1 2)      → r=" lr-empty)
+## ── Tuple/array & rest ─────────────────────────────────────────────
 
 # Array rest collects remaining elements into an array.
 (def [ar-first & ar-rest] [10 20 30])
@@ -108,14 +90,8 @@
 (def [ar-only & ar-none] [42])
 (assert (= (length ar-none) 0) "array rest empty: no remaining")
 
-(print "  [a & r] from [10 20 30] → a=") (print ar-first)
-  (print " r=") (print ar-rest)
-  (print " array?=") (println (array? ar-rest))
-
-
-# ========================================
-# 5. Nested patterns
-# ========================================
+(println "  [a & r] from [10 20 30] → a=" ar-first " r=" ar-rest " array?=" (array? ar-rest))
+## ── Nested patterns ────────────────────────────────────────────────
 
 # List inside list — two levels deep
 (def ((np-a np-b) np-c) (list (list 1 2) 3))
@@ -140,14 +116,10 @@
 (assert (= np-name "Alice") "nested: mixed list+struct name")
 (assert (= np-role :admin) "nested: mixed list+struct role")
 
-(print "  nested list     → a=") (print np-a) (print " c=") (println np-c)
-(print "  struct-in-struct → v=") (println np-val)
-(print "  list+struct mix  → ") (print np-name) (print " ") (println np-role)
-
-
-# ========================================
-# 6. Mutable destructuring
-# ========================================
+(println "  nested list     → a=" np-a " c=" np-c)
+(println "  struct-in-struct → v=" np-val)
+(println "  list+struct mix  → " np-name " " np-role)
+## ── Mutable destructuring ──────────────────────────────────────────
 
 # var + destructuring creates mutable bindings.
 (var (mut-a mut-b) (list 1 2))
@@ -164,13 +136,9 @@
 (assign mut-count (+ mut-count 1))
 (assert (= mut-count 2) "mutable: struct incremented twice")
 
-(print "  var list then set → a=") (println mut-a)
-(print "  var struct, 2 increments → c=") (println mut-count)
-
-
-# ========================================
-# 7. let and let* destructuring
-# ========================================
+(println "  var list then set → a=" mut-a)
+(println "  var struct, 2 increments → c=" mut-count)
+## ── let and let* destructuring ─────────────────────────────────────
 
 # Destructuring in let — parallel bindings
 (def let-sum (let ([(la lb) (list 10 20)]) (+ la lb)))
@@ -190,14 +158,10 @@
     total))
 (assert (= star-chain 7) "let*: chained destructure")
 
-(print "  (let (((a b) (list 10 20))) (+ a b)) → ") (println let-sum)
-(print "  (let* (((a b) ...) (c (+ a b))) c)   → ") (println star-seq)
-(print "  chained let* across 3 bindings        → ") (println star-chain)
-
-
-# ========================================
-# 8. Struct/@struct by-key extraction
-# ========================================
+(println "  (let (((a b) (list 10 20))) (+ a b)) → " let-sum)
+(println "  (let* (((a b) ...) (c (+ a b))) c)   → " star-seq)
+(println "  chained let* across 3 bindings        → " star-chain)
+## ── Struct/@struct by-key extraction ───────────────────────────────
 
 # Struct: extract named fields
 (def {:name sk-name :age sk-age} {:name "Bob" :age 25})
@@ -228,14 +192,10 @@
 (def let-tbl (let ([{:a la :b lb} {:a 10 :b 20}]) (+ la lb)))
 (assert (= let-tbl 30) "let: @struct destructure sum")
 
-(print "  {:name n :age a} → ") (print sk-name) (print ", ") (println sk-age)
-(print "  nested 3-level struct → host=") (println sk-host)
-(print "  missing key → error (strict semantics)") (println "")
-
-
-# ========================================
-# 9. Match dispatch on struct tags
-# ========================================
+(println "  {:name n :age a} → " sk-name ", " sk-age)
+(println "  nested 3-level struct → host=" sk-host)
+(println "  missing key → error (strict semantics)" "")
+## ── Match dispatch on struct tags ──────────────────────────────────
 
 # Pattern matching on literal key values: tagged structs as sum types.
 # {:type :circle :radius r} only matches when :type is literally :circle.
@@ -262,9 +222,9 @@
 (assert (= (db-host {:db {:host "pg.local"}}) "pg.local") "match: nested struct")
 (assert (= (db-host {:nodb true}) "unknown") "match: missing :db")
 
-(print "  area(circle r=5) = ") (println (area {:type :circle :radius 5}))
-(print "  area(square s=7) = ") (println (area {:type :square :side 7}))
-(print "  db-host(pg)      = ") (println (db-host {:db {:host "pg"}}))
+(println "  area(circle r=5) = " (area {:type :circle :radius 5}))
+(println "  area(square s=7) = " (area {:type :square :side 7}))
+(println "  db-host(pg)      = " (db-host {:db {:host "pg"}}))
 
 
 (println "")

@@ -606,6 +606,57 @@ pub(crate) fn prim_string_size_of(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// Repeat a string N times
+pub(crate) fn prim_string_repeat(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("string/repeat: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+    let s = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+        s
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string/repeat: expected string, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    };
+    let n = if let Some(i) = args[1].as_int() {
+        if i < 0 {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "string/repeat: count must be non-negative".to_string(),
+                ),
+            );
+        }
+        i as usize
+    } else {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "string/repeat: expected integer count, got {}",
+                    args[1].type_name()
+                ),
+            ),
+        );
+    };
+    (SIG_OK, Value::string(s.repeat(n)))
+}
+
 /// Declarative primitive definitions for string module.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -750,6 +801,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "string",
         example: "(string/size-of \"café\") #=> 5",
         aliases: &[],
+    },
+    PrimitiveDef {
+        name: "string/repeat",
+        func: prim_string_repeat,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Repeat a string N times.",
+        params: &["s", "n"],
+        category: "string",
+        example: "(string/repeat \"ab\" 3) #=> \"ababab\"",
+        aliases: &["string-repeat"],
     },
 ];
 

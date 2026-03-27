@@ -27,11 +27,7 @@
 (defn tmp [name]
   "Build a path inside the temp directory."
   (path/join tmp-dir name))
-
-
-# ========================================
-# 1. Async I/O — ev/spawn, ev/join, ev/map
-# ========================================
+## ── Async I/O — ev/spawn, ev/join, ev/map ──────────────────────────
 
 # Elle is async-first: all port I/O (port/read, port/write, port/read-all,
 # port/read-line, port/flush) yields to the scheduler.  User code runs inside
@@ -46,7 +42,7 @@
   (ev/map (fn [path] (string (port/read-all (port/open path :read))))
           [(tmp "async-1.txt") (tmp "async-2.txt")]))
 (assert (= (length results) 2) "ev/map: both concurrent reads completed")
-(print "  ev/map: ") (println results)
+(println "  ev/map: " results)
 
 # ev/spawn + ev/join: manual spawn and wait.
 (let ([f (ev/spawn (fn [] (+ 1 2)))])
@@ -59,11 +55,7 @@
     (ev/join a)
     (ev/join b))
   (assert (= (length ran) 2) "ev/spawn: both spawned fibers ran"))
-
-
-# ========================================
-# 2. Port I/O
-# ========================================
+## ── Port I/O ───────────────────────────────────────────────────────
 
 # port/write, port/read, port/read-all, port/read-line, port/flush are
 # async primitives that yield SIG_IO.  They work directly since user code
@@ -81,18 +73,14 @@
 # port/read-line: partial reads leave stale uring buffers, so test last.
 (let ((p (port/open (tmp "port-test.txt") :read)))
   (let ((line1 (port/read-line p)))
-    (print "  port/read-line: ") (println line1)
+    (println "  port/read-line: " line1)
     (assert (= line1 "line one") "port/read-line reads first line"))
   (port/close p))
-
-
-# ========================================
-# 3. Read/write files (sync convenience)
-# ========================================
+## ── Read/write files (sync convenience) ────────────────────────────
 
 (spit (tmp "hello.txt") "Hello, Elle!")
 (def content (slurp (tmp "hello.txt")))
-(print "  slurp: ") (println content)
+(println "  slurp: " content)
 (assert (= content "Hello, Elle!") "spit then slurp round-trips")
 
 (append-file (tmp "hello.txt") "\nSecond line.")
@@ -101,13 +89,9 @@
 
 (spit (tmp "lines.txt") "alpha\nbeta\ngamma\n")
 (def lines (read-lines (tmp "lines.txt")))
-(print "  lines: ") (println lines)
+(println "  lines: " lines)
 (assert (= (length lines) 3) "read-lines splits on newlines")
-
-
-# ========================================
-# 4. File info
-# ========================================
+## ── File info ──────────────────────────────────────────────────────
 
 (assert (file-exists? (tmp "hello.txt")) "file-exists? on existing file")
 (assert (not (file-exists? (tmp "nope.txt"))) "file-exists? on missing file")
@@ -115,13 +99,9 @@
 (assert (directory? tmp-dir) "directory? on directory")
 
 (def size (file-size (tmp "hello.txt")))
-(print "  file-size: ") (println size)
+(println "  file-size: " size)
 (assert (= size 25) "file-size returns byte count")
-
-
-# ========================================
-# 4b. file/stat and file/lstat
-# ========================================
+## ── file/stat and file/lstat ───────────────────────────────────────
 
 # file/stat on a regular file
 (def info (file/stat (tmp "hello.txt")))
@@ -157,11 +137,7 @@
 (assert (= (get linfo :size) 25) "file/lstat :size matches for regular file")
 (assert (not (get linfo :is-symlink)) "file/lstat :is-symlink false for regular file")
 (assert (= (get linfo :file-type) "file") "file/lstat :file-type for regular file")
-
-
-# ========================================
-# 5. File operations
-# ========================================
+## ── File operations ────────────────────────────────────────────────
 
 (copy-file (tmp "hello.txt") (tmp "copy.txt"))
 (assert (file-exists? (tmp "copy.txt")) "copy-file creates target")
@@ -170,11 +146,7 @@
 (rename-file (tmp "copy.txt") (tmp "renamed.txt"))
 (assert (not (file-exists? (tmp "copy.txt"))) "rename-file removes source")
 (assert (file-exists? (tmp "renamed.txt")) "rename-file creates target")
-
-
-# ========================================
-# 6. Directory operations
-# ========================================
+## ── Directory operations ───────────────────────────────────────────
 
 (def sub (tmp "sub"))
 (create-directory sub)
@@ -188,13 +160,9 @@
 (spit (path/join sub "one.txt") "1")
 (spit (path/join sub "two.txt") "2")
 (def entries (list-directory sub))
-(print "  list-directory: ") (println entries)
+(println "  list-directory: " entries)
 (assert (= (length entries) 2) "list-directory returns all entries")
-
-
-# ========================================
-# 7. Path operations
-# ========================================
+## ── Path operations ────────────────────────────────────────────────
 
 (def p "/home/user/docs/report.pdf")
 (assert (= (path/filename p) "report.pdf") "path/filename")
@@ -202,17 +170,13 @@
 (assert (= (path/parent p) "/home/user/docs") "path/parent")
 
 (def joined (path/join "a" "b" "c.txt"))
-(print "  path/join: ") (println joined)
+(println "  path/join: " joined)
 (assert (= joined "a/b/c.txt") "path/join composes segments")
 
 (def cwd (path/cwd))
-(print "  path/cwd: ") (println cwd)
+(println "  path/cwd: " cwd)
 (assert (> (length cwd) 0) "path/cwd returns non-empty string")
-
-
-# ========================================
-# 8. File seeking and positioning
-# ========================================
+## ── File seeking and positioning ───────────────────────────────────
 
 (let ((p (port/open "/tmp/elle-example-seek-tell" :read-write)))
   # Write 10 bytes
@@ -251,11 +215,7 @@
 
   (port/close p)
   (subprocess/system "rm" ["-f" "/tmp/elle-example-seek-tell"]))
-
-
-# ========================================
-# 9. JSON: parsing scalars
-# ========================================
+## ── JSON: parsing scalars ──────────────────────────────────────────
 
 (assert (= (json-parse "null") nil) "json-parse null")
 (assert (= (json-parse "true") true) "json-parse true")
@@ -263,11 +223,7 @@
 (assert (= (json-parse "42") 42) "json-parse integer")
 (assert (= (json-parse "3.14") 3.14) "json-parse float")
 (assert (= (json-parse "\"hello\"") "hello") "json-parse string")
-
-
-# ========================================
-# 10. JSON: serializing scalars
-# ========================================
+## ── JSON: serializing scalars ──────────────────────────────────────
 
 (assert (= (json-serialize nil) "null") "json-serialize nil")
 (assert (= (json-serialize true) "true") "json-serialize true")
@@ -275,19 +231,15 @@
 (assert (= (json-serialize 42) "42") "json-serialize int")
 (assert (= (json-serialize 3.14) "3.14") "json-serialize float")
 (assert (= (json-serialize "hello") "\"hello\"") "json-serialize string")
-
-
-# ========================================
-# 11. JSON: collections and nesting
-# ========================================
+## ── JSON: collections and nesting ──────────────────────────────────
 
 (def arr (json-parse "[1, \"two\", true, null]"))
-(print "  parsed array: ") (println arr)
+(println "  parsed array: " arr)
 (assert (= (length arr) 4) "json-parse array length")
 (assert (= (get arr 1) "two") "json-parse array element")
 
 (def obj (json-parse "{\"name\": \"Alice\", \"age\": 30}"))
-(print "  parsed object: ") (println obj)
+(println "  parsed object: " obj)
 (assert (= (get obj "name") "Alice") "json-parse object field")
 (assert (= (get obj "age") 30) "json-parse object field int")
 
@@ -295,11 +247,7 @@
 (def user (get nested "user"))
 (assert (= (get user "name") "Bob") "nested object access")
 (assert (= (get (get user "scores") 0) 95) "nested array access")
-
-
-# ========================================
-# 12. JSON: round-trip
-# ========================================
+## ── JSON: round-trip ───────────────────────────────────────────────
 
 # Serialize a list as a JSON array.
 (assert (= (json-serialize (list 1 2 3)) "[1,2,3]") "list serializes as array")
@@ -309,7 +257,7 @@
 (put product "price" 24.99)
 (put product "sale" true)
 (def updated-json (json-serialize product))
-(print "  round-trip: ") (println updated-json)
+(println "  round-trip: " updated-json)
 
 # Pretty-print for readability.
 (def pretty (json-serialize-pretty product))
@@ -319,11 +267,7 @@
 (def reparsed (json-parse updated-json))
 (assert (= (get reparsed "price") 24.99) "round-trip preserves modified value")
 (assert (= (get reparsed "sale") true) "round-trip preserves added field")
-
-
-# ========================================
-# 13. JSON: file I/O integration
-# ========================================
+## ── JSON: file I/O integration ─────────────────────────────────────
 
 # Write JSON to a file and read it back — the natural use case.
 (def config (@struct))
@@ -333,14 +277,10 @@
 
 (spit (tmp "config.json") (json-serialize-pretty config))
 (def loaded (json-parse (slurp (tmp "config.json"))))
-(print "  config from file: ") (println loaded)
+(println "  config from file: " loaded)
 (assert (= (get loaded "app") "elle-test") "JSON config round-trips through file")
 (assert (= (get loaded "version") 1) "JSON config preserves int")
-
-
-# ========================================
-# Cleanup
-# ========================================
+## ── Cleanup ────────────────────────────────────────────────────────
 
 # Remove all files and directories we created.
 (delete-file (tmp "async-1.txt"))

@@ -43,8 +43,7 @@
 
   (defn send-packet [conn packet-bytes]
     "Write encoded packet bytes to the connection's TCP port."
-    # TODO: (when (nonempty? packet-bytes) ...) once nonempty? lands
-    (when (> (length packet-bytes) 0)
+    (when (nonempty? packet-bytes)
       (port/write conn:tcp packet-bytes)))
 
   ## ── Public API ────────────────────────────────────────────────────
@@ -60,8 +59,7 @@
       (let [[[ok? err] (protect
                          (send-packet conn (plugin:encode-connect mqtt opts))
                          (let [[ack (drive-until conn (packet-type? :connack))]]
-                           # TODO: (unless (zero? ack:code) ...) once zero? lands
-                           (unless (= ack:code 0)
+                           (unless (zero? ack:code)
                              (error {:error :mqtt-error
                                      :message (concat "mqtt: CONNACK rejected, code="
                                                       (string ack:code))}))))]]

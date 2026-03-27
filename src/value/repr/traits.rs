@@ -23,38 +23,90 @@ impl PartialEq for Value {
             return false;
         }
 
-        // Both are heap values — different tags mean different types, never equal.
-        if self.tag != other.tag {
-            return false;
-        }
-
-        // Both are heap values of the same tag — dereference and compare contents.
+        // Both are heap values — dereference and compare contents.
+        // Mutable/immutable pairs of the same collection type are equal
+        // if their contents are equal: (= [1 2] @[1 2]) is true.
         unsafe {
             let self_obj = deref(*self);
             let other_obj = deref(*other);
 
             match (self_obj, other_obj) {
-                // String comparison
+                // String: immutable × immutable
                 (HeapObject::LString { s: s1, .. }, HeapObject::LString { s: s2, .. }) => s1 == s2,
+                // String × @string
+                (HeapObject::LString { s: s1, .. }, HeapObject::LStringMut { data: b2, .. })
+                | (HeapObject::LStringMut { data: b2, .. }, HeapObject::LString { s: s1, .. }) => {
+                    s1.as_bytes() == b2.borrow().as_slice()
+                }
+                // @string × @string
+                (
+                    HeapObject::LStringMut { data: b1, .. },
+                    HeapObject::LStringMut { data: b2, .. },
+                ) => *b1.borrow() == *b2.borrow(),
 
                 // Cons cell comparison (Cons::PartialEq ignores traits)
                 (HeapObject::Cons(c1), HeapObject::Cons(c2)) => c1 == c2,
 
-                // Array comparison (compare contents)
+                // Array: immutable × immutable
+                (
+                    HeapObject::LArray { elements: a1, .. },
+                    HeapObject::LArray { elements: a2, .. },
+                ) => a1 == a2,
+                // Array × @array
+                (
+                    HeapObject::LArray { elements: a1, .. },
+                    HeapObject::LArrayMut { data: a2, .. },
+                )
+                | (
+                    HeapObject::LArrayMut { data: a2, .. },
+                    HeapObject::LArray { elements: a1, .. },
+                ) => a1.as_slice() == a2.borrow().as_slice(),
+                // @array × @array
                 (
                     HeapObject::LArrayMut { data: v1, .. },
                     HeapObject::LArrayMut { data: v2, .. },
                 ) => v1.borrow().as_slice() == v2.borrow().as_slice(),
 
-                // Table comparison (compare contents)
+                // Struct: immutable × immutable
+                (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
+                    s1 == s2
+                }
+                // Struct × @struct
+                (HeapObject::LStruct { data: s1, .. }, HeapObject::LStructMut { data: s2, .. })
+                | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) => {
+                    *s1 == *s2.borrow()
+                }
+                // @struct × @struct
                 (
                     HeapObject::LStructMut { data: t1, .. },
                     HeapObject::LStructMut { data: t2, .. },
                 ) => *t1.borrow() == *t2.borrow(),
 
-                // Struct comparison (compare contents)
-                (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
-                    s1 == s2
+                // Bytes: immutable × immutable
+                (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => {
+                    b1 == b2
+                }
+                // Bytes × @bytes
+                (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytesMut { data: b2, .. })
+                | (HeapObject::LBytesMut { data: b2, .. }, HeapObject::LBytes { data: b1, .. }) => {
+                    b1.as_slice() == b2.borrow().as_slice()
+                }
+                // @bytes × @bytes
+                (
+                    HeapObject::LBytesMut { data: b1, .. },
+                    HeapObject::LBytesMut { data: b2, .. },
+                ) => *b1.borrow() == *b2.borrow(),
+
+                // Set: immutable × immutable
+                (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => s1 == s2,
+                // Set × @set
+                (HeapObject::LSet { data: s1, .. }, HeapObject::LSetMut { data: s2, .. })
+                | (HeapObject::LSetMut { data: s2, .. }, HeapObject::LSet { data: s1, .. }) => {
+                    *s1 == *s2.borrow()
+                }
+                // @set × @set
+                (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
+                    *s1.borrow() == *s2.borrow()
                 }
 
                 // Closure comparison (compare by reference)
@@ -62,18 +114,6 @@ impl PartialEq for Value {
                     HeapObject::Closure { closure: c1, .. },
                     HeapObject::Closure { closure: c2, .. },
                 ) => std::rc::Rc::ptr_eq(c1, c2),
-
-                // Array comparison (compare contents element-wise)
-                (
-                    HeapObject::LArray { elements: t1, .. },
-                    HeapObject::LArray { elements: t2, .. },
-                ) => t1 == t2,
-
-                // @string comparison (compare contents)
-                (
-                    HeapObject::LStringMut { data: b1, .. },
-                    HeapObject::LStringMut { data: b2, .. },
-                ) => *b1.borrow() == *b2.borrow(),
 
                 // Box comparison (compare contents)
                 (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
@@ -124,27 +164,7 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
-                // Bytes comparison (compare contents)
-                (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => {
-                    b1 == b2
-                }
-
-                // @bytes comparison (compare contents)
-                (
-                    HeapObject::LBytesMut { data: b1, .. },
-                    HeapObject::LBytesMut { data: b2, .. },
-                ) => *b1.borrow() == *b2.borrow(),
-
-                // Set comparison (compare contents)
-                (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => s1 == s2,
-
-                // Mutable set comparison (compare contents)
-                (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
-                    *s1.borrow() == *s2.borrow()
-                }
-
-                // Different types are not equal (same tag but mismatched variants — shouldn't
-                // happen given tag-guarded dispatch above, but safe fallback).
+                // Different types are not equal.
                 _ => false,
             }
         }
