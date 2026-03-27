@@ -16,6 +16,7 @@ depend on other modules or plugins take them as arguments.
 | `aws/` | AWS service modules (generated) + SigV4 signing — see [`aws/AGENTS.md`](aws/AGENTS.md) |
 | `contract.lisp` | Compositional validation for function boundaries |
 | `lua.lisp` | Lua standard library compatibility prelude |
+| `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
 
 ---
 
@@ -310,4 +311,122 @@ echo '((import-file "lib/redis.lisp"):test)' | ./target/debug/elle
 
 # Full integration tests (requires Redis on 127.0.0.1:6379)
 ./target/debug/elle tests/elle/redis.lisp
+```
+
+---
+
+# lib/process
+
+Agent guide for `lib/process.lisp` — Erlang-style processes with GenServer,
+Actor, and Supervisor.
+
+## Purpose
+
+Cooperative multitasking with message passing, links, monitors, timers, and
+named process registration. Built on fibers with fuel-based preemption.
+GenServer/Actor/Supervisor are OTP-like abstractions layered on top.
+
+## Exported functions
+
+### Process primitives (yield-based, used inside processes)
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `send` | `pid msg` | `:ok` |
+| `recv` | | message |
+| `recv-match` | `pred` | matching message |
+| `recv-timeout` | `ticks` | message or `:timeout` |
+| `self` | | pid |
+| `spawn` | `closure` | pid |
+| `spawn-link` | `closure` | pid |
+| `spawn-monitor` | `closure` | `[pid ref]` |
+| `link` / `unlink` | `pid` | `:ok` |
+| `monitor` / `demonitor` | `pid` / `ref` | ref / `:ok` |
+| `trap-exit` | `bool` | `:ok` |
+| `exit` | `pid reason` | `:ok` |
+| `register` / `unregister` | `name` | `:ok` |
+| `whereis` | `name` | pid or nil |
+| `send-named` | `name msg` | `:ok` |
+| `send-after` | `ticks pid msg` | timer-ref |
+| `cancel-timer` | `ref` | `:ok` or `:not-found` |
+| `put-dict` / `get-dict` / `erase-dict` | `key [val]` | old / val / old |
+
+### GenServer
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `gen-server-start-link` | `callbacks init-arg &named name` | pid |
+| `gen-server-call` | `server request &named timeout` | reply |
+| `gen-server-cast` | `server request` | `:ok` |
+| `gen-server-stop` | `server &named reason timeout` | `:ok` |
+| `gen-server-reply` | `from reply` | `:ok` |
+
+`server` is a pid or registered name (keyword). `from` is `[pid ref]`.
+
+Callbacks struct:
+```lisp
+{:init        (fn [arg] state)
+ :handle-call (fn [request from state] [:reply reply state] | [:noreply state] | [:stop reason reply state])
+ :handle-cast (fn [request state]      [:noreply state] | [:stop reason state])
+ :handle-info (fn [msg state]          [:noreply state] | [:stop reason state])
+ :terminate   (fn [reason state] ...)}
+```
+
+### Actor
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `actor-start-link` | `init-fn &named name` | pid |
+| `actor-get` | `actor fun` | `(fun state)` |
+| `actor-update` | `actor fun` | `:ok` |
+| `actor-cast` | `actor fun` | `:ok` |
+
+### Task
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `task-async` | `fun` | `[pid ref]` |
+| `task-await` | `task &named timeout` | result |
+
+### Supervisor
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `supervisor-start-link` | `children &named name strategy` | pid |
+| `supervisor-start-child` | `sup spec` | child pid |
+| `supervisor-stop-child` | `sup id` | `:ok` |
+| `supervisor-which-children` | `sup` | `[{:id :pid} ...]` |
+
+Child spec: `{:id keyword :start (fn [] ...) :restart :permanent|:transient|:temporary}`
+
+Strategies: `:one-for-one` (default), `:one-for-all`, `:rest-for-one`
+
+### EventManager
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `event-manager-start-link` | `&named name` | pid |
+| `event-manager-add-handler` | `manager mod init-arg` | handler ref |
+| `event-manager-remove-handler` | `manager ref` | `:ok` |
+| `event-manager-notify` | `manager event` | `:ok` (async) |
+| `event-manager-sync-notify` | `manager event` | `:ok` (sync) |
+| `event-manager-which-handlers` | `manager` | `[{:id :mod} ...]` |
+
+Handler module: `{:init (fn [arg] state) :handle-event (fn [event state] [:ok state]|[:remove state]) :terminate (fn [reason state] ...)}`
+
+### External API (outside processes)
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `make-scheduler` | `&named fuel backend` | scheduler struct |
+| `start` | `init &named fuel backend` | scheduler |
+| `run` | `sched init` | nil |
+| `process-info` | `sched pid` | info struct |
+| `inject` | `sched pid msg` | nil |
+
+## Running tests
+
+```bash
+./target/debug/elle tests/elle/process.lisp
+./target/debug/elle tests/elle/genserver.lisp
 ```

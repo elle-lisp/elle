@@ -754,6 +754,505 @@
 
 
 # ============================================================================
+# GenServer — callback-based generic server
+# ============================================================================
+#
+# Message protocol (internal, $-prefixed):
+#   [:$call caller-pid ref request]   client → server
+#   [:$cast request]                  client → server
+#   [:$stop caller-pid ref reason]    client → server
+#   [:$reply ref value]               server → client
+#   [:$call-timeout ref]              timer  → client (self)
+#
+# Callbacks struct:
+#   {:init        (fn [arg] state)
+#    :handle-call (fn [request from state] [:reply reply state] | [:noreply state] | [:stop reason reply state])
+#    :handle-cast (fn [request state]      [:noreply state] | [:stop reason state])
+#    :handle-info (fn [msg state]          [:noreply state] | [:stop reason state])
+#    :terminate   (fn [reason state] ...)}
+#
+# `from` in handle-call is [pid ref] — use gen-server-reply for deferred replies.
+
+# ── helpers ───────────────────────────────────────────────────────────
+
+(defn gen-make-ref []
+  "Per-process monotonic ref for call correlation."
+  (let ([n (or (get-dict :$gen-call-ref) 0)])
+    (put-dict :$gen-call-ref (+ n 1))
+    n))
+
+(defn gen-resolve [server]
+  "Resolve server — pid passes through, keyword does whereis."
+  (if (keyword? server)
+    (let ([pid (whereis server)])
+      (when (nil? pid)
+        (error {:error :noproc
+                :message (string "no process registered as " server)}))
+      pid)
+    server))
+
+# ── client API ────────────────────────────────────────────────────────
+
+(defn gen-server-reply [from reply]
+  "Send a reply to a pending call. from is the [pid ref] pair from handle-call."
+  (send (get from 0) [:$reply (get from 1) reply]))
+
+(defn gen-server-call [server request &named timeout]
+  "Synchronous request-response. Blocks until the server replies."
+  (let* ([pid (gen-resolve server)]
+         [ref (gen-make-ref)]
+         [me  (self)]
+         [timer-ref (when (not (nil? timeout))
+                      (send-after timeout me [:$call-timeout ref]))])
+    (send pid [:$call me ref request])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m)
+                        (>= (length m) 3)
+                        (or (and (= (get m 0) :$reply)        (= (get m 1) ref))
+                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))])
+      (when (not (nil? timer-ref))
+        (cancel-timer timer-ref))
+      (when (= (get reply 0) :$call-timeout)
+        (error {:error :gen-server-timeout
+                :message "gen-server call timed out"}))
+      (get reply 2))))
+
+(defn gen-server-cast [server request]
+  "Asynchronous one-way message. Returns :ok immediately."
+  (send (gen-resolve server) [:$cast request])
+  :ok)
+
+(defn gen-server-stop [server &named reason timeout]
+  "Request graceful shutdown. Blocks until the server acknowledges."
+  (let* ([pid (gen-resolve server)]
+         [ref (gen-make-ref)]
+         [me  (self)]
+         [rsn (or reason :normal)]
+         [timer-ref (when (not (nil? timeout))
+                      (send-after timeout me [:$call-timeout ref]))])
+    (send pid [:$stop me ref rsn])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m)
+                        (>= (length m) 3)
+                        (or (and (= (get m 0) :$reply)        (= (get m 1) ref))
+                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))])
+      (when (not (nil? timer-ref))
+        (cancel-timer timer-ref))
+      (when (= (get reply 0) :$call-timeout)
+        (error {:error :gen-server-timeout
+                :message "gen-server stop timed out"}))
+      (get reply 2))))
+
+# ── server loop ───────────────────────────────────────────────────────
+
+(defn gen-server-start-link [callbacks init-arg &named name]
+  "Spawn a linked GenServer. Returns the pid."
+  (let* ([handle-call (get callbacks :handle-call)]
+         [handle-cast (get callbacks :handle-cast)]
+         [handle-info (or (get callbacks :handle-info)
+                          (fn [_msg state] [:noreply state]))]
+         [on-terminate (or (get callbacks :terminate)
+                           (fn [_reason _state] nil))]
+         [init-fn     (get callbacks :init)])
+
+    (spawn-link (fn []
+      (when (not (nil? name)) (register name))
+
+      # Initialize
+      (var state
+        (let ([result (init-fn init-arg)])
+          (if (and (array? result) (> (length result) 0))
+            (case (get result 0)
+              :ok   (get result 1)
+              :stop (begin (on-terminate (get result 1) nil)
+                           (exit (self) (get result 1))
+                           nil)
+              result)
+            result)))
+
+      # Main loop
+      (forever
+        (let ([msg (recv)])
+          (match msg
+
+            ([:$call caller ref request]
+              (let ([result (handle-call request [caller ref] state)])
+                (match result
+                  ([:reply reply new-state]
+                    (send caller [:$reply ref reply])
+                    (assign state new-state))
+                  ([:noreply new-state]
+                    (assign state new-state))
+                  ([:stop reason reply new-state]
+                    (send caller [:$reply ref reply])
+                    (on-terminate reason new-state)
+                    (exit (self) reason))
+                  (_ (error {:error :gen-server-error
+                             :message "handle-call returned invalid result"})))))
+
+            ([:$cast request]
+              (let ([result (handle-cast request state)])
+                (match result
+                  ([:noreply new-state]
+                    (assign state new-state))
+                  ([:stop reason new-state]
+                    (on-terminate reason new-state)
+                    (exit (self) reason))
+                  (_ (error {:error :gen-server-error
+                             :message "handle-cast returned invalid result"})))))
+
+            ([:$stop caller ref reason]
+              (send caller [:$reply ref :ok])
+              (on-terminate reason state)
+              (exit (self) reason))
+
+            (_
+              (let ([result (handle-info msg state)])
+                (match result
+                  ([:noreply new-state]
+                    (assign state new-state))
+                  ([:stop reason new-state]
+                    (on-terminate reason new-state)
+                    (exit (self) reason))
+                  (_ (error {:error :gen-server-error
+                             :message "handle-info returned invalid result"}))))))))))))
+
+
+# ============================================================================
+# Actor — simple state wrapper over GenServer
+# ============================================================================
+
+(defn actor-start-link [init-fn &named name]
+  "Spawn a linked Actor. init-fn takes no args, returns initial state."
+  (gen-server-start-link
+    {:init        (fn [_] (init-fn))
+     :handle-call (fn [request _from state]
+                    (case (get request 0)
+                      :get    [:reply ((get request 1) state) state]
+                      :update (let ([new-state ((get request 1) state)])
+                                [:reply :ok new-state])))
+     :handle-cast (fn [request state]
+                    (case (get request 0)
+                      :update [:noreply ((get request 1) state)]))}
+    nil :name name))
+
+(defn actor-get [actor fun]
+  "Read a value derived from the actor's state."
+  (gen-server-call actor [:get fun]))
+
+(defn actor-update [actor fun]
+  "Transform the actor's state synchronously. Returns :ok."
+  (gen-server-call actor [:update fun]))
+
+(defn actor-cast [actor fun]
+  "Transform the actor's state asynchronously. Returns :ok."
+  (gen-server-cast actor [:update fun]))
+
+
+# ============================================================================
+# Task — one-shot async work as a process
+# ============================================================================
+#
+# Like ev/spawn but the work runs as a process with a pid, so it can be
+# monitored, linked, and supervised.
+
+(defn task-async [fun]
+  "Spawn a linked process that runs fun and sends the result back. Returns [pid ref]."
+  (let* ([me (self)]
+         [ref (gen-make-ref)]
+         [[child-pid mon-ref] (spawn-monitor (fn []
+           (let ([result (fun)])
+             (send me [:$task-result ref result]))))])
+    [child-pid ref]))
+
+(defn task-await [task &named timeout]
+  "Wait for a task's result. task is [pid ref] from task-async."
+  (let* ([ref (get task 1)]
+         [timer-ref (when (not (nil? timeout))
+                      (send-after timeout (self) [:$call-timeout ref]))])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m)
+                        (>= (length m) 3)
+                        (or (and (= (get m 0) :$task-result)   (= (get m 1) ref))
+                            (and (= (get m 0) :DOWN)           (= (get m 1) (get task 1))))
+                        (or (nil? timer-ref)
+                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))
+                            true))))])
+      (when (not (nil? timer-ref))
+        (cancel-timer timer-ref))
+      (match reply
+        ([:$task-result _ value] value)
+        ([:$call-timeout _ _]
+          (error {:error :task-timeout :message "task-await timed out"}))
+        ([:DOWN _ _ reason]
+          (error {:error :task-error :message (string "task crashed: " reason)}))
+        (_ (error {:error :task-error :message "unexpected task reply"}))))))
+
+
+# ============================================================================
+# Supervisor — child process management
+# ============================================================================
+#
+# Child spec: {:id :name  :start (fn [] ...)  :restart :permanent}
+#   :restart — :permanent (always), :transient (abnormal only), :temporary (never)
+#
+# Strategies:
+#   :one-for-one  — restart only the crashed child
+#   :one-for-all  — restart all children when one crashes
+#   :rest-for-one — restart crashed child and all children started after it
+
+(defn supervisor-start-link [children &named name strategy]
+  "Spawn a linked Supervisor managing the given child specs."
+  (let ([parent (self)]
+        [strat  (or strategy :one-for-one)])
+    (spawn-link (fn []
+      (when (not (nil? name)) (register name))
+      (trap-exit true)
+
+      # Ordered child ids (preserves start order for rest-for-one)
+      (var child-order @[])
+      # id → @{:pid :ref :spec}
+      (var kids @{})
+
+      (var start-child (fn [spec]
+        (let* ([child-pid (spawn-link (get spec :start))]
+               [ref       (monitor child-pid)])
+          (put kids (get spec :id)
+               @{:pid child-pid :ref ref :spec spec})
+          child-pid)))
+
+      (var stop-child (fn [id]
+        (when (has? kids id)
+          (let ([info (get kids id)])
+            (exit (get info :pid) :shutdown)
+            (del kids id)))))
+
+      (var should-restart? (fn [policy reason]
+        (cond
+          ((= policy :permanent) true)
+          ((= policy :transient)
+            (match reason ([:normal _] false) (_ true)))
+          (true false))))
+
+      # Start all initial children in order
+      (each spec in children
+        (push child-order (get spec :id))
+        (start-child spec))
+
+      # Find dead child id by pid
+      (var find-dead-id (fn [dead-pid]
+        (var found nil)
+        (each [id info] in (pairs kids)
+          (when (= (get info :pid) dead-pid)
+            (assign found id)))
+        found))
+
+      # Supervision loop
+      (forever
+        (match (recv)
+
+          ([:DOWN _ref dead-pid reason]
+            (let ([dead-id (find-dead-id dead-pid)])
+              (when (not (nil? dead-id))
+                (let* ([info (get kids dead-id)]
+                       [spec (get info :spec)]
+                       [policy (or (get spec :restart) :permanent)])
+
+                  (case strat
+
+                    :one-for-one
+                      (if (should-restart? policy reason)
+                        (start-child spec)
+                        (del kids dead-id))
+
+                    :one-for-all
+                      (if (should-restart? policy reason)
+                        (begin
+                          # Stop all other children
+                          (each [id info] in (pairs kids)
+                            (when (not (= id dead-id))
+                              (exit (get info :pid) :shutdown)))
+                          # Clear and restart all from specs in order
+                          (assign kids @{})
+                          (each id in child-order
+                            (let ([spec (find (fn [s] (= (get s :id) id)) children)])
+                              (when (not (nil? spec))
+                                (start-child spec)))))
+                        (del kids dead-id))
+
+                    :rest-for-one
+                      (if (should-restart? policy reason)
+                        (begin
+                          # Find position of dead child in order
+                          (var pos 0)
+                          (var found false)
+                          (each id in child-order
+                            (when (not found)
+                              (if (= id dead-id)
+                                (assign found true)
+                                (assign pos (+ pos 1)))))
+                          # Stop children after the dead one
+                          (var i (+ pos 1))
+                          (while (< i (length child-order))
+                            (let ([id (get child-order i)])
+                              (stop-child id))
+                            (assign i (+ i 1)))
+                          # Restart dead child and all after it
+                          (del kids dead-id)
+                          (assign i pos)
+                          (while (< i (length child-order))
+                            (let* ([id (get child-order i)]
+                                   [spec (find (fn [s] (= (get s :id) id)) children)])
+                              (when (not (nil? spec))
+                                (start-child spec)))
+                            (assign i (+ i 1))))
+                        (del kids dead-id)))))))
+
+          ([:$sup-start-child caller ref spec]
+            # DynamicSupervisor: add child at runtime
+            (let ([child-pid (start-child spec)])
+              (push child-order (get spec :id))
+              (send caller [:$reply ref child-pid])))
+
+          ([:$sup-stop-child caller ref id]
+            # DynamicSupervisor: remove child at runtime
+            (stop-child id)
+            (send caller [:$reply ref :ok]))
+
+          ([:$sup-which-children caller ref]
+            (var result @[])
+            (each [id info] in (pairs kids)
+              (push result {:id id :pid (get info :pid)}))
+            (send caller [:$reply ref (freeze result)]))
+
+          ([:EXIT from-pid _reason]
+            (when (= from-pid parent)
+              (each [_id info] in (pairs kids)
+                (exit (get info :pid) :shutdown))
+              (exit (self) :shutdown)))
+
+          (_ nil)))))))
+
+# ── DynamicSupervisor client API ──────────────────────────────────────
+
+(defn supervisor-start-child [sup spec]
+  "Add a child to a running supervisor. Returns the child pid."
+  (let* ([pid (gen-resolve sup)]
+         [ref (gen-make-ref)]
+         [me  (self)])
+    (send pid [:$sup-start-child me ref spec])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+      (get reply 2))))
+
+(defn supervisor-stop-child [sup id]
+  "Remove and stop a child by id."
+  (let* ([pid (gen-resolve sup)]
+         [ref (gen-make-ref)]
+         [me  (self)])
+    (send pid [:$sup-stop-child me ref id])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+      (get reply 2))))
+
+(defn supervisor-which-children [sup]
+  "List active children as [{:id :pid} ...]."
+  (let* ([pid (gen-resolve sup)]
+         [ref (gen-make-ref)]
+         [me  (self)])
+    (send pid [:$sup-which-children me ref])
+    (let ([reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+      (get reply 2))))
+
+
+# ============================================================================
+# EventManager — pub/sub event dispatching
+# ============================================================================
+#
+# Handlers are structs with callbacks:
+#   {:init        (fn [arg] state)
+#    :handle-event (fn [event state] [:ok new-state] | [:remove state])
+#    :terminate    (fn [reason state] ...)}
+
+(defn event-manager-start-link [&named name]
+  "Spawn a linked EventManager. Returns pid."
+  (gen-server-start-link
+    {:init        (fn [_] @[])  # state is @array of @{:id :mod :state}
+     :handle-call (fn [request _from handlers]
+       (match request
+         ([:add-handler mod init-arg]
+           (let ([ref (gen-make-ref)]
+                 [handler-state ((get mod :init) init-arg)])
+             (push handlers @{:id ref :mod mod :state handler-state})
+             [:reply ref handlers]))
+         ([:remove-handler ref]
+           (var remaining @[])
+           (each h in handlers
+             (if (= (get h :id) ref)
+               (let ([term (get (get h :mod) :terminate)])
+                 (when (not (nil? term)) (term :remove (get h :state))))
+               (push remaining h)))
+           [:reply :ok remaining])
+         ([:sync-notify event]
+           (var remaining @[])
+           (each h in handlers
+             (let ([result ((get (get h :mod) :handle-event) event (get h :state))])
+               (match result
+                 ([:ok new-state]
+                   (put h :state new-state)
+                   (push remaining h))
+                 ([:remove _new-state]
+                   (let ([term (get (get h :mod) :terminate)])
+                     (when (not (nil? term)) (term :remove (get h :state)))))
+                 (_ (push remaining h)))))
+           [:reply :ok remaining])
+         ([:which-handlers]
+           (var result @[])
+           (each h in handlers
+             (push result {:id (get h :id) :mod (get h :mod)}))
+           [:reply (freeze result) handlers])
+         (_ [:reply :unknown handlers])))
+     :handle-cast (fn [request handlers]
+       (match request
+         ([:notify event]
+           (var remaining @[])
+           (each h in handlers
+             (let ([result ((get (get h :mod) :handle-event) event (get h :state))])
+               (match result
+                 ([:ok new-state]
+                   (put h :state new-state)
+                   (push remaining h))
+                 ([:remove _new-state]
+                   (let ([term (get (get h :mod) :terminate)])
+                     (when (not (nil? term)) (term :remove (get h :state)))))
+                 (_ (push remaining h)))))
+           [:noreply remaining])
+         (_ [:noreply handlers])))}
+    nil :name name))
+
+(defn event-manager-add-handler [manager mod init-arg]
+  "Add a handler module to the event manager. Returns handler ref."
+  (gen-server-call manager [:add-handler mod init-arg]))
+
+(defn event-manager-remove-handler [manager ref]
+  "Remove a handler by ref."
+  (gen-server-call manager [:remove-handler ref]))
+
+(defn event-manager-notify [manager event]
+  "Broadcast an event to all handlers (async)."
+  (gen-server-cast manager [:notify event]))
+
+(defn event-manager-sync-notify [manager event]
+  "Broadcast an event to all handlers (sync — waits for processing)."
+  (gen-server-call manager [:sync-notify event]))
+
+(defn event-manager-which-handlers [manager]
+  "List registered handlers."
+  (gen-server-call manager [:which-handlers]))
+
+
+# ============================================================================
 # Exports
 # ============================================================================
 
@@ -782,6 +1281,37 @@
    :put-dict      put-dict
    :get-dict      get-dict
    :erase-dict    erase-dict
+
+   # GenServer
+   :gen-server-start-link  gen-server-start-link
+   :gen-server-call        gen-server-call
+   :gen-server-cast        gen-server-cast
+   :gen-server-stop        gen-server-stop
+   :gen-server-reply       gen-server-reply
+
+   # Actor
+   :actor-start-link  actor-start-link
+   :actor-get         actor-get
+   :actor-update      actor-update
+   :actor-cast        actor-cast
+
+   # Task
+   :task-async  task-async
+   :task-await  task-await
+
+   # Supervisor
+   :supervisor-start-link    supervisor-start-link
+   :supervisor-start-child   supervisor-start-child
+   :supervisor-stop-child    supervisor-stop-child
+   :supervisor-which-children supervisor-which-children
+
+   # EventManager
+   :event-manager-start-link    event-manager-start-link
+   :event-manager-add-handler   event-manager-add-handler
+   :event-manager-remove-handler event-manager-remove-handler
+   :event-manager-notify        event-manager-notify
+   :event-manager-sync-notify   event-manager-sync-notify
+   :event-manager-which-handlers event-manager-which-handlers
 
    # External API
    :make-scheduler make-scheduler
