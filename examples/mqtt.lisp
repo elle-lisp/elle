@@ -57,29 +57,25 @@
 # Synthetic CONNACK (success)
 (feed-fn st (bytes 32 2 0 0))
 (let [[pkt (poll-fn st)]]
-  (print "  CONNACK:     code=") (print pkt:code)
-  (print " session-present=") (println pkt:session-present))
+  (println "  CONNACK:     code=" pkt:code " session-present=" pkt:session-present))
 
-(print "  connected?   ") (println (connected?-fn st))
-(print "  keep-alive:  ") (print (keep-alive-fn st)) (println "s")
+(println "  connected?   " (connected?-fn st))
+(println "  keep-alive:  " (keep-alive-fn st) "s")
 
 # Synthetic PINGRESP
 (feed-fn st (bytes 208 0))
 (let [[pkt (poll-fn st)]]
-  (print "  PINGRESP:    type=") (println pkt:type))
+  (println "  PINGRESP:    type=" pkt:type))
 
 # Synthetic PUBLISH (topic "t", payload "hi", QoS 0)
 (feed-fn st (bytes 48 5 0 1 116 104 105))
 (let [[pkt (poll-fn st)]]
-  (print "  PUBLISH:     topic=") (print pkt:topic)
-  (print " payload=") (print (string pkt:payload))
-  (print " qos=") (println pkt:qos))
+  (println "  PUBLISH:     topic=" pkt:topic " payload=" (string pkt:payload) " qos=" pkt:qos))
 
 # Synthetic SUBACK (packet-id 1, code 0)
 (feed-fn st (bytes 144 3 0 1 0))
 (let [[pkt (poll-fn st)]]
-  (print "  SUBACK:      packet-id=") (print pkt:packet-id)
-  (print " codes=") (println pkt:codes))
+  (println "  SUBACK:      packet-id=" pkt:packet-id " codes=" pkt:codes))
 
 (println "")
 (println "all mqtt examples passed.")

@@ -51,7 +51,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
       (error {:error :bad-input :message "negative input"})
       (* x x)))
 
-  (def f (fiber/new (fn () (risky -1)) 1))  # mask=1: catch errors
+  (def f (fiber/new (fn () (risky -1)) |:error|))
   (fiber/resume f)
 
   (if (= (fiber/status f) :paused)
@@ -99,7 +99,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Static analysis is a first-class feature.** The compiler performs full binding resolution, capture analysis, signal inference, and lint passes before any code runs. This is not optional tooling bolted on — it is the compilation pipeline. Most Lisps are dynamic; Elle knows at compile time what every binding refers to, what every closure captures, and what signals every function can emit.
 
-- **A sound signal system, inferred not declared.** Every function is automatically classified as `Silent`, `Yields`, or `Polymorphic`. The compiler enforces this: an silent context cannot call a yielding function. No annotations required.
+- **A sound signal system, inferred not declared.** Every function is automatically classified as `Silent`, `Yields`, or `Polymorphic`. The compiler enforces this: a silent context cannot call a yielding function. No annotations required.
 
   ```janet
   # Silent — inferred automatically
@@ -642,12 +642,29 @@ Exactly two values are falsy. Everything else is truthy.
 
 ## Getting Started
 
+### Prerequisites
+
+- **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
+- **Linux** — Elle uses io-uring for async I/O. macOS and aarch64 Linux
+  are supported in CI but io-uring is Linux-only.
+- **GNU Make** — for the build targets below.
+
+### Build and run
+
 ```bash
-make                                      # build elle + plugins + docs
+make                                      # build elle + plugins
 ./target/release/elle examples/hello.lisp # run a file
 ./target/release/elle                     # REPL
+make smoke                                # run all examples (~15s)
+make test                                 # full test suite (~2min)
+```
+
+### Subcommands
+
+```bash
 ./target/release/elle lint <file|dir>    # static analysis
 ./target/release/elle lsp                 # language server
+./target/release/elle format <file>      # code formatter
 ./target/release/elle rewrite <file>     # source-to-source rewriting
 ```
 
@@ -660,6 +677,30 @@ The `examples/` directory is executable documentation. Each file demonstrates a 
 - **`elle lsp`** — Start the language server protocol server
 - **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
 - **`elle format [options] <file...>`** — Format Elle source files
+
+### LSP setup
+
+`elle lsp` speaks standard LSP over stdio. Point your editor at it:
+
+**VS Code** — add to `.vscode/settings.json`:
+
+```json
+{
+  "elle.server.path": "/path/to/elle",
+  "elle.server.args": ["lsp"]
+}
+```
+
+**Neovim** — add to your LSP config:
+
+```lua
+vim.lsp.start({
+  name = "elle",
+  cmd = { "/path/to/elle", "lsp" },
+  filetypes = { "elle", "lisp" },
+  root_dir = vim.fs.dirname(vim.fs.find({ ".git" }, { upward = true })[1]),
+})
+```
 
 ## License
 

@@ -42,7 +42,7 @@
 (assert (not (= 1 "1")) "int != string")
 (assert (not (= nil false)) "nil != false")
 (assert (not (= nil ())) "nil != empty list")
-(assert (not (= [1 2] @[1 2])) "array != @array")
+(assert (= [1 2] @[1 2]) "array = @array (cross-mutability equality)")
 
 # ============================================================================
 # NaN equality

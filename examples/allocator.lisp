@@ -14,12 +14,7 @@
 # for fiber death. It works on non-yielding child fibers where
 # allocations go to the private FiberHeap bump. The escape analysis
 # in the lowerer decides which scopes qualify.
-
-
-
-# ========================================
-# 1. Basic arena stats
-# ========================================
+## ── Basic arena stats ──────────────────────────────────────────────
 
 (let ((stats (arena/stats)))
   (assert (>= (get stats :object-count) 0) "arena object-count is non-negative")
@@ -28,12 +23,8 @@
 (let ((c (arena/count)))
   (assert (number? c) "arena/count returns a number")
   (assert (> c 0) "arena/count is positive after stdlib init")
-  (print "  arena has ") (print c) (print " objects\n"))
-
-
-# ========================================
-# 2. Measurement overhead
-# ========================================
+  (println "  arena has" c "objects"))
+## ── Measurement overhead ───────────────────────────────────────────
 
 # arena/count now operates directly on thread-local state (no SIG_QUERY overhead)
 (let* ((a (arena/count))
@@ -42,18 +33,14 @@
   (assert (= (- b a) 0) "arena/count has zero overhead")
   (assert (= (- c b) 0) "arena/count overhead is stable"))
 
-(print "  arena/count overhead: 0 objects per call\n")
+(println "  arena/count overhead: 0 objects per call")
 
 # arena/allocs compensates for this
 (let* ((m (arena/allocs (fn () nil)))
        (allocs (rest m)))
   (assert (= allocs 0) "nil thunk allocates 0 net objects")
-  (print "  arena/allocs overhead: compensated to 0\n"))
-
-
-# ========================================
-# 3. Allocation costs per type
-# ========================================
+  (println "  arena/allocs overhead: compensated to 0"))
+## ── Allocation costs per type ──────────────────────────────────────
 
 (defn net-allocs (thunk)
   "Measure net allocations from a thunk."
@@ -61,45 +48,37 @@
 
 (let ((n (net-allocs (fn () (cons 1 2)))))
   (assert (= n 1) "cons = 1 heap object")
-  (print "  cons:         ") (print n) (println))
+  (println "  cons:        " n))
 
 (let ((n (net-allocs (fn () (list 1 2 3 4 5)))))
   (assert (= n 5) "list of 5 = 5 cons cells")
-  (print "  (list 1..5):  ") (print n) (println))
+  (println "  (list 1..5): " n))
 
 (let ((n (net-allocs (fn () (fn (x) x)))))
   (assert (= n 1) "closure = 1 heap object")
-  (print "  closure:      ") (print n) (println))
+  (println "  closure:     " n))
 
 (let ((n (net-allocs (fn () @[1 2 3]))))
   (assert (= n 1) "array = 1 heap object")
-  (print "  @[1 2 3]:     ") (print n) (println))
+  (println "  @[1 2 3]:    " n))
 
 (let ((n (net-allocs (fn () @{:a 1 :b 2}))))
   (assert (= n 1) "@struct = 1 heap object")
-  (print "  @{:a 1 :b 2}: ") (print n) (println))
+  (println "  @{:a 1 :b 2}:" n))
 
 # String literals are in the constant pool, not runtime-allocated
 (let ((n (net-allocs (fn () "a long string literal"))))
   (assert (= n 0) "string literal = 0 (constant pool)")
-  (print "  str literal:  ") (print n) (println))
-
-
-# ========================================
-# 4. Immediates are free
-# ========================================
+  (println "  str literal: " n))
+## ── Immediates are free ────────────────────────────────────────────
 
 (assert (= (net-allocs (fn () (+ 1 2))) 0) "int arithmetic = 0")
 (assert (= (net-allocs (fn () (< 1 2))) 0) "comparison = 0")
 (assert (= (net-allocs (fn () nil)) 0) "nil = 0")
 (assert (= (net-allocs (fn () :foo)) 0) "keyword = 0")
 
-(print "  int, bool, nil, keyword: 0 objects each\n")
-
-
-# ========================================
-# 5. Growth patterns
-# ========================================
+(println "  int, bool, nil, keyword: 0 objects each")
+## ── Growth patterns ────────────────────────────────────────────────
 
 # Pure int loop: bounded
 (let ((n (net-allocs (fn ()
@@ -107,7 +86,7 @@
                             (if (>= i 1000) acc
                               (loop (+ i 1) (+ acc i))))))
              (loop 0 0))))))
-  (print "  1000 int additions: ") (print n) (print " objects\n")
+  (println "  1000 int additions:" n "objects")
   (assert (<= n 2) "int loop is bounded"))
 
 # List creation: linear (expected without arena release)
@@ -117,13 +96,10 @@
                               (list 1 2 3)
                               (loop (+ i 1))))))
              (loop 0))))))
-  (print "  100x (list 1 2 3): ") (print n) (print " objects\n")
+  (println "  100x (list 1 2 3):" n "objects")
   (assert (>= n 300) "list creation is linear"))
+## ── Scope allocation — compile-time analysis ───────────────────────
 
-
-# ========================================
-# 6. Scope allocation — compile-time analysis
-# ========================================
 #
 # Note: let bodies that call polymorphic-signal functions (map, filter, fold
 # with callbacks) or user-defined functions cannot scope-allocate — the
@@ -143,21 +119,21 @@
   (let ((a 1) (b 2)) (+ a b)))
 
 (assert (= (count-regions arith-let) 1) "arithmetic let emits 1 RegionEnter")
-(print "  arith-let:    ") (print (count-regions arith-let)) (println " region(s)")
+(println "  arith-let:    " (count-regions arith-let) " region(s)")
 
 # Returning a heap value — does NOT qualify.
 (defn heap-let []
   (let ((x (list 1 2 3))) x))
 
 (assert (= (count-regions heap-let) 0) "heap-returning let emits 0 regions")
-(print "  heap-let:     ") (print (count-regions heap-let)) (println " region(s)")
+(println "  heap-let:     " (count-regions heap-let) " region(s)")
 
 # Whitelist primitive (Tier 1): length returns int.
 (defn length-let []
   (let ((x (list 1 2 3))) (length x)))
 
 (assert (= (count-regions length-let) 1) "length let emits 1 region")
-(print "  length-let:   ") (print (count-regions length-let)) (println " region(s)")
+(println "  length-let:   " (count-regions length-let) " region(s)")
 
 # Match with immediate arms (Tier 5).
 (defn match-let []
@@ -165,7 +141,7 @@
     (match x (0 :zero) (1 :one) (_ :other))))
 
 (assert (= (count-regions match-let) 1) "match-let emits 1 region")
-(print "  match-let:    ") (print (count-regions match-let)) (println " region(s)")
+(println "  match-let:    " (count-regions match-let) " region(s)")
 
 # Match with a heap arm — does NOT qualify.
 (defn match-heap []
@@ -173,7 +149,7 @@
     (match x (0 :zero) (_ (list 1 2 3)))))
 
 (assert (= (count-regions match-heap) 0) "match with heap arm emits 0 regions")
-(print "  match-heap:   ") (print (count-regions match-heap)) (println " region(s)")
+(println "  match-heap:   " (count-regions match-heap) " region(s)")
 
 # Nested lets — both qualify (Tier 4).
 (defn nested-let []
@@ -182,19 +158,15 @@
       (+ x y))))
 
 (assert (>= (count-regions nested-let) 2) "nested lets emit >= 2 regions")
-(print "  nested-let:   ") (print (count-regions nested-let)) (println " region(s)")
+(println "  nested-let:   " (count-regions nested-let) " region(s)")
 
 # Captured binding — does NOT qualify.
 (defn captured-let []
   (let ((x 1)) (fn [] x)))
 
 (assert (= (count-regions captured-let) 0) "captured binding emits 0 regions")
-(print "  captured-let: ") (print (count-regions captured-let)) (println " region(s)")
-
-
-# ========================================
-# 7. Runtime scope stats in a child fiber
-# ========================================
+(println "  captured-let: " (count-regions captured-let) " region(s)")
+## ── Runtime scope stats in a child fiber ───────────────────────────
 
 # arena/stats includes :scope-enter-count and :scope-dtor-count.
 # After issue-525, the root fiber has a FiberHeap, so scope stats are
@@ -202,7 +174,7 @@
 
 (let ((stats (arena/stats)))
   (assert (>= (get stats :scope-enter-count) 0) "root fiber scope-enter-count is non-negative")
-  (print "  root fiber:   ") (println stats))
+  (println "  root fiber:" stats))
 
 # Non-yielding fibers (arity 1) use private FiberHeap where scope
 # marks actually free objects. Yielding fibers route allocations
@@ -224,7 +196,7 @@
                                         (get before :scope-dtor-count))]]
                    (assert (>= delta-enters 1) "at least 1 scope enter")
                    (assert (>= delta-dtors 1) "at least 1 destructor run")
-                   (print "  single scope: ") (println after)
+                   (println "  single scope: " after)
                    after)))))))
 
 
@@ -245,14 +217,9 @@
                                         (get before :scope-dtor-count))]]
                    (assert (>= delta-enters 100) "at least 100 scope enters from inner let")
                    (assert (>= delta-dtors 100) "at least 100 destructors run")
-                   (print "  100-iter loop: ") (println after)
+                   (println "  100-iter loop: " after)
                    after)))))))
-
-
-
-# ========================================
-# 8. Allocation savings: scoped vs unscoped
-# ========================================
+## ── Allocation savings: scoped vs unscoped ─────────────────────────
 
 # Compare net live objects after a loop: scoped lets free arrays at
 # scope exit, unscoped lets accumulate them until fiber death.
@@ -265,7 +232,7 @@
       (let ((x @[1 2 3 4 5])) (length x))
       (assign i (+ i 1)))
     (- (arena/count) before))))
-(print "  50x scoped:   ") (print scoped-net) (println " net objects")
+(println "  50x scoped:   " scoped-net " net objects")
 
 # The `(assign last x)` stores a heap value outward, defeating while-block
 # scope allocation (Tier 8 only allows immediate outward sets).
@@ -278,15 +245,11 @@
       (let ((x @[1 2 3 4 5])) (assign last x))
       (assign i (+ i 1)))
     (- (arena/count) before))))
-(print "  50x unscoped: ") (print unscoped-net) (println " net objects")
+(println "  50x unscoped: " unscoped-net " net objects")
 
 (assert (< scoped-net unscoped-net) "scoping reduces net objects")
-(print "  savings:      ") (print (- unscoped-net scoped-net)) (println " objects freed early")
-
-
-# ========================================
-# 9. Macro expansion: ArenaGuard works
-# ========================================
+(println "  savings:      " (- unscoped-net scoped-net) " objects freed early")
+## ── Macro expansion: ArenaGuard works ──────────────────────────────
 
 # Per-iteration cost must be constant regardless of N for warm (cached) calls.
 # Phase 2 of macro expansion uses an ArenaGuard to free transient allocations.
@@ -307,22 +270,16 @@
        (_ (eval e))  # warm-up: compile transformer closure, amortized outside measurement
        (p5 (measure-per-iter 5 e))
        (p20 (measure-per-iter 20 e)))
-  (print "  each via eval: ") (print p5) (print "/") (print p20)
-  (print " per-iter (5x/20x)\n")
+  (println "  each via eval:" p5 "/" p20 "per-iter (5x/20x)")
   (assert (= p5 p20) "macro expansion cost is constant after cache warm-up"))
 
 (let* ((e '(defn temp (x) (let* ((a (+ x 1)) (b (+ a 2))) (-> b (* 2)))))
        (_ (eval e))  # warm-up: compile transformer closures for defn, let*, ->
        (p5 (measure-per-iter 5 e))
        (p20 (measure-per-iter 20 e)))
-  (print "  defn+let*+->: ") (print p5) (print "/") (print p20)
-  (print " per-iter (5x/20x)\n")
+  (println "  defn+let*+->:" p5 "/" p20 "per-iter (5x/20x)")
   (assert (= p5 p20) "complex macro cost is constant after cache warm-up"))
-
-
-# ========================================
-# 10. Fiber lifecycle
-# ========================================
+## ── Fiber lifecycle ────────────────────────────────────────────────
 
 (let* ((p5 (measure-per-iter 5
               '(let ((f (fiber/new (fn () 42) 1)))
@@ -330,14 +287,10 @@
        (p20 (measure-per-iter 20
                '(let ((f (fiber/new (fn () 42) 1)))
                   (fiber/resume f nil)))))
-  (print "  fiber create+resume: ") (print p5) (print "/") (print p20)
-  (print " per-iter\n")
+  (println "  fiber create+resume:" p5 "/" p20 "per-iter")
   (assert (= p5 p20) "fiber cost is constant"))
+## ── Fiber-per-computation: bounded memory ──────────────────────────
 
-
-# ========================================
-# 11. Fiber-per-computation: bounded memory
-# ========================================
 #
 # Wrapping each iteration in a child fiber reclaims all temporary
 # allocations when the fiber dies. No GC — the bump resets on fiber death.
@@ -353,7 +306,7 @@
   (assign naive-last (cons (list 1 2 3 4 5) naive-last))
   (assign i (+ i 1)))
 (var naive-growth (- (arena/count) naive-before))
-(print "  naive 20 iters:   ") (print naive-growth) (println " net objects")
+(println "  naive 20 iters:   " naive-growth " net objects")
 
 # Fiber-per-iteration: each iteration runs in a child fiber.
 # When the fiber completes, its FiberHeap is reclaimed entirely.
@@ -367,19 +320,16 @@
         nil))
       (assign i (+ i 1)))
     (- (arena/count) before)))
-(print "  fiber 20 iters:   ") (print fiber-growth) (println " net objects")
+(println "  fiber 20 iters:   " fiber-growth " net objects")
 
 # The fiber pattern's growth is lower: temporaries inside each fiber
 # are reclaimed on fiber death. The naive loop escapes objects into acc
 # so they accumulate (bypassing scope allocation), while the fiber loop
 # only leaves the fiber object itself on the root arena.
 (assert (> naive-growth (* 2 fiber-growth)) "fiber-per-iteration keeps net growth lower than naive loop")
-(print "  savings:          ") (print (- naive-growth fiber-growth)) (println " fewer net objects")
+(println "  savings:          " (- naive-growth fiber-growth) " fewer net objects")
+## ── arena/checkpoint and arena/reset ───────────────────────────────
 
-
-# ========================================
-# 12. arena/checkpoint and arena/reset
-# ========================================
 #
 # Explicit reclamation for the root fiber. Dangerous: invalidates Values
 # allocated after the checkpoint. Use only when you know those Values
@@ -397,19 +347,19 @@
 (var cp-after (arena/count))
 # cp-after is cp-before + 1 (checkpoint External) + 4 (cons/list objects)
 (assert (> cp-after cp-before) "objects were allocated after checkpoint")
-(print "  after alloc:  ") (print (- cp-after cp-before)) (println " new objects")
+(println "  after alloc:  " (- cp-after cp-before) " new objects")
 (arena/reset cp-mark)
 (var cp-reset (arena/count))
 # after reset: checkpoint External and allocs are freed, back to cp-before
 (assert (= cp-reset cp-before) "arena/reset restored count exactly")
-(print "  after reset:  ") (print (- cp-reset cp-before)) (println " (no overhead)")
+(println "  after reset:  " (- cp-reset cp-before) " (no overhead)")
 
 # Verify reset with invalid mark errors — a non-checkpoint value is rejected
 (let ((result (try
                 (arena/reset 999)
                 (catch e (get e :error)))))
   (assert (= result :type-error) "arena/reset with non-checkpoint value errors")
-  (print "  bad mark:     caught ") (println result))
+  (println "  bad mark:     caught" result))
 
 (println "")
 (println "all allocator tests passed.")

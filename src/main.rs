@@ -1,5 +1,5 @@
 use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
-use elle::pipeline::{compile, compile_file};
+use elle::pipeline::compile_file;
 use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
@@ -181,8 +181,9 @@ fn run_repl(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
                     _ => {}
                 }
 
-                // Try to compile accumulated input
-                match compile(accumulated_input.trim(), symbols, "<repl>") {
+                // Try to compile accumulated input (compile_file supports
+                // multiple forms in one input, e.g. "(def x 1) (+ x 1)")
+                match compile_file(accumulated_input.trim(), symbols, "<repl>") {
                     Ok(result) => {
                         accumulated_input.clear();
 
@@ -302,7 +303,7 @@ fn run_repl_fallback(vm: &mut VM, symbols: &mut SymbolTable) -> bool {
         }
 
         // Try to compile accumulated input
-        match compile(trimmed, symbols, "<repl>") {
+        match compile_file(trimmed, symbols, "<repl>") {
             Ok(result) => {
                 accumulated_input.clear();
 

@@ -23,12 +23,8 @@
 #                       string/replace, string/contains?, string/trim,
 #                       string/upcase, string/downcase
 #   Grapheme clusters — string indexing operates on what humans see as characters
+## ── Creating the contact book ──────────────────────────────────────
 
-
-
-# ========================================
-# 1. Creating the contact book
-# ========================================
 #
 # Bare delimiters are immutable; @-prefixed are mutable.
 #   [...]  array      @[...]  @array
@@ -58,12 +54,9 @@
 (put book "carol" carol)
 (put book "dave"  dave)
 (assert (= (length (keys book)) 4) "book has 4 contacts")
-(print "  book has ") (print (length (keys book))) (println " contacts")
+(println "  book has " (length (keys book)) " contacts")
+## ── Accessing contacts — polymorphic get ───────────────────────────
 
-
-# ========================================
-# 2. Accessing contacts — polymorphic get
-# ========================================
 #
 # get works on every collection type with the same interface.
 
@@ -86,12 +79,9 @@
 (def alice-email
   (-> book (get "alice") (get :email)))
 (assert (= alice-email "alice@example.com") "->: nested access")
-(print "  alice email: ") (println alice-email)
+(println "  alice email: " alice-email)
+## ── Destructuring contacts ─────────────────────────────────────────
 
-
-# ========================================
-# 3. Destructuring contacts
-# ========================================
 #
 # Structs destructure by key; arrays by position.
 
@@ -100,7 +90,7 @@
   (get book "alice"))
 (assert (= aname "Alice") "struct destructure: name")
 (assert (= aemail "alice@example.com") "struct destructure: email")
-(print "  alice → ") (print aname) (print " <") (print aemail) (println ">")
+(println "  alice → " aname " <" aemail ">")
 
 # Unpack tags by position
 (def [first-tag second-tag] atags)
@@ -111,7 +101,7 @@
 (let ([{:name n :tags [t & _]} (get book "carol")])
   (assert (= n "Carol") "let destructure: name")
   (assert (= t :ops) "let destructure: first tag")
-  (print "  carol → ") (print n) (print " first-tag=") (println t))
+  (println "  carol →" n "first-tag=" t))
 
 # Destructuring in function params
 (defn contact-line [{:name name :email email}]
@@ -119,11 +109,8 @@
   (-> name (append " <") (append email) (append ">")))
 
 (assert (= (contact-line alice) "Alice <alice@example.com>") "fn param destructure")
+## ── Lists — collecting keys and contacts ───────────────────────────
 
-
-# ========================================
-# 4. Lists — collecting keys and contacts
-# ========================================
 #
 # Lists are cons cells. Ideal for accumulation and recursion.
 
@@ -141,11 +128,7 @@
 (assert (= (length (take 2 names)) 2) "take 2")
 (assert (= (length (drop 2 names)) 2) "drop 2")
 (assert (= (length (butlast names)) 3) "butlast drops one")
-
-
-# ========================================
-# 5. each — iterating the book
-# ========================================
+## ── each — iterating the book ──────────────────────────────────────
 
 # Collect all contacts into an array
 (var all-contacts @[])
@@ -157,7 +140,7 @@
 (var total-tags 0)
 (each c in all-contacts
   (assign total-tags (+ total-tags (length (get c :tags)))))
-(print "  total tags across all contacts: ") (println total-tags)
+(println "  total tags across all contacts: " total-tags)
 (assert (> total-tags 0) "each: summed tag counts")
 
 # each over an array (alice's tags)
@@ -171,11 +154,7 @@
 (each ch in "hello"
   (assign char-count (+ char-count 1)))
 (assert (= char-count 5) "each over string")
-
-
-# ========================================
-# 6. Querying — finding contacts by tag
-# ========================================
+## ── Querying — finding contacts by tag ─────────────────────────────
 
 (defn has-tag? [contact tag]
   "Check whether a contact has a given tag."
@@ -194,7 +173,7 @@
   (when (has-tag? (get book k) :lead)
     (push leads k)))
 (assert (= (length leads) 2) "two leads found")
-(print "  leads: ") (println leads)
+(println "  leads: " leads)
 
 # Collect devs
 (var devs @[])
@@ -202,12 +181,8 @@
   (when (has-tag? (get book k) :dev)
     (push devs k)))
 (assert (= (length devs) 3) "three devs found")
-(print "  devs: ") (println devs)
-
-
-# ========================================
-# 7. Formatting contacts for display
-# ========================================
+(println "  devs: " devs)
+## ── Formatting contacts for display ────────────────────────────────
 
 (defn format-tags [tags]
   "Format a tag array as [dev, lead]."
@@ -227,7 +202,7 @@
 (def alice-str (format-contact alice))
 (assert (string/contains? alice-str "Alice") "format: name")
 (assert (string/contains? alice-str "dev") "format: tag")
-(print "  ") (println alice-str)
+(println "  " alice-str)
 
 # Format every contact
 (var formatted @[])
@@ -235,12 +210,9 @@
   (push formatted (format-contact (get book k))))
 (assert (= (length formatted) 4) "formatted all contacts")
 (each line in formatted
-  (print "  ") (println line))
+  (println "  " line))
+## ── String processing — cleaning imported data ─────────────────────
 
-
-# ========================================
-# 8. String processing — cleaning imported data
-# ========================================
 #
 # Imagine importing raw contact names from a CSV file.
 
@@ -255,7 +227,7 @@
   (push clean (string/trim n)))
 (assert (= (get clean 0) "Alice") "trimmed first name")
 (assert (= (get clean 3) "Dave") "trimmed last name")
-(print "  cleaned import: ") (println clean)
+(println "  cleaned import: " clean)
 
 # String operations on email addresses
 (assert (string/starts-with? alice-email "alice") "starts-with?")
@@ -272,17 +244,14 @@
     domain))
 
 (assert (= (email-domain "alice@example.com") "example.com") "email-domain")
-(print "  domain: ") (println (email-domain "alice@example.com"))
+(println "  domain: " (email-domain "alice@example.com"))
 
 # Case and replace
 (assert (= (string/upcase "hello") "HELLO") "upcase")
 (assert (= (string/downcase "HELLO") "hello") "downcase")
 (assert (= (string/replace "foo-bar-baz" "-" "_") "foo_bar_baz") "replace")
+## ── Grapheme clusters — strings are human-readable units ───────────
 
-
-# ========================================
-# 9. Grapheme clusters — strings are human-readable units
-# ========================================
 #
 # String indexing, length, and iteration operate on grapheme clusters.
 # An emoji with a skin-tone modifier is one element, not two codepoints.
@@ -291,8 +260,7 @@
 (assert (= (length "héllo") 5) "precomposed é: one grapheme")
 (assert (= (length "👋🏽") 1) "wave + skin tone: one grapheme")
 (assert (= (get "👋🏽" 0) "👋🏽") "get: whole cluster")
-(print "  length(\"hello\")=") (print (length "hello"))
-(print "  length(\"👋🏽\")=") (println (length "👋🏽"))
+(println "  length(\"hello\")=" (length "hello") "  length(\"👋🏽\")=" (length "👋🏽"))
 
 # Iterating yields grapheme clusters
 (var graphemes @[])
@@ -307,11 +275,7 @@
 # Slicing and finding respect grapheme boundaries
 (assert (= (slice "héllo" 1 4) "éll") "slice: grapheme indices")
 (assert (= (string/find "aé👋🏽bc" "👋🏽") 2) "find: grapheme index of emoji")
-
-
-# ========================================
-# 10. Array mutation — managing an invite list
-# ========================================
+## ── Array mutation — managing an invite list ───────────────────────
 
 (var invites @[:alice :carol])
 
@@ -331,11 +295,7 @@
 (def popped (pop invites))
 (assert (= popped :dave) "pop returns last")
 (assert (= (length invites) 2) "pop shrinks")
-
-
-# ========================================
-# 11. Updating and removing contacts
-# ========================================
+## ── Updating and removing contacts ─────────────────────────────────
 
 (assert (has? book "dave") "dave exists")
 (del book "dave")
@@ -347,18 +307,15 @@
 (put book "alice" updated-alice)
 (def {:tags new-tags} (get book "alice"))
 (assert (= (length new-tags) 3) "alice now has 3 tags")
-(print "  updated alice tags: ") (println new-tags)
+(println "  updated alice tags: " new-tags)
 
 # del creates a new struct without a key
 (def point {:x 1 :y 2 :z 3})
 (def point2d (del point :z))
 (assert (= (get point :z) 3) "original struct unchanged")
 (assert (not (has? point2d :z)) "new struct lacks :z")
+## ── concat vs append ───────────────────────────────────────────────
 
-
-# ========================================
-# 12. concat vs append
-# ========================================
 #
 # concat always returns a new value. Neither argument is mutated.
 # append on mutable types mutates the first argument in place.
@@ -381,11 +338,8 @@
 (def s3 (concat s1 " world"))
 (assert (= s1 "hello") "concat: original string unchanged")
 (assert (= s3 "hello world") "concat: new string")
+## ── Splice — spreading into calls and constructors ─────────────────
 
-
-# ========================================
-# 13. Splice — spreading into calls and constructors
-# ========================================
 #
 # ;expr spreads an array into a function call's arguments.
 
@@ -400,11 +354,8 @@
 (def extended-arr @[;base 3 4])
 (assert (= (length extended-arr) 4) "splice in array literal")
 (assert (= (get extended-arr 2) 3) "splice: element order")
+## ── Export — putting it all together ───────────────────────────────
 
-
-# ========================================
-# 14. Export — putting it all together
-# ========================================
 #
 # Generate a CSV export of the contact book, using destructuring,
 # threading, each, splice, and string operations.
@@ -426,9 +377,9 @@
 (assert (= (get csv 0) "name,email,tags") "csv: header")
 (assert (= (length csv) 4) "csv: header + 3 data lines")
 
-(print "  csv output:") (println "")
+(println "  csv output:")
 (each line in csv
-  (print "    ") (println line))
+  (println "    " line))
 
 # Every data line should contain an @
 (each line in (rest (list ;csv))
@@ -438,10 +389,8 @@
 
 
 (println "")
+## ── Sets — immutable and mutable ───────────────────────────────────
 
-# ========================================
-# 15. Sets — immutable and mutable
-# ========================================
 #
 # Sets are unordered collections of unique values.
 # Immutable sets: |1 2 3|

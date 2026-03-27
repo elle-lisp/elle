@@ -9,34 +9,25 @@
 #   Disassembly        — disbit (bytecode), disjit (Cranelift IR)
 #   Debug utilities    — debug-print, trace
 #   Micro-benchmarking — timing loops with clock/monotonic
-
-
-
-# ========================================
-# 1. Clock primitives
-# ========================================
+## ── Clock primitives ───────────────────────────────────────────────
 
 # Three clocks, three purposes: wall time, epoch time, CPU time.
 (var mono1 (clock/monotonic))
 (var mono2 (clock/monotonic))
 (assert (number? mono1) "clock/monotonic returns a number")
 (assert (>= mono2 mono1) "clock/monotonic is non-decreasing")
-(print "  monotonic: ") (println mono1)
+(println "  monotonic: " mono1)
 
 (var epoch (clock/realtime))
 (assert (number? epoch) "clock/realtime returns a number")
 (assert (> epoch 1700000000.0) "clock/realtime is a plausible epoch")
-(print "  realtime (epoch): ") (println epoch)
+(println "  realtime (epoch): " epoch)
 
 (var cpu (clock/cpu))
 (assert (number? cpu) "clock/cpu returns a number")
 (assert (>= cpu 0.0) "clock/cpu is non-negative")
-(print "  cpu time: ") (println cpu)
-
-
-# ========================================
-# 2. Timing
-# ========================================
+(println "  cpu time: " cpu)
+## ── Timing ─────────────────────────────────────────────────────────
 
 # time/elapsed wraps a thunk, returns (result elapsed-seconds).
 (var elapsed-result (time/elapsed (fn [] (+ 21 21))))
@@ -45,7 +36,7 @@
 (var elapsed-secs (first (rest elapsed-result)))
 (assert (number? elapsed-secs) "elapsed time is a number")
 (assert (>= elapsed-secs 0.0) "elapsed time is non-negative")
-(print "  (+ 21 21) took ") (print elapsed-secs) (println " seconds")
+(println "  (+ 21 21) took " elapsed-secs " seconds")
 
 # time/stopwatch is a coroutine that yields elapsed seconds on each resume.
 (var sw (time/stopwatch))
@@ -54,12 +45,8 @@
 (var t-second (coro/resume sw))
 (assert (number? t-first) "stopwatch sample is a number")
 (assert (>= t-second t-first) "stopwatch samples are non-decreasing")
-(print "  stopwatch: ") (print t-first) (print " → ") (println t-second)
-
-
-# ========================================
-# 3. Closure introspection
-# ========================================
+(println "  stopwatch:" t-first "→" t-second)
+## ── Closure introspection ──────────────────────────────────────────
 
 # Define some functions to inspect.
 (defn add [x y]
@@ -82,69 +69,57 @@
 (assert (closure? add5) "returned lambda is a closure")
 (assert (not (closure? +)) "+ is a primitive, not a closure")
 (assert (not (closure? 42)) "42 is not a closure")
-(print "  closure?: add=") (print (closure? add))
-(print " +=") (println (closure? +))
+(println "  closure?: add=" (closure? add) " +=" (closure? +))
 
 # silent? — true for closures that do not suspend (no yield/debug/polymorphic)
 (assert (silent? add) "add is silent")
 (assert (silent? identity-fn) "identity-fn is silent")
-(print "  silent?: add=") (println (silent? add))
+(println "  silent?: add=" (silent? add))
 
 # arity — number of parameters (nil for non-closures)
 (assert (= (arity add) 2) "add has arity 2")
 (assert (= (arity identity-fn) 1) "identity-fn has arity 1")
 (assert (= (arity add5) 1) "add5 has arity 1")
 (assert (= (arity 42) nil) "non-closure arity is nil")
-(print "  arity: add=") (print (arity add))
-(print " identity=") (print (arity identity-fn))
-(print " add5=") (println (arity add5))
+(println "  arity: add=" (arity add) " identity=" (arity identity-fn) " add5=" (arity add5))
 
 # captures — number of captured variables
 (assert (= (captures add) 0) "add captures nothing")
 (assert (= (captures add5) 1) "add5 captures one variable")
-(print "  captures: add=") (print (captures add))
-(print " add5=") (println (captures add5))
+(println "  captures: add=" (captures add) " add5=" (captures add5))
 
 # bytecode-size — bytecode length in bytes
 (assert (> (bytecode-size add) 0) "add has bytecode")
 (assert (= (bytecode-size 42) nil) "non-closure bytecode-size is nil")
-(print "  bytecode-size: add=") (println (bytecode-size add))
+(println "  bytecode-size: add=" (bytecode-size add))
 
 # disbit — bytecode disassembly (returns array of strings)
 (var disasm (disbit add))
 (assert (> (length disasm) 0) "disbit returns non-empty result")
 (assert (string? (get disasm 0)) "disbit elements are strings")
-(print "  disbit add (") (print (length disasm)) (println " instructions):")
+(println "  disbit add (" (length disasm) " instructions):")
 (each line in disasm
-  (print "    ") (println line))
+  (println "    " line))
 
 # disjit — Cranelift IR (nil if LIR not stored for this function)
 (var jit (disjit add))
 (assert (or (nil? jit)
                  (and (> (length jit) 0)
                       (string? (get jit 0)))) "disjit returns nil or array of strings")
-(print "  disjit add: ") (println (if (nil? jit) "nil (no LIR)" "available"))
-
-
-# ========================================
-# 4. Debug utilities
-# ========================================
+(println "  disjit add: " (if (nil? jit) "nil (no LIR)" "available"))
+## ── Debug utilities ────────────────────────────────────────────────
 
 # debug-print writes to stderr — won't appear in captured stdout,
 # but proves the primitive exists and doesn't crash.
 (debug-print "introspection.lisp: debug-print works")
 (debug-print (string/join (list "add5(10) = " (string (add5 10))) ""))
-(print "  debug-print: ok (output on stderr)") (println "")
+(println "  debug-print: ok (output on stderr)")
 
 # trace wraps an expression, prints debug info to stderr, returns the value.
 (var traced (trace "add" (add 3 4)))
 (assert (= traced 7) "trace preserves return value")
-(print "  trace: (add 3 4) = ") (println traced)
-
-
-# ========================================
-# 5. Micro-benchmark pattern
-# ========================================
+(println "  trace: (add 3 4) = " traced)
+## ── Micro-benchmark pattern ────────────────────────────────────────
 
 # A simple bench loop: run a thunk N times, report ns/call.
 (defn bench [label n thunk]
@@ -155,8 +130,7 @@
     (begin (thunk) (assign i (+ i 1))))
   (var elapsed (- (clock/monotonic) t0))
   (var ns-per (/ (* elapsed 1000000000) n))
-  (print "  ") (print label) (print ": ")
-  (print ns-per) (println " ns/call")
+  (println "  " label ": " ns-per " ns/call")
   ns-per)
 
 (var iters 500)

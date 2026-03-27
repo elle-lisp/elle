@@ -14,12 +14,7 @@
 #   Bytes and @bytes  — immutable/mutable binary data
 #   Boxes            — first-class mutable cells
 #   Equality         — = does structural equality on data, reference on functions
-
-
-
-# ========================================
-# 1. Immediates
-# ========================================
+## ── Immediates ─────────────────────────────────────────────────────
 
 # nil — the absence of a value
 (assert (nil? nil) "nil? on nil")         # nil is only equal to itself
@@ -50,21 +45,17 @@
 (assert (not (nil? (list))) "empty list is NOT nil")     # () and nil differ!
 
 # (type x) returns a keyword describing x's type
-(print "  (type 42)   = ") (println (type 42))       # :integer
-(print "  (type 3.14) = ") (println (type 3.14))     # :float
-(print "  (type \"hi\") = ") (println (type "hi"))    # :string
-(print "  (type true) = ") (println (type true))     # :boolean
-(print "  (type nil)  = ") (println (type nil))      # :nil
-(print "  (type :foo) = ") (println (type :foo))     # :keyword
-(print "  (type 'foo) = ") (println (type 'foo))     # :symbol
+(println "  (type 42)   = " (type 42))       # :integer
+(println "  (type 3.14) = " (type 3.14))     # :float
+(println "  (type \"hi\") = " (type "hi"))    # :string
+(println "  (type true) = " (type true))     # :boolean
+(println "  (type nil)  = " (type nil))      # :nil
+(println "  (type :foo) = " (type :foo))     # :keyword
+(println "  (type 'foo) = " (type 'foo))     # :symbol
 (assert (= (type 42) :integer) "type of int")
 (assert (= (type "hi") :string) "type of string")
 (assert (= (type nil) :nil) "type of nil")
-
-
-# ========================================
-# 2. Truthiness
-# ========================================
+## ── Truthiness ─────────────────────────────────────────────────────
 
 # Only nil and false are falsy — everything else is truthy.
 # This differs from C/Python/JS where 0, "", [] are falsy.
@@ -82,17 +73,10 @@
 (assert (if :keyword true false) "keyword is truthy")
 (assert (if 'symbol true false) "symbol is truthy")
 
-(print "  falsy:  nil=") (print (if nil :T :F))
-  (print " false=") (println (if false :T :F))
-(print "  truthy: 0=") (print (if 0 :T :F))
-  (print " \"\"=") (print (if "" :T :F))
-  (print " ()=") (print (if (list) :T :F))
-  (print " []=") (println (if [] :T :F))
-
-
-# ========================================
-# 3. Arithmetic
-# ========================================
+(println "  falsy:  nil=" (if nil :T :F) " false=" (if false :T :F))
+(println "  truthy: 0=" (if 0 :T :F) " \"\"=" (if "" :T :F)
+         " ()=" (if (list) :T :F) " []=" (if [] :T :F))
+## ── Arithmetic ─────────────────────────────────────────────────────
 
 # Prefix notation: (op arg1 arg2)
 (assert (= (+ 10 5) 15) "addition")          # (+ a b) not a + b
@@ -103,14 +87,14 @@
 (assert (= (% 10 3) 1) "% is mod alias")     # % is shorthand for mod
 
 # + and * accept any number of arguments
-(print "  (+ 1 2 3 4) = ") (println (+ 1 2 3 4))   # 10
-(print "  (* 1 2 3 4) = ") (println (* 1 2 3 4))    # 24
+(println "  (+ 1 2 3 4) = " (+ 1 2 3 4))   # 10
+(println "  (* 1 2 3 4) = " (* 1 2 3 4))    # 24
 (assert (= (+ 1 2 3 4) 10) "+ is variadic")
 (assert (= (* 1 2 3 4) 24) "* is variadic")
 
 # Integer division truncates; float division doesn't
-(print "  (/ 7 2)   = ") (println (/ 7 2))          # 3 (truncated)
-(print "  (/ 7.0 2) = ") (println (/ 7.0 2))        # 3.5
+(println "  (/ 7 2)   =" (/ 7 2))  # 3 (truncated
+(println "  (/ 7.0 2) = " (/ 7.0 2))        # 3.5
 (assert (= (/ 7 2) 3) "int / int = int (truncates)")
 (assert (= (/ 7.0 2) 3.5) "float / int = float")
 
@@ -121,16 +105,12 @@
 (assert (even? 4) "even?")             # predicate: name ends in ?
 (assert (odd? 3) "odd?")
 (assert (even? 0) "0 is even")
-
-
-# ========================================
-# 4. Math
-# ========================================
+## ── Math ───────────────────────────────────────────────────────────
 
 # math/ prefix for transcendental functions
-(print "  (math/sqrt 16) = ") (println (math/sqrt 16))    # 4.0
-(print "  (math/pow 2 10) = ") (println (math/pow 2 10))  # 1024
-(print "  (math/pi) = ") (println (math/pi))               # 3.14159...
+(println "  (math/sqrt 16) = " (math/sqrt 16))    # 4.0
+(println "  (math/pow 2 10) = " (math/pow 2 10))  # 1024
+(println "  (math/pi) = " (math/pi))               # 3.14159...
 (assert (= (math/sqrt 16) 4.0) "sqrt returns float")   # always returns float
 (assert (= (math/floor 3.7) 3) "floor returns integer") # round down → int
 (assert (= (math/ceil 3.2) 4) "ceil returns integer")   # round up → int
@@ -140,11 +120,7 @@
 (assert (= (math/cos 0) 1.0) "cos returns float")
 (assert (> (math/pi) 3.14) "pi > 3.14")
 (assert (< (math/pi) 3.15) "pi < 3.15")
-
-
-# ========================================
-# 5. Comparison and logic
-# ========================================
+## ── Comparison and logic ───────────────────────────────────────────
 
 # = is structural equality (works on any type)
 (assert (= 1 1) "= on equal ints")
@@ -158,18 +134,14 @@
 (assert (not (not 0)) "not 0 (0 is truthy)")  # 0 is truthy, so (not 0) = false
 
 # and/or short-circuit and return the deciding value (not always a boolean)
-(print "  (and 1 2 3)       = ") (println (and 1 2 3))       # 3
-(print "  (and 1 false 3)   = ") (println (and 1 false 3))   # false
-(print "  (or nil false 42) = ") (println (or nil false 42))  # 42
+(println "  (and 1 2 3)       = " (and 1 2 3))       # 3
+(println "  (and 1 false 3)   = " (and 1 false 3))   # false
+(println "  (or nil false 42) = " (or nil false 42))  # 42
 (assert (= (and 1 2 3) 3) "and: returns last if all truthy")
 (assert (= (and 1 false 3) false) "and: returns first falsy")  # stops at false
 (assert (= (or nil false 42) 42) "or: returns first truthy")   # skips nil, false
 (assert (= (or 0 1) 0) "or: 0 is truthy, returned first")     # 0 is truthy!
-
-
-# ========================================
-# 6. Bitwise
-# ========================================
+## ── Bitwise ────────────────────────────────────────────────────────
 
 # bit/ prefix for bitwise operations on integers
 (assert (= (bit/and 12 10) 8) "bit/and")   # 1100 & 1010 = 1000
@@ -180,17 +152,13 @@
 (assert (= (bit/shr 16 2) 4) "bit/shr")    # 16 >> 2 = 4
 
 # Build a byte from nibbles: 0xA5 = (10 << 4) | 5 = 165
-(print "  0xA5 = (10 << 4) | 5 = ") (println (bit/or (bit/shl 10 4) 5))
+(println "  0xA5 = (10 << 4) | 5 = " (bit/or (bit/shl 10 4) 5))
 (assert (= (bit/or (bit/shl 10 4) 5) 165) "nibble assembly")
-
-
-# ========================================
-# 7. Type conversions
-# ========================================
+## ── Type conversions ───────────────────────────────────────────────
 
 # number->string and back
-(print "  42 → \"") (print (number->string 42)) (println "\"")
-(print "  \"42\" → ") (println (integer "42"))
+(println "  42 → \"" (number->string 42) "\"")
+(println "  \"42\" → " (integer "42"))
 (assert (= (number->string 42) "42") "number->string int")
 (assert (= (integer "42") 42) "integer from string")          # parse string → int
 (assert (= (float "3.14") 3.14) "float from string")          # parse string → float
@@ -205,21 +173,17 @@
 
 # Round-trip: int → string → int
 (assert (= (integer (number->string 99)) 99) "round-trip int")
-
-
-# ========================================
-# 8. The @ mutability split
-# ========================================
+## ── The @ mutability split ─────────────────────────────────────────
 
 # @ is the universal mutability prefix:
 #   [...]  array  (immutable)    @[...]  @array  (mutable)
 #   {...}  struct (immutable)    @{...}  @struct (mutable)
 #   "..."  string (immutable)    @"..."  @string (mutable)
 
-(print "  [1 2 3]  → ") (println (type [1 2 3]))     # :array
-(print "  @[1 2 3] → ") (println (type @[1 2 3]))    # :@array
-(print "  {:a 1}   → ") (println (type {:a 1}))      # :struct
-(print "  @{:a 1}  → ") (println (type @{:a 1}))     # :@struct
+(println "  [1 2 3]  → " (type [1 2 3]))     # :array
+(println "  @[1 2 3] → " (type @[1 2 3]))    # :@array
+(println "  {:a 1}   → " (type {:a 1}))      # :struct
+(println "  @{:a 1}  → " (type @{:a 1}))     # :@struct
 (assert (= (type [1 2 3]) :array) "[] is array")       # immutable indexed
 (assert (= (type @[1 2 3]) :@array) "@[] is @array")      # mutable indexed
 (assert (= (type {:a 1}) :struct) "{} is struct")       # immutable keyed
@@ -230,16 +194,12 @@
 # Both mutable and immutable arrays are arrays
 (assert (array? @[1 2]) "mutable array is an array")
 (assert (array? [1 2]) "immutable array is an array")
-
-
-# ========================================
-# 9. Bytes and blobs
-# ========================================
+## ── Bytes and blobs ────────────────────────────────────────────────
 
 # bytes (immutable) and @bytes (mutable) — raw binary data
 (def b (bytes 72 101 108 108 111))   # "Hello" in ASCII
-(print "  (bytes 72 101 108 108 111) → \"") (print (string b)) (println "\"")
-(print "  hex: ") (println (bytes->hex b))
+(println "  (bytes 72 101 108 108 111) → \"" (string b) "\"")
+(println "  hex: " (bytes->hex b))
 (assert (= (length b) 5) "bytes length")
 (assert (= (get b 0) 72) "get returns integer byte value")  # not a char
 (assert (= (string b) "Hello") "bytes->string (UTF-8)")
@@ -262,11 +222,7 @@
 (def sliced (slice (bytes 10 20 30 40 50) 1 3))  # bytes at index 1,2
 (assert (= (length sliced) 2) "slice bytes length")
 (assert (= (get sliced 0) 20) "slice bytes content")
-
-
-# ========================================
-# 10. Boxes
-# ========================================
+## ── Boxes ──────────────────────────────────────────────────────────
 
 # box/unbox/rebox — explicit first-class mutable cells
 (def b (box 0))                      # create a box holding 0
@@ -291,13 +247,9 @@
 (inc!)
 (inc!)
 (inc!)
-(print "  counter after 3 increments: ") (println (get-count))
+(println "  counter after 3 increments: " (get-count))
 (assert (= (get-count) 3) "shared counter via box")
-
-
-# ========================================
-# 11. Equality
-# ========================================
+## ── Equality ───────────────────────────────────────────────────────
 
 # = does structural equality on data types
 (assert (= [1 2 3] [1 2 3]) "= on equal arrays")          # same contents → equal
@@ -313,12 +265,12 @@
 
 # Destructuring works on any compound type
 (def [a b c] [10 20 30])            # unpack an array into bindings
-(print "  [10 20 30] → a=") (print a) (print " b=") (print b) (print " c=") (println c)
+(println "  [10 20 30] → a=" a " b=" b " c=" c)
 (assert (= a 10) "array destructure: first")
 (assert (= c 30) "array destructure: third")
 
 (def {:x px :y py} {:x 5 :y 10})    # unpack a struct by key
-(print "  {:x 5 :y 10} → px=") (print px) (print " py=") (println py)
+(println "  {:x 5 :y 10} → px=" px " py=" py)
 (assert (= px 5) "struct destructure: x")
 (assert (= py 10) "struct destructure: y")
 

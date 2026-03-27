@@ -35,6 +35,10 @@ resolver = "2"
 name = "elle"
 version = "1.0.0"
 edition = "2021"
+description = "A Lisp with static signal inference, hygienic macros, and colorless concurrency via fibers"
+license = "MIT"
+repository = "https://github.com/elle-lisp/elle"
+authors = ["Andy Davidoff"]
 
 [dependencies]
 bumpalo = "3"

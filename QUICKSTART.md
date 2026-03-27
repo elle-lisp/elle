@@ -1,6 +1,6 @@
-# Elle Quickstart for LLM Agents
+# Elle Language Reference
 
-Elle is a Lisp with lexical scope, closures, a signal system, and a register-based VM. This document is the minimum you need to write correct Elle code.
+Elle is a Lisp with lexical scope, closures, and a signal system. This document is what you need to write correct Elle code.
 
 ---
 
@@ -324,6 +324,8 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
   (process)
   (when done (break)))
 
+(repeat 5 (println "hi"))  # run body N times
+
 # break does not cross function boundaries
 
 # Iteration (prelude macro; `in` is optional sugar)
@@ -409,6 +411,13 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 (has? {:a 1} :a)             # => true
 (length {:a 1 :b 2})         # => 2
 (merge {:x 1 :y 2} {:y 3 :z 4})  # => {:x 1 :y 3 :z 4}
+(update {:count 5} :count inc)   # => {:count 6}
+(from-pairs [[:a 1] [:b 2]])     # => {:a 1 :b 2}
+
+# Nested access and update (works on structs and arrays)
+(get-in {:a {:b 1}} [:a :b])          # => 1
+(put-in {:a {:b 1}} [:a :b] 2)        # => {:a {:b 2}}
+(update-in {:a {:b 5}} [:a :b] inc)   # => {:a {:b 6}}
 ```
 
 ### @Structs (mutable)
@@ -433,7 +442,8 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 (string/upcase "hello")       # => "HELLO"
 (string/downcase "HELLO")     # => "hello"
 (string/trim "  hi  ")        # => "hi"
-(string/replace "foo-bar" "-" "_") # => "foo_bar"
+(string/replace "foo-bar" "-" "_") # => "foo_bar"  (replaces all)
+(string/repeat "-" 40)            # => "----...----"
 ```
 
 **Byte length vs grapheme length:** `length` returns the grapheme count, not
@@ -527,6 +537,18 @@ the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
 (filter f [1 2 3 4])         # => (3 4)    — returns list
 (fold   f init [1 2 3])      # => 10
 (apply  f [1 2 3])           # => (f 1 2 3)
+(sum [1 2 3 4])              # => 10
+(product [1 2 3 4])          # => 24
+
+# Type conversion
+(->array (list 1 2 3))      # => [1 2 3]
+(->list [1 2 3])             # => (1 2 3)
+(->array "abc")              # => ["a" "b" "c"]
+
+# Mutability conversion
+(freeze @[1 2 3])            # => [1 2 3]   (shallow)
+(thaw [1 2 3])               # => @[1 2 3]  (shallow)
+(deep-freeze @[@[1] @{:a 2}])  # => [[1] {:a 2}]  (recursive)
 
 # Threading macros
 (-> 5 (+ 10) (* 2))          # => 30  (insert as first arg)
@@ -559,11 +581,15 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (min 3 1 4)  (max 3 1 4)
 (even? 4)    (odd? 3)
 
-(math/sqrt 16)   (math/pow 2 10)
-(math/floor 3.7) (math/ceil 3.2) (math/round 3.5)
-(math/sin x)     (math/cos x)    (math/tan x)
-(math/exp x)     (math/log x)
+(math/sqrt 16)   (math/cbrt 27)   (math/pow 2 10)
+(math/floor 3.7) (math/ceil 3.2)  (math/round 3.5)  (math/trunc 3.7)
+(math/sin x)     (math/cos x)     (math/tan x)
+(math/asin x)    (math/acos x)    (math/atan x)     (math/atan2 y x)
+(math/sinh x)    (math/cosh x)    (math/tanh x)
+(math/exp x)     (math/exp2 x)
+(math/log x)     (math/log2 x)    (math/log10 x)
 (math/pi)        (math/e)
+# All math/ functions have bare aliases: sqrt, sin, log2, etc.
 
 (bit/and 12 10)  (bit/or 12 10)  (bit/xor 12 10)
 (bit/not 0)      (bit/shl 1 3)   (bit/shr 16 2)
@@ -573,8 +599,11 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 ```lisp
 (= 1 1)         # => true  (structural equality)
+(= [1 2] @[1 2]) # => true  (cross-mutability: same contents = equal)
+(not= 1 2)       # => true  (inequality)
 (< 1 2)         (> 2 1)
 (<= 1 1)        (>= 2 1)
+(hash :foo)      # => integer  (deterministic hash of any value)
 ```
 
 ### Logical Operators
@@ -613,6 +642,15 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (fn? x)          # closure or native-fn (any callable)
 (closure? x)     # user-defined closures only
 (native-fn? x)   # native functions only; aliases: native?, primitive?
+(mutable? x)     # true for @array, @struct, @string, @bytes, @set, box
+(immutable? x)   # complement of mutable?
+(zero? x)        # 0 or 0.0
+(nonzero? x)     # complement of zero?
+(nonempty? x)    # complement of empty?
+(pos? x)         # number > 0
+(neg? x)         # number < 0
+(nan? x)         # float NaN
+(inf? x)         # float infinity
 
 # Conversions
 (integer "42")             (float "3.14")
@@ -1179,7 +1217,9 @@ Tail call optimization is guaranteed — tail calls in Elle never grow the stack
 ### Struct update
 
 ```lisp
-(merge state {:count (+ (get state :count) 1)})
+(update state :count inc)                    # apply function to one key
+(merge state {:count (+ (get state :count) 1)})  # merge for multiple keys
+(update-in config [:db :pool-size] inc)      # nested update
 ```
 
 ### Iterate with index

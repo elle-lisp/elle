@@ -13,12 +13,7 @@
 #   Nested coroutines       — inner coroutine driven by outer
 #   yield*                  — delegation to a sub-coroutine
 #   forever + var/set       — infinite generators with mutable state
-
-
-
-# ========================================
-# 1. Basic creation, yield, resume
-# ========================================
+## ── Basic creation, yield, resume ──────────────────────────────────
 
 # coro/new wraps a zero-arg function into a coroutine.
 # coro/resume steps it forward; yield suspends and returns a value.
@@ -27,7 +22,7 @@
 (assert (= (coro/status co) :new) "initial status is :new")
 
 (def v (coro/resume co))
-(print "  first resume: ") (println v)
+(println "  first resume: " v)
 (assert (= v 42) "first resume returns yielded value")
 (assert (= (coro/status co) :paused) "status after yield is :paused")
 (assert (not (coro/done? co)) "not done while suspended")
@@ -35,17 +30,13 @@
 (coro/resume co)
 (assert (= (coro/status co) :dead) "status after body completes is :dead")
 (assert (coro/done? co) "done after completion")
-
-
-# ========================================
-# 2. Lifecycle and coro/value
-# ========================================
+## ── Lifecycle and coro/value ───────────────────────────────────────
 
 # coro/value returns the most recently yielded value without resuming.
 (def co2 (coro/new (fn [] (yield 10) (yield 20) (yield 30))))
 
 (coro/resume co2)
-(print "  after 1st yield, value: ") (println (coro/value co2))
+(println "  after 1st yield, value: " (coro/value co2))
 (assert (= (coro/value co2) 10) "value after first yield")
 
 (coro/resume co2)
@@ -54,11 +45,7 @@
 (coro/resume co2)
 (assert (= (coro/value co2) 30) "value after third yield")
 (assert (= (coro/status co2) :paused) "still paused after final yield")
-
-
-# ========================================
-# 3. Expressions in yield
-# ========================================
+## ── Expressions in yield ───────────────────────────────────────────
 
 # yield evaluates its argument before suspending.
 (def co3 (coro/new (fn []
@@ -69,14 +56,8 @@
 (assert (= (coro/resume co3) 6) "yield sum")
 (assert (= (coro/resume co3) 20) "yield product")
 (assert (= (coro/resume co3) 100) "yield conditional")
-(print "  (+ 1 2 3)=") (print 6)
-  (print "  (* 4 5)=") (print 20)
-  (print "  (if true 100 200)=") (println 100)
-
-
-# ========================================
-# 4. Fibonacci generator
-# ========================================
+(println "  (+ 1 2 3)=" 6 "  (* 4 5)=" 20 "  (if true 100 200)=" 100)
+## ── Fibonacci generator ────────────────────────────────────────────
 
 # The real thing: an infinite generator using mutable state.
 # Each resume yields the next Fibonacci number.
@@ -92,17 +73,10 @@
       (assign b next)))))
 
 (def fib (make-fib))
-(print "  fib: ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(print (coro/resume fib)) (print " ")
-(println (coro/resume fib))
+(println "  fib:" (coro/resume fib) (coro/resume fib) (coro/resume fib)
+         (coro/resume fib) (coro/resume fib) (coro/resume fib)
+         (coro/resume fib) (coro/resume fib) (coro/resume fib)
+         (coro/resume fib))
 # 0 1 1 2 3 5 8 13 21 34
 
 # Verify the sequence
@@ -118,11 +92,7 @@
 (assert (= (coro/resume fib2) 21) "fib(8)")
 (assert (= (coro/resume fib2) 34) "fib(9)")
 (assert (not (coro/done? fib2)) "infinite generator never done")
-
-
-# ========================================
-# 5. Closure captures — factory pattern
-# ========================================
+## ── Closure captures — factory pattern ─────────────────────────────
 
 # A factory function creates independent generators with captured state.
 (defn make-counter [start]
@@ -140,33 +110,21 @@
 (assert (= (coro/resume from-99) 99) "counter from 99")
 (assert (= (coro/resume from-10) 11) "counter from 10, step 2")
 (assert (= (coro/resume from-99) 100) "counter from 99, step 2")
-(print "  from-10: 10, 11  from-99: 99, 100") (println "")
-
-
-# ========================================
-# 6. Interleaving — independent state
-# ========================================
+(println "  from-10: 10, 11  from-99: 99, 100")
+## ── Interleaving — independent state ───────────────────────────────
 
 # Two coroutines resumed in alternation maintain independent state.
 (def odds (coro/new (fn [] (yield 1) (yield 3) (yield 5))))
 (def evens (coro/new (fn [] (yield 2) (yield 4) (yield 6))))
 
-(print "  interleaved: ")
-(print (coro/resume odds)) (print " ")
-(print (coro/resume evens)) (print " ")
-(print (coro/resume odds)) (print " ")
-(print (coro/resume evens)) (print " ")
-(print (coro/resume odds)) (print " ")
-(println (coro/resume evens))
+(println "  interleaved:" (coro/resume odds) (coro/resume evens)
+         (coro/resume odds) (coro/resume evens)
+         (coro/resume odds) (coro/resume evens))
 # 1 2 3 4 5 6
 
 (assert (= (coro/status odds) :paused) "odds still paused")
 (assert (= (coro/status evens) :paused) "evens still paused")
-
-
-# ========================================
-# 7. Nested coroutines
-# ========================================
+## ── Nested coroutines ──────────────────────────────────────────────
 
 # An outer coroutine drives an inner one, yielding its results.
 (def outer (coro/new (fn []
@@ -178,33 +136,22 @@
 (assert (= (coro/resume outer) 100) "nested: inner first")
 (assert (= (coro/resume outer) 200) "nested: inner second")
 (assert (= (coro/resume outer) 300) "nested: outer continues")
-(print "  nested: 100 200 300") (println "")
-
-
-# ========================================
-# 8. coro? type predicate
-# ========================================
+(println "  nested: 100 200 300")
+## ── coro? type predicate ───────────────────────────────────────────
 
 (assert (coro? (coro/new (fn [] (yield 1)))) "coroutine is coro?")
 (assert (not (coro? 42)) "int is not coro?")
 (assert (not (coro? (fn [] 1))) "function is not coro?")
 (assert (not (coro? nil)) "nil is not coro?")
 (assert (not (coro? '())) "empty list is not coro?")
-
-
-# ========================================
-# 9. yield* delegation
-# ========================================
+## ── yield* delegation ──────────────────────────────────────────────
 
 # yield* delegates to a sub-coroutine: the outer coroutine yields
 # each value from the sub-coroutine, then continues its own body.
 (def sub (coro/new (fn [] (yield 10) (yield 20))))
 (def main (coro/new (fn [] (yield* sub) (yield 30))))
 
-(print "  delegated: ")
-(print (coro/resume main)) (print " ")
-(print (coro/resume main)) (print " ")
-(println (coro/resume main))
+(println "  delegated:" (coro/resume main) (coro/resume main) (coro/resume main))
 # 10 20 30
 
 (assert (= (coro/status main) :paused) "main paused after final yield")

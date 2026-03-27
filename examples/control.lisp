@@ -20,12 +20,8 @@
 #                     list/array/struct patterns, nested, guards
 #   each            — iteration macro (brief — see collections.lisp)
 #   -> / ->>        — threading macros
+## ── Expression language ────────────────────────────────────────────
 
-
-
-# ========================================
-# Expression language
-# ========================================
 #
 # Arithmetic expressions are tagged arrays:
 #   [:lit n]     — literal number
@@ -34,11 +30,8 @@
 #   [:mul a b]   — multiplication
 #   [:div a b]   — division (with safe-division support)
 #   [:neg a]     — negation
+## ── if — is this expression a literal? ─────────────────────────────
 
-
-# ========================================
-# 1. if — is this expression a literal?
-# ========================================
 #
 # (if test then else) — else is optional (returns nil when omitted).
 # Only nil and false are falsy; everything else is truthy.
@@ -54,7 +47,7 @@
 (assert (literal? [:lit 42]) "literal?: yes")
 (assert (not (literal? [:add [:lit 1] [:lit 2]])) "literal?: compound")
 (assert (not (literal? 42)) "literal?: bare number is not an expr")
-(print "  (literal? [:lit 42]) = ") (println (literal? [:lit 42]))
+(println "  (literal? [:lit 42]) = " (literal? [:lit 42]))
 
 # Only nil and false are falsy — everything else is truthy
 (assert (= (if true :yes :no) :yes) "if: true branch")
@@ -67,11 +60,8 @@
 (assert (= (if 0 :yes :no) :yes) "if: 0 is truthy")
 (assert (= (if "" :yes :no) :yes) "if: empty string is truthy")
 (assert (= (if (list) :yes :no) :yes) "if: empty list is truthy")
+## ── cond — classify expression nodes ───────────────────────────────
 
-
-# ========================================
-# 2. cond — classify expression nodes
-# ========================================
 #
 # (cond (test1 body1) (test2 body2) ... (true default))
 # Evaluates tests in order, returns the body of the first truthy one.
@@ -92,7 +82,7 @@
 (assert (= (expr-type [:neg [:lit 3]]) :unary) "cond: unary")
 (assert (= (expr-type [:add [:lit 1] [:lit 2]]) :binary) "cond: binary")
 (assert (= (expr-type 42) :invalid) "cond: not an array")
-(print "  expr-type([:add ...]) = ") (println (expr-type [:add [:lit 1] [:lit 2]]))
+(println "  expr-type([:add ...]) = " (expr-type [:add [:lit 1] [:lit 2]]))
 
 # The operator symbol for pretty-printing
 (defn op-symbol [op]
@@ -107,11 +97,8 @@
 
 (assert (= (op-symbol :add) "+") "cond dispatch: add")
 (assert (= (op-symbol :unknown) "?") "cond dispatch: default")
+## ── case — dispatch on operator ────────────────────────────────────
 
-
-# ========================================
-# 3. case — dispatch on operator
-# ========================================
 #
 # (case expr val1 body1 val2 body2 ... default)
 # Sugar for chained (if (= g val) ...). Flat pairs, optional default.
@@ -129,12 +116,9 @@
 (assert (= (binary-op :sub 10 3) 7) "case: sub")
 (assert (= (binary-op :mul 6 7) 42) "case: mul")
 (assert (= (binary-op :div 15 3) 5) "case: div")
-(print "  (binary-op :mul 6 7) = ") (println (binary-op :mul 6 7))
+(println "  (binary-op :mul 6 7) = " (binary-op :mul 6 7))
+## ── when / unless — validation warnings ────────────────────────────
 
-
-# ========================================
-# 4. when / unless — validation warnings
-# ========================================
 #
 # (when test body...) — runs body if truthy, returns nil otherwise.
 # (unless test body...) — runs body if falsy.
@@ -163,11 +147,8 @@
 # when/unless return nil when the test doesn't fire
 (assert (= (when false :never) nil) "when: nil on false")
 (assert (= (unless true :never) nil) "unless: nil on true")
+## ── if-let / when-let — safe division ──────────────────────────────
 
-
-# ========================================
-# 5. if-let / when-let — safe division
-# ========================================
 #
 # (if-let ((x expr)) then else)
 # Binds x to expr; if falsy, takes the else branch.
@@ -186,8 +167,8 @@
 
 (assert (= (describe-result 10 2) "10/2 = 5") "if-let: truthy")
 (assert (= (describe-result 10 0) "10/0 is undefined") "if-let: falsy")
-(print "  ") (println (describe-result 10 2))
-(print "  ") (println (describe-result 10 0))
+(println "  " (describe-result 10 2))
+(println "  " (describe-result 10 0))
 
 # when-let: collect safe quotients, skip failures
 (var quotients @[])
@@ -202,11 +183,8 @@
 (try-divide 15 3)
 (assert (= (length quotients) 2) "when-let: only truthy pushes")
 (assert (= (get quotients 0) 5) "when-let: first quotient")
+## ── while — evaluate a batch of expressions ────────────────────────
 
-
-# ========================================
-# 6. while — evaluate a batch of expressions
-# ========================================
 #
 # (while test body...) — loops while test is truthy.
 # while always returns nil. Use block/break to return a value.
@@ -228,7 +206,7 @@
   (push results (eval-simple (get batch i)))
   (assign i (+ i 1)))
 (assert (= results @[10 20 -5 7]) "while: evaluated batch")
-(print "  batch results: ") (println results)
+(println "  batch results: " results)
 
 # while always returns nil
 (var j 0)
@@ -250,7 +228,7 @@
 (assert (= (factorial 0) 1) "factorial: 0")
 (assert (= (factorial 5) 120) "factorial: 5")
 (assert (= (factorial 10) 3628800) "factorial: 10")
-(print "  10! = ") (println (factorial 10))
+(println "  10! = " (factorial 10))
 
 # while has an implicit block named :while — break overrides the nil return
 (var k 0)
@@ -260,11 +238,8 @@
     (when (= k 5)
       (break :while k))))
 (assert (= found 5) "while: break :while returns a value")
+## ── forever / break — simplify until stable ────────────────────────
 
-
-# ========================================
-# 7. forever / break — simplify until stable
-# ========================================
 #
 # (forever body...) is sugar for (while true body...).
 # You MUST use break to exit. The break value is the return value.
@@ -282,7 +257,7 @@
 (assert (= (simplify [:lit 5]) [:lit 5]) "simplify: already simple")
 (assert (= (simplify [:neg [:neg [:lit 5]]]) [:lit 5]) "simplify: double neg")
 (assert (= (simplify [:neg [:neg [:neg [:neg [:lit 3]]]]]) [:lit 3]) "simplify: four negations")
-(print "  simplify(--5) = ") (println (simplify [:neg [:neg [:lit 5]]]))
+(println "  simplify(--5) = " (simplify [:neg [:neg [:lit 5]]]))
 
 # Bare (break) exits without a value — returns nil
 (var x 0)
@@ -310,12 +285,9 @@
 (assert (= (collatz-steps 1) 0) "collatz: 1 → 0 steps")
 (assert (= (collatz-steps 6) 8) "collatz: 6 → 8 steps")
 (assert (= (collatz-steps 27) 111) "collatz: 27 → 111 steps")
-(print "  collatz(27) = ") (print (collatz-steps 27)) (println " steps")
+(println "  collatz(27) = " (collatz-steps 27) " steps")
+## ── block / break — validate before evaluating ─────────────────────
 
-
-# ========================================
-# 8. block / break — validate before evaluating
-# ========================================
 #
 # (block :name body...) creates a named scope.
 # Without break, returns the last expression's value.
@@ -349,8 +321,8 @@
 (assert (= (validate-expr [:add [:lit 1] [:lit 2]]) :ok) "validate: good binary")
 (assert (= (validate-expr 42) :not-a-tuple) "validate: bare number")
 (assert (= (validate-expr [:lit "nope"]) :bad-literal) "validate: bad literal")
-(print "  validate([:lit 42]) = ") (println (validate-expr [:lit 42]))
-(print "  validate(42) = ") (println (validate-expr 42))
+(println "  validate([:lit 42]) = " (validate-expr [:lit 42]))
+(println "  validate(42) = " (validate-expr 42))
 
 # Block without break returns the last expression
 (def no-break
@@ -389,11 +361,8 @@
 (assert (= (find-first @[1 2 3] (fn [x] (> x 100))) nil) "find-first: not found")
 (print "  find-first(>10) = ")
 (println (find-first @[1 4 9 16 25] (fn [x] (> x 10))))
+## ── match — the full evaluator ─────────────────────────────────────
 
-
-# ========================================
-# 9. match — the full evaluator
-# ========================================
 #
 # (match value (pattern body) ...)
 #
@@ -480,7 +449,7 @@
     [:add [:lit 3] [:lit 4]]
     [:sub [:lit 10] [:lit 3]]])
 (assert (= (eval-expr complex-expr) 49) "eval: (3+4)*(10-3)")
-(print "  (3+4)*(10-3) = ") (println (eval-expr complex-expr))
+(println "  (3+4)*(10-3) = " (eval-expr complex-expr))
 
 # Deeper: -(2 * (5 + 3)) = -16
 (def deep-expr
@@ -488,12 +457,11 @@
     [:mul [:lit 2]
           [:add [:lit 5] [:lit 3]]]])
 (assert (= (eval-expr deep-expr) -16) "eval: -(2*(5+3))")
-(print "  -(2*(5+3)) = ") (println (eval-expr deep-expr))
+(println "  -(2*(5+3)) = " (eval-expr deep-expr))
 
 # Simplify + eval: double-neg removal feeds into the evaluator
 (def tricky [:neg [:neg [:mul [:lit 3] [:lit 4]]]])
-(print "  simplify then eval: ")
-(print (eval-expr (simplify tricky))) (println "")
+(println "  simplify then eval:" (eval-expr (simplify tricky)))
 (assert (= (eval-expr (simplify tricky)) 12) "simplify → eval")
 
 # --- Nested and rest patterns in match ---
@@ -530,11 +498,8 @@
 
 # Or-patterns with bindings — each alternative must bind the same names
 (assert (= (match (cons 1 2) ((or (x . _) (_ . x)) x) (_ 0)) 1) "match: or-pattern with binding")
+## ── each — evaluate a list of expressions ──────────────────────────
 
-
-# ========================================
-# 10. each — evaluate a list of expressions
-# ========================================
 #
 # (each var in collection body...)
 # See collections.lisp for full coverage.
@@ -552,18 +517,15 @@
   (push outputs (eval-expr expr)))
 
 (assert (= outputs @[10 7 42 -5 5]) "each: evaluated program")
-(print "  program outputs: ") (println outputs)
+(println "  program outputs: " outputs)
 
 # each over an array
 (var tuple-sum 0)
 (each x in [10 20 30]
   (assign tuple-sum (+ tuple-sum x)))
 (assert (= tuple-sum 60) "each: array sum")
+## ── -> / ->> — pretty-print an expression ──────────────────────────
 
-
-# ========================================
-# 11. -> / ->> — pretty-print an expression
-# ========================================
 #
 # (-> val (f a) (g b))  = (g (f val a) b)   — thread-first
 # (->> val (f a) (g b)) = (g b (f a val))   — thread-last
@@ -585,8 +547,8 @@
 
 (assert (= (format-expr [:lit 42]) "42") "format: literal")
 (assert (= (format-expr [:add [:lit 3] [:lit 4]]) "(3 + 4)") "format: add")
-(print "  format complex: ") (println (format-expr complex-expr))
-(print "  format deep:    ") (println (format-expr deep-expr))
+(println "  format complex: " (format-expr complex-expr))
+(println "  format deep:    " (format-expr deep-expr))
 
 # Thread-first for nested access
 (def config {:db {:host "localhost" :port 5432}})
@@ -594,15 +556,13 @@
 
 # Thread-last for pipeline
 (assert (= (->> "  hello  " string/trim string/upcase) "HELLO") "->>: trim then upcase")
-(print "  (->> \"  hello  \" trim upcase) = ")
-(println (->> "  hello  " string/trim string/upcase))
+(println "  (->> \"  hello  \" trim upcase) =" (->> "  hello  " string/trim string/upcase))
 
 # Bare symbol threading: (-> x f g) = (g (f x))
 (assert (= (-> -7 abs-val string) "7") "->: bare symbol threading")
 
 # The full pipeline: format, eval, display
-(print "  ") (print (format-expr complex-expr))
-(print " = ") (println (eval-expr complex-expr))
+(println "  " (format-expr complex-expr) "=" (eval-expr complex-expr))
 
 
 (println "")

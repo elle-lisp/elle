@@ -1,261 +1,206 @@
+## ── not= ──────────────────────────────────────────────────────────────
+
+(assert (not= 1 2) "not= different ints")
+(assert (not (not= 1 1)) "not= same int")
+(assert (not (not= 1 1.0)) "not= numeric coercion")
+(assert (not= "a" "b") "not= different strings")
+(assert (not (not= :foo :foo)) "not= same keyword")
+
+## ── hash ──────────────────────────────────────────────────────────────
+
+(assert (= (hash :foo) (hash :foo)) "hash deterministic")
+(assert (not= (hash :foo) (hash :bar)) "hash different values differ")
+(assert (integer? (hash "hello")) "hash returns integer")
+(assert (= (hash 42) (hash 42)) "hash integer deterministic")
+(assert (= (hash [1 2]) (hash [1 2])) "hash structural")
+
+## ── deep-freeze ───────────────────────────────────────────────────────
+
+(let* [[m @[@[1 2] @{:a @[3]}]]
+       [f (deep-freeze m)]]
+  (assert (immutable? f) "deep-freeze outer")
+  (assert (immutable? (get f 0)) "deep-freeze nested array")
+  (assert (immutable? (get f 1)) "deep-freeze nested struct")
+  (assert (immutable? (get (get f 1) :a)) "deep-freeze deeply nested"))
 
-## === Read primitives ===
+(assert (= (deep-freeze 42) 42) "deep-freeze atom passthrough")
+(assert (= (deep-freeze nil) nil) "deep-freeze nil passthrough")
+
+(let* [[lst (list @[1] @[2])]
+       [f (deep-freeze lst)]]
+  (assert (immutable? (first f)) "deep-freeze list element")
+  (assert (immutable? (first (rest f))) "deep-freeze list second element"))
+
+## ── immutable? ────────────────────────────────────────────────────────
+
+(assert (immutable? [1 2]) "immutable? array")
+(assert (immutable? {:a 1}) "immutable? struct")
+(assert (immutable? "hello") "immutable? string")
+(assert (immutable? 42) "immutable? integer")
+(assert (not (immutable? @[1])) "immutable? @array")
+(assert (not (immutable? @{:a 1})) "immutable? @struct")
+
+## ── nan? pos? neg? inf? ───────────────────────────────────────────────
+
+(assert (nan? (asin 2.0)) "nan? true via asin domain error")
+(assert (not (nan? 1.0)) "nan? false for normal float")
+(assert (not (nan? 42)) "nan? false for integer")
 
-(assert (= (read "42") 42) "read integer")
-(assert (= (read "\"hello\"") "hello") "read string")
-(assert (= (read "true") true) "read boolean true")
-(assert (= (read "false") false) "read boolean false")
-(assert (pair? (read "(+ 1 2)")) "read list")
-(let (([ok? _] (protect ((fn () (read 42)))))) (assert (not ok?) "read type error"))
+(assert (pos? 1) "pos? positive int")
+(assert (pos? 0.5) "pos? positive float")
+(assert (not (pos? 0)) "pos? zero")
+(assert (not (pos? -1)) "pos? negative")
 
-(assert (= (first (read-all "1 2 3")) 1) "read-all multiple forms")
-(assert (= (read-all "") ()) "read-all empty")
-(let (([ok? _] (protect ((fn () (read-all 42)))))) (assert (not ok?) "read-all type error"))
+(assert (neg? -1) "neg? negative int")
+(assert (neg? -0.5) "neg? negative float")
+(assert (not (neg? 0)) "neg? zero")
+(assert (not (neg? 1)) "neg? positive")
 
-## === Conversion primitives ===
+(assert (not (inf? 1.0)) "inf? false for finite")
+(assert (not (inf? 42)) "inf? false for integer")
 
-(assert (= (integer 42) 42) "integer from int")
-(assert (= (integer 3.7) 3) "integer from float")
-(assert (= (integer "42") 42) "integer from string")
-(let (([ok? _] (protect ((fn () (integer "abc")))))) (assert (not ok?) "integer from bad string"))
-(let (([ok? _] (protect ((fn () (integer true)))))) (assert (not ok?) "integer type error"))
+## ── string/repeat ─────────────────────────────────────────────────────
+
+(assert (= (string/repeat "ab" 3) "ababab") "string/repeat basic")
+(assert (= (string/repeat "-" 0) "") "string/repeat zero")
+(assert (= (string/repeat "x" 1) "x") "string/repeat one")
+(assert (= (string/repeat "" 5) "") "string/repeat empty string")
 
-(assert (= (float 42) 42.0) "float from int")
-(assert (= (float 2.5) 2.5) "float from float")
-(assert (= (float "2.5") 2.5) "float from string")
-(let (([ok? _] (protect ((fn () (float "abc")))))) (assert (not ok?) "float from bad string"))
+## ── math functions ────────────────────────────────────────────────────
 
-(assert (= (string 42) "42") "string from int")
-(assert (string? (string 3.14)) "string from float")
-(assert (= (string true) "true") "string from bool true")
-(assert (= (string false) "false") "string from bool false")
-(assert (= (string nil) "nil") "string from nil")
-(assert (= (string (list 1 2 3)) "(1 2 3)") "string from list")
-(assert (= (string @[1 2 3]) "[1, 2, 3]") "string from array")
+(assert (< (abs (- (asin 1.0) (/ (pi) 2))) 0.0001) "asin pi/2")
+(assert (< (abs (acos 1.0)) 0.0001) "acos 0")
+(assert (< (abs (- (atan 1.0) (/ (pi) 4))) 0.0001) "atan pi/4")
+(assert (< (abs (- (atan2 1.0 1.0) (/ (pi) 4))) 0.0001) "atan2")
+(assert (< (abs (sinh 0.0)) 0.0001) "sinh 0")
+(assert (< (abs (- (cosh 0.0) 1.0)) 0.0001) "cosh 0")
+(assert (< (abs (tanh 0.0)) 0.0001) "tanh 0")
+(assert (< (abs (- (log2 8.0) 3.0)) 0.0001) "log2")
+(assert (< (abs (- (log10 1000.0) 3.0)) 0.0001) "log10")
+(assert (= (trunc 3.7) 3.0) "trunc positive")
+(assert (= (trunc -3.7) -3.0) "trunc negative")
+(assert (< (abs (- (cbrt 27.0) 3.0)) 0.0001) "cbrt")
+(assert (< (abs (- (exp2 3.0) 8.0)) 0.0001) "exp2")
 
-(assert (= (number->string 42) "42") "number->string int")
-(assert (string? (number->string 3.14)) "number->string float")
+## ── repeat macro ──────────────────────────────────────────────────────
 
-(assert (= (integer "42") 42) "integer from string")
-(assert (= (integer "-7") -7) "integer from string negative")
-(assert (= (float "2.5") 2.5) "float from string")
+(var count 0)
+(repeat 5 (assign count (+ count 1)))
+(assert (= count 5) "repeat runs N times")
 
-(assert (= (any->string 42) "42") "any->string int")
-(assert (= (any->string true) "true") "any->string bool")
+(var count2 0)
+(repeat 0 (assign count2 (+ count2 1)))
+(assert (= count2 0) "repeat 0 runs nothing")
 
-(assert (= (string :foo) "foo") "string keyword")
-(assert (= (string 42) "42") "string int")
+## ── from-pairs ────────────────────────────────────────────────────────
 
-(assert (= (symbol->string 'foo) "foo") "symbol->string")
+(assert (= (from-pairs [[:a 1] [:b 2]]) {:a 1 :b 2}) "from-pairs arrays")
+(assert (= (from-pairs (list (list :x 10))) {:x 10}) "from-pairs lists")
+(assert (= (from-pairs []) {}) "from-pairs empty")
+(assert (= (from-pairs (pairs {:a 1 :b 2})) {:a 1 :b 2}) "from-pairs roundtrip")
 
-## === Path primitives ===
+## ── sum / product ─────────────────────────────────────────────────────
 
-(assert (string? (path/cwd)) "path/cwd returns string")
-(assert (= (path/join "a" "b" "c") "a/b/c") "path/join multiple")
-(assert (= (path/join "hello") "hello") "path/join single")
-(let (([ok? _] (protect ((fn () (path/join 42)))))) (assert (not ok?) "path/join type error"))
-(assert (= (path/join "a" "/b") "/b") "path/join absolute replaces")
+(assert (= (sum [1 2 3 4]) 10) "sum")
+(assert (= (sum []) 0) "sum empty")
+(assert (= (product [1 2 3 4]) 24) "product")
+(assert (= (product []) 1) "product empty")
 
-(assert (= (path/parent "/home/user/data.txt") "/home/user") "path/parent")
-(assert (= (path/parent "/") nil) "path/parent root")
-(assert (= (path/parent "a/b/c") "a/b") "path/parent relative")
+## ── update ────────────────────────────────────────────────────────────
 
-(assert (= (path/filename "/home/user/data.txt") "data.txt") "path/filename absolute")
-(assert (= (path/filename "data.txt") "data.txt") "path/filename bare")
-(assert (= (path/filename "/home/user/") "user") "path/filename trailing slash")
+(assert (= (update {:count 5} :count inc) {:count 6}) "update struct")
+(assert (= (update [10 20 30] 1 inc) [10 21 30]) "update array")
+(assert (= (update @{:x 2} :x (fn [v] (* v 3))) @{:x 6}) "update @struct")
 
-(assert (= (path/stem "data.txt") "data") "path/stem")
-(assert (= (path/stem "archive.tar.gz") "archive.tar") "path/stem multiple dots")
+(def [ok? err] (protect (update {:a 1} :b inc)))
+(assert (not ok?) "update missing key errors")
+(assert (= err:error :key-error) "update error is :key-error")
 
-(assert (= (path/extension "data.txt") "txt") "path/extension")
-(assert (= (path/extension "noext") nil) "path/extension none")
-(assert (= (path/extension "archive.tar.gz") "gz") "path/extension multiple dots")
+(def [ok2? err2] (protect (update [1 2] 5 inc)))
+(assert (not ok2?) "update out-of-bounds errors")
+(assert (= err2:error :key-error) "update oob is :key-error")
 
-(assert (= (path/with-extension "foo.txt" "rs") "foo.rs") "path/with-extension")
-(assert (= (path/normalize "./a/../b") "b") "path/normalize")
+## ── cross-mutability equality ─────────────────────────────────────────
 
-(assert (string? (path/absolute "src")) "path/absolute returns string")
-(assert (string? (path/canonicalize ".")) "path/canonicalize dot")
-(let (([ok? _] (protect ((fn () (path/canonicalize "/nonexistent/path/xyz")))))) (assert (not ok?) "path/canonicalize nonexistent"))
+(assert (= [1 2 3] @[1 2 3]) "array = @array")
+(assert (= @[1 2 3] [1 2 3]) "@array = array")
+(assert (= {:a 1} @{:a 1}) "struct = @struct")
+(assert (= @{:a 1} {:a 1}) "@struct = struct")
+(assert (= "hello" (thaw "hello")) "string = @string")
+(assert (= (bytes 1 2) (@bytes 1 2)) "bytes = @bytes")
+(assert (= |1 2 3| @|1 2 3|) "set = @set")
+(assert (not= [1 2] @[1 3]) "cross-mut different contents")
 
-(assert (= (path/relative "/foo/bar/baz" "/foo/bar") "baz") "path/relative")
-(assert (= (length (path/components "/a/b/c")) 4) "path/components")
+## ── ffi/with-stack ────────────────────────────────────────────────────
 
-(assert (= (path/absolute? "/foo") true) "path/absolute? true")
-(assert (= (path/absolute? "foo") false) "path/absolute? false")
+(ffi/with-stack [[p :int 42]]
+  (assert (= (ffi/read p :int) 42) "ffi/with-stack typed scalar"))
 
-(assert (= (path/relative? "foo") true) "path/relative? true")
-(assert (= (path/relative? "/foo") false) "path/relative? false")
+(ffi/with-stack [[buf 16]]
+  (ffi/write buf :int 99)
+  (assert (= (ffi/read buf :int) 99) "ffi/with-stack raw buffer"))
 
-(assert (= (path/exists? ".") true) "path/exists? current dir")
-(assert (= (path/exists? "/nonexistent/xyz") false) "path/exists? nonexistent")
+(ffi/with-stack [[a :int 10] [b :int 20]]
+  (assert (= (+ (ffi/read a :int) (ffi/read b :int)) 30) "ffi/with-stack multiple"))
 
-(assert (= (path/file? "Cargo.toml") true) "path/file? true")
-(assert (= (path/file? ".") false) "path/file? false")
+## ── ffi/pin ───────────────────────────────────────────────────────────
 
-(assert (= (path/dir? ".") true) "path/dir? true")
-(assert (= (path/dir? "Cargo.toml") false) "path/dir? false")
+(let* [[ptr (ffi/pin (bytes 72 101 108))]]
+  (assert (= (ffi/read ptr :u8) 72) "ffi/pin first byte")
+  (ffi/free ptr))
 
-## === Alias tests for predicates ===
+(let* [[ptr (ffi/pin "Hi")]]
+  (assert (= (ffi/read ptr :u8) 72) "ffi/pin string")
+  (ffi/free ptr))
 
-(assert (= (file-exists? ".") true) "file-exists? alias")
-(assert (= (directory? ".") true) "directory? alias")
-(assert (= (file? "Cargo.toml") true) "file? alias")
+## ── nonzero? ──────────────────────────────────────────────────────────
 
-## === Read edge cases ===
-
-(assert (= (string (read ":hello")) "hello") "read keyword")
-(assert (= (read "2.5") 2.5) "read float")
-(assert (= (read "nil") nil) "read nil")
-(let (([ok? _] (protect ((fn () (read "(+ 1")))))) (assert (not ok?) "read parse error"))
+(assert (nonzero? 1) "nonzero? positive int")
+(assert (nonzero? -1) "nonzero? negative int")
+(assert (nonzero? 0.5) "nonzero? float")
+(assert (not (nonzero? 0)) "nonzero? zero int")
+(assert (not (nonzero? 0.0)) "nonzero? zero float")
 
-## === Conversion edge cases ===
+## ── get-in ────────────────────────────────────────────────────────────
 
-(assert (= (integer 0) 0) "integer zero")
-(assert (= (integer -42) -42) "integer negative")
-(assert (= (float 0) 0.0) "float zero")
-(assert (= (string :hello) "hello") "string from keyword")
-(assert (string? (string (list))) "string from empty list")
-
-## === Alias tests ===
+(assert (= (get-in {:a {:b 1}} [:a :b]) 1) "get-in nested struct")
+(assert (= (get-in {:a [10 20 30]} [:a 1]) 20) "get-in struct then array")
+(assert (= (get-in [[1 2] [3 4]] [1 0]) 3) "get-in nested arrays")
 
-(assert (= (integer "42") 42) "integer from string")
-(assert (= (int 42) 42) "int alias for integer")
-
-## === Type predicates for collections ===
-
-(assert (= (array? @[1 2 3]) true) "array? true for mutable array")
-(assert (= (array? [1 2 3]) true) "array? true for immutable array")
-(assert (= (array? 42) false) "array? false for other")
-(assert (= (array? "hello") false) "array? false for string")
+## ── put-in ────────────────────────────────────────────────────────────
 
-(assert (= (struct? @{:a 1 :b 2}) true) "struct? true for mutable struct")
-(assert (= (struct? {:a 1 :b 2}) true) "struct? true for immutable struct")
-(assert (= (struct? 42) false) "struct? false for other")
-(assert (= (struct? "hello") false) "struct? false for string")
-(assert (= (struct? "hello") false) "struct? false string")
+(assert (= (put-in {:a {:b 1}} [:a :b] 2) {:a {:b 2}}) "put-in nested struct")
+(assert (= (put-in {:a [10 20]} [:a 1] 99) {:a [10 99]}) "put-in struct then array")
+(assert (= (put-in [0 [1 2]] [1 0] 9) [0 [9 2]]) "put-in nested arrays")
 
-(assert (= (empty? []) true) "empty? array true")
-(assert (= (empty? [1]) false) "empty? array false")
+## ── update-in ─────────────────────────────────────────────────────────
 
-(assert (= (empty? @[]) true) "empty? array true")
-(assert (= (empty? @[1]) false) "empty? array false")
+(assert (= (update-in {:a {:b 5}} [:a :b] inc) {:a {:b 6}}) "update-in nested struct")
+(assert (= (update-in [10 [20 30]] [1 0] inc) [10 [21 30]]) "update-in nested arrays")
 
-## === fn/errors? introspection ===
+(def [ok? err] (protect (update-in {:a {:b 1}} [:a :x] inc)))
+(assert (not ok?) "update-in missing key errors")
 
-(assert (= (fn/errors? (fn (x) x)) false) "fn/errors? pure closure")
-(assert (= (fn/errors? 42) false) "fn/errors? non-closure")
-(assert (= (fn/errors? "hello") false) "fn/errors? string")
+## ── nonzero? ──────────────────────────────────────────────────────────
 
-## === take/drop negative count ===
+(assert (nonzero? 1) "nonzero? positive int")
+(assert (nonzero? -1) "nonzero? negative int")
+(assert (not (nonzero? 0)) "nonzero? zero int")
+(assert (not (nonzero? 0.0)) "nonzero? zero float")
 
-(let (([ok? _] (protect ((fn () (take -1 (list 1 2 3))))))) (assert (not ok?) "take negative count"))
-(let (([ok? _] (protect ((fn () (drop -1 (list 1 2 3))))))) (assert (not ok?) "drop negative count"))
+## ── ->array / ->list ──────────────────────────────────────────────────
 
-(assert (= (take 0 (list 1 2 3)) ()) "take zero")
-(assert (= (drop 0 (list 1 2 3)) (list 1 2 3)) "drop zero")
+(assert (= (->array (list 1 2 3)) [1 2 3]) "->array from list")
+(assert (= (->array @[1 2 3]) [1 2 3]) "->array from @array")
+(assert (= (->array [1 2 3]) [1 2 3]) "->array from array passthrough")
+(assert (= (->array "abc") ["a" "b" "c"]) "->array from string")
+(assert (= (->array (bytes 1 2 3)) [1 2 3]) "->array from bytes")
+(assert (= (->array ()) []) "->array from empty list")
 
-## === Bitwise float truncation ===
+(assert (= (->list [1 2 3]) (list 1 2 3)) "->list from array")
+(assert (= (->list @[1 2 3]) (list 1 2 3)) "->list from @array")
+(assert (= (->list (list 1 2)) (list 1 2)) "->list from list passthrough")
+(assert (= (->list "abc") (list "a" "b" "c")) "->list from string")
+(assert (= (->list []) ()) "->list from empty array")
 
-(assert (= (bit/and 12.7 10.3) 8) "bit/and float truncation")
-(assert (= (bit/or 12.7 10.3) 14) "bit/or float truncation")
-(assert (= (bit/xor 12.7 10.3) 6) "bit/xor float truncation")
-(assert (= (bit/not 0.9) -1) "bit/not float truncation")
-(assert (= (bit/shl 1.9 3) 8) "bit/shl float value")
-(assert (= (bit/shr 8.7 2) 2) "bit/shr float value")
-
-(let (([ok? _] (protect ((fn () (bit/and (sqrt -1.0) 1)))))) (assert (not ok?) "bit/and NaN error"))
-(let (([ok? _] (protect ((fn () (bit/and (exp 1000.0) 1)))))) (assert (not ok?) "bit/and infinity error"))
-
-(assert (= (bit/and -3.7 255) (bit/and -3 255)) "bit/and negative float")
-
-## === mutable? predicate ===
-
-# Mutable collections
-(assert (mutable? @[1 2 3]) "mutable? true for @array")
-(assert (mutable? @"hello") "mutable? true for @string")
-(assert (mutable? (@bytes 1 2 3)) "mutable? true for @bytes")
-(assert (mutable? @{:a 1}) "mutable? true for @struct")
-(assert (mutable? @|1 2 3|) "mutable? true for @set")
-(assert (mutable? (box 42)) "mutable? true for box")
-(assert (mutable? (make-parameter 0)) "mutable? true for parameter")
-
-# Immutable collections
-(assert (not (mutable? [1 2 3])) "mutable? false for array")
-(assert (not (mutable? "hello")) "mutable? false for string")
-(assert (not (mutable? (bytes 1 2 3))) "mutable? false for bytes")
-(assert (not (mutable? {:a 1})) "mutable? false for struct")
-(assert (not (mutable? |1 2 3|)) "mutable? false for set")
-
-# Other types
-(assert (not (mutable? 42)) "mutable? false for integer")
-(assert (not (mutable? 3.14)) "mutable? false for float")
-(assert (not (mutable? true)) "mutable? false for boolean")
-(assert (not (mutable? nil)) "mutable? false for nil")
-(assert (not (mutable? :foo)) "mutable? false for keyword")
-(assert (not (mutable? (fn (x) x))) "mutable? false for closure")
-(assert (not (mutable? +)) "mutable? false for primitive")
-(assert (not (mutable? (cons 1 2))) "mutable? false for cons")
-
-## === box? predicate ===
-
-(assert (box? (box 42)) "box? true for box")
-(assert (not (box? 42)) "box? false for integer")
-(assert (not (box? @[1 2 3])) "box? false for @array")
-(assert (not (box? nil)) "box? false for nil")
-
-## === first polymorphism ===
-
-(assert (= (first (list 1 2 3)) 1) "first list")
-(assert (= (first (list)) nil) "first empty list")
-(assert (= (first [1 2 3]) 1) "first array")
-(assert (= (first []) nil) "first empty array")
-(assert (= (first @[1 2 3]) 1) "first array")
-(assert (= (first @[]) nil) "first empty array")
-(assert (= (first "abc") "a") "first string")
-(assert (= (first "") nil) "first empty string")
-(let (([ok? _] (protect ((fn () (first 42)))))) (assert (not ok?) "first non-sequence error"))
-
-## === rest polymorphism ===
-
-(assert (= (first (rest (list 1 2 3))) 2) "rest list")
-(assert (= (rest (list)) ()) "rest empty list")
-(assert (= (rest (list 1)) ()) "rest single list")
-
-(assert (= (length (rest [1 2 3])) 2) "rest array length")
-(assert (= (array? (rest [1 2 3])) true) "rest array type")
-
-(assert (= (array? (rest [])) true) "rest empty array type")
-(assert (= (length (rest [])) 0) "rest empty array length")
-
-(assert (= (length (rest @[1 2 3])) 2) "rest array length")
-(assert (= (array? (rest @[1 2 3])) true) "rest array type")
-
-(assert (= (array? (rest @[])) true) "rest empty array type")
-(assert (= (length (rest @[])) 0) "rest empty array length")
-
-(assert (= (rest "abc") "bc") "rest string")
-(assert (= (rest "") "") "rest empty string")
-(assert (= (rest "a") "") "rest single string")
-
-(let (([ok? _] (protect ((fn () (rest 42)))))) (assert (not ok?) "rest non-sequence error"))
-
-## === reverse polymorphism ===
-
-(assert (= (first (reverse (list 1 2 3))) 3) "reverse list")
-(assert (= (reverse (list)) ()) "reverse empty list")
-
-(assert (= (array? (reverse [1 2 3])) true) "reverse array type")
-(assert (= (get (reverse [1 2 3]) 0) 3) "reverse array first")
-
-(assert (= (array? (reverse [])) true) "reverse empty array type")
-
-(assert (= (array? (reverse @[1 2 3])) true) "reverse array type")
-(assert (= (get (reverse @[1 2 3]) 0) 3) "reverse array first")
-
-(assert (= (array? (reverse @[])) true) "reverse empty array type")
-
-(assert (= (reverse "abc") "cba") "reverse string")
-(assert (= (reverse "") "") "reverse empty string")
-
-(let (([ok? _] (protect ((fn () (reverse 42)))))) (assert (not ok?) "reverse non-sequence error"))
+(println "all primitives tests passed")

@@ -808,5 +808,26 @@
 # Stress tests (migrated from integration/core.rs)
 # ============================================================================
 
+# ============================================================================
+# nonempty? predicate
+# ============================================================================
+
+(assert (nonempty? (list 1)) "nonempty? true for non-empty list")
+(assert (not (nonempty? (list))) "nonempty? false for empty list")
+(assert (nonempty? [1]) "nonempty? true for non-empty array")
+(assert (not (nonempty? [])) "nonempty? false for empty array")
+(assert (nonempty? @[1]) "nonempty? true for non-empty @array")
+(assert (not (nonempty? @[])) "nonempty? false for empty @array")
+(assert (nonempty? "hello") "nonempty? true for non-empty string")
+(assert (not (nonempty? "")) "nonempty? false for empty string")
+(assert (nonempty? {:x 1}) "nonempty? true for non-empty struct")
+(assert (not (nonempty? {})) "nonempty? false for empty struct")
+(assert (nonempty? |1|) "nonempty? true for non-empty set")
+(assert (not (nonempty? ||)) "nonempty? false for empty set")
+(assert (nonempty? (bytes 1 2)) "nonempty? true for non-empty bytes")
+(assert (not (nonempty? (bytes))) "nonempty? false for empty bytes")
+(assert (= :type-error (try (nonempty? nil) (catch e e:error))) "nonempty? errors on nil")
+(assert (= :type-error (try (nonempty? 42) (catch e e:error))) "nonempty? errors on non-container")
+
 # test_deep_arithmetic — 50 nested additions
 (assert (= (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ (+ 1 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 1) 51) "deep arithmetic: 50 nested additions")

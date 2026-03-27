@@ -17,7 +17,6 @@ pub use eval::{eval, eval_all, eval_file, eval_syntax};
 #[derive(Debug)]
 pub struct CompileResult {
     pub bytecode: crate::compiler::Bytecode,
-    pub warnings: Vec<String>,
 }
 
 /// Analysis-only result (no bytecode generation)

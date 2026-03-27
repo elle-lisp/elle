@@ -1,7 +1,6 @@
 # Elle
 
-Elle is a Lisp. Source text becomes bytecode; bytecode runs on a
-register-based VM.
+Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
 This is not a toy. The implementation targets correctness, performance, and
 clarity — in that order. We compile through multiple IRs, we have proper
@@ -58,7 +57,7 @@ bytecode. Error messages include file:line:col information.
   native primitives and special forms by name; `(doc name)` is preferred over
   `(doc "name")` for stdlib functions — the explicit string form cannot find
   stdlib docs because their docstrings live in the closure value, not `vm.docs`),
-  `port/path`, `port/seek`, `port/tell`,
+  `port/path`, `port/seek`, `port/tell`, `port/read-line`, `port/read-all`,
   `string/size-of`,
   `with-traits`, `traits`,
   `sys/args` (returns args after the source file in argv as a list, empty list if none),
@@ -92,8 +91,8 @@ bytecode. Error messages include file:line:col information.
   `stream/into-array`, `stream/pipe`;
   subprocess convenience: `subprocess/system`
 - **`ffi`** — C interop via libloading/bindgen
-- **`jit`** — JIT compilation via Cranelift; `JitRejectionInfo` tracks why
-  closures were rejected
+- **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
+  functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
     available plugins: `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
@@ -145,9 +144,10 @@ equality, ordering, and hashing.
 `LSet`, `LSetMut`, `Cons`, `Closure`, `LBox`, `Fiber`, `Syntax`,
 `ManagedPointer`, `External`, `Parameter`, `ThreadHandle`.
 
-**Variants that do NOT carry `traits` (6 infrastructure types):** `Float`,
-`NativeFn`, `LibHandle`, `Binding`, `FFISignature`, `FFIType`. `with-traits`
-on these returns a `:type-error`.
+**Variants that do NOT carry `traits` (5 infrastructure types):** `Float`,
+`NativeFn`, `LibHandle`, `FFISignature`, `FFIType`. `with-traits`
+on these returns a `:type-error`. (`Binding` is compile-time only, not a
+heap variant.)
 
 ## Products
 

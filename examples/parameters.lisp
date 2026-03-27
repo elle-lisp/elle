@@ -14,24 +14,19 @@
 #   parameterize        — override a parameter's value in a scope
 #   Nested parameterize — shadowing and revert
 #   Fiber inheritance   — child fibers inherit parent's parameter bindings
-
-
-
-# ========================================
-# 1. Creating and reading parameters
-# ========================================
+## ── Creating and reading parameters ────────────────────────────────
 
 # parameter creates a parameter with a default value.
 # Calling the parameter (with no args) reads its current value.
 (def output-port (parameter "stdout"))
 (assert (= (output-port) "stdout") "parameter: read default")
-(print "  (output-port) = ") (println (output-port))
+(println "  (output-port) = " (output-port))
 
 # parameter? tests if a value is a parameter
 (assert (parameter? output-port) "parameter?: true for parameter")
 (assert (not (parameter? "stdout")) "parameter?: false for string")
 (assert (not (parameter? 42)) "parameter?: false for number")
-(print "  (parameter? output-port) = ") (println (parameter? output-port))
+(println "  (parameter? output-port) = " (parameter? output-port))
 
 # Parameters can hold any value
 (def current-user (parameter nil))
@@ -39,11 +34,7 @@
 
 (def max-retries (parameter 3))
 (assert (= (max-retries) 3) "parameter: int default")
-
-
-# ========================================
-# 2. parameterize — override in a scope
-# ========================================
+## ── parameterize — override in a scope ─────────────────────────────
 
 # parameterize temporarily overrides a parameter's value.
 # The override is active only within the parameterize body.
@@ -59,12 +50,8 @@
 
 # Outside parameterize, p reverts to the default
 (assert (= (p) 10) "parameterize: reverts after")
-(print "  After parameterize: (p) = ") (println (p))
-
-
-# ========================================
-# 3. Nested parameterize — shadowing
-# ========================================
+(println "  After parameterize: (p) = " (p))
+## ── Nested parameterize — shadowing ────────────────────────────────
 
 # Nested parameterize creates a stack of overrides.
 # Inner overrides shadow outer ones.
@@ -84,11 +71,7 @@
 (assert (= (level) 1) "nested: default after all")
 (print "  Nested parameterize: level reverts correctly")
 (println)
-
-
-# ========================================
-# 4. Multiple parameters in one parameterize
-# ========================================
+## ── Multiple parameters in one parameterize ────────────────────────
 
 # parameterize can override multiple parameters at once.
 (def x (parameter 1))
@@ -103,11 +86,7 @@
 (assert (= (y) 10) "multi: y reverted")
 (print "  Multiple parameters: both override and revert correctly")
 (println)
-
-
-# ========================================
-# 5. parameterize body is begin
-# ========================================
+## ── parameterize body is begin ─────────────────────────────────────
 
 # The body of parameterize is a begin — multiple expressions,
 # last one is the return value.
@@ -121,11 +100,7 @@
 
 (assert (= result 3) "parameterize: body returns last expr")
 (assert (= (config) "default") "parameterize: reverted after multi-expr body")
-
-
-# ========================================
-# 6. Use case: simulating I/O ports
-# ========================================
+## ── Use case: simulating I/O ports ─────────────────────────────────
 
 # A common use of parameters is to simulate I/O ports.
 # Functions can read the current output port without it being passed as an argument.
@@ -149,11 +124,7 @@
 
 (print "  I/O port simulation: ")
 (println (write-line "success"))
-
-
-# ========================================
-# 7. Fiber inheritance
-# ========================================
+## ── Fiber inheritance ──────────────────────────────────────────────
 
 # Child fibers inherit the parent's parameter bindings.
 # When a child fiber is created inside a parameterize,

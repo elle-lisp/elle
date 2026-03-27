@@ -14,11 +14,7 @@
 
 # Share the ev/run backend so all process schedulers use one event loop
 (def backend (*io-backend*))
-
-
-# ========================================
-# 1. Ping-pong
-# ========================================
+## ── Ping-pong ──────────────────────────────────────────────────────
 
 (process:start (fn []
   (let* ([me (process:self)]
@@ -31,11 +27,8 @@
       (println (string "  ping-pong: " reply))
       (assert (= reply :pong) "ping-pong"))))
   :backend backend)
+## ── Supervised workers ─────────────────────────────────────────────
 
-
-# ========================================
-# 2. Supervised workers
-# ========================================
 # Three workers square numbers. Worker 2 crashes on job 4. The supervisor
 # detects the crash via a monitor, restarts the worker, and re-dispatches.
 
@@ -104,11 +97,8 @@
     (assert (= (get (get result 5) 1) 3600) "60² = 3600")))
 
 (process:start run-supervised :backend backend)
+## ── Preemptive ring ────────────────────────────────────────────────
 
-
-# ========================================
-# 3. Preemptive ring
-# ========================================
 # A message passes through three forwarders while a CPU-hog runs alongside.
 
 (defn run-ring []
@@ -128,11 +118,7 @@
         (process:exit hog :kill)))))
 
 (process:start run-ring :fuel 200 :backend backend)
-
-
-# ========================================
-# 4. Selective receive and timers
-# ========================================
+## ── Selective receive and timers ───────────────────────────────────
 
 (defn run-selective []
   (let ([me (process:self)])
@@ -162,11 +148,7 @@
       (assert (= msg :timeout) "times out"))))
 
 (process:start run-selective :backend backend)
-
-
-# ========================================
-# 5. Key-value service
-# ========================================
+## ── Key-value service ──────────────────────────────────────────────
 
 (defn run-kv []
   (let ([me (process:self)])
@@ -208,11 +190,8 @@
     (process:send-named :kv [:stop])))
 
 (process:start run-kv :backend backend)
+## ── I/O inside processes ───────────────────────────────────────────
 
-
-# ========================================
-# 6. I/O inside processes
-# ========================================
 # Processes can freely use println — the scheduler submits I/O to the
 # async backend and parks the process, so other processes keep running.
 

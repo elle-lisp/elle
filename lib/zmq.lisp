@@ -62,14 +62,10 @@
 (ffi/defbind zmq-errno       libzmq "zmq_errno"        :int  @[])
 (ffi/defbind zmq-strerror    libzmq "zmq_strerror"     :ptr  @[:int])
 
-# TODO: zmq_send takes (ptr, len) — the FFI can't yet marshal bytes as
-# a pointer+length pair directly, so we manually malloc/copy/free.
-# A :bytes FFI type descriptor would eliminate bytes->ptr entirely.
+# zmq_send takes (ptr, len) — use ffi/pin to convert bytes to a pointer.
 (ffi/defbind zmq-send        libzmq "zmq_send"         :int  @[:ptr :ptr :size :int])
 
-# TODO: zmq_msg_* requires managing a 64-byte opaque struct through FFI.
-# A higher-level recv that returned bytes directly would save 6 FFI calls
-# per message (init, recv, size, data, close, free).
+# zmq_msg_* manages a 64-byte opaque struct via ffi/with-stack.
 (ffi/defbind zmq-msg-init    libzmq "zmq_msg_init"     :int  @[:ptr])
 (ffi/defbind zmq-msg-close   libzmq "zmq_msg_close"    :int  @[:ptr])
 (ffi/defbind zmq-msg-data    libzmq "zmq_msg_data"     :ptr  @[:ptr])
@@ -95,58 +91,34 @@
   "Coerce string or bytes to bytes."
   (if (string? data) (bytes data) data))
 
-# TODO: bytes->ptr / ptr->bytes exist because ffi/call can't pass bytes
-# as a C pointer directly. A :bytes type descriptor would replace both.
-(defn bytes->ptr [b]
-  "Allocate an ffi pointer and copy bytes into it. Caller must ffi/free."
-  (let* [[len (length b)]
-         [ptr (ffi/malloc (max len 1))]]
-    (when (> len 0)
-      (ffi/write ptr (ffi/array :u8 len) b))
-    ptr))
-
 (defn ptr->bytes [ptr len]
   "Read len bytes from an ffi pointer into a bytes value."
   (if (= len 0) (bytes) (ffi/read ptr (ffi/array :u8 len))))
 
-# TODO: setsockopt/getsockopt require malloc+write+call+read+free to pass
-# a single int by pointer. ffi/with-stack or ffi/alloca would eliminate this.
 (defn setsockopt-bytes [sock opt-int buf name]
-  (let* [[ptr (bytes->ptr buf)]
-         [rc (zmq-setsockopt sock opt-int ptr (length buf))]]
-    (ffi/free ptr)
-    (check rc name)
+  (let* [[ptr (ffi/pin buf)]]
+    (defer (ffi/free ptr)
+      (check (zmq-setsockopt sock opt-int ptr (length buf)) name))
     nil))
 
 (defn setsockopt-int [sock opt-int value name]
-  (let* [[ptr (ffi/malloc (ffi/size :int))]
-         [_ (ffi/write ptr :int value)]
-         [rc (zmq-setsockopt sock opt-int ptr (ffi/size :int))]]
-    (ffi/free ptr)
-    (check rc name)
+  (ffi/with-stack [[ptr :int value]]
+    (check (zmq-setsockopt sock opt-int ptr (ffi/size :int)) name)
     nil))
 
 (defn getsockopt-bytes [sock opt-int name]
-  (let* [[buf (ffi/malloc 256)]
-         [szptr (ffi/malloc (ffi/size :size))]
-         [_ (ffi/write szptr :size 256)]
-         [rc (zmq-getsockopt sock opt-int buf szptr)]
-         [result (ptr->bytes buf (ffi/read szptr :size))]]
-    (ffi/free buf)
-    (ffi/free szptr)
-    (check rc name)
-    result))
+  (ffi/with-stack [[szptr :size 256] [buf 256]]
+    (let* [[rc (zmq-getsockopt sock opt-int buf szptr)]
+           [result (ptr->bytes buf (ffi/read szptr :size))]]
+      (check rc name)
+      result)))
 
 (defn getsockopt-int [sock opt-int name]
-  (let* [[buf (ffi/malloc (ffi/size :int))]
-         [szptr (ffi/malloc (ffi/size :size))]
-         [_ (ffi/write szptr :size (ffi/size :int))]
-         [rc (zmq-getsockopt sock opt-int buf szptr)]
-         [result (ffi/read buf :int)]]
-    (ffi/free buf)
-    (ffi/free szptr)
-    (check rc name)
-    result))
+  (ffi/with-stack [[buf :int 0] [szptr :size (ffi/size :int)]]
+    (let* [[rc (zmq-getsockopt sock opt-int buf szptr)]
+           [result (ffi/read buf :int)]]
+      (check rc name)
+      result)))
 
 (defn resolve-option [opt-kw name]
   (let [[opt-int (get option-map opt-kw)]]
@@ -188,26 +160,23 @@
   (let* [[buf (as-bytes data)]
          [flags (+ (if dontwait ZMQ_DONTWAIT 0)
                    (if sndmore  ZMQ_SNDMORE  0))]
-         [ptr (bytes->ptr buf)]
-         [rc (zmq-send sock ptr (length buf) flags)]]
-    (ffi/free ptr)
-    (check rc "zmq/send")
+         [ptr (ffi/pin buf)]]
+    (defer (ffi/free ptr)
+      (check (zmq-send sock ptr (length buf) flags) "zmq/send"))
     nil))
 
 (defn zmq/recv [sock &named dontwait]
   "Receive bytes. :dontwait true for non-blocking."
-  (let* [[flags (if dontwait ZMQ_DONTWAIT 0)]
-         [msg (ffi/malloc (ffi/size msg-type))]]
-    (zmq-msg-init msg)
-    (let [[rc (zmq-msg-recv msg sock flags)]]
-      (when (< rc 0)
-        (zmq-msg-close msg)
-        (ffi/free msg)
-        (zmq-error "zmq/recv"))
-      (let [[result (ptr->bytes (zmq-msg-data msg) (zmq-msg-size msg))]]
-        (zmq-msg-close msg)
-        (ffi/free msg)
-        result))))
+  (let [[flags (if dontwait ZMQ_DONTWAIT 0)]]
+    (ffi/with-stack [[msg (ffi/size msg-type)]]
+      (zmq-msg-init msg)
+      (let [[rc (zmq-msg-recv msg sock flags)]]
+        (when (< rc 0)
+          (zmq-msg-close msg)
+          (zmq-error "zmq/recv"))
+        (let [[result (ptr->bytes (zmq-msg-data msg) (zmq-msg-size msg))]]
+          (zmq-msg-close msg)
+          result)))))
 
 (defn zmq/recv-string [sock &named dontwait]
   "Receive as UTF-8 string. :dontwait true for non-blocking."
@@ -234,8 +203,7 @@
     (if (contains? byte-options opt-kw)
       (getsockopt-bytes sock opt-int "zmq/get-option")
       (let [[result (getsockopt-int sock opt-int "zmq/get-option")]]
-        # TODO: (not= result 0) or (nonzero? result) once those land
-        (if (= opt-kw :rcvmore) (not (= result 0)) result)))))
+        (if (= opt-kw :rcvmore) (not (zero? result)) result)))))
 
 (defn zmq/has-more? [sock]
   "Check if more multipart frames are available."

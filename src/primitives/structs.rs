@@ -31,6 +31,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         aliases: &[],
     },
     PrimitiveDef {
+        name: "deep-freeze",
+        func: prim_deep_freeze,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "Recursively freeze a value and all its contents. Converts mutable collections to immutable and recurses into elements. Atoms and non-collection types are returned as-is.",
+        params: &["value"],
+        category: "struct",
+        example: "(deep-freeze @[@[1 2] @{:a 3}])",
+        aliases: &[],
+    },
+    PrimitiveDef {
         name: "thaw",
         func: prim_thaw,
         signal: Signal::errors(),
@@ -156,6 +167,77 @@ pub(crate) fn prim_freeze(args: &[Value]) -> (SignalBits, Value) {
             ),
         ),
     )
+}
+
+/// Recursively freeze a value and all nested contents.
+fn deep_freeze_val(val: Value) -> Value {
+    // @array → freeze to array, deep-freeze each element
+    if let Some(a) = val.as_array_mut() {
+        let elements: Vec<Value> = a.borrow().iter().map(|v| deep_freeze_val(*v)).collect();
+        return Value::array(elements);
+    }
+    // immutable array → deep-freeze each element
+    if let Some(a) = val.as_array() {
+        let elements: Vec<Value> = a.iter().map(|v| deep_freeze_val(*v)).collect();
+        return Value::array(elements);
+    }
+
+    // @struct → freeze to struct, deep-freeze each value
+    if let Some(t) = val.as_struct_mut() {
+        let map: BTreeMap<TableKey, Value> = t
+            .borrow()
+            .iter()
+            .map(|(k, v)| (k.clone(), deep_freeze_val(*v)))
+            .collect();
+        return Value::struct_from(map);
+    }
+    // immutable struct → deep-freeze each value
+    if let Some(t) = val.as_struct() {
+        let map: BTreeMap<TableKey, Value> = t
+            .iter()
+            .map(|(k, v)| (k.clone(), deep_freeze_val(*v)))
+            .collect();
+        return Value::struct_from(map);
+    }
+
+    // @set → freeze to set, deep-freeze each element
+    if let Some(s) = val.as_set_mut() {
+        let items: BTreeSet<Value> = s.borrow().iter().map(|v| deep_freeze_val(*v)).collect();
+        return Value::set(items);
+    }
+    // immutable set → deep-freeze each element
+    if let Some(s) = val.as_set() {
+        let items: BTreeSet<Value> = s.iter().map(|v| deep_freeze_val(*v)).collect();
+        return Value::set(items);
+    }
+
+    // cons → deep-freeze car and cdr, rebuild
+    if let Some(c) = val.as_cons() {
+        return Value::cons(deep_freeze_val(c.first), deep_freeze_val(c.rest));
+    }
+
+    // @string → string
+    if let Some(buf) = val.as_string_mut() {
+        let bytes = buf.borrow();
+        return match std::str::from_utf8(&bytes) {
+            Ok(s) => Value::string(s),
+            Err(_) => val, // return as-is if invalid UTF-8
+        };
+    }
+
+    // @bytes → bytes
+    if let Some(b) = val.as_bytes_mut() {
+        let data = b.borrow().clone();
+        return Value::bytes(data);
+    }
+
+    // atoms and everything else → return as-is
+    val
+}
+
+/// deep-freeze: recursively freeze a value
+pub(crate) fn prim_deep_freeze(args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, deep_freeze_val(args[0]))
 }
 
 /// Convert an immutable collection to its mutable equivalent

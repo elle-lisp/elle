@@ -24,11 +24,11 @@
 (defmacro -> (val & forms)
   (if (empty? forms)
     val
-    (let* ((form (first forms))
-           (rest-forms (rest forms))
-           (threaded (if (pair? form)
+    (let* [[form (first forms)]
+           [rest-forms (rest forms)]
+           [threaded (if (pair? form)
                        `(,(first form) ,val ,;(rest form))
-                       `(,form ,val))))
+                       `(,form ,val))]]
       `(-> ,threaded ,;rest-forms))))
 
 ## ->> thread-last: insert value as last argument
@@ -36,11 +36,11 @@
 (defmacro ->> (val & forms)
   (if (empty? forms)
     val
-    (let* ((form (first forms))
-           (rest-forms (rest forms))
-           (threaded (if (pair? form)
+    (let* [[form (first forms)]
+           [rest-forms (rest forms)]
+           [threaded (if (pair? form)
                        `(,;form ,val)
-                       `(,form ,val))))
+                       `(,form ,val))]]
       `(->> ,threaded ,;rest-forms))))
 
 ## as-> - thread with named binding
@@ -58,12 +58,12 @@
 (defmacro some-> (val & forms)
   (if (empty? forms)
     val
-    (let* ((g (gensym))
-           (form (first forms))
-           (rest-forms (rest forms))
-           (threaded (if (pair? form)
+    (let* [[g (gensym)]
+           [form (first forms)]
+           [rest-forms (rest forms)]
+           [threaded (if (pair? form)
                        `(,(first form) ,g ,;(rest form))
-                       `(,form ,g))))
+                       `(,form ,g))]]
       `(let ((,g ,val))
          (if (nil? ,g) nil
            (some-> ,threaded ,;rest-forms))))))
@@ -73,12 +73,12 @@
 (defmacro some->> (val & forms)
   (if (empty? forms)
     val
-    (let* ((g (gensym))
-           (form (first forms))
-           (rest-forms (rest forms))
-           (threaded (if (pair? form)
+    (let* [[g (gensym)]
+           [form (first forms)]
+           [rest-forms (rest forms)]
+           [threaded (if (pair? form)
                        `(,;form ,g)
-                       `(,form ,g))))
+                       `(,form ,g))]]
       `(let ((,g ,val))
          (if (nil? ,g) nil
            (some->> ,threaded ,;rest-forms))))))
@@ -111,10 +111,10 @@
 ## If an error occurs, the catch handler runs with the error bound.
 ## If no error occurs, the body result is returned.
 (defmacro try (& forms)
-  (let* ((catch-clause (last forms))
-         (body-forms (butlast forms))
-         (err-binding (first (rest catch-clause)))
-         (handler-body (rest (rest catch-clause))))
+  (let* [[catch-clause (last forms)]
+         [body-forms (butlast forms)]
+         [err-binding (first (rest catch-clause))]
+         [handler-body (rest (rest catch-clause))]]
     `(let ((f (fiber/new (fn () ,;body-forms) 1)))
        (fiber/resume f nil)
        (if (= (fiber/status f) :dead)
@@ -181,16 +181,16 @@
 ##                     (sig__ (ffi/signature :int [:int])))
 ##                 (fn (a0) (ffi/call ptr__ sig__ a0))))
 (defmacro ffi/defbind (name lib cname ret-type arg-types)
-  (let* ((ptr-sym (gensym))
-         (sig-sym (gensym))
-         (arg-types-val (syntax->datum arg-types))
-         (arg-count (length arg-types-val))
-         (params (letrec ((gen-params (fn (i acc)
+  (let* [[ptr-sym (gensym)]
+         [sig-sym (gensym)]
+         [arg-types-val (syntax->datum arg-types)]
+         [arg-count (length arg-types-val)]
+         [params (letrec [[gen-params (fn (i acc)
                                         (if (= i arg-count)
                                           (reverse acc)
-                                          (gen-params (+ i 1) (cons (gensym) acc))))))
-                   (gen-params 0 '())))
-         (call-args params))
+                                          (gen-params (+ i 1) (cons (gensym) acc))))]]
+                   (gen-params 0 '()))]
+         [call-args params]]
     `(def ,name
        (let ((,ptr-sym (ffi/lookup ,lib ,cname))
              (,sig-sym (ffi/signature ,ret-type ,arg-types)))
@@ -201,11 +201,11 @@
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.
 ## (each x coll body...) or (each x in coll body...)
 (defmacro each (var iter-or-in & forms)
-  (let* ((has-in (and (not (empty? forms))
+  (let* [[has-in (and (not (empty? forms))
                       (not (empty? (rest forms)))
-                      (= (syntax->datum iter-or-in) 'in)))
-         (iter (if has-in (first forms) iter-or-in))
-         (body (if has-in (rest forms) forms)))
+                      (= (syntax->datum iter-or-in) 'in))]
+         [iter (if has-in (first forms) iter-or-in)]
+         [body (if has-in (rest forms) forms)]]
     `(let ((seq ,iter))
        (match (type-of seq)
          (:list
@@ -234,15 +234,15 @@
 ## Uses gensym to avoid double evaluation of the dispatch expression.
 ## Odd element count means the last element is the default.
 (defmacro case (expr & clauses)
-  (let* ((g (gensym)))
-    (letrec ((build (fn (cs)
+  (let* [[g (gensym)]]
+    (letrec [[build (fn (cs)
                       (if (empty? cs)
                         nil
                         (if (empty? (rest cs))
                           (first cs)
                           `(if (= ,g ,(first cs))
                              ,(first (rest cs))
-                             ,(build (rest (rest cs)))))))))
+                             ,(build (rest (rest cs)))))))]]
       `(let ((,g ,expr))
          ,(build clauses)))))
 
@@ -253,9 +253,9 @@
 (defmacro if-let (bindings then else)
   (if (empty? bindings)
     then
-    (let* ((b (first bindings))
-           (name (first b))
-           (val (first (rest b))))
+    (let* [[b (first bindings)]
+           [name (first b)]
+           [val (first (rest b))]]
       `(let ((,name ,val))
          (if ,name
            ,(if (empty? (rest bindings))
@@ -276,17 +276,54 @@
 (defmacro forever (& body)
   `(while true ,;body))
 
+## repeat - run body N times
+## (repeat 3 (println "hi")) prints "hi" three times
+(defmacro repeat (n & body)
+  (let* [[g-n (gensym)]
+         [g-i (gensym)]]
+    `(let ((,g-n ,n))
+       (var ,g-i 0)
+       (while (< ,g-i ,g-n)
+         ,;body
+         (assign ,g-i (+ ,g-i 1))))))
+
 ## apply - call function with args spread from final list argument
 ## (apply f args) => (f (splice args))
 ## (apply f a b args) => (f a b (splice args))
 (defmacro apply (f & args)
   (if (empty? args)
     `(,f)
-    (let* ((last-arg (last args))
-            (init-args (butlast args)))
+    (let* [[last-arg (last args)]
+            [init-args (butlast args)]]
       (if (empty? init-args)
         `(,f (splice ,last-arg))
         `(,f ,;init-args (splice ,last-arg))))))
+
+## ffi/with-stack - scoped FFI stack allocations
+## (ffi/with-stack [[p :int 42] [buf 64]] body...)
+## Each binding is [name type value] for typed scalars or [name size] for
+## raw buffers. Pointers are malloc'd, written, and freed on scope exit.
+(defmacro ffi/with-stack (bindings & body)
+  (if (empty? bindings)
+    `(begin ,;body)
+    (let* [[b (first bindings)]
+           [name (first b)]
+           [rest-b (rest b)]
+           [rest-bindings (rest bindings)]
+           [inner (if (empty? rest-bindings)
+                    `(begin ,;body)
+                    `(ffi/with-stack ,rest-bindings ,;body))]]
+      (if (= (length b) 3)
+        # [name type value] — typed scalar
+        (let* [[typ (first rest-b)]
+               [val (first (rest rest-b))]]
+          `(let ((,name (ffi/malloc (ffi/size ,typ))))
+             (ffi/write ,name ,typ ,val)
+             (defer (ffi/free ,name) ,inner)))
+        # [name size] — raw buffer
+        (let* [[size (first rest-b)]]
+          `(let ((,name (ffi/malloc ,size)))
+             (defer (ffi/free ,name) ,inner)))))))
 
 ## with-allocator - route heap allocations through a custom allocator
 ## (with-allocator alloc body...) => installs alloc, runs body in defer, uninstalls

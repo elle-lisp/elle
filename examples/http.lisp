@@ -68,7 +68,7 @@
 (let [[listener (tcp/listen "127.0.0.1" 0)]]
   (let* [[addr (port/path listener)]
          [port-num (integer (get (string/split addr ":") 1))]]
-    (print "  server listening on port ") (println port-num)
+    (println "  server listening on port " port-num)
 
     (def server (ev/spawn (fn [] (http:serve listener handler))))
 
@@ -79,12 +79,12 @@
     (let [[session (http:connect
                      (string/format "http://127.0.0.1:{}/" port-num))]]
       (let [[r1 (http:send session "GET" "/hello")]]
-        (print "  keep-alive GET /hello: ") (println r1:status)
+        (println "  keep-alive GET /hello: " r1:status)
         (push results r1))
 
       (let [[r2 (http:send session "POST" "/echo"
                     :body "ping" :headers {:content-type "text/plain"})]]
-        (print "  keep-alive POST /echo: ") (println r2:status)
+        (println "  keep-alive POST /echo: " r2:status)
         (push results r2))
 
       (http:close session))
@@ -93,7 +93,7 @@
 
     (let [[r3 (http:get
                  (string/format "http://127.0.0.1:{}/count" port-num))]]
-      (print "  one-shot GET /count: ") (println r3:body)
+      (println "  one-shot GET /count: " r3:body)
       (push results r3))
 
     # ── Teardown ────────────────────────────────────────────────

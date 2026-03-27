@@ -153,9 +153,10 @@ check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
 		exit 1; \
 	fi
 
-test: smoke  ## Rust unit tests + clippy + fmt after smoke
+test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 	PROPTEST_CASES=4 cargo test --workspace --lib
 
 # ── Clean ───────────────────────────────────────────────────────────

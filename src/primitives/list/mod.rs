@@ -205,6 +205,115 @@ pub(crate) fn prim_list(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(args.to_vec()))
 }
 
+/// Collect elements of any sequence into a `Vec<Value>`.
+fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
+    // List — walk cons cells
+    if val.is_cons() || val.is_empty_list() {
+        let mut elements = Vec::new();
+        let mut cur = *val;
+        while let Some(c) = cur.as_cons() {
+            elements.push(c.first);
+            cur = c.rest;
+        }
+        return Ok(elements);
+    }
+    // Array / @array
+    if let Some(elems) = val.as_array() {
+        return Ok(elems.to_vec());
+    }
+    if let Some(data) = val.as_array_mut() {
+        return Ok(data.borrow().clone());
+    }
+    // Set / @set
+    if let Some(set) = val.as_set() {
+        return Ok(set.iter().copied().collect());
+    }
+    if let Some(set) = val.as_set_mut() {
+        return Ok(set.borrow().iter().copied().collect());
+    }
+    // String — grapheme clusters as single-char strings
+    if val.is_string() {
+        return val
+            .with_string(|s| {
+                use unicode_segmentation::UnicodeSegmentation;
+                Ok(s.graphemes(true).map(Value::string).collect())
+            })
+            .unwrap_or_else(|| Ok(vec![]));
+    }
+    // @string — grapheme clusters
+    if val.is_string_mut() {
+        if let Some(data) = val.as_string_mut() {
+            let bytes = data.borrow();
+            if let Ok(s) = std::str::from_utf8(&bytes) {
+                use unicode_segmentation::UnicodeSegmentation;
+                return Ok(s.graphemes(true).map(Value::string).collect());
+            }
+        }
+        return Ok(vec![]);
+    }
+    // Bytes — each byte as integer
+    if let Some(b) = val.as_bytes() {
+        return Ok(b.iter().map(|&byte| Value::int(byte as i64)).collect());
+    }
+    // @bytes — each byte as integer
+    if let Some(data) = val.as_bytes_mut() {
+        return Ok(data
+            .borrow()
+            .iter()
+            .map(|&byte| Value::int(byte as i64))
+            .collect());
+    }
+    Err((
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!("expected sequence, got {}", val.type_name()),
+        ),
+    ))
+}
+
+/// Convert any sequence to an immutable array.
+pub(crate) fn prim_to_array(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("->array: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    // Already an immutable array — return as-is
+    if args[0].as_array().is_some() {
+        return (SIG_OK, args[0]);
+    }
+    match collect_elements(&args[0]) {
+        Ok(elements) => (SIG_OK, Value::array(elements)),
+        Err(e) => e,
+    }
+}
+
+/// Convert any sequence to a list.
+pub(crate) fn prim_to_list(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("->list: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    // Already a list — return as-is
+    if args[0].is_cons() || args[0].is_empty_list() {
+        return (SIG_OK, args[0]);
+    }
+    match collect_elements(&args[0]) {
+        Ok(elements) => (SIG_OK, list(elements)),
+        Err(e) => e,
+    }
+}
+
 /// Get the length of a collection (universal for all container types)
 pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -476,6 +585,30 @@ pub(crate) fn prim_empty(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, if result { Value::TRUE } else { Value::FALSE })
 }
 
+/// Check if a collection is non-empty (negation of empty?)
+pub(crate) fn prim_nonempty(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("nonempty?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let (sig, val) = prim_empty(args);
+    if sig != SIG_OK {
+        // Re-wrap errors with nonempty? name
+        return (sig, val);
+    }
+    // Negate the boolean result
+    if val == Value::TRUE {
+        (SIG_OK, Value::FALSE)
+    } else {
+        (SIG_OK, Value::TRUE)
+    }
+}
+
 /// Declarative primitive definitions for list operations
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -542,6 +675,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
          params: &["collection"],
          category: "predicate",
          example: "(empty? (list))",
+         aliases: &[],
+     },
+     PrimitiveDef {
+         name: "nonempty?",
+         func: prim_nonempty,
+         signal: Signal::errors(),
+         arity: Arity::Exact(1),
+         doc: "Check if a collection is non-empty (negation of empty?)",
+         params: &["collection"],
+         category: "predicate",
+         example: "(nonempty? (list 1 2 3))",
          aliases: &[],
      },
     PrimitiveDef {
@@ -620,6 +764,28 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["count", "list"],
         category: "list",
         example: "(drop 2 (list 1 2 3 4))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "->array",
+        func: prim_to_array,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Convert any sequence to an immutable array. Lists, @arrays, sets, strings (graphemes), and bytes (integers) are supported.",
+        params: &["coll"],
+        category: "list",
+        example: "(->array (list 1 2 3)) #=> [1 2 3]\n(->array @[1 2]) #=> [1 2]\n(->array |3 1 2|) #=> [1 2 3]",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "->list",
+        func: prim_to_list,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Convert any sequence to a list. Arrays, @arrays, sets, strings (graphemes), and bytes (integers) are supported.",
+        params: &["coll"],
+        category: "list",
+        example: "(->list [1 2 3]) #=> (1 2 3)\n(->list @[1 2]) #=> (1 2)\n(->list |3 1 2|) #=> (1 2 3)",
         aliases: &[],
     },
 ];

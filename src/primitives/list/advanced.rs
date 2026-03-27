@@ -20,132 +20,143 @@ pub(crate) fn prim_append(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // @string (mutable) - mutate in place
+    // @string (mutable) — accepts string or @string as second arg
     if let Some(buf_ref) = args[0].as_string_mut() {
-        if let Some(other_buf_ref) = args[1].as_string_mut() {
-            let other_borrowed = other_buf_ref.borrow();
-            let mut borrowed = buf_ref.borrow_mut();
-            borrowed.extend(other_borrowed.iter());
-            drop(borrowed);
-            return (SIG_OK, args[0]); // Return the mutated buffer
+        if let Some(other_buf) = args[1].as_string_mut() {
+            let other = other_buf.borrow();
+            buf_ref.borrow_mut().extend(other.iter());
+        } else if let Some(other) = args[1].with_string(|s| s.as_bytes().to_vec()) {
+            buf_ref.borrow_mut().extend(other.iter());
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got buffer and {}",
+                        "append: expected string or @string, got {}",
                         args[1].type_name()
                     ),
                 ),
             );
         }
+        return (SIG_OK, args[0]);
     }
 
-    // Array (mutable) - mutate in place
+    // @array (mutable) — accepts array or @array
     if let Some(vec_ref) = args[0].as_array_mut() {
         if let Some(other_vec_ref) = args[1].as_array_mut() {
-            let other_borrowed = other_vec_ref.borrow();
-            let mut borrowed = vec_ref.borrow_mut();
-            borrowed.extend(other_borrowed.iter().cloned());
-            drop(borrowed);
-            return (SIG_OK, args[0]); // Return the mutated array
+            let other = other_vec_ref.borrow();
+            vec_ref.borrow_mut().extend(other.iter().cloned());
+        } else if let Some(other) = args[1].as_array() {
+            vec_ref.borrow_mut().extend(other.iter().cloned());
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got array and {}",
+                        "append: expected array or @array, got {}",
                         args[1].type_name()
                     ),
                 ),
             );
         }
+        return (SIG_OK, args[0]);
     }
 
-    // Array (immutable) - return new array
+    // array (immutable) — accepts array or @array
     if let Some(elems) = args[0].as_array() {
-        if let Some(other_elems) = args[1].as_array() {
-            let mut result = elems.to_vec();
-            result.extend(other_elems.iter().cloned());
-            return (SIG_OK, Value::array(result));
+        let other = if let Some(other) = args[1].as_array() {
+            other.to_vec()
+        } else if let Some(other_ref) = args[1].as_array_mut() {
+            other_ref.borrow().clone()
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got array and {}",
+                        "append: expected array or @array, got {}",
                         args[1].type_name()
                     ),
                 ),
             );
-        }
+        };
+        let mut result = elems.to_vec();
+        result.extend(other);
+        return (SIG_OK, Value::array(result));
     }
 
-    // String (immutable) - return new string
+    // string (immutable) — accepts string or @string
     if args[0].is_string() {
-        if args[1].is_string() {
-            let s = args[0].with_string(|s| s.to_string()).unwrap();
-            let other_s = args[1].with_string(|s| s.to_string()).unwrap();
-            let mut result = s;
-            result.push_str(&other_s);
-            return (SIG_OK, Value::string(result.as_str()));
+        let s = args[0].with_string(|s| s.as_bytes().to_vec()).unwrap();
+        let other = if let Some(o) = args[1].with_string(|s| s.as_bytes().to_vec()) {
+            o
+        } else if let Some(o) = args[1].as_string_mut() {
+            o.borrow().clone()
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got string and {}",
+                        "append: expected string or @string, got {}",
                         args[1].type_name()
                     ),
                 ),
             );
-        }
+        };
+        let mut result = s;
+        result.extend(other);
+        return (
+            SIG_OK,
+            Value::string(std::str::from_utf8(&result).unwrap_or("")),
+        );
     }
 
-    // Bytes (immutable) - return new bytes
-    if let Some(b) = args[0].as_bytes() {
-        if let Some(other_b) = args[1].as_bytes() {
-            let mut result = b.to_vec();
-            result.extend(other_b);
-            return (SIG_OK, Value::bytes(result));
-        } else {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "append: both arguments must be same type, got bytes and {}",
-                        args[1].type_name()
-                    ),
-                ),
-            );
-        }
-    }
-
-    // @bytes (mutable) - mutate in place
+    // @bytes (mutable) — accepts bytes or @bytes
     if let Some(blob_ref) = args[0].as_bytes_mut() {
-        if let Some(other_blob_ref) = args[1].as_bytes_mut() {
-            let other_borrowed = other_blob_ref.borrow();
-            let mut borrowed = blob_ref.borrow_mut();
-            borrowed.extend(other_borrowed.iter());
-            drop(borrowed);
-            return (SIG_OK, args[0]);
+        if let Some(other) = args[1].as_bytes_mut() {
+            let o = other.borrow();
+            blob_ref.borrow_mut().extend(o.iter());
+        } else if let Some(other) = args[1].as_bytes() {
+            blob_ref.borrow_mut().extend(other.iter());
         } else {
             return (
                 SIG_ERROR,
                 error_val(
                     "type-error",
                     format!(
-                        "append: both arguments must be same type, got blob and {}",
+                        "append: expected bytes or @bytes, got {}",
                         args[1].type_name()
                     ),
                 ),
             );
         }
+        return (SIG_OK, args[0]);
+    }
+
+    // bytes (immutable) — accepts bytes or @bytes
+    if let Some(b) = args[0].as_bytes() {
+        let other = if let Some(other) = args[1].as_bytes() {
+            other.to_vec()
+        } else if let Some(other_ref) = args[1].as_bytes_mut() {
+            other_ref.borrow().clone()
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "append: expected bytes or @bytes, got {}",
+                        args[1].type_name()
+                    ),
+                ),
+            );
+        };
+        let mut result = b.to_vec();
+        result.extend(other);
+        return (SIG_OK, Value::bytes(result));
     }
 
     // List (or syntax list — used during macro expansion)
