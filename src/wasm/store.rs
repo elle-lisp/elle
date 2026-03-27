@@ -537,8 +537,6 @@ fn call_wasm_closure(
     wasm_idx: u32,
     args: &[Value],
 ) -> (i64, i64, i32) {
-    use crate::value::fiber::SIG_OK;
-
     let env_base = caller.data().env_stack_ptr;
     prepare_wasm_env(caller, closure, args, env_base);
 
@@ -573,14 +571,35 @@ fn call_wasm_closure(
         Ok(()) => {
             let tag = results[0].unwrap_i64();
             let payload = results[1].unwrap_i64();
+
+            // Read signal from memory[0..4]. WASM code writes the signal
+            // here before returning on error (via store_result_with_signal).
+            // On success, memory[0..4] is 0 (initialized by module load).
+            let signal = {
+                let memory = caller
+                    .get_export("__elle_memory")
+                    .and_then(|e| e.into_memory())
+                    .expect("call_wasm_closure: no memory");
+                let data = memory.data(&*caller);
+                i32::from_le_bytes(data[0..4].try_into().unwrap())
+            };
+            // Clear the signal slot for the next call
+            if signal != 0 {
+                let memory = caller
+                    .get_export("__elle_memory")
+                    .and_then(|e| e.into_memory())
+                    .expect("call_wasm_closure: no memory");
+                memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+            }
+
             if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
                 let v = caller.data().wasm_to_value(tag, payload);
                 eprintln!(
-                    "[call_wasm_closure] returned: tag={} payload={} = {:?}",
-                    tag, payload, v
+                    "[call_wasm_closure] returned: tag={} payload={} signal={} = {:?}",
+                    tag, payload, signal, v
                 );
             }
-            (tag, payload, SIG_OK.0 as i32)
+            (tag, payload, signal)
         }
         Err(e) => {
             let err = crate::value::error_val("exec-error", e.to_string());

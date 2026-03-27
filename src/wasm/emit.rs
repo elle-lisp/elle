@@ -744,13 +744,16 @@ impl WasmEmitter {
                 }
             }
             LirInstr::Eval { dst, expr, env } => {
-                // For now, stub eval as nil
-                self.set_nil(f, *dst);
-                let _ = (expr, env);
+                // Eval not supported in WASM backend — emit unreachable.
+                // The analyzer should prevent eval from reaching emission
+                // in most cases; this guards against edge cases.
+                let _ = (dst, expr, env);
+                f.instruction(&Instruction::Unreachable);
             }
             LirInstr::LoadResumeValue { dst } => {
-                // Phase 2: stack switching
-                self.set_nil(f, *dst);
+                // Fiber resume values require stack switching (Phase 2).
+                let _ = dst;
+                f.instruction(&Instruction::Unreachable);
             }
             LirInstr::MakeClosure {
                 dst,
@@ -951,13 +954,23 @@ impl WasmEmitter {
     // --- Data operation helpers ---
 
     /// Store result from a host call that returns (tag, payload, signal).
-    /// Signal is on top of stack. Checks signal and returns on error.
+    /// Signal is on top of stack. On non-zero signal, writes the signal
+    /// to memory at byte 0 (so the host can read it after the call) and
+    /// returns the error value.
     fn store_result_with_signal(&self, f: &mut Function, dst: Reg) {
         f.instruction(&Instruction::LocalSet(self.signal_local));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::If(BlockType::Empty));
+        // Write signal to memory[0..4] for host to read after return
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I32Store(MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
         f.instruction(&Instruction::Return);
@@ -1155,36 +1168,152 @@ impl WasmEmitter {
     }
 
     fn emit_binop(&self, f: &mut Function, dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) {
-        f.instruction(&Instruction::I64Const(TAG_INT as i64));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-        f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
-        f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
-        match op {
-            BinOp::Add => f.instruction(&Instruction::I64Add),
-            BinOp::Sub => f.instruction(&Instruction::I64Sub),
-            BinOp::Mul => f.instruction(&Instruction::I64Mul),
-            BinOp::Div => f.instruction(&Instruction::I64DivS),
-            BinOp::Rem => f.instruction(&Instruction::I64RemS),
-            BinOp::BitAnd => f.instruction(&Instruction::I64And),
-            BinOp::BitOr => f.instruction(&Instruction::I64Or),
-            BinOp::BitXor => f.instruction(&Instruction::I64Xor),
-            BinOp::Shl => f.instruction(&Instruction::I64Shl),
-            BinOp::Shr => f.instruction(&Instruction::I64ShrS),
-        };
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        // Bitwise ops are integer-only, no float dispatch needed.
+        if matches!(
+            op,
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+        ) {
+            f.instruction(&Instruction::I64Const(TAG_INT as i64));
+            f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
+            match op {
+                BinOp::BitAnd => f.instruction(&Instruction::I64And),
+                BinOp::BitOr => f.instruction(&Instruction::I64Or),
+                BinOp::BitXor => f.instruction(&Instruction::I64Xor),
+                BinOp::Shl => f.instruction(&Instruction::I64Shl),
+                BinOp::Shr => f.instruction(&Instruction::I64ShrS),
+                _ => unreachable!(),
+            };
+            f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+            return;
+        }
+
+        // Arithmetic ops: check if either operand is float.
+        // if lhs.tag == TAG_FLOAT || rhs.tag == TAG_FLOAT → float path
+        // else → integer path
+        f.instruction(&Instruction::LocalGet(self.tag_local(lhs)));
+        f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+        f.instruction(&Instruction::I64Eq);
+        f.instruction(&Instruction::LocalGet(self.tag_local(rhs)));
+        f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+        f.instruction(&Instruction::I64Eq);
+        f.instruction(&Instruction::I32Or);
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            // Float path: reinterpret payloads as f64, promote ints
+            f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+            f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+            // Load lhs as f64 (promote int if needed)
+            self.emit_to_f64(f, lhs);
+            // Load rhs as f64
+            self.emit_to_f64(f, rhs);
+            match op {
+                BinOp::Add => {
+                    f.instruction(&Instruction::F64Add);
+                }
+                BinOp::Sub => {
+                    f.instruction(&Instruction::F64Sub);
+                }
+                BinOp::Mul => {
+                    f.instruction(&Instruction::F64Mul);
+                }
+                BinOp::Div => {
+                    f.instruction(&Instruction::F64Div);
+                }
+                BinOp::Rem => {
+                    // f64 remainder: a - floor(a/b) * b
+                    f.instruction(&Instruction::Drop); // drop the two f64s from emit_to_f64
+                    f.instruction(&Instruction::Drop);
+                    self.emit_to_f64(f, lhs); // a
+                    self.emit_to_f64(f, lhs); // a (for a/b)
+                    self.emit_to_f64(f, rhs); // b
+                    f.instruction(&Instruction::F64Div); // a/b
+                    f.instruction(&Instruction::F64Floor); // floor(a/b)
+                    self.emit_to_f64(f, rhs); // b
+                    f.instruction(&Instruction::F64Mul); // floor(a/b)*b
+                    f.instruction(&Instruction::F64Sub); // a - floor(a/b)*b
+                }
+                _ => unreachable!(),
+            }
+            // Reinterpret f64 result bits as i64 for payload
+            f.instruction(&Instruction::I64ReinterpretF64);
+            f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        }
+        f.instruction(&Instruction::Else);
+        {
+            // Integer path
+            f.instruction(&Instruction::I64Const(TAG_INT as i64));
+            f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
+            match op {
+                BinOp::Add => f.instruction(&Instruction::I64Add),
+                BinOp::Sub => f.instruction(&Instruction::I64Sub),
+                BinOp::Mul => f.instruction(&Instruction::I64Mul),
+                BinOp::Div => f.instruction(&Instruction::I64DivS),
+                BinOp::Rem => f.instruction(&Instruction::I64RemS),
+                _ => unreachable!(),
+            };
+            f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        }
+        f.instruction(&Instruction::End);
+    }
+
+    /// Load a register's payload as f64, promoting int to float if needed.
+    fn emit_to_f64(&self, f: &mut Function, reg: Reg) {
+        f.instruction(&Instruction::LocalGet(self.tag_local(reg)));
+        f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+        f.instruction(&Instruction::I64Eq);
+        f.instruction(&Instruction::If(BlockType::Result(ValType::F64)));
+        // Float: reinterpret bits as f64
+        f.instruction(&Instruction::LocalGet(self.pay_local(reg)));
+        f.instruction(&Instruction::F64ReinterpretI64);
+        f.instruction(&Instruction::Else);
+        // Int: convert i64 to f64
+        f.instruction(&Instruction::LocalGet(self.pay_local(reg)));
+        f.instruction(&Instruction::F64ConvertI64S);
+        f.instruction(&Instruction::End);
     }
 
     fn emit_compare(&self, f: &mut Function, dst: Reg, op: CmpOp, lhs: Reg, rhs: Reg) {
-        f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
-        f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
-        match op {
-            CmpOp::Eq => f.instruction(&Instruction::I64Eq),
-            CmpOp::Ne => f.instruction(&Instruction::I64Ne),
-            CmpOp::Lt => f.instruction(&Instruction::I64LtS),
-            CmpOp::Le => f.instruction(&Instruction::I64LeS),
-            CmpOp::Gt => f.instruction(&Instruction::I64GtS),
-            CmpOp::Ge => f.instruction(&Instruction::I64GeS),
-        };
+        // Check if either operand is float
+        f.instruction(&Instruction::LocalGet(self.tag_local(lhs)));
+        f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+        f.instruction(&Instruction::I64Eq);
+        f.instruction(&Instruction::LocalGet(self.tag_local(rhs)));
+        f.instruction(&Instruction::I64Const(TAG_FLOAT as i64));
+        f.instruction(&Instruction::I64Eq);
+        f.instruction(&Instruction::I32Or);
+        f.instruction(&Instruction::If(BlockType::Result(ValType::I32)));
+        {
+            // Float comparison
+            self.emit_to_f64(f, lhs);
+            self.emit_to_f64(f, rhs);
+            match op {
+                CmpOp::Eq => f.instruction(&Instruction::F64Eq),
+                CmpOp::Ne => f.instruction(&Instruction::F64Ne),
+                CmpOp::Lt => f.instruction(&Instruction::F64Lt),
+                CmpOp::Le => f.instruction(&Instruction::F64Le),
+                CmpOp::Gt => f.instruction(&Instruction::F64Gt),
+                CmpOp::Ge => f.instruction(&Instruction::F64Ge),
+            };
+        }
+        f.instruction(&Instruction::Else);
+        {
+            // Integer comparison
+            f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
+            match op {
+                CmpOp::Eq => f.instruction(&Instruction::I64Eq),
+                CmpOp::Ne => f.instruction(&Instruction::I64Ne),
+                CmpOp::Lt => f.instruction(&Instruction::I64LtS),
+                CmpOp::Le => f.instruction(&Instruction::I64LeS),
+                CmpOp::Gt => f.instruction(&Instruction::I64GtS),
+                CmpOp::Ge => f.instruction(&Instruction::I64GeS),
+            };
+        }
+        f.instruction(&Instruction::End);
         self.emit_bool_from_i32(f, dst);
     }
 
@@ -1245,6 +1374,7 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
     }
 
+    #[allow(dead_code)]
     fn set_nil(&self, f: &mut Function, dst: Reg) {
         f.instruction(&Instruction::I64Const(TAG_NIL as i64));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));

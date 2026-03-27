@@ -259,6 +259,18 @@ impl VM {
             // need `closure_squelch_mask` after the call returns.
             let closure_squelch_mask = closure.squelch_mask;
 
+            // Guard: WASM-compiled closures have empty bytecode. They
+            // cannot be executed by the bytecode VM.
+            if closure.template.bytecode.is_empty() {
+                let err = crate::value::error_val(
+                    "exec-error",
+                    "cannot execute WASM closure in bytecode VM",
+                );
+                self.fiber.stack.push(err);
+                self.fiber.call_depth -= 1;
+                return Some(SIG_ERROR);
+            }
+
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.
             let result = self.execute_bytecode_saving_stack(
