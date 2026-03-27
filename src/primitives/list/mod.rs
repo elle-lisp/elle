@@ -205,7 +205,7 @@ pub(crate) fn prim_list(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, list(args.to_vec()))
 }
 
-/// Collect elements of any sequence into a Vec<Value>.
+/// Collect elements of any sequence into a `Vec<Value>`.
 fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
     // List — walk cons cells
     if val.is_cons() || val.is_empty_list() {
