@@ -137,8 +137,8 @@
 (assert (= (get [1 2 3] 2) 3) "get array by index last")
 (assert (= (get [1 2 3] 10) nil) "get array out of bounds")
 (assert (= (get [1 2 3] 10 :missing) :missing) "get array out of bounds with default")
-(assert (= (get [1 2 3] -1) nil) "get array negative index")
-(assert (= (get [1 2 3] -1 :default) :default) "get array negative index with default")
+(assert (= (get [1 2 3] -1) 3) "get array negative index")
+(assert (= (get [1 2 3] -1 :default) 3) "get array negative index with default")
 (assert (= (get [] 0) nil) "get empty array")
 (let (([ok? _] (protect ((fn () (get [1 2 3] :key)))))) (assert (not ok?) "get array non-integer index error"))
 
@@ -149,7 +149,7 @@
 (assert (= (get @[1 2 3] 2) 3) "get array by index last")
 (assert (= (get @[1 2 3] 10) nil) "get array out of bounds")
 (assert (= (get @[1 2 3] 10 :missing) :missing) "get array out of bounds with default")
-(assert (= (get @[1 2 3] -1) nil) "get array negative index")
+(assert (= (get @[1 2 3] -1) 3) "get @array negative index")
 (assert (= (get @[] 0) nil) "get empty array")
 (let (([ok? _] (protect ((fn () (get @[1 2 3] :key)))))) (assert (not ok?) "get array non-integer index error"))
 
@@ -160,7 +160,7 @@
 (assert (= (get "hello" 4) "o") "get string by char index last")
 (assert (= (get "hello" 10) nil) "get string out of bounds")
 (assert (= (get "hello" 10 :missing) :missing) "get string out of bounds with default")
-(assert (= (get "hello" -1) nil) "get string negative index")
+(assert (= (get "hello" -1) "o") "get string negative index")
 (assert (= (get "" 0) nil) "get empty string")
 (let (([ok? _] (protect ((fn () (get "hello" :key)))))) (assert (not ok?) "get string non-integer index error"))
 (assert (= (get "café" 3) "é") "get string unicode char")
@@ -195,7 +195,7 @@
 (assert (= (get (put [1 2 3] 1 99) 1) 99) "put array by index middle")
 (assert (= (get (put [1 2 3] 2 99) 2) 99) "put array by index last")
 (let (([ok? _] (protect ((fn () (put [1 2 3] 10 99)))))) (assert (not ok?) "put array out of bounds"))
-(let (([ok? _] (protect ((fn () (put [1 2 3] -1 99)))))) (assert (not ok?) "put array negative index"))
+(assert (= (put [1 2 3] -1 99) [1 2 99]) "put array negative index")
 
 (assert (= (let ((t [1 2 3]))
              (let ((t2 (put t 0 99)))
@@ -210,7 +210,7 @@
 (assert (= (get (put @[1 2 3] 1 99) 1) 99) "put @array by index middle")
 (assert (= (get (put @[1 2 3] 2 99) 2) 99) "put @array by index last")
 (let (([ok? _] (protect ((fn () (put @[1 2 3] 10 99)))))) (assert (not ok?) "put @array out of bounds"))
-(let (([ok? _] (protect ((fn () (put @[1 2 3] -1 99)))))) (assert (not ok?) "put @array negative index"))
+(assert (= (get (put @[1 2 3] -1 99) 2) 99) "put @array negative index")
 
 (assert (= (let ((a @[1 2 3]))
              (let ((a2 (put a 0 99)))
@@ -225,7 +225,7 @@
 (assert (= (put "hello" 1 "a") "hallo") "put string by char index middle")
 (assert (= (put "hello" 4 "a") "hella") "put string by char index last")
 (let (([ok? _] (protect ((fn () (put "hello" 10 "a")))))) (assert (not ok?) "put string out of bounds"))
-(let (([ok? _] (protect ((fn () (put "hello" -1 "a")))))) (assert (not ok?) "put string negative index"))
+(assert (= (put "hello" -1 "a") "hella") "put string negative index")
 
 (assert (= (let ((s "hello"))
              (let ((s2 (put s 0 "a")))
@@ -573,7 +573,7 @@
 (assert (= (get (list 10 20 30) 2) 30) "get list by index last")
 (assert (= (get (list 10 20 30) 10) nil) "get list out of bounds")
 (assert (= (get (list 10 20 30) 10 :missing) :missing) "get list out of bounds with default")
-(assert (= (get (list 10 20 30) -1) nil) "get list negative index")
+(assert (= (get (list 10 20 30) -1) 30) "get list negative index")
 (assert (= (get (list) 0) nil) "get empty list")
 (let (([ok? _] (protect ((fn () (get (list 1 2 3) :key)))))) (assert (not ok?) "get list non-integer index error"))
 

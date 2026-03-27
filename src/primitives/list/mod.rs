@@ -81,23 +81,32 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     if let Some(cons) = args[0].as_cons() {
         return (SIG_OK, cons.first);
     }
-    // Empty list → nil (matches destructuring silent-nil semantics)
+    // Empty list → error
     if args[0].is_empty_list() {
-        return (SIG_OK, Value::NIL);
+        return (
+            SIG_ERROR,
+            error_val("argument-error", "first: empty sequence"),
+        );
     }
     // Array
     if let Some(elems) = args[0].as_array() {
         return if elems.is_empty() {
-            (SIG_OK, Value::NIL)
+            (
+                SIG_ERROR,
+                error_val("argument-error", "first: empty sequence"),
+            )
         } else {
             (SIG_OK, elems[0])
         };
     }
-    // Array
+    // @array
     if let Some(arr) = args[0].as_array_mut() {
         let borrowed = arr.borrow();
         return if borrowed.is_empty() {
-            (SIG_OK, Value::NIL)
+            (
+                SIG_ERROR,
+                error_val("argument-error", "first: empty sequence"),
+            )
         } else {
             (SIG_OK, borrowed[0])
         };
@@ -105,9 +114,52 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
     // String — first grapheme cluster
     if let Some(result) = args[0].with_string(|s| match s.graphemes(true).next() {
         Some(g) => (SIG_OK, Value::string(g)),
-        None => (SIG_OK, Value::NIL),
+        None => (
+            SIG_ERROR,
+            error_val("argument-error", "first: empty sequence"),
+        ),
     }) {
         return result;
+    }
+    // @string — first grapheme cluster
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        let borrowed = buf_ref.borrow();
+        if let Ok(s) = std::str::from_utf8(&borrowed) {
+            return match s.graphemes(true).next() {
+                Some(g) => (SIG_OK, Value::string(g)),
+                None => (
+                    SIG_ERROR,
+                    error_val("argument-error", "first: empty sequence"),
+                ),
+            };
+        }
+        return (
+            SIG_ERROR,
+            error_val("argument-error", "first: empty sequence"),
+        );
+    }
+    // Bytes — first byte as integer
+    if let Some(b) = args[0].as_bytes() {
+        return if b.is_empty() {
+            (
+                SIG_ERROR,
+                error_val("argument-error", "first: empty sequence"),
+            )
+        } else {
+            (SIG_OK, Value::int(b[0] as i64))
+        };
+    }
+    // @bytes — first byte as integer
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.is_empty() {
+            (
+                SIG_ERROR,
+                error_val("argument-error", "first: empty sequence"),
+            )
+        } else {
+            (SIG_OK, Value::int(borrowed[0] as i64))
+        };
     }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
@@ -123,14 +175,112 @@ pub(crate) fn prim_first(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "first: expected sequence (list, array, or string), got {}",
+                "first: expected sequence (list, array, string, bytes), got {}",
                 args[0].type_name()
             ),
         ),
     )
 }
 
-/// Get the rest of a sequence (list, array, @array, string)
+/// Get the second element of a sequence
+pub(crate) fn prim_second(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("second: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let too_short = (
+        SIG_ERROR,
+        error_val(
+            "argument-error",
+            "second: sequence has fewer than 2 elements",
+        ),
+    );
+    // Cons cell — walk to second
+    if let Some(cons) = args[0].as_cons() {
+        if let Some(c2) = cons.rest.as_cons() {
+            return (SIG_OK, c2.first);
+        }
+        return too_short;
+    }
+    if args[0].is_empty_list() {
+        return too_short;
+    }
+    // Array
+    if let Some(elems) = args[0].as_array() {
+        return if elems.len() < 2 {
+            too_short
+        } else {
+            (SIG_OK, elems[1])
+        };
+    }
+    // @array
+    if let Some(arr) = args[0].as_array_mut() {
+        let borrowed = arr.borrow();
+        return if borrowed.len() < 2 {
+            too_short
+        } else {
+            (SIG_OK, borrowed[1])
+        };
+    }
+    // String — second grapheme cluster
+    if let Some(result) = args[0].with_string(|s| match s.graphemes(true).nth(1) {
+        Some(g) => (SIG_OK, Value::string(g)),
+        None => (
+            SIG_ERROR,
+            error_val(
+                "argument-error",
+                "second: sequence has fewer than 2 elements",
+            ),
+        ),
+    }) {
+        return result;
+    }
+    // @string — second grapheme cluster
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        let borrowed = buf_ref.borrow();
+        if let Ok(s) = std::str::from_utf8(&borrowed) {
+            return match s.graphemes(true).nth(1) {
+                Some(g) => (SIG_OK, Value::string(g)),
+                None => too_short,
+            };
+        }
+        return too_short;
+    }
+    // Bytes — second byte as integer
+    if let Some(b) = args[0].as_bytes() {
+        return if b.len() < 2 {
+            too_short
+        } else {
+            (SIG_OK, Value::int(b[1] as i64))
+        };
+    }
+    // @bytes — second byte as integer
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.len() < 2 {
+            too_short
+        } else {
+            (SIG_OK, Value::int(borrowed[1] as i64))
+        };
+    }
+    (
+        SIG_ERROR,
+        error_val(
+            "type-error",
+            format!(
+                "second: expected sequence (list, array, string, bytes), got {}",
+                args[0].type_name()
+            ),
+        ),
+    )
+}
+
+/// Get the rest of a sequence (list, array, @array, string, @string, bytes, @bytes)
 pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -173,6 +323,32 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
     }) {
         return result;
     }
+    // @string — skip first grapheme, return new @string
+    if let Some(buf_ref) = args[0].as_string_mut() {
+        let borrowed = buf_ref.borrow();
+        if let Ok(s) = std::str::from_utf8(&borrowed) {
+            let rest: String = s.graphemes(true).skip(1).collect();
+            return (SIG_OK, Value::string_mut(rest.into_bytes()));
+        }
+        return (SIG_OK, Value::string_mut(vec![]));
+    }
+    // Bytes — return bytes from index 1 onward
+    if let Some(b) = args[0].as_bytes() {
+        return if b.len() <= 1 {
+            (SIG_OK, Value::bytes(vec![]))
+        } else {
+            (SIG_OK, Value::bytes(b[1..].to_vec()))
+        };
+    }
+    // @bytes — return new @bytes from index 1 onward
+    if let Some(blob_ref) = args[0].as_bytes_mut() {
+        let borrowed = blob_ref.borrow();
+        return if borrowed.len() <= 1 {
+            (SIG_OK, Value::bytes_mut(vec![]))
+        } else {
+            (SIG_OK, Value::bytes_mut(borrowed[1..].to_vec()))
+        };
+    }
     // Syntax (existing behavior, preserved)
     if let Some(syntax) = args[0].as_syntax() {
         if let SyntaxKind::List(items) | SyntaxKind::Array(items) = &syntax.kind {
@@ -193,7 +369,7 @@ pub(crate) fn prim_rest(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "rest: expected sequence (list, array, or string), got {}",
+                "rest: expected sequence (list, array, string, bytes), got {}",
                 args[0].type_name()
             ),
         ),
@@ -631,6 +807,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["sequence"],
         category: "list",
         example: "(first (list 1 2 3))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "second",
+        func: prim_second,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Get the second element of a sequence. Returns nil if fewer than 2 elements.",
+        params: &["sequence"],
+        category: "list",
+        example: "(second (list 1 2 3))",
         aliases: &[],
     },
     PrimitiveDef {

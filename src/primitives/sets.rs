@@ -14,7 +14,7 @@ use crate::value::{error_val, Value};
 /// - mutable-set → set
 /// - @string → string (lossy UTF-8)
 /// - @bytes → bytes
-fn freeze_value(v: Value) -> Value {
+pub(crate) fn freeze_value(v: Value) -> Value {
     if let Some(arr) = v.as_array_mut() {
         let items: Vec<Value> = arr.borrow().iter().map(|x| freeze_value(*x)).collect();
         Value::array(items)

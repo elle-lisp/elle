@@ -51,7 +51,7 @@
 # ============================================================================
 
 (let (([ok? _] (protect ((fn () (put @"hello" 10 "x")))))) (assert (not ok?) "put out of bounds errors"))
-(let (([ok? _] (protect ((fn () (put @"hello" -1 "x")))))) (assert (not ok?) "put negative index errors"))
+(assert (= (freeze (begin (var s @"hello") (put s -1 "x") s)) "hellx") "put negative index wraps")
 (let (([ok? _] (protect ((fn () (put @"" 0 "x")))))) (assert (not ok?) "put on empty @string errors"))
 
 # ============================================================================
@@ -94,7 +94,7 @@
 
 # put bounds errors (use string values, matching new semantics)
 (let (([ok? _] (protect ((fn () (put @"hello" 10 "x")))))) (assert (not ok?) "put out of bounds errors (new)"))
-(let (([ok? _] (protect ((fn () (put @"hello" -1 "x")))))) (assert (not ok?) "put negative index errors (new)"))
+(assert (= (freeze (begin (var s2 @"hello") (put s2 -1 "x") s2)) "hellx") "put negative index wraps (new)")
 (let (([ok? _] (protect ((fn () (put @"" 0 "x")))))) (assert (not ok?) "put on empty @string errors (new)"))
 
 # ============================================================================

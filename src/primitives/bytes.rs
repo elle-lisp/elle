@@ -267,17 +267,10 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    let start = match args[1].as_int() {
-        Some(i) if i >= 0 => i as usize,
-        Some(i) => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "argument-error",
-                    format!("slice: start must be non-negative, got {}", i),
-                ),
-            )
-        }
+    use crate::primitives::access::resolve_slice_index;
+
+    let raw_start = match args[1].as_int() {
+        Some(i) => i,
         None => {
             return (
                 SIG_ERROR,
@@ -289,21 +282,12 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    // If no end provided, use length of sequence (will be clamped below)
-    let end = if args.len() == 2 {
-        usize::MAX
+    // If no end provided, use i64::MAX (will be clamped to len below)
+    let raw_end = if args.len() == 2 {
+        i64::MAX
     } else {
         match args[2].as_int() {
-            Some(i) if i >= 0 => i as usize,
-            Some(i) => {
-                return (
-                    SIG_ERROR,
-                    error_val(
-                        "argument-error",
-                        format!("slice: end must be non-negative, got {}", i),
-                    ),
-                )
-            }
+            Some(i) => i,
             None => {
                 return (
                     SIG_ERROR,
@@ -318,59 +302,55 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
 
     // Bytes (immutable)
     if let Some(b) = args[0].as_bytes() {
-        let clamped_start = start.min(b.len());
-        let clamped_end = end.min(b.len());
-        if clamped_start >= clamped_end {
+        let start = resolve_slice_index(raw_start, b.len());
+        let end = resolve_slice_index(raw_end, b.len());
+        if start >= end {
             return (SIG_OK, Value::bytes(vec![]));
         }
-        return (SIG_OK, Value::bytes(b[clamped_start..clamped_end].to_vec()));
+        return (SIG_OK, Value::bytes(b[start..end].to_vec()));
     }
 
     // @bytes (mutable)
     if let Some(blob_ref) = args[0].as_bytes_mut() {
         let borrowed = blob_ref.borrow();
-        let clamped_start = start.min(borrowed.len());
-        let clamped_end = end.min(borrowed.len());
-        if clamped_start >= clamped_end {
+        let start = resolve_slice_index(raw_start, borrowed.len());
+        let end = resolve_slice_index(raw_end, borrowed.len());
+        if start >= end {
             return (SIG_OK, Value::bytes_mut(vec![]));
         }
-        return (
-            SIG_OK,
-            Value::bytes_mut(borrowed[clamped_start..clamped_end].to_vec()),
-        );
+        return (SIG_OK, Value::bytes_mut(borrowed[start..end].to_vec()));
     }
 
     // Array (immutable)
     if let Some(elems) = args[0].as_array() {
-        let clamped_start = start.min(elems.len());
-        let clamped_end = end.min(elems.len());
-        if clamped_start >= clamped_end {
+        let start = resolve_slice_index(raw_start, elems.len());
+        let end = resolve_slice_index(raw_end, elems.len());
+        if start >= end {
             return (SIG_OK, Value::array(vec![]));
         }
-        return (
-            SIG_OK,
-            Value::array(elems[clamped_start..clamped_end].to_vec()),
-        );
+        return (SIG_OK, Value::array(elems[start..end].to_vec()));
     }
 
     // Array (mutable)
     if let Some(arr_ref) = args[0].as_array_mut() {
         let borrowed = arr_ref.borrow();
-        let clamped_start = start.min(borrowed.len());
-        let clamped_end = end.min(borrowed.len());
-        if clamped_start >= clamped_end {
+        let start = resolve_slice_index(raw_start, borrowed.len());
+        let end = resolve_slice_index(raw_end, borrowed.len());
+        if start >= end {
             return (SIG_OK, Value::array_mut(vec![]));
         }
-        return (
-            SIG_OK,
-            Value::array_mut(borrowed[clamped_start..clamped_end].to_vec()),
-        );
+        return (SIG_OK, Value::array_mut(borrowed[start..end].to_vec()));
     }
 
     // String (immutable, grapheme-aware)
     if args[0].is_string() {
         return args[0]
-            .with_string(|s| slice_graphemes(s, start, end, false))
+            .with_string(|s| {
+                let grapheme_count = s.graphemes(true).count();
+                let start = resolve_slice_index(raw_start, grapheme_count);
+                let end = resolve_slice_index(raw_end, grapheme_count);
+                slice_graphemes(s, start, end, false)
+            })
             .unwrap();
     }
 
@@ -379,6 +359,9 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
         let borrowed = buf_ref.borrow();
         // @string is valid UTF-8 by construction
         let s = unsafe { std::str::from_utf8_unchecked(&borrowed) };
+        let grapheme_count = s.graphemes(true).count();
+        let start = resolve_slice_index(raw_start, grapheme_count);
+        let end = resolve_slice_index(raw_end, grapheme_count);
         return slice_graphemes(s, start, end, true);
     }
 
@@ -386,8 +369,8 @@ pub(crate) fn prim_slice(args: &[Value]) -> (SignalBits, Value) {
     if args[0].is_empty_list() || args[0].is_cons() {
         match args[0].list_to_vec() {
             Ok(elems) => {
-                let clamped_start = start.min(elems.len());
-                let clamped_end = end.min(elems.len());
+                let clamped_start = resolve_slice_index(raw_start, elems.len());
+                let clamped_end = resolve_slice_index(raw_end, elems.len());
                 if clamped_start >= clamped_end {
                     return (SIG_OK, Value::EMPTY_LIST);
                 }

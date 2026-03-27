@@ -123,7 +123,7 @@
        :ca-file    string — path to PEM CA bundle
        :client-cert string — path to PEM client certificate chain
        :client-key  string — path to PEM client private key"
-    (let* [[opts (or (first args) {})]
+    (let* [[opts (or (get args 0) {})]
            # Resolve hostname to IP. The io_uring TCP backend requires an IP
            # address; hostnames must be resolved before calling tcp/connect.
            # SNI and cert verification still use the original hostname.
