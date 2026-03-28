@@ -341,10 +341,15 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let func_val = caller.data().wasm_to_value(func_tag, func_payload);
 
             if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                let args_debug = read_args_from_memory(&mut caller, args_ptr, nargs);
                 eprintln!(
-                    "[rt_prepare_tail_call] type={} nargs={}",
+                    "[rt_prepare_tail_call] type={} nargs={} args={:?}",
                     func_val.type_name(),
-                    nargs
+                    nargs,
+                    args_debug
+                        .iter()
+                        .map(|v| format!("{}", v))
+                        .collect::<Vec<_>>()
                 );
             }
 
@@ -369,6 +374,28 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     caller.data_mut().env_stack_ptr = env_base;
                     // Build callee's env at the same position
                     prepare_wasm_env(&mut caller, closure, &args, env_base);
+
+                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                        let env_end = caller.data().env_stack_ptr;
+                        let memory = caller
+                            .get_export("__elle_memory")
+                            .and_then(|e| e.into_memory())
+                            .expect("debug");
+                        let data = memory.data(&caller);
+                        let num_slots = (env_end - env_base) / 16;
+                        let mut slots = Vec::new();
+                        for i in 0..num_slots.min(5) {
+                            let off = env_base + i * 16;
+                            let t = i64::from_le_bytes(data[off..off + 8].try_into().unwrap());
+                            let p = i64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap());
+                            slots.push(format!("({},{})", t, p));
+                        }
+                        eprintln!(
+                            "[rt_prepare_tail_call] env after prepare: base={} end={} slots={:?}",
+                            env_base, env_end, slots
+                        );
+                    }
+
                     return (env_base as i32, wasm_idx as i32, 1, 0, 0, 0);
                 }
                 let err = crate::value::error_val(
@@ -412,7 +439,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
-    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32)
+    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32, func_idx: i32)
     // Save yielded value and live registers to a WasmSuspensionFrame.
     linker.func_wrap(
         "elle",
@@ -422,21 +449,22 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          payload: i64,
          resume_state: i32,
          regs_ptr: i32,
-         num_regs: i32| {
+         num_regs: i32,
+         func_idx: i32| {
             // Read saved registers from linear memory
             let saved_regs = read_reg_pairs(&mut caller, regs_ptr, num_regs);
 
             if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
                 eprintln!(
-                    "[rt_yield] tag={} payload={} resume_state={} num_regs={}",
-                    tag, payload, resume_state, num_regs
+                    "[rt_yield] tag={} payload={} resume_state={} num_regs={} func_idx={}",
+                    tag, payload, resume_state, num_regs, func_idx
                 );
             }
 
             let host = caller.data_mut();
             host.suspension_frames
                 .push(super::host::WasmSuspensionFrame {
-                    wasm_func_idx: 0, // filled by caller (call_wasm_closure)
+                    wasm_func_idx: func_idx as u32,
                     resume_state: resume_state as u32,
                     saved_regs,
                     env_snapshot: Vec::new(), // filled by call_wasm_closure
@@ -452,13 +480,19 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         "rt_get_resume_value",
         |caller: Caller<'_, ElleHost>| -> (i64, i64) {
             let host = caller.data();
-            match host.resume_value {
+            let result = match host.resume_value {
                 Some((tag, payload)) => (tag, payload),
-                None => {
-                    // No resume value — return nil
-                    (crate::value::repr::TAG_NIL as i64, 0)
-                }
+                None => (crate::value::repr::TAG_NIL as i64, 0),
+            };
+            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                eprintln!(
+                    "[rt_get_resume_value] tag={} payload={} (resume_value={:?})",
+                    result.0,
+                    result.1,
+                    host.resume_value.is_some()
+                );
             }
+            result
         },
     )?;
 
@@ -471,11 +505,24 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let host = caller.data();
             if let Some(frame) = host.suspension_frames.last() {
                 if (index as usize) < frame.saved_regs.len() {
-                    frame.saved_regs[index as usize]
+                    let (tag, pay) = frame.saved_regs[index as usize];
+                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() && index < 5 {
+                        eprintln!(
+                            "[rt_load_saved_reg] index={} tag={} payload={} (frame has {} regs)",
+                            index,
+                            tag,
+                            pay,
+                            frame.saved_regs.len()
+                        );
+                    }
+                    (tag, pay)
                 } else {
                     (crate::value::repr::TAG_NIL as i64, 0)
                 }
             } else {
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    eprintln!("[rt_load_saved_reg] NO FRAME! index={}", index);
+                }
                 (crate::value::repr::TAG_NIL as i64, 0)
             }
         },
@@ -690,9 +737,11 @@ fn call_wasm_closure(
                     Vec::new()
                 };
 
-                // Update the suspension frame with env + metadata
+                // Update the suspension frame with env + metadata.
+                // Don't overwrite wasm_func_idx — rt_yield already set it
+                // to the correct function (important for tail calls where
+                // the callee, not the original caller, is what yielded).
                 if let Some(frame) = caller.data_mut().suspension_frames.last_mut() {
-                    frame.wasm_func_idx = wasm_idx;
                     frame.env_base = env_base;
                     frame.env_snapshot = env_snapshot;
                 }
@@ -802,6 +851,28 @@ pub fn resume_wasm_closure(
     // Set env_stack_ptr past the restored env
     caller.data_mut().env_stack_ptr = env_base + env_snapshot.len();
 
+    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+        eprintln!(
+            "[resume_wasm_closure] env_base={} env_size={} resume_state={} wasm_func_idx={}",
+            env_base,
+            env_snapshot.len(),
+            resume_state,
+            wasm_func_idx
+        );
+        // Dump first few env slots
+        if !env_snapshot.is_empty() {
+            let mut slots = Vec::new();
+            let num_slots = env_snapshot.len() / 16;
+            for i in 0..num_slots.min(4) {
+                let off = i * 16;
+                let tag = i64::from_le_bytes(env_snapshot[off..off + 8].try_into().unwrap());
+                let pay = i64::from_le_bytes(env_snapshot[off + 8..off + 16].try_into().unwrap());
+                slots.push(format!("({},{})", tag, pay));
+            }
+            eprintln!("[resume_wasm_closure] env slots: {:?}", slots);
+        }
+    }
+
     // Look up the WASM function in the table
     let table = caller
         .get_export("__elle_table")
@@ -853,7 +924,6 @@ pub fn resume_wasm_closure(
                 };
 
                 if let Some(new_frame) = caller.data_mut().suspension_frames.last_mut() {
-                    new_frame.wasm_func_idx = wasm_func_idx;
                     new_frame.env_base = env_base;
                     new_frame.env_snapshot = env_snapshot;
                 }

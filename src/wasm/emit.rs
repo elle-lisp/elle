@@ -133,6 +133,10 @@ struct WasmEmitter {
     resume_states: Vec<ResumeStateInfo>,
     /// Call-site continuations for yield-through-call virtual blocks.
     call_continuations: Vec<CallSiteContinuation>,
+    /// Table index of the current closure being emitted.
+    /// Used by rt_yield to record which function actually yielded (important
+    /// when tail calls replace the caller's frame).
+    current_table_idx: u32,
     /// Maps (block_idx) → resume_state for yield terminators.
     yield_state_map: HashMap<usize, u32>,
     /// Maps (block_idx, instr_idx) → resume_state for call sites.
@@ -158,6 +162,7 @@ impl WasmEmitter {
             call_continuations: Vec::new(),
             yield_state_map: HashMap::new(),
             call_state_map: HashMap::new(),
+            current_table_idx: 0,
         }
     }
 
@@ -243,11 +248,12 @@ impl WasmEmitter {
                 ValType::I32,
             ],
         );
-        // Type 10: rt_yield(tag, payload, resume_state, regs_ptr, num_regs) -> ()
+        // Type 10: rt_yield(tag, payload, resume_state, regs_ptr, num_regs, func_idx) -> ()
         types.ty().function(
             [
                 ValType::I64,
                 ValType::I64,
+                ValType::I32,
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,
@@ -339,7 +345,8 @@ impl WasmEmitter {
         code.function(&entry_body);
 
         // Closure function bodies
-        for nested in &nested_funcs {
+        for (i, nested) in nested_funcs.iter().enumerate() {
+            self.current_table_idx = i as u32;
             let closure_body = self.emit_closure_function(nested);
             code.function(&closure_body);
         }
@@ -641,6 +648,7 @@ impl WasmEmitter {
                     f.instruction(&Instruction::I32Const(resume_state as i32));
                     f.instruction(&Instruction::I32Const(ARGS_BASE));
                     f.instruction(&Instruction::I32Const(total_saved as i32));
+                    f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
                     f.instruction(&Instruction::Call(FN_RT_YIELD));
 
                     f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
@@ -696,6 +704,7 @@ impl WasmEmitter {
             f.instruction(&Instruction::I32Const(resume_state as i32));
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
             f.instruction(&Instruction::Call(FN_RT_YIELD));
 
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
@@ -757,6 +766,7 @@ impl WasmEmitter {
             f.instruction(&Instruction::I32Const(resume_state as i32));
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
             f.instruction(&Instruction::Call(FN_RT_YIELD));
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
@@ -817,6 +827,7 @@ impl WasmEmitter {
             f.instruction(&Instruction::I32Const(resume_state as i32));
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
             f.instruction(&Instruction::Call(FN_RT_YIELD));
 
             // Return suspended
@@ -1997,6 +2008,20 @@ impl WasmEmitter {
             // so the yield emission re-assigns the same IDs.
             self.pre_scan_resume_states(func);
             self.next_resume_state = 1; // reset for emit_cfg pass
+
+            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                eprintln!(
+                    "[emit] suspending closure: name={:?} regs={} locals={} captures={} params={}",
+                    func.name, func.num_regs, func.num_locals, func.num_captures, func.num_params
+                );
+                for block in &func.blocks {
+                    eprintln!("[emit]   Block {:?}:", block.label);
+                    for si in &block.instructions {
+                        eprintln!("[emit]     {:?}", si.instr);
+                    }
+                    eprintln!("[emit]     term: {:?}", block.terminator.terminator);
+                }
+            }
 
             let mut f = Function::new([
                 (n, ValType::I64), // register tags

@@ -489,7 +489,6 @@ fn test_generator_pattern() {
 }
 
 #[test]
-#[ignore] // TODO: recursive yield-through-call with multiple suspension frames
 fn test_yield_in_loop() {
     // Yield inside a recursive loop — yields 1, 2, 3
     assert_eq!(
