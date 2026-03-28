@@ -179,13 +179,15 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with "unknown binding," the HIR→LIR mapping is incomplete. The key is `Binding` (hashed by `Value::to_bits()`), the value is `u16` slot index.
 
-4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
+4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies, captures, parameters, and LBox locals are upvalues; they use LoadCapture/StoreCapture. Non-LBox locals use LoadLocal/StoreLocal.
 
-5. **`lbox_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time.
+5. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for LBox locals (`num_captures + num_locals`) and stack-relative indices for non-LBox locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 
-6. **`lbox_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `set!`. The JIT uses this to skip `LocalLBox` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+6. **`lbox_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time.
 
-7. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering. The emitter preserves it into `Closure.doc` without encoding it in bytecode.
+7. **`lbox_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `set!`. The JIT uses this to skip `LocalLBox` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+
+8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering. The emitter preserves it into `Closure.doc` without encoding it in bytecode.
 
 ## When to modify
 
