@@ -216,6 +216,14 @@ pub extern "C" fn elle_jit_struct_get_destructure(
         tag: key_tag,
         payload: key_payload,
     };
+    if std::env::var("ELLE_DEBUG_JIT").is_ok() {
+        eprintln!(
+            "[struct_get_destr] src={} {:?} key={}",
+            val.type_name(),
+            val,
+            key_val,
+        );
+    }
     let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let key = match crate::value::heap::TableKey::from_value(&key_val) {
         Some(k) => k,

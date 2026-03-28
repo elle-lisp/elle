@@ -390,7 +390,7 @@ impl JitCompiler {
         let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_logical = std::cmp::max(
-            std::cmp::max(lir.num_regs, lir.num_locals as u32),
+            std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),
             local_var_base + num_locally_defined,
         );
         // Declare 2 * max_logical Cranelift variables (tag + payload per slot)
