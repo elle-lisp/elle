@@ -13,16 +13,18 @@
 (def do-glob (get glob-plugin :glob))
 
 (def syn-plugin (import "target/release/libelle_syn.so"))
-(def parse-file    (get syn-plugin :parse-file))
-(def items         (get syn-plugin :items))
-(def item-kind     (get syn-plugin :item-kind))
-(def item-name     (get syn-plugin :item-name))
-(def fn-info       (get syn-plugin :fn-info))
-(def struct-fields (get syn-plugin :struct-fields))
-(def enum-variants (get syn-plugin :enum-variants))
-(def visibility    (get syn-plugin :visibility))
-(def attributes    (get syn-plugin :attributes))
-(def to-string     (get syn-plugin :to-string))
+(def parse-file      (get syn-plugin :parse-file))
+(def items           (get syn-plugin :items))
+(def item-kind       (get syn-plugin :item-kind))
+(def item-name       (get syn-plugin :item-name))
+(def fn-info         (get syn-plugin :fn-info))
+(def fn-calls        (get syn-plugin :fn-calls))
+(def primitive-defs  (get syn-plugin :primitive-defs))
+(def struct-fields   (get syn-plugin :struct-fields))
+(def enum-variants   (get syn-plugin :enum-variants))
+(def visibility      (get syn-plugin :visibility))
+(def attributes      (get syn-plugin :attributes))
+(def to-string       (get syn-plugin :to-string))
 
 (def args (drop 1 (sys/args)))
 
@@ -113,7 +115,12 @@
     (when (get info :unsafe?)
       (triple subj (pred "unsafe") (lit "true")))
     (emit-visibility subj item)
-    (emit-attributes subj item)))
+    (emit-attributes subj item)
+    # Emit call edges from function body.
+    (let [[[ok? calls] (protect (fn-calls item))]]
+      (when ok?
+        (each callee in calls
+          (triple subj (pred "calls") (rust-iri "fn" callee)))))))
 
 (defn process-struct [item file]
   (let* [[info (struct-fields item)]
@@ -195,6 +202,36 @@
     (triple subj (pred "file") (lit file))
     (emit-visibility subj item)))
 
+# ── Primitive mapping ────────────────────────────────────────────────
+# Extract Elle name → Rust function links from PRIMITIVES tables.
+# Each PrimitiveDef { name: "elle/name", func: rust_fn_name, ... }
+# produces: <urn:elle:fn:elle%2Fname> <urn:elle:implemented-by> <urn:rust:fn:rust_fn_name>
+
+(def elle-ns "urn:elle")
+
+(defn elle-iri [name]
+  (iri (string/format "{}:fn:{}" elle-ns (encode-name (string name)))))
+
+(defn elle-pred [name]
+  (iri (string/format "{}:{}" elle-ns name)))
+
+(defn extract-primitive-mappings [tree file]
+  "Walk all items looking for PRIMITIVES consts and extract name→func mappings."
+  (each item in (items tree)
+    (when (= (item-kind item) :const)
+      (var name (item-name item))
+      (when (= name "PRIMITIVES")
+        (var defs (primitive-defs item))
+        (each def in defs
+          (var elle-name (get def :name))
+          (var rust-fn   (get def :func))
+          (triple (elle-iri elle-name)
+                  (elle-pred "implemented-by")
+                  (rust-iri "fn" rust-fn))
+          (triple (rust-iri "fn" rust-fn)
+                  (pred "implements")
+                  (elle-iri elle-name)))))))
+
 # ── Main ─────────────────────────────────────────────────────────────
 
 (each file in files
@@ -203,18 +240,21 @@
       (let [[[ok? tree] (protect (parse-file src))]]
         (if (not ok?)
           (eprintln "warning: parse error in " file ": " (get tree :message))
-          (each item in (items tree)
-            (let [[kind (item-kind item)]]
-              (case kind
-                :fn      (process-fn item file)
-                :struct  (process-struct item file)
-                :enum    (process-enum item file)
-                :trait   (process-trait item file)
-                :const   (process-const item file)
-                :static  (process-static item file)
-                :type    (process-type item file)
-                :mod     (process-mod item file)
-                :use     (process-use item file)
-                nil))))))))
+          (begin
+            (each item in (items tree)
+              (let [[kind (item-kind item)]]
+                (case kind
+                  :fn      (process-fn item file)
+                  :struct  (process-struct item file)
+                  :enum    (process-enum item file)
+                  :trait   (process-trait item file)
+                  :const   (process-const item file)
+                  :static  (process-static item file)
+                  :type    (process-type item file)
+                  :mod     (process-mod item file)
+                  :use     (process-use item file)
+                  nil)))
+            # Extract primitive name→func mappings from PRIMITIVES tables.
+            (extract-primitive-mappings tree file)))))))
 
 (print (freeze out))

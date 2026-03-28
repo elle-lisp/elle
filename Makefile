@@ -38,6 +38,7 @@ PLUGINS := \
     toml \
     tree-sitter \
     uuid \
+    watch \
     xml \
     yaml
 

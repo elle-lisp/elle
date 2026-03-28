@@ -135,7 +135,7 @@ impl<'a> HirSymbolExtractor<'a> {
                     self.record_definition(
                         *binding_id,
                         SymbolKind::Variable,
-                        &hir.span,
+                        &init.span,
                         index,
                         symbols,
                     );
@@ -151,7 +151,7 @@ impl<'a> HirSymbolExtractor<'a> {
                     } else {
                         SymbolKind::Variable
                     };
-                    self.record_definition(*binding_id, kind, &hir.span, index, symbols);
+                    self.record_definition(*binding_id, kind, &init.span, index, symbols);
                     if let HirKind::Lambda {
                         doc: Some(doc_val), ..
                     } = &init.kind

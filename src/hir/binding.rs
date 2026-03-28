@@ -11,7 +11,7 @@ use std::fmt;
 
 /// A compile-time binding handle. Index into a `BindingArena`.
 /// 4 bytes, Copy, no heap allocation.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Binding(pub(crate) u32);
 
 impl fmt::Debug for Binding {

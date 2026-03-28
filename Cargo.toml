@@ -26,6 +26,7 @@ members = [
     "plugins/toml",
     "plugins/tree-sitter",
     "plugins/uuid",
+    "plugins/watch",
     "plugins/xml",
     "plugins/yaml",
 ]

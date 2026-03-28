@@ -9,6 +9,7 @@ pub mod calling;
 pub mod cell;
 pub mod chan;
 pub mod comparison;
+pub mod compile;
 pub mod concurrency;
 pub mod convert;
 pub mod coroutines;

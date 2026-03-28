@@ -101,6 +101,16 @@ impl BindingArena {
     pub fn get_mut(&mut self, binding: Binding) -> &mut BindingInner {
         &mut self.bindings[binding.0 as usize]
     }
+
+    /// Number of bindings in the arena.
+    pub fn len(&self) -> usize {
+        self.bindings.len()
+    }
+
+    /// Returns true if the arena contains no bindings.
+    pub fn is_empty(&self) -> bool {
+        self.bindings.is_empty()
+    }
 }
 
 impl Default for BindingArena {
