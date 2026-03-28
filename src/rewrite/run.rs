@@ -5,7 +5,8 @@ use super::engine::collect_edits;
 use super::rule::{RenameSymbol, RewriteRule};
 use crate::epoch::detect_epoch_in_source;
 use crate::epoch::rules::{
-    collapsed_renames, removals_in_range, replace_rules_in_range, CURRENT_EPOCH,
+    collapsed_renames, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
+    CURRENT_EPOCH,
 };
 use crate::reader::{Lexer, Token};
 use std::collections::HashMap;
@@ -56,6 +57,10 @@ pub fn run(args: &[String]) -> i32 {
             let replaces = replace_rules_in_range(0, CURRENT_EPOCH);
             for (sym, arity, template) in &replaces {
                 println!("  replace: {} (arity {}) → {}", sym, arity, template);
+            }
+            let unwraps = unwrap_rules_in_range(0, CURRENT_EPOCH);
+            for (sym, msg) in &unwraps {
+                println!("  unwrap:  {} ({})", sym, msg);
             }
         }
         return 0;
@@ -131,6 +136,18 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         }
     }
 
+    // Collect unwrap edits: (symbol (fn [] body...)) → body...
+    let unwrap_edits = if let Some(epoch) = file_epoch {
+        let unwraps = unwrap_rules_in_range(epoch, CURRENT_EPOCH);
+        if unwraps.is_empty() {
+            Vec::new()
+        } else {
+            collect_unwrap_edits(source, &unwraps, file_path)?
+        }
+    } else {
+        Vec::new()
+    };
+
     // Collect replace edits (syntax-level, whole-form rewrites)
     let replace_edits = if let Some(epoch) = file_epoch {
         let replaces = replace_rules_in_range(epoch, CURRENT_EPOCH);
@@ -160,16 +177,17 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
     let mut edits = collect_edits(source, &rules)?;
 
-    // Filter out rename edits that fall within replace edit spans,
-    // then merge the two sets.
-    if !replace_edits.is_empty() {
+    // Merge all structural edits (unwrap + replace), filtering out
+    // rename edits that fall within their spans.
+    let structural_edits: Vec<Edit> = replace_edits.into_iter().chain(unwrap_edits).collect();
+    if !structural_edits.is_empty() {
         edits.retain(|edit| {
-            !replace_edits.iter().any(|re| {
+            !structural_edits.iter().any(|re| {
                 edit.byte_offset >= re.byte_offset
                     && edit.byte_offset + edit.byte_len <= re.byte_offset + re.byte_len
             })
         });
-        edits.extend(replace_edits);
+        edits.extend(structural_edits);
     }
 
     // Replace old (elle/epoch N) with current epoch, or add it if absent
@@ -231,6 +249,131 @@ fn check_removals(
             errors.join("\n")
         ))
     }
+}
+
+/// Lex source and collect edits for forms matching unwrap rules.
+/// Matches `(symbol (fn [] body...))` or `(symbol (fn () body...))` and
+/// replaces the entire form with just the body.
+fn collect_unwrap_edits(
+    source: &str,
+    unwraps: &HashMap<&str, &str>,
+    file_path: &str,
+) -> Result<Vec<Edit>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        if let Some(edit) = try_match_unwrap(source, &tokens, i, unwraps) {
+            i = skip_balanced_form(&tokens, i);
+            edits.push(edit);
+        } else {
+            // Check for non-unwrappable uses (ev/run with wrong pattern)
+            if let Token::Symbol(name) = &tokens[i].0 {
+                if let Some(msg) = unwraps.get(*name) {
+                    // Check if this is in head position of a list
+                    if i > 0 && matches!(tokens[i - 1].0, Token::LeftParen) {
+                        return Err(format!(
+                            "{}: `{}` cannot be automatically unwrapped — {}",
+                            file_path, name, msg
+                        ));
+                    }
+                }
+            }
+            i += 1;
+        }
+    }
+    Ok(edits)
+}
+
+/// Try to match an unwrap rule: `(symbol (fn [] body...))` → `body...`
+fn try_match_unwrap<'a>(
+    source: &str,
+    tokens: &[(Token<'a>, usize, usize)],
+    i: usize,
+    unwraps: &HashMap<&str, &str>,
+) -> Option<Edit> {
+    // Must be `(` symbol `(` fn `[]` or `()` ...body... `)` `)`
+    if !matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
+        return None;
+    }
+    let head_sym = match tokens.get(i + 1) {
+        Some((Token::Symbol(s), _, _)) => *s,
+        _ => return None,
+    };
+    if !unwraps.contains_key(head_sym) {
+        return None;
+    }
+    // Next must be `(` fn
+    if !matches!(tokens.get(i + 2), Some((Token::LeftParen, _, _))) {
+        return None;
+    }
+    if !matches!(tokens.get(i + 3), Some((Token::Symbol(s), _, _)) if *s == "fn") {
+        return None;
+    }
+    // Next must be `[]` or `()`
+    let params_start = i + 4;
+    let params_end = match tokens.get(params_start) {
+        Some((Token::LeftBracket, _, _)) => {
+            // Check for empty brackets: [ ]
+            if matches!(
+                tokens.get(params_start + 1),
+                Some((Token::RightBracket, _, _))
+            ) {
+                params_start + 2
+            } else {
+                return None; // non-empty params
+            }
+        }
+        Some((Token::LeftParen, _, _)) => {
+            // Check for empty parens: ( )
+            if matches!(
+                tokens.get(params_start + 1),
+                Some((Token::RightParen, _, _))
+            ) {
+                params_start + 2
+            } else {
+                return None; // non-empty params
+            }
+        }
+        _ => return None,
+    };
+
+    // Body starts at params_end, ends before the inner `)` of `(fn [] body...)`
+    // then the outer `)` of `(ev/run ...)`
+    // Find the body text: from first body token to before inner `)`
+    let body_start_byte = tokens.get(params_end).map(|t| t.1)?;
+
+    // Find the matching `)` for the `(fn` — walk balanced from i+2
+    let inner_close = skip_balanced_form(tokens, i + 2);
+    if inner_close == 0 {
+        return None;
+    }
+    let inner_close_idx = inner_close - 1; // index of the `)` token
+
+    // Body ends before this `)`
+    let body_end_byte = tokens.get(inner_close_idx).map(|t| t.1)?;
+
+    // The outer form spans from `(` at i to `)` after the inner close
+    let outer_close = skip_balanced_form(tokens, i);
+    let form_start = tokens[i].1;
+    let form_end = tokens.get(outer_close - 1).map(|t| t.1 + t.2)?;
+
+    let body_text = source[body_start_byte..body_end_byte].trim();
+
+    Some(Edit {
+        byte_offset: form_start,
+        byte_len: form_end - form_start,
+        replacement: body_text.to_string(),
+    })
 }
 
 /// Lex source and collect edits for forms matching replace rules.

@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tests/elle/aws.lisp — Elle-native AWS client test
 ##
 ## Requires AWS credentials in env:
@@ -16,11 +17,7 @@
 (def aws ((import-file "lib/aws.lisp") crypto jiff tls))
 (def s3  ((import-file "lib/aws/s3.lisp") aws))
 
-(ev/run (fn []
-
-  # ── Direct request: ListBuckets ────────────────────────────────────
-
-  (println "listing buckets via aws:request...")
+(println "listing buckets via aws:request...")
   (def result (aws:request :s3 "GET" "/"))
   (println "  status: " result:status)
   (println "  content-type: " (get result:headers :content-type))
@@ -63,4 +60,4 @@
     (def del-result (s3:delete-object test-bucket test-key))
     (println "  delete status: " del-result:status))
 
-  (println "\nall aws tests passed")))
+  (println "\nall aws tests passed")

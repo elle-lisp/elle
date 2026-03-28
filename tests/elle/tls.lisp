@@ -98,7 +98,7 @@
 ## ── Chunk 6: loopback echo server/client ──────────────────────────────────
 ##
 ## Generates a self-signed cert via openssl, starts a TLS echo server and a
-## TLS client in the same ev/run, verifies the full round-trip.
+## TLS client in the same the async scheduler, verifies the full round-trip.
 
 ## Generate test certificates. If openssl is not available or fails, skip.
 (let [[cert-path "/tmp/elle-tls-test.cert.pem"]
@@ -116,7 +116,7 @@
 
       (begin
         ## Shared mutable cell: the client fiber writes true here when done.
-        ## Checked after ev/run to confirm the client fiber actually completed.
+        ## Checked after the async scheduler to confirm the client fiber actually completed.
         (def loopback-ok @[false])
 
         ## Set up the listener before spawning fibers so the port is bound
@@ -206,7 +206,7 @@
 
 ## Error 5: tls/connect to a closed port → :io-error or :connect-error
 ## Port 19999 on 127.0.0.1 should have nothing listening.
-## ev/run propagates errors out, so protect wraps the ev/run call.
+## the async scheduler propagates errors out, so protect wraps the the async scheduler call.
 (let [[[ok? err] (protect ((fn []
                                     (tls:connect "127.0.0.1" 19999))))]]
   (assert (not ok?) "connect to closed port: must signal an error")

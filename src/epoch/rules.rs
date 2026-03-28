@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 5;
+pub const CURRENT_EPOCH: u64 = 6;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -32,6 +32,14 @@ pub enum MigrationRule {
     /// A form has been removed. Any occurrence of this symbol in head
     /// position of a list emits the provided error message.
     Remove {
+        symbol: &'static str,
+        message: &'static str,
+    },
+    /// Unwrap a call that wraps a single zero-arg lambda. Matches
+    /// `(symbol (fn [] body...))` or `(symbol (fn () body...))` and
+    /// replaces with `(begin body...)`. If the form doesn't match this
+    /// pattern, produces a compile error with `message` (like Remove).
+    Unwrap {
         symbol: &'static str,
         message: &'static str,
     },
@@ -176,6 +184,14 @@ static MIGRATIONS: &[Migration] = &[
             },
         ],
     },
+    Migration {
+        epoch: 6,
+        summary: "remove ev/run from user code — runtime wraps all code in the async scheduler",
+        rules: &[MigrationRule::Unwrap {
+            symbol: "ev/run",
+            message: "user code already runs in the async scheduler; remove the ev/run wrapper",
+        }],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -222,6 +238,19 @@ pub fn replace_rules_in_range(from: u64, to: u64) -> Vec<(&'static str, usize, &
             } = rule
             {
                 result.push((*symbol, *arity, *template));
+            }
+        }
+    }
+    result
+}
+
+/// Collect all unwrap rules in a range as (symbol, message) pairs.
+pub fn unwrap_rules_in_range(from: u64, to: u64) -> HashMap<&'static str, &'static str> {
+    let mut result = HashMap::new();
+    for migration in migrations_in_range(from, to) {
+        for rule in migration.rules {
+            if let MigrationRule::Unwrap { symbol, message } = rule {
+                result.insert(*symbol, *message);
             }
         }
     }

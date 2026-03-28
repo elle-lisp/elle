@@ -1,3 +1,4 @@
+(elle/epoch 6)
 
 # ── println / print ──────────────────────────────────────────────────
 
@@ -20,18 +21,14 @@
 # ── *stdout* rebinding ──────────────────────────────────────────────
 
 (def tmp-path "/tmp/elle-print-test-redirect.txt")
-(ev/run
-  (fn []
-    (def out (port/open tmp-path :write))
+(def out (port/open tmp-path :write))
     (parameterize ((*stdout* out))
       (println "captured line"))
-    (port/close out)))
+    (port/close out)
 
-(ev/run
-  (fn []
-    (def in (port/open tmp-path :read))
+(def in (port/open tmp-path :read))
     (def contents (port/read-all in))
     (port/close in)
-    (assert (= (string contents) "captured line\n") "println respects *stdout* rebinding")))
+    (assert (= (string contents) "captured line\n") "println respects *stdout* rebinding")
 
 (println "all print tests passed")

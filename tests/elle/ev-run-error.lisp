@@ -1,7 +1,7 @@
-## tests/elle/ev-run-error.lisp — ev/run must propagate fiber errors
+## tests/elle/ev-run-error.lisp — error propagation through fibers
 ##
-## Before the fix, ev/run swallowed errors from fibers: the process
-## exited with code 0, no error message.
+## Tests that errors from spawned fibers propagate correctly
+## via ev/join and ev/join-protected.
 
 # Test 1: protect captures error
 (let [[[ok? val] (protect (error {:error :test-error :message "boom"}))]]

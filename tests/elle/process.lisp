@@ -5,7 +5,7 @@
 (def process ((import-file "lib/process.lisp")))
 (def backend (*io-backend*))
 
-# Wrap process:start to always share the ev/run backend
+# Wrap process:start to always share the scheduler backend
 (def process:start-raw process:start)
 (defn process:start [init &named fuel]
   (process:start-raw init :fuel fuel :backend backend))

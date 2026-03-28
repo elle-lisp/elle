@@ -12,7 +12,7 @@
 
 (def process ((import-file "lib/process.lisp")))
 
-# Share the ev/run backend so all process schedulers use one event loop
+# Share the scheduler backend so all process schedulers use one event loop
 (def backend (*io-backend*))
 ## ── Ping-pong ──────────────────────────────────────────────────────
 

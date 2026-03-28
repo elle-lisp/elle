@@ -1,3 +1,4 @@
+(elle/epoch 6)
 # DNS resolution tests
 
 # Test 1: sys/resolve sync
@@ -6,11 +7,9 @@
   (print (string "test 1 passed: sync resolve -> " ips "\n")))
 
 # Test 2: sys/resolve async
-(ev/run
-  (fn []
-    (let ((ips (sys/resolve "localhost")))
+(let ((ips (sys/resolve "localhost")))
       (assert (> (length ips) 0) "async sys/resolve should return at least one IP")
-      (print (string "test 2 passed: async resolve -> " ips "\n")))))
+      (print (string "test 2 passed: async resolve -> " ips "\n")))
 
 # Test 3: sys/resolve with IP passthrough — IPs are valid hostnames
 # for getaddrinfo and should resolve to themselves.
