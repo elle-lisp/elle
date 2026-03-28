@@ -46,7 +46,7 @@ pub struct AnalysisHandle {
     pub diagnostics: Vec<Diagnostic>,
     /// Function name → Signal, built eagerly.
     pub signal_map: HashMap<String, Signal>,
-    /// Function name → Vec<CallEdge>, built eagerly.
+    /// Function name → `Vec<CallEdge>`, built eagerly.
     pub call_graph: CallGraphData,
     /// Original source text.
     pub source: String,

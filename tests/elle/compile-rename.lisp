@@ -20,8 +20,8 @@
 (assert (not (nil? sum-sym)) "renamed symbol 'sum' exists")
 
 # Old name should not appear as a function
-(def add-sym (first (filter (fn [s] (= (get s :name) "add")) syms)))
-(assert (nil? add-sym) "old name 'add' is gone")
+(def add-matches (filter (fn [s] (= (get s :name) "add")) syms))
+(assert (empty? add-matches) "old name 'add' is gone")
 
 # ── Shadowed names are NOT renamed ───────────────────────────────────
 
