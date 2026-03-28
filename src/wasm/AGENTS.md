@@ -60,6 +60,11 @@ Int-to-float promotion for mixed operands. Bitwise ops remain integer-only.
 `call_wasm_closure` reads signal from memory after WASM call returns.
 Signals propagate through WASM↔host boundaries.
 
+For SIG_YIELD in suspending functions, `emit_call_suspending` checks the
+signal BEFORE the general early-return path, spills caller state, and
+returns suspended. `rt_call` intercepts SIG_RESUME from fiber/resume and
+executes the fiber's WASM closure host-side via `handle_fiber_resume`.
+
 ## Files
 
 | File | Purpose |
@@ -80,6 +85,9 @@ Signals propagate through WASM↔host boundaries.
 | `rt_data_op` | Data operations (cons, car, cdr, arrays, lbox, etc.) by opcode |
 | `rt_make_closure` | Create Closure value with wasm_func_idx + captures |
 | `rt_prepare_tail_call` | Build env for tail callee, return func_idx for `return_call_indirect` |
+| `rt_yield` | Save yielded value + live regs to WasmSuspensionFrame |
+| `rt_get_resume_value` | Return the resume value passed by scheduler |
+| `rt_load_saved_reg` | Load saved register by index from suspension frame |
 
 ## Linear memory layout
 
@@ -104,9 +112,9 @@ Closure function (params 0-3): `[tags: i64 * N] [payloads: i64 * N] [signal/stat
 Register mapping: `tag_local(Reg(i)) = offset + i`, `pay_local(Reg(i)) = offset + N + i`
 where offset = 0 for entry, 4 for closures.
 
-## What works (51 tests, ELLE_WASM=1 make smoke passes)
+## What works (58 tests, ELLE_WASM=1 make smoke passes)
 
-- All LIR instructions except Eval, LoadResumeValue (emit Unreachable)
+- All LIR instructions except Eval (emit Unreachable)
 - Constants (int, float, bool, nil, empty_list, symbol, keyword, string)
 - Arithmetic (int and float with tag dispatch), comparisons, bitwise, unary
 - Control flow: if/else (nested, cond), let*, defn, letrec, block/break
@@ -118,9 +126,25 @@ where offset = 0 for entry, 4 for closures.
 - Strings via constant pool
 - Signal propagation (error early-return after host calls)
 - stdlib.lisp compiles to WASM and runs; all smoke examples pass
+- Yield/resume: basic yield, resume with value, multiple sequential yields
+- Yield-through-call: callee yields, caller suspends, resume chain
+- Fiber primitives: fiber/new, fiber/resume work with WASM closures
 
-## Known issues / Phase 2 scope
+### CPS state-machine transform (Phase 2)
+
+Yielding functions become re-entrant via compile-time state machine:
+- Closures return `(tag: i64, payload: i64, status: i32)`: status=0 normal, >0 suspended
+- `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
+- Yield spills all registers + local slots to ARGS_BASE, calls `rt_yield`, returns suspended
+- Resume prologue: if ctx!=0, dispatch via br_table to restore block, load saved regs
+- Yield-through-call: after Call in suspending functions, check SIG_YIELD, spill+return
+- Virtual resume blocks handle mid-block resume (instructions after the call + terminator)
+- Host snapshots env, manages `WasmSuspensionFrame` stack, drives resume chain
+
+Host functions: `rt_yield`, `rt_get_resume_value`, `rt_load_saved_reg`.
+
+## Known issues / Phase 3 scope
 
 - `Eval` — needs dynamic module compilation (Phase 3)
-- Yield / fibers — needs Wasmtime stack switching or state-machine transform (Phase 2)
+- Recursive yield-through-call with multiple suspension frames — incorrect frame ordering
 - Port-edge-cases example slow under WASM — needs investigation

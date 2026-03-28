@@ -438,3 +438,71 @@ fn test_fiber_dead_after_return() {
         "42"
     );
 }
+
+#[test]
+fn test_yield_through_call() {
+    // A calls B, B yields — yield propagates through A to the fiber
+    assert_eq!(
+        eval(concat!(
+            "(defn inner [] (yield 77))\n",
+            "(defn outer [] (+ 1 (inner)))\n",
+            "(let* [[f (fiber/new outer |:yield|)]]\n",
+            "  (fiber/resume f))"
+        )),
+        "77"
+    );
+}
+
+#[test]
+fn test_yield_through_call_resume() {
+    // A calls B, B yields. Resume B with a value, B returns it,
+    // A adds 1 to the result.
+    assert_eq!(
+        eval(concat!(
+            "(defn inner [] (yield 0))\n",
+            "(defn outer [] (+ 1 (inner)))\n",
+            "(let* [[f (fiber/new outer |:yield|)]]\n",
+            "  (fiber/resume f)\n",   // yields 0
+            "  (fiber/resume f 10))"  // resumes inner with 10, outer returns 11
+        )),
+        "11"
+    );
+}
+
+#[test]
+fn test_generator_pattern() {
+    // Generator: yields successive values
+    assert_eq!(
+        eval(concat!(
+            "(let* [[g (fiber/new (fn []\n",
+            "           (yield 10)\n",
+            "           (yield 20)\n",
+            "           (yield 30)\n",
+            "           0) |:yield|)]]\n",
+            "  (let* [[a (fiber/resume g)]\n",
+            "         [b (fiber/resume g)]\n",
+            "         [c (fiber/resume g)]]\n",
+            "    (+ a (+ b c))))"
+        )),
+        "60"
+    );
+}
+
+#[test]
+#[ignore] // TODO: recursive yield-through-call with multiple suspension frames
+fn test_yield_in_loop() {
+    // Yield inside a recursive loop — yields 1, 2, 3
+    assert_eq!(
+        eval(concat!(
+            "(defn count-up [n max]\n",
+            "  (if (> n max) nil\n",
+            "    (let* [[_ (yield n)]] (count-up (+ n 1) max))))\n",
+            "(let* [[f (fiber/new (fn [] (count-up 1 3)) |:yield|)]]\n",
+            "  (let* [[a (fiber/resume f)]\n",
+            "         [b (fiber/resume f)]\n",
+            "         [c (fiber/resume f)]]\n",
+            "    (+ a (+ b c))))"
+        )),
+        "6"
+    );
+}

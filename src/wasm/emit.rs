@@ -540,27 +540,40 @@ impl WasmEmitter {
     fn emit_block_instructions(&mut self, f: &mut Function, block_idx: usize, func: &LirFunction) {
         let block = &func.blocks[block_idx];
         for (instr_idx, spanned) in block.instructions.iter().enumerate() {
-            self.emit_instr(f, &spanned.instr);
-
-            // After a Call/CallArrayMut in a suspending function,
-            // check for SIG_YIELD and handle yield-through
+            // For Call/CallArrayMut in suspending functions, use the
+            // yield-aware signal handler instead of the normal one.
             if self.may_suspend {
                 match &spanned.instr {
-                    LirInstr::Call { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
+                    LirInstr::Call {
+                        dst,
+                        func: fn_reg,
+                        args,
+                    } => {
                         let resume_state = self
                             .call_state_map
                             .get(&(block_idx, instr_idx))
                             .copied()
-                            .unwrap_or_else(|| {
-                                let s = self.next_resume_state;
-                                self.next_resume_state += 1;
-                                s
-                            });
-                        self.emit_yield_through_check(f, *dst, resume_state);
+                            .unwrap_or(0);
+                        self.emit_call_suspending(f, *dst, *fn_reg, args, resume_state);
+                        continue;
+                    }
+                    LirInstr::CallArrayMut {
+                        dst,
+                        func: fn_reg,
+                        args,
+                    } => {
+                        let resume_state = self
+                            .call_state_map
+                            .get(&(block_idx, instr_idx))
+                            .copied()
+                            .unwrap_or(0);
+                        self.emit_call_array_suspending(f, *dst, *fn_reg, *args, resume_state);
+                        continue;
                     }
                     _ => {}
                 }
             }
+            self.emit_instr(f, &spanned.instr);
         }
     }
 
@@ -639,6 +652,133 @@ impl WasmEmitter {
                 }
             }
         }
+    }
+
+    /// Emit a function call in a suspending function.
+    /// Like emit_call, but checks for SIG_YIELD before the general signal return.
+    fn emit_call_suspending(
+        &self,
+        f: &mut Function,
+        dst: Reg,
+        func: Reg,
+        args: &[Reg],
+        resume_state: u32,
+    ) {
+        // Write args to linear memory
+        for (i, arg) in args.iter().enumerate() {
+            self.write_val_to_mem(f, *arg, i);
+        }
+
+        // Call rt_call
+        f.instruction(&Instruction::LocalGet(self.tag_local(func)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(func)));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(args.len() as i32));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Call(FN_RT_CALL));
+
+        // Pop results: (tag, payload, signal) — signal on top
+        f.instruction(&Instruction::LocalSet(self.signal_local));
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+
+        // Check SIG_YIELD first (bit 1 = value 2)
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I32Const(2)); // SIG_YIELD
+        f.instruction(&Instruction::I32And);
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            let total_saved = self.num_regs + self.num_stack_locals;
+            self.emit_spill_all(f);
+
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::Call(FN_RT_YIELD));
+
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::Return);
+        }
+        f.instruction(&Instruction::End);
+
+        // Check other signals (error etc.)
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::If(BlockType::Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I32Store(MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+        f.instruction(&Instruction::I32Const(0)); // status: normal return
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
+    }
+
+    /// Emit CallArrayMut in a suspending function.
+    fn emit_call_array_suspending(
+        &self,
+        f: &mut Function,
+        dst: Reg,
+        func: Reg,
+        args_array: Reg,
+        resume_state: u32,
+    ) {
+        self.write_val_to_mem(f, func, 0);
+        self.write_val_to_mem(f, args_array, 1);
+        f.instruction(&Instruction::LocalGet(self.tag_local(func)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(func)));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(-1));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Call(FN_RT_CALL));
+
+        // Same signal handling as emit_call_suspending
+        f.instruction(&Instruction::LocalSet(self.signal_local));
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I32Const(2));
+        f.instruction(&Instruction::I32And);
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            let total_saved = self.num_regs + self.num_stack_locals;
+            self.emit_spill_all(f);
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::Call(FN_RT_YIELD));
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::Return);
+        }
+        f.instruction(&Instruction::End);
+
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::If(BlockType::Empty));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I32Store(MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Return);
+        f.instruction(&Instruction::End);
     }
 
     /// Emit the SIG_YIELD check after a call in a suspending function.
