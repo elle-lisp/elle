@@ -56,8 +56,23 @@
     ((sys/env "ELLE_MCP_STORE")    (sys/env "ELLE_MCP_STORE"))
     (true                          ".elle-mcp/store")))
 
-(file/mkdir-all store-path)
-(def store (ox:store-open store-path))
+(defn nuke-store [path]
+  "Delete a corrupt store directory so it can be recreated fresh."
+  (each entry in (glob-plugin:glob (string path "/*"))
+    (file/delete entry))
+  nil)
+
+(defn open-store [path]
+  "Open the oxigraph store, nuking and recreating if corrupt."
+  (file/mkdir-all path)
+  (let [[[ok? s] (protect (ox:store-open path))]]
+    (if ok? s
+      (begin
+        (eprintln "store corrupt, rebuilding: " path)
+        (nuke-store path)
+        (ox:store-open path)))))
+
+(def store (open-store store-path))
 
 (defn flush-store []
   (ox:store-flush store))
@@ -78,7 +93,7 @@
             (begin
               (ox:load store (rust-rdf:file file) :ntriples)
               (ox:load store (rust-rdf:primitive-links file) :ntriples)))]]
-      (when ok? (assign count (+ count 1)))))
+      (when ok? (assign count (inc count)))))
   (flush-store)
   count)
 

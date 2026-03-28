@@ -1,7 +1,7 @@
 (elle/epoch 1)
 #!/usr/bin/env elle
 ## demo-queries.lisp — load elle graph into oxigraph and run SPARQL queries
-## Run: GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384 elle demo-queries.lisp
+## Run: elle demo-queries.lisp
 
 (def ox (import "target/release/libelle_oxigraph.so"))
 

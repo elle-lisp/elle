@@ -47,25 +47,25 @@
     (var watcher (get handle :watcher))
     (var ext (get handle :filter))
     (var deadline (+ (int (* (clock/monotonic) 1000)) timeout))
-    (forever
-      (var event (plugin:next watcher))
-      (cond
-        ((and (not (nil? event)) (matches-filter? event ext))
-          (return event))
-        ((>= (int (* (clock/monotonic) 1000)) deadline)
-          (return nil))
-        (true
-          (ev/sleep 0.05)))))
+    (block :poll
+      (forever
+        (var event (plugin:next watcher))
+        (cond
+          ((and (not (nil? event)) (matches-filter? event ext))
+            (break :poll event))
+          ((>= (int (* (clock/monotonic) 1000)) deadline)
+            (break :poll nil))
+          (true
+            (ev/sleep 0.05))))))
 
   (defn watch/for-each [handle callback]
     "Loop calling callback on each event. Yields between polls.
      Runs until the watcher is closed (watch/next returns nil
      after the watcher handle is invalid)."
     (forever
-      (var event (watch/next handle :timeout 60000))
-      (when (nil? event)
-        (continue))
-      (callback event)))
+      (let [[event (watch/next handle :timeout 60000)]]
+        (unless (nil? event)
+          (callback event)))))
 
   (defn watch/stop [handle]
     "Close the watcher."

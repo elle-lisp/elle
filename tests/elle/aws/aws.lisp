@@ -4,8 +4,7 @@
 ##   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN (optional)
 ##
 ## Run:
-##   GLIBC_TUNABLES=glibc.rtld.optional_static_tls=65536 \
-##     ./target/debug/elle tests/elle/aws.lisp
+##   ./target/debug/elle tests/elle/aws.lisp
 
 # Load plugins
 (def crypto (import-file "target/debug/libelle_crypto.so"))

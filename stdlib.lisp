@@ -1021,7 +1021,8 @@
         [select-sets   @{}]        # waiting-fiber → @{:candidates [...] :woken @[false]}
         [completed     @{}]        # fiber → :ok | :error (already-completed fibers)
         [joined        @|  |]      # set of fibers whose result was observed
-        [shutdown-req  @[nil]]]    # nil = running, integer = shutdown requested with timeout
+        [shutdown-req  @[nil]]     # nil = running, integer = shutdown requested with timeout
+        [park-queues   @{}]]       # key → @[parked-fibers...] (futex park/notify)
 
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
@@ -1111,14 +1112,54 @@
       (fiber/resume caller nil)
       (handle-fiber-after-resume caller))
 
+    (defn handle-park [caller request]
+      "Handle a :park wait request (futex wait).
+       If cell value == expected, park caller. Otherwise resume immediately."
+      (let* [[key      (request :key)]
+             [val-cell (request :val)]
+             [expected (request :expected)]]
+        (if (= (get val-cell 0) expected)
+          # Value matches — park the fiber (stays suspended)
+          (let [[q (or (park-queues key)
+                       (let [[q @[]]] (put park-queues key q) q))]]
+            (push q caller))
+          # Value changed — spurious wakeup avoidance, resume immediately
+          (begin (fiber/resume caller :ok)
+                 (handle-fiber-after-resume caller)))))
+
+    (defn handle-notify [caller request]
+      "Handle a :notify wait request (futex wake).
+       Wake min(count, queue-length) parked fibers, resume caller with woken count."
+      (let* [[key   (request :key)]
+             [count (request :count)]
+             [q     (or (park-queues key) @[])]
+             [n     (min count (length q))]
+             [woken 0]]
+        (var i 0)
+        (while (< i n)
+          (let [[fiber (q 0)]]
+            (remove q 0)
+            (fiber/resume fiber true)
+            (push runnable fiber))
+          (assign i (inc i)))
+        (assign woken i)
+        # Remove empty queue
+        (when (= (length q) 0)
+          (del park-queues key))
+        # Resume caller immediately with woken count
+        (fiber/resume caller woken)
+        (handle-fiber-after-resume caller)))
+
     (defn handle-wait [caller request]
       "Dispatch a :wait signal based on :op."
-      (case (get request :op)
-        :join   (handle-join caller (get request :fiber))
-        :select (handle-select caller (get request :fibers))
-        :abort  (handle-abort caller (get request :fiber))
+      (case (request :op)
+        :join   (handle-join caller (request :fiber))
+        :select (handle-select caller (request :fibers))
+        :abort  (handle-abort caller (request :fiber))
+        :park   (handle-park caller request)
+        :notify (handle-notify caller request)
         (error {:error :protocol-error
-                :message (string "unknown :wait op: " (get request :op))})))
+                :message (string "unknown :wait op: " (request :op))})))
 
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
@@ -1222,7 +1263,8 @@
             (drain-runnable)
             (when (and (= (length pending) 0)
                        (= (length waiters) 0)
-                       (= (length select-sets) 0))
+                       (= (length select-sets) 0)
+                       (= (length park-queues) 0))
               (break :loop nil))
             # Check for shutdown request
             (let [[timeout (get shutdown-req 0)]]
@@ -1306,6 +1348,17 @@
     (error {:error :state-error
             :message (string "ev/" (get request :op) " requires an async scheduler")}))
   (emit :wait request))
+
+(defn ev/futex-wait [key cell expected]
+  "Park the current fiber if (get cell 0) == expected. Returns when woken
+   or immediately if the value has already changed (spurious wakeup avoidance).
+   key must be a unique hashable value identifying this futex."
+  (emit-wait {:op :park :key key :val cell :expected expected}))
+
+(defn ev/futex-wake [key count]
+  "Wake up to count fibers parked on key. Returns the number actually woken.
+   Caller is NOT suspended — returns immediately."
+  (emit-wait {:op :notify :key key :count count}))
 
 (defn ev/join [target]
   "Wait for a fiber or sequence of fibers, returning their results.
@@ -1609,6 +1662,7 @@
      :ev/timeout ev/timeout :ev/scope ev/scope
      :ev/map ev/map :ev/map-limited ev/map-limited
      :ev/shutdown ev/shutdown :*shutdown* *shutdown*
+     :ev/futex-wait ev/futex-wait :ev/futex-wake ev/futex-wake
      :merge merge :inc inc :dec dec
      :stream/for-each stream/for-each :stream/fold stream/fold
      :stream/collect stream/collect :stream/into-array stream/into-array
