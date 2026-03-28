@@ -942,7 +942,7 @@ fn resolve_name(
 
 // ── Primitives ─────────────────────────────────────────────────────────
 
-/// (compile/analyze source [opts]) → analysis handle
+/// `(compile/analyze source [opts])` → analysis handle
 pub(crate) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
     if args.is_empty() || args.len() > 2 {
         return (
