@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "elle-mcp": {
-      "command": "/home/adavidoff/git/tmp/elle-living/tools/run-elle.sh",
-      "args": ["tools/mcp-server.lisp"],
-      "cwd": "/home/adavidoff/git/tmp/elle-living"
+      "command": "elle",
+      "args": ["tools/mcp-server.lisp"]
     }
   }
 }
