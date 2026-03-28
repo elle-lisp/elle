@@ -25,7 +25,7 @@ use super::handle::HandleTable;
 /// Each `call_wasm_closure` allocates a region starting from here.
 pub const ENV_STACK_BASE: usize = 4096;
 
-/// Host state stored in the Wasmtime Store<ElleHost>.
+/// Host state stored in the Wasmtime `Store<ElleHost>`.
 pub struct ElleHost {
     /// Handle table for heap objects.
     pub handles: HandleTable,

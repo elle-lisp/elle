@@ -1,4 +1,4 @@
-//! Handle table: maps opaque u64 handles to Rc<HeapObject>.
+//! Handle table: maps opaque u64 handles to `Rc<HeapObject>`.
 //!
 //! WASM code sees heap values as `(tag: i64, payload: i64)` where
 //! `payload` is a handle index. The host resolves handles to actual

@@ -161,15 +161,13 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::LoadLocal { dst, slot } => {
-                // Local slots are in the env-relative space; offset by num_regs
-                // to avoid colliding with LIR work registers [0, num_regs).
-                let base = self.lir.num_regs + *slot as u32;
+                let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, base);
                 self.def_var_pair(builder, dst.0, tag, payload);
             }
 
             LirInstr::StoreLocal { slot, src } => {
-                let base = self.lir.num_regs + *slot as u32;
+                let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
             }

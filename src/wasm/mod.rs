@@ -5,7 +5,7 @@
 //!
 //! Architecture:
 //! - `emit` — LIR → WASM module bytes (via `wasm-encoder`)
-//! - `handle` — Handle table mapping u64 → Rc<HeapObject>
+//! - `handle` — Handle table mapping u64 → `Rc<HeapObject>`
 //! - `host` — Wasmtime host functions (primitive dispatch, runtime support)
 //! - `store` — Engine/Store/Linker management
 //!
