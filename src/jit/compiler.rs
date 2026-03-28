@@ -381,7 +381,8 @@ impl JitCompiler {
         let arg_var_base = lir.num_regs;
         let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
             && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
-        let arity_params = if is_list_variadic {
+        let is_range_arity = matches!(lir.arity, Arity::Range(_, _));
+        let arity_params = if is_list_variadic || is_range_arity {
             lir.num_params as u16
         } else {
             lir.arity.fixed_params() as u16
@@ -548,29 +549,93 @@ impl JitCompiler {
 
             // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
-            // --- Non-variadic entry: load all args directly (16 bytes each) ---
+            // --- Non-variadic entry: load args directly (16 bytes each) ---
+            let required = lir.arity.fixed_params() as u32;
             for i in 0..arity_params as u32 {
-                let tag_offset = (i as i32) * 16;
-                let payload_offset = (i as i32) * 16 + 8;
-                let arg_tag = builder
-                    .ins()
-                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                let arg_payload =
+                let base = arg_var_base + i;
+                let is_optional = is_range_arity && i >= required;
+
+                if is_optional {
+                    // Optional param: check nargs > i, load arg or default to nil
+                    let threshold = builder.ins().iconst(I64, i as i64 + 1);
+                    let has_arg =
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedGreaterThanOrEqual, nargs, threshold);
+                    let then_block = builder.create_block();
+                    let else_block = builder.create_block();
+                    let merge_block = builder.create_block();
+                    builder.append_block_param(merge_block, I64); // tag
+                    builder.append_block_param(merge_block, I64); // payload
+
                     builder
                         .ins()
-                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                let base = arg_var_base + i;
-                // Wrap in LBox if this param is mutable-captured
-                if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
-                    let (cell_t, cell_p) = translator.call_helper_value_unary(
-                        &mut builder,
-                        translator.helpers.make_lbox,
-                        arg_tag,
-                        arg_payload,
-                    )?;
-                    translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                        .brif(has_arg, then_block, &[], else_block, &[]);
+
+                    // then: load from args
+                    builder.switch_to_block(then_block);
+                    builder.seal_block(then_block);
+                    let tag_offset = (i as i32) * 16;
+                    let payload_offset = (i as i32) * 16 + 8;
+                    let arg_tag =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                    let arg_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    builder.ins().jump(merge_block, &[arg_tag, arg_payload]);
+
+                    // else: nil
+                    builder.switch_to_block(else_block);
+                    builder.seal_block(else_block);
+                    let nil_tag = builder
+                        .ins()
+                        .iconst(I64, crate::value::Value::NIL.tag as i64);
+                    let nil_pay = builder.ins().iconst(I64, 0);
+                    builder.ins().jump(merge_block, &[nil_tag, nil_pay]);
+
+                    // merge
+                    builder.switch_to_block(merge_block);
+                    builder.seal_block(merge_block);
+                    let merged_tag = builder.block_params(merge_block)[0];
+                    let merged_pay = builder.block_params(merge_block)[1];
+
+                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                        let (cell_t, cell_p) = translator.call_helper_value_unary(
+                            &mut builder,
+                            translator.helpers.make_lbox,
+                            merged_tag,
+                            merged_pay,
+                        )?;
+                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                    } else {
+                        translator.def_var_pair(&mut builder, base, merged_tag, merged_pay);
+                    }
                 } else {
-                    translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                    // Required param: load unconditionally
+                    let tag_offset = (i as i32) * 16;
+                    let payload_offset = (i as i32) * 16 + 8;
+                    let arg_tag =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                    let arg_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                        let (cell_t, cell_p) = translator.call_helper_value_unary(
+                            &mut builder,
+                            translator.helpers.make_lbox,
+                            arg_tag,
+                            arg_payload,
+                        )?;
+                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                    } else {
+                        translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                    }
                 }
             }
         }
