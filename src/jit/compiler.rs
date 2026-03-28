@@ -429,8 +429,8 @@ impl JitCompiler {
         if is_list_variadic {
             // --- Variadic entry: load required+optional params, then cons list for rest ---
             let required = lir.arity.fixed_params();
-            // num_params includes required + optional (not rest)
-            let non_rest_params = lir.num_params;
+            // num_params includes the rest param slot — subtract 1 for non-rest count
+            let non_rest_params = lir.num_params.saturating_sub(1);
             let has_opt_params = non_rest_params > required;
 
             // Load required params unconditionally

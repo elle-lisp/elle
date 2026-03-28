@@ -61,6 +61,33 @@ impl VM {
                         (*closure.template.symbol_names).clone(),
                     ) {
                         Ok(jit_code) => {
+                            if std::env::var("ELLE_DEBUG_JIT").is_ok() {
+                                // Dump first few LIR blocks to identify the function
+                                let block_info: Vec<String> = lir_func
+                                    .blocks
+                                    .iter()
+                                    .take(1)
+                                    .map(|b| {
+                                        let instrs: Vec<String> = b
+                                            .instructions
+                                            .iter()
+                                            .take(5)
+                                            .map(|i| format!("{:?}", i))
+                                            .collect();
+                                        format!("L{}:[{}]", b.label.0, instrs.join(", "))
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "[jit] compiled: name={} arity={} nargs={} num_params={} bc_len={} vararg={:?} lir={}",
+                                    closure.template.name.as_deref().unwrap_or("<anon>"),
+                                    lir_func.arity,
+                                    args.len(),
+                                    lir_func.num_params,
+                                    closure.template.bytecode.len(),
+                                    lir_func.vararg_kind,
+                                    block_info.join(" "),
+                                );
+                            }
                             let jit_code = Rc::new(jit_code);
                             self.jit_cache.insert(bytecode_ptr, jit_code.clone());
                             return Some(self.run_jit(&jit_code, closure, args, func));
