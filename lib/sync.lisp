@@ -8,9 +8,7 @@
 ## All primitives are cooperative (fiber-level), not OS-level.
 ## They use ev/futex-wait and ev/futex-wake from stdlib.
 
-# ============================================================================
-# Layer 1: Futex
-# ============================================================================
+## ── Layer 1: Futex ──────────────────────────────────────────────────
 
 (var *futex-id* 0)
 
@@ -28,11 +26,9 @@
      :set  (fn [v] (put cell 0 v))
      :cell cell}))
 
-# ============================================================================
-# Layer 2: Core primitives
-# ============================================================================
+## ── Layer 2: Core primitives ────────────────────────────────────────
 
-## ── Lock (mutual exclusion) ───────────────────────────────────────────
+## ── Lock (mutual exclusion) ─────────────────────────────────────────
 
 (defn make-lock []
   "Mutual exclusion lock. false = free, true = held."
@@ -57,7 +53,7 @@
      :held?
      (fn [] (ftx:get))}))
 
-## ── Semaphore (counting permits) ──────────────────────────────────────
+## ── Semaphore (counting permits) ─────────────────────────────────────
 
 (defn make-semaphore [n]
   "Counting semaphore with n initial permits."
@@ -84,7 +80,7 @@
      :permits
      (fn [] (ftx:get))}))
 
-## ── Condition variable ────────────────────────────────────────────────
+## ── Condition variable ───────────────────────────────────────────────
 
 (defn make-condvar []
   "Condition variable using a generation counter."
@@ -107,17 +103,15 @@
        (ftx:wake 999999999)
        nil)}))
 
-# ============================================================================
-# Layer 3: Composed primitives
-# ============================================================================
+## ── Layer 3: Composed primitives ────────────────────────────────────
 
-## ── Read-write lock ───────────────────────────────────────────────────
+## ── Read-write lock ─────────────────────────────────────────────────
 
 (defn make-rwlock []
   "Read-write lock. Multiple readers OR one writer."
   (let [[state @[0]]       # positive = reader count, -1 = writer held
         [ftx (make-futex 0)]]
-    # Use ftx just for signaling; state tracks reader-count / writer-flag
+    # ftx is for signaling only; state tracks reader-count / writer-flag
     {:read-acquire
      (fn []
        (while true
@@ -147,7 +141,7 @@
        (ftx:wake 999999999)
        nil)}))
 
-## ── Barrier ───────────────────────────────────────────────────────────
+## ── Barrier ──────────────────────────────────────────────────────────
 
 (defn make-barrier [n]
   "Barrier for N fibers. All must call :wait before any proceed."
@@ -160,7 +154,7 @@
            (begin (ftx:wake 999999999) nil)
            (begin (ftx:wait count) nil))))}))
 
-## ── Latch (one-shot gate) ─────────────────────────────────────────────
+## ── Latch (one-shot gate) ────────────────────────────────────────────
 
 (defn make-latch []
   "One-shot gate. Once opened, stays open."
@@ -177,7 +171,7 @@
      :open?
      (fn [] (ftx:get))}))
 
-## ── Once (lazy one-time init) ─────────────────────────────────────────
+## ── Once (lazy one-time init) ────────────────────────────────────────
 
 (defn make-once [thunk]
   "Run thunk exactly once. All callers of :get receive the cached result."
@@ -200,7 +194,7 @@
               (ftx:wake 999999999)
               (if ok? val (error val)))))))}))
 
-## ── Blocking queue ────────────────────────────────────────────────────
+## ── Blocking queue ───────────────────────────────────────────────────
 
 (defn make-queue [capacity]
   "Bounded blocking FIFO queue."
@@ -231,7 +225,7 @@
      :size
      (fn [] (length buf))}))
 
-## ── Monitor ───────────────────────────────────────────────────────────
+## ── Monitor ──────────────────────────────────────────────────────────
 
 (defn make-monitor []
   "Bundled lock + condvar for synchronized access to shared state."
@@ -250,9 +244,7 @@
      :broadcast
      (fn [] (cv:broadcast))}))
 
-# ============================================================================
-# Export
-# ============================================================================
+## ── Export ───────────────────────────────────────────────────────────
 
 (fn []
   {:make-futex     make-futex

@@ -485,6 +485,47 @@ impl VM {
                         self.fiber.stack.push(current_value);
                     }
 
+                    if std::env::var("ELLE_DEBUG_STACK").is_ok() {
+                        let opcode = if frame.ip < frame.bytecode.len() {
+                            frame.bytecode[frame.ip]
+                        } else {
+                            255
+                        };
+                        let env_ptr = std::rc::Rc::as_ptr(&frame.env) as usize;
+                        eprintln!(
+                            "[resume] frame={} ip={} bc_len={} opcode={} saved_stack={} push_rv={} final_stack={} env_len={} env_ptr={:#x} rv_type={}",
+                            i, frame.ip, frame.bytecode.len(), opcode,
+                            frame.stack.len(), frame.push_resume_value,
+                            self.fiber.stack.len(), frame.env.len(),
+                            env_ptr, current_value.type_name(),
+                        );
+                        for (si, sv) in self.fiber.stack.iter().enumerate() {
+                            eprintln!("  stack[{}] = {} {:?}", si, sv.type_name(), sv);
+                        }
+                        // Only dump env for small envs (inner closures, not stdlib)
+                        if frame.env.len() <= 5 {
+                            for (ei, ev) in frame.env.iter().enumerate() {
+                                let detail = if ev.is_local_lbox() {
+                                    if let Some(cell_ref) = ev.as_lbox() {
+                                        let inner = *cell_ref.borrow();
+                                        let lbox_ptr = cell_ref as *const _ as usize;
+                                        format!(
+                                            "box(ptr={:#x}) -> {} {:?}",
+                                            lbox_ptr,
+                                            inner.type_name(),
+                                            inner
+                                        )
+                                    } else {
+                                        format!("{} {:?}", ev.type_name(), ev)
+                                    }
+                                } else {
+                                    format!("{} {:?}", ev.type_name(), ev)
+                                };
+                                eprintln!("  env[{}] = {}", ei, detail);
+                            }
+                        }
+                    }
+
                     let exec = self.execute_bytecode_from_ip(
                         &frame.bytecode,
                         &frame.constants,

@@ -328,6 +328,17 @@ impl VM {
                     let (_, value) = self.fiber.signal.take().unwrap();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+                    if std::env::var("ELLE_DEBUG_STACK").is_ok() && caller_stack.len() <= 5 {
+                        eprintln!(
+                            "[call_inner suspend] ip={} bc_len={} stack_depth={}",
+                            *ip,
+                            bytecode.len(),
+                            caller_stack.len(),
+                        );
+                        for (si, sv) in caller_stack.iter().enumerate() {
+                            eprintln!("  stack[{}] = {} {:?}", si, sv.type_name(), sv);
+                        }
+                    }
                     let caller_frame = SuspendedFrame::Bytecode(BytecodeFrame {
                         bytecode: bytecode.clone(),
                         constants: constants.clone(),
@@ -335,9 +346,6 @@ impl VM {
                         ip: *ip,
                         stack: caller_stack,
                         location_map: location_map.clone(),
-                        // Caller frame: on resume, the callee's return value
-                        // flows as current_value and must be pushed as the
-                        // Call instruction's result.
                         push_resume_value: true,
                     });
 
@@ -345,11 +353,7 @@ impl VM {
                     if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
                         eprintln!(
                             "[call_inner] suspend: bits=0x{:x} ip={} bc_len={} inner_frames={} env_len={}",
-                            bits.0,
-                            *ip,
-                            bytecode.len(),
-                            frames.len(),
-                            closure_env.len(),
+                            bits.0, *ip, bytecode.len(), frames.len(), closure_env.len(),
                         );
                     }
                     frames.push(caller_frame);
@@ -610,7 +614,10 @@ impl VM {
 /// Returns `None` if the value is not a callable collection.
 /// Returns `Some(Ok(value))` on success.
 /// Returns `Some(Err((kind, msg)))` on error.
-fn call_collection(func: &Value, args: &[Value]) -> Option<Result<Value, (&'static str, String)>> {
+pub(crate) fn call_collection(
+    func: &Value,
+    args: &[Value],
+) -> Option<Result<Value, (&'static str, String)>> {
     // ── Structs (immutable and mutable) ──────────────────────────────
     if let Some(s) = func.as_struct() {
         if args.is_empty() || args.len() > 2 {

@@ -7,7 +7,8 @@
 
 use crate::jit::value::{JitValue, TAIL_CALL_SENTINEL_JV, YIELD_SENTINEL_JV};
 use crate::value::fiber::{
-    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME, SIG_YIELD,
+    SignalBits, SIG_ABORT, SIG_ERROR, SIG_HALT, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_RESUME,
+    SIG_YIELD,
 };
 use crate::value::{error_val, Value};
 
@@ -298,6 +299,16 @@ pub extern "C" fn elle_jit_call(
         vm.fiber.call_depth -= 1;
 
         exec_result_to_jit_value(vm, result.bits)
+    } else if let Some(result) =
+        crate::vm::call::call_collection(&func, args_ptr_to_value_slice(args_ptr, nargs))
+    {
+        match result {
+            Ok(value) => JitValue::from_value(value),
+            Err((kind, msg)) => {
+                vm.fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
+                JitValue::nil()
+            }
+        }
     } else {
         vm.fiber.signal = Some((
             SIG_ERROR,
@@ -629,6 +640,22 @@ pub extern "C" fn elle_jit_tail_call(
         });
 
         return TAIL_CALL_SENTINEL;
+    }
+
+    // Callable collections: struct, array, set, string, bytes
+    if let Some(result) =
+        crate::vm::call::call_collection(&func, args_ptr_to_value_slice(args_ptr, nargs))
+    {
+        match result {
+            Ok(value) => {
+                vm.fiber.signal = Some((SIG_OK, value));
+                return JitValue::from_value(value);
+            }
+            Err((kind, msg)) => {
+                vm.fiber.signal = Some((SIG_ERROR, error_val(kind, msg)));
+                return JitValue::nil();
+            }
+        }
     }
 
     vm.fiber.signal = Some((
