@@ -71,7 +71,7 @@ Supported instructions:
 - **Constants**: `Const` (Int, Float, Bool, Nil, EmptyList, Symbol, Keyword), `ValueConst`
 - **Arithmetic**: `BinOp` (inline integer fast path, extern fallback), `UnaryOp` (Not fully inlined, Neg/BitNot inline integer fast path)
 - **Comparison**: `Compare` (inline integer fast path, extern fallback)
-- **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal`, `LoadCapture`, `LoadCaptureRaw`
+- **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
 - **LBoxes**: `MakeLBox`, `LoadLBox`, `StoreLBox`, `StoreCapture`
 - **Globals**: Accessed as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`; `LoadGlobal`/`StoreGlobal` are dead instructions (unreachable in VM dispatch)
@@ -352,6 +352,25 @@ No errors are silently swallowed.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.
+
+## Dual Address Space for Variables
+
+`LoadLocal`/`StoreLocal` and `LoadCapture`/`StoreCapture` use different address
+spaces:
+
+- **Stack-relative (LoadLocal/StoreLocal):** The lowerer assigns slots starting
+  at `num_params` (it initializes `num_locals = num_params`). The JIT maps these
+  via `local_slot_to_var()` in `helpers.rs`: slots >= `num_params` are offset
+  into the `local_var_base` region; slots < `num_params` defensively map to
+  `arg_var_base`.
+
+- **Env-relative (LoadCapture/StoreCapture):** Indices address the closure
+  environment array directly. Captures with index < `num_captures` load from
+  the env pointer; indices >= `num_captures` address locally-defined variables
+  (params and locals that were hoisted into the env for lbox reasons).
+
+This separation means LoadLocal/StoreLocal never touch the env pointer and
+LoadCapture/StoreCapture never use stack-relative slots.
 
 ## LBox Optimization for Locally-Defined Variables
 
