@@ -103,6 +103,14 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     );
                 }
                 let (bits, result) = caller.data().maybe_execute_io(bits, result);
+
+                // Handle SIG_RESUME: fiber/resume returns this signal.
+                // Execute the fiber's WASM closure host-side.
+                if bits.0 & 8 != 0 {
+                    // SIG_RESUME: result is the fiber value
+                    return handle_fiber_resume(&mut caller, result);
+                }
+
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
                 (tag, payload, bits.0 as i32)
             } else if let Some((id, default)) = func_val.as_parameter() {
@@ -404,7 +412,100 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
+    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32)
+    // Save yielded value and live registers to a WasmSuspensionFrame.
+    linker.func_wrap(
+        "elle",
+        "rt_yield",
+        |mut caller: Caller<'_, ElleHost>,
+         tag: i64,
+         payload: i64,
+         resume_state: i32,
+         regs_ptr: i32,
+         num_regs: i32| {
+            // Read saved registers from linear memory
+            let saved_regs = read_reg_pairs(&mut caller, regs_ptr, num_regs);
+
+            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                eprintln!(
+                    "[rt_yield] tag={} payload={} resume_state={} num_regs={}",
+                    tag, payload, resume_state, num_regs
+                );
+            }
+
+            let host = caller.data_mut();
+            host.suspension_frames
+                .push(super::host::WasmSuspensionFrame {
+                    wasm_func_idx: 0, // filled by caller (call_wasm_closure)
+                    resume_state: resume_state as u32,
+                    saved_regs,
+                    env_snapshot: Vec::new(), // filled by call_wasm_closure
+                    env_base: 0,              // filled by call_wasm_closure
+                });
+        },
+    )?;
+
+    // rt_get_resume_value() -> (tag: i64, payload: i64)
+    // Return the resume value set by the scheduler.
+    linker.func_wrap(
+        "elle",
+        "rt_get_resume_value",
+        |caller: Caller<'_, ElleHost>| -> (i64, i64) {
+            let host = caller.data();
+            match host.resume_value {
+                Some((tag, payload)) => (tag, payload),
+                None => {
+                    // No resume value — return nil
+                    (crate::value::repr::TAG_NIL as i64, 0)
+                }
+            }
+        },
+    )?;
+
+    // rt_load_saved_reg(index: i32) -> (tag: i64, payload: i64)
+    // Load a saved register by index from the current suspension frame.
+    linker.func_wrap(
+        "elle",
+        "rt_load_saved_reg",
+        |caller: Caller<'_, ElleHost>, index: i32| -> (i64, i64) {
+            let host = caller.data();
+            if let Some(frame) = host.suspension_frames.last() {
+                if (index as usize) < frame.saved_regs.len() {
+                    frame.saved_regs[index as usize]
+                } else {
+                    (crate::value::repr::TAG_NIL as i64, 0)
+                }
+            } else {
+                (crate::value::repr::TAG_NIL as i64, 0)
+            }
+        },
+    )?;
+
     Ok(linker)
+}
+
+/// Read (tag, payload) pairs from linear memory at `regs_ptr`.
+fn read_reg_pairs(
+    caller: &mut Caller<'_, ElleHost>,
+    regs_ptr: i32,
+    num_regs: i32,
+) -> Vec<(i64, i64)> {
+    if num_regs <= 0 {
+        return Vec::new();
+    }
+    let memory = caller
+        .get_export("__elle_memory")
+        .and_then(|e| e.into_memory())
+        .expect("read_reg_pairs: no memory");
+    let data = memory.data(&*caller);
+    let mut pairs = Vec::with_capacity(num_regs as usize);
+    for i in 0..num_regs as usize {
+        let offset = regs_ptr as usize + i * 16;
+        let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+        let payload = i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap());
+        pairs.push((tag, payload));
+    }
+    pairs
 }
 
 /// Build a WASM closure's environment in linear memory at `env_base`.
@@ -552,7 +653,7 @@ fn call_wasm_closure(
         .unwrap_func()
         .expect("call_wasm_closure: table entry is not a function");
 
-    let mut results = [Val::I64(0), Val::I64(0)];
+    let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
     let call_result = func.call(
         &mut *caller,
         &[
@@ -564,47 +665,368 @@ fn call_wasm_closure(
         &mut results,
     );
 
-    // Restore env stack pointer
-    caller.data_mut().env_stack_ptr = env_base;
+    match call_result {
+        Ok(()) => {
+            let tag = results[0].unwrap_i64();
+            let payload = results[1].unwrap_i64();
+            let status = results[2].unwrap_i32();
+
+            if status > 0 {
+                // Suspended: the WASM function yielded (or yield-through-call).
+                // rt_yield already pushed a WasmSuspensionFrame with saved regs.
+                // We need to snapshot the env and set metadata on the frame.
+
+                // Snapshot env from linear memory
+                let env_end = caller.data().env_stack_ptr;
+                let env_size = env_end - env_base;
+                let env_snapshot = if env_size > 0 {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("call_wasm_closure: no memory");
+                    let data = memory.data(&*caller);
+                    data[env_base..env_end].to_vec()
+                } else {
+                    Vec::new()
+                };
+
+                // Update the suspension frame with env + metadata
+                if let Some(frame) = caller.data_mut().suspension_frames.last_mut() {
+                    frame.wasm_func_idx = wasm_idx;
+                    frame.env_base = env_base;
+                    frame.env_snapshot = env_snapshot;
+                }
+
+                // Restore env_stack_ptr (env is saved in snapshot)
+                caller.data_mut().env_stack_ptr = env_base;
+
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    eprintln!(
+                        "[call_wasm_closure] SUSPENDED: status={} tag={} payload={}",
+                        status, tag, payload
+                    );
+                }
+
+                // Return the yielded value with SIG_YIELD
+                (tag, payload, crate::value::fiber::SIG_YIELD.0 as i32)
+            } else {
+                // Normal return — restore env stack pointer
+                caller.data_mut().env_stack_ptr = env_base;
+
+                // Read signal from memory[0..4].
+                let signal = {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("call_wasm_closure: no memory");
+                    let data = memory.data(&*caller);
+                    i32::from_le_bytes(data[0..4].try_into().unwrap())
+                };
+                if signal != 0 {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("call_wasm_closure: no memory");
+                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                }
+
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    let v = caller.data().wasm_to_value(tag, payload);
+                    eprintln!(
+                        "[call_wasm_closure] returned: tag={} payload={} signal={} status={} = {:?}",
+                        tag, payload, signal, status, v
+                    );
+                }
+                (tag, payload, signal)
+            }
+        }
+        Err(e) => {
+            // Restore env_stack_ptr on error too
+            caller.data_mut().env_stack_ptr = env_base;
+            let err = crate::value::error_val("exec-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            (tag, payload, 1)
+        }
+    }
+}
+
+/// Resume a suspended WASM closure with a resume value.
+///
+/// Pops the outermost suspension frame, restores its env to linear memory,
+/// sets the resume value, and re-invokes the WASM function with
+/// `ctx = resume_state`. If the function suspends again, the new frame
+/// is saved. If it returns normally, returns the result.
+///
+/// For multi-frame suspension chains (yield-through-call), the caller
+/// must call this repeatedly: first resume the innermost callee, then
+/// use its result to resume the next frame.
+pub fn resume_wasm_closure(
+    caller: &mut Caller<'_, ElleHost>,
+    resume_val: Value,
+) -> Option<(i64, i64, i32)> {
+    // Don't pop the frame yet — rt_load_saved_reg needs to read from it
+    // during the WASM function's resume prologue. Extract metadata first.
+    let frame_idx = caller.data().suspension_frames.len().checked_sub(1)?;
+    let wasm_func_idx = caller.data().suspension_frames[frame_idx].wasm_func_idx;
+    let resume_state = caller.data().suspension_frames[frame_idx].resume_state;
+    let env_base = caller.data().suspension_frames[frame_idx].env_base;
+    let env_snapshot = caller.data().suspension_frames[frame_idx]
+        .env_snapshot
+        .clone();
+
+    // Set resume value for rt_get_resume_value
+    let (resume_tag, resume_pay) = caller.data_mut().value_to_wasm(resume_val);
+    caller.data_mut().resume_value = Some((resume_tag, resume_pay));
+
+    // Restore env to linear memory
+    if !env_snapshot.is_empty() {
+        let memory = caller
+            .get_export("__elle_memory")
+            .and_then(|e| e.into_memory())
+            .expect("resume_wasm_closure: no memory");
+
+        // Grow memory if needed
+        let needed = env_base + env_snapshot.len();
+        let current = memory.data_size(&*caller);
+        if needed > current {
+            let pages = (needed - current).div_ceil(65536) as u64;
+            memory
+                .grow(&mut *caller, pages)
+                .expect("resume_wasm_closure: failed to grow memory");
+        }
+
+        let data = memory.data_mut(&mut *caller);
+        data[env_base..env_base + env_snapshot.len()].copy_from_slice(&env_snapshot);
+    }
+
+    // Set env_stack_ptr past the restored env
+    caller.data_mut().env_stack_ptr = env_base + env_snapshot.len();
+
+    // Look up the WASM function in the table
+    let table = caller
+        .get_export("__elle_table")
+        .and_then(|e| e.into_table())
+        .expect("resume_wasm_closure: no table");
+    let func_ref = table
+        .get(&mut *caller, wasm_func_idx as u64)
+        .expect("resume_wasm_closure: table index out of bounds");
+    let func = func_ref
+        .unwrap_func()
+        .expect("resume_wasm_closure: table entry is not a function");
+
+    // Call with ctx = resume_state
+    let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
+    let call_result = func.call(
+        &mut *caller,
+        &[
+            Val::I32(env_base as i32),
+            Val::I32(0),                   // args_ptr unused
+            Val::I32(0),                   // nargs unused
+            Val::I32(resume_state as i32), // ctx = resume state
+        ],
+        &mut results,
+    );
+
+    // Clear resume value and pop the old suspension frame
+    // (it was kept alive for rt_load_saved_reg during the prologue)
+    caller.data_mut().resume_value = None;
+    caller.data_mut().suspension_frames.remove(frame_idx);
 
     match call_result {
         Ok(()) => {
             let tag = results[0].unwrap_i64();
             let payload = results[1].unwrap_i64();
+            let status = results[2].unwrap_i32();
 
-            // Read signal from memory[0..4]. WASM code writes the signal
-            // here before returning on error (via store_result_with_signal).
-            // On success, memory[0..4] is 0 (initialized by module load).
-            let signal = {
-                let memory = caller
-                    .get_export("__elle_memory")
-                    .and_then(|e| e.into_memory())
-                    .expect("call_wasm_closure: no memory");
-                let data = memory.data(&*caller);
-                i32::from_le_bytes(data[0..4].try_into().unwrap())
-            };
-            // Clear the signal slot for the next call
-            if signal != 0 {
-                let memory = caller
-                    .get_export("__elle_memory")
-                    .and_then(|e| e.into_memory())
-                    .expect("call_wasm_closure: no memory");
-                memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
-            }
+            if status > 0 {
+                // Suspended again — snapshot env and update frame (rt_yield pushed a new one)
+                let env_end = caller.data().env_stack_ptr;
+                let env_size = env_end - env_base;
+                let env_snapshot = if env_size > 0 {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("resume_wasm_closure: no memory");
+                    memory.data(&*caller)[env_base..env_end].to_vec()
+                } else {
+                    Vec::new()
+                };
 
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                let v = caller.data().wasm_to_value(tag, payload);
-                eprintln!(
-                    "[call_wasm_closure] returned: tag={} payload={} signal={} = {:?}",
-                    tag, payload, signal, v
-                );
+                if let Some(new_frame) = caller.data_mut().suspension_frames.last_mut() {
+                    new_frame.wasm_func_idx = wasm_func_idx;
+                    new_frame.env_base = env_base;
+                    new_frame.env_snapshot = env_snapshot;
+                }
+
+                caller.data_mut().env_stack_ptr = env_base;
+
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    eprintln!("[resume_wasm_closure] SUSPENDED AGAIN: status={}", status);
+                }
+                Some((tag, payload, crate::value::fiber::SIG_YIELD.0 as i32))
+            } else {
+                // Normal return
+                caller.data_mut().env_stack_ptr = env_base;
+
+                let signal = {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("resume_wasm_closure: no memory");
+                    let data = memory.data(&*caller);
+                    i32::from_le_bytes(data[0..4].try_into().unwrap())
+                };
+                if signal != 0 {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("resume_wasm_closure: no memory");
+                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                }
+
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    let v = caller.data().wasm_to_value(tag, payload);
+                    eprintln!(
+                        "[resume_wasm_closure] returned: tag={} payload={} signal={} = {:?}",
+                        tag, payload, signal, v
+                    );
+                }
+                Some((tag, payload, signal))
             }
-            (tag, payload, signal)
         }
         Err(e) => {
+            caller.data_mut().env_stack_ptr = env_base;
             let err = crate::value::error_val("exec-error", e.to_string());
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, 1)
+            Some((tag, payload, 1))
+        }
+    }
+}
+
+/// Handle SIG_RESUME from fiber/resume in the WASM backend.
+///
+/// When `fiber/resume` returns SIG_RESUME, the fiber value contains the
+/// fiber to execute. We extract it, run its WASM closure, update status.
+fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) -> (i64, i64, i32) {
+    use crate::value::fiber::{FiberStatus, SIG_ERROR, SIG_YIELD};
+
+    let fiber_handle = match fiber_value.as_fiber() {
+        Some(f) => f.clone(),
+        None => {
+            let err = crate::value::error_val("type-error", "fiber/resume: not a fiber");
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, SIG_ERROR.0 as i32);
+        }
+    };
+
+    // Extract closure, resume value, and status from the fiber
+    let (closure, resume_value, status) = fiber_handle.with_mut(|fiber| {
+        let closure = fiber.closure.clone();
+        let resume_value = fiber.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
+        let status = fiber.status;
+        (closure, resume_value, status)
+    });
+
+    let wasm_idx = match closure.template.wasm_func_idx {
+        Some(idx) => idx,
+        None => {
+            fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+            let err =
+                crate::value::error_val("internal-error", "fiber/resume: bytecode closure in WASM");
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, SIG_ERROR.0 as i32);
+        }
+    };
+
+    let yield_signal = SIG_YIELD.0 as i32;
+
+    match status {
+        FiberStatus::New => {
+            fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
+
+            let args = if resume_value.is_nil() {
+                vec![]
+            } else {
+                vec![resume_value]
+            };
+            let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
+
+            if signal == yield_signal {
+                let yielded = caller.data().wasm_to_value(tag, payload);
+                fiber_handle.with_mut(|f| {
+                    f.status = FiberStatus::Paused;
+                    f.signal = Some((SIG_YIELD, yielded));
+                });
+                (tag, payload, 0) // caught by fiber
+            } else if signal != 0 {
+                fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                (tag, payload, signal)
+            } else {
+                fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                (tag, payload, 0)
+            }
+        }
+        FiberStatus::Paused => {
+            fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
+
+            let result = resume_wasm_closure(caller, resume_value);
+
+            match result {
+                Some((tag, payload, signal)) => {
+                    if signal == yield_signal {
+                        let yielded = caller.data().wasm_to_value(tag, payload);
+                        fiber_handle.with_mut(|f| {
+                            f.status = FiberStatus::Paused;
+                            f.signal = Some((SIG_YIELD, yielded));
+                        });
+                        (tag, payload, 0)
+                    } else if signal != 0 {
+                        fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                        (tag, payload, signal)
+                    } else {
+                        // Resume chain for yield-through-call
+                        let mut result_val = caller.data().wasm_to_value(tag, payload);
+                        loop {
+                            if caller.data().suspension_frames.is_empty() {
+                                fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                                let (t, p) = caller.data_mut().value_to_wasm(result_val);
+                                return (t, p, 0);
+                            }
+                            match resume_wasm_closure(caller, result_val) {
+                                Some((t, p, s)) => {
+                                    if s == yield_signal {
+                                        let yielded = caller.data().wasm_to_value(t, p);
+                                        fiber_handle.with_mut(|f| {
+                                            f.status = FiberStatus::Paused;
+                                            f.signal = Some((SIG_YIELD, yielded));
+                                        });
+                                        return (t, p, 0);
+                                    } else if s != 0 {
+                                        fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                                        return (t, p, s);
+                                    }
+                                    result_val = caller.data().wasm_to_value(t, p);
+                                }
+                                None => {
+                                    fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                                    let (t, p) = caller.data_mut().value_to_wasm(result_val);
+                                    return (t, p, 0);
+                                }
+                            }
+                        }
+                    }
+                }
+                None => {
+                    fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                    let (tag, payload) = caller.data_mut().value_to_wasm(Value::NIL);
+                    (tag, payload, 0)
+                }
+            }
+        }
+        _ => {
+            let err = crate::value::error_val("fiber-error", "fiber/resume: fiber not resumable");
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            (tag, payload, SIG_ERROR.0 as i32)
         }
     }
 }
@@ -883,8 +1305,8 @@ pub fn run_module(
     module: &Module,
 ) -> Result<Value> {
     let instance = linker.instantiate(&mut *store, module)?;
-    let entry = instance.get_typed_func::<(), (i64, i64)>(&mut *store, "__elle_entry")?;
-    let (tag, payload) = entry.call(&mut *store, ())?;
+    let entry = instance.get_typed_func::<(), (i64, i64, i32)>(&mut *store, "__elle_entry")?;
+    let (tag, payload, _status) = entry.call(&mut *store, ())?;
     let value = store.data().wasm_to_value(tag, payload);
     Ok(value)
 }

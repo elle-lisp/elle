@@ -384,3 +384,57 @@ fn test_int_float_promotion() {
 fn test_float_comparison() {
     assert_eq!(eval("(> 3.14 2.71)"), "true");
 }
+
+// --- Phase 2: yield/resume ---
+
+#[test]
+fn test_basic_yield() {
+    // A fiber that yields 42, then returns 99
+    assert_eq!(
+        eval(concat!(
+            "(let* [[f (fiber/new (fn [] (yield 42) 99) |:yield|)]]\n",
+            "  (fiber/resume f))"
+        )),
+        "42"
+    );
+}
+
+#[test]
+fn test_yield_resume_value() {
+    // Resume a fiber with a value; the yield expression evaluates to it
+    assert_eq!(
+        eval(concat!(
+            "(let* [[f (fiber/new (fn [] (+ 1 (yield 0))) |:yield|)]]\n",
+            "  (fiber/resume f)\n",   // yields 0, fiber paused
+            "  (fiber/resume f 10))"  // resumes with 10, returns 1+10=11
+        )),
+        "11"
+    );
+}
+
+#[test]
+fn test_multiple_yields() {
+    // Fiber yields 1, 2, 3 in sequence
+    assert_eq!(
+        eval(concat!(
+            "(let* [[f (fiber/new (fn [] (yield 1) (yield 2) 3) |:yield|)]]\n",
+            "  (let* [[a (fiber/resume f)]\n",
+            "         [b (fiber/resume f)]\n",
+            "         [c (fiber/resume f)]]\n",
+            "    (+ a (+ b c))))"
+        )),
+        "6"
+    );
+}
+
+#[test]
+fn test_fiber_dead_after_return() {
+    // After a fiber returns, it's dead
+    assert_eq!(
+        eval(concat!(
+            "(let* [[f (fiber/new (fn [] 42) |:yield|)]]\n",
+            "  (fiber/resume f))"
+        )),
+        "42"
+    );
+}

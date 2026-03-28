@@ -44,9 +44,12 @@ const FN_RT_MAKE_CLOSURE: u32 = 4;
 const FN_RT_PUSH_PARAM: u32 = 5;
 const FN_RT_POP_PARAM: u32 = 6;
 const FN_RT_PREPARE_TAIL_CALL: u32 = 7;
+const FN_RT_YIELD: u32 = 8;
+const FN_RT_GET_RESUME_VALUE: u32 = 9;
+const FN_RT_LOAD_SAVED_REG: u32 = 10;
 
 // First non-imported function index
-const FN_ENTRY: u32 = 8;
+const FN_ENTRY: u32 = 11;
 
 // Linear memory layout
 const ARGS_BASE: i32 = 256; // Args buffer starts at byte 256
@@ -74,6 +77,32 @@ const OP_ARRAY_LEN: i32 = 18;
 const OP_ARRAY_REF_OR_NIL: i32 = 19;
 const OP_STRUCT_REST: i32 = 20;
 
+/// Info about a resume state, used to generate the resume prologue.
+struct ResumeStateInfo {
+    /// Resume state ID (1-based, passed as ctx).
+    #[allow(dead_code)]
+    state_id: u32,
+    /// Block index to jump to after restoring registers.
+    /// For yield terminators: the resume_label's block index.
+    /// For call sites: the virtual block index (num_real_blocks + continuation_idx).
+    target_block_idx: i32,
+    /// Number of saved register+local pairs.
+    num_saved: u32,
+}
+
+/// Info about a call-site continuation (virtual resume block).
+/// When a callee yields through a call, the caller resumes in a
+/// virtual block that loads the resume value into the call dst
+/// and emits the remaining instructions from the original block.
+struct CallSiteContinuation {
+    /// The call's destination register.
+    dst: Reg,
+    /// Index of the original LIR block containing the call.
+    source_block_idx: usize,
+    /// Index of the first instruction AFTER the call in the source block.
+    instr_offset: usize,
+}
+
 struct WasmEmitter {
     label_to_idx: HashMap<Label, usize>,
     num_regs: u32,
@@ -90,6 +119,24 @@ struct WasmEmitter {
     signal_local: u32,
     /// Number of stack-local slots (non-LBox let-bound variables in closures).
     num_stack_locals: u32,
+    /// Whether the current function may suspend (yield or yield-through-call).
+    may_suspend: bool,
+    /// Next resume state ID for yield points and call sites.
+    /// State 0 = initial entry; states 1+ are assigned to yield/call points.
+    next_resume_state: u32,
+    /// WASM local index for resume value tag (i64). Set during resume prologue.
+    resume_tag_local: u32,
+    /// WASM local index for resume value payload (i64).
+    resume_pay_local: u32,
+    /// Resume state table: maps state IDs to target blocks and saved counts.
+    /// Built during yield/call-site emission, consumed by resume prologue.
+    resume_states: Vec<ResumeStateInfo>,
+    /// Call-site continuations for yield-through-call virtual blocks.
+    call_continuations: Vec<CallSiteContinuation>,
+    /// Maps (block_idx) → resume_state for yield terminators.
+    yield_state_map: HashMap<usize, u32>,
+    /// Maps (block_idx, instr_idx) → resume_state for call sites.
+    call_state_map: HashMap<(usize, usize), u32>,
 }
 
 impl WasmEmitter {
@@ -103,6 +150,14 @@ impl WasmEmitter {
             local_offset: 0,
             signal_local: 0,
             num_stack_locals: 0,
+            may_suspend: false,
+            next_resume_state: 1,
+            resume_tag_local: 0,
+            resume_pay_local: 0,
+            resume_states: Vec::new(),
+            call_continuations: Vec::new(),
+            yield_state_map: HashMap::new(),
+            call_state_map: HashMap::new(),
         }
     }
 
@@ -124,8 +179,11 @@ impl WasmEmitter {
 
         // Type section
         let mut types = TypeSection::new();
-        // Type 0: entry function () -> (i64, i64)
-        types.ty().function([], [ValType::I64, ValType::I64]);
+        // Type 0: entry function () -> (i64, i64, i32)
+        // status: 0 = normal return, >0 = suspended (resume state ID)
+        types
+            .ty()
+            .function([], [ValType::I64, ValType::I64, ValType::I32]);
         // Type 1: call_primitive(prim_id, args_ptr, nargs, ctx) -> (tag, payload, signal)
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
@@ -151,10 +209,11 @@ impl WasmEmitter {
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I32],
         );
-        // Type 5: closure function (env_ptr, args_ptr, nargs, ctx) -> (tag, payload)
+        // Type 5: closure function (env_ptr, args_ptr, nargs, ctx) -> (tag, payload, status)
+        // status: 0 = normal return, >0 = suspended (resume state ID)
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64],
+            [ValType::I64, ValType::I64, ValType::I32],
         );
         // Type 6: rt_make_closure(table_idx, captures_ptr, metadata_ptr) -> (tag, payload)
         types.ty().function(
@@ -184,9 +243,26 @@ impl WasmEmitter {
                 ValType::I32,
             ],
         );
+        // Type 10: rt_yield(tag, payload, resume_state, regs_ptr, num_regs) -> ()
+        types.ty().function(
+            [
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            [],
+        );
+        // Type 11: rt_get_resume_value() -> (tag, payload)
+        types.ty().function([], [ValType::I64, ValType::I64]);
+        // Type 12: rt_load_saved_reg(index) -> (tag, payload)
+        types
+            .ty()
+            .function([ValType::I32], [ValType::I64, ValType::I64]);
         module.section(&types);
 
-        // Import section (function indices 0–7)
+        // Import section (function indices 0–10)
         let mut imports = ImportSection::new();
         imports.import("elle", "call_primitive", EntityType::Function(1));
         imports.import("elle", "rt_call", EntityType::Function(2));
@@ -196,6 +272,9 @@ impl WasmEmitter {
         imports.import("elle", "rt_push_param", EntityType::Function(7));
         imports.import("elle", "rt_pop_param", EntityType::Function(8));
         imports.import("elle", "rt_prepare_tail_call", EntityType::Function(9));
+        imports.import("elle", "rt_yield", EntityType::Function(10));
+        imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
+        imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
         module.section(&imports);
 
         // Function section: entry (type 0) + closures (type 5 each)
@@ -311,14 +390,26 @@ impl WasmEmitter {
         if num_blocks == 0 {
             f.instruction(&Instruction::I64Const(TAG_NIL as i64));
             f.instruction(&Instruction::I64Const(0));
+            f.instruction(&Instruction::I32Const(0)); // status: normal return
             return;
         }
 
-        // Single block: no loop needed
-        if num_blocks == 1 {
+        // Single block: no loop needed (unless suspending with call continuations)
+        if num_blocks == 1 && self.call_continuations.is_empty() {
             let block = &func.blocks[0];
             for spanned in &block.instructions {
                 self.emit_instr(f, &spanned.instr);
+                // Yield-through check for calls in suspending functions
+                if self.may_suspend {
+                    match &spanned.instr {
+                        LirInstr::Call { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
+                            let resume_state = self.next_resume_state;
+                            self.next_resume_state += 1;
+                            self.emit_yield_through_check(f, *dst, resume_state);
+                        }
+                        _ => {}
+                    }
+                }
             }
             self.emit_terminator_return(f, &block.terminator.terminator);
             return;
@@ -334,10 +425,15 @@ impl WasmEmitter {
         // overlap with those uses).
         let state_local = self.signal_local;
 
-        // Initialize state to entry block index
-        let entry_idx = self.label_to_idx[&func.entry] as i32;
-        f.instruction(&Instruction::I32Const(entry_idx));
-        f.instruction(&Instruction::LocalSet(state_local));
+        // Resume prologue: if ctx != 0, restore saved state and jump to resume target
+        if self.may_suspend && self.is_closure && !self.resume_states.is_empty() {
+            self.emit_resume_prologue(f, state_local);
+        } else {
+            // Initialize state to entry block index
+            let entry_idx = self.label_to_idx[&func.entry] as i32;
+            f.instruction(&Instruction::I32Const(entry_idx));
+            f.instruction(&Instruction::LocalSet(state_local));
+        }
 
         // Outer block for return (br 0 from inside loop = break to after block)
         // loop $dispatch
@@ -361,104 +457,235 @@ impl WasmEmitter {
         // N-1 = outermost of the nested blocks. After landing at block i's end,
         // execution falls through to block i's code.
 
+        // Total blocks = real LIR blocks + virtual resume blocks (for call sites)
+        let num_virtual = self.call_continuations.len();
+        let total_blocks = num_blocks + num_virtual;
+
         // Loop for dispatch. All exits use `return`.
         f.instruction(&Instruction::Loop(BlockType::Empty));
 
         // Nested blocks for br_table targets (innermost = highest index)
-        for _ in 0..num_blocks {
+        for _ in 0..total_blocks {
             f.instruction(&Instruction::Block(BlockType::Empty));
         }
 
         // br_table dispatch
         f.instruction(&Instruction::LocalGet(state_local));
-        // Targets: block 0 is outermost (depth = num_blocks - 1),
-        // block N-1 is innermost (depth = 0).
-        // br_table target for state=i should jump to depth (num_blocks - 1 - i).
-        let targets: Vec<u32> = (0..num_blocks as u32)
-            .map(|i| num_blocks as u32 - 1 - i)
+        let targets: Vec<u32> = (0..total_blocks as u32)
+            .map(|i| total_blocks as u32 - 1 - i)
             .collect();
-        // Default target = first block
-        f.instruction(&Instruction::BrTable(targets.clone().into(), targets[0]));
+        let default = if targets.is_empty() { 0 } else { targets[0] };
+        f.instruction(&Instruction::BrTable(targets.into(), default));
 
-        // After br_table, emit blocks in reverse order (innermost end first)
-        // Block N-1's code comes right after the innermost block's end
+        // Emit virtual resume blocks first (they have the highest indices)
+        // Virtual blocks are numbered num_blocks..num_blocks+num_virtual-1
+        // In the br_table, they're innermost (emitted first in reverse)
+        for virt_idx in (0..num_virtual).rev() {
+            f.instruction(&Instruction::End); // close the block
+
+            let cont = &self.call_continuations[virt_idx];
+            let src_block_idx = cont.source_block_idx;
+            let instr_offset = cont.instr_offset;
+            let dst = cont.dst;
+
+            // Load resume value into call dst register
+            f.instruction(&Instruction::LocalGet(self.resume_tag_local));
+            f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.resume_pay_local));
+            f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+
+            // Emit remaining instructions from the source block
+            let block = &func.blocks[src_block_idx];
+            for spanned in &block.instructions[instr_offset..] {
+                self.emit_instr(f, &spanned.instr);
+            }
+
+            // Emit the source block's terminator
+            // Loop depth for virtual block virt_idx = num_blocks + virt_idx
+            self.emit_block_terminator(
+                f,
+                &block.terminator.terminator,
+                state_local,
+                (num_blocks + virt_idx) as u32,
+                Some(src_block_idx),
+            );
+        }
+
+        // Emit real blocks in reverse order
         for block_idx in (0..num_blocks).rev() {
             f.instruction(&Instruction::End); // close the block
 
             let block = &func.blocks[block_idx];
 
-            // Emit instructions
-            for spanned in &block.instructions {
-                self.emit_instr(f, &spanned.instr);
-            }
+            // Emit instructions (with yield-through checks for calls)
+            self.emit_block_instructions(f, block_idx, func);
 
-            // Emit terminator
-            match &block.terminator.terminator {
-                Terminator::Return(reg) => {
-                    f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
-                    // Store into the outer result blocks and break out
-                    // br 1 goes to the inner result block, br 2 to the outer
-                    // We need to break out of the loop (depth: num_blocks - block_idx + loop_depth)
-                    // Actually: the structure is:
-                    //   block(result i64) $ret_tag    depth from here: varies
-                    //     block(result i64) $ret_pay
-                    //       loop $dispatch
-                    //         block*N
-                    //         ...
-                    //         code
-                    // From code position, depths are:
-                    //   0 = previous block's block
-                    //   ... up to num_blocks-1-block_idx = our block
-                    //   num_blocks - block_idx = loop
-                    //   num_blocks - block_idx + 1 = $ret_pay
-                    //   num_blocks - block_idx + 2 = $ret_tag
-                    // We want to br to $ret_pay with payload, then that falls through to ret_tag
-                    // Actually, multi-value br doesn't work like that.
-
-                    // Simpler: just use `return` instruction which works from anywhere.
-                    f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
-                    f.instruction(&Instruction::Return);
-                }
-                Terminator::Jump(target) => {
-                    let target_idx = self.label_to_idx[target] as i32;
-                    f.instruction(&Instruction::I32Const(target_idx));
-                    f.instruction(&Instruction::LocalSet(state_local));
-                    // br to loop: depth = (remaining blocks below us) + 1 (for loop)
-                    let loop_depth = block_idx as u32;
-                    f.instruction(&Instruction::Br(loop_depth));
-                }
-                Terminator::Branch {
-                    cond,
-                    then_label,
-                    else_label,
-                } => {
-                    let then_idx = self.label_to_idx[then_label] as i32;
-                    let else_idx = self.label_to_idx[else_label] as i32;
-
-                    self.emit_truthiness_check(f, *cond);
-                    f.instruction(&Instruction::If(BlockType::Empty));
-                    f.instruction(&Instruction::I32Const(then_idx));
-                    f.instruction(&Instruction::LocalSet(state_local));
-                    f.instruction(&Instruction::Else);
-                    f.instruction(&Instruction::I32Const(else_idx));
-                    f.instruction(&Instruction::LocalSet(state_local));
-                    f.instruction(&Instruction::End);
-
-                    let loop_depth = block_idx as u32;
-                    f.instruction(&Instruction::Br(loop_depth));
-                }
-                Terminator::Unreachable => {
-                    f.instruction(&Instruction::Unreachable);
-                }
-                Terminator::Yield { .. } => {
-                    f.instruction(&Instruction::Unreachable);
-                }
-            }
+            // Emit terminator — loop depth for real block = block_idx
+            self.emit_block_terminator(
+                f,
+                &block.terminator.terminator,
+                state_local,
+                block_idx as u32,
+                Some(block_idx),
+            );
         }
 
         f.instruction(&Instruction::End); // loop
                                           // Unreachable — all paths through the loop use `return`
         f.instruction(&Instruction::Unreachable);
+    }
+
+    /// Emit a block's instructions, with yield-through checks for calls
+    /// in suspending functions.
+    fn emit_block_instructions(&mut self, f: &mut Function, block_idx: usize, func: &LirFunction) {
+        let block = &func.blocks[block_idx];
+        for (instr_idx, spanned) in block.instructions.iter().enumerate() {
+            self.emit_instr(f, &spanned.instr);
+
+            // After a Call/CallArrayMut in a suspending function,
+            // check for SIG_YIELD and handle yield-through
+            if self.may_suspend {
+                match &spanned.instr {
+                    LirInstr::Call { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
+                        let resume_state = self
+                            .call_state_map
+                            .get(&(block_idx, instr_idx))
+                            .copied()
+                            .unwrap_or_else(|| {
+                                let s = self.next_resume_state;
+                                self.next_resume_state += 1;
+                                s
+                            });
+                        self.emit_yield_through_check(f, *dst, resume_state);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Emit a block terminator.
+    /// `loop_depth` is the br depth to reach the dispatch loop from this code position.
+    /// `lir_block_idx` is the index of the LIR block (for yield state lookup).
+    fn emit_block_terminator(
+        &mut self,
+        f: &mut Function,
+        term: &Terminator,
+        state_local: u32,
+        loop_depth: u32,
+        lir_block_idx: Option<usize>,
+    ) {
+        match term {
+            Terminator::Return(reg) => {
+                f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
+                f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
+                f.instruction(&Instruction::I32Const(0)); // status: normal return
+                f.instruction(&Instruction::Return);
+            }
+            Terminator::Jump(target) => {
+                let target_idx = self.label_to_idx[target] as i32;
+                f.instruction(&Instruction::I32Const(target_idx));
+                f.instruction(&Instruction::LocalSet(state_local));
+                f.instruction(&Instruction::Br(loop_depth));
+            }
+            Terminator::Branch {
+                cond,
+                then_label,
+                else_label,
+            } => {
+                let then_idx = self.label_to_idx[then_label] as i32;
+                let else_idx = self.label_to_idx[else_label] as i32;
+
+                self.emit_truthiness_check(f, *cond);
+                f.instruction(&Instruction::If(BlockType::Empty));
+                f.instruction(&Instruction::I32Const(then_idx));
+                f.instruction(&Instruction::LocalSet(state_local));
+                f.instruction(&Instruction::Else);
+                f.instruction(&Instruction::I32Const(else_idx));
+                f.instruction(&Instruction::LocalSet(state_local));
+                f.instruction(&Instruction::End);
+
+                f.instruction(&Instruction::Br(loop_depth));
+            }
+            Terminator::Unreachable => {
+                f.instruction(&Instruction::Unreachable);
+            }
+            Terminator::Yield { value, .. } => {
+                if self.may_suspend {
+                    let resume_state = lir_block_idx
+                        .and_then(|idx| self.yield_state_map.get(&idx).copied())
+                        .unwrap_or_else(|| {
+                            let s = self.next_resume_state;
+                            self.next_resume_state += 1;
+                            s
+                        });
+
+                    let total_saved = self.num_regs + self.num_stack_locals;
+                    self.emit_spill_all(f);
+
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*value)));
+                    f.instruction(&Instruction::I32Const(resume_state as i32));
+                    f.instruction(&Instruction::I32Const(ARGS_BASE));
+                    f.instruction(&Instruction::I32Const(total_saved as i32));
+                    f.instruction(&Instruction::Call(FN_RT_YIELD));
+
+                    f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
+                    f.instruction(&Instruction::LocalGet(self.pay_local(*value)));
+                    f.instruction(&Instruction::I32Const(resume_state as i32));
+                    f.instruction(&Instruction::Return);
+                } else {
+                    f.instruction(&Instruction::Unreachable);
+                }
+            }
+        }
+    }
+
+    /// Emit the SIG_YIELD check after a call in a suspending function.
+    /// If the callee yielded, spill caller state and return suspended.
+    fn emit_yield_through_check(&self, f: &mut Function, dst: Reg, resume_state: u32) {
+        let total_saved = self.num_regs + self.num_stack_locals;
+
+        // The signal is already in memory[0..4] (written by store_result_with_signal)
+        // and the dst register holds the yielded value.
+        // Read signal from memory.
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I32Load(MemArg {
+            offset: 0,
+            align: 2,
+            memory_index: 0,
+        }));
+        f.instruction(&Instruction::I32Const(2)); // SIG_YIELD bit
+        f.instruction(&Instruction::I32And);
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            // Clear signal word (so it doesn't affect future calls)
+            f.instruction(&Instruction::I32Const(0));
+            f.instruction(&Instruction::I32Const(0));
+            f.instruction(&Instruction::I32Store(MemArg {
+                offset: 0,
+                align: 2,
+                memory_index: 0,
+            }));
+
+            // Spill all registers + local slots
+            self.emit_spill_all(f);
+
+            // Call rt_yield with the callee's yielded value
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::I32Const(total_saved as i32));
+            f.instruction(&Instruction::Call(FN_RT_YIELD));
+
+            // Return suspended
+            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
+            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::Return);
+        }
+        f.instruction(&Instruction::End);
     }
 
     /// Emit a terminator that produces the function's return values.
@@ -468,6 +695,7 @@ impl WasmEmitter {
             Terminator::Return(reg) => {
                 f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
                 f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
+                f.instruction(&Instruction::I32Const(0)); // status: normal return
             }
             Terminator::Unreachable => {
                 f.instruction(&Instruction::Unreachable);
@@ -641,6 +869,7 @@ impl WasmEmitter {
                     self.emit_call(f, dst, *func, args);
                     f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+                    f.instruction(&Instruction::I32Const(0)); // status: normal return
                     f.instruction(&Instruction::Return);
                 } else {
                     // Closure: write args, call rt_prepare_tail_call, dispatch
@@ -730,6 +959,7 @@ impl WasmEmitter {
                     self.emit_call_array(f, dst, *func, *args);
                     f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+                    f.instruction(&Instruction::I32Const(0)); // status: normal return
                     f.instruction(&Instruction::Return);
                 } else {
                     // Closure: write array arg, call rt_prepare_tail_call with nargs=-1
@@ -751,9 +981,15 @@ impl WasmEmitter {
                 f.instruction(&Instruction::Unreachable);
             }
             LirInstr::LoadResumeValue { dst } => {
-                // Fiber resume values require stack switching (Phase 2).
-                let _ = dst;
-                f.instruction(&Instruction::Unreachable);
+                if self.may_suspend {
+                    // Load from resume locals (set in resume prologue)
+                    f.instruction(&Instruction::LocalGet(self.resume_tag_local));
+                    f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+                    f.instruction(&Instruction::LocalGet(self.resume_pay_local));
+                    f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+                } else {
+                    f.instruction(&Instruction::Unreachable);
+                }
             }
             LirInstr::MakeClosure {
                 dst,
@@ -973,6 +1209,7 @@ impl WasmEmitter {
         }));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
+        f.instruction(&Instruction::I32Const(0)); // status: normal return (error propagated via signal memory)
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);
     }
@@ -1016,9 +1253,10 @@ impl WasmEmitter {
         }
         f.instruction(&Instruction::Else);
         {
-            // NativeFn/Parameter result: return (tag, payload)
+            // NativeFn/Parameter result: return (tag, payload, 0)
             f.instruction(&Instruction::LocalGet(tc_tag));
             f.instruction(&Instruction::LocalGet(tc_payload));
+            f.instruction(&Instruction::I32Const(0)); // status: normal return
             f.instruction(&Instruction::Return);
         }
         f.instruction(&Instruction::End);
@@ -1133,6 +1371,189 @@ impl WasmEmitter {
             align: 3,
             memory_index: 0,
         }));
+    }
+
+    /// Spill all registers + local slots to linear memory at ARGS_BASE.
+    /// Each slot is 16 bytes (tag: i64, payload: i64).
+    /// Layout: [reg0_tag, reg0_pay, reg1_tag, reg1_pay, ..., local0_tag, local0_pay, ...]
+    fn emit_spill_all(&self, f: &mut Function) {
+        // Spill registers
+        for i in 0..self.num_regs {
+            let offset = (i * 16) as u64;
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.tag_local(Reg(i))));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset,
+                align: 3,
+                memory_index: 0,
+            }));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.pay_local(Reg(i))));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset: offset + 8,
+                align: 3,
+                memory_index: 0,
+            }));
+        }
+        // Spill local slots
+        for i in 0..self.num_stack_locals {
+            let offset = ((self.num_regs + i) * 16) as u64;
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.local_slot_tag(i as u16)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset,
+                align: 3,
+                memory_index: 0,
+            }));
+            f.instruction(&Instruction::I32Const(ARGS_BASE));
+            f.instruction(&Instruction::LocalGet(self.local_slot_pay(i as u16)));
+            f.instruction(&Instruction::I64Store(MemArg {
+                offset: offset + 8,
+                align: 3,
+                memory_index: 0,
+            }));
+        }
+    }
+
+    /// Restore all registers + local slots from saved data via rt_load_saved_reg.
+    fn emit_restore_all(&self, f: &mut Function, num_saved: u32) {
+        let num_regs = self.num_regs.min(num_saved);
+        let num_locals = (num_saved - num_regs).min(self.num_stack_locals);
+
+        // Restore registers
+        for i in 0..num_regs {
+            f.instruction(&Instruction::I32Const(i as i32));
+            f.instruction(&Instruction::Call(FN_RT_LOAD_SAVED_REG));
+            // Stack: [tag, payload]
+            f.instruction(&Instruction::LocalSet(self.pay_local(Reg(i))));
+            f.instruction(&Instruction::LocalSet(self.tag_local(Reg(i))));
+        }
+        // Restore local slots
+        for i in 0..num_locals {
+            f.instruction(&Instruction::I32Const((self.num_regs + i) as i32));
+            f.instruction(&Instruction::Call(FN_RT_LOAD_SAVED_REG));
+            f.instruction(&Instruction::LocalSet(self.local_slot_pay(i as u16)));
+            f.instruction(&Instruction::LocalSet(self.local_slot_tag(i as u16)));
+        }
+    }
+
+    /// Emit the resume prologue for suspending closures.
+    ///
+    /// When ctx != 0, we're resuming a previously suspended invocation:
+    /// 1. Load resume value from host via rt_get_resume_value
+    /// 2. Dispatch on ctx to the right restore block via br_table
+    /// 3. Each restore block loads saved regs, sets state to target block
+    ///
+    /// When ctx == 0, fall through to normal entry.
+    fn emit_resume_prologue(&self, f: &mut Function, state_local: u32) {
+        let entry_idx = self.label_to_idx.values().min().copied().unwrap_or(0) as i32;
+
+        // Check ctx (param 3)
+        f.instruction(&Instruction::LocalGet(3)); // ctx
+        f.instruction(&Instruction::If(BlockType::Empty));
+        {
+            // Resuming: load resume value
+            f.instruction(&Instruction::Call(FN_RT_GET_RESUME_VALUE));
+            // Stack: [tag, payload]
+            f.instruction(&Instruction::LocalSet(self.resume_pay_local));
+            f.instruction(&Instruction::LocalSet(self.resume_tag_local));
+
+            // Build nested blocks for br_table dispatch.
+            // Wrap everything in an outer block so restore blocks can br to exit.
+            let num_states = self.resume_states.len();
+            f.instruction(&Instruction::Block(BlockType::Empty)); // $exit_block
+            for _ in 0..num_states {
+                f.instruction(&Instruction::Block(BlockType::Empty));
+            }
+
+            // br_table: (ctx - 1) → jump to restore block
+            f.instruction(&Instruction::LocalGet(3)); // ctx
+            f.instruction(&Instruction::I32Const(1));
+            f.instruction(&Instruction::I32Sub);
+            // Depths: state i → num_states - 1 - i (to land at restore block i)
+            // But shifted by 1 because of $exit_block
+            let targets: Vec<u32> = (0..num_states as u32)
+                .map(|i| num_states as u32 - 1 - i)
+                .collect();
+            let default = if targets.is_empty() { 0 } else { targets[0] };
+            f.instruction(&Instruction::BrTable(targets.into(), default));
+
+            // Emit restore blocks (innermost end first)
+            for idx in (0..num_states).rev() {
+                f.instruction(&Instruction::End); // close dispatch block
+
+                let info = &self.resume_states[idx];
+                self.emit_restore_all(f, info.num_saved);
+                f.instruction(&Instruction::I32Const(info.target_block_idx));
+                f.instruction(&Instruction::LocalSet(state_local));
+                // Branch to $exit_block to skip remaining restore blocks.
+                // From here, depth 0..idx-1 are the remaining dispatch blocks,
+                // depth idx is $exit_block.
+                f.instruction(&Instruction::Br(idx as u32));
+            }
+            f.instruction(&Instruction::End); // $exit_block
+        }
+        f.instruction(&Instruction::Else);
+        {
+            // Normal entry: state = entry block
+            f.instruction(&Instruction::I32Const(entry_idx));
+            f.instruction(&Instruction::LocalSet(state_local));
+        }
+        f.instruction(&Instruction::End);
+    }
+
+    /// Pre-scan a LirFunction to build the resume_states table.
+    /// Must be called before emit_cfg for suspending closures.
+    fn pre_scan_resume_states(&mut self, func: &LirFunction) {
+        self.resume_states.clear();
+        self.call_continuations.clear();
+        self.yield_state_map.clear();
+        self.call_state_map.clear();
+        self.next_resume_state = 1;
+        let total_saved = self.num_regs + self.num_stack_locals;
+        let num_real_blocks = func.blocks.len();
+
+        for block in &func.blocks {
+            let block_idx = self.label_to_idx[&block.label];
+
+            // Yield terminators
+            if let Terminator::Yield { resume_label, .. } = &block.terminator.terminator {
+                let state_id = self.next_resume_state;
+                self.next_resume_state += 1;
+                let target_block_idx = self.label_to_idx[resume_label] as i32;
+                self.resume_states.push(ResumeStateInfo {
+                    state_id,
+                    target_block_idx,
+                    num_saved: total_saved,
+                });
+                self.yield_state_map.insert(block_idx, state_id);
+            }
+
+            // Call sites: each Call/CallArrayMut is a yield-through point.
+            for (instr_idx, spanned) in block.instructions.iter().enumerate() {
+                let dst = match &spanned.instr {
+                    LirInstr::Call { dst, .. } => Some(*dst),
+                    LirInstr::CallArrayMut { dst, .. } => Some(*dst),
+                    _ => None,
+                };
+                if let Some(dst) = dst {
+                    let state_id = self.next_resume_state;
+                    self.next_resume_state += 1;
+                    let virtual_idx = (num_real_blocks + self.call_continuations.len()) as i32;
+                    self.resume_states.push(ResumeStateInfo {
+                        state_id,
+                        target_block_idx: virtual_idx,
+                        num_saved: total_saved,
+                    });
+                    self.call_state_map.insert((block_idx, instr_idx), state_id);
+                    self.call_continuations.push(CallSiteContinuation {
+                        dst,
+                        source_block_idx: block_idx,
+                        instr_offset: instr_idx + 1,
+                    });
+                }
+            }
+        }
     }
 
     fn emit_const(&mut self, f: &mut Function, dst: Reg, value: &LirConst) {
@@ -1384,7 +1805,7 @@ impl WasmEmitter {
 
     /// Emit a closure function body.
     ///
-    /// Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, pay: i64)`
+    /// Closure WASM type: `(env_ptr: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, pay: i64, status: i32)`
     ///
     /// WASM local layout:
     /// - 0: env_ptr (param)
@@ -1397,6 +1818,10 @@ impl WasmEmitter {
     /// - 4+2N+M..4+2N+2M: local slot payloads
     /// - 4+2N+2M: signal scratch (i32)
     /// - 4+2N+2M+1..+3: tail call temps (i32)
+    ///
+    /// For suspending closures, 2 extra i64 locals:
+    /// - 4+2N+2M+4: resume_tag (i64)
+    /// - 4+2N+2M+5: resume_pay (i64)
     ///
     /// Three address spaces:
     /// - Env (linear memory at env_ptr): captures, params, LBox locals
@@ -1412,24 +1837,54 @@ impl WasmEmitter {
         self.local_offset = 4;
         self.is_closure = true;
         self.num_stack_locals = func.num_locals as u32;
+        self.may_suspend = func.signal.may_suspend();
+        self.next_resume_state = 1;
+        self.resume_states.clear();
+        self.call_continuations.clear();
 
         // Layout: params(4) + reg_tags(N) + reg_pays(N) + local_tags(M) + local_pays(M) + i32s(4)
         let n = func.num_regs;
         let m = self.num_stack_locals;
         self.signal_local = 4 + 2 * n + 2 * m;
 
-        let mut f = Function::new([
-            (n, ValType::I64), // register tags
-            (n, ValType::I64), // register payloads
-            (m, ValType::I64), // local slot tags
-            (m, ValType::I64), // local slot payloads
-            (4, ValType::I32), // signal_scratch + 3 tail call temps
-        ]);
+        if self.may_suspend {
+            // Extra locals for resume value
+            self.resume_tag_local = 4 + 2 * n + 2 * m + 4;
+            self.resume_pay_local = 4 + 2 * n + 2 * m + 5;
 
-        self.emit_cfg(&mut f, func);
+            // Pre-scan to build resume state table (needed by prologue).
+            // This sets next_resume_state; we reset it before emit_cfg
+            // so the yield emission re-assigns the same IDs.
+            self.pre_scan_resume_states(func);
+            self.next_resume_state = 1; // reset for emit_cfg pass
 
-        f.instruction(&Instruction::End);
-        f
+            let mut f = Function::new([
+                (n, ValType::I64), // register tags
+                (n, ValType::I64), // register payloads
+                (m, ValType::I64), // local slot tags
+                (m, ValType::I64), // local slot payloads
+                (4, ValType::I32), // signal_scratch + 3 tail call temps
+                (2, ValType::I64), // resume_tag + resume_pay
+            ]);
+
+            self.emit_cfg(&mut f, func);
+
+            f.instruction(&Instruction::End);
+            f
+        } else {
+            let mut f = Function::new([
+                (n, ValType::I64), // register tags
+                (n, ValType::I64), // register payloads
+                (m, ValType::I64), // local slot tags
+                (m, ValType::I64), // local slot payloads
+                (4, ValType::I32), // signal_scratch + 3 tail call temps
+            ]);
+
+            self.emit_cfg(&mut f, func);
+
+            f.instruction(&Instruction::End);
+            f
+        }
     }
 
     /// WASM local index for the env pointer.

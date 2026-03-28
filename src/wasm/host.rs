@@ -25,6 +25,26 @@ use super::handle::HandleTable;
 /// Each `call_wasm_closure` allocates a region starting from here.
 pub const ENV_STACK_BASE: usize = 4096;
 
+/// Saved state for a suspended WASM closure.
+///
+/// When a WASM closure yields (or a callee yields through it), the live
+/// registers and env snapshot are saved here. On resume, the env is
+/// restored to linear memory and the function is re-invoked with
+/// `ctx = resume_state`.
+pub struct WasmSuspensionFrame {
+    /// Table index of the WASM function to re-invoke.
+    pub wasm_func_idx: u32,
+    /// Resume state ID (passed as `ctx` parameter on re-entry).
+    pub resume_state: u32,
+    /// Saved registers at the yield/call point: (tag, payload) pairs.
+    pub saved_regs: Vec<(i64, i64)>,
+    /// Snapshot of the env region in linear memory. Copied because the
+    /// env stack allocator would reclaim the space on return.
+    pub env_snapshot: Vec<u8>,
+    /// Base address where env_snapshot was taken from (for restore).
+    pub env_base: usize,
+}
+
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
 pub struct ElleHost {
     /// Handle table for heap objects.
@@ -44,6 +64,12 @@ pub struct ElleHost {
     /// of (parameter_id, value) pairs. PushParamFrame pushes a new
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
+    /// Stack of suspension frames for yield/resume. Innermost (callee)
+    /// frame is last. On resume, frames are popped from the end.
+    pub suspension_frames: Vec<WasmSuspensionFrame>,
+    /// Resume value passed by the scheduler (fiber/resume). Set before
+    /// re-invoking a suspended function; consumed by rt_get_resume_value.
+    pub resume_value: Option<(i64, i64)>,
 }
 
 impl ElleHost {
@@ -55,6 +81,8 @@ impl ElleHost {
             const_pool: Vec::new(),
             env_stack_ptr: ENV_STACK_BASE,
             param_frames: Vec::new(),
+            suspension_frames: Vec::new(),
+            resume_value: None,
         }
     }
 }
