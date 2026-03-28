@@ -48,6 +48,9 @@ pub struct VM {
     /// Added before execution, removed after. If a module is in this set
     /// when import-file is called, it's a circular dependency.
     pub loading_modules: std::collections::HashSet<String>,
+    /// Plugins already loaded (path → return value). Prevents double-loading
+    /// which would re-register primitives and leak library handles.
+    pub loaded_plugins: HashMap<String, Value>,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -141,6 +144,7 @@ impl VM {
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
             loading_modules: std::collections::HashSet::new(),
+            loaded_plugins: HashMap::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),

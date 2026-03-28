@@ -64,6 +64,14 @@ impl Expander {
                 self.quasiquote_list_to_code(items, depth, span, symbols, vm)
             }
 
+            // Array (bracket syntax) — process elements so unquote/splice work
+            // inside `[...]`, producing a runtime array via the `array` primitive.
+            // This enables `[,a ,b]` in quasiquote and bracket bindings in
+            // macro output: `(let [[,name ,val]] ...)`.
+            SyntaxKind::Array(items) => {
+                self.quasiquote_array_to_code(items, depth, span, symbols, vm)
+            }
+
             // StructMut — quasiquote treats it as data (quoted)
             SyntaxKind::StructMut(_) => Ok(self.make_list(
                 vec![self.make_symbol("quote", span.clone()), syntax.clone()],
@@ -76,6 +84,27 @@ impl Expander {
                 span.clone(),
             )),
         }
+    }
+
+    /// Convert a quasiquoted array `[...]` to code that constructs an
+    /// immutable array at runtime. Uses the `array` primitive so that
+    /// unquote/splice work inside brackets in macro templates. The macro
+    /// evaluator produces an immutable array Value, which `from_value`
+    /// converts back to `SyntaxKind::Array` — preserving bracket syntax
+    /// through the expansion round-trip.
+    pub(super) fn quasiquote_array_to_code(
+        &mut self,
+        items: &[Syntax],
+        depth: usize,
+        span: &Span,
+        symbols: &mut SymbolTable,
+        vm: &mut VM,
+    ) -> Result<Syntax, String> {
+        let mut array_call = vec![self.make_symbol("array", span.clone())];
+        for item in items {
+            array_call.push(self.quasiquote_to_code(item, depth, span, symbols, vm)?);
+        }
+        Ok(self.make_list(array_call, span.clone()))
     }
 
     /// Convert a quasiquoted list to code
