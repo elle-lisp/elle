@@ -89,7 +89,7 @@ ELLE_SKIP_JIT :=
 ELLE_JIT_THRESHOLD := 0
 
 # WASM backend skip list: tests requiring features not yet in WASM backend
-# (concurrency = threads, eval = dynamic compilation, port-edge-cases = slow)
+# (eval = dynamic compilation)
 WASM_SKIP := -e eval.lisp
 
 examples-vm:
@@ -101,7 +101,7 @@ examples-vm:
 
 examples-jit:
 	@echo "=== examples (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' examples/*.lisp | \
+	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) && printf '%s\n' examples/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=1)"; exit 1; }
@@ -118,8 +118,7 @@ smoke-vm: examples-vm
 
 smoke-jit: examples-jit
 	@echo "=== elle scripts (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' tests/elle/*.lisp | \
-		grep -v $(ELLE_SKIP_JIT) $(ELLE_SKIP_WASM) | \
+	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) && printf '%s\n' tests/elle/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
