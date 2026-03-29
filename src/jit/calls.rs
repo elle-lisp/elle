@@ -623,58 +623,14 @@ pub extern "C" fn elle_jit_tail_call(
         return JitValue::from_value(result);
     }
 
-    // Handle closures
+    // Handle closures — always use TAIL_CALL_SENTINEL so the trampoline
+    // handles the call without growing the native stack.  This ensures
+    // mutual tail recursion (A→B→A) doesn't overflow.
     if let Some(closure) = func.as_closure() {
         if !vm.check_arity(&closure.template.arity, nargs as usize) {
             return JitValue::nil();
         }
 
-        // JIT fast path: if the target has JIT code, call it directly
-        let bytecode_ptr = closure.template.bytecode.as_ptr();
-        if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
-            let env_ptr = if closure.env.is_empty() {
-                std::ptr::null()
-            } else {
-                closure.env.as_ptr()
-            };
-
-            let result = unsafe {
-                jit_code.call(
-                    env_ptr,
-                    args_ptr,
-                    nargs,
-                    vm as *mut crate::vm::VM as *mut (),
-                    func_tag,
-                    func_payload,
-                )
-            };
-
-            // Check for exception — use contains for compound signals
-            if vm
-                .fiber
-                .signal
-                .as_ref()
-                .is_some_and(|(b, _)| b.contains(SIG_ERROR) || b.contains(SIG_HALT))
-            {
-                return JitValue::nil();
-            }
-
-            // Check for suspending signal from callee (SIG_YIELD, SIG_SWITCH, user-defined)
-            if let Some((sig, _)) = vm.fiber.signal {
-                if !sig.is_ok() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
-                    return YIELD_SENTINEL;
-                }
-            }
-
-            if result == YIELD_SENTINEL {
-                return YIELD_SENTINEL;
-            }
-
-            // Propagate result (including TAIL_CALL_SENTINEL) to caller
-            return result;
-        }
-
-        // Interpreter fallback — build env, return TAIL_CALL_SENTINEL
         let args: Vec<Value> = (0..nargs as usize)
             .map(|i| unsafe { *args_ptr.add(i) })
             .collect();
