@@ -121,10 +121,11 @@ impl<'a> FunctionTranslator<'a> {
 
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
-            if i < 64 && (lbox_locals_mask & (1 << i)) != 0 {
-                // This local needs a fresh cell on EVERY invocation.
-                // Call elle_jit_make_lbox(TAG_NIL, 0) at runtime to allocate
-                // a new LocalLBox(NIL) each time the function is entered.
+            // Wrap in LBox if the mask says so, OR if beyond bit 63 (the
+            // mask can't represent it — be conservative, matching the
+            // emitter which treats beyond-63 locals as cell locals).
+            let needs_lbox = i >= 64 || (lbox_locals_mask & (1 << i)) != 0;
+            if needs_lbox {
                 let (cell_tag, cell_payload) =
                     self.call_helper_value_unary(builder, self.helpers.make_lbox, nil_tag, zero)?;
                 builder.def_var(var(self.var_tag(base)), cell_tag);
@@ -222,9 +223,9 @@ impl<'a> FunctionTranslator<'a> {
                     let local_index = *index - num_captures - arity;
                     let base = self.local_var_base + local_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    if (local_index as u32) < 64
-                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
-                    {
+                    let needs_lbox = (local_index as u32) >= 64
+                        || (self.lir.lbox_locals_mask & (1 << local_index)) != 0;
+                    if needs_lbox {
                         // cell-wrapped: auto-unwrap via load_lbox
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
@@ -420,9 +421,11 @@ impl<'a> FunctionTranslator<'a> {
                 } else {
                     let local_index = *index - num_captures - arity;
                     let base = self.local_var_base + local_index as u32;
-                    if (local_index as u32) < 64
-                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
-                    {
+                    // Use store_lbox if the mask says so, OR if beyond bit 63
+                    // (conservative — matches emitter which treats these as cell locals)
+                    let needs_lbox = (local_index as u32) >= 64
+                        || (self.lir.lbox_locals_mask & (1 << local_index)) != 0;
+                    if needs_lbox {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
                             .module
