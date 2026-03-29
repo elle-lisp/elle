@@ -4,7 +4,8 @@
 ## Runs both extractors and loads their ntriples directly into an
 ## oxigraph store (no MCP server needed).
 ##
-## Run:  tools/run-elle.sh tools/load-all.lisp
+## Run:  elle tools/load-all.lisp
+(elle/epoch 5)
 
 (def glob-plugin (import "target/release/libelle_glob.so"))
 (def do-glob (get glob-plugin :glob))
