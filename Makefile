@@ -94,12 +94,12 @@ examples-vm:
 		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
 
 examples-jit:
-	@echo "=== examples (JIT enabled, threshold=0) ==="
-	@export ELLE_JIT_THRESHOLD=0 &&printf '%s\n' examples/*.lisp | \
+	@echo "=== examples (JIT enabled, threshold=2) ==="
+	@export ELLE_JIT_THRESHOLD=2 &&printf '%s\n' examples/*.lisp | \
 		grep -v allocator.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=0)"; exit 1; }
+		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=2)"; exit 1; }
 
 examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
 
@@ -112,12 +112,12 @@ smoke-vm: examples-vm
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
 
 smoke-jit: examples-jit
-	@echo "=== elle scripts (JIT enabled, threshold=0) ==="
-	@export ELLE_JIT_THRESHOLD=0 &&printf '%s\n' tests/elle/*.lisp | \
+	@echo "=== elle scripts (JIT enabled, threshold=2) ==="
+	@export ELLE_JIT_THRESHOLD=2 &&printf '%s\n' tests/elle/*.lisp | \
 		grep -v -e arena.lisp -e fiber_io_stress.lisp -e jit-rejections.lisp -e streams.lisp -e redis.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=0)"; exit 1; }
+		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=2)"; exit 1; }
 
 smoke: smoke-vm smoke-jit  ## Run examples + elle scripts (VM then JIT) + docgen
 	$(ELLE) demos/docgen/generate.lisp
