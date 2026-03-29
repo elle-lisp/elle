@@ -30,19 +30,19 @@
 (def saved-stdout (*stdout*))
 (def saved-stderr (*stderr*))
 
-(def ox (import "target/release/libelle_oxigraph.so"))
-(def syn (import "target/release/libelle_syn.so"))
-(def glob-plugin (import "target/release/libelle_glob.so"))
-(def portrait-lib ((import "lib/portrait.lisp")))
-(def rdf ((import "lib/rdf.lisp")))
-(def rust-rdf ((import "tools/rust-rdf-lib.lisp") syn))
+(def ox (import "oxigraph"))
+(def syn (import "syn"))
+(def glob-plugin (import "glob"))
+(def portrait-lib ((import "lib/portrait")))
+(def rdf ((import "lib/rdf")))
+(def rust-rdf ((import "tools/rust-rdf-lib") syn))
 
 # ── Watch plugin (optional) ──────────────────────────────────────────────
 
-(def [watch-ok? watch-plugin] (protect (import "target/release/libelle_watch.so")))
+(def [watch-ok? watch-plugin] (protect (import "watch")))
 (def [watch-ok? watch-lib]
   (if watch-ok?
-    (let [[[ok? lib] (protect ((import "lib/watch.lisp") watch-plugin))]]
+    (let [[[ok? lib] (protect ((import "lib/watch") watch-plugin))]]
       [ok? lib])
     [false nil]))
 

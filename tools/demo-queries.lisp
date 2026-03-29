@@ -3,7 +3,7 @@
 ## Run: elle demo-queries.lisp
 
 (elle/epoch 5)
-(def ox (import "target/release/libelle_oxigraph.so"))
+(def ox (import "oxigraph"))
 
 # Fresh in-memory store for demo
 (def store (ox:store-new))
