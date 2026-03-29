@@ -694,6 +694,20 @@ fn args_to_list(args: &[Value]) -> Value {
     list
 }
 
+/// Build an immutable struct from keyword/value pairs.
+/// Mirrors `VM::args_to_struct_static` but without strict validation.
+fn args_to_struct(args: &[Value]) -> Value {
+    let mut map = std::collections::BTreeMap::new();
+    let mut i = 0;
+    while i + 1 < args.len() {
+        if let Some(key) = crate::value::heap::TableKey::from_value(&args[i]) {
+            map.insert(key, args[i + 1]);
+        }
+        i += 2;
+    }
+    Value::struct_from(map)
+}
+
 /// Build a closure environment from captured variables and arguments.
 ///
 /// Mirrors `VM::populate_env` for the interpreter fallback path in JIT
@@ -745,7 +759,12 @@ pub(crate) fn build_closure_env_for_jit(
             } else {
                 &[]
             };
-            let collected = args_to_list(rest_args);
+            let collected = match &closure.template.vararg_kind {
+                crate::hir::VarargKind::List => args_to_list(rest_args),
+                crate::hir::VarargKind::Struct | crate::hir::VarargKind::StrictStruct(_) => {
+                    args_to_struct(rest_args)
+                }
+            };
             push_param(&mut new_env, closure, fixed_slots, collected);
         }
         crate::value::Arity::Range(_, max) => {
