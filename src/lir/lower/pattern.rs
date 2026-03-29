@@ -53,7 +53,8 @@ impl<'a> Lowerer<'a> {
                     } else {
                         self.allocate_slot(*binding)
                     };
-                    if self.in_lambda {
+                    let needs_lbox = self.arena.get(*binding).needs_lbox();
+                    if self.in_lambda && needs_lbox {
                         self.upvalue_bindings.insert(*binding);
                         self.emit(LirInstr::StoreCapture {
                             index: slot,
@@ -107,7 +108,8 @@ impl<'a> Lowerer<'a> {
                     } else {
                         self.allocate_slot(*binding)
                     };
-                    if self.in_lambda {
+                    let needs_lbox = self.arena.get(*binding).needs_lbox();
+                    if self.in_lambda && needs_lbox {
                         self.upvalue_bindings.insert(*binding);
                         self.emit(LirInstr::StoreCapture {
                             index: slot,
@@ -530,8 +532,8 @@ impl<'a> Lowerer<'a> {
                 } else {
                     self.allocate_slot(*binding)
                 };
-                // Inside lambdas, pattern-bound variables are part of the closure environment
-                if self.in_lambda {
+                let needs_lbox = self.arena.get(*binding).needs_lbox();
+                if self.in_lambda && needs_lbox {
                     self.upvalue_bindings.insert(*binding);
                     self.emit(LirInstr::StoreCapture {
                         index: slot,
@@ -549,38 +551,20 @@ impl<'a> Lowerer<'a> {
                 // Store value to temp slot before any operations, so we can
                 // reload it after the block boundary.
                 // Inside a lambda, slots need to account for the captures offset.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 // Reload for type check (auto-pop consumed value_reg)
                 let reloaded_for_check = self.fresh_reg();
-                if self.in_lambda {
-                    self.emit(LirInstr::LoadCapture {
-                        dst: reloaded_for_check,
-                        index: temp_slot,
-                    });
-                } else {
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_check,
-                        slot: temp_slot,
-                    });
-                }
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_check,
+                    slot: temp_slot,
+                });
 
                 // Check if value is a pair
                 let is_pair_reg = self.fresh_reg();
@@ -607,17 +591,10 @@ impl<'a> Lowerer<'a> {
 
                 // Reload for car
                 let reloaded_for_car = self.fresh_reg();
-                if self.in_lambda {
-                    self.emit(LirInstr::LoadCapture {
-                        dst: reloaded_for_car,
-                        index: temp_slot,
-                    });
-                } else {
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_car,
-                        slot: temp_slot,
-                    });
-                }
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_car,
+                    slot: temp_slot,
+                });
 
                 let head_reg = self.fresh_reg();
                 self.emit(LirInstr::Car {
@@ -630,17 +607,10 @@ impl<'a> Lowerer<'a> {
 
                 // Now reload for cdr — in whatever block the head match left us in
                 let reloaded_for_cdr = self.fresh_reg();
-                if self.in_lambda {
-                    self.emit(LirInstr::LoadCapture {
-                        dst: reloaded_for_cdr,
-                        index: temp_slot,
-                    });
-                } else {
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_cdr,
-                        slot: temp_slot,
-                    });
-                }
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_cdr,
+                    slot: temp_slot,
+                });
 
                 let tail_reg = self.fresh_reg();
                 self.emit(LirInstr::Cdr {
@@ -663,38 +633,19 @@ impl<'a> Lowerer<'a> {
                     // Store current to a temporary slot BEFORE IsPair, so we can
                     // reload it after the block boundary.
                     // Inside a lambda, slots need to account for the captures offset.
-                    let temp_slot = if self.in_lambda {
-                        self.num_captures + self.current_func.num_locals
-                    } else {
-                        self.current_func.num_locals
-                    };
+                    let temp_slot = self.current_func.num_locals;
                     self.current_func.num_locals += 1;
-
-                    if self.in_lambda {
-                        self.emit(LirInstr::StoreCapture {
-                            index: temp_slot,
-                            src: current_reg,
-                        });
-                    } else {
-                        self.emit(LirInstr::StoreLocal {
-                            slot: temp_slot,
-                            src: current_reg,
-                        });
-                    }
+                    self.emit(LirInstr::StoreLocal {
+                        slot: temp_slot,
+                        src: current_reg,
+                    });
 
                     // Reload for type check (auto-pop consumed current_reg)
                     let reloaded_for_check = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded_for_check,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded_for_check,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded_for_check,
+                        slot: temp_slot,
+                    });
 
                     // Check if current is a pair
                     let is_pair_reg = self.fresh_reg();
@@ -714,17 +665,10 @@ impl<'a> Lowerer<'a> {
 
                     // Load for car extraction
                     let current_for_car = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: current_for_car,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: current_for_car,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: current_for_car,
+                        slot: temp_slot,
+                    });
 
                     // Extract head
                     let head_reg = self.fresh_reg();
@@ -739,17 +683,10 @@ impl<'a> Lowerer<'a> {
                     // Load for cdr extraction — always needed for next
                     // element, rest binding, or EMPTY_LIST check at end
                     let current_for_cdr = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: current_for_cdr,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: current_for_cdr,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: current_for_cdr,
+                        slot: temp_slot,
+                    });
 
                     // Extract tail for next iteration
                     let tail_reg = self.fresh_reg();
@@ -794,24 +731,13 @@ impl<'a> Lowerer<'a> {
             HirPattern::Tuple { elements, rest } => {
                 // Array [...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 // Step 2: Check if value is an array
                 let is_tuple_reg = self.fresh_reg();
@@ -832,17 +758,10 @@ impl<'a> Lowerer<'a> {
                 // Step 3: Check array length
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
-                if self.in_lambda {
-                    self.emit(LirInstr::LoadCapture {
-                        dst: reloaded_for_len,
-                        index: temp_slot,
-                    });
-                } else {
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_len,
-                        slot: temp_slot,
-                    });
-                }
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_len,
+                    slot: temp_slot,
+                });
 
                 let len_reg = self.fresh_reg();
                 self.emit(LirInstr::ArrayMutLen {
@@ -884,17 +803,10 @@ impl<'a> Lowerer<'a> {
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let elem_reg = self.fresh_reg();
                     self.emit(LirInstr::ArrayMutRefDestructure {
@@ -910,17 +822,10 @@ impl<'a> Lowerer<'a> {
                 // Step 5: Handle & rest
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let slice_reg = self.fresh_reg();
                     self.emit(LirInstr::ArrayMutSliceFrom {
@@ -937,24 +842,13 @@ impl<'a> Lowerer<'a> {
             HirPattern::Array { elements, rest } => {
                 // Array @[...] pattern matching for `match`.
                 // Check if value is an array, then use ArrayMutRefDestructure for each element.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 // Step 2: Check if value is an array
                 let is_array_reg = self.fresh_reg();
@@ -975,17 +869,10 @@ impl<'a> Lowerer<'a> {
                 // Step 3: Check array length
                 // Reload from temp slot
                 let reloaded_for_len = self.fresh_reg();
-                if self.in_lambda {
-                    self.emit(LirInstr::LoadCapture {
-                        dst: reloaded_for_len,
-                        index: temp_slot,
-                    });
-                } else {
-                    self.emit(LirInstr::LoadLocal {
-                        dst: reloaded_for_len,
-                        slot: temp_slot,
-                    });
-                }
+                self.emit(LirInstr::LoadLocal {
+                    dst: reloaded_for_len,
+                    slot: temp_slot,
+                });
 
                 let len_reg = self.fresh_reg();
                 self.emit(LirInstr::ArrayMutLen {
@@ -1027,17 +914,10 @@ impl<'a> Lowerer<'a> {
                 for (i, element_pat) in elements.iter().enumerate() {
                     // Reload the array from temp slot for each element
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let elem_reg = self.fresh_reg();
                     self.emit(LirInstr::ArrayMutRefDestructure {
@@ -1053,17 +933,10 @@ impl<'a> Lowerer<'a> {
                 // Step 5: Handle & rest
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let slice_reg = self.fresh_reg();
                     self.emit(LirInstr::ArrayMutSliceFrom {
@@ -1080,24 +953,13 @@ impl<'a> Lowerer<'a> {
             HirPattern::Struct { entries, rest } => {
                 // Struct {...} pattern matching for `match`.
                 // Check if value is a struct, then use StructGetOrNil for each key.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 // Type guard: reject non-struct values
                 let is_struct_reg = self.fresh_reg();
@@ -1117,17 +979,10 @@ impl<'a> Lowerer<'a> {
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let elem_reg = self.fresh_reg();
                     let lir_key = match key {
@@ -1145,17 +1000,10 @@ impl<'a> Lowerer<'a> {
 
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let rest_reg = self.fresh_reg();
                     let exclude: Vec<LirConst> = entries
                         .iter()
@@ -1177,24 +1025,13 @@ impl<'a> Lowerer<'a> {
             HirPattern::Table { entries, rest } => {
                 // @struct @{...} pattern matching for `match`.
                 // Check if value is a @struct, then use StructGetOrNil for each key.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 // Type guard: reject non-@struct values
                 let is_table_reg = self.fresh_reg();
@@ -1214,17 +1051,10 @@ impl<'a> Lowerer<'a> {
 
                 for (key, sub_pattern) in entries.iter() {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     let elem_reg = self.fresh_reg();
                     let lir_key = match key {
@@ -1242,17 +1072,10 @@ impl<'a> Lowerer<'a> {
 
                 if let Some(rest_pat) = rest {
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
                     let rest_reg = self.fresh_reg();
                     let exclude: Vec<LirConst> = entries
                         .iter()
@@ -1274,24 +1097,13 @@ impl<'a> Lowerer<'a> {
             HirPattern::Or(alternatives) => {
                 // Or-pattern: try each alternative sequentially.
                 // Store value to temp slot so we can reload for each alternative.
-                let temp_slot = if self.in_lambda {
-                    self.num_captures + self.current_func.num_locals
-                } else {
-                    self.current_func.num_locals
-                };
+                // Temp slots are always stack-local (never LBox cells).
+                let temp_slot = self.current_func.num_locals;
                 self.current_func.num_locals += 1;
-
-                if self.in_lambda {
-                    self.emit(LirInstr::StoreCapture {
-                        index: temp_slot,
-                        src: value_reg,
-                    });
-                } else {
-                    self.emit(LirInstr::StoreLocal {
-                        slot: temp_slot,
-                        src: value_reg,
-                    });
-                }
+                self.emit(LirInstr::StoreLocal {
+                    slot: temp_slot,
+                    src: value_reg,
+                });
 
                 let success_label = self.fresh_label();
 
@@ -1304,17 +1116,10 @@ impl<'a> Lowerer<'a> {
 
                     // Reload value for this alternative
                     let reloaded = self.fresh_reg();
-                    if self.in_lambda {
-                        self.emit(LirInstr::LoadCapture {
-                            dst: reloaded,
-                            index: temp_slot,
-                        });
-                    } else {
-                        self.emit(LirInstr::LoadLocal {
-                            dst: reloaded,
-                            slot: temp_slot,
-                        });
-                    }
+                    self.emit(LirInstr::LoadLocal {
+                        dst: reloaded,
+                        slot: temp_slot,
+                    });
 
                     self.lower_pattern_match(alt, reloaded, next_alt_label)?;
 

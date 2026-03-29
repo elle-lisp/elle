@@ -143,8 +143,39 @@ Yielding functions become re-entrant via compile-time state machine:
 
 Host functions: `rt_yield`, `rt_get_resume_value`, `rt_load_saved_reg`.
 
+## Deterministic WASM output
+
+WASM module bytes are fully deterministic across runs of the same source.
+Non-deterministic runtime values (symbol IDs, keyword hashes) are routed
+through the constant pool (`rt_load_const`) instead of inlined as `i64.const`.
+Register allocation uses deterministic slot freeing order.
+
+This enables reliable module caching: `ELLE_WASM_CACHE=/path` hashes the
+WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
+
+## Tiered compilation (lazy WASM)
+
+`ELLE_WASM_TIER=1` enables tiered execution: the bytecode VM runs by default,
+and hot closures are compiled to per-closure WASM modules on demand.
+
+| File | Purpose |
+|------|---------|
+| `lazy.rs` | `WasmTier`: per-closure WASM compilation, caching, and dispatch |
+
+**Constraints on per-closure compilation:**
+- No `MakeClosure` instructions (nested closures stay on bytecode VM)
+- No `TailCall`/`TailCallArrayMut` (uses `return_call_indirect` with callee table indices)
+- No `Yield` terminators (suspension frame management)
+
+**Self-recursive call optimization:** When `rt_call` detects a call to the
+same closure currently executing in WASM (same bytecode pointer), it dispatches
+directly through the instance's funcref table (`call_indirect` on index 0)
+instead of creating a new Store. This makes recursive functions like fib
+efficient within a single WASM instance.
+
 ## Known issues / Phase 3 scope
 
 - `Eval` — needs dynamic module compilation (Phase 3)
 - Recursive yield-through-call with multiple suspension frames — incorrect frame ordering
 - Port-edge-cases example slow under WASM — needs investigation
+- Tiered mode: per-call Store creation for cross-closure WASM calls is slow

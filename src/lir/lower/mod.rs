@@ -124,6 +124,9 @@ pub struct Lowerer<'a> {
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
+    /// Number of parameters allocated as locals (non-LBox, non-captured params).
+    /// Used by allocate_slot to compute lbox_locals_mask offsets.
+    num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
     upvalue_bindings: std::collections::HashSet<Binding>,
@@ -165,6 +168,7 @@ impl<'a> Lowerer<'a> {
             binding_to_slot: HashMap::new(),
             in_lambda: false,
             num_captures: 0,
+            num_local_params: 0,
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
@@ -263,8 +267,8 @@ impl<'a> Lowerer<'a> {
         // Both increment num_locals to keep env placeholder slots aligned.
         let needs_lbox = self.arena.get(binding).needs_lbox();
         let slot = if self.in_lambda {
-            let num_params = self.current_func.num_params as u16;
-            let local_index = self.current_func.num_locals - num_params;
+            // local_index is relative to locally-defined vars (after param locals)
+            let local_index = self.current_func.num_locals - self.num_local_params;
             if needs_lbox && local_index < 64 {
                 self.current_func.lbox_locals_mask |= 1 << local_index;
             }

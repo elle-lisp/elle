@@ -9,6 +9,7 @@ impl<'a> Lowerer<'a> {
         func: &Hir,
         args: &[CallArg],
         is_tail: bool,
+        call_may_suspend: bool,
     ) -> Result<Reg, String> {
         let has_splice = args.iter().any(|a| a.spliced);
 
@@ -34,11 +35,19 @@ impl<'a> Lowerer<'a> {
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                self.emit(LirInstr::Call {
-                    dst,
-                    func: func_reg,
-                    args: arg_regs,
-                });
+                if call_may_suspend {
+                    self.emit(LirInstr::SuspendingCall {
+                        dst,
+                        func: func_reg,
+                        args: arg_regs,
+                    });
+                } else {
+                    self.emit(LirInstr::Call {
+                        dst,
+                        func: func_reg,
+                        args: arg_regs,
+                    });
+                }
                 Ok(dst)
             }
         } else {

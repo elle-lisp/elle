@@ -60,7 +60,7 @@ impl<'a> Lowerer<'a> {
                 func,
                 args,
                 is_tail,
-            } => self.lower_call(func, args.as_slice(), *is_tail),
+            } => self.lower_call(func, args.as_slice(), *is_tail, hir.signal.may_suspend()),
 
             HirKind::Assign { target, value } => self.lower_assign(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),
@@ -105,10 +105,11 @@ impl<'a> Lowerer<'a> {
 
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
-                // LBox-wrapped locals, captures, and parameters use LoadCapture
-                // which auto-unwraps LocalCell. Plain locals fall through to
-                // the LoadLocal path below.
-                self.emit(LirInstr::LoadCapture { dst, index: slot });
+                if needs_lbox {
+                    self.emit(LirInstr::LoadCapture { dst, index: slot });
+                } else {
+                    self.emit(LirInstr::LoadCaptureRaw { dst, index: slot });
+                }
                 Ok(dst)
             } else {
                 // Outside lambdas, local variables use LoadLocal

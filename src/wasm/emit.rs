@@ -13,7 +13,6 @@
 //! handle table at instantiation time.
 
 use crate::lir::{BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, Terminator, UnaryOp};
-use crate::value::keyword::intern_keyword;
 use crate::value::repr::*;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -33,6 +32,37 @@ pub struct EmitResult {
 pub fn emit_module(func: &LirFunction) -> EmitResult {
     let mut emitter = WasmEmitter::new();
     emitter.emit_module(func)
+}
+
+/// Emit a WASM module containing a single closure function.
+///
+/// Used by tiered compilation: the bytecode VM compiles individual hot
+/// closures to WASM on demand. The module has the same host imports as
+/// the full module but contains only one function (at table index 0).
+///
+/// Returns `None` if the function can't be compiled standalone (contains
+/// MakeClosure, TailCall, or yield points).
+pub fn emit_single_closure(func: &LirFunction) -> Option<EmitResult> {
+    // Reject functions that can't be self-contained in a single-function module:
+    // - MakeClosure: would need nested functions in the table
+    // - TailCall/TailCallArrayMut: uses return_call_indirect with callee table indices
+    // - Yield: needs suspension frame management tied to the full module
+    for block in &func.blocks {
+        for si in &block.instructions {
+            match &si.instr {
+                LirInstr::MakeClosure { .. }
+                | LirInstr::TailCall { .. }
+                | LirInstr::TailCallArrayMut { .. } => return None,
+                _ => {}
+            }
+        }
+        if matches!(block.terminator.terminator, Terminator::Yield { .. }) {
+            return None;
+        }
+    }
+
+    let mut emitter = WasmEmitter::new();
+    Some(emitter.emit_single_closure_module(func))
 }
 
 // Host function import indices (in order of declaration)
@@ -141,6 +171,18 @@ struct WasmEmitter {
     yield_state_map: HashMap<usize, u32>,
     /// Maps (block_idx, instr_idx) → resume_state for call sites.
     call_state_map: HashMap<(usize, usize), u32>,
+    /// Register allocation map: LIR Reg → compacted WASM local slot.
+    reg_to_slot: HashMap<Reg, u32>,
+    /// Bitmask of env slots that are LBox cells.
+    /// Derived from the current closure's lbox_params_mask and lbox_locals_mask.
+    /// Used to skip dead LBox unwrap checks in LoadCapture.
+    env_lbox_mask: u64,
+    /// Number of captures in the current closure (env layout offset for params).
+    current_num_captures: u16,
+    /// Registers known to hold integer values (TAG_INT) at the current point.
+    /// Used to skip float dispatch in BinOp/Compare.
+    /// Cleared at block boundaries (conservative).
+    known_int: std::collections::HashSet<Reg>,
 }
 
 impl WasmEmitter {
@@ -163,6 +205,10 @@ impl WasmEmitter {
             yield_state_map: HashMap::new(),
             call_state_map: HashMap::new(),
             current_table_idx: 0,
+            reg_to_slot: HashMap::new(),
+            env_lbox_mask: 0,
+            current_num_captures: 0,
+            known_int: std::collections::HashSet::new(),
         }
     }
 
@@ -359,23 +405,179 @@ impl WasmEmitter {
         }
     }
 
+    /// Emit a WASM module containing a single closure function.
+    ///
+    /// The function is placed at FN_ENTRY and in table slot 0.
+    /// Module structure mirrors emit_module but with exactly one function.
+    fn emit_single_closure_module(&mut self, func: &LirFunction) -> EmitResult {
+        let mut module = Module::new();
+
+        // Type section (same as full module)
+        let mut types = TypeSection::new();
+        types
+            .ty()
+            .function([], [ValType::I64, ValType::I64, ValType::I32]);
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I32],
+        );
+        types.ty().function(
+            [
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            [ValType::I64, ValType::I64, ValType::I32],
+        );
+        types
+            .ty()
+            .function([ValType::I32], [ValType::I64, ValType::I64]);
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I32],
+        );
+        // Type 5: closure function
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I32],
+        );
+        types.ty().function(
+            [ValType::I32, ValType::I32, ValType::I32],
+            [ValType::I64, ValType::I64],
+        );
+        types.ty().function([ValType::I32, ValType::I32], []);
+        types.ty().function([], []);
+        types.ty().function(
+            [
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            [
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+            ],
+        );
+        types.ty().function(
+            [
+                ValType::I64,
+                ValType::I64,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+                ValType::I32,
+            ],
+            [],
+        );
+        types.ty().function([], [ValType::I64, ValType::I64]);
+        types
+            .ty()
+            .function([ValType::I32], [ValType::I64, ValType::I64]);
+        module.section(&types);
+
+        // Import section (same as full module)
+        let mut imports = ImportSection::new();
+        imports.import("elle", "call_primitive", EntityType::Function(1));
+        imports.import("elle", "rt_call", EntityType::Function(2));
+        imports.import("elle", "rt_load_const", EntityType::Function(3));
+        imports.import("elle", "rt_data_op", EntityType::Function(4));
+        imports.import("elle", "rt_make_closure", EntityType::Function(6));
+        imports.import("elle", "rt_push_param", EntityType::Function(7));
+        imports.import("elle", "rt_pop_param", EntityType::Function(8));
+        imports.import("elle", "rt_prepare_tail_call", EntityType::Function(9));
+        imports.import("elle", "rt_yield", EntityType::Function(10));
+        imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
+        imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
+        module.section(&imports);
+
+        // Function section: one closure function (type 5)
+        let mut functions = FunctionSection::new();
+        functions.function(5);
+        module.section(&functions);
+
+        // Table section: 1-entry funcref table (for potential self-calls via rt_call)
+        let mut tables = TableSection::new();
+        tables.table(TableType {
+            element_type: RefType::FUNCREF,
+            minimum: 1,
+            maximum: Some(1),
+            shared: false,
+            table64: false,
+        });
+        module.section(&tables);
+
+        // Memory section
+        let mut memories = MemorySection::new();
+        memories.memory(MemoryType {
+            minimum: 1,
+            maximum: None,
+            memory64: false,
+            shared: false,
+            page_size_log2: None,
+        });
+        module.section(&memories);
+
+        // Export section
+        let mut exports = ExportSection::new();
+        exports.export("__elle_closure", ExportKind::Func, FN_ENTRY);
+        exports.export("__elle_memory", ExportKind::Memory, 0);
+        exports.export("__elle_table", ExportKind::Table, 0);
+        module.section(&exports);
+
+        // Element section: function at table index 0
+        let mut elements = ElementSection::new();
+        elements.active(
+            Some(0),
+            &ConstExpr::i32_const(0),
+            Elements::Functions(vec![FN_ENTRY].into()),
+        );
+        module.section(&elements);
+
+        // Code section: the closure function
+        let mut code = CodeSection::new();
+        self.current_table_idx = 0;
+        let closure_body = self.emit_closure_function(func);
+        code.function(&closure_body);
+
+        module.section(&code);
+
+        EmitResult {
+            wasm_bytes: module.finish(),
+            const_pool: std::mem::take(&mut self.const_pool),
+        }
+    }
+
     fn emit_function(&mut self, func: &LirFunction) -> Function {
         self.label_to_idx.clear();
         for (idx, block) in func.blocks.iter().enumerate() {
             self.label_to_idx.insert(block.label, idx);
         }
 
-        self.num_regs = func.num_regs;
+        // Run register allocation to compact virtual regs → reusable slots.
+        // Pin local-slot registers (0..num_locals) since LoadLocal/StoreLocal
+        // maps slot N to Reg(N) via copy_reg in the entry function.
+        let alloc = super::regalloc::allocate(func, func.num_locals as u32);
+        let n = alloc.max_slots;
+        self.reg_to_slot = alloc.reg_to_slot;
+        self.num_regs = n;
         self.local_offset = 0;
         self.is_closure = false;
         // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal/state (2N+1)
-        self.signal_local = func.num_regs * 2 + 1;
+        self.signal_local = n * 2 + 1;
 
         let mut f = Function::new([
-            (func.num_regs, ValType::I64), // tags
-            (func.num_regs, ValType::I64), // payloads
-            (1, ValType::I32),             // env_ptr
-            (1, ValType::I32),             // signal/state scratch
+            (n, ValType::I64), // tags
+            (n, ValType::I64), // payloads
+            (1, ValType::I32), // env_ptr
+            (1, ValType::I32), // signal/state scratch
         ]);
 
         self.emit_cfg(&mut f, func);
@@ -545,13 +747,15 @@ impl WasmEmitter {
     /// Emit a block's instructions, with yield-through checks for calls
     /// in suspending functions.
     fn emit_block_instructions(&mut self, f: &mut Function, block_idx: usize, func: &LirFunction) {
+        self.known_int.clear();
         let block = &func.blocks[block_idx];
         for (instr_idx, spanned) in block.instructions.iter().enumerate() {
-            // For Call/CallArrayMut in suspending functions, use the
-            // yield-aware signal handler instead of the normal one.
+            // SuspendingCall/CallArrayMut in suspending functions use the
+            // yield-aware signal handler with spill/restore continuations.
+            // Regular Call always uses the simple emit_call path.
             if self.may_suspend {
                 match &spanned.instr {
-                    LirInstr::Call {
+                    LirInstr::SuspendingCall {
                         dst,
                         func: fn_reg,
                         args,
@@ -872,12 +1076,32 @@ impl WasmEmitter {
         match instr {
             LirInstr::Const { dst, value } => {
                 self.emit_const(f, *dst, value);
+                match value {
+                    LirConst::Int(_) => {
+                        self.known_int.insert(*dst);
+                    }
+                    _ => {
+                        self.known_int.remove(dst);
+                    }
+                }
             }
             LirInstr::ValueConst { dst, value } => {
                 self.emit_value_const(f, *dst, *value);
+                self.known_int.remove(dst);
             }
             LirInstr::BinOp { dst, op, lhs, rhs } => {
-                self.emit_binop(f, *dst, *op, *lhs, *rhs);
+                let both_int = self.known_int.contains(lhs) && self.known_int.contains(rhs);
+                self.emit_binop(f, *dst, *op, *lhs, *rhs, both_int);
+                // Propagate: int binop on two ints produces int; bitwise always int
+                let is_bitwise = matches!(
+                    op,
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+                );
+                if both_int || is_bitwise {
+                    self.known_int.insert(*dst);
+                } else {
+                    self.known_int.remove(dst);
+                }
             }
             LirInstr::Compare { dst, op, lhs, rhs } => {
                 self.emit_compare(f, *dst, *op, *lhs, *rhs);
@@ -922,7 +1146,7 @@ impl WasmEmitter {
                 }
             }
             LirInstr::LoadCapture { dst, index } => {
-                // Load from closure env, auto-unwrap LBox.
+                // Load from closure env, auto-unwrap LBox if needed.
                 // env_ptr + index*16 → (tag, payload)
                 let offset = (*index as u64) * 16;
                 // Load tag
@@ -1011,6 +1235,11 @@ impl WasmEmitter {
                 f.instruction(&Instruction::Drop); // tag
             }
             LirInstr::Call { dst, func, args } => {
+                self.emit_call(f, *dst, *func, args);
+            }
+            LirInstr::SuspendingCall { dst, func, args } => {
+                // In a non-suspending context (entry function), treat the same
+                // as a regular call — propagate signals to the host.
                 self.emit_call(f, *dst, *func, args);
             }
             LirInstr::TailCall { func, args } => {
@@ -1229,30 +1458,24 @@ impl WasmEmitter {
                 exclude_keys,
             } => {
                 // Write src struct as arg[0], exclude keys as arg[1..n].
+                // Keys are loaded via const pool (dst is scratch — overwritten by result).
                 self.write_val_to_mem(f, *src, 0);
                 for (i, key) in exclude_keys.iter().enumerate() {
-                    let (tag, payload) = match key {
+                    match key {
                         LirConst::Keyword(name) => {
-                            (TAG_KEYWORD as i64, intern_keyword(name) as i64)
+                            self.emit_const_pool_load(f, *dst, Value::keyword(name));
                         }
-                        LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
-                        _ => (TAG_NIL as i64, 0),
-                    };
-                    let offset = ((i + 1) * 16) as u64;
-                    f.instruction(&Instruction::I32Const(ARGS_BASE));
-                    f.instruction(&Instruction::I64Const(tag));
-                    f.instruction(&Instruction::I64Store(MemArg {
-                        offset,
-                        align: 3,
-                        memory_index: 0,
-                    }));
-                    f.instruction(&Instruction::I32Const(ARGS_BASE));
-                    f.instruction(&Instruction::I64Const(payload));
-                    f.instruction(&Instruction::I64Store(MemArg {
-                        offset: offset + 8,
-                        align: 3,
-                        memory_index: 0,
-                    }));
+                        LirConst::Symbol(id) => {
+                            self.emit_const_pool_load(f, *dst, Value::symbol(id.0));
+                        }
+                        _ => {
+                            f.instruction(&Instruction::I64Const(TAG_NIL as i64));
+                            f.instruction(&Instruction::LocalSet(self.tag_local(*dst)));
+                            f.instruction(&Instruction::I64Const(0));
+                            f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
+                        }
+                    }
+                    self.write_val_to_mem(f, *dst, i + 1);
                 }
                 f.instruction(&Instruction::I32Const(OP_STRUCT_REST));
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
@@ -1315,6 +1538,26 @@ impl WasmEmitter {
         f.instruction(&Instruction::I32Const(0)); // ctx = 0 for now
         f.instruction(&Instruction::Call(FN_RT_CALL));
         self.store_result_with_signal(f, dst);
+    }
+
+    /// Like emit_call but drops the signal instead of checking it.
+    /// Used for SuspendingCall in non-suspending contexts (entry function)
+    /// where I/O signals should be ignored — the I/O already completed on the host.
+    #[allow(dead_code)]
+    fn emit_call_ignore_signal(&self, f: &mut Function, dst: Reg, func: Reg, args: &[Reg]) {
+        for (i, arg) in args.iter().enumerate() {
+            self.write_val_to_mem(f, *arg, i);
+        }
+        f.instruction(&Instruction::LocalGet(self.tag_local(func)));
+        f.instruction(&Instruction::LocalGet(self.pay_local(func)));
+        f.instruction(&Instruction::I32Const(ARGS_BASE));
+        f.instruction(&Instruction::I32Const(args.len() as i32));
+        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::Call(FN_RT_CALL));
+        // Drop signal, keep tag+payload
+        f.instruction(&Instruction::Drop);
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
     }
 
     /// Emit CallArrayMut: call a function with args from an array value.
@@ -1474,26 +1717,19 @@ impl WasmEmitter {
     /// Struct get with a constant key (keyword or symbol from LirConst).
     fn emit_struct_get(&mut self, f: &mut Function, dst: Reg, op: i32, src: Reg, key: &LirConst) {
         self.write_val_to_mem(f, src, 0);
-        // Write key as Value in slot 1
-        let (tag, payload) = match key {
-            LirConst::Keyword(name) => (TAG_KEYWORD as i64, intern_keyword(name) as i64),
-            LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
-            _ => (TAG_NIL as i64, 0),
-        };
-        f.instruction(&Instruction::I32Const(ARGS_BASE));
-        f.instruction(&Instruction::I64Const(tag));
-        f.instruction(&Instruction::I64Store(MemArg {
-            offset: 16,
-            align: 3,
-            memory_index: 0,
-        }));
-        f.instruction(&Instruction::I32Const(ARGS_BASE));
-        f.instruction(&Instruction::I64Const(payload));
-        f.instruction(&Instruction::I64Store(MemArg {
-            offset: 24,
-            align: 3,
-            memory_index: 0,
-        }));
+        // Load key via const pool into dst (scratch — overwritten by result),
+        // then write to memory slot 1.
+        match key {
+            LirConst::Keyword(name) => self.emit_const_pool_load(f, dst, Value::keyword(name)),
+            LirConst::Symbol(id) => self.emit_const_pool_load(f, dst, Value::symbol(id.0)),
+            _ => {
+                f.instruction(&Instruction::I64Const(TAG_NIL as i64));
+                f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+                f.instruction(&Instruction::I64Const(0));
+                f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+            }
+        }
+        self.write_val_to_mem(f, dst, 1);
         f.instruction(&Instruction::I32Const(op));
         f.instruction(&Instruction::I32Const(ARGS_BASE));
         f.instruction(&Instruction::I32Const(2));
@@ -1528,18 +1764,18 @@ impl WasmEmitter {
     /// Each slot is 16 bytes (tag: i64, payload: i64).
     /// Layout: [reg0_tag, reg0_pay, reg1_tag, reg1_pay, ..., local0_tag, local0_pay, ...]
     fn emit_spill_all(&self, f: &mut Function) {
-        // Spill registers
+        // Spill registers (physical slots, not virtual regs)
         for i in 0..self.num_regs {
             let offset = (i * 16) as u64;
             f.instruction(&Instruction::I32Const(ARGS_BASE));
-            f.instruction(&Instruction::LocalGet(self.tag_local(Reg(i))));
+            f.instruction(&Instruction::LocalGet(self.tag_phys(i)));
             f.instruction(&Instruction::I64Store(MemArg {
                 offset,
                 align: 3,
                 memory_index: 0,
             }));
             f.instruction(&Instruction::I32Const(ARGS_BASE));
-            f.instruction(&Instruction::LocalGet(self.pay_local(Reg(i))));
+            f.instruction(&Instruction::LocalGet(self.pay_phys(i)));
             f.instruction(&Instruction::I64Store(MemArg {
                 offset: offset + 8,
                 align: 3,
@@ -1571,13 +1807,13 @@ impl WasmEmitter {
         let num_regs = self.num_regs.min(num_saved);
         let num_locals = (num_saved - num_regs).min(self.num_stack_locals);
 
-        // Restore registers
+        // Restore registers (physical slots)
         for i in 0..num_regs {
             f.instruction(&Instruction::I32Const(i as i32));
             f.instruction(&Instruction::Call(FN_RT_LOAD_SAVED_REG));
             // Stack: [tag, payload]
-            f.instruction(&Instruction::LocalSet(self.pay_local(Reg(i))));
-            f.instruction(&Instruction::LocalSet(self.tag_local(Reg(i))));
+            f.instruction(&Instruction::LocalSet(self.pay_phys(i)));
+            f.instruction(&Instruction::LocalSet(self.tag_phys(i)));
         }
         // Restore local slots
         for i in 0..num_locals {
@@ -1680,10 +1916,11 @@ impl WasmEmitter {
                 self.yield_state_map.insert(block_idx, state_id);
             }
 
-            // Call sites: each Call/CallArrayMut is a yield-through point.
+            // Call sites: only SuspendingCall/CallArrayMut are yield-through points.
+            // Regular Call is known to not suspend, so no continuation needed.
             for (instr_idx, spanned) in block.instructions.iter().enumerate() {
                 let dst = match &spanned.instr {
-                    LirInstr::Call { dst, .. } => Some(*dst),
+                    LirInstr::SuspendingCall { dst, .. } => Some(*dst),
                     LirInstr::CallArrayMut { dst, .. } => Some(*dst),
                     _ => None,
                 };
@@ -1707,17 +1944,28 @@ impl WasmEmitter {
         }
     }
 
+    /// Add a value to the constant pool and emit rt_load_const into dst.
+    fn emit_const_pool_load(&mut self, f: &mut Function, dst: Reg, value: Value) {
+        let idx = self.const_pool.len() as i32;
+        self.const_pool.push(value);
+        f.instruction(&Instruction::I32Const(idx));
+        f.instruction(&Instruction::Call(FN_RT_LOAD_CONST));
+        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
+        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+    }
+
     fn emit_const(&mut self, f: &mut Function, dst: Reg, value: &LirConst) {
         match value {
             LirConst::String(s) => {
-                // String is a heap value — add to constant pool and load via host
-                let str_val = Value::string(s.clone());
-                let idx = self.const_pool.len() as i32;
-                self.const_pool.push(str_val);
-                f.instruction(&Instruction::I32Const(idx));
-                f.instruction(&Instruction::Call(FN_RT_LOAD_CONST));
-                f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-                f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
+                self.emit_const_pool_load(f, dst, Value::string(s.clone()));
+            }
+            // Symbols and keywords have runtime-allocated IDs — route through
+            // the constant pool so WASM bytes are deterministic.
+            LirConst::Symbol(id) => {
+                self.emit_const_pool_load(f, dst, Value::symbol(id.0));
+            }
+            LirConst::Keyword(name) => {
+                self.emit_const_pool_load(f, dst, Value::keyword(name));
             }
             _ => {
                 let (tag, payload) = match value {
@@ -1727,9 +1975,9 @@ impl WasmEmitter {
                     LirConst::Bool(false) => (TAG_FALSE as i64, 0),
                     LirConst::Int(n) => (TAG_INT as i64, *n),
                     LirConst::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
-                    LirConst::Symbol(id) => (TAG_SYMBOL as i64, id.0 as i64),
-                    LirConst::Keyword(name) => (TAG_KEYWORD as i64, intern_keyword(name) as i64),
-                    LirConst::String(_) => unreachable!(),
+                    LirConst::Symbol(_) | LirConst::Keyword(_) | LirConst::String(_) => {
+                        unreachable!()
+                    }
                 };
                 f.instruction(&Instruction::I64Const(tag));
                 f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
@@ -1739,23 +1987,38 @@ impl WasmEmitter {
         }
     }
 
-    fn emit_binop(&self, f: &mut Function, dst: Reg, op: BinOp, lhs: Reg, rhs: Reg) {
-        // Bitwise ops are integer-only, no float dispatch needed.
-        if matches!(
-            op,
-            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
-        ) {
+    fn emit_binop(
+        &self,
+        f: &mut Function,
+        dst: Reg,
+        op: BinOp,
+        lhs: Reg,
+        rhs: Reg,
+        both_int: bool,
+    ) {
+        // Integer-only fast path: both operands statically known to be int,
+        // or bitwise ops which are always int.
+        if both_int
+            || matches!(
+                op,
+                BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+            )
+        {
             f.instruction(&Instruction::I64Const(TAG_INT as i64));
             f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(lhs)));
             f.instruction(&Instruction::LocalGet(self.pay_local(rhs)));
             match op {
+                BinOp::Add => f.instruction(&Instruction::I64Add),
+                BinOp::Sub => f.instruction(&Instruction::I64Sub),
+                BinOp::Mul => f.instruction(&Instruction::I64Mul),
+                BinOp::Div => f.instruction(&Instruction::I64DivS),
+                BinOp::Rem => f.instruction(&Instruction::I64RemS),
                 BinOp::BitAnd => f.instruction(&Instruction::I64And),
                 BinOp::BitOr => f.instruction(&Instruction::I64Or),
                 BinOp::BitXor => f.instruction(&Instruction::I64Xor),
                 BinOp::Shl => f.instruction(&Instruction::I64Shl),
                 BinOp::Shr => f.instruction(&Instruction::I64ShrS),
-                _ => unreachable!(),
             };
             f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
             return;
@@ -1984,17 +2247,47 @@ impl WasmEmitter {
             self.label_to_idx.insert(block.label, idx);
         }
 
-        self.num_regs = func.num_regs;
+        // Run register allocation to compact virtual regs → reusable slots.
+        let alloc = super::regalloc::allocate(func, 0);
+        let n = alloc.max_slots;
+        if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+            eprintln!(
+                "[emit] closure {:?}: {} virtual regs → {} slots",
+                func.name, func.num_regs, n
+            );
+        }
+        self.reg_to_slot = alloc.reg_to_slot;
+        self.num_regs = n;
         self.local_offset = 4;
         self.is_closure = true;
         self.num_stack_locals = func.num_locals as u32;
         self.may_suspend = func.signal.may_suspend();
+        self.current_num_captures = func.num_captures;
+        // Build LBox mask: captures have their own LBox status (unknown here,
+        // so mark all captures as potentially LBox), params use lbox_params_mask,
+        // locals use lbox_locals_mask.
+        // Env layout: [captures(0..nc), params(nc..nc+np), locals(nc+np..)]
+        let nc = func.num_captures as u64;
+        // Captures: conservatively assume ALL might be LBox (set bits 0..nc)
+        let capture_bits = if nc >= 64 { u64::MAX } else { (1u64 << nc) - 1 };
+        // Params: shift lbox_params_mask by nc (saturate to all-set if >= 64)
+        let param_bits = if nc >= 64 {
+            u64::MAX
+        } else {
+            func.lbox_params_mask.wrapping_shl(nc as u32)
+        };
+        let np = nc + func.num_params as u64;
+        let local_bits = if np >= 64 {
+            u64::MAX
+        } else {
+            func.lbox_locals_mask.wrapping_shl(np as u32)
+        };
+        self.env_lbox_mask = capture_bits | param_bits | local_bits;
         self.next_resume_state = 1;
         self.resume_states.clear();
         self.call_continuations.clear();
 
         // Layout: params(4) + reg_tags(N) + reg_pays(N) + local_tags(M) + local_pays(M) + i32s(4)
-        let n = func.num_regs;
         let m = self.num_stack_locals;
         self.signal_local = 4 + 2 * n + 2 * m;
 
@@ -2066,11 +2359,24 @@ impl WasmEmitter {
     }
 
     fn tag_local(&self, reg: Reg) -> u32 {
-        self.local_offset + reg.0
+        let slot = self.reg_to_slot.get(&reg).copied().unwrap_or(reg.0);
+        self.local_offset + slot
     }
 
     fn pay_local(&self, reg: Reg) -> u32 {
-        self.local_offset + reg.0 + self.num_regs
+        let slot = self.reg_to_slot.get(&reg).copied().unwrap_or(reg.0);
+        self.local_offset + slot + self.num_regs
+    }
+
+    /// Direct WASM local index for a physical slot's tag (bypasses reg_to_slot).
+    /// Used by spill/restore which iterate over physical slots, not virtual regs.
+    fn tag_phys(&self, slot: u32) -> u32 {
+        self.local_offset + slot
+    }
+
+    /// Direct WASM local index for a physical slot's payload.
+    fn pay_phys(&self, slot: u32) -> u32 {
+        self.local_offset + slot + self.num_regs
     }
 
     /// WASM local index for a stack-local variable's tag.

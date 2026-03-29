@@ -6,11 +6,66 @@ use super::host::ElleHost;
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
+/// Disk-backed compilation cache for wasmtime incremental compilation.
+/// Cache entries are stored as files named by hex-encoded key hash.
+#[derive(Debug)]
+pub struct DiskCache(std::path::PathBuf);
+
+impl DiskCache {
+    pub fn new(path: std::path::PathBuf) -> Self {
+        DiskCache(path)
+    }
+}
+
+impl wasmtime::CacheStore for DiskCache {
+    fn get(&self, key: &[u8]) -> Option<std::borrow::Cow<'_, [u8]>> {
+        let path = self.0.join(hex_name(key));
+        std::fs::read(&path).ok().map(std::borrow::Cow::Owned)
+    }
+
+    fn insert(&self, key: &[u8], value: Vec<u8>) -> bool {
+        let path = self.0.join(hex_name(key));
+        std::fs::write(&path, &value).is_ok()
+    }
+}
+
+fn hex_name(key: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(key.len() * 2);
+    for b in key {
+        write!(s, "{:02x}", b).ok();
+    }
+    s
+}
+
 /// Create a Wasmtime Engine with tail-call support.
+///
+/// Honors `ELLE_JIT`:
+///   - unset or non-zero: aggressive cranelift optimization (OptLevel::Speed)
+///   - "0": cranelift optimization disabled (OptLevel::None) for faster compile
 pub fn create_engine() -> Result<Engine> {
     let mut config = Config::new();
     config.wasm_tail_call(true);
     config.wasm_multi_value(true);
+
+    let jit_disabled = std::env::var("ELLE_JIT").map(|v| v == "0").unwrap_or(false);
+    if jit_disabled {
+        config.cranelift_opt_level(OptLevel::None);
+    } else {
+        config.cranelift_opt_level(OptLevel::Speed);
+    }
+
+    // Disk-backed compilation cache: reuses compiled machine code across runs.
+    // Keyed on WASM bytecode content, so stdlib compilation is amortized.
+    if let Ok(cache_dir) = std::env::var("ELLE_WASM_CACHE") {
+        let path = std::path::PathBuf::from(cache_dir);
+        std::fs::create_dir_all(&path).ok();
+        let cache = DiskCache(path);
+        config
+            .enable_incremental_compilation(std::sync::Arc::new(cache))
+            .ok();
+    }
+
     Engine::new(&config)
 }
 
@@ -674,6 +729,116 @@ fn prepare_wasm_env(
     }
 }
 
+/// Prepare WASM env for a closure call in tiered mode.
+///
+/// Same logic as `prepare_wasm_env` but works with `TieredHost`.
+pub fn prepare_wasm_env_tiered(
+    caller: &mut Caller<'_, super::lazy::TieredHost>,
+    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    args: &[Value],
+    env_base: usize,
+) {
+    let template = &closure.template;
+    let num_captures = template.num_captures;
+    let num_params = template.num_params;
+    let num_locals = template.num_locals;
+    let lbox_params_mask = template.lbox_params_mask;
+    let lbox_locals_mask = template.lbox_locals_mask;
+
+    let effective_args;
+    let args = match template.arity {
+        crate::value::types::Arity::AtLeast(required) => {
+            let mut collected = Vec::with_capacity(num_params);
+            for arg in args.iter().take(required) {
+                collected.push(*arg);
+            }
+            let rest: Vec<Value> = args[required..].to_vec();
+            let vararg_val = match template.vararg_kind {
+                crate::hir::VarargKind::List => {
+                    let mut list = Value::EMPTY_LIST;
+                    for v in rest.iter().rev() {
+                        list = Value::cons(*v, list);
+                    }
+                    list
+                }
+                _ => Value::array_mut(rest),
+            };
+            collected.push(vararg_val);
+            while collected.len() < num_params {
+                collected.push(Value::NIL);
+            }
+            effective_args = collected;
+            effective_args.as_slice()
+        }
+        _ => args,
+    };
+
+    let extra_locals = num_locals.saturating_sub(num_params);
+    let total_slots = num_captures + num_params + extra_locals;
+    caller.data_mut().inner.env_stack_ptr = env_base + total_slots * 16;
+
+    let memory = caller
+        .get_export("__elle_memory")
+        .and_then(|e| e.into_memory())
+        .expect("prepare_wasm_env_tiered: no memory");
+
+    let needed_bytes = env_base + total_slots * 16;
+    let current_bytes = memory.data_size(&*caller);
+    if needed_bytes > current_bytes {
+        let pages_needed = (needed_bytes - current_bytes).div_ceil(65536) as u64;
+        memory
+            .grow(&mut *caller, pages_needed)
+            .expect("prepare_wasm_env_tiered: grow failed");
+    }
+
+    for (i, val) in closure.env.iter().enumerate() {
+        let (tag, payload) = caller.data_mut().inner.value_to_wasm(*val);
+        let offset = env_base + i * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    for (i, arg) in args.iter().enumerate().take(num_params) {
+        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
+            Value::local_lbox(*arg)
+        } else {
+            *arg
+        };
+        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
+        let offset = env_base + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    for i in args.len()..num_params {
+        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
+            Value::local_lbox(Value::NIL)
+        } else {
+            Value::NIL
+        };
+        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
+        let offset = env_base + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    for i in 0..extra_locals {
+        let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
+            Value::local_lbox(Value::NIL)
+        } else {
+            Value::NIL
+        };
+        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
+        let offset = env_base + (num_captures + num_params + i) * 16;
+        let data = memory.data_mut(&mut *caller);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+}
+
 /// Call a WASM closure: build env in linear memory and invoke via table.
 ///
 /// Each call allocates a fresh env region from `ElleHost::env_stack_ptr`
@@ -1102,7 +1267,7 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
 }
 
 /// Dispatch a data operation by opcode.
-fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::SignalBits, Value) {
+pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::SignalBits, Value) {
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
     use crate::value::heap::TableKey;
 

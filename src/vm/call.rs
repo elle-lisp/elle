@@ -203,6 +203,16 @@ impl VM {
                 return None;
             }
 
+            // Tiered WASM compilation and dispatch.
+            // Checked before JIT because WASM is the preferred fast path when enabled.
+            if closure.template.lir_function.is_some() {
+                if let Some(bits) = self.try_wasm_call(closure, &args) {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
+                    return bits;
+                }
+            }
+
             // JIT compilation and dispatch.
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).

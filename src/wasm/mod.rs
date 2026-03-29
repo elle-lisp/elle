@@ -17,6 +17,8 @@
 pub mod emit;
 pub mod handle;
 pub mod host;
+pub mod lazy;
+pub mod regalloc;
 pub mod store;
 
 use crate::value::Value;
@@ -63,15 +65,91 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     };
 
     // Compile source → LIR (file mode = letrec for mutual recursion)
+    let t0 = std::time::Instant::now();
     let lir_func = crate::pipeline::compile_file_to_lir(compile_source, &mut symbols, source_name)?;
+    let t1 = std::time::Instant::now();
+
+    if std::env::var_os("ELLE_WASM_LIR").is_some() {
+        eprintln!(
+            "[lir] entry: regs={} locals={} blocks={}",
+            lir_func.num_regs,
+            lir_func.num_locals,
+            lir_func.blocks.len()
+        );
+        for block in &lir_func.blocks {
+            eprintln!("[lir]   {:?}:", block.label);
+            for si in &block.instructions {
+                eprintln!("[lir]     {:?}", si.instr);
+            }
+            eprintln!("[lir]     term: {:?}", block.terminator.terminator);
+        }
+    }
 
     // LIR → WASM bytes + constant pool
     let result = emit::emit_module(&lir_func);
+    let t2 = std::time::Instant::now();
+
+    // Dump WASM for analysis
+    if std::env::var_os("ELLE_WASM_DUMP").is_some() {
+        std::fs::write("/tmp/elle-wasm-dump.wasm", &result.wasm_bytes).ok();
+    }
 
     // Run on Wasmtime
     let engine = store::create_engine().map_err(|e| e.to_string())?;
     let mut wasm_store = store::create_store(&engine, result.const_pool);
     let linker = store::create_linker(&engine).map_err(|e| e.to_string())?;
-    let module = store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
-    store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string())
+    let t3 = std::time::Instant::now();
+
+    // Module cache: hash the WASM bytes, check for a cached pre-compiled module.
+    let module = if let Ok(cache_dir) = std::env::var("ELLE_WASM_CACHE") {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        result.wasm_bytes.hash(&mut hasher);
+        let hash = hasher.finish();
+        let cache_path =
+            std::path::PathBuf::from(&cache_dir).join(format!("module_{:016x}.bin", hash));
+
+        if let Ok(bytes) = std::fs::read(&cache_path) {
+            // SAFETY: we trust our own cache files.
+            unsafe { wasmtime::Module::deserialize(&engine, &bytes) }
+                .map_err(|e: wasmtime::Error| e.to_string())?
+        } else {
+            let module =
+                store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
+            if let Ok(serialized) = module.serialize() {
+                std::fs::create_dir_all(&cache_dir).ok();
+                std::fs::write(&cache_path, &serialized).ok();
+            }
+            module
+        }
+    } else {
+        store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?
+    };
+    let t4 = std::time::Instant::now();
+    let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
+    let t5 = std::time::Instant::now();
+
+    eprintln!("[wasm] funcs: {}  elle→LIR: {:.3}s  LIR→wasm: {:.3}s  wasmtime compile: {:.3}s  execute: {:.3}s  total: {:.3}s  wasm_bytes: {}",
+        {
+            fn count_nested(f: &crate::lir::LirFunction) -> usize {
+                let mut n = 0;
+                for block in &f.blocks {
+                    for spanned in &block.instructions {
+                        if let crate::lir::LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
+                            n += 1 + count_nested(nested);
+                        }
+                    }
+                }
+                n
+            }
+            1 + count_nested(&lir_func)
+        },
+        (t1 - t0).as_secs_f64(),
+        (t2 - t1).as_secs_f64(),
+        (t4 - t3).as_secs_f64(),
+        (t5 - t4).as_secs_f64(),
+        (t5 - t0).as_secs_f64(),
+        result.wasm_bytes.len());
+    ret
 }

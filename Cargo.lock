@@ -1156,10 +1156,13 @@ dependencies = [
  "hashbrown 0.16.1",
  "libm",
  "log",
+ "postcard",
  "pulley-interpreter",
  "regalloc2 0.15.0",
  "rustc-hash",
  "serde",
+ "serde_derive",
+ "sha2",
  "smallvec",
  "target-lexicon",
  "wasmtime-internal-core",
@@ -5521,6 +5524,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "rustc-hash",
+ "serde",
  "smallvec",
 ]
 

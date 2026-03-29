@@ -69,7 +69,7 @@ cranelift-native = "0.116"
 target-lexicon = "0.13"
 
 # WASM backend (feature-gated behind ELLE_WASM=1)
-wasmtime = "43"
+wasmtime = { version = "43", features = ["incremental-cache"] }
 wasm-encoder = "0.245"
 
 [dev-dependencies]

@@ -226,8 +226,13 @@ pub enum LirInstr {
     },
 
     // === Function Calls ===
-    /// Call a function
+    /// Call a function (callee is known to not suspend).
     Call { dst: Reg, func: Reg, args: Vec<Reg> },
+    /// Call a function that may suspend (yield, I/O, etc.).
+    /// The WASM emitter creates a call-site continuation with spill/restore
+    /// so the caller can resume if the callee yields.
+    /// Only emitted inside functions whose signal includes may_suspend().
+    SuspendingCall { dst: Reg, func: Reg, args: Vec<Reg> },
     /// Tail call (no return)
     TailCall { func: Reg, args: Vec<Reg> },
 

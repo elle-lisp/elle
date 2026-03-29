@@ -26,7 +26,7 @@ impl VM {
     ///
     /// Reuses `self.env_cache` to avoid a fresh Vec allocation per call.
     /// Returns `None` if `populate_env` fails (e.g., bad keyword args for `&keys`/`&named`).
-    pub(super) fn build_closure_env(
+    pub fn build_closure_env(
         &mut self,
         closure: &crate::value::Closure,
         args: &[Value],

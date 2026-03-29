@@ -19,6 +19,7 @@ pub mod signal;
 pub mod stack;
 pub mod types;
 pub mod variables;
+mod wasm_entry;
 
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;

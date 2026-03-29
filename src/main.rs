@@ -89,7 +89,13 @@ fn run_source(
 ) -> Result<(), String> {
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
     if std::env::var_os("ELLE_WASM").is_some() {
-        return match elle::wasm::eval_wasm_with_stdlib(contents, source_name) {
+        let no_stdlib = std::env::var_os("ELLE_WASM_NO_STDLIB").is_some();
+        let eval_fn = if no_stdlib {
+            elle::wasm::eval_wasm
+        } else {
+            elle::wasm::eval_wasm_with_stdlib
+        };
+        return match eval_fn(contents, source_name) {
             Ok(_) => Ok(()),
             Err(e) => {
                 eprintln!("{}", e);

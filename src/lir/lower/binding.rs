@@ -232,9 +232,8 @@ impl<'a> Lowerer<'a> {
         let is_upvalue = self.upvalue_bindings.contains(target);
 
         if let Some(&slot) = self.binding_to_slot.get(target) {
-            if self.in_lambda && is_upvalue {
-                // For captured variables, use StoreCapture which handles cells automatically
-                // StoreUpvalue checks if the upvalue is a cell and updates it
+            if self.in_lambda && is_upvalue && needs_lbox {
+                // For LBox upvalues, use StoreCapture (updates cell) + LoadCapture (unwraps)
                 self.emit(LirInstr::StoreCapture {
                     index: slot,
                     src: value_reg,
