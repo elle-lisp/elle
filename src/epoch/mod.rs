@@ -83,6 +83,15 @@ pub struct EpochInfo {
 /// if no epoch declaration is present. Used by the CLI rewriter to
 /// build per-file rules without modifying the syntax tree.
 pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String> {
+    // The reader strips shebang lines before parsing, so syntax spans are
+    // relative to the post-strip input.  Compute the offset so we can
+    // translate back to original-source byte positions.
+    let shebang_offset = if source.starts_with("#!") {
+        source.find('\n').map(|i| i + 1).unwrap_or(source.len())
+    } else {
+        0
+    };
+
     let syntaxes = read_syntax_all(source, "<detect-epoch>")?;
     if syntaxes.is_empty() {
         return Ok(None);
@@ -103,8 +112,8 @@ pub fn detect_epoch_in_source(source: &str) -> Result<Option<EpochInfo>, String>
                 }
                 return Ok(Some(EpochInfo {
                     epoch,
-                    byte_start: syntaxes[0].span.start,
-                    byte_end: syntaxes[0].span.end,
+                    byte_start: syntaxes[0].span.start + shebang_offset,
+                    byte_end: syntaxes[0].span.end + shebang_offset,
                 }));
             }
         }

@@ -190,17 +190,33 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         edits.extend(structural_edits);
     }
 
-    // Replace old (elle/epoch N) with current epoch, or add it if absent
+    // Remove the old epoch tag (if present) and inject the current epoch as
+    // the first form — after the shebang line if one exists.
     if let Some(info) = &epoch_info {
+        // Consume trailing whitespace/newline so we don't leave a blank line.
+        let mut end = info.byte_end;
+        while end < source.len() && source.as_bytes()[end] == b' ' {
+            end += 1;
+        }
+        if end < source.len() && source.as_bytes()[end] == b'\n' {
+            end += 1;
+        }
         edits.push(Edit {
             byte_offset: info.byte_start,
-            byte_len: info.byte_end - info.byte_start,
-            replacement: format!("(elle/epoch {})", CURRENT_EPOCH),
+            byte_len: end - info.byte_start,
+            replacement: String::new(),
         });
-    } else if !edits.is_empty() {
-        // File had no epoch tag but needed rewrites — prepend the current epoch
+    }
+
+    if !edits.is_empty() {
+        // Insert current epoch as the first form, after the shebang if present.
+        let insert_offset = if source.starts_with("#!") {
+            source.find('\n').map(|i| i + 1).unwrap_or(source.len())
+        } else {
+            0
+        };
         edits.push(Edit {
-            byte_offset: 0,
+            byte_offset: insert_offset,
             byte_len: 0,
             replacement: format!("(elle/epoch {})\n", CURRENT_EPOCH),
         });
@@ -545,4 +561,73 @@ fn print_help() {
     println!("  elle rewrite script.lisp");
     println!("  elle rewrite --check src/*.lisp");
     println!("  elle rewrite --dry-run examples/");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rewrite_preserves_shebang() {
+        let source = "#!/usr/bin/env elle\n(elle/epoch 0)\n(assert-true x \"test\")\n";
+        let result = rewrite_file(source, "<test>").unwrap();
+        assert!(result.is_some(), "expected rewrites to be applied");
+        let (new_source, _count) = result.unwrap();
+        let epoch_line = format!("(elle/epoch {})\n", CURRENT_EPOCH);
+        let expected_prefix = format!("#!/usr/bin/env elle\n{}", epoch_line);
+        assert!(
+            new_source.starts_with(&expected_prefix),
+            "shebang then epoch tag expected, got: {:?}",
+            &new_source[..new_source.len().min(80)]
+        );
+        // Old epoch tag must not survive
+        assert!(
+            !new_source.contains("(elle/epoch 0)"),
+            "old epoch tag should be removed"
+        );
+        let epoch_count = new_source.matches("elle/epoch").count();
+        assert_eq!(
+            epoch_count, 1,
+            "should have exactly one epoch tag, got: {:?}",
+            new_source
+        );
+    }
+
+    #[test]
+    fn test_rewrite_injects_epoch_first_form() {
+        let source = "(elle/epoch 0)\n(assert-true x \"test\")\n";
+        let result = rewrite_file(source, "<test>").unwrap();
+        assert!(result.is_some());
+        let (new_source, _) = result.unwrap();
+        let epoch_line = format!("(elle/epoch {})\n", CURRENT_EPOCH);
+        assert!(
+            new_source.starts_with(&epoch_line),
+            "epoch tag should be the first form, got: {:?}",
+            &new_source[..new_source.len().min(80)]
+        );
+        assert!(
+            !new_source.contains("(elle/epoch 0)"),
+            "old epoch tag should be removed"
+        );
+        // Verify no double epoch tags
+        let epoch_count = new_source.matches("elle/epoch").count();
+        assert_eq!(
+            epoch_count, 1,
+            "should have exactly one epoch tag, got: {:?}",
+            new_source
+        );
+    }
+
+    #[test]
+    fn test_rewrite_no_epoch_tag_injects_one() {
+        // File at epoch 0 without an explicit tag — the reader assumes current
+        // epoch, so no rewrites fire and no epoch tag is injected.
+        // This is correct: only files that need migration get the tag.
+        let source = "(println \"hello\")\n";
+        let result = rewrite_file(source, "<test>").unwrap();
+        assert!(
+            result.is_none(),
+            "no rewrites expected for current-epoch file"
+        );
+    }
 }
