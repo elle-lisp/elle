@@ -155,6 +155,28 @@ impl VM {
                 .as_ref()
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
+
+            // Squelch enforcement: if the closure has a squelch mask and the
+            // signal matches, convert to signal-violation error.
+            let squelch_mask = closure.squelch_mask;
+            if squelch_mask != 0 && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                let squelched = sig.0 & squelch_mask;
+                if squelched != 0 {
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    };
+                    let err = crate::value::error_val(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                    );
+                    self.fiber.suspended = None;
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    self.fiber.stack.push(Value::NIL);
+                    return None;
+                }
+            }
+
             return Some(sig);
         }
 
@@ -178,6 +200,27 @@ impl VM {
                     return None;
                 } else {
                     // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
+                    // Squelch enforcement on the tail-call path
+                    let tail_squelch = tail.squelch_mask | closure.squelch_mask;
+                    if tail_squelch != 0 {
+                        let squelched = eb.0 & tail_squelch;
+                        if squelched != 0 {
+                            let squelched_str = {
+                                let registry =
+                                    crate::signals::registry::global_registry().lock().unwrap();
+                                registry
+                                    .format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                            };
+                            let err = crate::value::error_val(
+                                "signal-violation",
+                                format!("squelch: signal {} caught at boundary", squelched_str),
+                            );
+                            self.fiber.suspended = None;
+                            self.fiber.signal = Some((SIG_ERROR, err));
+                            self.fiber.stack.push(Value::NIL);
+                            return None;
+                        }
+                    }
                     // Propagate so call_inner can build the caller frame.
                     return Some(eb);
                 }
