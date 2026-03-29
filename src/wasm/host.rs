@@ -70,6 +70,9 @@ pub struct ElleHost {
     /// Resume value passed by the scheduler (fiber/resume). Set before
     /// re-invoking a suspended function; consumed by rt_get_resume_value.
     pub resume_value: Option<(i64, i64)>,
+    /// Mapping from const pool index → handle table index for heap values.
+    /// Immediate values (tag < TAG_HEAP_START) have 0 here (unused).
+    pub pool_to_handle: Vec<u64>,
 }
 
 impl ElleHost {
@@ -83,6 +86,7 @@ impl ElleHost {
             param_frames: Vec::new(),
             suspension_frames: Vec::new(),
             resume_value: None,
+            pool_to_handle: Vec::new(),
         }
     }
 }

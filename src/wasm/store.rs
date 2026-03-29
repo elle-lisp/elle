@@ -73,15 +73,22 @@ pub fn create_engine() -> Result<Engine> {
 pub fn create_store(engine: &Engine, const_pool: Vec<Value>) -> Store<ElleHost> {
     let mut host = ElleHost::new();
 
-    // Pre-load heap constants into handle table.
-    // The const_pool index maps 1:1 to the order rt_load_const will be called.
+    // Pre-load heap constants into handle table and build a mapping from
+    // const pool index → handle index. Immediate values (symbols, keywords,
+    // etc.) are NOT inserted into the handle table, so pool indices and
+    // handle indices diverge when the pool contains a mix of types.
+    let mut pool_to_handle = Vec::with_capacity(const_pool.len());
     for value in &const_pool {
         if value.tag >= TAG_HEAP_START {
-            host.handles.insert(*value);
+            let handle = host.handles.insert(*value);
+            pool_to_handle.push(handle);
+        } else {
+            pool_to_handle.push(0); // unused for immediates
         }
     }
 
     host.const_pool = const_pool;
+    host.pool_to_handle = pool_to_handle;
     Store::new(engine, host)
 }
 
@@ -219,10 +226,8 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             if value.tag < TAG_HEAP_START {
                 (value.tag as i64, value.payload as i64)
             } else {
-                // Heap value — look up handle. Constants were pre-inserted
-                // into the handle table in create_store, in order.
-                // Handle index = index + 1 (handle 0 is reserved).
-                let handle = (index + 1) as u64;
+                // Heap value — use pre-computed handle from create_store.
+                let handle = host.pool_to_handle[index as usize];
                 (value.tag as i64, handle as i64)
             }
         },
@@ -1478,7 +1483,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
     }
 }
 
-/// Read args from linear memory as Vec<Value>.
+/// Read args from linear memory as `Vec<Value>`.
 fn read_args_from_memory(
     caller: &mut Caller<'_, ElleHost>,
     args_ptr: i32,

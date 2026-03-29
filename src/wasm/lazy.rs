@@ -144,12 +144,17 @@ impl WasmTier {
 
         // Create a fresh Store with the const pool and VM pointer.
         let mut host = ElleHost::new();
+        let mut pool_to_handle = Vec::with_capacity(compiled.const_pool.len());
         for value in &compiled.const_pool {
             if value.tag >= TAG_HEAP_START {
-                host.handles.insert(*value);
+                let handle = host.handles.insert(*value);
+                pool_to_handle.push(handle);
+            } else {
+                pool_to_handle.push(0);
             }
         }
         host.const_pool = compiled.const_pool.clone();
+        host.pool_to_handle = pool_to_handle;
 
         let tiered_host = TieredHost {
             inner: host,
@@ -478,7 +483,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
             if value.tag < TAG_HEAP_START {
                 (value.tag as i64, value.payload as i64)
             } else {
-                let handle = (index + 1) as u64;
+                let handle = host.pool_to_handle[index as usize];
                 (value.tag as i64, handle as i64)
             }
         },
