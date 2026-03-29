@@ -3,11 +3,95 @@ use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
 use crate::value::{error_val, error_val_extra, Value};
+use std::path::{Path, PathBuf};
+
+/// Resolve a module specifier to a concrete file path.
+///
+/// If the path already exists as given, return it immediately (backward compat).
+/// Otherwise probe search directories with extension suffixes:
+///   1. `<spec>.lisp`        — Elle source module
+///   2. `lib<leaf>.so`       — native plugin (e.g. "glob" → "libelle_glob.so")
+///
+/// Search order:
+///   - current working directory
+///   - each entry in `ELLE_PATH` (colon-separated)
+///   - `ELLE_HOME` (defaults to the directory containing the elle binary)
+fn resolve_import(spec: &str) -> Option<String> {
+    let as_path = Path::new(spec);
+
+    // Fast path: already exists with the given name (full path or relative)
+    if as_path.exists() {
+        return Some(spec.to_string());
+    }
+
+    // Build list of directories to search
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
+
+    // CWD
+    if let Ok(cwd) = std::env::current_dir() {
+        search_dirs.push(cwd);
+    }
+
+    // ELLE_PATH (colon-separated)
+    if let Ok(elle_path) = std::env::var("ELLE_PATH") {
+        for entry in elle_path.split(':') {
+            let p = PathBuf::from(entry);
+            if p.is_dir() {
+                search_dirs.push(p);
+            }
+        }
+    }
+
+    // ELLE_HOME (default: directory of the elle binary)
+    let elle_home = std::env::var("ELLE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_default()
+        });
+    if elle_home.is_dir() {
+        search_dirs.push(elle_home);
+    }
+
+    // Derive the leaf name for plugin probing: "plugin/glob" → "glob"
+    let leaf = as_path.file_name().and_then(|n| n.to_str()).unwrap_or(spec);
+
+    for dir in &search_dirs {
+        // Try <dir>/<spec>.lisp
+        let lisp = dir.join(format!("{}.lisp", spec));
+        if lisp.is_file() {
+            return Some(lisp.to_string_lossy().into_owned());
+        }
+
+        // Try <dir>/<spec> as-is (without extension, in case it exists in a search dir)
+        let bare = dir.join(spec);
+        if bare.is_file() {
+            return Some(bare.to_string_lossy().into_owned());
+        }
+
+        // Try <dir>/<spec_dir>/libelle_<leaf>.so  (plugin convention)
+        let so_name = format!("libelle_{}.so", leaf);
+        let plugin_in_dir = dir
+            .join(as_path.parent().unwrap_or(Path::new("")))
+            .join(&so_name);
+        if plugin_in_dir.is_file() {
+            return Some(plugin_in_dir.to_string_lossy().into_owned());
+        }
+
+        // Try <dir>/libelle_<leaf>.so  (flat layout)
+        let plugin_flat = dir.join(&so_name);
+        if plugin_flat.is_file() {
+            return Some(plugin_flat.to_string_lossy().into_owned());
+        }
+    }
+
+    None
+}
 
 /// Import a module file
 pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
-    // (import "path/to/module.elle")
-    // Loads and compiles a .elle file as a module
     if args.len() != 1 {
         return (
             SIG_ERROR,
@@ -18,7 +102,7 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    let path = if let Some(s) = args[0].with_string(|s| s.to_string()) {
+    let spec = if let Some(s) = args[0].with_string(|s| s.to_string()) {
         s
     } else {
         return (
@@ -28,6 +112,20 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                 format!("import: expected string, got {}", args[0].type_name()),
             ),
         );
+    };
+
+    let path = match resolve_import(&spec) {
+        Some(p) => p,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val_extra(
+                    "io-error",
+                    format!("import: module '{}' not found", spec),
+                    &[("spec", Value::string(spec.as_str()))],
+                ),
+            );
+        }
     };
 
     // Get VM context for file loading
@@ -80,8 +178,16 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
 
         // Plugin loading for .so files
         if path.ends_with(".so") {
-            return match crate::plugin::load_plugin(&path, vm, symbols) {
-                Ok(value) => (SIG_OK, value),
+            // Return cached value if already loaded (avoids re-registering primitives)
+            if let Some(&cached) = vm.loaded_plugins.get(&path) {
+                vm.unmark_module_loading(&path);
+                return (SIG_OK, cached);
+            }
+            let result = match crate::plugin::load_plugin(&path, vm, symbols) {
+                Ok(value) => {
+                    vm.loaded_plugins.insert(path.clone(), value);
+                    (SIG_OK, value)
+                }
                 Err(e) => (
                     SIG_ERROR,
                     error_val_extra(
@@ -91,6 +197,8 @@ pub(crate) fn prim_import_file(args: &[Value]) -> (SignalBits, Value) {
                     ),
                 ),
             };
+            vm.unmark_module_loading(&path);
+            return result;
         }
 
         // Elle source file loading
@@ -180,9 +288,9 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     func: prim_import_file,
     signal: Signal::errors(),
     arity: Arity::Exact(1),
-    doc: "Import a module file and execute it in the current context",
-    params: &["path"],
+    doc: "Import a module by specifier. Resolves via search paths (CWD, ELLE_PATH, ELLE_HOME) with extension probing (.lisp, libelle_<name>.so).",
+    params: &["spec"],
     category: "",
-    example: "(import \"lib/utils.elle\")",
+    example: "(import \"lib/http\")",
     aliases: &["import-file", "module/import"],
 }];

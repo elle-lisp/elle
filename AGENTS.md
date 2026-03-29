@@ -327,16 +327,6 @@ Resolution order:
 The store is always persistent (no in-memory fallback). `.elle-mcp/` is
 gitignored.
 
-### Static TLS requirement
-
-The oxigraph plugin embeds RocksDB (C++), which uses `__thread` storage.
-This causes `dlopen` to fail with "cannot allocate memory in static TLS
-block" on glibc systems. Set the tunable before running:
-
-```bash
-export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384
-```
-
 ### Related tools
 
 | File | Purpose |
@@ -344,8 +334,6 @@ export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=16384
 | `tools/elle-graph.lisp` | Extract RDF triples from Elle source files via `read-all` |
 | `tools/rust-graph.lisp` | Extract RDF triples from Rust source files via syn plugin |
 | `tools/load-all.lisp` | Extract Elle + Rust graphs and load into oxigraph store |
-| `tools/run-elle.sh` | Wrapper that sets GLIBC_TUNABLES for C++ plugins (oxigraph, syn) |
-| `tools/run-graph.sh` | Wrapper that sets `GLIBC_TUNABLES` and runs elle-graph |
 | `tools/demo-queries.lisp` | Example SPARQL queries against the Elle knowledge graph |
 | `tools/test-mcp.lisp` | Smoke test: spawns server, exercises all tools |
 | `tools/test-oxigraph-load.lisp` | Verifies oxigraph plugin loads |

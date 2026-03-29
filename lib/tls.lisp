@@ -8,15 +8,15 @@
 ##   - tcp/connect, tcp/accept from net primitives
 ##   - port/read, port/write from stream primitives  (port/read returns
 ##     bytes for TCP ports — TCP streams use binary encoding in this runtime)
-##   - ev/run, ev/spawn from scheduler
+##   - ev/spawn from scheduler
 ##   - port/close for TCP port lifecycle
 ##   - subprocess/system for hostname resolution (getent fallback)
 ##
 ## Usage:
 ##   (def tls-plugin (import-file "target/release/libelle_tls.so"))
 ##   (def tls ((import-file "lib/tls.lisp") tls-plugin))
-##   (ev/run (fn [] (let [[conn (tls:connect "example.com" 443)]]
-##                    (defer (tls:close conn) ...))))
+##   (let [[conn (tls:connect "example.com" 443)]]
+##     (defer (tls:close conn) ...))
 ##
 ## The file exports a function that accepts the plugin struct and returns the
 ## public API struct. The plugin struct is closed over so all public
@@ -75,7 +75,7 @@
   (defn tls-handshake [port tls]
     "Drive TLS handshake to completion over a TCP port.
      Mutates tls in place. Returns nil on success.
-     Must be called inside a scheduler context (ev/run or ev/spawn).
+     Must be called inside a scheduler context (the async scheduler).
 
      Loop invariant:
        - After every tls/process call, drain and send outgoing bytes.
@@ -112,7 +112,7 @@
 
   (defn tls/connect [hostname port-num & args]
     "Connect to a TLS server. Returns a tls-conn struct {:tcp port :tls tls-state}.
-     Must be called inside a scheduler context (ev/run or ev/spawn).
+     Must be called inside a scheduler context (the async scheduler).
 
      hostname is used for TLS SNI and certificate verification.
      The hostname is DNS-resolved to an IP before connecting (required by

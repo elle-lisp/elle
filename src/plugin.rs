@@ -90,9 +90,8 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     //
     // Note: if dlopen fails with "cannot allocate memory in static TLS block",
     // that is a separate glibc static-TLS-reservation issue and is NOT fixed by
-    // RTLD_GLOBAL.  The workaround on glibc 2.41+ is to set the environment
-    // variable GLIBC_TUNABLES=glibc.rtld.optional_static_tls=<N> to a value
-    // large enough for the plugin's TLS needs.
+    // RTLD_GLOBAL.  main.rs handles this by setting GLIBC_TUNABLES and
+    // re-execing before we get here.
     #[cfg(target_os = "linux")]
     let lib = {
         use libloading::os::unix::Library as UnixLibrary;

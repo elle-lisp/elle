@@ -5,6 +5,7 @@
 ## its stdin, reads responses from its stdout, and asserts correctness.
 ##
 ## Run:  elle test-mcp.lisp
+(elle/epoch 5)
 
 (defn test [name ok? msg]
   (if ok?
@@ -26,8 +27,7 @@
       (error {:error :eof :message "server closed stdout"}))
     (json/parse line)))
 
-(ev/run (fn []
-  (def proc (subprocess/exec "tools/run-elle.sh" ["tools/mcp-server.lisp"]))
+(def proc (subprocess/exec "elle" ["tools/mcp-server.lisp"]))
   (def pin  (get proc :stdin))
   (def pout (get proc :stdout))
   (def perr (get proc :stderr))
@@ -110,4 +110,4 @@
         (not (nil? (get r "error"))) "expected error response"))
 
     (println "")
-    (println "all MCP tests passed."))))
+    (println "all MCP tests passed."))

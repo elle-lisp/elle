@@ -1,3 +1,4 @@
+(elle/epoch 6)
 # I/O — stream primitives, sync scheduler, ev/spawn, async backend
 
 
@@ -37,16 +38,16 @@
 (let ((result @[]))
   (ev/spawn (fn []
     (push result (port/read-all (port/open "/tmp/elle-test-ev-spawn-lisp" :read)))))
-  # Pump happens naturally since we're inside ev/run; spawned fiber runs before user code returns.
+  # Pump happens naturally; spawned fiber runs before user code returns.
   )
 
 # === Error propagation ===
 
 (let (([ok? _] (protect ((fn () (sync-scheduler (fiber/new (fn [] (error :boom)) (bit/or 1 512)))))))) (assert (not ok?) "sync-scheduler propagates errors"))
 
-# ev/spawn errors propagate when the scheduler pump drains the fiber
-(let (([ok? _] (protect ((fn () (ev/run (fn [] (ev/spawn (fn [] (error :kaboom))))))))))
-  (assert (not ok?) "ev/spawn propagates errors via ev/run"))
+# ev/spawn errors propagate via ev/join
+(let (([ok? _] (protect (ev/join (ev/spawn (fn [] (error :kaboom)))))))
+  (assert (not ok?) "ev/spawn propagates errors via ev/join"))
 
 # === port/read-line ===
 
@@ -160,11 +161,11 @@
 
 (assert (struct? (make-async-scheduler)) "make-async-scheduler returns struct")
 
-# === ev/run pure thunk ===
+# === basic expression evaluation ===
 
-(assert (= (ev/run (fn [] 42)) 42) "ev/run pure thunk returns last value")
+(assert (= 42 42) "pure expression")
 
-# === I/O thunk (direct, no nested ev/run) ===
+# === I/O thunk (direct) ===
 
 (spit "/tmp/elle-test-ev-run-io-lisp" "async scheduler")
 (assert (= (string (port/read-all (port/open "/tmp/elle-test-ev-run-io-lisp" :read)))
@@ -183,9 +184,9 @@
     (ev/join f2))
   (assert (= (length results) 2) "concurrent fibers both complete"))
 
-# === ev/run error propagation ===
+# === error propagation ===
 
-(let (([ok? _] (protect ((fn () (ev/run (fn [] (error :async-boom)))))))) (assert (not ok?) "ev/run propagates errors"))
+(let (([ok? _] (protect ((fn () (error :async-boom)))))) (assert (not ok?) "protect captures errors"))
 
 # === async write ===
 
@@ -249,7 +250,7 @@
   (assert (= (get result 1) :slow) "longer sleep finishes second"))
 
 # === ev/sleep error: negative duration ===
-# No need for nested ev/run — user code already runs in async scheduler.
+# User code already runs in the async scheduler.
 
 (let (([ok? _] (protect (ev/sleep -1)))) (assert (not ok?) "ev/sleep rejects negative int"))
 

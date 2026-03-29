@@ -114,6 +114,9 @@ pub(crate) fn handle_store_upvalue(
         }
         vm.fiber.stack.push(val);
     } else {
-        panic!("VM bug: Cannot mutate non-lbox closure environment variables");
+        panic!(
+            "VM bug: Cannot mutate non-lbox closure environment variables (idx={}, env_len={}, val_type={}, env_val_type={})",
+            idx, env.len(), val.type_name(), env_val.type_name(),
+        );
     }
 }

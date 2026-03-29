@@ -355,6 +355,11 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 # protect captures errors as data; try/catch affords a body for control flow
 (def [ok? val] (protect (/ 10 0)))
 
+# Protect + bind in one step — runs body only if expr succeeds
+(when-ok [result (parse-json input)]
+  (println "parsed:" result))
+# Returns nil if expr errors (body is skipped)
+
 # Guaranteed cleanup
 (defer (close f)
   (use f))
@@ -941,13 +946,19 @@ You can define your own dynamic parameters with `make-parameter`:
 ## Modules and Imports
 
 ```lisp
-# Import an Elle file (executes it, returns last value)
-(import "lib/http.lisp")
-(import-file "lib/http.lisp")   # alias
+# Import by short name — searches ELLE_PATH, ELLE_HOME, and CWD
+(def http ((import "lib/http")))       # finds lib/http.lisp
+(def crypto (import "crypto"))         # finds libelle_crypto.so via ELLE_PATH
 
-# Import a plugin (.so) — returns a struct of its functions
+# Full path still works (backward compat)
+(import "lib/http.lisp")
+(import-file "lib/http.lisp")         # alias
+
+# Plugin by full path
 (def crypto (import "target/release/libelle_crypto.so"))
 ```
+
+`import` resolves module specifiers by searching directories in order: CWD, `ELLE_PATH` (colon-separated), `ELLE_HOME` (defaults to the elle binary's directory). For each directory it probes: `<spec>` as-is, `<spec>.lisp`, `libelle_<leaf>.so`. Plugins are cached — re-importing the same `.so` returns the cached struct without re-loading.
 
 Importing a plugin returns a struct of its functions. Bind it to use them — plugin functions are **not** injected into the global scope.
 
@@ -965,11 +976,12 @@ cargo build --release -p elle-crypto
 
 **Pattern:**
 ```lisp
-(def crypto (import "target/release/libelle_crypto.so"))
-(seq->hex ((get crypto :sha256) "hello"))  # seq->hex is the canonical name
+# With ELLE_PATH=target/release (or ELLE_HOME pointing to install dir):
+(def crypto (import "crypto"))
+(seq->hex (crypto:sha256 "hello"))
 
 # Or destructure:
-(def {:sha256 sha256 :hmac-sha256 hmac} (import "target/release/libelle_crypto.so"))
+(def {:sha256 sha256 :hmac-sha256 hmac} (import "crypto"))
 (seq->hex (sha256 "hello"))
 # (bytes->hex is an alias for seq->hex and still works)
 ```

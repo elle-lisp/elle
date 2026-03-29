@@ -381,7 +381,8 @@ impl JitCompiler {
         let arg_var_base = lir.num_regs;
         let is_list_variadic = matches!(lir.arity, Arity::AtLeast(_))
             && matches!(lir.vararg_kind, crate::hir::VarargKind::List);
-        let arity_params = if is_list_variadic {
+        let is_range_arity = matches!(lir.arity, Arity::Range(_, _));
+        let arity_params = if is_list_variadic || is_range_arity {
             lir.num_params as u16
         } else {
             lir.arity.fixed_params() as u16
@@ -389,7 +390,7 @@ impl JitCompiler {
         let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_logical = std::cmp::max(
-            std::cmp::max(lir.num_regs, lir.num_locals as u32),
+            std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),
             local_var_base + num_locally_defined,
         );
         // Declare 2 * max_logical Cranelift variables (tag + payload per slot)
@@ -426,11 +427,14 @@ impl JitCompiler {
         translator.self_tag_payload = Some((self_tag, self_payload));
 
         if is_list_variadic {
-            // --- Variadic entry: load fixed params, then build cons list for rest ---
-            let fixed = lir.arity.fixed_params();
+            // --- Variadic entry: load required+optional params, then cons list for rest ---
+            let required = lir.arity.fixed_params();
+            // num_params includes the rest param slot — subtract 1 for non-rest count
+            let non_rest_params = lir.num_params.saturating_sub(1);
+            let has_opt_params = non_rest_params > required;
 
-            // Load fixed params from args pointer (16 bytes per Value)
-            for i in 0..fixed as u32 {
+            // Load required params unconditionally
+            for i in 0..required as u32 {
                 let tag_offset = (i as i32) * 16;
                 let payload_offset = (i as i32) * 16 + 8;
                 let arg_tag = builder
@@ -441,7 +445,6 @@ impl JitCompiler {
                         .ins()
                         .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
                 let base = arg_var_base + i;
-                // Wrap in LBox if this param is mutable-captured
                 if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
                     let (cell_t, cell_p) = translator.call_helper_value_unary(
                         &mut builder,
@@ -455,8 +458,68 @@ impl JitCompiler {
                 }
             }
 
-            // Build cons list from remaining args (reverse iteration)
-            let rest_var_idx = arg_var_base + fixed as u32;
+            // Load optional params conditionally (check nargs for each)
+            if has_opt_params {
+                for i in required as u32..non_rest_params as u32 {
+                    let base = arg_var_base + i;
+                    let threshold = builder.ins().iconst(I64, i as i64 + 1);
+                    let has_arg =
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedGreaterThanOrEqual, nargs, threshold);
+                    let then_block = builder.create_block();
+                    let else_block = builder.create_block();
+                    let merge_block = builder.create_block();
+                    builder.append_block_param(merge_block, I64);
+                    builder.append_block_param(merge_block, I64);
+
+                    builder
+                        .ins()
+                        .brif(has_arg, then_block, &[], else_block, &[]);
+
+                    builder.switch_to_block(then_block);
+                    builder.seal_block(then_block);
+                    let tag_offset = (i as i32) * 16;
+                    let payload_offset = (i as i32) * 16 + 8;
+                    let arg_tag =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                    let arg_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    builder.ins().jump(merge_block, &[arg_tag, arg_payload]);
+
+                    builder.switch_to_block(else_block);
+                    builder.seal_block(else_block);
+                    let nil_tag = builder
+                        .ins()
+                        .iconst(I64, crate::value::Value::NIL.tag as i64);
+                    let nil_pay = builder.ins().iconst(I64, 0);
+                    builder.ins().jump(merge_block, &[nil_tag, nil_pay]);
+
+                    builder.switch_to_block(merge_block);
+                    builder.seal_block(merge_block);
+                    let merged_tag = builder.block_params(merge_block)[0];
+                    let merged_pay = builder.block_params(merge_block)[1];
+
+                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                        let (cell_t, cell_p) = translator.call_helper_value_unary(
+                            &mut builder,
+                            translator.helpers.make_lbox,
+                            merged_tag,
+                            merged_pay,
+                        )?;
+                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                    } else {
+                        translator.def_var_pair(&mut builder, base, merged_tag, merged_pay);
+                    }
+                }
+            }
+
+            // Build cons list from remaining args after non_rest_params (reverse iteration)
+            let rest_var_idx = arg_var_base + non_rest_params as u32;
 
             let empty_tag = builder
                 .ins()
@@ -464,10 +527,8 @@ impl JitCompiler {
             let empty_pay = builder.ins().iconst(I64, 0);
             let one = builder.ins().iconst(I64, 1);
             let initial_i = builder.ins().isub(nargs, one);
-            let fixed_val = builder.ins().iconst(I64, fixed as i64);
+            let non_rest_val = builder.ins().iconst(I64, non_rest_params as i64);
 
-            // Block structure (accumulator carries tag+payload as phi params):
-            // loop_head(i, acc_tag, acc_payload): ...
             let cons_loop_head = builder.create_block();
             let cons_loop_body = builder.create_block();
             let cons_loop_exit = builder.create_block();
@@ -486,7 +547,7 @@ impl JitCompiler {
             let acc_pay_param = builder.block_params(cons_loop_head)[2];
             let cmp = builder
                 .ins()
-                .icmp(IntCC::SignedGreaterThanOrEqual, i_param, fixed_val);
+                .icmp(IntCC::SignedGreaterThanOrEqual, i_param, non_rest_val);
             builder.ins().brif(
                 cmp,
                 cons_loop_body,
@@ -504,12 +565,10 @@ impl JitCompiler {
             let i_body = builder.block_params(cons_loop_body)[0];
             let acc_tag_body = builder.block_params(cons_loop_body)[1];
             let acc_pay_body = builder.block_params(cons_loop_body)[2];
-            // Load args[i] at byte offset i*16 (tag) and i*16+8 (payload)
             let byte_offset = builder.ins().imul_imm(i_body, 16);
             let tag_addr = builder.ins().iadd(args_ptr, byte_offset);
             let arg_tag = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 0);
             let arg_payload = builder.ins().load(I64, MemFlags::trusted(), tag_addr, 8);
-            // cons(args[i], acc) -> new_acc
             let cons_ref = translator
                 .module
                 .declare_func_in_func(translator.helpers.cons, builder.func);
@@ -533,7 +592,7 @@ impl JitCompiler {
             let rest_payload = builder.block_params(cons_loop_exit)[1];
 
             // Handle lbox_params_mask for the rest param
-            let rest_param_index = fixed;
+            let rest_param_index = non_rest_params;
             if rest_param_index < 64 && (lir.lbox_params_mask & (1 << rest_param_index)) != 0 {
                 let (cell_t, cell_p) = translator.call_helper_value_unary(
                     &mut builder,
@@ -548,29 +607,93 @@ impl JitCompiler {
 
             // NOTE: cons_loop_head is NOT sealed here — sealed by seal_all_blocks() below.
         } else {
-            // --- Non-variadic entry: load all args directly (16 bytes each) ---
+            // --- Non-variadic entry: load args directly (16 bytes each) ---
+            let required = lir.arity.fixed_params() as u32;
             for i in 0..arity_params as u32 {
-                let tag_offset = (i as i32) * 16;
-                let payload_offset = (i as i32) * 16 + 8;
-                let arg_tag = builder
-                    .ins()
-                    .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
-                let arg_payload =
+                let base = arg_var_base + i;
+                let is_optional = is_range_arity && i >= required;
+
+                if is_optional {
+                    // Optional param: check nargs > i, load arg or default to nil
+                    let threshold = builder.ins().iconst(I64, i as i64 + 1);
+                    let has_arg =
+                        builder
+                            .ins()
+                            .icmp(IntCC::UnsignedGreaterThanOrEqual, nargs, threshold);
+                    let then_block = builder.create_block();
+                    let else_block = builder.create_block();
+                    let merge_block = builder.create_block();
+                    builder.append_block_param(merge_block, I64); // tag
+                    builder.append_block_param(merge_block, I64); // payload
+
                     builder
                         .ins()
-                        .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                let base = arg_var_base + i;
-                // Wrap in LBox if this param is mutable-captured
-                if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
-                    let (cell_t, cell_p) = translator.call_helper_value_unary(
-                        &mut builder,
-                        translator.helpers.make_lbox,
-                        arg_tag,
-                        arg_payload,
-                    )?;
-                    translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                        .brif(has_arg, then_block, &[], else_block, &[]);
+
+                    // then: load from args
+                    builder.switch_to_block(then_block);
+                    builder.seal_block(then_block);
+                    let tag_offset = (i as i32) * 16;
+                    let payload_offset = (i as i32) * 16 + 8;
+                    let arg_tag =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                    let arg_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    builder.ins().jump(merge_block, &[arg_tag, arg_payload]);
+
+                    // else: nil
+                    builder.switch_to_block(else_block);
+                    builder.seal_block(else_block);
+                    let nil_tag = builder
+                        .ins()
+                        .iconst(I64, crate::value::Value::NIL.tag as i64);
+                    let nil_pay = builder.ins().iconst(I64, 0);
+                    builder.ins().jump(merge_block, &[nil_tag, nil_pay]);
+
+                    // merge
+                    builder.switch_to_block(merge_block);
+                    builder.seal_block(merge_block);
+                    let merged_tag = builder.block_params(merge_block)[0];
+                    let merged_pay = builder.block_params(merge_block)[1];
+
+                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                        let (cell_t, cell_p) = translator.call_helper_value_unary(
+                            &mut builder,
+                            translator.helpers.make_lbox,
+                            merged_tag,
+                            merged_pay,
+                        )?;
+                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                    } else {
+                        translator.def_var_pair(&mut builder, base, merged_tag, merged_pay);
+                    }
                 } else {
-                    translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                    // Required param: load unconditionally
+                    let tag_offset = (i as i32) * 16;
+                    let payload_offset = (i as i32) * 16 + 8;
+                    let arg_tag =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, tag_offset);
+                    let arg_payload =
+                        builder
+                            .ins()
+                            .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
+                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                        let (cell_t, cell_p) = translator.call_helper_value_unary(
+                            &mut builder,
+                            translator.helpers.make_lbox,
+                            arg_tag,
+                            arg_payload,
+                        )?;
+                        translator.def_var_pair(&mut builder, base, cell_t, cell_p);
+                    } else {
+                        translator.def_var_pair(&mut builder, base, arg_tag, arg_payload);
+                    }
                 }
             }
         }

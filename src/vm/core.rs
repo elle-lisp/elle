@@ -48,6 +48,9 @@ pub struct VM {
     /// Added before execution, removed after. If a module is in this set
     /// when import-file is called, it's a circular dependency.
     pub loading_modules: std::collections::HashSet<String>,
+    /// Plugins already loaded (path → return value). Prevents double-loading
+    /// which would re-register primitives and leak library handles.
+    pub loaded_plugins: HashMap<String, Value>,
     pub closure_call_counts: FxHashMap<*const u8, usize>,
     pub location_map: LocationMap,
     pub tail_call_env_cache: Vec<Value>,
@@ -141,6 +144,7 @@ impl VM {
             current_fiber_value: None,  // root fiber has no Value
             ffi: FFISubsystem::new(),
             loading_modules: std::collections::HashSet::new(),
+            loaded_plugins: HashMap::new(),
             closure_call_counts: FxHashMap::default(),
             location_map: LocationMap::new(),
             tail_call_env_cache: Vec::with_capacity(256),
@@ -483,6 +487,47 @@ impl VM {
                     // re-executes from scratch — no extra value is injected.
                     if frame.push_resume_value {
                         self.fiber.stack.push(current_value);
+                    }
+
+                    if std::env::var("ELLE_DEBUG_STACK").is_ok() {
+                        let opcode = if frame.ip < frame.bytecode.len() {
+                            frame.bytecode[frame.ip]
+                        } else {
+                            255
+                        };
+                        let env_ptr = std::rc::Rc::as_ptr(&frame.env) as usize;
+                        eprintln!(
+                            "[resume] frame={} ip={} bc_len={} opcode={} saved_stack={} push_rv={} final_stack={} env_len={} env_ptr={:#x} rv_type={}",
+                            i, frame.ip, frame.bytecode.len(), opcode,
+                            frame.stack.len(), frame.push_resume_value,
+                            self.fiber.stack.len(), frame.env.len(),
+                            env_ptr, current_value.type_name(),
+                        );
+                        for (si, sv) in self.fiber.stack.iter().enumerate() {
+                            eprintln!("  stack[{}] = {} {:?}", si, sv.type_name(), sv);
+                        }
+                        // Only dump env for small envs (inner closures, not stdlib)
+                        if frame.env.len() <= 5 {
+                            for (ei, ev) in frame.env.iter().enumerate() {
+                                let detail = if ev.is_local_lbox() {
+                                    if let Some(cell_ref) = ev.as_lbox() {
+                                        let inner = *cell_ref.borrow();
+                                        let lbox_ptr = cell_ref as *const _ as usize;
+                                        format!(
+                                            "box(ptr={:#x}) -> {} {:?}",
+                                            lbox_ptr,
+                                            inner.type_name(),
+                                            inner
+                                        )
+                                    } else {
+                                        format!("{} {:?}", ev.type_name(), ev)
+                                    }
+                                } else {
+                                    format!("{} {:?}", ev.type_name(), ev)
+                                };
+                                eprintln!("  env[{}] = {}", ei, detail);
+                            }
+                        }
                     }
 
                     let exec = self.execute_bytecode_from_ip(

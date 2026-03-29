@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tools/aws/aws-gen.lisp — Fetch Smithy models and generate Elle API modules
 ##
 ## Usage:
@@ -57,8 +58,7 @@
 
 (def elle-bin (or (sys/env "ELLE_BIN") "./target/debug/elle"))
 
-(ev/run (fn []
-  (each service in services
+(each service in services
     (def model-path (concat "aws-models/" service ".json"))
     (def output-path (concat "lib/aws/" service ".lisp"))
 
@@ -97,4 +97,4 @@
             (eprintln service ": " output-path " (" new-stat:size " bytes)"
                       " " (string/trim result:stderr)))
           (eprintln service ": codegen failed\n" result:stderr)))
-      (eprintln service ": up to date")))))
+      (eprintln service ": up to date")))

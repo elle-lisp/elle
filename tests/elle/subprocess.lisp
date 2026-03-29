@@ -1,3 +1,4 @@
+(elle/epoch 6)
 # Subprocess integration tests
 
 
@@ -111,9 +112,10 @@
 
 # subprocess/system: concurrent subprocesses
 (let ((results @[]))
-  (ev/run
-    (fn [] (push results (get (subprocess/system "echo" ["one"]) :stdout)))
-    (fn [] (push results (get (subprocess/system "echo" ["two"]) :stdout))))
+  (let ([f1 (ev/spawn (fn [] (push results (get (subprocess/system "echo" ["one"]) :stdout))))]
+        [f2 (ev/spawn (fn [] (push results (get (subprocess/system "echo" ["two"]) :stdout))))])
+    (ev/join f1)
+    (ev/join f2))
   (assert (= (length results) 2) "concurrent subprocess/system: both complete")
   (assert (any? (fn [x] (= x "one\n")) results) "concurrent subprocess/system: one")
   (assert (any? (fn [x] (= x "two\n")) results) "concurrent subprocess/system: two"))

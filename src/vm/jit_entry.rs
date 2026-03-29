@@ -61,6 +61,33 @@ impl VM {
                         (*closure.template.symbol_names).clone(),
                     ) {
                         Ok(jit_code) => {
+                            if std::env::var("ELLE_DEBUG_JIT").is_ok() {
+                                // Dump first few LIR blocks to identify the function
+                                let block_info: Vec<String> = lir_func
+                                    .blocks
+                                    .iter()
+                                    .take(1)
+                                    .map(|b| {
+                                        let instrs: Vec<String> = b
+                                            .instructions
+                                            .iter()
+                                            .take(5)
+                                            .map(|i| format!("{:?}", i))
+                                            .collect();
+                                        format!("L{}:[{}]", b.label.0, instrs.join(", "))
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "[jit] compiled: name={} arity={} nargs={} num_params={} bc_len={} vararg={:?} lir={}",
+                                    closure.template.name.as_deref().unwrap_or("<anon>"),
+                                    lir_func.arity,
+                                    args.len(),
+                                    lir_func.num_params,
+                                    closure.template.bytecode.len(),
+                                    lir_func.vararg_kind,
+                                    block_info.join(" "),
+                                );
+                            }
                             let jit_code = Rc::new(jit_code);
                             self.jit_cache.insert(bytecode_ptr, jit_code.clone());
                             return Some(self.run_jit(&jit_code, closure, args, func));
@@ -128,6 +155,28 @@ impl VM {
                 .as_ref()
                 .map(|(b, _)| *b)
                 .unwrap_or(SIG_YIELD);
+
+            // Squelch enforcement: if the closure has a squelch mask and the
+            // signal matches, convert to signal-violation error.
+            let squelch_mask = closure.squelch_mask;
+            if squelch_mask != 0 && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                let squelched = sig.0 & squelch_mask;
+                if squelched != 0 {
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    };
+                    let err = crate::value::error_val(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                    );
+                    self.fiber.suspended = None;
+                    self.fiber.signal = Some((SIG_ERROR, err));
+                    self.fiber.stack.push(Value::NIL);
+                    return None;
+                }
+            }
+
             return Some(sig);
         }
 
@@ -151,6 +200,27 @@ impl VM {
                     return None;
                 } else {
                     // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
+                    // Squelch enforcement on the tail-call path
+                    let tail_squelch = tail.squelch_mask | closure.squelch_mask;
+                    if tail_squelch != 0 {
+                        let squelched = eb.0 & tail_squelch;
+                        if squelched != 0 {
+                            let squelched_str = {
+                                let registry =
+                                    crate::signals::registry::global_registry().lock().unwrap();
+                                registry
+                                    .format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                            };
+                            let err = crate::value::error_val(
+                                "signal-violation",
+                                format!("squelch: signal {} caught at boundary", squelched_str),
+                            );
+                            self.fiber.suspended = None;
+                            self.fiber.signal = Some((SIG_ERROR, err));
+                            self.fiber.stack.push(Value::NIL);
+                            return None;
+                        }
+                    }
                     // Propagate so call_inner can build the caller frame.
                     return Some(eb);
                 }

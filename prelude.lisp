@@ -269,6 +269,17 @@
 (defmacro when-let (bindings & body)
   `(if-let ,bindings (begin ,;body) nil))
 
+## when-ok - protect + destructure in one step
+## (when-ok [val (expr)] body...) => runs body with val if expr succeeds
+## Returns nil when expr errors (body is skipped).
+(defmacro when-ok (binding & body)
+  (let* [[name (first binding)]
+         [expr (first (rest binding))]]
+    `(let [[[ok? val] (protect ,expr)]]
+       (when ok?
+         (let [[,name val]]
+           ,;body)))))
+
 ## forever - infinite loop
 ## (forever body...)
 ## Expands to (while true body...)

@@ -1,3 +1,4 @@
+(elle/epoch 6)
 ## tools/aws/fetch-model.lisp — Download AWS Smithy models via HTTPS
 ##
 ## Usage:
@@ -54,8 +55,7 @@
   (eprintln "usage: elle tools/aws/fetch-model.lisp -- <service> [service...]")
   (error {:error :usage :message "missing service name"}))
 
-(ev/run (fn []
-  (each service in user-args
+(each service in user-args
     (def path (concat "/awslabs/aws-sdk-rust/main/aws-models/" service ".json"))
     (def dest (concat "aws-models/" service ".json"))
     (eprintln service ": fetching...")
@@ -66,4 +66,4 @@
         (port/write p result:body)
         (port/close p)
         (eprintln "  → " dest " (" (length result:body) " bytes)"))
-      (eprintln "  FAILED (HTTP " result:status ")")))))
+      (eprintln "  FAILED (HTTP " result:status ")")))

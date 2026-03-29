@@ -1,4 +1,3 @@
-(elle/epoch 1)
 #!/usr/bin/env elle
 ## elle-graph.lisp — extract RDF triples from Elle source files
 ##
@@ -9,6 +8,7 @@
 ##   elle elle-graph.lisp -- src.lisp lib.lisp ...
 ##   elle elle-graph.lisp                          # defaults to *.lisp in CWD
 
+(elle/epoch 5)
 (def glob-plugin (import "target/release/libelle_glob.so"))
 (def do-glob (get glob-plugin :glob))
 
@@ -141,4 +141,4 @@
                                (process-def form file))
                   nil)))))))))
 
-(print (freeze out))
+(println (freeze out))

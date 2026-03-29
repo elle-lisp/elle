@@ -135,6 +135,7 @@ The standard prelude (`prelude.lisp`) defines:
 - `case` — pattern matching (legacy)
 - `if-let` — conditional binding
 - `when-let` — conditional binding without else
+- `when-ok` — protect + bind: `(when-ok [v (expr)] body...)` runs body only on success
 - `forever` — infinite loop
 
 These are loaded by `Expander::load_prelude()` before user code expansion.
