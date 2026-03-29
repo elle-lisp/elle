@@ -122,3 +122,10 @@
 (assert (>= 3.0 3) "float >= int: 3.0 >= 3")
 (assert (>= 4 3.5) "int >= float: 4 >= 3.5")
 (assert (not (>= 2 3.5)) "int >= float: 2 >= 3.5 is false")
+
+# ── Mixed int/float sort ordering ──────────────────────────────────────
+(assert (= (sort [1 0.5 2]) [0.5 1 2]) "sort mixed int/float")
+(assert (= (sort [3 1.5 2 0.5]) [0.5 1.5 2 3]) "sort mixed int/float 4 elements")
+(assert (= (compare 1 1.5) -1) "compare int < float")
+(assert (= (compare 1.5 1) 1) "compare float > int")
+(assert (= (compare 1 1.0) 0) "compare int = float")
