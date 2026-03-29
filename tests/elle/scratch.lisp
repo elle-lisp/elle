@@ -1,1 +1,1 @@
-(ev/run (fn [] (println "should fail")))
+(println "scratch")
