@@ -2,6 +2,7 @@
 
 # Fibonacci benchmark — naive recursive, fib(30) = 832040
 # Tests raw function call overhead: ~2.7M calls
+(elle/epoch 0)
 
 (defn fib [n]
   (if (< n 2) n
