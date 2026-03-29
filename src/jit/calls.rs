@@ -216,9 +216,6 @@ pub extern "C" fn elle_jit_call(
         }
 
         let closure_squelch_mask = closure.squelch_mask;
-        if closure_squelch_mask != 0 && std::env::var("ELLE_DEBUG_JIT").is_ok() {
-            eprintln!("[jit_call] squelch_mask={:#x}", closure_squelch_mask);
-        }
 
         // JIT-to-JIT fast path: check if callee has JIT code
         let bytecode_ptr = closure.template.bytecode.as_ptr();
