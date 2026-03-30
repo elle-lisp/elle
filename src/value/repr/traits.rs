@@ -186,8 +186,15 @@ impl Hash for Value {
         use crate::value::heap::{deref, HeapObject};
 
         if !self.is_heap() {
-            // Immediate values: tag + payload encode the type and value.
-            // Same tag+payload ↔ same value, and PartialEq agrees.
+            // Numeric coercion: (= 1 1.0) is true, so they must hash
+            // identically.  Canonicalize all numbers to their f64 bits.
+            if let Some(f) = self.as_number() {
+                // Use a fixed discriminator so int 1 and float 1.0 match.
+                0xFFu8.hash(state);
+                f.to_bits().hash(state);
+                return;
+            }
+            // Non-numeric immediates: tag + payload is unique and matches PartialEq.
             self.tag.hash(state);
             self.payload.hash(state);
             return;
@@ -282,49 +289,47 @@ fn type_rank(v: &Value) -> u8 {
         0
     } else if v.is_bool() {
         1
-    } else if v.is_int() {
+    } else if v.is_int() || v.is_float() {
         2
-    } else if v.is_float() {
-        3
     } else if v.is_symbol() {
-        4
+        3
     } else if v.is_keyword() {
-        5
+        4
     } else if v.is_pointer() {
-        6
+        5
     } else if v.is_empty_list() {
-        7
+        6
     } else if v.is_heap() {
         match unsafe { deref(*v).tag() } {
-            HeapTag::LString => 8,
-            HeapTag::Cons => 9,
-            HeapTag::LArray => 10,
-            HeapTag::LArrayMut => 11,
-            HeapTag::LBytes => 12,
-            HeapTag::LStringMut => 13,
-            HeapTag::LBytesMut => 14,
-            HeapTag::LStruct => 15,
-            HeapTag::LStructMut => 16,
-            HeapTag::Closure => 17,
-            HeapTag::LBox => 18,
-            HeapTag::NativeFn => 19,
-            HeapTag::LibHandle => 20,
-            HeapTag::ThreadHandle => 21,
-            HeapTag::Fiber => 22,
-            HeapTag::Syntax => 23,
-            HeapTag::FFISignature => 25,
-            HeapTag::FFIType => 26,
-            HeapTag::ManagedPointer => 27,
-            HeapTag::External => 28,
-            HeapTag::Parameter => 29,
-            HeapTag::LSet => 30,
-            HeapTag::LSetMut => 31,
-            // Float as heap object is a legacy variant; treat same rank as float.
-            HeapTag::Float => 3,
+            HeapTag::LString => 7,
+            HeapTag::Cons => 8,
+            HeapTag::LArray => 9,
+            HeapTag::LArrayMut => 10,
+            HeapTag::LBytes => 11,
+            HeapTag::LStringMut => 12,
+            HeapTag::LBytesMut => 13,
+            HeapTag::LStruct => 14,
+            HeapTag::LStructMut => 15,
+            HeapTag::Closure => 16,
+            HeapTag::LBox => 17,
+            HeapTag::NativeFn => 18,
+            HeapTag::LibHandle => 19,
+            HeapTag::ThreadHandle => 20,
+            HeapTag::Fiber => 21,
+            HeapTag::Syntax => 22,
+            HeapTag::FFISignature => 23,
+            HeapTag::FFIType => 24,
+            HeapTag::ManagedPointer => 25,
+            HeapTag::External => 26,
+            HeapTag::Parameter => 27,
+            HeapTag::LSet => 28,
+            HeapTag::LSetMut => 29,
+            // Float as heap object is a legacy variant; treat same rank as number.
+            HeapTag::Float => 2,
         }
     } else {
         // Unknown — should not happen
-        32
+        30
     }
 }
 
@@ -343,42 +348,40 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
             a_bool.cmp(&b_bool)
         }
 
-        // Int — numeric
+        // Number (int or float) — compare as f64, use total_cmp for NaN ordering
         2 => {
-            let a_int = a.as_int().unwrap();
-            let b_int = b.as_int().unwrap();
-            a_int.cmp(&b_int)
-        }
-
-        // Float — f64::total_cmp
-        3 => {
-            let a_f = a.as_float().unwrap();
-            let b_f = b.as_float().unwrap();
-            a_f.total_cmp(&b_f)
+            // Fast path: both ints
+            if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
+                return ai.cmp(&bi);
+            }
+            // Mixed or both floats: coerce to f64
+            let af = a.as_number().unwrap();
+            let bf = b.as_number().unwrap();
+            af.total_cmp(&bf)
         }
 
         // Symbol — by ID
-        4 => {
+        3 => {
             let a_id = a.as_symbol().unwrap();
             let b_id = b.as_symbol().unwrap();
             a_id.cmp(&b_id)
         }
 
         // Keyword — lexicographic by name
-        5 => {
+        4 => {
             let a_name = a.as_keyword_name().unwrap();
             let b_name = b.as_keyword_name().unwrap();
             a_name.cmp(&b_name)
         }
 
         // C pointer — by address (payload)
-        6 => a.payload.cmp(&b.payload),
+        5 => a.payload.cmp(&b.payload),
 
         // Empty list — singleton
-        7 => Ordering::Equal,
+        6 => Ordering::Equal,
 
         // String (heap) — lexicographic by content
-        8 => a.compare_str(b).unwrap_or(Ordering::Equal),
+        7 => a.compare_str(b).unwrap_or(Ordering::Equal),
 
         // Heap types (ranks 9–31) — deref and compare
         _ => unsafe { cmp_heap(a, b) },

@@ -30,21 +30,16 @@
 (def saved-stdout (*stdout*))
 (def saved-stderr (*stderr*))
 
-(def ox (import "target/release/libelle_oxigraph.so"))
-(def syn (import "target/release/libelle_syn.so"))
-(def glob-plugin (import "target/release/libelle_glob.so"))
-(def portrait-lib ((import "lib/portrait.lisp")))
-(def rdf ((import "lib/rdf.lisp")))
-(def rust-rdf ((import "tools/rust-rdf-lib.lisp") syn))
+(def ox (import "oxigraph"))
+(def syn (import "syn"))
+(def glob-plugin (import "glob"))
+(def portrait-lib ((import "lib/portrait")))
+(def rdf ((import "lib/rdf")))
+(def rust-rdf ((import "tools/rust-rdf-lib") syn))
 
-# ── Watch plugin (optional) ──────────────────────────────────────────────
+# ── Watch library ───────────────────────────────────────────────────────
 
-(def [watch-ok? watch-plugin] (protect (import "target/release/libelle_watch.so")))
-(def [watch-ok? watch-lib]
-  (if watch-ok?
-    (let [[[ok? lib] (protect ((import "lib/watch.lisp") watch-plugin))]]
-      [ok? lib])
-    [false nil]))
+(def watch ((import "lib/watch")))
 
 # ── Store initialization ─────────────────────────────────────────────────
 
@@ -754,35 +749,31 @@
 (eprintln "  store: " store-path)
 (eprintln "  rust: " rust-file-count " files loaded")
 
-# Watcher fiber (optional)
-(when watch-ok?
-  (eprintln "  watch: enabled")
-  (ev/spawn (fn []
-    (var watcher (watch-lib:lisp-files "." :debounce 300))
-    (watch-lib:for-each watcher (fn [event]
-      (each path in (get event :paths)
-        (when (and (string/ends-with? path ".lisp")
-                   (contains? |:create :modify| (get event :kind)))
-          (let [[[ok? err] (protect
-                  (begin
-                    (var old-analysis (get analysis-cache path))
-                    (var old-sigs (when (not (nil? old-analysis))
-                                    (snapshot-signals old-analysis)))
-                    (invalidate-cache path)
-                    (var new-analysis (get-or-analyze path))
-                    (var new-sigs (snapshot-signals new-analysis))
-                    (when (not (nil? old-sigs))
-                      (var diff (diff-signals old-sigs new-sigs))
-                      (when (or (not (empty? (get diff :added)))
-                                (not (empty? (get diff :removed)))
-                                (not (empty? (get diff :changed))))
-                        (send-response (build-notification path diff))))
-                    (eprintln "  re-analyzed: " path)))]]
-            (unless ok?
-              (eprintln "  watch error for " path ": " (string err)))))))))))
-
-(unless watch-ok?
-  (eprintln "  watch: disabled (plugin not available)"))
+# Watcher fiber
+(eprintln "  watch: enabled")
+(ev/spawn (fn []
+  (var watcher (watch:start "." :filter ".lisp"))
+  (watch:each watcher (fn [event]
+    (let [[path (get event :path)]]
+      (when (and (string/ends-with? path ".lisp")
+                 (contains? |:create :modify| (get event :kind)))
+        (let [[[ok? err] (protect
+                (begin
+                  (var old-analysis (get analysis-cache path))
+                  (var old-sigs (when (not (nil? old-analysis))
+                                  (snapshot-signals old-analysis)))
+                  (invalidate-cache path)
+                  (var new-analysis (get-or-analyze path))
+                  (var new-sigs (snapshot-signals new-analysis))
+                  (when (not (nil? old-sigs))
+                    (var diff (diff-signals old-sigs new-sigs))
+                    (when (or (not (empty? (get diff :added)))
+                              (not (empty? (get diff :removed)))
+                              (not (empty? (get diff :changed))))
+                      (send-response (build-notification path diff))))
+                  (eprintln "  re-analyzed: " path)))]]
+          (unless ok?
+            (eprintln "  watch error for " path ": " (string err))))))))))
 
 (forever
   (let [[line (port/read-line (*stdin*))]]

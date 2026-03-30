@@ -7,10 +7,10 @@
 ## Run:  elle tools/load-all.lisp
 (elle/epoch 5)
 
-(def glob-plugin (import "target/release/libelle_glob.so"))
+(def glob-plugin (import "glob"))
 (def do-glob (get glob-plugin :glob))
 
-(def syn-plugin (import "target/release/libelle_syn.so"))
+(def syn-plugin (import "syn"))
 (def syn-parse-file     (get syn-plugin :parse-file))
 (def syn-items          (get syn-plugin :items))
 (def syn-item-kind      (get syn-plugin :item-kind))
@@ -24,7 +24,7 @@
 (def syn-attributes     (get syn-plugin :attributes))
 (def syn-to-string      (get syn-plugin :to-string))
 
-(def ox (import "target/release/libelle_oxigraph.so"))
+(def ox (import "oxigraph"))
 
 # ── Store ────────────────────────────────────────────────────────────
 

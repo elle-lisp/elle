@@ -192,9 +192,27 @@ jobs:
       - name: Run smoke tests
         run: make smoke
 
+  macos:
+    name: macOS Build & Smoke
+    needs: changes
+    runs-on: macos-latest
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: macos
+      - name: Install GNU parallel and coreutils
+        run: brew install parallel coreutils
+      - name: Build release binary
+        run: cargo build --release -p elle
+      - name: Run smoke tests
+        run: make smoke
+
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests, aarch64]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests, aarch64, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -218,6 +236,9 @@ jobs:
         run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'
+        run: exit 1
+      - name: Check macOS
+        if: needs.macos.result == 'failure'
         run: exit 1
       - name: Check changes detection
         if: needs.changes.result == 'failure'

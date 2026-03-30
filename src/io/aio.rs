@@ -80,6 +80,9 @@ impl AsyncBackend {
 
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
+        if std::env::var("ELLE_NO_URING").is_ok() {
+            return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
+        }
         match io_uring::IoUring::new(256) {
             Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
             Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
@@ -112,6 +115,11 @@ impl AsyncBackend {
         // Resolve is portless — always goes to the thread pool.
         if let IoOp::Resolve { ref hostname } = request.op {
             return self.submit_resolve(hostname);
+        }
+
+        // WatchNext is portless — the FsWatcher External is in request.port.
+        if let IoOp::WatchNext = request.op {
+            return self.submit_watch_next(&request.port);
         }
 
         // Open is portless — creates a new port rather than operating on one.
@@ -160,9 +168,11 @@ impl AsyncBackend {
                             let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
                         }
                         PlatformBackend::ThreadPool(_) => {
-                            // Thread pool: remove pending entry. The blocking
-                            // syscall will get EBADF when the fd closes.
-                            inner.pending.remove(&op_id);
+                            // Thread pool: shutdown the fd to unblock any thread
+                            // stuck in accept/read/recv. Do NOT remove the pending
+                            // entry — let the thread's error completion flow back
+                            // so the fiber resumes and can exit cleanly.
+                            unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
                         }
                     }
                 }
@@ -659,6 +669,48 @@ impl AsyncBackend {
         inner.pending.insert(
             id,
             PendingOp::Resolve {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Submit a watch-next operation. Reads from the inotify fd.
+    fn submit_watch_next(&self, watcher_val: &Value) -> Result<u64, String> {
+        use crate::io::watch::FsWatcher;
+
+        let watcher = watcher_val
+            .as_external::<FsWatcher>()
+            .ok_or("watch-next: expected a watcher handle")?;
+        let fd = watcher.raw_fd()?;
+
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(4096);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ref mut buffer_pool,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                network_pool.submit(id, PoolOp::WatchRead { fd })?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::WatchNext {
+                watcher: *watcher_val,
                 buffer_handle: buf_handle,
             },
         );
@@ -1328,6 +1380,7 @@ impl AsyncBackendInner {
             | IoOp::Tell
             | IoOp::Task(_)
             | IoOp::Resolve { .. }
+            | IoOp::WatchNext
             | IoOp::Close => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;

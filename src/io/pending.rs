@@ -59,6 +59,11 @@ pub(crate) enum PendingOp {
     Task { buffer_handle: BufferHandle },
     /// DNS resolution via getaddrinfo(3). Portless.
     Resolve { buffer_handle: BufferHandle },
+    /// Waiting for filesystem watch events (inotify/kqueue).
+    WatchNext {
+        watcher: Value,
+        buffer_handle: BufferHandle,
+    },
 }
 
 impl PendingOp {
@@ -71,6 +76,7 @@ impl PendingOp {
             PendingOp::Open { buffer_handle, .. } => *buffer_handle,
             PendingOp::Task { buffer_handle, .. } => *buffer_handle,
             PendingOp::Resolve { buffer_handle, .. } => *buffer_handle,
+            PendingOp::WatchNext { buffer_handle, .. } => *buffer_handle,
         }
     }
 
@@ -83,6 +89,7 @@ impl PendingOp {
             PendingOp::Open { buffer_handle, .. } => buffer_handle,
             PendingOp::Task { buffer_handle, .. } => buffer_handle,
             PendingOp::Resolve { buffer_handle, .. } => buffer_handle,
+            PendingOp::WatchNext { buffer_handle, .. } => buffer_handle,
         }
     }
 }

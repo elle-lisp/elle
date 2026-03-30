@@ -703,6 +703,10 @@ pub(super) fn drain_cqes(
                     }
                     _ => Vec::new(),
                 },
+                PendingOp::WatchNext { .. } if result_code > 0 => {
+                    let buf = buffer_pool.get_mut(buf_handle);
+                    buf[..result_code as usize].to_vec()
+                }
                 _ => Vec::new(),
             };
 
@@ -905,5 +909,32 @@ pub(super) fn wait_uring(
             drain_cqes(ring, pending, buffer_pool, fd_states, completions);
         }
     }
+    Ok(())
+}
+
+/// Submit a read on an inotify fd to wait for filesystem events.
+pub(super) fn submit_uring_watch_next(
+    ring: &mut io_uring::IoUring,
+    id: u64,
+    fd: RawFd,
+    buffer_pool: &mut BufferPool,
+    buf_handle: BufferHandle,
+) -> Result<(), String> {
+    use io_uring::opcode;
+    use io_uring::types::Fd;
+
+    let buf = buffer_pool.get_mut(buf_handle);
+    buf.resize(4096, 0);
+    let sqe = opcode::Read::new(Fd(fd), buf.as_mut_ptr(), buf.len() as u32)
+        .build()
+        .user_data(id);
+
+    unsafe {
+        ring.submission()
+            .push(&sqe)
+            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+    }
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
     Ok(())
 }

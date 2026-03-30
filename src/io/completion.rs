@@ -9,7 +9,7 @@ use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
 use crate::value::{error_val, Value};
 use std::collections::HashMap;
-use std::os::unix::io::{FromRawFd, OwnedFd};
+use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
 /// Convert an errno to a human-readable message via strerror.
 fn errno_message(errno: i32) -> String {
@@ -52,9 +52,12 @@ pub(super) fn process_raw_completion(
             }
 
             let exit_code: i32 = if siginfo.is_null() {
-                // Thread pool path: exit code comes directly as the raw result integer
-                // (from waitpid in PoolOp::ProcessWait dispatch).
-                result_code
+                // Thread pool path: exit code is encoded as 4-byte LE int in data.
+                if data.len() >= 4 {
+                    i32::from_le_bytes(data[..4].try_into().unwrap())
+                } else {
+                    result_code
+                }
             } else {
                 // io_uring path: exit status is in siginfo_t filled by the kernel.
                 // Reclaim the siginfo_t allocation.
@@ -149,7 +152,8 @@ pub(super) fn process_raw_completion(
             // Connect: fd and address come from PendingOp (set at submission time).
             // io_uring: connect_fd = pre-created socket, result_code = 0.
             // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
-            let fd = connect_fd.expect("Connect completion without connect_fd");
+            // io_uring: fd is pre-created in connect_fd. Thread pool: fd is result_code.
+            let fd = connect_fd.unwrap_or(result_code as RawFd);
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             let peer_addr = match addr {
                 ConnectAddr::Tcp { addr: host, port } => {
@@ -178,6 +182,48 @@ pub(super) fn process_raw_completion(
                     id,
                     result: Ok(Value::bytes(data)),
                 }
+            }
+        }
+        PendingOp::WatchNext { watcher, .. } => {
+            if result_code <= 0 {
+                let msg = if result_code == 0 {
+                    "watcher closed".to_string()
+                } else {
+                    format!(
+                        "watch read error: {}",
+                        std::io::Error::from_raw_os_error(-result_code)
+                    )
+                };
+                return Completion {
+                    id,
+                    result: Err(error_val("io-error", msg)),
+                };
+            }
+            // Parse inotify events from raw bytes
+            let events = if let Some(w) = watcher.as_external::<crate::io::watch::FsWatcher>() {
+                w.parse_events(&data[..result_code as usize])
+            } else {
+                Vec::new()
+            };
+            // Convert to Elle array of structs
+            let event_values: Vec<Value> = events
+                .iter()
+                .map(|ev| {
+                    let mut fields = std::collections::BTreeMap::new();
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("kind".into()),
+                        Value::keyword(ev.kind.as_keyword()),
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("path".into()),
+                        Value::string(ev.path.to_string_lossy().as_ref()),
+                    );
+                    Value::struct_from(fields)
+                })
+                .collect();
+            Completion {
+                id,
+                result: Ok(Value::array(event_values)),
             }
         }
         PendingOp::Resolve { .. } => {
@@ -387,9 +433,10 @@ pub(super) fn process_raw_completion(
                     unreachable!("Task should use PendingOp::Task variant")
                 }
                 IoOp::Resolve { .. } => {
-                    // Resolve is portless and dispatched to the thread pool — never
-                    // produces a PendingOp::Port entry.
                     unreachable!("Resolve is portless; cannot reach PendingOp::Port")
+                }
+                IoOp::WatchNext => {
+                    unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
                 }
                 // Close completion: port already closed in submit. Return nil.
                 IoOp::Close => Value::NIL,

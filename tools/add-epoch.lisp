@@ -1,15 +1,15 @@
 #!/usr/bin/env elle
 ## Add (elle N) declaration to all .lisp files that don't already have one.
-## Usage: elle scripts/add-epoch.lisp -- <epoch>
+## Usage: elle tools/add-epoch.lisp -- <epoch>
 
 (def args (drop 1 (sys/args)))
 (when (empty? args)
-  (print "Usage: elle scripts/add-epoch.lisp -- <epoch>")
+  (print "Usage: elle tools/add-epoch.lisp -- <epoch>")
   (exit 1))
 
 (def epoch (integer (first args)))
 
-(def glob-plugin (import "target/release/libelle_glob.so"))
+(def glob-plugin (import "glob"))
 (def do-glob (get glob-plugin :glob))
 
 (def files (append

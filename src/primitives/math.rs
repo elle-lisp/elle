@@ -197,15 +197,14 @@ pub(crate) fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    match (args[0].as_int(), args[1].as_int()) {
-        (Some(a), Some(b)) => {
-            if b < 0 {
-                (SIG_OK, Value::float((a as f64).powf(b as f64)))
-            } else {
-                (SIG_OK, Value::int(a.pow(b as u32)))
-            }
+    if let (Some(a), Some(b)) = (args[0].as_int(), args[1].as_int()) {
+        if b < 0 {
+            (SIG_OK, Value::float((a as f64).powf(b as f64)))
+        } else {
+            (SIG_OK, Value::int(a.pow(b as u32)))
         }
-        _ => match (args[0].as_float(), args[1].as_float()) {
+    } else {
+        match (args[0].as_number(), args[1].as_number()) {
             (Some(a), Some(b)) => (SIG_OK, Value::float(a.powf(b))),
             _ => (
                 SIG_ERROR,
@@ -214,7 +213,7 @@ pub(crate) fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
                     format!("pow: expected number, got {}", args[0].type_name()),
                 ),
             ),
-        },
+        }
     }
 }
 
@@ -636,6 +635,18 @@ pub(crate) fn prim_e(_args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::float(E))
 }
 
+pub(crate) fn prim_inf(_args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::float(f64::INFINITY))
+}
+
+pub(crate) fn prim_neg_inf(_args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::float(f64::NEG_INFINITY))
+}
+
+pub(crate) fn prim_nan(_args: &[Value]) -> (SignalBits, Value) {
+    (SIG_OK, Value::float(f64::NAN))
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "math/sqrt",
@@ -900,5 +911,38 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "math",
         example: "(math/exp2 3)",
         aliases: &["exp2"],
+    },
+    PrimitiveDef {
+        name: "math/inf",
+        func: prim_inf,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Positive infinity (IEEE 754).",
+        params: &[],
+        category: "math",
+        example: "(math/inf)",
+        aliases: &["+inf", "inf"],
+    },
+    PrimitiveDef {
+        name: "math/-inf",
+        func: prim_neg_inf,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Negative infinity (IEEE 754).",
+        params: &[],
+        category: "math",
+        example: "(math/-inf)",
+        aliases: &["-inf"],
+    },
+    PrimitiveDef {
+        name: "math/nan",
+        func: prim_nan,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Not-a-number (IEEE 754 NaN).",
+        params: &[],
+        category: "math",
+        example: "(math/nan)",
+        aliases: &["nan"],
     },
 ];

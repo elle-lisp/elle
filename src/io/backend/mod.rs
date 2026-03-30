@@ -198,7 +198,8 @@ impl SyncBackend {
                 | IoOp::ProcessWait
                 | IoOp::Open { .. }
                 | IoOp::Task(_)
-                | IoOp::Resolve { .. } => unreachable!(), // handled above
+                | IoOp::Resolve { .. }
+                | IoOp::WatchNext => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),
@@ -769,7 +770,7 @@ impl SyncBackend {
             }
         };
         let fd =
-            unsafe { libc::openat(libc::AT_FDCWD, c_path.as_ptr(), flags, mode as libc::mode_t) };
+            unsafe { libc::openat(libc::AT_FDCWD, c_path.as_ptr(), flags, mode as libc::c_uint) };
         if fd < 0 {
             let err = std::io::Error::last_os_error();
             return (

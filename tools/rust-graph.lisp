@@ -9,10 +9,10 @@
 ##   elle rust-graph.lisp -- src/main.rs lib.rs ...
 ##   elle rust-graph.lisp                          # defaults to **/*.rs in CWD
 
-(def glob-plugin (import "target/release/libelle_glob.so"))
+(def glob-plugin (import "glob"))
 (def do-glob (get glob-plugin :glob))
 
-(def syn-plugin (import "target/release/libelle_syn.so"))
+(def syn-plugin (import "syn"))
 (def parse-file      (get syn-plugin :parse-file))
 (def items           (get syn-plugin :items))
 (def item-kind       (get syn-plugin :item-kind))

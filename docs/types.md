@@ -106,19 +106,28 @@ Full-range i64 integer. Range: -2^63 to 2^63-1.
 (number? x)     # predicate (true for int or float)
 ```
 
-No automatic coercion to float. Overflow panics.
+Mixed arithmetic promotes to float: `(+ 1 0.5)` ⟹ `1.5`.
+Integers and floats compare naturally: `(< 3 3.5)` ⟹ `true`.
+Equal values hash identically: `(= (hash 1) (hash 1.0))` ⟹ `true`.
+Overflow panics.
 
 #### float
 
 IEEE 754 double-precision. All float values (including NaN and Infinity) are
-stored as immediates in the tagged-union representation.
+stored as immediates in the tagged-union representation. Float division by
+zero follows IEEE 754: `(/ 1.0 0.0)` ⟹ `inf`.
 
 ```janet
 3.14            # literal
 1e10            # scientific notation (= 10000000000.0)
 1.5e-3          # negative exponent (= 0.0015)
 1_000.5_5       # underscores for readability
+(+inf)          # positive infinity
+(-inf)          # negative infinity
+(nan)           # not-a-number
 (number? x)     # predicate (true for int or float)
+(inf? x)        # true for ±infinity
+(nan? x)        # true for NaN
 ```
 
 #### symbol

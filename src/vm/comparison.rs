@@ -32,7 +32,7 @@ pub(crate) fn handle_lt(vm: &mut VM) {
                 Value::FALSE
             }
         }
-        _ => match (a.as_float(), b.as_float()) {
+        _ => match (a.as_number(), b.as_number()) {
             (Some(x), Some(y)) => {
                 if x < y {
                     Value::TRUE
@@ -79,7 +79,7 @@ pub(crate) fn handle_gt(vm: &mut VM) {
                 Value::FALSE
             }
         }
-        _ => match (a.as_float(), b.as_float()) {
+        _ => match (a.as_number(), b.as_number()) {
             (Some(x), Some(y)) => {
                 if x > y {
                     Value::TRUE
@@ -126,7 +126,7 @@ pub(crate) fn handle_le(vm: &mut VM) {
                 Value::FALSE
             }
         }
-        _ => match (a.as_float(), b.as_float()) {
+        _ => match (a.as_number(), b.as_number()) {
             (Some(x), Some(y)) => {
                 if x <= y {
                     Value::TRUE
@@ -173,7 +173,7 @@ pub(crate) fn handle_ge(vm: &mut VM) {
                 Value::FALSE
             }
         }
-        _ => match (a.as_float(), b.as_float()) {
+        _ => match (a.as_number(), b.as_number()) {
             (Some(x), Some(y)) => {
                 if x >= y {
                     Value::TRUE

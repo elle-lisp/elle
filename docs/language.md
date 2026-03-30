@@ -69,6 +69,18 @@ Elle supports both integers and floating-point numbers:
 1_000_000      # Underscores for readability
 ```
 
+Integers and floats interoperate naturally. Mixed arithmetic promotes to
+float, comparisons and sorting work across numeric types, and equal values
+hash identically:
+
+```janet
+(+ 1 0.5)       ⟹ 1.5
+(< 3 3.5)       ⟹ true
+(= 1 1.0)       ⟹ true
+(sort [2 0.5 1]) ⟹ [0.5 1 2]
+(min 3 2.5)      ⟹ 2.5
+```
+
 Use `number?` to test for numeric values. Use `type-of` to get the type name:
 
 ```janet
@@ -1130,8 +1142,13 @@ Structs are immutable:
 (floor 3.7)        ⟹ 3
 (ceil 3.2)         ⟹ 4
 (round 3.5)        ⟹ 4
-pi                 ⟹ 3.14159...
-e                  ⟹ 2.71828...
+(pi)               ⟹ 3.14159...
+(e)                ⟹ 2.71828...
+(+inf)             ⟹ inf
+(-inf)             ⟹ -inf
+(nan)              ⟹ NaN
+(inf? (+inf))      ⟹ true
+(nan? (nan))       ⟹ true
 ```
 
 ### String Operations

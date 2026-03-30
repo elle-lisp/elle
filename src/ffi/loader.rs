@@ -9,7 +9,7 @@ pub(crate) struct LibraryHandle {
     /// Path to the library file
     pub path: String,
     /// The underlying native library (Linux only)
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     pub native: libloading::Library,
 }
 
@@ -23,7 +23,7 @@ impl LibraryHandle {
     /// * `Ok(pointer)` - Raw function pointer
     /// * `Err(message)` - If symbol not found or other error
     pub fn get_symbol(&self, symbol_name: &str) -> Result<*const std::ffi::c_void, String> {
-        #[cfg(target_os = "linux")]
+        #[cfg(unix)]
         {
             unsafe {
                 self.native
@@ -35,7 +35,7 @@ impl LibraryHandle {
             }
         }
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(unix))]
         {
             Err(format!(
                 "Dynamic library loading not supported on this platform (attempted to load {})",
@@ -61,7 +61,7 @@ impl LibraryHandle {
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
 pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         // Only check existence for absolute/relative paths.
         // Bare names like "libm.so.6" are resolved by the dynamic linker
@@ -82,7 +82,7 @@ pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
         }
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     {
         Err(format!(
             "Dynamic library loading only supported on Linux (attempted to load {})",
@@ -107,7 +107,7 @@ pub(crate) fn load_library(path: &str) -> Result<LibraryHandle, String> {
 /// let strlen_ptr = lib.get_symbol("strlen")?;
 /// ```
 pub(crate) fn load_self() -> Result<LibraryHandle, String> {
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     {
         use libloading::os::unix::Library as UnixLibrary;
         let unix_lib = UnixLibrary::this();
@@ -118,7 +118,7 @@ pub(crate) fn load_self() -> Result<LibraryHandle, String> {
         })
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     {
         Err("Self-process loading not supported on this platform".to_string())
     }
@@ -129,7 +129,7 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_load_libc() {
         // Load system libc
         let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
@@ -149,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_get_symbol_strlen() {
         let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
             .or_else(|_| load_library("/lib64/libc.so.6"))
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_get_symbol_missing() {
         let lib = load_library("/lib/x86_64-linux-gnu/libc.so.6")
             .or_else(|_| load_library("/lib64/libc.so.6"))
@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     fn test_load_self() {
         let lib = load_self();
         assert!(lib.is_ok());

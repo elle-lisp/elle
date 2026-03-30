@@ -108,3 +108,24 @@
 # Float comparison
 (assert (< 1.5 2.5) "1.5 < 2.5")
 (assert (> 2.5 1.5) "2.5 > 1.5")
+
+# ── Mixed int/float comparison ──────────────────────────────────────────
+(assert (< 3 3.3) "int < float: 3 < 3.3")
+(assert (not (< 3 2.9)) "int < float: 3 < 2.9 is false")
+(assert (< 2.9 3) "float < int: 2.9 < 3")
+(assert (> 3.3 3) "float > int: 3.3 > 3")
+(assert (> 3 2.9) "int > float: 3 > 2.9")
+(assert (not (> 2.9 3)) "float > int: 2.9 > 3 is false")
+(assert (<= 3 3.0) "int <= float: 3 <= 3.0")
+(assert (<= 2 3.5) "int <= float: 2 <= 3.5")
+(assert (not (<= 4 3.5)) "int <= float: 4 <= 3.5 is false")
+(assert (>= 3.0 3) "float >= int: 3.0 >= 3")
+(assert (>= 4 3.5) "int >= float: 4 >= 3.5")
+(assert (not (>= 2 3.5)) "int >= float: 2 >= 3.5 is false")
+
+# ── Mixed int/float sort ordering ──────────────────────────────────────
+(assert (= (sort [1 0.5 2]) [0.5 1 2]) "sort mixed int/float")
+(assert (= (sort [3 1.5 2 0.5]) [0.5 1.5 2 3]) "sort mixed int/float 4 elements")
+(assert (= (compare 1 1.5) -1) "compare int < float")
+(assert (= (compare 1.5 1) 1) "compare float > int")
+(assert (= (compare 1 1.0) 0) "compare int = float")

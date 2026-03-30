@@ -577,7 +577,8 @@ Note: `map` and `filter` always return lists, even when given arrays.
 ```lisp
 (+ 1 2 3)   (- 10 3)   (* 2 3 4)
 (/ 10 2)               # integer division truncates
-(/ 7.0 2)              # => 3.5
+(/ 7.0 2)              # => 3.5  (mixed: promotes to float)
+(/ 1.0 0.0)            # => inf  (IEEE 754; integer /0 errors)
 (mod 10 3)             # => 1   (flooring: sign follows divisor)
 (rem 10 3)             # => 1   (truncating: sign follows dividend)
 (mod -10 3)            # => 2
@@ -594,7 +595,8 @@ Note: `map` and `filter` always return lists, even when given arrays.
 (math/exp x)     (math/exp2 x)
 (math/log x)     (math/log2 x)    (math/log10 x)
 (math/pi)        (math/e)
-# All math/ functions have bare aliases: sqrt, sin, log2, etc.
+(math/inf)       (math/-inf)      (math/nan)
+# All math/ functions have bare aliases: sqrt, sin, log2, +inf, -inf, nan, etc.
 
 (bit/and 12 10)  (bit/or 12 10)  (bit/xor 12 10)
 (bit/not 0)      (bit/shl 1 3)   (bit/shr 16 2)
@@ -604,11 +606,14 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 ```lisp
 (= 1 1)         # => true  (structural equality)
+(= 1 1.0)       # => true  (numeric coercion: int and float compare naturally)
 (= [1 2] @[1 2]) # => true  (cross-mutability: same contents = equal)
 (not= 1 2)       # => true  (inequality)
 (< 1 2)         (> 2 1)
+(< 3 3.5)       # => true  (mixed int/float)
 (<= 1 1)        (>= 2 1)
 (hash :foo)      # => integer  (deterministic hash of any value)
+(= (hash 1) (hash 1.0))  # => true  (equal values hash identically)
 ```
 
 ### Logical Operators

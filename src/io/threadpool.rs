@@ -63,6 +63,10 @@ pub(super) enum PoolOp {
     ReadLine {
         fd: RawFd,
     },
+    /// Blocking read on an inotify/kqueue fd for filesystem watch events.
+    WatchRead {
+        fd: RawFd,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -361,20 +365,21 @@ impl ThreadPoolBackend {
                         let code = -std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
                         (code, vec![])
                     } else {
-                        let code = if libc::WIFEXITED(status) {
+                        let exit_code: i32 = if libc::WIFEXITED(status) {
                             libc::WEXITSTATUS(status)
                         } else if libc::WIFSIGNALED(status) {
-                            // killed by signal — return negative signal number by convention
                             -libc::WTERMSIG(status)
                         } else {
                             -1
                         };
-                        (code, vec![])
+                        // Encode exit code in data so result_code=0 (success)
+                        // avoids collision with negative errno in completion handler.
+                        (0, exit_code.to_le_bytes().to_vec())
                     }
                 }
                 PoolOp::Open { path, flags, mode } => {
                     let fd = unsafe {
-                        libc::openat(libc::AT_FDCWD, path.as_ptr(), flags, mode as libc::mode_t)
+                        libc::openat(libc::AT_FDCWD, path.as_ptr(), flags, mode as libc::c_uint)
                     };
                     if fd < 0 {
                         (
@@ -401,6 +406,7 @@ impl ThreadPoolBackend {
                         Err(e) => (-1, format!("getaddrinfo: {}", e).into_bytes()),
                     }
                 }
+                PoolOp::WatchRead { fd } => watch_read_blocking(fd),
             };
             let _ = sender.send(PoolCompletion {
                 id,
@@ -602,6 +608,51 @@ impl StdinThread {
         }
         results
     }
+}
+
+/// Blocking read on an inotify fd (Linux).
+#[cfg(target_os = "linux")]
+fn watch_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
+    let mut buf = vec![0u8; 4096];
+    let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+    if ret < 0 {
+        (
+            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+            Vec::new(),
+        )
+    } else {
+        buf.truncate(ret as usize);
+        (ret as i32, buf)
+    }
+}
+
+/// Blocking kevent() on a kqueue fd (macOS). Encodes results as
+/// (fd:i32, fflags:u32) LE pairs for FsWatcher::parse_events().
+#[cfg(target_os = "macos")]
+fn watch_read_blocking(kq: RawFd) -> (i32, Vec<u8>) {
+    let mut eventlist: [libc::kevent; 32] = unsafe { std::mem::zeroed() };
+    let n = unsafe {
+        libc::kevent(
+            kq,
+            std::ptr::null(),
+            0,
+            eventlist.as_mut_ptr(),
+            eventlist.len() as i32,
+            std::ptr::null(),
+        )
+    };
+    if n < 0 {
+        return (
+            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+            Vec::new(),
+        );
+    }
+    let mut data = Vec::with_capacity(n as usize * 8);
+    for event in &eventlist[..n as usize] {
+        data.extend_from_slice(&(event.ident as i32).to_le_bytes());
+        data.extend_from_slice(&event.fflags.to_le_bytes());
+    }
+    (data.len() as i32, data)
 }
 
 #[cfg(test)]
