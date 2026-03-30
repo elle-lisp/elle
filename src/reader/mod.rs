@@ -106,10 +106,37 @@ pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, St
     parser.read_all()
 }
 
-/// Parse source, dispatching to the Lua reader for `.lua` files.
+/// Strip markdown prose, keeping only ```lisp / ```elle fenced code blocks.
+/// Non-code lines become empty (preserving line numbers for error reporting).
+pub fn strip_markdown(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut in_code = false;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if !in_code && (trimmed == "```lisp" || trimmed == "```elle") {
+            in_code = true;
+            out.push('\n');
+        } else if in_code && trimmed.starts_with("```") {
+            in_code = false;
+            out.push('\n');
+        } else if in_code {
+            out.push_str(line);
+            out.push('\n');
+        } else {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Parse source, dispatching to the Lua reader for `.lua` files
+/// and stripping markdown for `.md` files.
 pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
     if source_name.ends_with(".lua") {
         lua_parser::parse_lua_file(input, source_name)
+    } else if source_name.ends_with(".md") {
+        let stripped = strip_markdown(input);
+        read_syntax_all(&stripped, source_name)
     } else {
         read_syntax_all(input, source_name)
     }

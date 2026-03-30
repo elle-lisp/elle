@@ -92,11 +92,16 @@ impl<'a> Analyzer<'a> {
     }
 
     pub(crate) fn analyze_yield(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() != 2 {
-            return Err(format!("{}: yield requires 1 argument", span));
+        if items.len() > 2 {
+            return Err(format!("{}: yield expects 0 or 1 arguments", span));
         }
 
-        let value = self.analyze_expr(&items[1])?;
+        let value = if items.len() == 2 {
+            self.analyze_expr(&items[1])?
+        } else {
+            // (yield) with no args yields nil
+            Hir::silent(HirKind::Nil, span.clone())
+        };
 
         // Track that this lambda has a direct yield (not from calling a parameter)
         self.current_signal_sources.has_direct_yield = true;

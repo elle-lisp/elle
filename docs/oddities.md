@@ -127,7 +127,7 @@ Collection literals follow the mutable/immutable split (see `docs/types.md`): ba
 
 Module files (`.lisp`) follow a standard pattern. The last expression in a module is a closure that returns a struct of exports. This allows parameterized modules in the future. Example:
 
-```lisp
+```text
 # module defines functions...
 (defn assert-eq [a b] ...)
 (defn assert-true [x] ...)
@@ -138,14 +138,14 @@ Module files (`.lisp`) follow a standard pattern. The last expression in a modul
 
 When imported via `import-file`, the module's last expression (a closure) is returned. Call it to get the exports struct:
 
-```lisp
+```text
 (def asserts ((import-file "assertions.lisp")))
 (asserts :assert-eq 1 1)
 ```
 
 Or destructure directly:
 
-```lisp
+```text
 (def {:assert-eq assert-eq :assert-true assert-true} ((import-file "assertions.lisp")))
 ```
 

@@ -1,5 +1,5 @@
 .PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help \
-       examples-vm examples-jit smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit
+       examples-vm examples-jit smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit doctest
 
 .DEFAULT_GOAL := all
 
@@ -121,7 +121,14 @@ smoke-jit: examples-jit
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke: smoke-vm smoke-jit  ## Run examples + elle scripts (VM then JIT) + docgen
+doctest:  ## Test code examples in documentation (literate mode)
+	@echo "=== doctest ==="
+	@printf '%s\n' docs/*.md QUICKSTART.md | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: doctest"; exit 1; }
+
+smoke: smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
 	$(ELLE) demos/docgen/generate.lisp
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)

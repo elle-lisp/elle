@@ -344,7 +344,7 @@ frame execution, no defer/protect unwinding. The fiber is dead.
   it propagates through all masks including `protect` and `defer`
 - Other-cancel returns `SIG_OK` with the error value
 
-```elle
+```text
 (def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) 3))
 (fiber/resume f)          # f is now :paused
 (fiber/cancel f :reason)  # f is now :error, :cleanup never printed

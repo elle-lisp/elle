@@ -43,7 +43,7 @@ termination condition causes infinite recursion.
 
 ```lisp
 # This is a comment
-(f 1 ;[2 3] 4)  # => (f 1 2 3 4)  — splice spreads into surrounding form
+(+ 1 ;[2 3] 4)  # => (+ 1 2 3 4)  — splice spreads into surrounding form
 [1 ;[2 3] 4]    # => [1 2 3 4]    — works in collection literals too
 ```
 
@@ -122,6 +122,9 @@ true  false          # booleans (not #t/#f)
 (type-of {:a 1})     # => :struct
 (type-of (fn [] 1))  # => :closure
 
+```
+
+```text
 # Predicates
 (nil? x)      (boolean? x)   (number? x)
 (integer? x)  (float? x)     (symbol? x)
@@ -147,7 +150,7 @@ true  false          # booleans (not #t/#f)
 
 (math/sqrt 16)   (math/pow 2 10)
 (math/floor 3.7) (math/ceil 3.2)  (math/round 3.5)
-(math/sin x)     (math/cos x)     (math/atan2 y x)
+(math/sin 1.0)   (math/cos 1.0)   (math/atan2 1.0 1.0)
 (math/pi)        (math/e)
 ```
 
@@ -274,11 +277,11 @@ config:port                # => 8080
 @|1 2 3|                   # @set (mutable)
 
 (contains? |1 2 3| 2)     # => true
-(add @|1 2 3| 4)           # mutates in place
-(del @|1 2 3| 1)           # mutates in place
-(union s1 s2)
-(intersection s1 s2)
-(difference s1 s2)
+(def s1 |1 2 3|)
+(def s2 |2 3 4|)
+(union s1 s2)              # => |1 2 3 4|
+(intersection s1 s2)       # => |2 3|
+(difference s1 s2)         # => |1|
 ```
 
 ### Bytes
@@ -316,9 +319,10 @@ config:port                # => 8080
 ### Boxes (mutable cells)
 
 ```lisp
-(box 42)
-(unbox b)
+(def b (box 42))
+(unbox b)           # => 42
 (rebox b 99)
+(unbox b)           # => 99
 ```
 
 ---
@@ -352,14 +356,14 @@ config:port                # => 8080
 Destructuring is strict — missing elements signal an error. Works in `def`,
 `var`, `let`, `let*`, `fn`, `defn`, `match`.
 
-```lisp
+```text
 # List
 (def (a b c) (list 1 2 3))
-(def (head & tail) (list 1 2 3))   # head=1, tail=(2 3)
+(def (hd & tl) (list 1 2 3))       # hd=1, tl=(2 3)
 
 # Array (& rest collects into an array)
 (def [x y] [10 20])
-(def [first & rest] [1 2 3])       # rest=[2 3]
+(def [fst & rst] [1 2 3])          # rst=[2 3]
 
 # Struct
 (def {:x x :y y} {:x 5 :y 10})
@@ -395,7 +399,7 @@ Destructuring is strict — missing elements signal an error. Works in `def`,
   (+ x y))
 
 # Variadic (& rest)
-(defn sum [& nums]
+(defn sum-all [& nums]
   (fold + 0 nums))
 
 # Closures capture lexical environment
@@ -448,7 +452,7 @@ Use `default` to set default values for named parameters:
 
 ### Conditionals
 
-```lisp
+```text
 # If-then-else
 (if test then else)
 
@@ -479,7 +483,7 @@ Use `default` to set default values for named parameters:
 
 ### Pattern matching
 
-```lisp
+```text
 # Compiler warns on non-exhaustive match;
 # any unbound symbol works as a wildcard
 (match value
@@ -502,13 +506,15 @@ Use `default` to set default values for named parameters:
 (while (< i 10)
   (assign i (+ i 1)))
 
+# Repeat N times
+(repeat 5 (println "hi"))
+```
+
+```text
 # Infinite loop
 (forever
   (process)
   (when done (break)))
-
-# Repeat N times
-(repeat 5 (println "hi"))
 
 # While-let — loop while binding succeeds
 (while-let [[line (port/read-line port)]]
@@ -522,7 +528,9 @@ Use `default` to set default values for named parameters:
 (block
   (var x 10)
   x)
+```
 
+```text
 # Named block with early exit
 (block :search
   (each item in items
@@ -533,7 +541,7 @@ Use `default` to set default values for named parameters:
 
 ### Sequencing
 
-```lisp
+```text
 # begin shares surrounding scope (no new scope created)
 (begin expr1 expr2 ...)
 
@@ -550,7 +558,7 @@ Use `begin` unless you need `break` or scope isolation.
 Elle does **not** have `try/catch/finally`. It uses `protect`, `defer`, and
 `try/catch` (which is a macro over fibers).
 
-```lisp
+```text
 # Raise an error
 (error {:error :bad-input :message "expected a number"})
 
@@ -591,11 +599,14 @@ Elle does **not** have `try/catch/finally`. It uses `protect`, `defer`, and
 
 ## Higher-Order Functions
 
-```lisp
+```text
 (map    f [1 2 3])           # => (2 4 6)  — always returns list
 (filter f [1 2 3 4])         # => (3 4)    — always returns list
 (fold   f init [1 2 3])      # => result
 (apply  f [1 2 3])           # => (f 1 2 3)
+```
+
+```lisp
 (sum [1 2 3 4])              # => 10
 (product [1 2 3 4])          # => 24
 
@@ -610,7 +621,7 @@ Elle does **not** have `try/catch/finally`. It uses `protect`, `defer`, and
 
 # Threading macros
 (-> 5 (+ 10) (* 2))         # => 30  (insert as first arg)
-(->> [1 2 3] (map double))  # (insert as last arg)
+(->> [1 2 3] (map (fn [x] (* x 2))))  # (insert as last arg)
 ```
 
 Note: `map` and `filter` always return lists, even when given arrays. Use
@@ -622,7 +633,7 @@ Note: `map` and `filter` always return lists, even when given arrays. Use
 
 ### File I/O
 
-```lisp
+```text
 # Read a file
 (def p (port/open "data.txt" :read))
 (defer (port/close p)
@@ -652,7 +663,7 @@ Note: `map` and `filter` always return lists, even when given arrays. Use
 
 ### Subprocesses
 
-```lisp
+```text
 # Run to completion — returns {:exit :stdout :stderr}
 (subprocess/system "echo" ["hello"])
 # => {:exit 0 :stdout "hello\n" :stderr ""}
@@ -670,7 +681,7 @@ Note: `map` and `filter` always return lists, even when given arrays. Use
 
 ### Output
 
-```lisp
+```text
 (print "no newline")           # write to *stdout*
 (println "with newline")       # write to *stdout* + newline
 (println "count: " 42)         # multiple args concatenated
@@ -688,7 +699,7 @@ All output functions are async (they yield to the scheduler).
 User code runs inside the async scheduler automatically. Use `ev/spawn` and
 `ev/join` for concurrency, not threads.
 
-```lisp
+```text
 # Spawn and join
 (def f (ev/spawn (fn [] (port/read-all (port/open "data.txt" :read)))))
 (def content (ev/join f))
@@ -723,7 +734,7 @@ User code runs inside the async scheduler automatically. Use `ev/spawn` and
 
 ### TCP
 
-```lisp
+```text
 (tcp/listen addr port)      # bind and listen
 (tcp/accept listener)       # yield until connection
 (tcp/connect host port)     # yield until connected
@@ -731,7 +742,7 @@ User code runs inside the async scheduler automatically. Use `ev/spawn` and
 
 ### Channels
 
-```lisp
+```text
 (def [tx rx] (chan))        # unbounded channel
 (def [tx rx] (chan 10))     # bounded (capacity 10)
 
@@ -754,7 +765,7 @@ User code runs inside the async scheduler automatically. Use `ev/spawn` and
 
 ## Modules and Imports
 
-```lisp
+```text
 # Import by short name — searches ELLE_PATH, ELLE_HOME, and CWD
 (def http ((import "lib/http")))       # finds lib/http.lisp
 (def crypto (import "crypto"))         # finds libelle_crypto.so
@@ -798,7 +809,9 @@ is a bit in a mask.
 (fiber/value f)    # signal value
 (fiber/bits f)     # signal bits
 (fiber/mask f)     # signal mask
+```
 
+```text
 # Terminate
 (fiber/cancel f)   # hard kill (no unwinding)
 (fiber/abort f)    # graceful (with unwinding)
@@ -819,7 +832,9 @@ Signal masks accept set literals `|:yield :io|`, keywords `:yield`, arrays
 (defn safe-map [f xs]
   (silence f)
   (map f xs))
+```
 
+```text
 # squelch — runtime wrapper
 (let [[safe-f (squelch f |:yield|)]]
   (map safe-f xs))
@@ -854,7 +869,7 @@ Traits are invisible to structural equality, ordering, and hashing.
 Elle libraries wrap code in a closure returning a struct of functions. This
 allows parameterization and avoids polluting global scope.
 
-```lisp
+```text
 ## ── lib/counter.lisp ──────────────────────────────────────────────
 (fn []
   (var n 0)
@@ -865,7 +880,7 @@ allows parameterization and avoids polluting global scope.
 
 Usage:
 
-```lisp
+```text
 (def counter ((import-file "lib/counter.lisp")))
 (counter:inc)    # => 1
 (counter:inc)    # => 2
@@ -896,7 +911,7 @@ Tail call optimization is guaranteed.
 
 ### Safe error capture
 
-```lisp
+```text
 (def [ok? val] (protect (risky-op)))
 (if ok?
   (use val)
@@ -905,7 +920,7 @@ Tail call optimization is guaranteed.
 
 ### Struct update
 
-```lisp
+```text
 (update state :count inc)
 (merge state {:count (+ (get state :count) 1)})
 (update-in config [:db :pool-size] inc)
@@ -913,7 +928,7 @@ Tail call optimization is guaranteed.
 
 ### Iterate with index
 
-```lisp
+```text
 (var i 0)
 (each x in items
   (println i x)
@@ -922,7 +937,7 @@ Tail call optimization is guaranteed.
 
 ### Immediate-mode GUI loop
 
-```lisp
+```text
 (var count 0)
 (def win (ui:open :title "Counter"))
 (ui:run win (fn [ix]
@@ -936,7 +951,7 @@ Tail call optimization is guaranteed.
 
 ## Macros
 
-```lisp
+```text
 # Quasiquote-based
 (defmacro when [test & body]
   `(if ,test (begin ,;body) nil))

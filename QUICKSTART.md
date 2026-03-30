@@ -23,7 +23,7 @@ These are separate values because they are genuinely distinguishable: `()` is wh
 
 ### `#` is comment, `;` is splice
 
-```lisp
+```text
 # This is a comment
 ;[1 2 3]        # Splice: spreads array into surrounding form
 (f 1 ;[2 3] 4)  # => (f 1 2 3 4)
@@ -49,7 +49,7 @@ These are separate values because they are genuinely distinguishable: `()` is wh
 
 ### `silence` is a compile-time declaration; `squelch` is a runtime function
 
-```lisp
+```text
 # silence: preamble inside a lambda body — constrains a parameter's signal
 (fn [f x]
   (silence f)   # f must be completely silent at call sites
@@ -84,7 +84,7 @@ cannot see earlier ones. Use `let*` when a binding depends on a previous one.
 
 Also works with array-style syntax:
 
-```lisp
+```text
 (let* [[url (parse-url input)]
        [host url:host]           # host depends on url
        [conn (tcp/connect host 80)]]  # conn depends on host
@@ -154,7 +154,7 @@ true  false          # booleans (not #t/#f)
 
 ### Quoting
 
-```lisp
+```text
 '(+ 1 2)             # quote — prevents evaluation
 `(+ 1 ,x)            # quasiquote — unquote with ,
 `(list ,;items)      # unquote-splice with ,;
@@ -272,7 +272,7 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 
 ## Control Flow
 
-```lisp
+```text
 # Conditional
 (if test then else)
 
@@ -339,7 +339,7 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 
 ## Error Handling
 
-```lisp
+```text
 # Raise
 (error {:error :bad-input :message "expected a number"})
 
@@ -375,7 +375,7 @@ Destructuring is strict — missing elements or keys signal an error (no silent 
 
 ### Lists (linked)
 
-```lisp
+```text
 (list 1 2 3)
 (cons 1 (list 2 3))
 (first lst)   (rest lst)   (last lst)
@@ -499,7 +499,7 @@ the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
 
 ### Sets
 
-```lisp
+```text
 |1 2 3|                      # immutable set
 @|1 2 3|                     # mutable set
 (contains? |1 2 3| 2)        # => true
@@ -537,7 +537,7 @@ the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
 
 ## Higher-Order Functions
 
-```lisp
+```text
 (map    f [1 2 3])           # => (2 4 6)  — returns list
 (filter f [1 2 3 4])         # => (3 4)    — returns list
 (fold   f init [1 2 3])      # => 10
@@ -574,7 +574,7 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 ## Arithmetic and Math
 
-```lisp
+```text
 (+ 1 2 3)   (- 10 3)   (* 2 3 4)
 (/ 10 2)               # integer division truncates
 (/ 7.0 2)              # => 3.5  (mixed: promotes to float)
@@ -618,7 +618,7 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 ### Logical Operators
 
-```lisp
+```text
 (and x y z)     # short-circuiting; returns last truthy or first falsy
 (or x y z)      # short-circuiting; returns first truthy or last falsy
 (not false)     # => true  (not is a function, not a macro)
@@ -628,7 +628,7 @@ Note: `map` and `filter` always return lists, even when given arrays.
 
 ## Type System
 
-```lisp
+```text
 (type-of 42)        # => :integer
 (type-of 3.14)      # => :float
 (type-of "hi")      # => :string
@@ -753,7 +753,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 ### Ports (not-thread-safe)
 
-```lisp
+```text
 (port/open "file.txt" :read)
 (port/open "file.txt" :write)
 (port/read p n)          # read n bytes
@@ -789,7 +789,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 Streams are lazy and pull-based. Use `stream/map`, `stream/filter`, etc. to transform streams — the eager `map`/`filter` functions operate on lists, not streams.
 
-```lisp
+```text
 (stream/map    f stream)
 (stream/filter f stream)
 (stream/take   n stream)
@@ -810,7 +810,7 @@ User code runs inside the async scheduler automatically. Port I/O
 
 **Spawn and join** — the fundamental building blocks:
 
-```lisp
+```text
 # Spawn a fiber, wait for its result
 (def f (ev/spawn (fn [] (port/read-all (port/open "data.txt" :read)))))
 (def content (ev/join f))
@@ -822,21 +822,21 @@ User code runs inside the async scheduler automatically. Port I/O
 
 **Parallel map** — the most common pattern:
 
-```lisp
+```text
 (ev/map (fn [url] (http/get url)) urls)   # → [response1 response2 ...]
 ```
 
 **Error handling** — `ev/join-protected` returns `[ok? value]` instead of
 raising errors:
 
-```lisp
+```text
 (let (([ok? val] (ev/join-protected (ev/spawn (fn [] (flaky-api-call))))))
   (if ok? val (cached-fallback)))
 ```
 
 **Select, race, timeout** — waiting for the first of N:
 
-```lisp
+```text
 # First to complete wins; abort the rest
 (ev/race [(ev/spawn (fn [] (query-replica-1)))
           (ev/spawn (fn [] (query-replica-2)))])
@@ -847,7 +847,7 @@ raising errors:
 
 **Scoped concurrency** — all children must finish before scope exits:
 
-```lisp
+```text
 (ev/scope (fn [spawn]
   (let ([users    (spawn (fn [] (fetch "/users")))]
         [settings (spawn (fn [] (fetch "/settings")))])
@@ -857,7 +857,7 @@ raising errors:
 
 Key primitives:
 
-```lisp
+```text
 (ev/spawn thunk)            # create a fiber, returns fiber handle
 (ev/join fiber-or-seq)      # wait for result(s), propagate errors
 (ev/join-protected target)  # wait without raising — returns [ok? value]
@@ -889,7 +889,7 @@ via the same async I/O path.
 
 Crossbeam-based channels for inter-fiber (and inter-thread) messaging. Often unnecessary in single-threaded designs where a list or array suffices.
 
-```lisp
+```text
 (def [tx rx] (chan))            # unbounded channel; returns [sender receiver]
 (def [tx rx] (chan 10))         # bounded (capacity 10)
 
@@ -931,7 +931,7 @@ All four respect `*stdout*`/`*stderr*` parameter rebinding.
 
 You can define your own dynamic parameters with `make-parameter`:
 
-```lisp
+```text
 (def *my-param* (make-parameter :default-value))
 (*my-param*)                  # => :default-value
 (parameter? *my-param*)       # => true
@@ -950,7 +950,7 @@ You can define your own dynamic parameters with `make-parameter`:
 
 ## Modules and Imports
 
-```lisp
+```text
 # Import by short name — searches ELLE_PATH, ELLE_HOME, and CWD
 (def http ((import "lib/http")))       # finds lib/http.lisp
 (def crypto (import "crypto"))         # finds libelle_crypto.so via ELLE_PATH
@@ -980,7 +980,7 @@ cargo build --release -p elle-crypto
 ```
 
 **Pattern:**
-```lisp
+```text
 # With ELLE_PATH=target/release (or ELLE_HOME pointing to install dir):
 (def crypto (import "crypto"))
 (seq->hex (crypto:sha256 "hello"))
@@ -997,7 +997,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-crypto` — SHA-2 hashing and HMAC
 
-```lisp
+```text
 (def crypto (import "target/release/libelle_crypto.so"))
 # Keys: :sha224 :sha256 :sha384 :sha512
 #       :hmac-sha224 :hmac-sha256 :hmac-sha384 :hmac-sha512
@@ -1007,7 +1007,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-glob` — Filesystem glob patterns
 
-```lisp
+```text
 (def glob (import "target/release/libelle_glob.so"))
 # Keys: :glob :match? :match-path?
 ((get glob :glob) "src/**/*.rs")           # => list of matching paths
@@ -1016,7 +1016,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-random` — Pseudo-random numbers
 
-```lisp
+```text
 (def random (import "target/release/libelle_random.so"))
 # Keys: :int :float :bool :shuffle
 ((get random :int) 1 100)      # random integer in [1, 100]
@@ -1026,7 +1026,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-regex` — Regular expressions
 
-```lisp
+```text
 (def re (import "target/release/libelle_regex.so"))
 # Keys: :compile :match? :find :find-all :split :replace
 (def pat ((get re :compile) "\\d+"))
@@ -1037,7 +1037,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-sqlite` — SQLite database
 
-```lisp
+```text
 (def sqlite (import "target/release/libelle_sqlite.so"))
 # Keys: :open :query :exec :close
 (def db ((get sqlite :open) "data.db"))
