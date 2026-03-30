@@ -25,7 +25,7 @@ fn compile_stdlib_to_bytecode() {
 #[test]
 fn compile_stdlib_to_lir() {
     let (_vm, mut symbols) = setup();
-    match elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>") {
+    match elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0) {
         Ok(lir) => {
             eprintln!(
                 "stdlib LIR: {} blocks, {} regs, {} locals",
@@ -41,7 +41,7 @@ fn compile_stdlib_to_lir() {
 #[test]
 fn compile_stdlib_to_wasm() {
     let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>").unwrap();
+    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
     let result = elle::wasm::emit::emit_module(&lir);
     eprintln!(
         "stdlib WASM: {} bytes, {} constants",
@@ -62,7 +62,7 @@ fn run_stdlib_first_100_lines() {
 (classify 5)
 "#;
     let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(source, &mut symbols, "<stdlib>").unwrap();
+    let lir = elle::pipeline::compile_file_to_lir(source, &mut symbols, "<stdlib>", 0).unwrap();
     let result = elle::wasm::emit::emit_module(&lir);
     let engine = elle::wasm::store::create_engine().unwrap();
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
@@ -85,7 +85,7 @@ fn stdlib_with_map() {
 #[test]
 fn run_stdlib_on_wasm() {
     let (_vm, mut symbols) = setup();
-    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>").unwrap();
+    let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
     let result = elle::wasm::emit::emit_module(&lir);
     eprintln!(
         "WASM: {} bytes, {} consts, {} closures",

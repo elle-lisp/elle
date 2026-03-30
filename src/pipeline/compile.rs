@@ -137,10 +137,15 @@ pub(super) fn classify_form(syntax: &Syntax) -> FileForm<'_> {
 }
 
 /// Compile a file to LIR as a single synthetic letrec (for WASM backend).
+///
+/// `epoch_skip` — number of leading forms to exclude from epoch migration
+/// (e.g. stdlib forms that are already in the current epoch). When 0,
+/// epoch migration applies to all forms.
 pub fn compile_file_to_lir(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
+    epoch_skip: usize,
 ) -> Result<crate::lir::LirFunction, String> {
     intern_primitive_names(symbols);
 
@@ -148,7 +153,11 @@ pub fn compile_file_to_lir(
 
     let source_epoch = crate::epoch::extract_epoch(&mut syntaxes)?;
     if let Some(epoch) = source_epoch {
-        crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+        if epoch_skip > 0 && epoch_skip < syntaxes.len() {
+            crate::epoch::migrate_forms(&mut syntaxes[epoch_skip..], epoch)?;
+        } else {
+            crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
+        }
     }
 
     let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();

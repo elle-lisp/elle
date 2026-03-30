@@ -296,9 +296,13 @@ fn test_dump_closure_let_lir() {
     let sym_ptr: *mut elle::SymbolTable = &mut *symbols;
     elle::context::set_symbol_table(sym_ptr);
     elle::primitives::set_length_symbol_table(sym_ptr);
-    let lir =
-        elle::pipeline::compile_file_to_lir("((fn [] (let* [[x 42]] x)))", &mut symbols, "<test>")
-            .unwrap();
+    let lir = elle::pipeline::compile_file_to_lir(
+        "((fn [] (let* [[x 42]] x)))",
+        &mut symbols,
+        "<test>",
+        0,
+    )
+    .unwrap();
     eprintln!(
         "Entry: num_regs={} num_locals={} num_captures={} num_params={}",
         lir.num_regs, lir.num_locals, lir.num_captures, lir.num_params

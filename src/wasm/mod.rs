@@ -52,24 +52,36 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     crate::primitives::set_length_symbol_table(sym_ptr);
 
     let full_source;
+    let stdlib_form_count;
     let compile_source = if with_stdlib {
+        // Count stdlib forms so epoch migration skips them.
+        stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
+            .map(|s| s.len())
+            .unwrap_or(0);
         // Concatenate stdlib + user source wrapped in ev/run so the async
         // scheduler is active and *io-backend* is bound. Epoch directives
-        // must be at the top level (outside the fn) for extract_epoch.
-        let (epoch_line, body) = if source.starts_with("(elle/epoch") {
-            source.split_once('\n').unwrap_or(("", source))
+        // are hoisted before stdlib so extract_epoch finds them at forms[0],
+        // but migration is scoped to user forms via epoch_skip.
+        let (epoch_prefix, body) = if source.starts_with("(elle/epoch") {
+            source.split_once('\n').unwrap_or((source, ""))
         } else {
             ("", source)
         };
-        full_source = format!("{}\n{}\n(ev/run (fn []\n{}\n))", STDLIB, epoch_line, body);
+        full_source = format!("{}\n{}\n(ev/run (fn []\n{}\n))", epoch_prefix, STDLIB, body);
         full_source.as_str()
     } else {
+        stdlib_form_count = 0;
         source
     };
 
     // Compile source → LIR (file mode = letrec for mutual recursion)
     let t0 = std::time::Instant::now();
-    let lir_func = crate::pipeline::compile_file_to_lir(compile_source, &mut symbols, source_name)?;
+    let lir_func = crate::pipeline::compile_file_to_lir(
+        compile_source,
+        &mut symbols,
+        source_name,
+        stdlib_form_count,
+    )?;
     let t1 = std::time::Instant::now();
 
     if std::env::var_os("ELLE_WASM_LIR").is_some() {
