@@ -365,15 +365,16 @@ impl ThreadPoolBackend {
                         let code = -std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
                         (code, vec![])
                     } else {
-                        let code = if libc::WIFEXITED(status) {
+                        let exit_code: i32 = if libc::WIFEXITED(status) {
                             libc::WEXITSTATUS(status)
                         } else if libc::WIFSIGNALED(status) {
-                            // killed by signal — return negative signal number by convention
                             -libc::WTERMSIG(status)
                         } else {
                             -1
                         };
-                        (code, vec![])
+                        // Encode exit code in data so result_code=0 (success)
+                        // avoids collision with negative errno in completion handler.
+                        (0, exit_code.to_le_bytes().to_vec())
                     }
                 }
                 PoolOp::Open { path, flags, mode } => {

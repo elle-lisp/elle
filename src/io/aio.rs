@@ -80,6 +80,9 @@ impl AsyncBackend {
 
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
+        if std::env::var("ELLE_NO_URING").is_ok() {
+            return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
+        }
         match io_uring::IoUring::new(256) {
             Ok(ring) => PlatformBackend::Uring(Box::new(ring)),
             Err(_) => PlatformBackend::ThreadPool(ThreadPoolBackend::new()),
@@ -165,9 +168,11 @@ impl AsyncBackend {
                             let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
                         }
                         PlatformBackend::ThreadPool(_) => {
-                            // Thread pool: remove pending entry. The blocking
-                            // syscall will get EBADF when the fd closes.
-                            inner.pending.remove(&op_id);
+                            // Thread pool: shutdown the fd to unblock any thread
+                            // stuck in accept/read/recv. Do NOT remove the pending
+                            // entry — let the thread's error completion flow back
+                            // so the fiber resumes and can exit cleanly.
+                            unsafe { libc::shutdown(*fd, libc::SHUT_RDWR) };
                         }
                     }
                 }

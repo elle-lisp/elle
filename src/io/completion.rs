@@ -52,9 +52,12 @@ pub(super) fn process_raw_completion(
             }
 
             let exit_code: i32 = if siginfo.is_null() {
-                // Thread pool path: exit code comes directly as the raw result integer
-                // (from waitpid in PoolOp::ProcessWait dispatch).
-                result_code
+                // Thread pool path: exit code is encoded as 4-byte LE int in data.
+                if data.len() >= 4 {
+                    i32::from_le_bytes(data[..4].try_into().unwrap())
+                } else {
+                    result_code
+                }
             } else {
                 // io_uring path: exit status is in siginfo_t filled by the kernel.
                 // Reclaim the siginfo_t allocation.
