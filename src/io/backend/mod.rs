@@ -770,7 +770,7 @@ impl SyncBackend {
             }
         };
         let fd =
-            unsafe { libc::openat(libc::AT_FDCWD, c_path.as_ptr(), flags, mode as libc::mode_t) };
+            unsafe { libc::openat(libc::AT_FDCWD, c_path.as_ptr(), flags, mode as libc::c_uint) };
         if fd < 0 {
             let err = std::io::Error::last_os_error();
             return (
