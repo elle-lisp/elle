@@ -9,7 +9,7 @@ use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
 use crate::value::{error_val, Value};
 use std::collections::HashMap;
-use std::os::unix::io::{FromRawFd, OwnedFd};
+use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 
 /// Convert an errno to a human-readable message via strerror.
 fn errno_message(errno: i32) -> String {
@@ -149,7 +149,8 @@ pub(super) fn process_raw_completion(
             // Connect: fd and address come from PendingOp (set at submission time).
             // io_uring: connect_fd = pre-created socket, result_code = 0.
             // thread pool: connect_fd = fd from TcpStream::connect, result_code unused.
-            let fd = connect_fd.expect("Connect completion without connect_fd");
+            // io_uring: fd is pre-created in connect_fd. Thread pool: fd is result_code.
+            let fd = connect_fd.unwrap_or(result_code as RawFd);
             let fd = unsafe { OwnedFd::from_raw_fd(fd) };
             let peer_addr = match addr {
                 ConnectAddr::Tcp { addr: host, port } => {
