@@ -11,29 +11,21 @@
 (def w (watch))
 (watch-add w dir)
 
-# Spawn writer and watcher concurrently
-(def writer (ev/spawn (fn []
-  (ev/sleep 0.05)
-  (spit (string dir "/a.txt") "hello"))))
+# Use a subprocess to create the file after a delay — this avoids
+# scheduler deadlock on the thread-pool backend (macOS) where both
+# ev/sleep and watch-next compete for the same wait() call.
+(subprocess/exec "sh" ["-c" (string "sleep 0.1 && echo hello > " dir "/a.txt")])
 
-(def watcher (ev/spawn (fn [] (watch-next w))))
-
-(def events (ev/join watcher))
-(ev/join writer)
+(def events (watch-next w))
 
 (assert (not (empty? events)) "got events")
 # inotify reports :create; kqueue reports :modify (NOTE_WRITE on directory)
 (assert (contains? |:create :modify| (get (first events) :kind)) "first event is create or modify")
 
 # ── Modify event ────────────────────────────────────────────────────────
-(def writer2 (ev/spawn (fn []
-  (ev/sleep 0.05)
-  (spit (string dir "/a.txt") "updated"))))
+(subprocess/exec "sh" ["-c" (string "sleep 0.1 && echo updated > " dir "/a.txt")])
 
-(def watcher2 (ev/spawn (fn [] (watch-next w))))
-
-(def events2 (ev/join watcher2))
-(ev/join writer2)
+(def events2 (watch-next w))
 
 (assert (not (empty? events2)) "got modify events")
 (assert (= (get (first events2) :kind) :modify) "event is modify")
