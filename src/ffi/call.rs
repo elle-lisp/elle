@@ -185,7 +185,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn test_call_abs() {
         extern "C" {
@@ -203,7 +203,7 @@ mod tests {
         assert_eq!(result.unwrap().as_int(), Some(42));
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn test_call_strlen() {
         extern "C" {

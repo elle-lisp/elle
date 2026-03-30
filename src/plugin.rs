@@ -92,14 +92,14 @@ pub fn load_plugin(path: &str, vm: &mut VM, symbols: &mut SymbolTable) -> LResul
     // that is a separate glibc static-TLS-reservation issue and is NOT fixed by
     // RTLD_GLOBAL.  main.rs handles this by setting GLIBC_TUNABLES and
     // re-execing before we get here.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     let lib = {
         use libloading::os::unix::Library as UnixLibrary;
         unsafe { UnixLibrary::open(Some(path), libc::RTLD_NOW | libc::RTLD_GLOBAL) }
             .map(libloading::Library::from)
             .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?
     };
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(unix))]
     let lib = unsafe { libloading::Library::new(path) }
         .map_err(|e| LError::generic(format!("failed to load plugin '{}': {}", path, e)))?;
 
