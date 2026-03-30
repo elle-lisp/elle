@@ -1,6 +1,8 @@
 .PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help \
        examples-vm examples-jit smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit
 
+.DEFAULT_GOAL := all
+
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
   ELLE    ?= ./target/release/elle
@@ -19,6 +21,7 @@ PLUGINS := \
     compress \
     crypto \
     csv \
+    egui \
     git \
     glob \
     hash \

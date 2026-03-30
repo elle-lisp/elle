@@ -1,0 +1,19 @@
+[package]
+name = "elle-egui"
+version = "1.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+elle = { path = "../.." }
+egui = "0.31"
+egui-winit = "0.31"
+egui_glow = "0.31"
+winit = "0.30"
+glutin = "0.32"
+glutin-winit = "0.5"
+glow = "0.16"
+raw-window-handle = "0.6"
+libc = "0.2"

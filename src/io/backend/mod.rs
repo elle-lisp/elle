@@ -103,6 +103,27 @@ impl SyncBackend {
             }
         }
 
+        // PollFd: blocking poll(2) inline. Sync backend is single-fiber.
+        if let IoOp::PollFd { fd, events } = request.op {
+            let timeout_ms = request.timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
+            let mut pfd = libc::pollfd {
+                fd,
+                events: events as i16,
+                revents: 0,
+            };
+            let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+            if ret < 0 {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "io-error",
+                        format!("ev/poll-fd: {}", std::io::Error::last_os_error()),
+                    ),
+                );
+            }
+            return (SIG_OK, Value::int(pfd.revents as i64));
+        }
+
         // Open is portless — it creates a new port rather than operating on one.
         // Sync backend: blocking openat() is fine — single-fiber, no concurrent work to
         // protect. The timeout from IoRequest is intentionally ignored here.
@@ -199,7 +220,8 @@ impl SyncBackend {
                 | IoOp::Open { .. }
                 | IoOp::Task(_)
                 | IoOp::Resolve { .. }
-                | IoOp::WatchNext => unreachable!(), // handled above
+                | IoOp::WatchNext
+                | IoOp::PollFd { .. } => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),

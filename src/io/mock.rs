@@ -125,6 +125,7 @@ impl crate::io::IoBackend for MockBackend {
             IoOp::Resolve { .. } => "resolve",
             IoOp::WatchNext => "watch-next",
             IoOp::Close => "close",
+            IoOp::PollFd { .. } => "poll-fd",
         };
         inner.log.push(op_name.to_string());
 
@@ -204,6 +205,7 @@ impl crate::io::IoBackend for MockBackend {
                 IoOp::Task(_) => Err(error_val("io-error", "mock: task not supported")),
                 IoOp::Resolve { .. } => Err(error_val("io-error", "mock: resolve not supported")),
                 IoOp::WatchNext => Err(error_val("io-error", "mock: watch not supported")),
+                IoOp::PollFd { .. } => Err(error_val("io-error", "mock: poll-fd not supported")),
                 // Close completes synchronously in submit
                 IoOp::Close => Ok(Value::NIL),
             }

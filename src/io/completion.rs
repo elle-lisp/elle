@@ -226,6 +226,27 @@ pub(super) fn process_raw_completion(
                 result: Ok(Value::array(event_values)),
             }
         }
+        PendingOp::PollFd { .. } => {
+            // result_code is the revents mask (positive) or negative errno.
+            if result_code < 0 {
+                let errno = -result_code;
+                let is_timeout = errno == 125; // ECANCELED from linked timeout
+                let msg = if is_timeout {
+                    "ev/poll-fd: timed out".to_string()
+                } else {
+                    format!("ev/poll-fd: poll error: errno {}", errno)
+                };
+                let error_type = if is_timeout { "timeout" } else { "io-error" };
+                return Completion {
+                    id,
+                    result: Err(error_val(error_type, msg)),
+                };
+            }
+            Completion {
+                id,
+                result: Ok(Value::int(result_code as i64)),
+            }
+        }
         PendingOp::Resolve { .. } => {
             if result_code < 0 {
                 let msg = if data.is_empty() {
@@ -437,6 +458,9 @@ pub(super) fn process_raw_completion(
                 }
                 IoOp::WatchNext => {
                     unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
+                }
+                IoOp::PollFd { .. } => {
+                    unreachable!("PollFd is portless; cannot reach PendingOp::Port")
                 }
                 // Close completion: port already closed in submit. Return nil.
                 IoOp::Close => Value::NIL,
