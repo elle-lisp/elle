@@ -467,7 +467,7 @@ the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
 ```lisp
 (string "hello " "world")     # => "hello world"
 (string "count: " 42)         # => "count: 42"
-(string "key:" :foo "=" val)  # => "key:foo=123"
+(string "key:" :foo "=" 123)  # => "key:foo=123"
 ```
 
 `string/join` is for joining a collection with a separator:
@@ -527,7 +527,7 @@ the byte count. For byte-level size (e.g. protocol framing, I/O offsets), use
 
 ### Boxes (mutable cells)
 
-```lisp
+```text
 (box 42)
 (unbox b)
 (rebox b 99)
@@ -567,7 +567,7 @@ Note: `map` and `filter` always return lists, even when given arrays.
 ```lisp
 (sort [3 1 2])                    # => (1 2 3)  — natural order
 (sort-by length ["bb" "a" "ccc"]) # => ("a" "bb" "ccc")  — by key function
-(sort-with (fn [a b] (> a b)) [3 1 2])  # => (3 2 1)  — custom comparator
+(sort-with (fn [a b] (compare b a)) [3 1 2])  # => (3 2 1)  — custom comparator
 ```
 
 ---
@@ -718,7 +718,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 **Built-in signals:** `:error` (bit 0), `:yield` (bit 1), `:debug` (bit 2), `:ffi` (bit 4), `:halt` (bit 8), `:io` (bit 9), `:exec` (bit 11), `:fuel` (bit 12).
 
-```lisp
+```text
 # Create a fiber (mask = SIG_YIELD = 2)
 (def f (fiber/new (fn [] (yield 42)) 2))
 
@@ -769,7 +769,7 @@ Signals are the unified mechanism for all non-local control flow. Every signal i
 
 ### Subprocess
 
-```lisp
+```text
 # Run to completion — returns {:exit int :stdout string :stderr string}
 (subprocess/system "echo" ["hello"])
 # => {:exit 0 :stdout "hello\n" :stderr ""}
@@ -1049,7 +1049,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-hash` — Universal hashing
 
-```lisp
+```text
 (def hash (import "target/release/libelle_hash.so"))
 # Keys: :md5 :sha1 :sha224 :sha256 :sha384 :sha512 :sha512-224 :sha512-256
 #       :sha3-224 :sha3-256 :sha3-384 :sha3-512
@@ -1086,7 +1086,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-selkie` — Mermaid diagram rendering
 
-```lisp
+```text
 (def selkie (import "target/release/libelle_selkie.so"))
 # Keys: :render :render-to-file
 ((get selkie :render) "graph TD\n  A --> B")
@@ -1095,7 +1095,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-tls` — TLS client and server via rustls
 
-```lisp
+```text
 (import "target/release/libelle_tls.so")
 (def tls ((import-file "lib/tls.lisp")))
 # Client: tls:connect, tls:read, tls:write, tls:read-all, tls:close
@@ -1108,7 +1108,7 @@ Elle ships with 23+ plugins. Here are a few commonly used ones:
 
 #### `elle-tree-sitter` — Multi-language parsing and structural queries
 
-```lisp
+```text
 (def ts (import "target/release/libelle_tree_sitter.so"))
 # Keys: :parse :query :root :children :text :kind :node-at :walk
 (def tree ((get ts :parse) :rust "fn main() { 42 }"))
@@ -1202,13 +1202,13 @@ the source of truth for the full API.
 
 Tail call optimization is guaranteed — tail calls in Elle never grow the stack.
 
-```lisp
-(defn sum [lst acc]
+```text
+(defn my-sum [lst acc]
   (if (empty? lst)
     acc
-    (sum (rest lst) (+ acc (first lst)))))
+    (my-sum (rest lst) (+ acc (first lst)))))
 
-(sum [1 2 3 4 5] 0)   # => 15
+(my-sum (list 1 2 3 4 5) 0)   # => 15
 ```
 
 ### Mutable accumulator
@@ -1224,7 +1224,7 @@ Tail call optimization is guaranteed — tail calls in Elle never grow the stack
 
 ### Safe error capture
 
-```lisp
+```text
 (def [ok? val] (protect (risky-op)))
 (if ok?
   (use val)
@@ -1233,7 +1233,7 @@ Tail call optimization is guaranteed — tail calls in Elle never grow the stack
 
 ### Struct update
 
-```lisp
+```text
 (update state :count inc)                    # apply function to one key
 (merge state {:count (+ (get state :count) 1)})  # merge for multiple keys
 (update-in config [:db :pool-size] inc)      # nested update
@@ -1241,7 +1241,7 @@ Tail call optimization is guaranteed — tail calls in Elle never grow the stack
 
 ### Iterate with index
 
-```lisp
+```text
 (var i 0)
 (each x in items
   (println i x)
@@ -1309,7 +1309,7 @@ They solve different problems at different times:
 
 - **`block`** creates a new isolated scope and supports `break` for early exit with a value. It has more overhead (scope infrastructure, exit labels, region tracking).
 
-```lisp
+```text
 # begin — idiomatic for sequencing (used in macro expansion)
 (when ready
   (begin
@@ -1330,7 +1330,7 @@ Use `begin` unless you need `break`.
 
 Signal masks accept multiple formats, but **set literals are preferred**:
 
-```lisp
+```text
 # Preferred — symbolic set literal
 (fiber/new (fn [] (yield 42)) |:yield|)
 (fiber/new thunk |:yield :io|)
@@ -1349,7 +1349,7 @@ The runtime resolves set literals by looking up each keyword in the signal regis
 
 There is no module cache. Every `import` call reads the file, compiles it, and executes it fresh. This is intentional — it gives each import independent state:
 
-```lisp
+```text
 # Two imports of the same counter module get independent state
 (let ([c1 ((import-file "lib/counter.lisp"))]
       [c2 ((import-file "lib/counter.lisp"))])
@@ -1360,7 +1360,7 @@ There is no module cache. Every `import` call reads the file, compiles it, and e
 
 **To avoid redundant loads**, bind the result at the top level and reuse it:
 
-```lisp
+```text
 (def utils (import-file "lib/utils.lisp"))
 (utils:helper1 x)
 (utils:helper2 y)
@@ -1386,7 +1386,7 @@ For plugins (`.so` files), the library handle is intentionally leaked (never unl
 
 They have different return conventions and error propagation:
 
-```lisp
+```text
 # try/catch — handle and recover
 (try
   (risky-op)
