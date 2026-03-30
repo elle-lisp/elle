@@ -198,7 +198,8 @@ impl SyncBackend {
                 | IoOp::ProcessWait
                 | IoOp::Open { .. }
                 | IoOp::Task(_)
-                | IoOp::Resolve { .. } => unreachable!(), // handled above
+                | IoOp::Resolve { .. }
+                | IoOp::WatchNext => unreachable!(), // handled above
                 IoOp::SendTo { .. } | IoOp::RecvFrom { .. } => (
                     SIG_ERROR,
                     error_val("io-error", "UDP operations require a UDP socket"),

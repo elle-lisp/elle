@@ -63,6 +63,10 @@ pub(super) enum PoolOp {
     ReadLine {
         fd: RawFd,
     },
+    /// Blocking read on an inotify/kqueue fd for filesystem watch events.
+    WatchRead {
+        fd: RawFd,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -399,6 +403,20 @@ impl ThreadPoolBackend {
                             }
                         }
                         Err(e) => (-1, format!("getaddrinfo: {}", e).into_bytes()),
+                    }
+                }
+                PoolOp::WatchRead { fd } => {
+                    let mut buf = vec![0u8; 4096];
+                    let ret =
+                        unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+                    if ret < 0 {
+                        (
+                            -(std::io::Error::last_os_error().raw_os_error().unwrap_or(1)),
+                            Vec::new(),
+                        )
+                    } else {
+                        buf.truncate(ret as usize);
+                        (ret as i32, buf)
                     }
                 }
             };

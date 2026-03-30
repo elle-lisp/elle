@@ -8,7 +8,7 @@ use super::{
     concurrency, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers,
     fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta,
     modules, net, package, parameters, path, ports, read, sets, sort, stream, string, structs,
-    subprocess, time, traits, types, unix,
+    subprocess, time, traits, types, unix, watch,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
@@ -62,6 +62,7 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     time::PRIMITIVES,
     traits::PRIMITIVES,
     types::PRIMITIVES,
+    watch::PRIMITIVES,
 ];
 
 /// Register all primitive functions with the VM and build metadata.

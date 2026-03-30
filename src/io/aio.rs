@@ -114,6 +114,11 @@ impl AsyncBackend {
             return self.submit_resolve(hostname);
         }
 
+        // WatchNext is portless — the FsWatcher External is in request.port.
+        if let IoOp::WatchNext = request.op {
+            return self.submit_watch_next(&request.port);
+        }
+
         // Open is portless — creates a new port rather than operating on one.
         if let IoOp::Open {
             ref path,
@@ -659,6 +664,48 @@ impl AsyncBackend {
         inner.pending.insert(
             id,
             PendingOp::Resolve {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Submit a watch-next operation. Reads from the inotify fd.
+    fn submit_watch_next(&self, watcher_val: &Value) -> Result<u64, String> {
+        use crate::io::watch::FsWatcher;
+
+        let watcher = watcher_val
+            .as_external::<FsWatcher>()
+            .ok_or("watch-next: expected a watcher handle")?;
+        let fd = watcher.raw_fd()?;
+
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(4096);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ref mut buffer_pool,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                crate::io::uring::submit_uring_watch_next(ring, id, fd, buffer_pool, buf_handle)?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                network_pool.submit(id, PoolOp::WatchRead { fd })?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::WatchNext {
+                watcher: *watcher_val,
                 buffer_handle: buf_handle,
             },
         );
@@ -1328,6 +1375,7 @@ impl AsyncBackendInner {
             | IoOp::Tell
             | IoOp::Task(_)
             | IoOp::Resolve { .. }
+            | IoOp::WatchNext
             | IoOp::Close => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;

@@ -22,6 +22,7 @@ pub(crate) mod threadpool;
 pub(crate) mod types;
 #[cfg(target_os = "linux")]
 pub(crate) mod uring;
+pub(crate) mod watch;
 
 use crate::io::request::IoRequest;
 use crate::value::heap::TableKey;

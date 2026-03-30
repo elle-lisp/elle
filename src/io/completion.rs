@@ -180,6 +180,48 @@ pub(super) fn process_raw_completion(
                 }
             }
         }
+        PendingOp::WatchNext { watcher, .. } => {
+            if result_code <= 0 {
+                let msg = if result_code == 0 {
+                    "watcher closed".to_string()
+                } else {
+                    format!(
+                        "watch read error: {}",
+                        std::io::Error::from_raw_os_error(-result_code)
+                    )
+                };
+                return Completion {
+                    id,
+                    result: Err(error_val("io-error", msg)),
+                };
+            }
+            // Parse inotify events from raw bytes
+            let events = if let Some(w) = watcher.as_external::<crate::io::watch::FsWatcher>() {
+                w.parse_events(&data[..result_code as usize])
+            } else {
+                Vec::new()
+            };
+            // Convert to Elle array of structs
+            let event_values: Vec<Value> = events
+                .iter()
+                .map(|ev| {
+                    let mut fields = std::collections::BTreeMap::new();
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("kind".into()),
+                        Value::keyword(ev.kind.as_keyword()),
+                    );
+                    fields.insert(
+                        crate::value::heap::TableKey::Keyword("path".into()),
+                        Value::string(ev.path.to_string_lossy().as_ref()),
+                    );
+                    Value::struct_from(fields)
+                })
+                .collect();
+            Completion {
+                id,
+                result: Ok(Value::array(event_values)),
+            }
+        }
         PendingOp::Resolve { .. } => {
             if result_code < 0 {
                 let msg = if data.is_empty() {
@@ -387,9 +429,10 @@ pub(super) fn process_raw_completion(
                     unreachable!("Task should use PendingOp::Task variant")
                 }
                 IoOp::Resolve { .. } => {
-                    // Resolve is portless and dispatched to the thread pool — never
-                    // produces a PendingOp::Port entry.
                     unreachable!("Resolve is portless; cannot reach PendingOp::Port")
+                }
+                IoOp::WatchNext => {
+                    unreachable!("WatchNext uses PendingOp::WatchNext, not PendingOp::Port")
                 }
                 // Close completion: port already closed in submit. Return nil.
                 IoOp::Close => Value::NIL,

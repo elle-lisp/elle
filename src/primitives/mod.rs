@@ -54,6 +54,7 @@ pub mod time;
 pub mod traits;
 pub mod types;
 pub mod unix;
+pub mod watch;
 pub use def::{PrimitiveDef, PrimitiveMeta};
 pub use docs::help_text;
 pub use list::{clear_length_symbol_table, set_length_symbol_table};
