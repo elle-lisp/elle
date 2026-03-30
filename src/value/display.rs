@@ -12,6 +12,26 @@ fn resolve_symbol(id: u32) -> Option<String> {
     crate::context::resolve_symbol_name(id)
 }
 
+/// Format a float, ensuring whole numbers display with a trailing `.0`
+/// so that `3.0` prints as `3.0`, not `3`.
+fn write_float(f: &mut fmt::Formatter<'_>, n: f64) -> fmt::Result {
+    if n.is_infinite() {
+        return if n.is_sign_positive() {
+            write!(f, "inf")
+        } else {
+            write!(f, "-inf")
+        };
+    }
+    if n.is_nan() {
+        return write!(f, "NaN");
+    }
+    if n.fract() == 0.0 {
+        write!(f, "{:.1}", n)
+    } else {
+        write!(f, "{}", n)
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Handle immediate values
@@ -36,7 +56,7 @@ impl fmt::Display for Value {
         }
 
         if let Some(n) = self.as_float() {
-            return write!(f, "{}", n);
+            return write_float(f, n);
         }
 
         if let Some(id) = self.as_symbol() {
@@ -287,7 +307,7 @@ impl fmt::Debug for Value {
             return write!(f, "{}", n);
         }
         if let Some(n) = self.as_float() {
-            return write!(f, "{}", n);
+            return write_float(f, n);
         }
         if let Some(id) = self.as_symbol() {
             return if let Some(name) = resolve_symbol(id) {

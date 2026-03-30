@@ -178,7 +178,12 @@ pub(crate) fn prim_number_to_string(args: &[Value]) -> (SignalBits, Value) {
             return (SIG_OK, Value::string(n.to_string()));
         }
         if let Some(f) = args[0].as_float() {
-            return (SIG_OK, Value::string(f.to_string()));
+            let s = if f.fract() == 0.0 && f.is_finite() {
+                format!("{:.1}", f)
+            } else {
+                f.to_string()
+            };
+            return (SIG_OK, Value::string(s));
         }
         return (
             SIG_ERROR,
@@ -361,7 +366,20 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
     }
 
     if let Some(f) = val.as_float() {
-        return (SIG_OK, Value::string(f.to_string()));
+        let s = if f.is_infinite() {
+            if f.is_sign_positive() {
+                "inf".to_string()
+            } else {
+                "-inf".to_string()
+            }
+        } else if f.is_nan() {
+            "NaN".to_string()
+        } else if f.fract() == 0.0 {
+            format!("{:.1}", f)
+        } else {
+            f.to_string()
+        };
+        return (SIG_OK, Value::string(s));
     }
 
     if let Some(b) = val.as_bool() {

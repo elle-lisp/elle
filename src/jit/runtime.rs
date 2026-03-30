@@ -35,7 +35,10 @@ pub extern "C" fn elle_jit_add(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
         payload: b_payload,
     };
     if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
-        JitValue::from_value(Value::int(ai.wrapping_add(bi)))
+        match ai.checked_add(bi) {
+            Some(r) => JitValue::from_value(Value::int(r)),
+            None => overflow_error_jv("addition"),
+        }
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         JitValue::from_value(Value::float(af + bf))
     } else {
@@ -55,7 +58,10 @@ pub extern "C" fn elle_jit_sub(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
         payload: b_payload,
     };
     if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
-        JitValue::from_value(Value::int(ai.wrapping_sub(bi)))
+        match ai.checked_sub(bi) {
+            Some(r) => JitValue::from_value(Value::int(r)),
+            None => overflow_error_jv("subtraction"),
+        }
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         JitValue::from_value(Value::float(af - bf))
     } else {
@@ -75,7 +81,10 @@ pub extern "C" fn elle_jit_mul(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
         payload: b_payload,
     };
     if let (Some(ai), Some(bi)) = (a.as_int(), b.as_int()) {
-        JitValue::from_value(Value::int(ai.wrapping_mul(bi)))
+        match ai.checked_mul(bi) {
+            Some(r) => JitValue::from_value(Value::int(r)),
+            None => overflow_error_jv("multiplication"),
+        }
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         JitValue::from_value(Value::float(af * bf))
     } else {
@@ -98,7 +107,10 @@ pub extern "C" fn elle_jit_div(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
         if bi == 0 {
             type_error_jv("non-zero divisor")
         } else {
-            JitValue::from_value(Value::int(ai.wrapping_div(bi)))
+            match ai.checked_div(bi) {
+                Some(r) => JitValue::from_value(Value::int(r)),
+                None => overflow_error_jv("division"),
+            }
         }
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         JitValue::from_value(Value::float(af / bf))
@@ -122,7 +134,10 @@ pub extern "C" fn elle_jit_rem(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
         if bi == 0 {
             type_error_jv("non-zero divisor")
         } else {
-            JitValue::from_value(Value::int(ai.wrapping_rem(bi)))
+            match ai.checked_rem(bi) {
+                Some(r) => JitValue::from_value(Value::int(r)),
+                None => overflow_error_jv("remainder"),
+            }
         }
     } else if let (Some(af), Some(bf)) = (a.as_number(), b.as_number()) {
         JitValue::from_value(Value::float(af % bf))
@@ -249,7 +264,10 @@ pub extern "C" fn elle_jit_shr(a_tag: u64, a_payload: u64, b_tag: u64, b_payload
 pub extern "C" fn elle_jit_neg(tag: u64, payload: u64) -> JitValue {
     let a = Value { tag, payload };
     if let Some(ai) = a.as_int() {
-        JitValue::from_value(Value::int(-ai))
+        match ai.checked_neg() {
+            Some(r) => JitValue::from_value(Value::int(r)),
+            None => overflow_error_jv("negation"),
+        }
     } else if let Some(af) = a.as_float() {
         JitValue::from_value(Value::float(-af))
     } else {
@@ -471,6 +489,12 @@ pub extern "C" fn elle_jit_type_error(expected: *const u8, expected_len: usize) 
 /// Type error helper that takes a static string
 pub(super) fn type_error_jv(expected: &str) -> JitValue {
     eprintln!("JIT type error: expected {}", expected);
+    JitValue::nil()
+}
+
+/// Overflow error helper for JIT arithmetic
+fn overflow_error_jv(op: &str) -> JitValue {
+    eprintln!("JIT overflow error: integer {} overflow", op);
     JitValue::nil()
 }
 

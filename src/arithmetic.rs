@@ -7,121 +7,92 @@
 use crate::error::{LError, LResult};
 use crate::value::Value;
 
-/// Add two numeric values, automatically promoting Int to Float when needed
+/// Add two numeric values, promoting to float when either operand is float.
 pub(crate) fn add_values(a: &Value, b: &Value) -> LResult<Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Ok(Value::int(x + y)),
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Ok(Value::float(x + y)),
-            _ => {
-                // Handle mixed int+float by coercing int to float
-                match (a.as_int(), b.as_float()) {
-                    (Some(x), Some(y)) => Ok(Value::float(x as f64 + y)),
-                    _ => match (a.as_float(), b.as_int()) {
-                        (Some(x), Some(y)) => Ok(Value::float(x + y as f64)),
-                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
-                    },
-                }
-            }
-        },
+    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+        return match x.checked_add(y) {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer addition overflow")),
+        };
+    }
+    match (a.as_number(), b.as_number()) {
+        (Some(x), Some(y)) => Ok(Value::float(x + y)),
+        _ => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
-/// Subtract two numeric values, automatically promoting Int to Float when needed
+/// Subtract two numeric values, promoting to float when either operand is float.
 pub(crate) fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Ok(Value::int(x - y)),
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Ok(Value::float(x - y)),
-            _ => {
-                // Handle mixed int-float by coercing int to float
-                match (a.as_int(), b.as_float()) {
-                    (Some(x), Some(y)) => Ok(Value::float(x as f64 - y)),
-                    _ => match (a.as_float(), b.as_int()) {
-                        (Some(x), Some(y)) => Ok(Value::float(x - y as f64)),
-                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
-                    },
-                }
-            }
-        },
+    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+        return match x.checked_sub(y) {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer subtraction overflow")),
+        };
+    }
+    match (a.as_number(), b.as_number()) {
+        (Some(x), Some(y)) => Ok(Value::float(x - y)),
+        _ => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
-/// Multiply two numeric values, automatically promoting Int to Float when needed
+/// Multiply two numeric values, promoting to float when either operand is float.
 pub(crate) fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => Ok(Value::int(x * y)),
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Ok(Value::float(x * y)),
-            _ => {
-                // Handle mixed int*float by coercing int to float
-                match (a.as_int(), b.as_float()) {
-                    (Some(x), Some(y)) => Ok(Value::float(x as f64 * y)),
-                    _ => match (a.as_float(), b.as_int()) {
-                        (Some(x), Some(y)) => Ok(Value::float(x * y as f64)),
-                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
-                    },
-                }
-            }
-        },
+    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+        return match x.checked_mul(y) {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer multiplication overflow")),
+        };
+    }
+    match (a.as_number(), b.as_number()) {
+        (Some(x), Some(y)) => Ok(Value::float(x * y)),
+        _ => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
-/// Divide two numeric values, automatically promoting Int to Float when needed
+/// Divide two numeric values. Integer division truncates; mixed/float
+/// division follows IEEE 754 (including Inf on divide-by-zero).
 pub(crate) fn div_values(a: &Value, b: &Value) -> LResult<Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
-            if y == 0 {
-                return Err(LError::division_by_zero());
-            }
-            Ok(Value::int(x / y))
+    if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+        if y == 0 {
+            return Err(LError::division_by_zero());
         }
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Ok(Value::float(x / y)),
-            _ => {
-                // Handle mixed int/float by coercing int to float
-                match (a.as_int(), b.as_float()) {
-                    (Some(x), Some(y)) => Ok(Value::float(x as f64 / y)),
-                    _ => match (a.as_float(), b.as_int()) {
-                        (Some(x), Some(y)) => {
-                            if y == 0 {
-                                return Err(LError::division_by_zero());
-                            }
-                            Ok(Value::float(x / y as f64))
-                        }
-                        _ => Err(LError::type_mismatch("number", "non-numeric value")),
-                    },
-                }
-            }
-        },
+        return match x.checked_div(y) {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer division overflow")),
+        };
+    }
+    match (a.as_number(), b.as_number()) {
+        (Some(x), Some(y)) => Ok(Value::float(x / y)),
+        _ => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
 /// Negate a numeric value
 pub(crate) fn negate_value(a: &Value) -> LResult<Value> {
-    match a.as_int() {
-        Some(n) => Ok(Value::int(-n)),
-        None => match a.as_float() {
-            Some(f) => Ok(Value::float(-f)),
-            None => Err(LError::type_mismatch("number", "non-numeric value")),
-        },
+    if let Some(n) = a.as_int() {
+        return match n.checked_neg() {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer negation overflow")),
+        };
+    }
+    match a.as_float() {
+        Some(f) => Ok(Value::float(-f)),
+        None => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
-/// Reciprocal of a numeric value (1/x)
+/// Reciprocal of a numeric value (1/x). Integer zero errors;
+/// float zero returns Inf per IEEE 754.
 pub(crate) fn reciprocal_value(a: &Value) -> LResult<Value> {
-    match a.as_int() {
-        Some(n) => {
-            if n == 0 {
-                Err(LError::division_by_zero())
-            } else {
-                Ok(Value::float(1.0 / n as f64))
-            }
+    if let Some(n) = a.as_int() {
+        if n == 0 {
+            return Err(LError::division_by_zero());
         }
-        None => match a.as_float() {
-            Some(f) => Ok(Value::float(1.0 / f)),
-            None => Err(LError::type_mismatch("number", "non-numeric value")),
-        },
+        return Ok(Value::float(1.0 / n as f64));
+    }
+    match a.as_float() {
+        Some(f) => Ok(Value::float(1.0 / f)),
+        None => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
@@ -153,12 +124,15 @@ pub(crate) fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
 
 /// Absolute value of a numeric value
 pub(crate) fn abs_value(a: &Value) -> LResult<Value> {
-    match a.as_int() {
-        Some(n) => Ok(Value::int(n.abs())),
-        None => match a.as_float() {
-            Some(f) => Ok(Value::float(f.abs())),
-            None => Err(LError::type_mismatch("number", "non-numeric value")),
-        },
+    if let Some(n) = a.as_int() {
+        return match n.checked_abs() {
+            Some(r) => Ok(Value::int(r)),
+            None => Err(LError::numeric_overflow("integer abs overflow")),
+        };
+    }
+    match a.as_float() {
+        Some(f) => Ok(Value::float(f.abs())),
+        None => Err(LError::type_mismatch("number", "non-numeric value")),
     }
 }
 
@@ -166,10 +140,15 @@ pub(crate) fn abs_value(a: &Value) -> LResult<Value> {
 pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Value::int(x.min(y)),
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Value::float(x.min(y)),
-            _ => *a,
-        },
+        _ => {
+            let af = a.as_number().unwrap();
+            let bf = b.as_number().unwrap();
+            if af <= bf {
+                *a
+            } else {
+                *b
+            }
+        }
     }
 }
 
@@ -177,10 +156,15 @@ pub(crate) fn min_values(a: &Value, b: &Value) -> Value {
 pub(crate) fn max_values(a: &Value, b: &Value) -> Value {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => Value::int(x.max(y)),
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(x), Some(y)) => Value::float(x.max(y)),
-            _ => *a,
-        },
+        _ => {
+            let af = a.as_number().unwrap();
+            let bf = b.as_number().unwrap();
+            if af >= bf {
+                *a
+            } else {
+                *b
+            }
+        }
     }
 }
 

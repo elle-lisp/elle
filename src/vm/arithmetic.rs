@@ -201,25 +201,14 @@ pub(crate) fn handle_div(vm: &mut VM) {
         .pop()
         .expect("VM bug: Stack underflow on Div");
 
-    // Check for division by zero and set exception instead of returning error
-    let is_zero = match (a.as_int(), b.as_int()) {
-        (Some(_), Some(y)) => y == 0,
-        _ => match (a.as_float(), b.as_float()) {
-            (Some(_), Some(y)) => y == 0.0,
-            _ => match (a.as_int(), b.as_float()) {
-                (Some(_), Some(y)) => y == 0.0,
-                _ => match (a.as_float(), b.as_int()) {
-                    (Some(_), Some(y)) => y == 0,
-                    _ => false,
-                },
-            },
-        },
-    };
-
-    if is_zero {
-        vm.fiber.signal = Some((SIG_ERROR, error_val("division-by-zero", "division by zero")));
-        vm.fiber.stack.push(Value::NIL);
-        return;
+    // Division by zero: error only for pure integer division.
+    // Float division follows IEEE 754 (returns Inf/-Inf/NaN).
+    if let (Some(_), Some(y)) = (a.as_int(), b.as_int()) {
+        if y == 0 {
+            vm.fiber.signal = Some((SIG_ERROR, error_val("division-by-zero", "division by zero")));
+            vm.fiber.stack.push(Value::NIL);
+            return;
+        }
     }
 
     match arithmetic::div_values(&a, &b) {

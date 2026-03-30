@@ -254,24 +254,12 @@ pub(crate) fn prim_div_vm(args: &[Value]) -> (SignalBits, Value) {
 
     let mut result = args[0];
     for arg in &args[1..] {
-        // Check for division by zero
-        let is_zero = match (result.as_int(), arg.as_int()) {
-            (Some(_), Some(y)) => y == 0,
-            _ => match (result.as_float(), arg.as_float()) {
-                (Some(_), Some(y)) => y == 0.0,
-                _ => match (result.as_int(), arg.as_float()) {
-                    (Some(_), Some(y)) => y == 0.0,
-                    _ => match (result.as_float(), arg.as_int()) {
-                        (Some(_), Some(y)) => y == 0,
-                        _ => false,
-                    },
-                },
-            },
-        };
-
-        if is_zero {
-            // Create a division-by-zero error
-            return (SIG_ERROR, error_val("division-by-zero", "division by zero"));
+        // Division by zero: error only for pure integer division.
+        // Float division follows IEEE 754 (returns Inf/-Inf/NaN).
+        if let (Some(_), Some(y)) = (result.as_int(), arg.as_int()) {
+            if y == 0 {
+                return (SIG_ERROR, error_val("division-by-zero", "division by zero"));
+            }
         }
 
         match arithmetic::div_values(&result, arg) {

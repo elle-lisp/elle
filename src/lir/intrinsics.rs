@@ -145,6 +145,18 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "port/open?",
     // Parameter predicate → bool
     "parameter?",
+    // Math constants → float
+    "math/pi",
+    "pi",
+    "math/e",
+    "e",
+    "math/inf",
+    "+inf",
+    "inf",
+    "math/-inf",
+    "-inf",
+    "math/nan",
+    "nan",
 ];
 
 /// Build the set of primitive SymbolIds known to return immediates.

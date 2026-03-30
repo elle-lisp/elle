@@ -186,8 +186,15 @@ impl Hash for Value {
         use crate::value::heap::{deref, HeapObject};
 
         if !self.is_heap() {
-            // Immediate values: tag + payload encode the type and value.
-            // Same tag+payload ↔ same value, and PartialEq agrees.
+            // Numeric coercion: (= 1 1.0) is true, so they must hash
+            // identically.  Canonicalize all numbers to their f64 bits.
+            if let Some(f) = self.as_number() {
+                // Use a fixed discriminator so int 1 and float 1.0 match.
+                0xFFu8.hash(state);
+                f.to_bits().hash(state);
+                return;
+            }
+            // Non-numeric immediates: tag + payload is unique and matches PartialEq.
             self.tag.hash(state);
             self.payload.hash(state);
             return;
