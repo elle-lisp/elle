@@ -15,11 +15,14 @@ use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
 use crate::primitives::registration::ALL_TABLES;
 use crate::signals::SIG_IO;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::SignalBits;
 use crate::value::repr::TAG_HEAP_START;
 use crate::value::Value;
 
 use super::handle::HandleTable;
+
+/// Bytecode + constants for a closure, used by spawn for cross-thread execution.
+pub type ClosureBytecode = (std::rc::Rc<Vec<u8>>, std::rc::Rc<Vec<Value>>);
 
 /// Base address for the env stack in linear memory.
 /// Each `call_wasm_closure` allocates a region starting from here.
@@ -43,6 +46,9 @@ pub struct WasmSuspensionFrame {
     pub env_snapshot: Vec<u8>,
     /// Base address where env_snapshot was taken from (for restore).
     pub env_base: usize,
+    /// Full signal bits at the yield point. Preserves SIG_IO and other
+    /// bits so the scheduler can detect I/O requests on the fiber.
+    pub signal_bits: u32,
 }
 
 /// Host state stored in the Wasmtime `Store<ElleHost>`.
@@ -64,15 +70,24 @@ pub struct ElleHost {
     /// of (parameter_id, value) pairs. PushParamFrame pushes a new
     /// frame; PopParamFrame pops.
     pub param_frames: Vec<Vec<(u32, Value)>>,
-    /// Stack of suspension frames for yield/resume. Innermost (callee)
-    /// frame is last. On resume, frames are popped from the end.
-    pub suspension_frames: Vec<WasmSuspensionFrame>,
+    /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
+    /// address). Each fiber's frames are independent — nested coroutine
+    /// resumes don't interfere with the parent fiber's frames.
+    pub suspension_frames: std::collections::HashMap<usize, Vec<WasmSuspensionFrame>>,
+    /// Stack of active fiber IDs. Pushed when entering handle_fiber_resume,
+    /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
+    /// to find the correct fiber's frame list.
+    pub fiber_id_stack: Vec<usize>,
     /// Resume value passed by the scheduler (fiber/resume). Set before
     /// re-invoking a suspended function; consumed by rt_get_resume_value.
     pub resume_value: Option<(i64, i64)>,
     /// Mapping from const pool index → handle table index for heap values.
     /// Immediate values (tag < TAG_HEAP_START) have 0 here (unused).
     pub pool_to_handle: Vec<u64>,
+    /// Bytecode for each closure, indexed by table index.
+    /// Populated from EmitResult so rt_make_closure can give WASM closures
+    /// valid bytecode for cross-thread execution via spawn.
+    pub closure_bytecodes: Vec<ClosureBytecode>,
 }
 
 impl ElleHost {
@@ -84,9 +99,11 @@ impl ElleHost {
             const_pool: Vec::new(),
             env_stack_ptr: ENV_STACK_BASE,
             param_frames: Vec::new(),
-            suspension_frames: Vec::new(),
+            suspension_frames: std::collections::HashMap::new(),
+            fiber_id_stack: Vec::new(),
             resume_value: None,
             pool_to_handle: Vec::new(),
+            closure_bytecodes: Vec::new(),
         }
     }
 }
@@ -98,6 +115,48 @@ impl Default for ElleHost {
 }
 
 impl ElleHost {
+    /// Get the current fiber's ID from the stack, or 0 for top-level.
+    pub fn current_fiber_id(&self) -> usize {
+        self.fiber_id_stack.last().copied().unwrap_or(0)
+    }
+
+    /// Push a suspension frame for the current fiber.
+    pub fn push_suspension_frame(&mut self, frame: WasmSuspensionFrame) {
+        let id = self.current_fiber_id();
+        self.suspension_frames.entry(id).or_default().push(frame);
+    }
+
+    /// Pop the last suspension frame for the current fiber.
+    pub fn pop_suspension_frame(&mut self) -> Option<WasmSuspensionFrame> {
+        let id = self.current_fiber_id();
+        let frames = self.suspension_frames.get_mut(&id)?;
+        let frame = frames.pop();
+        if frames.is_empty() {
+            self.suspension_frames.remove(&id);
+        }
+        frame
+    }
+
+    /// Get the last suspension frame for the current fiber (immutable).
+    pub fn last_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
+        let id = self.current_fiber_id();
+        self.suspension_frames.get(&id)?.last()
+    }
+
+    /// Get the last suspension frame for the current fiber (mutable).
+    pub fn last_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
+        let id = self.current_fiber_id();
+        self.suspension_frames.get_mut(&id)?.last_mut()
+    }
+
+    /// Check if the current fiber has any suspension frames.
+    pub fn has_suspension_frames(&self) -> bool {
+        let id = self.current_fiber_id();
+        self.suspension_frames
+            .get(&id)
+            .is_some_and(|f| !f.is_empty())
+    }
+
     /// Convert a Value to its WASM representation (tag, payload).
     /// Immediate values pass through directly. Heap values get a handle.
     pub fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {
@@ -137,52 +196,28 @@ impl ElleHost {
         (def.func)(args)
     }
 
-    /// If the signal contains SIG_IO, extract the IoRequest and execute
-    /// it using the backend from `*io-backend*` in the parameter system.
-    /// Falls back to a fresh sync backend if no parameter is bound.
+    /// Handle SIG_IO from a primitive call.
+    ///
+    /// When an async backend (`*io-backend*`) is bound, SIG_IO is
+    /// propagated as-is so the scheduler can drive I/O through the
+    /// event loop. Only when no backend is bound (no scheduler active)
+    /// do we fall back to inline sync execution.
     pub fn maybe_execute_io(&self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
         if bits.0 & SIG_IO.0 == 0 {
             return (bits, value);
         }
-        if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-            eprintln!(
-                "[wasm-io] SIG_IO intercepted, value type: {}",
-                value.type_name()
-            );
+
+        // If an async backend is bound, let SIG_IO propagate to the
+        // scheduler — it will submit to io-uring and drive fibers.
+        if self.find_io_backend().is_some() {
+            return (bits, value);
         }
+
+        // No scheduler active — execute I/O inline via sync backend.
         let request = match value.as_external::<IoRequest>() {
             Some(r) => r,
-            None => {
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!("[wasm-io] value is NOT an IoRequest, propagating signal");
-                }
-                return (bits, value);
-            }
+            None => return (bits, value),
         };
-        if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-            eprintln!("[wasm-io] executing IoRequest: {:?}", request.op);
-        }
-        // Look up *io-backend* from param_frames. The backend is a
-        // Value::external with type "io-backend" — either AnyBackend
-        // (async: uring/threads) or SyncBackend.
-        if let Some(backend_val) = self.find_io_backend() {
-            if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
-                if let Ok(_id) = async_be.0.submit(request) {
-                    if let Ok(completions) = async_be.0.wait(-1) {
-                        if let Some(c) = completions.into_iter().next() {
-                            return match c.result {
-                                Ok(v) => (SIG_OK, v),
-                                Err(e) => (SIG_ERROR, e),
-                            };
-                        }
-                    }
-                }
-            }
-            if let Some(sync_be) = backend_val.as_external::<SyncBackend>() {
-                return sync_be.execute(request);
-            }
-        }
-        // Fallback: create a temporary sync backend
         SyncBackend::new().execute(request)
     }
 

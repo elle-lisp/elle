@@ -26,6 +26,9 @@ pub struct EmitResult {
     /// into its handle table before execution, and `rt_load_const(i)`
     /// returns the i-th constant.
     pub const_pool: Vec<Value>,
+    /// Bytecode for each closure, indexed by table index.
+    /// Used by spawn to execute WASM closures in new threads.
+    pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
 }
 
 /// Emit a WASM module from a top-level LirFunction.
@@ -294,11 +297,12 @@ impl WasmEmitter {
                 ValType::I32,
             ],
         );
-        // Type 10: rt_yield(tag, payload, resume_state, regs_ptr, num_regs, func_idx) -> ()
+        // Type 10: rt_yield(tag, payload, resume_state, regs_ptr, num_regs, func_idx, signal_bits) -> ()
         types.ty().function(
             [
                 ValType::I64,
                 ValType::I64,
+                ValType::I32,
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,
@@ -399,9 +403,22 @@ impl WasmEmitter {
 
         module.section(&code);
 
+        // Dual-compile: emit bytecode for each closure so spawn can run
+        // WASM closures in new threads via the bytecode VM.
+        let mut closure_bytecodes = Vec::with_capacity(nested_funcs.len());
+        let mut bc_emitter = crate::lir::Emitter::new();
+        for nf in &nested_funcs {
+            let (bytecode, _yield_points, _call_sites) = bc_emitter.emit(nf);
+            closure_bytecodes.push((
+                std::rc::Rc::new(bytecode.instructions),
+                std::rc::Rc::new(bytecode.constants),
+            ));
+        }
+
         EmitResult {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
+            closure_bytecodes,
         }
     }
 
@@ -552,6 +569,7 @@ impl WasmEmitter {
         EmitResult {
             wasm_bytes: module.finish(),
             const_pool: std::mem::take(&mut self.const_pool),
+            closure_bytecodes: Vec::new(),
         }
     }
 
@@ -853,6 +871,7 @@ impl WasmEmitter {
                     f.instruction(&Instruction::I32Const(ARGS_BASE));
                     f.instruction(&Instruction::I32Const(total_saved as i32));
                     f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
+                    f.instruction(&Instruction::I32Const(2)); // SIG_YIELD
                     f.instruction(&Instruction::Call(FN_RT_YIELD));
 
                     f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
@@ -909,6 +928,7 @@ impl WasmEmitter {
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
             f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
+            f.instruction(&Instruction::LocalGet(self.signal_local)); // full signal bits
             f.instruction(&Instruction::Call(FN_RT_YIELD));
 
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
@@ -971,6 +991,7 @@ impl WasmEmitter {
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
             f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
+            f.instruction(&Instruction::LocalGet(self.signal_local)); // full signal bits
             f.instruction(&Instruction::Call(FN_RT_YIELD));
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
@@ -1002,13 +1023,15 @@ impl WasmEmitter {
 
         // The signal is already in memory[0..4] (written by store_result_with_signal)
         // and the dst register holds the yielded value.
-        // Read signal from memory.
+        // Read full signal bits from memory (for SIG_IO propagation etc.)
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::I32Load(MemArg {
             offset: 0,
             align: 2,
             memory_index: 0,
         }));
+        // Save full signal bits on stack, then check SIG_YIELD bit
+        f.instruction(&Instruction::LocalTee(self.signal_local));
         f.instruction(&Instruction::I32Const(2)); // SIG_YIELD bit
         f.instruction(&Instruction::I32And);
         f.instruction(&Instruction::If(BlockType::Empty));
@@ -1025,13 +1048,14 @@ impl WasmEmitter {
             // Spill all registers + local slots
             self.emit_spill_all(f);
 
-            // Call rt_yield with the callee's yielded value
+            // Call rt_yield with the callee's yielded value and full signal bits
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
             f.instruction(&Instruction::I32Const(resume_state as i32));
             f.instruction(&Instruction::I32Const(ARGS_BASE));
             f.instruction(&Instruction::I32Const(total_saved as i32));
             f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
+            f.instruction(&Instruction::LocalGet(self.signal_local));
             f.instruction(&Instruction::Call(FN_RT_YIELD));
 
             // Return suspended

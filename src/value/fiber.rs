@@ -41,6 +41,12 @@ impl FiberHandle {
             .expect("FiberHandle::take: fiber already taken (currently executing on VM)")
     }
 
+    /// Stable identity for this fiber (Rc pointer address).
+    /// Used by the WASM backend to key per-fiber suspension frame storage.
+    pub fn id(&self) -> usize {
+        Rc::as_ptr(&self.0) as usize
+    }
+
     /// Put a fiber back into the handle. Panics if slot is occupied.
     pub fn put(&self, fiber: Fiber) {
         let mut slot = self.0.borrow_mut();

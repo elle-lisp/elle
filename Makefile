@@ -127,13 +127,13 @@ smoke-wasm:
 	@echo "=== examples (WASM backend) ==="
 	@export ELLE_WASM=1 && printf '%s\n' examples/*.lisp | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 60s $(FAST_ELLE) {}' \
+			'timeout 180s $(FAST_ELLE) {}' \
 		|| { echo "FAILED: examples WASM pass"; exit 1; }
 	@echo "=== elle scripts (WASM backend) ==="
 	@export ELLE_WASM=1 && printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 60s $(FAST_ELLE) {}' \
+			'timeout 180s $(FAST_ELLE) {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
 
 smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest

@@ -86,6 +86,9 @@ codegen-units = 1
 opt-level = 3
 strip = "symbols"
 
+[patch.crates-io]
+wasmparser = { path = "patches/wasmparser" }
+
 [profile.profiling]
 inherits = "release"
 strip = false

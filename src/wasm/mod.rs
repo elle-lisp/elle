@@ -53,12 +53,15 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     let full_source;
     let compile_source = if with_stdlib {
-        // Concatenate stdlib + user source as peer top-level forms.
-        // No source-level wrapping — the IO backend falls back to
-        // SyncBackend in maybe_execute_io when no *io-backend*
-        // parameter is bound. Host-side parameter setup (Phase 2)
-        // will replace the fallback.
-        full_source = format!("{}\n{}", STDLIB, source);
+        // Concatenate stdlib + user source wrapped in ev/run so the async
+        // scheduler is active and *io-backend* is bound. Epoch directives
+        // must be at the top level (outside the fn) for extract_epoch.
+        let (epoch_line, body) = if source.starts_with("(elle/epoch") {
+            source.split_once('\n').unwrap_or(("", source))
+        } else {
+            ("", source)
+        };
+        full_source = format!("{}\n{}\n(ev/run (fn []\n{}\n))", STDLIB, epoch_line, body);
         full_source.as_str()
     } else {
         source
@@ -96,7 +99,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     // Run on Wasmtime
     let engine = store::create_engine().map_err(|e| e.to_string())?;
-    let mut wasm_store = store::create_store(&engine, result.const_pool);
+    let mut wasm_store = store::create_store(&engine, result.const_pool, result.closure_bytecodes);
     let linker = store::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
 
