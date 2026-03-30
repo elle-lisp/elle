@@ -203,7 +203,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
             propagates: 0,
         },
         arity: Arity::Exact(1),
-        doc: "Wait for filesystem events. Yields to the scheduler; resumes with an array of event structs [{:kind :modify :path \"...\"}].",
+        doc: "Wait for filesystem events. Yields to the scheduler; resumes with an array of event structs [{:kind :modify :path \"...\"}]. Event kinds: :create, :modify, :remove, :rename. On macOS (kqueue), :create is reported as :modify because kqueue does not distinguish them at the directory level.",
         params: &["watcher"],
         category: "watch",
         example: "(watch-next w)",
