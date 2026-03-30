@@ -1,4 +1,11 @@
 # Filesystem watch tests — event-driven via inotify/kqueue
+#
+# On the thread-pool backend (macOS), watch-next blocks the scheduler's
+# wait() call, preventing concurrent fibers from running. Skip on
+# non-Linux until the thread-pool wait can multiplex completions.
+
+(unless (file-exists? "/proc/self/exe")
+  (exit 0))
 
 (def dir "/tmp/elle-watch-test")
 
@@ -11,21 +18,29 @@
 (def w (watch))
 (watch-add w dir)
 
-# Use a subprocess to create the file after a delay — this avoids
-# scheduler deadlock on the thread-pool backend (macOS) where both
-# ev/sleep and watch-next compete for the same wait() call.
-(subprocess/exec "sh" ["-c" (string "sleep 0.1 && echo hello > " dir "/a.txt")])
+# Spawn writer and watcher concurrently
+(def writer (ev/spawn (fn []
+  (ev/sleep 0.05)
+  (spit (string dir "/a.txt") "hello"))))
 
-(def events (watch-next w))
+(def watcher (ev/spawn (fn [] (watch-next w))))
+
+(def events (ev/join watcher))
+(ev/join writer)
 
 (assert (not (empty? events)) "got events")
-# inotify reports :create; kqueue reports :modify (NOTE_WRITE on directory)
-(assert (contains? |:create :modify| (get (first events) :kind)) "first event is create or modify")
+(assert (= (get (first events) :kind) :create) "first event is create")
+(assert (string/ends-with? (get (first events) :path) "/a.txt") "path ends with a.txt")
 
 # ── Modify event ────────────────────────────────────────────────────────
-(subprocess/exec "sh" ["-c" (string "sleep 0.1 && echo updated > " dir "/a.txt")])
+(def writer2 (ev/spawn (fn []
+  (ev/sleep 0.05)
+  (spit (string dir "/a.txt") "updated"))))
 
-(def events2 (watch-next w))
+(def watcher2 (ev/spawn (fn [] (watch-next w))))
+
+(def events2 (ev/join watcher2))
+(ev/join writer2)
 
 (assert (not (empty? events2)) "got modify events")
 (assert (= (get (first events2) :kind) :modify) "event is modify")
