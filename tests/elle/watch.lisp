@@ -10,13 +10,20 @@
 # ── Basic: create file, receive event ───────────────────────────────────
 (def w (watch))
 (watch-add w dir)
+(eprintln "watch: added " dir)
 
 # Spawn writer and watcher concurrently
 (def writer (ev/spawn (fn []
   (ev/sleep 0.1)
-  (spit (string dir "/a.txt") "hello"))))
+  (eprintln "watch: writing file")
+  (spit (string dir "/a.txt") "hello")
+  (eprintln "watch: wrote file"))))
 
-(def watcher (ev/spawn (fn [] (watch-next w))))
+(def watcher (ev/spawn (fn []
+  (eprintln "watch: calling watch-next")
+  (let [[events (watch-next w)]]
+    (eprintln "watch: got " (length events) " events")
+    events))))
 
 (def events (ev/join watcher))
 (ev/join writer)
@@ -38,7 +45,7 @@
 (assert (not (empty? events2)) "got modify events")
 (assert (= (get (first events2) :kind) :modify) "event is modify")
 
-# ── Close and cleanup ──────────────────────────────────────────��───────
+# ── Close and cleanup ──────────────────────────────────────────────────
 (watch-close w)
 (delete-file (string dir "/a.txt"))
 (delete-directory dir)
