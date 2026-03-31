@@ -1,58 +1,51 @@
 # Elle Documentation
 
-This directory contains design documents, language references, and contributor guides for Elle.
+This directory contains language references, design documents, and contributor
+guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
 
-## Language Reference
+## Language Topics
 
-| File | Description |
-|------|-------------|
-| [language.md](language.md) | Complete language reference: syntax, data types, variables, functions, control flow, scoping |
-| [types.md](types.md) | Type system: mutable/immutable split, all types, predicates, display format, equality |
-| [semantics.md](semantics.md) | Authoritative semantics: truthiness, lists, conditionals, equality, destructuring |
-| [macros.md](macros.md) | Macro system: current state, architecture, hygiene, scope sets |
-| [modules.md](modules.md) | Module system: closure-as-module, parametric imports, qualified symbols, trade-offs |
+Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
-## Contributor Guides
-
-| File | Description |
-|------|-------------|
-| [cookbook.md](cookbook.md) | Step-by-step recipes for common changes: new primitives, heap types, bytecode instructions, special forms, lint rules, macros |
-| [testing.md](testing.md) | Testing strategy: decision tree, test categories, property tests, CI structure, running tests |
-| [pipeline.md](pipeline.md) | Compilation pipeline: entry points, VM ownership, expander lifecycle, fixpoint loop, caching |
-| [debugging.md](debugging.md) | Debugging toolkit: introspection primitives, time API, signal system, memory profiling |
+`syntax` `types` `bindings` `destructuring` `destructuring-advanced`
+`functions` `named-args` `arrays` `structs` `sets` `strings` `bytes`
+`control` `loops` `match` `errors` `concurrency` `threads` `coroutines`
+`parameters` `traits` `io` `lua` `epochs`
 
 ## Design Documents
 
-| File | Description |
-|------|-------------|
-| [signals.md](signals.md) | Signal system design: motivation, signal protocol, signal inference, JIT integration |
-| [fibers.md](fibers.md) | Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains |
-| [ffi.md](ffi.md) | FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling |
+| Directory | Content |
+|-----------|---------|
+| [signals/](signals/) | Signal system design, protocol, inference, JIT |
+| [signals/fibers.md](signals/fibers.md) | Fiber architecture |
 
-## Reference Material
+## Contributor Guides
 
-| File | Description |
-|------|-------------|
-| [reference/janet.md](reference/janet.md) | Janet language reference (design inspiration, not Elle's implementation) |
-| [reference/janet-compiler.md](reference/janet-compiler.md) | Janet compiler design (reference material) |
-| [reference/janet-destructuring.md](reference/janet-destructuring.md) | Janet destructuring patterns (reference material) |
+| Directory | Content |
+|-----------|---------|
+| [cookbook/](cookbook/) | Recipes: primitives, heap types, bytecode, plugins |
+| [analysis/](analysis/) | Testing strategy, debugging, portraits |
+| [pipeline.md](pipeline.md) | Compilation pipeline |
+
+## Implementation
+
+| Directory | Content |
+|-----------|---------|
+| [impl/](impl/) | Reader, HIR, LIR, bytecode, VM, JIT, values |
+
+## Reference
+
+| File | Content |
+|------|---------|
+| [plugins.md](plugins.md) | 29 shipped plugins |
+| [stdlib.md](stdlib.md) | Standard library and prelude |
+| [modules.md](modules.md) | Import system |
+| [macros.md](macros.md) | Macro system |
+| [ffi.md](ffi.md) | C interop |
 
 ## Quick Navigation
 
-- **Starting out?** Read [language.md](language.md) first, then [pipeline.md](pipeline.md)
-- **Working with modules?** Read [modules.md](modules.md)
-- **Adding a feature?** Check [cookbook.md](cookbook.md) for the recipe
-- **Understanding signals?** Read [signals.md](signals.md)
-- **Working with concurrency?** Read [fibers.md](fibers.md)
-- **Implementing FFI?** Read [ffi.md](ffi.md)
-- **Writing tests?** Read [testing.md](testing.md)
-- **Debugging?** See [debugging.md](debugging.md)
-
-## Maintaining Documentation
-
-When you change a module's interface or discover undocumented behavior:
-1. Update the relevant doc file
-2. Update the module's AGENTS.md
-3. If adding a new doc, add it to this index and to [AGENTS.md](AGENTS.md)
-
-Documentation debt compounds. A few minutes now saves hours of confusion later.
+- **Starting out?** Read [QUICKSTART.md](../QUICKSTART.md)
+- **Adding a feature?** Check [cookbook/](cookbook/)
+- **Understanding signals?** Read [signals/](signals/)
+- **Writing tests?** Read [analysis/](analysis/)
