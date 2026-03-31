@@ -198,26 +198,42 @@ impl ElleHost {
 
     /// Handle SIG_IO from a primitive call.
     ///
-    /// When an async backend (`*io-backend*`) is bound, SIG_IO is
-    /// propagated as-is so the scheduler can drive I/O through the
-    /// event loop. Only when no backend is bound (no scheduler active)
-    /// do we fall back to inline sync execution.
+    /// When inside a fiber (fiber_id_stack is non-empty), propagate
+    /// SIG_IO so the scheduler can drive I/O through the event loop.
+    /// Otherwise, execute I/O inline via the bound backend or SyncBackend.
     pub fn maybe_execute_io(&self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
         if bits.0 & SIG_IO.0 == 0 {
             return (bits, value);
         }
 
-        // If an async backend is bound, let SIG_IO propagate to the
-        // scheduler — it will submit to io-uring and drive fibers.
-        if self.find_io_backend().is_some() {
+        // Inside a fiber: propagate SIG_IO to the scheduler
+        if !self.fiber_id_stack.is_empty() {
             return (bits, value);
         }
 
-        // No scheduler active — execute I/O inline via sync backend.
+        // Top-level: execute I/O inline
         let request = match value.as_external::<IoRequest>() {
             Some(r) => r,
             None => return (bits, value),
         };
+
+        if let Some(backend_val) = self.find_io_backend() {
+            if let Some(async_be) = backend_val.as_external::<AnyBackend>() {
+                if let Ok(_id) = async_be.0.submit(request) {
+                    if let Ok(completions) = async_be.0.wait(-1) {
+                        if let Some(c) = completions.into_iter().next() {
+                            return match c.result {
+                                Ok(v) => (crate::value::fiber::SIG_OK, v),
+                                Err(e) => (crate::value::fiber::SIG_ERROR, e),
+                            };
+                        }
+                    }
+                }
+            }
+            if let Some(sync_be) = backend_val.as_external::<SyncBackend>() {
+                return sync_be.execute(request);
+            }
+        }
         SyncBackend::new().execute(request)
     }
 

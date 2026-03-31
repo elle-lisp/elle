@@ -1234,15 +1234,17 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
             };
             caller.data_mut().fiber_id_stack.push(fiber_id);
             let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
+            // Read signal bits BEFORE popping fiber_id (frames are keyed by it)
+            let frame_sig_bits = caller
+                .data()
+                .last_suspension_frame()
+                .map(|f| f.signal_bits)
+                .unwrap_or(SIG_YIELD.0);
             caller.data_mut().fiber_id_stack.pop();
 
             if signal == yield_signal {
                 let yielded = caller.data().wasm_to_value(tag, payload);
-                let sig_bits = caller
-                    .data()
-                    .last_suspension_frame()
-                    .map(|f| f.signal_bits)
-                    .unwrap_or(SIG_YIELD.0);
+                let sig_bits = frame_sig_bits;
                 fiber_handle.with_mut(|f| {
                     f.status = FiberStatus::Paused;
                     f.signal = Some((SignalBits::new(sig_bits), yielded));

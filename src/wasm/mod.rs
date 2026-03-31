@@ -59,9 +59,10 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
             .map(|s| s.len())
             .unwrap_or(0);
         // Concatenate stdlib + user source wrapped in ev/run so the async
-        // scheduler is active and *io-backend* is bound. Epoch directives
-        // are hoisted before stdlib so extract_epoch finds them at forms[0],
-        // but migration is scoped to user forms via epoch_skip.
+        // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
+        // I/O inside fibers propagates SIG_IO to the scheduler; top-level
+        // I/O executes inline via maybe_execute_io.
+        // Epoch directives are hoisted before stdlib for extract_epoch.
         let (epoch_prefix, body) = if source.starts_with("(elle/epoch") {
             source.split_once('\n').unwrap_or((source, ""))
         } else {
