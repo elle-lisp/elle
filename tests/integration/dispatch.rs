@@ -85,7 +85,7 @@ fn test_lint_nonexistent_file() {
 fn test_existing_file_execution_unchanged() {
     // Verify that normal file execution still works
     let output = Command::new(get_elle_binary())
-        .args(["examples/basics.lisp"])
+        .args(["docs/syntax.md"])
         .output()
         .expect("Failed to run elle");
 
