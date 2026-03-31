@@ -11,6 +11,11 @@ OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 (sys/thread-id)            # current OS thread ID
 ```
 
+`sys/spawn` **deep-copies** the closure and all captured values into the
+new thread via `SendValue`. The threads share nothing — mutations on one
+side are invisible to the other. Values that cannot be serialized (fibers,
+open ports) will error at spawn time.
+
 ## Channels
 
 Crossbeam-based channels for inter-fiber and inter-thread messaging.
