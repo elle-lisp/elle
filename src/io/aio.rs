@@ -139,6 +139,11 @@ impl AsyncBackend {
             return self.submit_task(task_fn);
         }
 
+        // PollFd: poll a raw fd for readiness.
+        if let IoOp::PollFd { fd, events } = request.op {
+            return self.submit_poll_fd(fd, events, request.timeout);
+        }
+
         let port = request
             .port
             .as_external::<Port>()
@@ -648,6 +653,52 @@ impl AsyncBackend {
         pending.insert(
             id,
             PendingOp::Sleep {
+                buffer_handle: buf_handle,
+            },
+        );
+        Ok(id)
+    }
+
+    /// Submit a PollFd operation — wait for a raw fd to become ready.
+    fn submit_poll_fd(
+        &self,
+        fd: std::os::unix::io::RawFd,
+        events: u32,
+        timeout: Option<Duration>,
+    ) -> Result<u64, String> {
+        let mut inner = self.inner.borrow_mut();
+        let id = inner.next_id;
+        inner.next_id += 1;
+        let buf_handle = inner.buffer_pool.alloc(0);
+
+        let AsyncBackendInner {
+            ref mut platform,
+            ref mut network_pool,
+            ref mut pending,
+            ..
+        } = *inner;
+
+        match platform {
+            #[cfg(target_os = "linux")]
+            PlatformBackend::Uring(ring) => {
+                crate::io::uring::submit_uring_poll_add(ring, id, fd, events)?;
+            }
+            PlatformBackend::ThreadPool(_) => {
+                let timeout_ms = timeout.map(|d| d.as_millis() as i32).unwrap_or(-1);
+                network_pool.submit(
+                    id,
+                    PoolOp::PollFd {
+                        fd,
+                        events,
+                        timeout_ms,
+                    },
+                )?;
+            }
+        }
+
+        pending.insert(
+            id,
+            PendingOp::PollFd {
                 buffer_handle: buf_handle,
             },
         );
@@ -1381,7 +1432,8 @@ impl AsyncBackendInner {
             | IoOp::Task(_)
             | IoOp::Resolve { .. }
             | IoOp::WatchNext
-            | IoOp::Close => return Err("io/submit: unsupported operation on stdin".into()),
+            | IoOp::Close
+            | IoOp::PollFd { .. } => return Err("io/submit: unsupported operation on stdin".into()),
         };
         stdin_thread.submit(id, op_kind)?;
         // No buffer needed for stdin (thread manages its own)

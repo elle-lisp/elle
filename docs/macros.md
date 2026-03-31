@@ -24,7 +24,7 @@ compiled and executed in the real VM via `pipeline::eval_syntax()`.
 The full language is available in macro bodies: `if`, `let`, closures,
 list operations, recursion — everything.
 
-```janet
+```text
 (defmacro my-when (test body)
   `(if ,test ,body nil))
 
@@ -73,7 +73,9 @@ unique global names).
 lists. A macro body that returns `(cons 1 2)` will error.
 
 **REPL macro persistence.** `compile` creates a fresh Expander per call,
-so macros defined in one REPL input are lost before the next.
+so macros defined in one REPL input are lost before the next. This means
+`defmacro` in the REPL only affects the current input line. Macros used
+across multiple inputs must be defined in a file and imported.
 
 
 ## Architecture
@@ -303,7 +305,7 @@ with the lexical context of `context`. The result is marked
 not override the context's scopes. This enables anaphoric macros —
 macros that intentionally introduce bindings visible at the call site.
 
-```janet
+```text
 (defmacro aif (test then else)
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))

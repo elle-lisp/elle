@@ -67,6 +67,12 @@ pub(super) enum PoolOp {
     WatchRead {
         fd: RawFd,
     },
+    /// Poll a raw fd for readiness via libc::poll(). Returns revents mask.
+    PollFd {
+        fd: RawFd,
+        events: u32,
+        timeout_ms: i32,
+    },
 }
 
 /// Typed thread-pool completion (replaces `(u64, i32, Vec<u8>)` tuples).
@@ -407,6 +413,24 @@ impl ThreadPoolBackend {
                     }
                 }
                 PoolOp::WatchRead { fd } => watch_read_blocking(fd),
+                PoolOp::PollFd {
+                    fd,
+                    events,
+                    timeout_ms,
+                } => {
+                    let mut pfd = libc::pollfd {
+                        fd,
+                        events: events as i16,
+                        revents: 0,
+                    };
+                    let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
+                    if ret < 0 {
+                        let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(1);
+                        (-errno, Vec::new())
+                    } else {
+                        (pfd.revents as i32, Vec::new())
+                    }
+                }
             };
             let _ = sender.send(PoolCompletion {
                 id,

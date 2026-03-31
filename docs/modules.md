@@ -11,12 +11,29 @@ the design trades away.
 ## The Primitive
 
 ```
-(import "path/to/file.lisp")   → value
-(import "path/to/plugin.so")   → value
+(import "std/http")             → value   (standard library)
+(import "plugin/regex")         → value   (native plugin)
+(import "path/to/file.lisp")   → value   (explicit path)
 ```
 
 `import` (aliases: `import-file`, `module/import`) takes a string path and
 returns a value. That is the entire module system API.
+
+### Virtual prefixes
+
+Two prefixes resolve relative to the Elle project root (`ELLE_HOME`, or
+auto-detected by walking up from the binary to find `Cargo.toml`):
+
+| Prefix | Resolves to | Example |
+|--------|-------------|---------|
+| `std/X` | `<root>/lib/X.lisp` | `(import "std/http")` → `lib/http.lisp` |
+| `plugin/X` | `<root>/target/<profile>/libelle_X.so` | `(import "plugin/regex")` → `libelle_regex.so` |
+
+Plugin resolution prefers the same build profile as the running binary
+(debug binary tries `target/debug/` first, release tries `target/release/`
+first) and falls back to the other.
+
+### Path resolution
 
 For `.lisp` files: the file is read, compiled via `compile_file`, and executed
 on the current VM. The return value is the file's last expression.
@@ -27,13 +44,23 @@ is called, and its return value is passed back to the caller.
 Both code paths return a value. What that value is — and how the caller uses
 it — is convention, not mechanism.
 
+### import-file — low-level interface
+
+`import-file` takes an explicit file path and bypasses prefix resolution.
+It is the low-level primitive suitable for building a user-supplied module
+system on top of:
+
+```text
+(def utils (import-file "my/custom/path/utils.lisp"))
+```
+
 
 ## Convention: Closure-as-Module
 
 A module file defines private bindings, then exports a subset by returning a
 closure that produces a struct:
 
-```lisp
+```text
 # greet.lisp
 (def greeting "Hello")
 
@@ -45,7 +72,7 @@ closure that produces a struct:
 
 The caller imports, calls the closure, and binds the result:
 
-```lisp
+```text
 (let ([g ((import "greet.lisp"))])
   (g:greet "world"))       # => "Hello, world!"
 ```
@@ -64,7 +91,7 @@ from access modifiers or export declarations.
 The closure can accept arguments, making the module configurable at import
 time:
 
-```lisp
+```text
 # formatter.lisp
 (fn (&keys {:prefix prefix :suffix suffix :separator separator})
   (let* ([prefix    (if (nil? prefix) "" prefix)]
@@ -80,7 +107,7 @@ time:
     {:wrap wrap :join join}))
 ```
 
-```lisp
+```text
 (let ([fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")])
   (fmt:wrap "hello")          # => "[hello]"
   (fmt:join [1 2 3]))         # => "1 | 2 | 3"
@@ -89,7 +116,7 @@ time:
 Each call to the closure captures its own configuration. Two imports of the
 same module with different arguments produce independent instances:
 
-```lisp
+```text
 (let ([parens  ((import "formatter.lisp") :prefix "(" :suffix ")")]
       [angles  ((import "formatter.lisp") :prefix "<" :suffix ">")])
   (parens:wrap "x")           # => "(x)"
@@ -105,7 +132,7 @@ This is ML's functor pattern without any dedicated syntax.
 
 Bind the whole module, access via `mod:name`:
 
-```lisp
+```text
 (let ([json ((import "json.lisp") :pretty-indent 4)])
   (json:pretty (json:parse input)))
 ```
@@ -114,7 +141,7 @@ Bind the whole module, access via `mod:name`:
 
 Pull specific names into scope:
 
-```lisp
+```text
 (def {:parse parse :pretty pretty} ((import "json.lisp") :pretty-indent 4))
 (pretty (parse input))
 ```
@@ -126,13 +153,13 @@ the file runs for its side effects — I/O, registration, printing. But because
 files are compiled as a single letrec, top-level `defn` forms are local to the
 file, not injected into the caller's scope:
 
-```lisp
+```text
 # helpers.lisp
 (defn double [x] (* x 2))
 # last expression is the closure bound to `double`
 ```
 
-```lisp
+```text
 (import "helpers.lisp")
 (double 21)                   # ✗ compilation error: undefined variable: double
 ```
@@ -145,8 +172,8 @@ namespace pollution.
 
 Native plugins return a struct from `elle_plugin_init`:
 
-```lisp
-(import "target/release/libelle_random.so")
+```text
+(import "plugin/random")
 (random/int 1 100)
 ```
 
@@ -154,8 +181,8 @@ Plugins also register their primitives globally, so both qualified and
 unqualified access work. The return value from `import` is a struct with
 short-name keys (`:int`, `:float`, etc.), enabling the same qualified pattern:
 
-```lisp
-(let ([rng (import "target/release/libelle_random.so")])
+```text
+(let ([rng (import "plugin/random")])
   (rng:int 1 100))
 ```
 
@@ -270,18 +297,6 @@ This means there is no "flat import" footgun: you cannot accidentally pollute
 the caller's namespace by importing a file. The closure pattern is not a
 discipline imposed on top of a leaky primitive — it is the only way to get
 definitions out of a file.
-
-### No path resolution
-
-Import paths are literal strings, resolved relative to the working directory.
-There is no module search path, no package registry, no `ELLEPATH` environment
-variable. `(import "lib/utils.lisp")` means exactly that file, right there.
-
-This is simple and unambiguous but means there is no mechanism for relocatable
-libraries. If you move a file, you fix every import that references it. For
-the current scale of Elle projects, this is appropriate. If the language grows
-a package ecosystem, path resolution becomes necessary — but building that
-infrastructure before the need exists would be premature.
 
 ### Static analysis cannot see through imports
 

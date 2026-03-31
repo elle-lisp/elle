@@ -7,7 +7,7 @@ use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
 
@@ -299,6 +299,149 @@ fn prim_io_cancel(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+// ── Scheduler-yielding I/O primitives ────────────────────────────────
+
+/// Async sleep — yields to the scheduler with a timer IoRequest.
+/// (ev/sleep seconds)
+fn prim_ev_sleep(args: &[Value]) -> (SignalBits, Value) {
+    use crate::io::request::IoOp;
+    use std::time::Duration;
+
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ev/sleep: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+
+    let duration = if let Some(n) = args[0].as_int() {
+        if n < 0 {
+            return (
+                SIG_ERROR,
+                error_val("argument-error", "ev/sleep: duration must be non-negative"),
+            );
+        }
+        Duration::from_secs(n as u64)
+    } else if let Some(f) = args[0].as_float() {
+        if f < 0.0 || !f.is_finite() {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "argument-error",
+                    "ev/sleep: duration must be a finite non-negative number",
+                ),
+            );
+        }
+        Duration::from_secs_f64(f)
+    } else {
+        return (
+            SIG_ERROR,
+            error_val("type-error", "ev/sleep: argument must be a number"),
+        );
+    };
+
+    (
+        SIG_YIELD | SIG_IO,
+        IoRequest::portless(IoOp::Sleep { duration }),
+    )
+}
+
+/// Poll a raw fd for readiness — yields to the scheduler.
+/// (ev/poll-fd fd mode) or (ev/poll-fd fd mode timeout)
+/// mode: :read, :write, or :read-write
+/// timeout: seconds (float/int), default no timeout
+/// Returns revents mask as int, or 0 on timeout.
+fn prim_ev_poll_fd(args: &[Value]) -> (SignalBits, Value) {
+    use std::time::Duration;
+
+    if args.len() < 2 || args.len() > 3 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("ev/poll-fd: expected 2-3 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let fd = match args[0].as_int() {
+        Some(n) if n >= 0 => n as std::os::unix::io::RawFd,
+        _ => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    "ev/poll-fd: fd must be a non-negative integer",
+                ),
+            )
+        }
+    };
+
+    let events: u32 = if let Some(kw) = args[1].as_keyword_name() {
+        match kw.as_str() {
+            "read" => libc::POLLIN as u32,
+            "write" => libc::POLLOUT as u32,
+            "read-write" => (libc::POLLIN | libc::POLLOUT) as u32,
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        "ev/poll-fd: mode must be :read, :write, or :read-write",
+                    ),
+                )
+            }
+        }
+    } else {
+        return (
+            SIG_ERROR,
+            error_val("type-error", "ev/poll-fd: mode must be a keyword"),
+        );
+    };
+
+    let timeout = if args.len() == 3 {
+        let secs = if let Some(n) = args[2].as_int() {
+            if n < 0 {
+                return (
+                    SIG_ERROR,
+                    error_val("argument-error", "ev/poll-fd: timeout must be non-negative"),
+                );
+            }
+            n as f64
+        } else if let Some(f) = args[2].as_float() {
+            if f < 0.0 || !f.is_finite() {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        "ev/poll-fd: timeout must be a finite non-negative number",
+                    ),
+                );
+            }
+            f
+        } else {
+            return (
+                SIG_ERROR,
+                error_val("type-error", "ev/poll-fd: timeout must be a number"),
+            );
+        };
+        Some(Duration::from_secs_f64(secs))
+    } else {
+        None
+    };
+
+    match timeout {
+        Some(t) => (
+            SIG_YIELD | SIG_IO,
+            IoRequest::poll_fd_with_timeout(fd, events, t),
+        ),
+        None => (SIG_YIELD | SIG_IO, IoRequest::poll_fd(fd, events)),
+    }
+}
+
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "io-request?",
@@ -386,6 +529,34 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["backend", "id"],
         category: "io",
         example: "(io/cancel backend id)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ev/sleep",
+        func: prim_ev_sleep,
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::Exact(1),
+        doc: "Async sleep — yields to the scheduler for the specified duration in seconds",
+        params: &["seconds"],
+        category: "scheduler",
+        example: "(ev/sleep 0.5)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "ev/poll-fd",
+        func: prim_ev_poll_fd,
+        signal: Signal {
+            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            propagates: 0,
+        },
+        arity: Arity::Range(2, 3),
+        doc: "Poll a raw fd for readiness — yields to the scheduler. mode: :read, :write, :read-write. Optional timeout in seconds.",
+        params: &["fd", "mode", "timeout?"],
+        category: "scheduler",
+        example: "(ev/poll-fd 5 :read 1.0)",
         aliases: &[],
     },
 ];

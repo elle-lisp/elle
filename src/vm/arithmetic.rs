@@ -138,8 +138,8 @@ pub(crate) fn handle_add(vm: &mut VM) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
-        Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
+        Err(err_val) => {
+            vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
         }
     }
@@ -160,8 +160,8 @@ pub(crate) fn handle_sub(vm: &mut VM) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
-        Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
+        Err(err_val) => {
+            vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
         }
     }
@@ -182,8 +182,8 @@ pub(crate) fn handle_mul(vm: &mut VM) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
-        Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
+        Err(err_val) => {
+            vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
         }
     }
@@ -215,8 +215,8 @@ pub(crate) fn handle_div(vm: &mut VM) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
-        Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
+        Err(err_val) => {
+            vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
         }
     }
@@ -237,8 +237,8 @@ pub(crate) fn handle_rem(vm: &mut VM) {
         Ok(result) => {
             vm.fiber.stack.push(result);
         }
-        Err(msg) => {
-            vm.fiber.signal = Some((SIG_ERROR, error_val("type-error", msg)));
+        Err(err_val) => {
+            vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
         }
     }

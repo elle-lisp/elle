@@ -139,6 +139,13 @@ pub(crate) enum IoOp {
     /// The scheduler handles the cancel-then-close sequence so that
     /// io_uring operations are properly cancelled before the fd is dropped.
     Close,
+    /// Poll a raw fd for readiness. Portless — no existing port.
+    /// Uses `IORING_OP_POLL_ADD` on io_uring, `libc::poll()` on thread pool.
+    /// Returns revents mask (int) on completion.
+    PollFd {
+        fd: std::os::unix::io::RawFd,
+        events: u32,
+    },
 }
 
 /// Address for connect operations.
@@ -204,6 +211,32 @@ impl IoRequest {
     #[allow(clippy::new_ret_no_self, dead_code)]
     pub fn task(f: impl FnOnce() -> (i32, Vec<u8>) + Send + 'static) -> Value {
         Self::portless(IoOp::Task(TaskFn::new(Box::new(f))))
+    }
+
+    /// Poll a raw fd for readiness. Portless.
+    ///
+    /// Async backend: uses `IORING_OP_POLL_ADD` or `libc::poll()` on thread pool.
+    /// Returns revents mask as int on completion.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn poll_fd(fd: std::os::unix::io::RawFd, events: u32) -> Value {
+        Self::portless(IoOp::PollFd { fd, events })
+    }
+
+    /// Poll a raw fd with a timeout.
+    #[allow(clippy::new_ret_no_self)]
+    pub fn poll_fd_with_timeout(
+        fd: std::os::unix::io::RawFd,
+        events: u32,
+        timeout: Duration,
+    ) -> Value {
+        Value::external(
+            "io-request",
+            IoRequest {
+                op: IoOp::PollFd { fd, events },
+                port: Value::NIL,
+                timeout: Some(timeout),
+            },
+        )
     }
 }
 

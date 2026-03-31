@@ -29,6 +29,7 @@ members = [
     "plugins/watch",
     "plugins/xml",
     "plugins/yaml",
+    "plugins/egui",
 ]
 resolver = "2"
 

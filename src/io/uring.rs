@@ -476,6 +476,31 @@ pub(super) fn submit_uring_sleep(
     Ok(())
 }
 
+/// Submit IORING_OP_POLL_ADD to wait for a raw fd to become ready.
+///
+/// The CQE result contains the revents mask (which events are ready).
+/// Used by `ev/poll-fd` for waiting on display connections, eventfds, etc.
+pub(super) fn submit_uring_poll_add(
+    ring: &mut io_uring::IoUring,
+    id: u64,
+    fd: std::os::unix::io::RawFd,
+    events: u32,
+) -> Result<(), String> {
+    use io_uring::opcode;
+
+    let sqe = opcode::PollAdd::new(io_uring::types::Fd(fd), events)
+        .build()
+        .user_data(id);
+    unsafe {
+        ring.submission()
+            .push(&sqe)
+            .map_err(|_| "io/submit: io_uring submission queue full".to_string())?;
+    }
+    ring.submit()
+        .map_err(|e| format!("io/submit: io_uring submit failed: {}", e))?;
+    Ok(())
+}
+
 /// Submit IORING_OP_WAITID to wait for a subprocess to exit.
 ///
 /// The kernel fills `infop` when the child exits. The `siginfo_t` must

@@ -284,7 +284,7 @@ Key details:
 - **Zero-copy args**: `args_ptr` passes through from the JIT caller directly.
 - **Zero-copy native args**: Native function calls use `args_ptr as *const Value`
   to create a slice without Vec allocation.
-- **Call depth tracking**: Increments/decrements `call_depth`, checks > 1000.
+- **Call depth tracking**: Increments/decrements `call_depth` for stack traces.
 - **Tail call handling**: If the callee returns `TAIL_CALL_SENTINEL`, the
   pending tail call is executed via `execute_closure_bytecode`.
 - **Exception propagation**: Checks `fiber.signal` for `SIG_ERROR` after call.

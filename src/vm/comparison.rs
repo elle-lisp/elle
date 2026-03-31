@@ -9,8 +9,14 @@ pub(crate) fn handle_eq(vm: &mut VM) {
         vm.fiber.stack.push(Value::TRUE);
         return;
     }
-    // Numeric coercion: int 1 == float 1.0
+    // Numeric coercion: int-int stays exact, mixed promotes to f64
     if a.is_number() && b.is_number() {
+        if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
+            vm.fiber
+                .stack
+                .push(if x == y { Value::TRUE } else { Value::FALSE });
+            return;
+        }
         if let (Some(x), Some(y)) = (a.as_number(), b.as_number()) {
             vm.fiber
                 .stack

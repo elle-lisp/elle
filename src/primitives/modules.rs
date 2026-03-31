@@ -5,19 +5,60 @@ use crate::value::types::Arity;
 use crate::value::{error_val, error_val_extra, Value};
 use std::path::{Path, PathBuf};
 
+/// Resolve the Elle project root.
+/// Checks `ELLE_HOME` env var first, then walks up from the binary to find `Cargo.toml`.
+fn elle_root() -> Option<PathBuf> {
+    if let Ok(home) = std::env::var("ELLE_HOME") {
+        let p = PathBuf::from(home);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let mut dir = exe.parent()?;
+    // Walk up until we find Cargo.toml
+    loop {
+        if dir.join("Cargo.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
+    }
+}
+
 /// Resolve a module specifier to a concrete file path.
-///
-/// If the path already exists as given, return it immediately (backward compat).
-/// Otherwise probe search directories with extension suffixes:
-///   1. `<spec>.lisp`        — Elle source module
-///   2. `lib<leaf>.so`       — native plugin (e.g. "glob" → "libelle_glob.so")
-///
-/// Search order:
-///   - current working directory
-///   - each entry in `ELLE_PATH` (colon-separated)
-///   - `ELLE_HOME` (defaults to the directory containing the elle binary)
 fn resolve_import(spec: &str) -> Option<String> {
     let as_path = Path::new(spec);
+
+    // Virtual prefix: std/X → <repo-root>/lib/X.lisp
+    if let Some(rest) = spec.strip_prefix("std/") {
+        if let Some(root) = elle_root() {
+            let path = root.join("lib").join(format!("{}.lisp", rest));
+            if path.is_file() {
+                return Some(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    // Virtual prefix: plugin/X → <repo-root>/target/<profile>/libelle_X.so
+    // Prefer the same profile as the running binary, fallback to the other.
+    if let Some(rest) = spec.strip_prefix("plugin/") {
+        if let Some(root) = elle_root() {
+            let profiles: &[&str] = if cfg!(debug_assertions) {
+                &["debug", "release"]
+            } else {
+                &["release", "debug"]
+            };
+            for profile in profiles {
+                let path = root
+                    .join("target")
+                    .join(profile)
+                    .join(format!("libelle_{}.so", rest));
+                if path.is_file() {
+                    return Some(path.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
 
     // Fast path: already exists with the given name (full path or relative)
     if as_path.exists() {

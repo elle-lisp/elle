@@ -1,5 +1,7 @@
-.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help \
-       examples-vm examples-jit smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit
+.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git check-plugin-list clean help \
+       smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit doctest
+
+.DEFAULT_GOAL := all
 
 ifdef GITHUB_ACTIONS
   JOBS    ?= 4
@@ -7,7 +9,6 @@ ifdef GITHUB_ACTIONS
 else
   JOBS    ?= 16
   ELLE    ?= ./target/debug/elle
-  examples: dev
   plugin-tests: plugins
 endif
 TIMEOUT ?= 30s
@@ -19,6 +20,7 @@ PLUGINS := \
     compress \
     crypto \
     csv \
+    egui \
     git \
     glob \
     hash \
@@ -87,23 +89,7 @@ ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT :=
 ELLE_JIT_THRESHOLD := 0
 
-examples-vm:
-	@echo "=== examples (VM, JIT disabled) ==="
-	@export ELLE_JIT=0 &&printf '%s\n' examples/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
-
-examples-jit:
-	@echo "=== examples (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' examples/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=1)"; exit 1; }
-
-examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
-
-smoke-vm: examples-vm
+smoke-vm:
 	@echo "=== elle scripts (VM, JIT disabled) ==="
 	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
@@ -111,14 +97,21 @@ smoke-vm: examples-vm
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
 
-smoke-jit: examples-jit
+smoke-jit:
 	@echo "=== elle scripts (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
 	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' tests/elle/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke: smoke-vm smoke-jit  ## Run examples + elle scripts (VM then JIT) + docgen
+doctest:  ## Test code examples in documentation (literate mode)
+	@echo "=== doctest ==="
+	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: doctest"; exit 1; }
+
+smoke: smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
 	$(ELLE) demos/docgen/generate.lisp
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)

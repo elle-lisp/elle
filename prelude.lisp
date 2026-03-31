@@ -92,17 +92,18 @@
   `(if ,test nil (begin ,;body)))
 
 ## default - supply a default value for a &named parameter
-## (default x 42) shadows x with (or x 42), so nil becomes 42.
+## (default x 42) assigns x to 42 only if x is nil (not provided).
+## Unlike (or), this correctly preserves explicitly-passed false values.
 (defmacro default (name value)
-  `(def ,name (or ,name ,value)))
+  `(when (nil? ,name) (assign ,name ,value)))
 
 ## error - signal a fiber error
-## (error) => (emit 1 nil)
-## (error value) => (emit 1 value)
+## (error) => (emit :error nil)
+## (error value) => (emit :error value)
 (defmacro error (& args)
   (if (> (length args) 1)
-    (emit 1 {:error :arity-error :message "error: expected 0 or 1 arguments"})
-    `(emit 1 ,(if (empty? args) nil (first args)))))
+    (emit :error {:error :arity-error :message "error: expected 0 or 1 arguments"})
+    `(emit :error ,(if (empty? args) nil (first args)))))
 
 ## try/catch - error handling via fibers
 ## Usage: (try body... (catch e handler...))

@@ -1,0 +1,89 @@
+# Standard Library
+
+Elle's standard library has three layers: VM primitives (Rust), stdlib
+functions (Elle), and prelude macros (Elle).
+
+## Libraries (`lib/`)
+
+Higher-level modules loaded with `import-file`. Each wraps its code in
+a closure returning a struct.
+
+| Module | Import | Description |
+|--------|--------|-------------|
+| Module | Import | Description |
+|--------|--------|-------------|
+| aws | `(import "std/aws")` | AWS API client (S3, etc.) |
+| contract | `(import "std/contract")` | Design-by-contract assertions |
+| dns | `(import "std/dns")` | DNS resolution |
+| egui | `(import "std/egui")` | GUI helpers (wraps egui plugin) |
+| hash | `(import "std/hash")` | Streaming hash convenience |
+| http | `(import "std/http")` | HTTP client |
+| lua | `(import "std/lua")` | Lua compat helpers |
+| mqtt | `(import "std/mqtt")` | MQTT client wrapper |
+| portrait | `(import "std/portrait")` | Semantic portraits |
+| process | `(import "std/process")` | Erlang-style processes |
+| rdf | `(import "std/rdf")` | RDF knowledge graph |
+| redis | `(import "std/redis")` | Redis client |
+| sync | `(import "std/sync")` | Synchronization primitives |
+| telemetry | `(import "std/telemetry")` | Tracing and metrics |
+| tls | `(import "std/tls")` | TLS convenience wrapper |
+| watch | `(import "std/watch")` | File watching wrapper |
+| zmq | `(import "std/zmq")` | ZeroMQ messaging |
+
+## Prelude (`prelude.lisp`)
+
+Macros loaded before user code. These define fundamental control flow:
+
+```text
+defn        function definition sugar
+let*        sequential bindings
+->          thread-first
+->>         thread-last
+when        one-armed conditional
+unless      negated one-armed conditional
+cond        multi-branch conditional
+case        equality dispatch
+if-let      conditional binding (two arms)
+when-let    conditional binding (one arm)
+while-let   conditional loop
+match       pattern matching
+each        iteration
+try/catch   error recovery
+protect     error capture
+defer       guaranteed cleanup
+with        resource management
+repeat      run N times
+forever     infinite loop
+error       raise an error
+```
+
+## stdlib (`stdlib.lisp`)
+
+Functions loaded after the prelude:
+
+```text
+map filter fold apply sum product
+append reverse take drop butlast last
+sort sort-by sort-with
+compose partial identity
+->array ->list
+freeze thaw deep-freeze
+```
+
+## VM primitives
+
+Native functions implemented in Rust. Use `(vm/list-primitives)` to
+enumerate, or `(doc fn-name)` for documentation.
+
+```text
+(doc +)                    # shows arity, params, examples
+(vm/primitive-meta "+")    # returns full metadata struct
+```
+
+---
+
+## See also
+
+- [plugins.md](plugins.md) — native plugin extensions
+- [modules.md](modules.md) — import system
+- [functions.md](functions.md) — function reference
