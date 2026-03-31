@@ -1,6 +1,6 @@
 # Dynamic Parameters
 
-Dynamic parameters are thread-local variables with scoped rebinding.
+Dynamic parameters are fiber-local variables with scoped rebinding.
 They provide dynamic scope without breaking lexical scope rules.
 
 ## Creating parameters

@@ -1,7 +1,9 @@
 # Concurrency
 
-User code runs inside the async scheduler automatically. Use `ev/spawn`
-and `ev/join` for concurrency — not OS threads.
+User code runs inside the async scheduler automatically. Fibers are
+single-threaded cooperative tasks — concurrent but not parallel. Because
+only one fiber runs at a time, shared data requires no synchronization.
+For CPU parallelism across cores, see [threads.md](threads.md).
 
 ## Spawn and join
 
@@ -87,11 +89,72 @@ others are aborted.
 (tcp/connect host port)     # yield until connected, returns port
 ```
 
+## Synchronization (lib/sync)
+
+`lib/sync` provides fiber-friendly synchronization primitives built on
+`ev/futex-wait` and `ev/futex-wake`. These cooperate with the async
+scheduler — waiting fibers yield rather than blocking the thread.
+
+```text
+(def sync ((import "lib/sync")))
+
+(def lock (sync:make-lock))
+(lock:acquire)
+# ... critical section ...
+(lock:release)
+```
+
+| Primitive | Description |
+|-----------|-------------|
+| `make-lock` | Mutual exclusion lock |
+| `make-semaphore n` | Counting semaphore with `n` permits |
+| `make-condvar` | Condition variable (`:wait`, `:notify`, `:broadcast`) |
+| `make-rwlock` | Read-write lock (multiple readers or one writer) |
+| `make-barrier n` | All `n` fibers must `:wait` before any proceed |
+| `make-latch` | One-shot gate — once opened, stays open |
+| `make-once thunk` | Lazy one-time initialization; all callers get the cached result |
+| `make-queue capacity` | Bounded blocking FIFO queue |
+
+
+## Processes (lib/process)
+
+`lib/process` provides an Erlang-inspired process model: lightweight
+processes with mailboxes, links, monitors, and named registration. Processes
+are fibers driven by a cooperative scheduler with fuel-based preemption.
+
+```text
+(def process ((import "lib/process")))
+
+(process:start (fn []
+  (let [[pid (self)]]
+    (send pid :hello)
+    (println "received:" (recv)))))
+```
+
+| Function | Description |
+|----------|-------------|
+| `send pid msg` | Send a message to a process mailbox |
+| `recv` | Block until a message arrives |
+| `recv-match pred` | Block until a message matching `pred` arrives |
+| `recv-timeout ticks` | Receive with timeout |
+| `self` | Current process PID |
+| `spawn fn` | Start a new process |
+| `spawn-link fn` | Start linked (crash propagation) |
+| `spawn-monitor fn` | Start monitored (death notification) |
+| `link pid` / `unlink pid` | Manage crash links |
+| `monitor pid` / `demonitor ref` | Manage monitors |
+| `register name` | Register current process by name |
+| `whereis name` | Look up PID by name |
+| `send-named name msg` | Send to a named process |
+| `exit pid reason` | Terminate a process |
+| `trap-exit flag` | Catch linked exits as messages |
+
+
 ---
 
 ## See also
 
 - [fibers.md](fibers.md) — fiber architecture
 - [io.md](io.md) — port I/O
-- [threads.md](threads.md) — OS threads
+- [threads.md](threads.md) — OS threads for CPU parallelism
 - [signals.md](signals.md) — signal system

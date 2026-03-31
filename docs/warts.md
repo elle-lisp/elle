@@ -62,6 +62,16 @@ hover, completion, definition, and references. One `fn
 extract_position(params) -> Option<(Uri, Line, Col)>` would delete half
 the file.
 
+### Macros are not exportable across modules
+
+`defmacro` registers macros in the Expander's table, not as runtime
+values. A macro defined in one module cannot be imported by another.
+The prelude macros work because they're loaded before expansion of every
+file. A branch exists where macros are first-class values (stored as
+`Value::Macro`), which would make them exportable via the normal struct
+return pattern. Until then, shared macros must live in the prelude or be
+copy-pasted.
+
 ### Thread-local singletons in multiple modules
 
 `context.rs`, `primitives/list/mod.rs`, `primitives/registration.rs`,

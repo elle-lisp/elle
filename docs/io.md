@@ -3,6 +3,25 @@
 All I/O in Elle is async — reads and writes yield to the scheduler. User
 code runs inside the async scheduler automatically.
 
+## I/O backend
+
+On Linux, Elle uses `io_uring` for all I/O: file reads, writes, TCP,
+timers, subprocess pipes. Operations are submitted to the kernel's
+submission queue and completed without syscalls or threads — the kernel
+handles multiplexing directly. A single-threaded event loop polls the
+completion queue and resumes the waiting fiber.
+
+On macOS, Elle uses a thread-pool backend that provides the same
+abstraction. Blocking I/O operations run on background threads; the
+event loop collects results and resumes fibers identically. User code
+sees no difference — the same `port/open`, `port/read-line`, `ev/spawn`
+API works on both platforms.
+
+Both backends are syscall-free from the fiber's perspective: the fiber
+yields `:io`, the scheduler submits the operation, and the fiber resumes
+with the result. No threads are created per-operation on Linux; on macOS,
+the thread pool is shared across all fibers.
+
 ## Ports
 
 Ports are bidirectional file descriptors. Open with `port/open`, close

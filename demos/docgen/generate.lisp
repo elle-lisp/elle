@@ -1,803 +1,542 @@
 ## Elle Documentation Generator
-## Reads JSON input files and produces static HTML documentation
+## Renders docs/*.md as HTML pages + auto-generated API reference
+## with signal profiles from compile/analyze and portrait system.
 
-## ============================================================================
-## HTML generation utilities
-## ============================================================================
+# ── Configuration ──────────────────────────────────────────────────
 
-## Escape HTML special characters
-(var html-escape
-  (fn (str)
-    (if (nil? str)
-      ""
-      (if (not (string? str))
-        (string str)
-        (fold
-          (fn (s pair)
-            (string-replace s (first pair) (first (rest pair))))
-          str
-          (list
-            (list "&" "&amp;")
-            (list "<" "&lt;")
-            (list ">" "&gt;")
-            (list (string 34) "&quot;")
-            (list "'" "&#39;")))))))
-
-## Find delimiter in text starting from character position
-(def find-closing-helper (fn (text pos tlen delimiter dlen)
-  (if (> (+ pos dlen) tlen)
-    nil
-    (if (= (slice text pos (+ pos dlen)) delimiter)
-      pos
-      (find-closing-helper text (+ pos 1) tlen delimiter dlen)))))
-
-(def find-closing (fn (text start delimiter)
-  (find-closing-helper text start (length text) delimiter (length delimiter))))
-
-## Convert markdown links [text](url) to HTML anchor tags
-## Uses let* to avoid the compiler bug with def in nested contexts
-(def format-links-rec (fn (text result)
-  (let* ((bp (find-closing text 0 "[")))
-    (if (nil? bp)
-      (append result text)
-      (let* ((cb (find-closing text (+ bp 1) "]")))
-        (if (nil? cb)
-          (append result text)
-          (if (or (>= (+ cb 1) (length text))
-                  (not (= (slice text (+ cb 1) (+ cb 2)) "(")))
-            (format-links-rec
-              (slice text (+ cb 1) (length text))
-              (append result (slice text 0 (+ cb 1))))
-            (let* ((cp (find-closing text (+ cb 2) ")")))
-              (if (nil? cp)
-                (append result text)
-                (format-links-rec
-                  (slice text (+ cp 1) (length text))
-                  (string result
-                    (slice text 0 bp)
-                    "<a href=\""
-                    (slice text (+ cb 2) cp)
-                    "\">"
-                    (slice text (+ bp 1) cb)
-                    "</a>")))))))))))
-
-(def format-links (fn (text)
-  (format-links-rec text "")))
-
-## Helper function to apply formatting to split parts using fold
-## Applies a tag (like "strong", "em", "code") to alternating parts
-(var apply-formatting
-  (fn (parts tag)
-    (first
-      (fold
-        (fn (state part)
-          ## state is [result, is-active]
-          ## Avoid variable definitions in fn to work around compiler bug
-          (list
-            (if (first (rest state))
-              (-> (first state) (append "<") (append tag) (append ">") (append part) (append "</") (append tag) (append ">"))
-               (append (first state) part))
-            (not (first (rest state)))))
-        (list "" false)
-        parts))))
-
-## Format inline markdown: **bold**, *italic*, `code`
-## Uses string-split to avoid UTF-8 boundary issues
-(def format-inline (fn (text)
-  (format-links
-    (apply-formatting
-      (string-split
-        (apply-formatting
-          (string-split
-            (apply-formatting
-              (string-split
-                (html-escape text)
-                "**")
-              "strong")
-            "*")
-          "em")
-        "`")
-      "code"))))
-
-## ============================================================================
-## CSS stylesheet generation
-## ============================================================================
-
-(var generate-css
-  (fn ()
-    "/* Elle Documentation Site Stylesheet */
-
-:root {
-  color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1a2e;
-  --bg-secondary: #f8f9fa;
-  --code-bg: #f5f5f5;
-  --code-fg: #e83e8c;
-  --accent: #6c5ce7;
-  --accent-hover: #5a4bd1;
-  --border: #e0e0e0;
-  --shadow: rgba(0,0,0,0.1);
-  --note-info-bg: #e3f2fd;
-  --note-info-border: #2196f3;
-  --note-warning-bg: #fff3e0;
-  --note-warning-border: #ff9800;
-  --note-tip-bg: #e8f5e9;
-  --note-tip-border: #4caf50;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1a1a2e;
-    --fg: #e0e0e0;
-    --bg-secondary: #16213e;
-    --code-bg: #2d2d44;
-    --code-fg: #f78da7;
-    --accent: #a29bfe;
-    --accent-hover: #b8b3ff;
-    --border: #3d3d5c;
-    --shadow: rgba(0,0,0,0.3);
-    --note-info-bg: #1a237e;
-    --note-info-border: #5c6bc0;
-    --note-warning-bg: #3e2723;
-    --note-warning-border: #ff8f00;
-    --note-tip-bg: #1b5e20;
-    --note-tip-border: #66bb6a;
-  }
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: var(--bg);
-  color: var(--fg);
-  line-height: 1.6;
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-/* Layout */
-body {
-  display: flex;
-  min-height: 100vh;
-}
-
-.sidebar {
-  width: 250px;
-  background-color: var(--bg-secondary);
-  border-right: 1px solid var(--border);
-  padding: 2rem 1rem;
-  position: fixed;
-  height: 100vh;
-  overflow-y: auto;
-  transition: background-color 0.3s ease;
-}
-
-.site-title {
-  font-size: 1.5rem;
-  font-weight: bold;
-  margin-bottom: 2rem;
-  color: var(--accent);
-}
-
-.sidebar ul {
-  list-style: none;
-}
-
-.sidebar li {
-  margin-bottom: 0.5rem;
-}
-
-.sidebar a {
-  display: block;
-  padding: 0.5rem 1rem;
-  color: var(--fg);
-  text-decoration: none;
-  border-radius: 4px;
-  transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.sidebar a:hover {
-  background-color: var(--bg);
-  color: var(--accent);
-}
-
-.sidebar a.active {
-  background-color: var(--accent);
-  color: white;
-}
-
-.content {
-  margin-left: 250px;
-  flex: 1;
-  padding: 3rem;
-  max-width: 900px;
-}
-
-/* Typography */
-h1 {
-  font-size: 2.5rem;
-  margin-bottom: 1.5rem;
-  margin-top: 0;
-  color: var(--accent);
-}
-
-h2 {
-  font-size: 2rem;
-  margin-top: 2rem;
-  margin-bottom: 1rem;
-  color: var(--accent);
-  border-bottom: 2px solid var(--border);
-  padding-bottom: 0.5rem;
-}
-
-h3 {
-  font-size: 1.5rem;
-  margin-top: 1.5rem;
-  margin-bottom: 0.75rem;
-  color: var(--fg);
-}
-
-p {
-  margin-bottom: 1rem;
-}
-
-/* Links */
-a {
-  color: var(--accent);
-  text-decoration: none;
-  transition: color 0.2s ease;
-}
-
-a:hover {
-  color: var(--accent-hover);
-  text-decoration: underline;
-}
-
-/* Code */
-code {
-  background-color: var(--code-bg);
-  color: var(--code-fg);
-  padding: 0.2em 0.4em;
-  border-radius: 3px;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 0.9em;
-}
-
-pre {
-  background-color: var(--code-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 1rem;
-  overflow-x: auto;
-  margin-bottom: 1rem;
-}
-
-pre code {
-  background-color: transparent;
-  color: var(--fg);
-  padding: 0;
-  border-radius: 0;
-}
-
-/* Lists */
-ul, ol {
-  margin-left: 2rem;
-  margin-bottom: 1rem;
-}
-
-li {
-  margin-bottom: 0.5rem;
-}
-
-/* Blockquotes */
-blockquote {
-  border-left: 4px solid var(--accent);
-  padding-left: 1rem;
-  margin-left: 0;
-  margin-bottom: 1rem;
-  color: var(--fg);
-  font-style: italic;
-}
-
-/* Tables */
-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-}
-
-thead {
-  background-color: var(--bg-secondary);
-}
-
-th {
-  padding: 0.75rem;
-  text-align: left;
-  font-weight: bold;
-  border-bottom: 2px solid var(--border);
-}
-
-td {
-  padding: 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-tbody tr:nth-child(even) {
-  background-color: var(--bg-secondary);
-}
-
-/* Notes/Callouts */
-.note {
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border-left: 4px solid;
-  border-radius: 4px;
-  background-color: var(--bg-secondary);
-}
-
-.note-info {
-  border-left-color: var(--note-info-border);
-  background-color: var(--note-info-bg);
-}
-
-.note-warning {
-  border-left-color: var(--note-warning-border);
-  background-color: var(--note-warning-bg);
-}
-
-.note-tip {
-  border-left-color: var(--note-tip-border);
-  background-color: var(--note-tip-bg);
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  body {
-    flex-direction: column;
-  }
-  
-  .sidebar {
-    width: 100%;
-    height: auto;
-    position: relative;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    padding: 1rem;
-  }
-  
-  .site-title {
-    margin-bottom: 1rem;
-  }
-  
-  .content {
-    margin-left: 0;
-    padding: 1.5rem;
-  }
-  
-  h1 {
-    font-size: 1.75rem;
-  }
-  
-  h2 {
-    font-size: 1.5rem;
-  }
-  
-  h3 {
-    font-size: 1.25rem;
-  }
-}
-
-/* Details/Spoilers */
-details {
-  margin-bottom: 1rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-
-details summary {
-  padding: 0.75rem 1rem;
-  cursor: pointer;
-  font-weight: 600;
-  background-color: var(--bg-secondary);
-  user-select: none;
-}
-
-details summary:hover {
-  color: var(--accent);
-}
-
-details[open] summary {
-  border-bottom: 1px solid var(--border);
-}
-
-details > pre {
-  margin: 0;
-  border: none;
-  border-radius: 0;
-  padding: 1rem;
-}
-
-/* Utility */
-.container {
-  max-width: 900px;
-  margin: 0 auto;
-}
-"))
-
-## ============================================================================
-## Content block rendering
-## ============================================================================
-
-## Render a paragraph block
-(var render-paragraph
-  (fn (block)
-    (-> "<p>" (append (format-inline (get block "text"))) (append "</p>"))))
-
-## Render a code block
-(var render-code
-  (fn (block)
-    (-> "<pre><code class=\"language-" (append (html-escape (get block "language"))) (append "\">")
-      (append (html-escape (get block "text")))
-      (append "</code></pre>"))))
-
-## Render a list block using fold
-## NOTE: We call format-inline directly without storing in a variable
-## to work around a compiler bug with variable definitions in fold closures
-(var render-list
-  (fn (block)
-    (-> "<" (append (if (get block "ordered") "ol" "ul")) (append ">")
-      (append (fold
-        (fn (acc item)
-          (-> acc (append "<li>") (append (format-inline item)) (append "</li>")))
-        ""
-        (get block "items")))
-      (append "</") (append (if (get block "ordered") "ol" "ul")) (append ">"))))
-
-## Render a blockquote block
-(var render-blockquote
-  (fn (block)
-    (-> "<blockquote>" (append (format-inline (get block "text"))) (append "</blockquote>"))))
-
-## Render a table block using fold
-(var render-table
-  (fn (block)
-    (-> "<table><thead><tr>"
-      (append (fold
-        (fn (acc header)
-          (-> acc (append "<th>") (append (html-escape header)) (append "</th>")))
-        ""
-        (get block "headers")))
-      (append "</tr></thead><tbody>")
-      (append (fold
-        (fn (acc row)
-          (-> acc (append "<tr>")
-            (append (fold
-              (fn (acc2 cell)
-                (-> acc2 (append "<td>") (append (format-inline cell)) (append "</td>")))
-              ""
-              row))
-            (append "</tr>")))
-        ""
-        (get block "rows")))
-      (append "</tbody></table>"))))
-
-## Render a note/callout block
-(var render-note
-  (fn (block)
-    (-> "<div class=\"note note-" (append (html-escape (get block "kind"))) (append "\">")
-      (append (format-inline (get block "text")))
-      (append "</div>"))))
-
-## Render a details/spoiler block
-(var render-details
-  (fn (block)
-    (string "<details><summary>"
-      (format-inline (get block "summary"))
-      "</summary>"
-      (render-blocks-in-section (get block "content") "")
-      "</details>")))
-
-## Main dispatcher
-(var render-block
-  (fn (block)
-    (cond
-      ((string-contains? (get block "type") "paragraph") (render-paragraph block))
-      ((string-contains? (get block "type") "code") (render-code block))
-      ((string-contains? (get block "type") "list") (render-list block))
-      ((string-contains? (get block "type") "blockquote") (render-blockquote block))
-      ((string-contains? (get block "type") "table") (render-table block))
-      ((string-contains? (get block "type") "note") (render-note block))
-      ((string-contains? (get block "type") "details") (render-details block))
-      ((string-contains? (get block "type") "heading") "")
-      (true ""))))
-
-## Render blocks in a section
-(var render-blocks-in-section
-  (fn (blocks result)
-    (fold
-      (fn (acc block)
-        (append acc (render-block block)))
-      result
-      blocks)))
-
-## Render a heading block (nested heading within content)
-(var render-heading
-  (fn (block)
-    (-> "<h" (append (number->string (get block "level"))) (append ">")
-      (append (render-blocks-in-section (get block "content") ""))
-      (append "</h") (append (number->string (get block "level"))) (append ">"))))
-
-## Render a section with heading and content blocks
-(var render-section
-  (fn (section)
-    (-> "<h" (append (number->string (get section "level"))) (append ">")
-      (append (html-escape (get section "heading")))
-      (append "</h") (append (number->string (get section "level"))) (append ">")
-      (append (render-blocks-in-section (get section "content") "")))))
-
-## Render all sections using fold
-## NOTE: We call render-section directly without storing in a variable
-## to work around a compiler bug with variable definitions in fold closures
-(var render-sections
-  (fn (sections)
-    (fold
-      (fn (acc section)
-        (append acc (render-section section)))
-      ""
-      sections)))
-
-## ============================================================================
-## Page template generation
-## ============================================================================
-
-## Render navigation items
-(var render-nav-items
-  (fn (items current-slug result)
-    (fold
-      (fn (acc item)
-        (-> acc (append "<li><a href=\"") (append (get item "slug")) (append ".html\" class=\"nav-link")
-          (append (if (string-contains? (get item "slug") current-slug) " active" ""))
-          (append "\">") (append (get item "title")) (append "</a></li>")))
-      result
-      items)))
-
-## Generate navigation HTML
-(var generate-nav
-  (fn (nav-items current-slug)
-    (render-nav-items nav-items current-slug "")))
-
-## Generate the full HTML page
-(var generate-page
-  (fn (site page nav css body)
-    (-> "<!DOCTYPE html>\n"
-      (append "<html lang=\"en\">\n")
-      (append "<head>\n")
-      (append "  <meta charset=\"UTF-8\">\n")
-      (append "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
-      (append "  <title>") (append (get page "title")) (append " - ") (append (get site "title")) (append "</title>\n")
-      (append "  <meta name=\"description\" content=\"") (append (get page "description")) (append "\">\n")
-      (append "  <link rel=\"stylesheet\" href=\"style.css\">\n")
-      (append "</head>\n")
-      (append "<body>\n")
-      (append "  <nav class=\"sidebar\">\n")
-      (append "    <div class=\"site-title\">") (append (get site "title")) (append "</div>\n")
-      (append "    <ul>\n")
-      (append (generate-nav (get site "nav") (get page "slug")))
-      (append "    </ul>\n")
-      (append "  </nav>\n")
-      (append "  <main class=\"content\">\n")
-      (append "    <h1>") (append (get page "title")) (append "</h1>\n")
-      (append body)
-      (append "  </main>\n")
-      (append "</body>\n")
-      (append "</html>\n"))))
-
-## ============================================================================
-## Standard library reference generator (from runtime primitive metadata)
-## ============================================================================
-
-## Map category identifiers to display names
-(var category-display-name
-  (fn (cat)
-    (cond
-      ((= cat "") "Core")
-      ((= cat "math") "Math")
-      ((= cat "string") "String Operations")
-      ((= cat "file") "File I/O")
-      ((= cat "ffi") "FFI (Foreign Function Interface)")
-      ((= cat "fiber") "Fibers")
-      ((= cat "coro") "Coroutines")
-      ((= cat "array") "Arrays")
-      ((= cat "struct") "Structs")
-      ((= cat "json") "JSON")
-      ((= cat "clock") "Clock")
-      ((= cat "time") "Time")
-      ((= cat "meta") "Metaprogramming")
-      ((= cat "debug") "Debugging")
-      ((= cat "fn") "Function Introspection")
-      ((= cat "os") "OS / Process")
-      ((= cat "pkg") "Packages")
-      ((= cat "module") "Modules")
-      ((= cat "bit") "Bitwise Operations")
-      (true cat))))
-
-## Build a function signature string like "(cons car cdr)" from metadata
-(var build-signature
-  (fn (meta)
-    (let* ((name (get meta :name))
-           (params (get meta :params)))
-      (if (empty? params)
-        (-> "(" (append name) (append ")"))
-        (-> "(" (append name) (append " ") (append (string-join params " ")) (append ")"))))))
-
-
-## Build the description string, including aliases if any
-(var build-description
-  (fn (meta)
-    (let* ((doc (get meta :doc))
-           (aliases (get meta :aliases)))
-      (if (empty? aliases)
-        doc
-        (-> doc (append " (alias: ") (append (string-join aliases ", ")) (append ")"))))))
-
-## Group primitives by category, skipping aliases.
-## Returns an @struct mapping category-name → list of metadata structs.
-(var group-by-category
-  (fn (names)
-    (fold (fn (groups name)
-            (let* ((meta (vm/primitive-meta name))
-                   (canonical (get meta :name)))
-              ## Skip aliases: name passed in doesn't match canonical name
-              (if (not (= (string name) canonical))
-                groups
-                (let* ((cat (get meta :category))
-                       (existing (get groups cat))
-                       (items (if (nil? existing) (list) existing)))
-                  (put groups cat (append items (list meta)))
-                  groups))))
-          (@struct)
-          names)))
-
-## Build a section (@struct with heading) for one category
-(var build-category-section
-  (fn (cat-name metas)
-    (let* ((rows (map (fn (meta)
-                        (list (build-signature meta)
-                              (build-description meta)
-                              (get meta :example)))
-                      metas))
-           (tbl (@struct "type" "table"
-                       "headers" (list "Function" "Description" "Example")
-                       "rows" rows)))
-      (@struct "heading" (category-display-name cat-name)
-             "level" 2
-             "content" (list tbl)))))
-
-## Preferred category ordering for the stdlib reference page
-(var category-order
-  (list "" "math" "string" "array" "struct" "json"
-        "file" "fn" "fiber" "coro" "clock" "time"
-        "meta" "debug" "bit" "os" "pkg" "module" "ffi"))
-
-## Generate all stdlib sections from runtime primitive metadata
-(var generate-stdlib-sections
-  (fn ()
-    (let* ((names (vm/list-primitives))
-           (groups (group-by-category names))
-           (all-cats (keys groups)))
-      ## Build sections in preferred order, then append any unknown categories
-      (let* ((ordered
-               (fold (fn (acc cat)
-                       (let* ((metas (get groups cat)))
-                         (if (nil? metas)
-                           acc
-                           (append acc (list (build-category-section cat metas))))))
-                     (list)
-                     category-order))
-             ## Find categories not in category-order
-             (extra
-               (fold (fn (acc cat)
-                       (if (fold (fn (found c) (or found (= c cat)))
-                                 false
-                                 category-order)
-                         acc
-                         (append acc (list (build-category-section
-                                            cat (get groups cat))))))
-                     (list)
-                     all-cats)))
-        (append ordered extra)))))
-
-## ============================================================================
-## Main generator
-## ============================================================================
-
-## Configuration
-(var docs-dir "demos/docgen/docs")
+(var docs-root "docs")
 (var output-dir "site")
+(var docs-dir "demos/docgen/docs")
+(var github-base "https://github.com/anthropics/elle/blob/main")
 
-## Create output directory if it doesn't exist
-(if (not (path/dir? output-dir))
+# ── Imports ────────────────────────────────────────────────────────
+
+(def md ((import "demos/docgen/lib/markdown.lisp")))
+(def css-mod ((import "demos/docgen/lib/css.lisp")))
+
+(var html-escape md:html-escape)
+(var format-inline md:format-inline)
+(var parse-markdown md:parse)
+(var generate-css css-mod:generate-css)
+
+# ── Signal display ─────────────────────────────────────────────────
+
+(defn signal-class [bit]
+  "CSS class for a signal keyword."
+  (cond
+    ((= bit :error) "signal-error")
+    ((= bit :io)    "signal-io")
+    ((= bit :yield) "signal-yield")
+    ((= bit :exec)  "signal-exec")
+    ((= bit :ffi)   "signal-ffi")
+    ((= bit :fuel)  "signal-fuel")
+    ((= bit :wait)  "signal-wait")
+    (true           "signal-badge")))
+
+(defn render-signal-badges [sig]
+  "Render signal profile as HTML badges."
+  (if (get sig :silent)
+    "<span class=\"signal-badge signal-silent\">silent</span>"
+    (let [[bits (get sig :bits)]]
+      (if (empty? bits)
+        ""
+        (let [[result @""]]
+          (each bit in (set->array bits)
+            (push result (string "<span class=\"signal-badge "
+              (signal-class bit) "\">"
+              (string bit) "</span>")))
+          (freeze result))))))
+
+# ── Navigation ─────────────────────────────────────────────────────
+
+(defn render-nav [nav-items current-slug]
+  "Generate sidebar HTML from nav items."
+  (var html @"")
+  (each item in nav-items
+    (if (get item :section)
+      (push html (string "      <li class=\"nav-section\">"
+        (html-escape (get item :section)) "</li>\n"))
+      (let* [[slug (get item :slug)]
+             [title (get item :title)]
+             [active (if (= slug current-slug) " active" "")]]
+        (push html (string "      <li><a href=\"" slug ".html\" class=\"nav-link"
+          active "\">" (html-escape title) "</a></li>\n")))))
+  (freeze html))
+
+# ── Page template ──────────────────────────────────────────────────
+
+(defn generate-page [site-title page-title page-desc current-slug nav-items body]
+  "Generate a complete HTML page."
+  (string "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n"
+    "  <meta charset=\"UTF-8\">\n"
+    "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+    "  <title>" (html-escape page-title) " - " (html-escape site-title) "</title>\n"
+    "  <meta name=\"description\" content=\"" (html-escape page-desc) "\">\n"
+    "  <link rel=\"stylesheet\" href=\"style.css\">\n"
+    "</head>\n<body>\n"
+    "  <nav class=\"sidebar\">\n"
+    "    <div class=\"site-title\">" (html-escape site-title) "</div>\n"
+    "    <ul>\n"
+    (render-nav nav-items current-slug)
+    "    </ul>\n"
+    "  </nav>\n"
+    "  <main class=\"content\">\n"
+    "    <h1>" (html-escape page-title) "</h1>\n"
+    body
+    "  </main>\n"
+    "</body>\n</html>\n"))
+
+# ── Link rewriting ─────────────────────────────────────────────────
+
+(defn rewrite-md-links [html source-dir slug-map]
+  "Rewrite .md href links to .html using the slug map."
+  (var result "")
+  (var remaining html)
+  (while (not (= remaining ""))
+    (let [[pos (md:find-closing remaining 0 "href=\"")]]
+      (if (nil? pos)
+        (begin (assign result (append result remaining))
+               (assign remaining ""))
+        (let* [[href-start (+ pos 6)]
+               [href-end (md:find-closing remaining href-start "\"")]]
+          (if (nil? href-end)
+            (begin (assign result (append result remaining))
+                   (assign remaining ""))
+            (let [[url (slice remaining href-start href-end)]]
+              (if (not (string/ends-with? url ".md"))
+                # Not a .md link: keep as-is
+                (begin
+                  (assign result (append result (slice remaining 0 (+ href-end 1))))
+                  (assign remaining (slice remaining (+ href-end 1) (length remaining))))
+                # Rewrite .md link
+                (let* [[md-path (slice url 0 (- (length url) 3))]
+                       # Resolve relative path from source-dir
+                       [resolved (if (= source-dir "")
+                                   md-path
+                                   (if (string/starts-with? md-path "../")
+                                     (slice md-path 3 (length md-path))
+                                     (if (string-contains? md-path "/")
+                                       md-path
+                                       (string source-dir "/" md-path))))]
+                       [slug (or (get slug-map resolved) resolved)]]
+                  (assign result (string result
+                    (slice remaining 0 href-start)
+                    slug ".html"))
+                  (assign remaining (slice remaining href-end (length remaining)))))))))))
+  result)
+
+# ── API: Primitives ───────────────────────────────────────────────
+
+(defn category-display-name [cat]
+  (cond
+    ((= cat "") "Core")
+    ((= cat "math") "Math")
+    ((= cat "string") "String Operations")
+    ((= cat "file") "File I/O")
+    ((= cat "ffi") "FFI (Foreign Function Interface)")
+    ((= cat "fiber") "Fibers")
+    ((= cat "coro") "Coroutines")
+    ((= cat "array") "Arrays")
+    ((= cat "struct") "Structs")
+    ((= cat "json") "JSON")
+    ((= cat "clock") "Clock")
+    ((= cat "time") "Time")
+    ((= cat "meta") "Metaprogramming")
+    ((= cat "debug") "Debugging")
+    ((= cat "fn") "Function Introspection")
+    ((= cat "os") "OS / Process")
+    ((= cat "pkg") "Packages")
+    ((= cat "module") "Modules")
+    ((= cat "bit") "Bitwise Operations")
+    (true cat)))
+
+(var category-order
+  ["" "math" "string" "array" "struct" "json"
+   "file" "fn" "fiber" "coro" "clock" "time"
+   "meta" "debug" "bit" "os" "pkg" "module" "ffi"])
+
+(defn generate-primitives-html []
+  "Generate HTML for the primitives API page."
+  (let* [[names (vm/list-primitives)]
+         [groups (@struct)]]
+    # Group by category, skipping aliases
+    (each name in names
+      (let* [[meta (vm/primitive-meta name)]
+             [canonical (get meta :name)]]
+        (when (= (string name) canonical)
+          (let* [[cat (get meta :category)]
+                 [existing (get groups cat)]
+                 [items (if (nil? existing) @[] existing)]]
+            (push items meta)
+            (put groups cat items)))))
+
+    (var html @"")
+    # Render in preferred order
+    (each cat in category-order
+      (let [[metas (get groups cat)]]
+        (when (and (not (nil? metas)) (not (empty? metas)))
+          (push html (string "<h2>" (category-display-name cat) "</h2>\n"))
+          (push html "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
+          (each meta in metas
+            (let* [[name (get meta :name)]
+                   [params (get meta :params)]
+                   [sig-str (if (empty? params)
+                              (string "(" name ")")
+                              (string "(" name " " (string/join params " ") ")"))]
+                   [doc (get meta :doc)]
+                   [aliases (get meta :aliases)]
+                   [desc (if (empty? aliases)
+                           doc
+                           (string doc " (alias: " (string/join aliases ", ") ")"))]
+                   [example (get meta :example)]]
+              (push html (string "<tr><td><code>" (html-escape sig-str) "</code></td>"
+                "<td>" (html-escape desc) "</td>"
+                "<td><code>" (html-escape (or example "")) "</code></td></tr>\n"))))
+          (push html "</tbody></table>\n"))))
+
+    # Handle any categories not in the preferred order
+    (each [cat metas] in (pairs groups)
+      (when (not (any? (fn [c] (= c cat)) category-order))
+        (push html (string "<h2>" (category-display-name cat) "</h2>\n"))
+        (push html "<table><thead><tr><th>Function</th><th>Description</th><th>Example</th></tr></thead><tbody>\n")
+        (each meta in metas
+          (let* [[name (get meta :name)]
+                 [params (get meta :params)]
+                 [sig-str (if (empty? params)
+                            (string "(" name ")")
+                            (string "(" name " " (string/join params " ") ")"))]
+                 [doc (get meta :doc)]
+                 [example (get meta :example)]]
+            (push html (string "<tr><td><code>" (html-escape sig-str) "</code></td>"
+              "<td>" (html-escape doc) "</td>"
+              "<td><code>" (html-escape (or example "")) "</code></td></tr>\n"))))
+        (push html "</tbody></table>\n")))
+
+    (freeze html)))
+
+# ── API: Prelude macros ───────────────────────────────────────────
+
+(defn generate-prelude-html []
+  "Generate HTML for prelude macros."
+  (let [[source (slurp "prelude.lisp")]]
+    (var html @"")
+    (push html "<p>Macros loaded automatically before user code. These expand at compile time.</p>\n")
+    (push html "<table><thead><tr><th>Macro</th><th>Description</th></tr></thead><tbody>\n")
+
+    (let [[lines (string/split source "\n")]]
+      (var comment-lines @[])
+      (var i 0)
+      (var n (length lines))
+      (while (< i n)
+        (let [[line (get lines i)]]
+          (cond
+            ((string/starts-with? line "## ")
+             (push comment-lines (slice line 3 (length line))))
+            ((string/starts-with? line "(defmacro ")
+             (let* [[after (slice line 10 (length line))]
+                    [parts (string/split after " ")]
+                    [name (get parts 0)]
+                    [desc (string/join (freeze comment-lines) " ")]
+                    [line-num (+ i 1)]
+                    [source-link (string github-base "/prelude.lisp#L" (string line-num))]]
+               (push html (string "<tr><td><code>" (html-escape name) "</code>"
+                 " <a class=\"source-link\" href=\"" source-link "\">src</a></td>"
+                 "<td>" (format-inline desc) "</td></tr>\n"))
+               (assign comment-lines @[])))
+            (true
+             (when (not (= (string/trim line) ""))
+               (assign comment-lines @[])))))
+        (assign i (+ i 1))))
+
+    (push html "</tbody></table>\n")
+    (freeze html)))
+
+# ── API: Stdlib functions with signal profiles ─────────────────────
+
+(defn extract-section-name [line]
+  "Extract section name from ## ── Name ── line."
+  (when (string/starts-with? line "## ")
+    (let [[text (slice line 3 (length line))]]
+      (when (string-contains? text "──")
+        (let* [[parts (string/split text "──")]
+               [name (string/trim (get parts 1))]]
+          (when (not (= name ""))
+            name))))))
+
+(defn generate-stdlib-html []
+  "Generate HTML for stdlib functions with signal profiles."
+  (let* [[source (slurp "stdlib.lisp")]
+         [analysis (compile/analyze source {:file "stdlib.lisp"})]
+         [syms (compile/symbols analysis)]
+         [fn-syms (filter (fn [s] (= (get s :kind) :function)) syms)]
+         [lines (string/split source "\n")]]
+
+    (var html @"")
+    (push html "<p>Runtime functions loaded at startup after primitives.</p>\n")
+
+    # Parse source to find section headers and defn lines
+    (var current-section nil)
+    (var sections @[])
+    (var section-fns @{})
+    (var fn-comments @{})
+    (var fn-lines @{})
+
+    (var comment-lines @[])
+    (var i 0)
+    (var n (length lines))
+    (while (< i n)
+      (let [[line (get lines i)]]
+        (let [[section-name (extract-section-name line)]]
+          (when section-name
+            (assign current-section section-name)
+            (unless (any? (fn [s] (= s section-name)) sections)
+              (push sections section-name)
+              (put section-fns section-name @[]))))
+
+        (cond
+          ((string/starts-with? line "## ")
+           (unless (extract-section-name line)
+             (push comment-lines (slice line 3 (length line)))))
+          ((string/starts-with? line "(defn ")
+           (let* [[after (slice line 6 (length line))]
+                  [parts (string/split after " ")]
+                  [name (get parts 0)]]
+             (when current-section
+               (let [[fns (get section-fns current-section)]]
+                 (when fns (push fns name))))
+             (put fn-comments name (string/join (freeze comment-lines) " "))
+             (put fn-lines name (+ i 1))
+             (assign comment-lines @[])))
+          ((string/starts-with? line "(def ")
+           (assign comment-lines @[]))
+          (true
+           (when (and (not (= (string/trim line) ""))
+                      (not (string/starts-with? line "## ")))
+             (assign comment-lines @[])))))
+      (assign i (+ i 1)))
+
+    # Render each section
+    (each section-name in (freeze sections)
+      (let [[fns (get section-fns section-name)]]
+        (when (and fns (not (empty? fns)))
+          (push html (string "<h2>" (html-escape section-name) "</h2>\n"))
+          (each fn-name in (freeze fns)
+            (let* [[sig-result (protect (compile/signal analysis (keyword fn-name)))]
+                   [sig (when (get sig-result 0) (get sig-result 1))]
+                   [desc (or (get fn-comments fn-name) "")]
+                   [line-num (get fn-lines fn-name)]
+                   [source-link (when line-num
+                                  (string github-base "/stdlib.lisp#L" (string line-num)))]]
+              (push html "<div class=\"api-entry\">")
+              (push html (string "<code class=\"api-signature\">" (html-escape fn-name) "</code>"))
+              (when source-link
+                (push html (string " <a class=\"source-link\" href=\""
+                  source-link "\">src</a>")))
+              (when sig
+                (push html (string "\n<div class=\"api-signals\">"
+                  (render-signal-badges sig) "</div>")))
+              (when (not (= desc ""))
+                (push html (string "<p class=\"api-desc\">"
+                  (format-inline desc) "</p>")))
+              (push html "</div>\n"))))))
+
+    (freeze html)))
+
+# ── API: Libraries ────────────────────────────────────────────────
+
+(defn generate-libraries-html []
+  "Generate HTML for lib/*.lisp modules."
+  (let* [[result (subprocess/system "find" ["lib" "-maxdepth" "1" "-name" "*.lisp" "-type" "f"])]
+         [files (filter (fn [f] (not (= f "")))
+                  (string/split result:stdout "\n"))]]
+    (var html @"")
+    (push html "<p>Reusable libraries in <code>lib/</code>. Each exports a struct of functions.</p>\n")
+
+    (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
+      (let* [[source (slurp file)]
+             [lines (string/split source "\n")]
+             # Extract first ## comment as description
+             [desc (let [[first-comment nil]]
+                     (each line in lines
+                       (when (and (nil? first-comment) (string/starts-with? line "## "))
+                         (assign first-comment (slice line 3 (length line)))))
+                     first-comment)]
+             # Extract module name from filename
+             [basename (let* [[parts (string/split file "/")]
+                              [fname (get parts (- (length parts) 1))]]
+                         (slice fname 0 (- (length fname) 5)))]
+             # Try to analyze
+             [analysis-result (protect (compile/analyze source {:file file}))]]
+
+        (push html (string "<h2>" (html-escape basename)
+          " <a class=\"source-link\" href=\"" github-base "/" file "\">source</a></h2>\n"))
+        (when desc
+          (push html (string "<p>" (format-inline desc) "</p>\n")))
+
+        # Show exports with signal profiles if analysis succeeded
+        (when (get analysis-result 0)
+          (let* [[analysis (get analysis-result 1)]
+                 [syms-result (protect (compile/symbols analysis))]]
+            (when (get syms-result 0)
+              (let* [[syms (get syms-result 1)]
+                     [fn-syms (filter (fn [s]
+                                        (and (struct? s)
+                                             (= (get s :kind) :function)))
+                                syms)]]
+                (when (and (array? fn-syms) (not (empty? fn-syms)))
+                  (push html "<table><thead><tr><th>Export</th><th>Signals</th></tr></thead><tbody>\n")
+                  (each sym in fn-syms
+                    (let* [[name (get sym :name)]
+                           [line-num (get sym :line)]
+                           [sig-result (protect (compile/signal analysis (keyword name)))]
+                           [badges (if (get sig-result 0)
+                                     (render-signal-badges (get sig-result 1))
+                                     "")]]
+                      (push html (string "<tr><td><code>" (html-escape name) "</code>"
+                        (if line-num
+                          (string " <a class=\"source-link\" href=\""
+                            github-base "/" file "#L" (string line-num) "\">src</a>")
+                          "")
+                        "</td><td>" badges "</td></tr>\n"))))
+                  (push html "</tbody></table>\n"))))))))
+
+    (freeze html)))
+
+# ── API: Plugins ──────────────────────────────────────────────────
+
+(defn generate-plugins-html []
+  "Generate HTML from plugin README.md files."
+  (let* [[result (subprocess/system "find" ["plugins" "-maxdepth" "2" "-name" "README.md" "-type" "f"])]
+         [files (filter (fn [f] (and (not (= f ""))
+                                     (not (= f "plugins/README.md"))))
+                  (string/split result:stdout "\n"))]]
+    (var html @"")
+    (push html "<p>Available plugins. Each provides primitives accessible after import.</p>\n")
+
+    (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
+      (let* [[source (slurp file)]
+             [parsed (parse-markdown source)]
+             # Extract plugin dir: plugins/name/README.md → plugins/name
+             [plugin-dir (let* [[parts (string/split file "/")]
+                                [dir-name (get parts 1)]]
+                           (string "plugins/" dir-name))]]
+        (push html (string "<h2>" (html-escape parsed:title)
+          " <a class=\"source-link\" href=\"" github-base "/" plugin-dir "\">source</a>"
+          " <a class=\"source-link\" href=\"" github-base "/" file "\">README</a></h2>\n"))
+        (push html parsed:body)
+        (push html "<hr>\n")))
+
+    (freeze html)))
+
+# ── Main generator ─────────────────────────────────────────────────
+
+# Create output directory
+(when (not (path/dir? output-dir))
   (create-directory-all output-dir))
 
-## Read and parse site configuration
-(print "Reading site configuration...")
-(println)
-(var site-json (slurp (path/join docs-dir "site.json")))
-(var site-config (json-parse site-json))
+# Read site configuration
+(println "Reading site configuration...")
+(def site-config (json-parse (slurp (path/join docs-dir "site.json"))))
+(def site-title (get site-config "title"))
+(def site-desc (get site-config "description"))
 
-## Generate and write CSS
-(print "Generating CSS...")
-(println)
-(var css-content (generate-css))
-(spit (path/join output-dir "style.css") css-content)
+# Write CSS
+(println "Generating CSS...")
+(spit (path/join output-dir "style.css") (generate-css))
 
-## Get navigation items
-(var nav-items (get site-config "nav"))
+# Build all pages and navigation
+(var all-pages @[])
+(var nav-items @[])
+(var slug-map @{})
 
-## Process each page
-(var process-pages
-  (fn (all-nav-items current-nav-items)
-    (if (empty? current-nav-items)
-      (begin
-        (print "Done!")
-        (println))
-      (begin
-        (var nav-item (first current-nav-items))
-        (var rest-nav-items (rest current-nav-items))
-        (var slug (get nav-item "slug"))
-        (var title (get nav-item "title"))
-        (var page-file (path/join docs-dir (-> "pages/" (append slug) (append ".json"))))
-        
-        (print "Generating: ")
-        (print slug)
-        (print ".html...")
-        (println)
-        
-        ## For stdlib-reference, generate from runtime metadata
-        ## For all other pages, read from JSON
-        (var page-data
-          (if (= slug "stdlib-reference")
-            (begin
-              (var pd (@struct))
-              (put pd "title" title)
-              (put pd "description" "Built-in functions and operations in Elle")
-              (put pd "sections" (generate-stdlib-sections))
-              pd)
-            (json-parse (slurp page-file))))
-        
-        ## Add slug to page data for template
-        (put page-data "slug" slug)
-        
-        ## Render content sections
-        (var sections (get page-data "sections"))
-        (var body-html (render-sections sections))
-        
-        ## Generate full page (use all-nav-items for navigation)
-        ## NOTE: We pass slug as a separate parameter to avoid closure issues
-        (var full-html (generate-page site-config page-data all-nav-items css-content body-html))
-        
-        ## Write HTML file
-        (var output-file (path/join output-dir (append slug ".html")))
-        (spit output-file full-html)
-        
-        ## Process next page
-        (process-pages all-nav-items rest-nav-items)))))
+# Home page from docs/README.md
+(let* [[home-name (get site-config "home")]
+       [home-file (path/join docs-root (string home-name ".md"))]
+       [parsed (parse-markdown (slurp home-file))]]
+  (push nav-items {:slug "index" :title "Home"})
+  (push all-pages {:slug "index" :title parsed:title
+                   :description parsed:description :body parsed:body
+                   :source-dir ""})
+  (put slug-map "README" "index"))
 
-(process-pages nav-items nav-items)
+# Process each section
+(each section in (get site-config "sections")
+  (let* [[name (get section "name")]
+         [dir (get section "dir")]
+         [api (get section "api")]
+         [pages (get section "pages")]]
 
-## Print summary
-(print "Generated documentation in ")
-(print output-dir)
-(print "/")
-(println)
+    (push nav-items {:section name})
+
+    (if api
+      # API Reference section — auto-generated pages
+      (each page-name in pages
+        (let* [[slug (string "api-" page-name)]
+               [title (cond
+                        ((= page-name "primitives") "Primitives")
+                        ((= page-name "prelude") "Prelude Macros")
+                        ((= page-name "stdlib") "Standard Library")
+                        ((= page-name "libraries") "Libraries")
+                        ((= page-name "plugins") "Plugins")
+                        (true page-name))]]
+          (push nav-items {:slug slug :title title})
+          (push all-pages {:slug slug :title title
+                           :description (string title " API reference")
+                           :api page-name :source-dir ""})))
+
+      # Markdown section — read from docs/
+      (each page-name in pages
+        (let* [[file-path (if dir
+                            (path/join docs-root dir (string page-name ".md"))
+                            (path/join docs-root (string page-name ".md")))]
+               [slug (if dir
+                       (if (= page-name "index") dir (string dir "-" page-name))
+                       page-name)]
+               [source-dir (or dir "")]
+               [read-result (protect (slurp file-path))]]
+          (if (not (get read-result 0))
+            (eprintln "  Warning: skipping missing file " file-path)
+            (let [[parsed (parse-markdown (get read-result 1))]]
+              (push nav-items {:slug slug :title parsed:title})
+              (push all-pages {:slug slug :title parsed:title
+                               :description parsed:description
+                               :body parsed:body :source-dir source-dir})
+              # Map relative paths to slugs for link rewriting
+              (let [[rel-path (if dir
+                                (string dir "/" page-name)
+                                page-name)]]
+                (put slug-map rel-path slug)
+                (put slug-map (string rel-path ".md") slug)
+                (when (= page-name "index")
+                  (put slug-map dir slug))))))))))
+
+(def frozen-nav (freeze nav-items))
+(def frozen-slug-map (freeze slug-map))
+
+# Generate all pages
+(each page in all-pages
+  (let* [[slug (get page :slug)]
+         [title (get page :title)]
+         [desc (get page :description)]
+         [source-dir (get page :source-dir)]
+         [api-name (get page :api)]]
+    (print "Generating: " slug ".html...")
+    (println)
+
+    (var body-html
+      (if api-name
+        # Auto-generated API content
+        (cond
+          ((= api-name "primitives") (generate-primitives-html))
+          ((= api-name "prelude") (generate-prelude-html))
+          ((= api-name "stdlib") (generate-stdlib-html))
+          ((= api-name "libraries") (generate-libraries-html))
+          ((= api-name "plugins") (generate-plugins-html))
+          (true ""))
+        # Markdown content with link rewriting
+        (rewrite-md-links (get page :body) source-dir frozen-slug-map)))
+
+    (let [[full-html (generate-page site-title title desc slug frozen-nav body-html)]]
+      (spit (path/join output-dir (string slug ".html")) full-html))))
+
+(println "Generated " (string (length all-pages)) " pages in " output-dir "/")

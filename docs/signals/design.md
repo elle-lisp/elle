@@ -2,14 +2,10 @@
 
 ## Motivation
 
-Elle previously had separate mechanisms for coroutines (continuation
-capture/replay), exception handling (handler stack with unwind semantics),
-and signal inference (boolean fields for yields and errors). The JIT could
-only compile silent functions.
-
-These have been unified into a single mechanism: **fibers with signals**.
-Coroutines are fibers that yield. Errors are signals. The signal system
-tracks signal bits. See `docs/fibers.md` for the implementation reference.
+Elle uses a single unified mechanism for all non-local control flow:
+**fibers with signals**. Coroutines are fibers that yield. Errors are
+signals. The compiler infers signal bits at compile time. See
+`docs/fibers.md` for the implementation reference.
 
 
 
