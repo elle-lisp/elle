@@ -1234,17 +1234,31 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
             };
             caller.data_mut().fiber_id_stack.push(fiber_id);
             let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
-            // Read signal bits BEFORE popping fiber_id (frames are keyed by it)
-            let frame_sig_bits = caller
-                .data()
-                .last_suspension_frame()
-                .map(|f| f.signal_bits)
-                .unwrap_or(SIG_YIELD.0);
+            // Read signal bits from the FIRST (innermost) frame — it has the
+            // original I/O signal. Outer frames from yield-through-call only
+            // have SIG_YIELD because call_wasm_closure strips SIG_IO.
+            let frame_sig_bits = {
+                let id = caller.data().current_fiber_id();
+                caller
+                    .data()
+                    .suspension_frames
+                    .get(&id)
+                    .and_then(|frames| frames.first())
+                    .map(|f| f.signal_bits)
+                    .unwrap_or(SIG_YIELD.0)
+            };
             caller.data_mut().fiber_id_stack.pop();
 
             if signal == yield_signal {
                 let yielded = caller.data().wasm_to_value(tag, payload);
                 let sig_bits = frame_sig_bits;
+                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                    eprintln!(
+                        "[handle_fiber_resume] New yield: sig_bits={} (SIG_IO={})",
+                        sig_bits,
+                        sig_bits & 512
+                    );
+                }
                 fiber_handle.with_mut(|f| {
                     f.status = FiberStatus::Paused;
                     f.signal = Some((SignalBits::new(sig_bits), yielded));
