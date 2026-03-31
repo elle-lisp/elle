@@ -95,7 +95,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (parent)
   ```
 
-  See `examples/signals.lisp` for the full signal system: user-defined signals, `silence` for callback sandboxing, and composed signal masks.
+  See [docs/signals/](docs/signals/) for the full signal system: user-defined signals, `silence` for callback sandboxing, and composed signal masks.
 
 - **Static analysis is a first-class feature.** The compiler performs full binding resolution, capture analysis, signal inference, and lint passes before any code runs. This is not optional tooling bolted on — it is the compilation pipeline. Most Lisps are dynamic; Elle knows at compile time what every binding refers to, what every closure captures, and what signals every function can emit.
 
@@ -558,7 +558,7 @@ Exactly two values are falsy. Everything else is truthy.
      :mul (fn (a b) (* (* a b) scale))})
 
   # Usage
-  (def {:add add :mul mul} ((import "math.lisp") 2))
+  (def {:add add :mul mul} ((import "std/math") 2))
   (add 1 2)  # => 6
   ```
 
@@ -569,13 +569,13 @@ Exactly two values are falsy. Everything else is truthy.
 - **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
 
   ```janet
-  (def re (import "target/release/libelle_regex.so"))
+  (def re (import "plugin/regex"))
   (def pat (re:compile "\\d+"))
   (re:find-all pat "a1b2c3")
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **23 plugins ship with Elle:**
+- **29 plugins ship with Elle:**
 
   | Plugin | Description |
   |--------|-------------|
@@ -640,6 +640,23 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
 
+## Documentation
+
+All documentation lives in `docs/` as literate markdown — every `.md` file
+is runnable via `elle docs/<file>.md`. Code blocks tagged `` ```lisp `` are
+extracted and executed; the rest is prose. This means examples are always
+tested and never stale.
+
+Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
+
+| Directory | Content |
+|-----------|---------|
+| `docs/*.md` | Language topics (one file per concept) |
+| `docs/signals/` | Signal system and fiber architecture |
+| `docs/cookbook/` | Recipes for common codebase changes |
+| `docs/analysis/` | Testing, debugging, semantic portraits |
+| `docs/impl/` | Implementation internals (reader, HIR, LIR, VM, JIT) |
+
 ## Getting Started
 
 ### Prerequisites
@@ -653,30 +670,18 @@ Exactly two values are falsy. Everything else is truthy.
 
 ```bash
 make                                      # build elle + plugins
-./target/release/elle examples/hello.lisp # run a file
+echo '(println "hello")' | ./target/release/elle  # one-liner
 ./target/release/elle                     # REPL
-make smoke                                # run all examples (~15s)
+make smoke                                # run all tests (~30s)
 make test                                 # full test suite (~2min)
 ```
 
 ### Subcommands
 
-```bash
-./target/release/elle lint <file|dir>    # static analysis
-./target/release/elle lsp                 # language server
-./target/release/elle format <file>      # code formatter
-./target/release/elle rewrite <file>     # source-to-source rewriting
-```
-
-The `examples/` directory is executable documentation. Each file demonstrates a feature and asserts its own correctness — they run as part of CI.
-
-### Subcommands
-
-- **`elle [file...]`** — Run Elle files or start the REPL if no files given
+- **`elle [file...]`** — Run Elle files (`.lisp`, `.lua`, `.md`) or start the REPL
 - **`elle lint [options] <file|dir>...`** — Static analysis and linting
 - **`elle lsp`** — Start the language server protocol server
 - **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
-- **`elle format [options] <file...>`** — Format Elle source files
 
 ### LSP setup
 
