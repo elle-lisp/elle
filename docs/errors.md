@@ -1,7 +1,9 @@
 # Error Handling
 
 Errors in Elle are values signaled via fibers. By convention, error values
-are structs `{:error :keyword :message "string"}`, but any value works.
+are structs `{:error :keyword :message "string"}`, but `(error val)` accepts
+any value — integers, strings, lists. Catch handlers that assume struct
+shape should guard with `struct?` first.
 
 ## Raising errors
 

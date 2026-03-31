@@ -7,7 +7,7 @@ functions.
 ## Usage pattern
 
 ```text
-(def crypto (import "crypto"))
+(def crypto (import "plugin/crypto"))
 (seq->hex (crypto:sha256 "hello"))
 ```
 
@@ -17,35 +17,35 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 
 | Plugin | Import name | Description |
 |--------|-------------|-------------|
-| `elle-arrow` | `"arrow"` | Apache Arrow columnar data |
-| `elle-base64` | `"base64"` | Base64 encoding/decoding |
-| `elle-clap` | `"clap"` | CLI argument parsing |
-| `elle-compress` | `"compress"` | Compression (gzip, zstd, etc.) |
-| `elle-crypto` | `"crypto"` | SHA-2 hashing and HMAC |
-| `elle-csv` | `"csv"` | CSV reading and writing |
-| `elle-git` | `"git"` | Git repository operations |
-| `elle-glob` | `"glob"` | Filesystem glob patterns |
-| `elle-hash` | `"hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
-| `elle-jiff` | `"jiff"` | Date/time operations |
-| `elle-mqtt` | `"mqtt"` | MQTT client |
-| `elle-msgpack` | `"msgpack"` | MessagePack serialization |
-| `elle-oxigraph` | `"oxigraph"` | RDF triple store |
-| `elle-polars` | `"polars"` | DataFrames (Polars) |
-| `elle-protobuf` | `"protobuf"` | Protocol Buffers |
-| `elle-random` | `"random"` | Pseudo-random numbers |
-| `elle-regex` | `"regex"` | Regular expressions |
-| `elle-selkie` | `"selkie"` | Mermaid diagram rendering |
-| `elle-semver` | `"semver"` | Semantic versioning |
-| `elle-sqlite` | `"sqlite"` | SQLite database |
-| `elle-syn` | `"syn"` | Rust source parsing |
-| `elle-tls` | `"tls"` | TLS client/server (rustls) |
-| `elle-toml` | `"toml"` | TOML parsing |
-| `elle-tree-sitter` | `"tree-sitter"` | Multi-language parsing |
-| `elle-uuid` | `"uuid"` | UUID generation |
-| `elle-watch` | `"watch"` | Filesystem watching |
-| `elle-xml` | `"xml"` | XML parsing |
-| `elle-yaml` | `"yaml"` | YAML parsing |
-| `elle-egui` | `"egui"` | Immediate-mode GUI |
+| `elle-arrow` | `"plugin/arrow"` | Apache Arrow columnar data |
+| `elle-base64` | `"plugin/base64"` | Base64 encoding/decoding |
+| `elle-clap` | `"plugin/clap"` | CLI argument parsing |
+| `elle-compress` | `"plugin/compress"` | Compression (gzip, zstd, etc.) |
+| `elle-crypto` | `"plugin/crypto"` | SHA-2 hashing and HMAC |
+| `elle-csv` | `"plugin/csv"` | CSV reading and writing |
+| `elle-git` | `"plugin/git"` | Git repository operations |
+| `elle-glob` | `"plugin/glob"` | Filesystem glob patterns |
+| `elle-hash` | `"plugin/hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
+| `elle-jiff` | `"plugin/jiff"` | Date/time operations |
+| `elle-mqtt` | `"plugin/mqtt"` | MQTT client |
+| `elle-msgpack` | `"plugin/msgpack"` | MessagePack serialization |
+| `elle-oxigraph` | `"plugin/oxigraph"` | RDF triple store |
+| `elle-polars` | `"plugin/polars"` | DataFrames (Polars) |
+| `elle-protobuf` | `"plugin/protobuf"` | Protocol Buffers |
+| `elle-random` | `"plugin/random"` | Pseudo-random numbers |
+| `elle-regex` | `"plugin/regex"` | Regular expressions |
+| `elle-selkie` | `"plugin/selkie"` | Mermaid diagram rendering |
+| `elle-semver` | `"plugin/semver"` | Semantic versioning |
+| `elle-sqlite` | `"plugin/sqlite"` | SQLite database |
+| `elle-syn` | `"plugin/syn"` | Rust source parsing |
+| `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
+| `elle-toml` | `"plugin/toml"` | TOML parsing |
+| `elle-tree-sitter` | `"plugin/tree-sitter"` | Multi-language parsing |
+| `elle-uuid` | `"plugin/uuid"` | UUID generation |
+| `elle-watch` | `"plugin/watch"` | Filesystem watching |
+| `elle-xml` | `"plugin/xml"` | XML parsing |
+| `elle-yaml` | `"plugin/yaml"` | YAML parsing |
+| `elle-egui` | `"plugin/egui"` | Immediate-mode GUI |
 
 ## Gotchas
 

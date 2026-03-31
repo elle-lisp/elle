@@ -44,6 +44,16 @@ is called, and its return value is passed back to the caller.
 Both code paths return a value. What that value is — and how the caller uses
 it — is convention, not mechanism.
 
+### import-file — low-level interface
+
+`import-file` takes an explicit file path and bypasses prefix resolution.
+It is the low-level primitive suitable for building a user-supplied module
+system on top of:
+
+```text
+(def utils (import-file "my/custom/path/utils.lisp"))
+```
+
 
 ## Convention: Closure-as-Module
 
@@ -287,18 +297,6 @@ This means there is no "flat import" footgun: you cannot accidentally pollute
 the caller's namespace by importing a file. The closure pattern is not a
 discipline imposed on top of a leaky primitive — it is the only way to get
 definitions out of a file.
-
-### No path resolution
-
-Import paths are literal strings, resolved relative to the working directory.
-There is no module search path, no package registry, no `ELLEPATH` environment
-variable. `(import "lib/utils.lisp")` means exactly that file, right there.
-
-This is simple and unambiguous but means there is no mechanism for relocatable
-libraries. If you move a file, you fix every import that references it. For
-the current scale of Elle projects, this is appropriate. If the language grows
-a package ecosystem, path resolution becomes necessary — but building that
-infrastructure before the need exists would be premature.
 
 ### Static analysis cannot see through imports
 

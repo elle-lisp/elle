@@ -10,23 +10,25 @@ a closure returning a struct.
 
 | Module | Import | Description |
 |--------|--------|-------------|
-| `lib/aws.lisp` | `(import-file "lib/aws.lisp")` | AWS API client (S3, etc.) |
-| `lib/contract.lisp` | `(import-file "lib/contract.lisp")` | Design-by-contract assertions |
-| `lib/dns.lisp` | `(import-file "lib/dns.lisp")` | DNS resolution |
-| `lib/egui.lisp` | `(import-file "lib/egui.lisp")` | GUI helpers (wraps egui plugin) |
-| `lib/hash.lisp` | `(import-file "lib/hash.lisp")` | Streaming hash convenience |
-| `lib/http.lisp` | `(import-file "lib/http.lisp")` | HTTP client |
-| `lib/lua.lisp` | `(import-file "lib/lua.lisp")` | Lua compat helpers |
-| `lib/mqtt.lisp` | `(import-file "lib/mqtt.lisp")` | MQTT client wrapper |
-| `lib/portrait.lisp` | `(import-file "lib/portrait.lisp")` | Semantic portraits |
-| `lib/process.lisp` | `(import-file "lib/process.lisp")` | Erlang-style processes |
-| `lib/rdf.lisp` | `(import-file "lib/rdf.lisp")` | RDF knowledge graph |
-| `lib/redis.lisp` | `(import-file "lib/redis.lisp")` | Redis client |
-| `lib/sync.lisp` | `(import-file "lib/sync.lisp")` | Synchronization primitives |
-| `lib/telemetry.lisp` | `(import-file "lib/telemetry.lisp")` | Tracing and metrics |
-| `lib/tls.lisp` | `(import-file "lib/tls.lisp")` | TLS convenience wrapper |
-| `lib/watch.lisp` | `(import-file "lib/watch.lisp")` | File watching wrapper |
-| `lib/zmq.lisp` | `(import-file "lib/zmq.lisp")` | ZeroMQ messaging |
+| Module | Import | Description |
+|--------|--------|-------------|
+| aws | `(import "std/aws")` | AWS API client (S3, etc.) |
+| contract | `(import "std/contract")` | Design-by-contract assertions |
+| dns | `(import "std/dns")` | DNS resolution |
+| egui | `(import "std/egui")` | GUI helpers (wraps egui plugin) |
+| hash | `(import "std/hash")` | Streaming hash convenience |
+| http | `(import "std/http")` | HTTP client |
+| lua | `(import "std/lua")` | Lua compat helpers |
+| mqtt | `(import "std/mqtt")` | MQTT client wrapper |
+| portrait | `(import "std/portrait")` | Semantic portraits |
+| process | `(import "std/process")` | Erlang-style processes |
+| rdf | `(import "std/rdf")` | RDF knowledge graph |
+| redis | `(import "std/redis")` | Redis client |
+| sync | `(import "std/sync")` | Synchronization primitives |
+| telemetry | `(import "std/telemetry")` | Tracing and metrics |
+| tls | `(import "std/tls")` | TLS convenience wrapper |
+| watch | `(import "std/watch")` | File watching wrapper |
+| zmq | `(import "std/zmq")` | ZeroMQ messaging |
 
 ## Prelude (`prelude.lisp`)
 

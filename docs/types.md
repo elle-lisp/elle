@@ -125,6 +125,10 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 (= 1 1.0)                  # => true  — numeric coercion
 ```
 
+**Precision caveat:** mixed int/float comparisons coerce through f64.
+Integers beyond 2^53 may compare equal when they shouldn't:
+`(= 9007199254740992 9007199254740993)` returns `true`.
+
 Closures compare by reference:
 
 ```lisp

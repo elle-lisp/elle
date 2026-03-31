@@ -48,8 +48,8 @@ make smoke                 # run all tests (~30s)
 | [loops](docs/loops.md) | while, forever, each, repeat |
 | [match](docs/match.md) | Pattern matching with guards |
 | [errors](docs/errors.md) | error, try/catch, protect, defer, with |
-| [signals](docs/signals.md) | Signal system, silence, squelch |
-| [fibers](docs/fibers.md) | Fiber basics, signal masks, status |
+| [signals](docs/signals/) | Signal system, silence, squelch |
+| [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
 | [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope |
 | [threads](docs/threads.md) | OS threads, channels |
 | [coroutines](docs/coroutines.md) | coro/new, coro/resume, generators |
@@ -90,6 +90,6 @@ make smoke                 # run all tests (~30s)
 |------|---------|
 | [plugins](docs/plugins.md) | 29 shipped plugins |
 | [stdlib](docs/stdlib.md) | Standard library and prelude |
-| [testing](docs/analysis/) | Test patterns, make smoke/test |
+| [testing](docs/analysis/testing.md) | Test patterns, make smoke/test |
 | [debugging](docs/analysis/debugging.md) | Debugging and introspection |
-| [cookbook](docs/cookbook/) | Recipes for cross-cutting changes |
+| [cookbook](docs/cookbook/index.md) | Recipes for cross-cutting changes |

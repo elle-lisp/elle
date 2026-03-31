@@ -1,8 +1,10 @@
 # Memory
 
-Elle uses arena-based allocation. Values live in a fiber's arena and are
-freed when the fiber completes. Scope allocation can free earlier, at
-block exit.
+Each fiber owns a logical arena of heap objects. The underlying allocator
+is Rust's global allocator (`Rc<RefCell<...>>`), not a bump allocator —
+"arena" refers to the ownership model, not the allocation strategy.
+Objects are freed when their owning fiber completes. Scope allocation
+can free earlier, at block exit.
 
 ## Arena introspection
 

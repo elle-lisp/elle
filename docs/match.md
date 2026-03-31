@@ -1,7 +1,8 @@
 # Pattern Matching
 
-`match` dispatches on the structure and value of data. The compiler warns
-on non-exhaustive patterns. Any unbound symbol works as a wildcard.
+`match` dispatches on the structure and value of data. The compiler
+**errors** on non-exhaustive patterns. Any unbound symbol works as a
+wildcard.
 
 ## Basic patterns
 
