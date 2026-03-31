@@ -175,7 +175,14 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 // Execute the fiber's WASM closure host-side.
                 if bits.0 & 8 != 0 {
                     // SIG_RESUME: result is the fiber value
-                    return handle_fiber_resume(&mut caller, result);
+                    let r = handle_fiber_resume(&mut caller, result);
+                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                        eprintln!(
+                            "[rt_call] handle_fiber_resume returned: tag={} payload={} signal={}",
+                            r.0, r.1, r.2
+                        );
+                    }
+                    return r;
                 }
 
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
@@ -929,6 +936,23 @@ fn call_wasm_closure(
                     frame.env_snapshot = env_snapshot;
                 }
 
+                // Clear signal word so callers don't see stale SIG_YIELD
+                {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("call_wasm_closure: no memory");
+                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                        let old =
+                            i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
+                        eprintln!(
+                            "[call_wasm_closure] clearing memory[0..4] from {} to 0",
+                            old
+                        );
+                    }
+                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                }
+
                 // Restore env_stack_ptr (env is saved in snapshot)
                 caller.data_mut().env_stack_ptr = env_base;
 
@@ -939,13 +963,10 @@ fn call_wasm_closure(
                     );
                 }
 
-                // Return the yielded value with the full signal bits from the frame
-                let sig = caller
-                    .data()
-                    .last_suspension_frame()
-                    .map(|f| f.signal_bits as i32)
-                    .unwrap_or(crate::value::fiber::SIG_YIELD.0 as i32);
-                (tag, payload, sig)
+                // Return SIG_YIELD to the calling CPS code. The full signal
+                // bits (including SIG_IO) are on the suspension frame for
+                // handle_fiber_resume to read via last_suspension_frame().
+                (tag, payload, crate::value::fiber::SIG_YIELD.0 as i32)
             } else {
                 // Normal return — restore env stack pointer
                 caller.data_mut().env_stack_ptr = env_base;
@@ -1581,14 +1602,68 @@ pub fn compile_module(engine: &Engine, wasm_bytes: &[u8]) -> Result<Module> {
 }
 
 /// Instantiate a module and call its entry function.
+/// If the entry function suspends (e.g. I/O inside ev/run), drive it
+/// to completion by processing I/O inline via SyncBackend and resuming.
 pub fn run_module(
     linker: &Linker<ElleHost>,
     store: &mut Store<ElleHost>,
     module: &Module,
 ) -> Result<Value> {
+    use crate::io::backend::SyncBackend;
+    use crate::io::request::IoRequest;
+    use crate::signals::SIG_IO;
+
     let instance = linker.instantiate(&mut *store, module)?;
-    let entry = instance.get_typed_func::<(), (i64, i64, i32)>(&mut *store, "__elle_entry")?;
-    let (tag, payload, _status) = entry.call(&mut *store, ())?;
+    let entry = instance.get_typed_func::<(i32,), (i64, i64, i32)>(&mut *store, "__elle_entry")?;
+    let (mut tag, mut payload, mut status) = entry.call(&mut *store, (0,))?;
+
+    // The entry function may suspend when ev/run's scheduler does I/O
+    // (SIG_IO propagates through yield-through-call to the top level).
+    // Drive it to completion by processing I/O inline and re-invoking
+    // the entry function with the resume state from the suspension frame.
+    // The entry function may suspend when ev/run's scheduler does I/O
+    // (SIG_IO propagates through yield-through-call to the top level).
+    // Drive it to completion by executing I/O inline and re-calling the
+    // entry function with the resume state.
+    while status > 0 {
+        let value = store.data().wasm_to_value(tag, payload);
+
+        // Execute I/O if the suspension was caused by SIG_IO
+        let resume_val = if let Some(frame) = store.data().last_suspension_frame() {
+            if frame.signal_bits & SIG_IO.0 != 0 {
+                if let Some(request) = value.as_external::<IoRequest>() {
+                    let (_bits, result) = SyncBackend::new().execute(request);
+                    result
+                } else {
+                    value
+                }
+            } else {
+                value
+            }
+        } else {
+            break;
+        };
+
+        // Pop all suspension frames (the resume chain will be replayed
+        // by the entry function's CPS from its resume point)
+        let frame = store.data_mut().pop_suspension_frame().unwrap();
+        let resume_state = frame.resume_state as i32;
+        // Drain remaining frames from this yield-through-call chain
+        while store.data().has_suspension_frames() {
+            store.data_mut().pop_suspension_frame();
+        }
+
+        // Set resume value and re-call entry with the resume state
+        let (resume_tag, resume_pay) = store.data_mut().value_to_wasm(resume_val);
+        store.data_mut().resume_value = Some((resume_tag, resume_pay));
+
+        let (t, p, s) = entry.call(&mut *store, (resume_state,))?;
+        store.data_mut().resume_value = None;
+        tag = t;
+        payload = p;
+        status = s;
+    }
+
     let value = store.data().wasm_to_value(tag, payload);
     Ok(value)
 }

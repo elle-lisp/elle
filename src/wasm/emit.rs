@@ -154,6 +154,9 @@ struct WasmEmitter {
     num_stack_locals: u32,
     /// Whether the current function may suspend (yield or yield-through-call).
     may_suspend: bool,
+    /// WASM local index of the ctx parameter (resume state on re-entry).
+    /// 3 for closures (param 3), 0 for entry function (param 0).
+    ctx_local: u32,
     /// Next resume state ID for yield points and call sites.
     /// State 0 = initial entry; states 1+ are assigned to yield/call points.
     next_resume_state: u32,
@@ -200,6 +203,7 @@ impl WasmEmitter {
             signal_local: 0,
             num_stack_locals: 0,
             may_suspend: false,
+            ctx_local: 0,
             next_resume_state: 1,
             resume_tag_local: 0,
             resume_pay_local: 0,
@@ -233,11 +237,11 @@ impl WasmEmitter {
 
         // Type section
         let mut types = TypeSection::new();
-        // Type 0: entry function () -> (i64, i64, i32)
-        // status: 0 = normal return, >0 = suspended (resume state ID)
+        // Type 0: entry function (ctx: i32) -> (i64, i64, i32)
+        // ctx: 0 = initial, >0 = resume state for re-entry after suspension
         types
             .ty()
-            .function([], [ValType::I64, ValType::I64, ValType::I32]);
+            .function([ValType::I32], [ValType::I64, ValType::I64, ValType::I32]);
         // Type 1: call_primitive(prim_id, args_ptr, nargs, ctx) -> (tag, payload, signal)
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
@@ -586,10 +590,17 @@ impl WasmEmitter {
         let n = alloc.max_slots;
         self.reg_to_slot = alloc.reg_to_slot;
         self.num_regs = n;
-        self.local_offset = 0;
+        // local_offset = 1 because param 0 is ctx (resume state for re-entry)
+        self.local_offset = 1;
         self.is_closure = false;
-        // Locals: tags [0,N), payloads [N,2N), env_ptr (2N), signal/state (2N+1)
-        self.signal_local = n * 2 + 1;
+        // The entry function should not suspend — the ev/run scheduler
+        // handles I/O internally via the async backend. Suspension would
+        // propagate to run_module which has no scheduler to drive it.
+        self.may_suspend = false;
+        self.ctx_local = 0;
+        self.num_stack_locals = 0;
+        // Locals: [ctx param] + tags [1,N+1), payloads [N+1,2N+1), env_ptr, signal/state
+        self.signal_local = 1 + n * 2 + 1;
 
         let mut f = Function::new([
             (n, ValType::I64), // tags
@@ -653,7 +664,7 @@ impl WasmEmitter {
         let state_local = self.signal_local;
 
         // Resume prologue: if ctx != 0, restore saved state and jump to resume target
-        if self.may_suspend && self.is_closure && !self.resume_states.is_empty() {
+        if self.may_suspend && !self.resume_states.is_empty() {
             self.emit_resume_prologue(f, state_local);
         } else {
             // Initialize state to entry block index
@@ -1608,16 +1619,15 @@ impl WasmEmitter {
     // --- Data operation helpers ---
 
     /// Store result from a host call that returns (tag, payload, signal).
-    /// Signal is on top of stack. On non-zero signal, writes the signal
-    /// to memory at byte 0 (so the host can read it after the call) and
-    /// returns the error value.
+    /// Signal is on top of stack. Always writes signal to memory[0..4]
+    /// (clearing stale values from prior yields). On non-zero signal,
+    /// early-returns with the error value.
     fn store_result_with_signal(&self, f: &mut Function, dst: Reg) {
         f.instruction(&Instruction::LocalSet(self.signal_local));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-        f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::If(BlockType::Empty));
-        // Write signal to memory[0..4] for host to read after return
+        // Always write signal to memory (clears stale SIG_YIELD from
+        // inner closures that yielded through call_wasm_closure)
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::LocalGet(self.signal_local));
         f.instruction(&Instruction::I32Store(MemArg {
@@ -1625,6 +1635,9 @@ impl WasmEmitter {
             align: 2,
             memory_index: 0,
         }));
+        // Early return on error
+        f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::If(BlockType::Empty));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
         f.instruction(&Instruction::I32Const(0)); // status: normal return (error propagated via signal memory)
@@ -1859,8 +1872,8 @@ impl WasmEmitter {
     fn emit_resume_prologue(&self, f: &mut Function, state_local: u32) {
         let entry_idx = self.label_to_idx.values().min().copied().unwrap_or(0) as i32;
 
-        // Check ctx (param 3)
-        f.instruction(&Instruction::LocalGet(3)); // ctx
+        // Check ctx param
+        f.instruction(&Instruction::LocalGet(self.ctx_local)); // ctx
         f.instruction(&Instruction::If(BlockType::Empty));
         {
             // Resuming: load resume value
@@ -1878,7 +1891,7 @@ impl WasmEmitter {
             }
 
             // br_table: (ctx - 1) → jump to restore block
-            f.instruction(&Instruction::LocalGet(3)); // ctx
+            f.instruction(&Instruction::LocalGet(self.ctx_local)); // ctx
             f.instruction(&Instruction::I32Const(1));
             f.instruction(&Instruction::I32Sub);
             // Depths: state i → num_states - 1 - i (to land at restore block i)
@@ -2284,6 +2297,7 @@ impl WasmEmitter {
         self.num_regs = n;
         self.local_offset = 4;
         self.is_closure = true;
+        self.ctx_local = 3; // closures: ctx is param 3
         self.num_stack_locals = func.num_locals as u32;
         self.may_suspend = func.signal.may_suspend();
         self.current_num_captures = func.num_captures;
