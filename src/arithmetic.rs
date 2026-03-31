@@ -3,136 +3,192 @@
 //! This module provides a single source of truth for arithmetic operations
 //! (add, subtract, multiply, divide, etc.) to avoid duplication between
 //! the VM's binary stack operations and the primitives' variadic functions.
+//!
+//! All functions return `Result<Value, Value>` where `Err` is an
+//! already-composed Elle error struct (e.g. `{:error :overflow ...}`).
 
-use crate::error::{LError, LResult};
-use crate::value::Value;
+use crate::value::{error_val, Value};
 
 /// Add two numeric values, promoting to float when either operand is float.
-pub(crate) fn add_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn add_values(a: &Value, b: &Value) -> Result<Value, Value> {
     if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
         return match x.checked_add(y) {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer addition overflow")),
+            None => Err(error_val("overflow", "+: integer overflow")),
         };
     }
     match (a.as_number(), b.as_number()) {
         (Some(x), Some(y)) => Ok(Value::float(x + y)),
-        _ => Err(LError::type_mismatch("number", "non-numeric value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "+: expected number, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Subtract two numeric values, promoting to float when either operand is float.
-pub(crate) fn sub_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn sub_values(a: &Value, b: &Value) -> Result<Value, Value> {
     if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
         return match x.checked_sub(y) {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer subtraction overflow")),
+            None => Err(error_val("overflow", "-: integer overflow")),
         };
     }
     match (a.as_number(), b.as_number()) {
         (Some(x), Some(y)) => Ok(Value::float(x - y)),
-        _ => Err(LError::type_mismatch("number", "non-numeric value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "-: expected number, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Multiply two numeric values, promoting to float when either operand is float.
-pub(crate) fn mul_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn mul_values(a: &Value, b: &Value) -> Result<Value, Value> {
     if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
         return match x.checked_mul(y) {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer multiplication overflow")),
+            None => Err(error_val("overflow", "*: integer overflow")),
         };
     }
     match (a.as_number(), b.as_number()) {
         (Some(x), Some(y)) => Ok(Value::float(x * y)),
-        _ => Err(LError::type_mismatch("number", "non-numeric value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "*: expected number, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Divide two numeric values. Integer division truncates; mixed/float
 /// division follows IEEE 754 (including Inf on divide-by-zero).
-pub(crate) fn div_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn div_values(a: &Value, b: &Value) -> Result<Value, Value> {
     if let (Some(x), Some(y)) = (a.as_int(), b.as_int()) {
         if y == 0 {
-            return Err(LError::division_by_zero());
+            return Err(error_val("division-by-zero", "/: division by zero"));
         }
         return match x.checked_div(y) {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer division overflow")),
+            None => Err(error_val("overflow", "/: integer overflow")),
         };
     }
     match (a.as_number(), b.as_number()) {
         (Some(x), Some(y)) => Ok(Value::float(x / y)),
-        _ => Err(LError::type_mismatch("number", "non-numeric value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "/: expected number, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Negate a numeric value
-pub(crate) fn negate_value(a: &Value) -> LResult<Value> {
+pub(crate) fn negate_value(a: &Value) -> Result<Value, Value> {
     if let Some(n) = a.as_int() {
         return match n.checked_neg() {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer negation overflow")),
+            None => Err(error_val("overflow", "negate: integer overflow")),
         };
     }
     match a.as_float() {
         Some(f) => Ok(Value::float(-f)),
-        None => Err(LError::type_mismatch("number", "non-numeric value")),
+        None => Err(error_val(
+            "type-error",
+            format!("negate: expected number, got {}", a.type_name()),
+        )),
     }
 }
 
 /// Reciprocal of a numeric value (1/x). Integer zero errors;
 /// float zero returns Inf per IEEE 754.
-pub(crate) fn reciprocal_value(a: &Value) -> LResult<Value> {
+pub(crate) fn reciprocal_value(a: &Value) -> Result<Value, Value> {
     if let Some(n) = a.as_int() {
         if n == 0 {
-            return Err(LError::division_by_zero());
+            return Err(error_val(
+                "division-by-zero",
+                "reciprocal: division by zero",
+            ));
         }
         return Ok(Value::float(1.0 / n as f64));
     }
     match a.as_float() {
         Some(f) => Ok(Value::float(1.0 / f)),
-        None => Err(LError::type_mismatch("number", "non-numeric value")),
+        None => Err(error_val(
+            "type-error",
+            format!("reciprocal: expected number, got {}", a.type_name()),
+        )),
     }
 }
 
 /// Modulo operation (Euclidean modulo - result has same sign as divisor)
-pub(crate) fn mod_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn mod_values(a: &Value, b: &Value) -> Result<Value, Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
-                return Err(LError::division_by_zero());
+                return Err(error_val("division-by-zero", "mod: division by zero"));
             }
             Ok(Value::int(x.rem_euclid(y)))
         }
-        _ => Err(LError::type_mismatch("integer", "non-integer value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "mod: expected integer, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Remainder operation (truncated division - result has same sign as dividend)
-pub(crate) fn remainder_values(a: &Value, b: &Value) -> LResult<Value> {
+pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, Value> {
     match (a.as_int(), b.as_int()) {
         (Some(x), Some(y)) => {
             if y == 0 {
-                return Err(LError::division_by_zero());
+                return Err(error_val("division-by-zero", "rem: division by zero"));
             }
             Ok(Value::int(x % y))
         }
-        _ => Err(LError::type_mismatch("integer", "non-integer value")),
+        _ => Err(error_val(
+            "type-error",
+            format!(
+                "rem: expected integer, got {} and {}",
+                a.type_name(),
+                b.type_name()
+            ),
+        )),
     }
 }
 
 /// Absolute value of a numeric value
-pub(crate) fn abs_value(a: &Value) -> LResult<Value> {
+pub(crate) fn abs_value(a: &Value) -> Result<Value, Value> {
     if let Some(n) = a.as_int() {
         return match n.checked_abs() {
             Some(r) => Ok(Value::int(r)),
-            None => Err(LError::numeric_overflow("integer abs overflow")),
+            None => Err(error_val("overflow", "abs: integer overflow")),
         };
     }
     match a.as_float() {
         Some(f) => Ok(Value::float(f.abs())),
-        None => Err(LError::type_mismatch("number", "non-numeric value")),
+        None => Err(error_val(
+            "type-error",
+            format!("abs: expected number, got {}", a.type_name()),
+        )),
     }
 }
 

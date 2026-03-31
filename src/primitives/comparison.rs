@@ -83,8 +83,15 @@ pub(crate) fn prim_eq(args: &[Value]) -> (SignalBits, Value) {
         if args[i] == args[i + 1] {
             continue;
         }
-        // Numeric coercion: if both are numbers, compare as f64
+        // Numeric coercion: int-int stays exact, mixed promotes to f64
         if args[i].is_number() && args[i + 1].is_number() {
+            if let (Some(a), Some(b)) = (args[i].as_int(), args[i + 1].as_int()) {
+                if a == b {
+                    continue;
+                } else {
+                    return (SIG_OK, Value::FALSE);
+                }
+            }
             if let (Some(a), Some(b)) = (args[i].as_number(), args[i + 1].as_number()) {
                 if a == b {
                     continue;
