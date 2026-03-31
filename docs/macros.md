@@ -1,22 +1,9 @@
-# Macros: Design Document
+# Macros
 
-This document describes Elle's macro system — what exists today and
-the remaining work for full hygiene.
+Elle's macro system: VM-evaluated, fully hygienic via sets-of-scopes,
+with `datum->syntax` escape hatch for anaphoric macros.
 
-## Contents
-
-- [Current State](#current-state)
-- [Architecture](#architecture)
-- [The Hygiene Problem](#the-hygiene-problem)
-- [Implemented: Sets-of-Scopes Hygiene (PR 3)](#implemented-sets-of-scopes-hygiene-pr-3)
-- [What This Unblocks](#what-this-unblocks)
-- [Files](#files)
-- [Resolved Questions](#resolved-questions)
-- [Hygiene Escape Hatch: `datum->syntax`](#hygiene-escape-hatch-datum-syntax)
-- [Open Questions](#open-questions)
-
-
-## Current State
+## Overview
 
 Macros in Elle are VM-evaluated. A macro is a name, a parameter list,
 and a body. At expansion time, arguments are quoted and the body is
@@ -32,7 +19,7 @@ list operations, recursion — everything.
 ;# Expands to: (if (> x 0) (println "positive") nil)
 ```
 
-### What works
+### Features
 
 - **VM-evaluated macros.** `defmacro` bodies are normal Elle code.
   Arguments are quoted and bound via `let`. The body runs in the VM
@@ -62,20 +49,19 @@ list operations, recursion — everything.
 - **Define shorthand.** `(def (f x) body)` desugars to
   `(def f (fn (x) body))` during expansion.
 
-### Known limitations
+### Notes
 
-**`gensym` is rarely needed.** With automatic hygiene (PR 3), most
-macros don't need `gensym`. It's still available for cases where you
-need a unique name that's not related to hygiene (e.g., generating
-unique global names).
+**`gensym` is rarely needed.** With automatic hygiene, most macros
+don't need `gensym`. It's still available for cases where you need a
+unique name that's not related to hygiene (e.g., generating unique
+global names).
 
 **Macros cannot return improper lists.** `from_value()` requires proper
 lists. A macro body that returns `(cons 1 2)` will error.
 
-**REPL macro persistence.** `compile` creates a fresh Expander per call,
-so macros defined in one REPL input are lost before the next. This means
-`defmacro` in the REPL only affects the current input line. Macros used
-across multiple inputs must be defined in a file and imported.
+**Macros are not yet exportable.** Macros defined in one module cannot
+be imported by another. A branch exists where macros are first-class
+values, which will resolve this. See [warts.md](warts.md).
 
 
 ## Architecture
@@ -192,20 +178,19 @@ objects* — s-expressions annotated with lexical context. Hygiene is
 automatic but breakable via `datum->syntax`. This is the most powerful
 and most complex model.
 
-**Racket's "sets of scopes"** (Matthew Flatt, 2016) replaced the older
-"marks and renames" model. Each identifier carries a set of scope IDs.
-A binding is visible to a reference if the binding's scope set is a
-subset of the reference's scope set. This is what Elle's `Syntax.scopes`
-was designed for — the infrastructure exists, the wiring doesn't.
+**Racket's "sets of scopes"** (Matthew Flatt, 2016). Each identifier
+carries a set of scope IDs. A binding is visible to a reference if the
+binding's scope set is a subset of the reference's scope set. Elle
+implements this model.
 
 
-## Implemented: Sets-of-Scopes Hygiene (PR 3)
+## Sets-of-Scopes Hygiene
 
 Binding resolution respects scope marks. Macro-introduced bindings can't
 capture call-site names and vice versa. Automatic — no `gensym` needed
 for the common case.
 
-**What changed:**
+**Implementation:**
 
 - `Scope.bindings` stores `HashMap<String, Vec<ScopedBinding>>` — multiple
   bindings per name with different scope sets
@@ -246,22 +231,25 @@ After expanding (swap x y) with intro scope 3:
 so code that hasn't been through macro expansion works identically.
 
 
-## What This Unblocks
+## Macros in the prelude
 
-Features that are now possible with VM-based macros:
+The prelude defines all core control-flow macros using `defmacro`:
 
-| Feature | Defined in | Status |
-|---------|-----------|--------|
-| `try`/`catch` | `docs/signals.md` | Ready to implement |
-| `defer` | `docs/janet.md` | Ready to implement |
-| `with` | `docs/janet.md` | Ready to implement |
-| `protect` | `docs/janet.md` | Ready to implement |
-| `generate` | `docs/janet.md` | Ready to implement |
-| `bench` | `docs/debugging.md` | Ready to implement |
-| `swap` | — | Ready (automatic hygiene via PR 3) |
-| Anaphoric macros | — | Implemented via `datum->syntax` |
-| `assert` (variadic) | — | Needs variadic macro params |
-| `match` (as macro) | — | Ready to implement |
+| Macro | Purpose |
+|-------|---------|
+| `try`/`catch` | Error handling via fibers |
+| `protect` | Run body, return `[success? value]` |
+| `defer` | Unconditional cleanup after body |
+| `with` | Resource acquisition/release |
+| `when`, `unless` | One-armed conditionals |
+| `each` | Polymorphic iteration |
+| `match` | Pattern matching with destructuring |
+| `->`, `->>`, `as->`, `some->` | Threading macros |
+| `apply` | Spread args from final list |
+| `forever`, `repeat` | Loop forms |
+| `if-let`, `when-let`, `when-ok` | Conditional binding |
+| `ffi/defbind`, `ffi/with-stack` | FFI convenience |
+| Anaphoric macros | Via `datum->syntax` escape hatch |
 
 
 ## Files
@@ -281,9 +269,7 @@ Features that are now possible with VM-based macros:
 | `src/pipeline.rs` | Compilation entry points, `eval_syntax` |
 
 
-## Resolved Questions
-
-These were open during design# now answered by the implementation:
+## Design notes
 
 1. **Argument quoting.** `Quote(Box::new(arg.clone()))` works. The
    Analyzer handles `quote` by converting to a Value via `to_value()`.
@@ -333,16 +319,16 @@ and skips exempt nodes. `set_scopes_recursive` (called by
 `datum->syntax`) sets both the scopes and the exempt flag recursively.
 
 
-## Open Questions
+## Performance
 
-1. **Performance.** Every macro call compiles and executes bytecode.
-   For hot macros (e.g., `when` used hundreds of times), this could be
-   slow. Mitigation: cache compiled bytecode per MacroDef. The body
-   doesn't change between calls — only the argument bindings do.
+Macro expansion compiles and executes bytecode per call. A macro cache
+stores compiled bytecode per `MacroDef`, so repeated expansions of the
+same macro (e.g., `when` used hundreds of times) reuse the cached
+bytecode — only the argument bindings change.
 
-2. **Interaction between `set` and scope-aware lookup.** `set` goes
-   through the Analyzer's `lookup()`. With scope-aware resolution, a
-   macro that uses `set` on a call-site variable must have the right
-   scope set for the reference to resolve. This works naturally because
-   call-site arguments keep their original scopes via syntax objects.
-   The `swap` macro's `set` on call-site variables is tested and works.
+## `set` and scope-aware lookup
+
+`set` goes through the Analyzer's `lookup()`. With scope-aware resolution,
+a macro that uses `set` on a call-site variable must have the right
+scope set for the reference to resolve. This works naturally because
+call-site arguments keep their original scopes via syntax objects.

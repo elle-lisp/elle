@@ -168,10 +168,9 @@ happens in 1–3 iterations.
 
 ### Deduplication
 
-The fixpoint loop was previously duplicated between `compile_file` and
-`analyze_file`. It is now unified in `run_fixpoint()` (in `src/pipeline/fixpoint.rs`),
-parameterized by a `post_analyze` closure. This eliminates ~100 lines of
-duplicated logic and makes the algorithm easier to maintain.
+The fixpoint loop lives in `run_fixpoint()` (in `src/pipeline/fixpoint.rs`),
+parameterized by a `post_analyze` closure. Both `compile_file` and
+`analyze_file` call through it.
 
 ## Pre-scanning functions (in `src/pipeline/scan.rs`)
 

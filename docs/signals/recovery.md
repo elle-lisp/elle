@@ -185,12 +185,11 @@ Steps 1–3 are complete. Steps 4–7 are future work.
    parent/child chain, signal mask, all fiber primitives implemented.
    Coroutines are fibers that yield.
 
-2. ✅ **Unified signals.** Error and yield are signal types. `Condition`
-   type removed. Errors are `[:keyword "message"]` tuples.
+2. ✅ **Unified signals.** Error and yield are signal types. Errors are
+   `[:keyword "message"]` tuples.
 
 3. ✅ **Signal-bits-based Signal type.** `Signal { bits: SignalBits,
-   propagates: u32 }`. Inference tracks signal bits. Old `yield_behavior`
-    and `may_error` fields replaced.
+   propagates: u32 }`. Inference tracks signal bits per function.
 
 4. ❌ **Relax JIT restrictions.** JIT still restricted to silent functions.
    Signal-aware calling convention not yet implemented.

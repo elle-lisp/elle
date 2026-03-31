@@ -2,22 +2,10 @@
 
 ## Open Questions
 
-### Compound signals
-
-Can a function emit multiple signal bits simultaneously? Current position:
-probably not (signals are suspension points), but the representation supports
-it. Revisit if we find a use case.
-
 ### Signal bit allocation
 
 32 bits: 7 used (0–6) + 9 reserved (7–15) + 16 user-defined (16–31). If
 users need more than 16 signal types, bump SignalBits to u64.
-
-### Dynamic signal checking overhead
-
-Checking `closure.signals & ~bound == 0` at every call boundary with a
-signal bound — is this too expensive? It's one AND + one branch. Probably
-fine, but worth measuring.
 
 ### Interaction with the type system
 
@@ -44,11 +32,19 @@ and faster. Current implementation: flat.
 
 - **Coroutine aliases**: `yield` works as a special form (emits
   `SIG_YIELD`). `make-coroutine` / `coro/resume` are thin wrappers
-  around `fiber/new` / `fiber/resume`. `try`/`catch` macro is blocked on
-  macro system work.
+  around `fiber/new` / `fiber/resume`. `try`/`catch` is a prelude macro.
 
-- **Signal erasure**: Signal bits are stored on the `Closure` struct (one
-  `Signal` value = 8 bytes). Acceptable cost.
+- **Signal erasure**: Signal bits are stored on the `Closure` struct
+  (`SignalBits` = 4 bytes per closure). Acceptable cost.
+
+- **Compound signals**: Functions routinely carry multiple signal bits.
+  A function that does I/O and can error has bits `|:error :io|`. The
+  compiler infers compound signals by unioning the bits of all callees.
+  Compound signals that include `:io` receive special treatment: a fiber
+  mask that catches `:error` but not `:io` will *not* catch a compound
+  `:error :io` signal. The signal remains uncaught until a handler that
+  catches `:io` is reached — the scheduler must see the `:io` bit to
+  submit the operation to the backend.
 
 ---
 

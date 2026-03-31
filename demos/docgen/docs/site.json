@@ -1,14 +1,51 @@
 {
   "title": "Elle Programming Language",
   "description": "A Lisp with deep static analysis: binding resolution, capture analysis, and signal inference at compile time",
-  "base_url": "/elle",
-  "nav": [
-    {"slug": "index", "title": "Home"},
-    {"slug": "getting-started", "title": "Getting Started"},
-    {"slug": "language-guide", "title": "Language Guide"},
-    {"slug": "concurrency", "title": "Concurrency"},
-    {"slug": "documentation", "title": "Documentation"},
-    {"slug": "examples", "title": "Examples"},
-    {"slug": "stdlib-reference", "title": "Standard Library"}
+  "home": "README",
+  "sections": [
+    {
+      "name": "Language",
+      "pages": [
+        "syntax", "types", "bindings", "destructuring", "destructuring-advanced",
+        "functions", "named-args", "parameters",
+        "arrays", "structs", "sets", "strings", "bytes",
+        "control", "loops", "match", "errors",
+        "concurrency", "threads", "coroutines",
+        "modules", "macros", "traits", "io", "ffi", "lua", "epochs"
+      ]
+    },
+    {
+      "name": "Runtime",
+      "pages": ["runtime", "scheduler", "memory", "processes", "pipeline"]
+    },
+    {
+      "name": "Signals",
+      "dir": "signals",
+      "pages": ["index", "design", "protocol", "inference", "recovery", "jit", "fibers", "primitives", "questions"]
+    },
+    {
+      "name": "Cookbook",
+      "dir": "cookbook",
+      "pages": ["index", "primitives", "heap-types", "bytecode", "prelude-macros", "special-forms", "plugins", "lint-rules"]
+    },
+    {
+      "name": "Analysis",
+      "dir": "analysis",
+      "pages": ["index", "testing", "debugging", "portrait", "scripts", "ci"]
+    },
+    {
+      "name": "Implementation",
+      "dir": "impl",
+      "pages": ["reader", "hir", "lir", "bytecode", "vm", "jit", "values"]
+    },
+    {
+      "name": "Reference",
+      "pages": ["stdlib", "libraries", "plugins", "warts"]
+    },
+    {
+      "name": "API Reference",
+      "api": true,
+      "pages": ["primitives", "prelude", "stdlib", "libraries", "plugins"]
+    }
   ]
 }

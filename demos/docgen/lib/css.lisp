@@ -299,6 +299,87 @@ tbody tr:nth-child(even) {
   max-width: 900px;
   margin: 0 auto;
 }
+
+/* Navigation sections */
+.nav-section {
+  font-weight: 600;
+  padding: 0.5rem 1rem;
+  margin-top: 1rem;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+}
+
+/* Signal badges */
+.signal-badge {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  border-radius: 3px;
+  font-size: 0.8em;
+  font-family: 'Courier New', Courier, monospace;
+  margin-right: 0.2em;
+  margin-bottom: 0.2em;
+}
+
+.signal-silent { background-color: var(--note-tip-bg); color: var(--note-tip-border); }
+.signal-error { background-color: var(--note-warning-bg); color: var(--note-warning-border); }
+.signal-io { background-color: var(--note-info-bg); color: var(--note-info-border); }
+.signal-yield { background-color: #fff3e0; color: #ef6c00; }
+.signal-exec { background-color: #f3e5f5; color: #7b1fa2; }
+.signal-ffi { background-color: #fce4ec; color: #ad1457; }
+.signal-fuel { background-color: #efebe9; color: #6d4c41; }
+.signal-wait { background-color: #e0f7fa; color: #00838f; }
+
+@media (prefers-color-scheme: dark) {
+  .signal-yield { background-color: #3e2723; color: #ffb74d; }
+  .signal-exec { background-color: #311b92; color: #ce93d8; }
+  .signal-ffi { background-color: #880e4f; color: #f48fb1; }
+  .signal-fuel { background-color: #3e2723; color: #bcaaa4; }
+  .signal-wait { background-color: #004d40; color: #80cbc4; }
+}
+
+/* Source links */
+.source-link {
+  font-size: 0.8em;
+  margin-left: 0.5em;
+  opacity: 0.6;
+}
+
+.source-link:hover { opacity: 1; }
+
+/* API entry cards */
+.api-entry {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background-color: var(--bg);
+}
+
+.api-entry h3 { margin-top: 0; }
+
+.api-signature {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 0.95em;
+  color: var(--code-fg);
+  background-color: var(--code-bg);
+  padding: 0.3em 0.6em;
+  border-radius: 3px;
+  display: inline-block;
+  margin-bottom: 0.5em;
+}
+
+.api-desc { margin: 0.5em 0; }
+
+.api-signals { margin-top: 0.3em; }
+
+/* Section dividers */
+.section-divider {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 2px solid var(--border);
+}
 "
 ))
 
