@@ -60,7 +60,7 @@ impl<'a> Lowerer<'a> {
                 func,
                 args,
                 is_tail,
-            } => self.lower_call(func, args.as_slice(), *is_tail, hir.signal.may_suspend()),
+            } => self.lower_call(func, args.as_slice(), *is_tail, hir.signal.bits),
 
             HirKind::Assign { target, value } => self.lower_assign(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),

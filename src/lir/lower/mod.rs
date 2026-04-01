@@ -13,8 +13,8 @@ use super::intrinsics::IntrinsicOp;
 use super::types::*;
 use crate::hir::arena::BindingArena;
 use crate::hir::{Binding, BlockId, CallArg, Hir, HirKind, HirPattern};
-use crate::signals::Signal;
 use crate::syntax::Span;
+use crate::value::fiber::SignalBits;
 use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
@@ -566,8 +566,12 @@ impl<'a> Lowerer<'a> {
     /// 3. Call doesn't suspend (conservative: no yielding anywhere)
     /// 4. At least one argument may heap-allocate (otherwise no benefit)
     /// 5. No spliced arguments (splice path builds an array; more complex)
-    #[allow(dead_code)]
-    fn can_scope_allocate_call(&self, func: &Hir, args: &[CallArg], _call_signal: Signal) -> bool {
+    fn can_scope_allocate_call(
+        &self,
+        func: &Hir,
+        args: &[CallArg],
+        _call_signals: SignalBits,
+    ) -> bool {
         // Must be a variable reference to a known function
         let HirKind::Var(binding) = &func.kind else {
             return false;

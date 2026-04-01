@@ -368,6 +368,11 @@ pub enum LirInstr {
     /// Exit an allocation region (scope boundary for allocator).
     /// No registers produced or consumed.
     RegionExit,
+    /// Exit a call-scoped allocation region. Pops two scope marks:
+    /// the barrier (top) and the region start (below). Frees only
+    /// objects between the two marks (arg temporaries), leaving the
+    /// callee's allocations intact.
+    RegionExitCall,
 
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.

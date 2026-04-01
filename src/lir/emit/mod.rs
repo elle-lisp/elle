@@ -819,6 +819,11 @@ impl Emitter {
                 // No stack effect
             }
 
+            LirInstr::RegionExitCall => {
+                self.bytecode.emit(Instruction::RegionExitCall);
+                // No stack effect
+            }
+
             LirInstr::PushParamFrame { pairs } => {
                 // Push all param/value pairs onto the stack
                 for (param, value) in pairs {

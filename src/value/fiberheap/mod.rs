@@ -305,6 +305,47 @@ impl FiberHeap {
         self.scope_dtors_run += dtors_before - self.pool.dtors.len();
     }
 
+    /// Pop two scope marks and release only the range between them.
+    ///
+    /// Used by `RegionExitCall`: mark2 (top) is the barrier pushed
+    /// after arg evaluation; mark1 (below) is the region start.
+    /// Objects in [mark1..mark2) (arg temporaries) are freed.
+    /// Objects after mark2 (callee's allocations) are preserved.
+    ///
+    /// Panics if fewer than two marks are on the stack.
+    pub fn pop_call_scope_marks_and_release(&mut self) {
+        let mark2 = self
+            .scope_marks
+            .pop()
+            .expect("RegionExitCall: missing barrier mark");
+        let mark1 = self
+            .scope_marks
+            .pop()
+            .expect("RegionExitCall: missing region mark");
+
+        // Run dtors in reverse for objects allocated between mark1 and mark2.
+        for i in (mark1.dtor_len()..mark2.dtor_len()).rev() {
+            unsafe {
+                std::ptr::drop_in_place(self.pool.dtors[i]);
+            }
+        }
+        let dtors_freed = mark2.dtor_len() - mark1.dtor_len();
+        self.pool.dtors.drain(mark1.dtor_len()..mark2.dtor_len());
+        self.scope_dtors_run += dtors_freed;
+
+        // Dealloc slab slots for the range, then drain the entries.
+        for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
+            unsafe {
+                self.pool.dealloc_slot(self.pool.allocs[i]);
+            }
+        }
+        self.pool
+            .allocs
+            .drain(mark1.root_allocs_len()..mark2.root_allocs_len());
+
+        self.pool.alloc_count -= mark2.position() - mark1.position();
+    }
+
     /// Private heap object count (used by mark/release scoping).
     pub fn len(&self) -> usize {
         self.pool.alloc_count

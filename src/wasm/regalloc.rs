@@ -263,6 +263,7 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::TailCallArrayMut { .. }
         | LirInstr::RegionEnter
         | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
         | LirInstr::CheckSignalBound { .. } => {}
@@ -371,7 +372,10 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::PopParamFrame => {}
+        LirInstr::RegionEnter
+        | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
+        | LirInstr::PopParamFrame => {}
     }
 }
 

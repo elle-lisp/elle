@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::hir::{CallArg, HirPattern};
+use crate::value::fiber::SignalBits;
 
 impl<'a> Lowerer<'a> {
     pub(super) fn lower_call(
@@ -9,7 +10,7 @@ impl<'a> Lowerer<'a> {
         func: &Hir,
         args: &[CallArg],
         is_tail: bool,
-        _call_may_suspend: bool,
+        call_signals: SignalBits,
     ) -> Result<Reg, String> {
         let has_splice = args.iter().any(|a| a.spliced);
 
@@ -21,20 +22,24 @@ impl<'a> Lowerer<'a> {
                 return Ok(result);
             }
 
-            // Call-scoped reclamation: infrastructure is in place
-            // (can_scope_allocate_call, precompute_result_immediate) but
-            // emission is disabled. RegionEnter/RegionExit around a Call
-            // frees the callee's internal allocations too (they share the
-            // slab), which corrupts JIT-cached closure templates. Enabling
-            // this requires per-call slab isolation or JIT awareness of
-            // call-scoped regions.
-            let call_scoped = false;
+            // Call-scoped reclamation: wrap the call in two RegionEnters
+            // (before args, after args) + RegionExitCall (after Call).
+            // RegionExitCall pops both marks and frees only the arg range
+            // [mark1..mark2), leaving the callee's allocations intact.
+            let call_scoped = !is_tail && self.can_scope_allocate_call(func, args, call_signals);
+            if call_scoped {
+                self.emit_region_enter(); // mark1: before arg evaluation
+            }
 
             let mut arg_regs = Vec::new();
             for arg in args {
                 arg_regs.push(self.lower_expr(&arg.expr)?);
             }
             let func_reg = self.lower_expr(func)?;
+
+            if call_scoped {
+                self.emit_region_enter(); // mark2: barrier before Call
+            }
 
             if is_tail {
                 // Emit pending RegionExits before TailCall — the scope's
@@ -53,7 +58,9 @@ impl<'a> Lowerer<'a> {
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                if _call_may_suspend {
+                if call_signals
+                    .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
+                {
                     self.emit(LirInstr::SuspendingCall {
                         dst,
                         func: func_reg,
@@ -67,7 +74,8 @@ impl<'a> Lowerer<'a> {
                     });
                 }
                 if call_scoped {
-                    self.emit_region_exit();
+                    self.emit(LirInstr::RegionExitCall);
+                    self.region_depth -= 2; // both marks consumed
                     self.scope_stats.calls_scoped += 1;
                 }
                 Ok(dst)

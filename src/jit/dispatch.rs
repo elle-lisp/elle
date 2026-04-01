@@ -364,6 +364,14 @@ pub extern "C" fn elle_jit_region_exit() -> JitValue {
     JitValue::nil()
 }
 
+/// Pop two scope marks and release only the range between them
+/// (called by JIT `RegionExitCall`).
+#[no_mangle]
+pub extern "C" fn elle_jit_region_exit_call() -> JitValue {
+    crate::value::fiberheap::region_exit_call();
+    JitValue::nil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

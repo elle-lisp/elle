@@ -1622,21 +1622,17 @@ fn correct_scope_binding_not_passed_to_tail_call() {
 // get wrapped in RegionEnter/RegionExit to free temporary arguments.
 
 #[test]
-fn call_scoped_infrastructure_marks_callee() {
+fn call_scoped_emits_region_exit_call() {
     // inner is rotation-safe and always returns an integer literal.
-    // The precomputed maps identify it as result-immediate and
-    // rotation-safe. Call-scoped emission is currently disabled
-    // (callee's internal allocations share the slab), but the
-    // infrastructure for can_scope_allocate_call is in place.
-    // Verify the code compiles and runs correctly.
+    // outer's call (inner (cons n (list))) should get call-scoped
+    // reclamation: two RegionEnter + one RegionExitCall.
     let source = r#"(letrec
         ((inner (fn [x] (if (empty? x) 0 (+ 1 (inner (rest x))))))
          (outer (fn [n] (inner (cons n (list))))))
-        (outer 3))
+        nil)
     "#;
-    let mut symbols = SymbolTable::new();
-    let compiled = compile(source, &mut symbols, "<test>").expect("compile");
-    assert!(!compiled.bytecode.instructions.is_empty());
+    assert!(closure_bytecode_contains(source, "RegionEnter"));
+    assert!(closure_bytecode_contains(source, "RegionExitCall"));
 }
 
 #[test]

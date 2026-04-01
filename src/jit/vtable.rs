@@ -101,6 +101,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) has_signal: FuncId,
     pub(crate) region_enter: FuncId,
     pub(crate) region_exit: FuncId,
+    pub(crate) region_exit_call: FuncId,
     pub(crate) rotate_pools: FuncId,
 }
 
@@ -297,6 +298,10 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_region_exit as *const u8,
     );
     builder.symbol(
+        "elle_jit_region_exit_call",
+        dispatch::elle_jit_region_exit_call as *const u8,
+    );
+    builder.symbol(
         "elle_jit_rotate_pools",
         dispatch::elle_jit_rotate_pools as *const u8,
     );
@@ -456,6 +461,7 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         has_signal: declare(module, "elle_jit_has_signal", &vm_only)?,
         region_enter: declare(module, "elle_jit_region_enter", &void_to_value)?,
         region_exit: declare(module, "elle_jit_region_exit", &void_to_value)?,
+        region_exit_call: declare(module, "elle_jit_region_exit_call", &void_to_value)?,
         rotate_pools: declare(module, "elle_jit_rotate_pools", &vm_to_void)?,
     })
 }
