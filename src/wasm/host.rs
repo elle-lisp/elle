@@ -282,6 +282,26 @@ impl ElleHost {
     }
 }
 
+/// Trait for host types that can prepare WASM closure environments.
+/// Implemented by both ElleHost (full-module mode) and TieredHost (per-closure mode).
+pub trait WasmEnvHost {
+    fn env_stack_ptr(&self) -> usize;
+    fn set_env_stack_ptr(&mut self, ptr: usize);
+    fn value_to_wasm(&mut self, value: Value) -> (i64, i64);
+}
+
+impl WasmEnvHost for ElleHost {
+    fn env_stack_ptr(&self) -> usize {
+        self.env_stack_ptr
+    }
+    fn set_env_stack_ptr(&mut self, ptr: usize) {
+        self.env_stack_ptr = ptr;
+    }
+    fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {
+        self.value_to_wasm(value)
+    }
+}
+
 /// Build a flattened dispatch table from ALL_TABLES.
 ///
 /// Each primitive gets a sequential index. This table is used by the

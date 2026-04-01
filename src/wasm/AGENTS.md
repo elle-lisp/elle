@@ -7,9 +7,11 @@ LIR → WASM emission via `wasm-encoder`, execution via Wasmtime.
 ```
 LIR → WasmEmitter (emit.rs) → .wasm bytes + const_pool
                                     ↓
-                              Wasmtime Engine/Store/Linker (store.rs)
+                              Wasmtime Engine/Store (store.rs)
                                     ↓
-                              Host functions (store.rs, host.rs)
+                              Host functions (linker.rs)
+                                    ↓
+                              Fiber resume chain (resume.rs)
                                     ↓
                               HandleTable (handle.rs) ← heap objects live here
 ```
@@ -57,13 +59,17 @@ Int-to-float promotion for mixed operands. Bitwise ops remain integer-only.
 ### Signal propagation
 
 `store_result_with_signal` writes signal to memory[0..4] before returning.
-`call_wasm_closure` reads signal from memory after WASM call returns.
+`handle_wasm_result` reads signal from memory after WASM call returns.
 Signals propagate through WASM↔host boundaries.
 
 For SIG_YIELD in suspending functions, `emit_call_suspending` checks the
-signal BEFORE the general early-return path, spills caller state, and
-returns suspended. `rt_call` intercepts SIG_RESUME from fiber/resume and
-executes the fiber's WASM closure host-side via `handle_fiber_resume`.
+signal from the return value BEFORE the general early-return path, spills
+caller state, and returns suspended. Virtual resume blocks (CPS continuations
+for mid-block call sites) use the same suspending-aware emission so that
+yield-through-call works correctly after resume.
+
+`rt_call` intercepts SIG_RESUME from fiber/resume and executes the fiber's
+WASM closure host-side via `handle_fiber_resume` (in resume.rs).
 
 ## Files
 
@@ -71,15 +77,19 @@ executes the fiber's WASM closure host-side via `handle_fiber_resume`.
 |------|---------|
 | `emit.rs` | LIR → WASM emission. `emit_module()` is the entry point. |
 | `handle.rs` | `HandleTable`: maps u64 handles to `Rc<HeapObject>`. |
-| `host.rs` | `ElleHost` state (handle table + primitive dispatch + const pool). |
-| `store.rs` | Wasmtime setup, host function registration, `call_wasm_closure`, `dispatch_data_op`. |
+| `host.rs` | `ElleHost` state (handle table + primitives + suspension frames). |
+| `linker.rs` | Host function registration (`create_linker`), data op dispatch. |
+| `resume.rs` | Fiber resume chain (`drive_resume_chain`, `handle_fiber_resume`). |
+| `store.rs` | Engine/Store creation, `call_wasm_closure`, `resume_wasm_closure`, `run_module`. |
+| `lazy.rs` | `WasmTier`: per-closure WASM compilation and tiered dispatch. |
+| `regalloc.rs` | Register allocation for WASM locals. |
 | `mod.rs` | `eval_wasm()` entry point. |
 
 ## Host functions (WASM imports)
 
 | Import | Purpose |
 |--------|---------|
-| `call_primitive` | Dispatch by prim_id (unused currently, rt_call covers this) |
+| `call_primitive` | Dispatch by prim_id (registered but unused; rt_call covers this) |
 | `rt_call` | Dynamic function call: NativeFn or WASM closure dispatch |
 | `rt_load_const` | Load heap constant from const_pool by index |
 | `rt_data_op` | Data operations (cons, car, cdr, arrays, lbox, etc.) by opcode |
@@ -88,6 +98,8 @@ executes the fiber's WASM closure host-side via `handle_fiber_resume`.
 | `rt_yield` | Save yielded value + live regs to WasmSuspensionFrame |
 | `rt_get_resume_value` | Return the resume value passed by scheduler |
 | `rt_load_saved_reg` | Load saved register by index from suspension frame |
+| `rt_push_param` | Push dynamic parameter binding frame |
+| `rt_pop_param` | Pop dynamic parameter binding frame |
 
 ## Linear memory layout
 
@@ -102,6 +114,38 @@ The env region uses a **stack allocator** (`ElleHost::env_stack_ptr`). Each
 restores. This prevents nested closure calls from overwriting each other's
 environments. Memory is grown automatically if the stack exceeds one page.
 
+## Suspension frames and resume chain
+
+Per-fiber suspension frames are stored in a `VecDeque` keyed by fiber ID.
+Frames are pushed to the back (innermost first during yield-through-call)
+and consumed from the front (innermost first during resume).
+
+**Resume protocol (`resume_wasm_closure`):**
+1. Peek the front frame (innermost) — `rt_load_saved_reg` reads from it
+2. Restore env to linear memory from the frame's snapshot
+3. Call WASM with `ctx = resume_state`
+4. Pop the front frame after the call completes
+5. If re-yielded: `back_suspension_frame_mut()` updates the new frame
+6. New frames pushed by `rt_yield` go to the back, so they don't interfere
+
+**`drive_resume_chain`:** Loops `resume_wasm_closure` until all frames are
+consumed (Dead), a frame yields (Yielded), or a frame errors (Error).
+
+**`handle_fiber_resume`:** Dispatches New (call_wasm_closure) vs Paused
+(drive_resume_chain). Sets fiber status and signal on completion.
+
+## CPS state-machine transform
+
+Yielding functions become re-entrant via compile-time state machine:
+- Closures return `(tag: i64, payload: i64, status: i32)`: status=0 normal, >0 suspended
+- `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
+- Yield spills all registers + local slots to ARGS_BASE, calls `rt_yield`, returns suspended
+- Resume prologue: if ctx!=0, dispatch via br_table to restore block, load saved regs
+- Yield-through-call: after Call in suspending functions, check SIG_YIELD, spill+return
+- Virtual resume blocks handle mid-block resume (instructions after the call + terminator)
+- Both real blocks and virtual resume blocks use `emit_call_suspending` for SuspendingCall
+- Host snapshots env, manages `WasmSuspensionFrame` deque, drives resume chain
+
 ## WASM local layout
 
 Entry function: `[tags: i64 * N] [payloads: i64 * N] [env_ptr: i32] [signal/state: i32]`
@@ -111,37 +155,6 @@ Closure function (params 0-3): `[tags: i64 * N] [payloads: i64 * N] [signal/stat
 
 Register mapping: `tag_local(Reg(i)) = offset + i`, `pay_local(Reg(i)) = offset + N + i`
 where offset = 0 for entry, 4 for closures.
-
-## What works (58 tests, ELLE_WASM=1 make smoke passes)
-
-- All LIR instructions except Eval (emit Unreachable)
-- Constants (int, float, bool, nil, empty_list, symbol, keyword, string)
-- Arithmetic (int and float with tag dispatch), comparisons, bitwise, unary
-- Control flow: if/else (nested, cond), let*, defn, letrec, block/break
-- All 331 primitives via rt_call
-- Closures: creation, calling, capture, higher-order, recursion, mutual recursion
-- Tail calls via `return_call_indirect` (100K deep recursion verified)
-- Nested closure calls with captures (env stack allocator)
-- Data: cons, car, cdr, arrays, structs, destructuring, lbox
-- Strings via constant pool
-- Signal propagation (error early-return after host calls)
-- stdlib.lisp compiles to WASM and runs; all smoke examples pass
-- Yield/resume: basic yield, resume with value, multiple sequential yields
-- Yield-through-call: callee yields, caller suspends, resume chain
-- Fiber primitives: fiber/new, fiber/resume work with WASM closures
-
-### CPS state-machine transform (Phase 2)
-
-Yielding functions become re-entrant via compile-time state machine:
-- Closures return `(tag: i64, payload: i64, status: i32)`: status=0 normal, >0 suspended
-- `ctx` parameter (param 3) carries resume state on re-entry (0 = initial)
-- Yield spills all registers + local slots to ARGS_BASE, calls `rt_yield`, returns suspended
-- Resume prologue: if ctx!=0, dispatch via br_table to restore block, load saved regs
-- Yield-through-call: after Call in suspending functions, check SIG_YIELD, spill+return
-- Virtual resume blocks handle mid-block resume (instructions after the call + terminator)
-- Host snapshots env, manages `WasmSuspensionFrame` stack, drives resume chain
-
-Host functions: `rt_yield`, `rt_get_resume_value`, `rt_load_saved_reg`.
 
 ## Deterministic WASM output
 
@@ -158,10 +171,6 @@ WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
 `ELLE_WASM_TIER=1` enables tiered execution: the bytecode VM runs by default,
 and hot closures are compiled to per-closure WASM modules on demand.
 
-| File | Purpose |
-|------|---------|
-| `lazy.rs` | `WasmTier`: per-closure WASM compilation, caching, and dispatch |
-
 **Constraints on per-closure compilation:**
 - No `MakeClosure` instructions (nested closures stay on bytecode VM)
 - No `TailCall`/`TailCallArrayMut` (uses `return_call_indirect` with callee table indices)
@@ -173,9 +182,9 @@ directly through the instance's funcref table (`call_indirect` on index 0)
 instead of creating a new Store. This makes recursive functions like fib
 efficient within a single WASM instance.
 
-## Known issues / Phase 3 scope
+## Known issues
 
-- `Eval` — needs dynamic module compilation (Phase 3)
-- Recursive yield-through-call with multiple suspension frames — incorrect frame ordering
+- `Eval` — needs dynamic module compilation (post-merge)
 - Port-edge-cases example slow under WASM — needs investigation
 - Tiered mode: per-call Store creation for cross-closure WASM calls is slow
+- `call_primitive` host function registered but unused (import required by module declaration)

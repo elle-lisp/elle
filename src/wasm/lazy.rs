@@ -51,6 +51,18 @@ pub struct TieredHost {
     pub current_bytecode_ptr: *const u8,
 }
 
+impl super::host::WasmEnvHost for TieredHost {
+    fn env_stack_ptr(&self) -> usize {
+        self.inner.env_stack_ptr
+    }
+    fn set_env_stack_ptr(&mut self, ptr: usize) {
+        self.inner.env_stack_ptr = ptr;
+    }
+    fn value_to_wasm(&mut self, value: crate::value::Value) -> (i64, i64) {
+        self.inner.value_to_wasm(value)
+    }
+}
+
 impl WasmTier {
     /// Create a new WasmTier with engine and linker.
     pub fn new() -> Result<Self, String> {
@@ -345,7 +357,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 // The current function is at table index 0.
                 if bytecode_ptr == current_ptr {
                     let env_base = caller.data().inner.env_stack_ptr;
-                    super::store::prepare_wasm_env_tiered(&mut caller, closure, &args, env_base);
+                    super::store::prepare_wasm_env(&mut caller, closure, &args, env_base);
 
                     let table = caller
                         .get_export("__elle_table")

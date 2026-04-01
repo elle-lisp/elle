@@ -102,8 +102,11 @@ pub fn create_store(
 /// Layout: `[captures...][params...][local_slots...]`, each slot 16 bytes.
 /// Handles varargs, LBox wrapping, and memory growth.
 /// Updates `env_stack_ptr` to point past the new env region.
-pub(super) fn prepare_wasm_env(
-    caller: &mut Caller<'_, ElleHost>,
+///
+/// Generic over host type: works with both `ElleHost` (full-module) and
+/// `TieredHost` (per-closure) via the `WasmEnvHost` trait.
+pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
+    caller: &mut Caller<'_, T>,
     closure: &std::rc::Rc<crate::value::closure::Closure>,
     args: &[Value],
     env_base: usize,
@@ -147,14 +150,15 @@ pub(super) fn prepare_wasm_env(
 
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
-    caller.data_mut().env_stack_ptr = env_base + total_slots * 16;
+    caller
+        .data_mut()
+        .set_env_stack_ptr(env_base + total_slots * 16);
 
     let memory = caller
         .get_export("__elle_memory")
         .and_then(|e| e.into_memory())
         .expect("prepare_wasm_env: no memory");
 
-    // Grow memory if needed
     let needed_bytes = env_base + total_slots * 16;
     let current_bytes = memory.data_size(&*caller);
     if needed_bytes > current_bytes {
@@ -164,7 +168,6 @@ pub(super) fn prepare_wasm_env(
             .expect("prepare_wasm_env: failed to grow memory");
     }
 
-    // Write captures from closure.env
     for (i, val) in closure.env.iter().enumerate() {
         let (tag, payload) = caller.data_mut().value_to_wasm(*val);
         let offset = env_base + i * 16;
@@ -173,7 +176,6 @@ pub(super) fn prepare_wasm_env(
         data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
     }
 
-    // Write params with optional LBox wrapping
     for (i, arg) in args.iter().enumerate().take(num_params) {
         let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
             Value::local_lbox(*arg)
@@ -187,7 +189,6 @@ pub(super) fn prepare_wasm_env(
         data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
     }
 
-    // Write nil for remaining params
     for i in args.len()..num_params {
         let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
             Value::local_lbox(Value::NIL)
@@ -201,7 +202,6 @@ pub(super) fn prepare_wasm_env(
         data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
     }
 
-    // Write nil/LBox(nil) for extra local slots
     for i in 0..extra_locals {
         let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
             Value::local_lbox(Value::NIL)
@@ -209,116 +209,6 @@ pub(super) fn prepare_wasm_env(
             Value::NIL
         };
         let (tag, payload) = caller.data_mut().value_to_wasm(val);
-        let offset = env_base + (num_captures + num_params + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
-    }
-}
-
-/// Prepare WASM env for a closure call in tiered mode.
-///
-/// Same logic as `prepare_wasm_env` but works with `TieredHost`.
-pub fn prepare_wasm_env_tiered(
-    caller: &mut Caller<'_, super::lazy::TieredHost>,
-    closure: &std::rc::Rc<crate::value::closure::Closure>,
-    args: &[Value],
-    env_base: usize,
-) {
-    let template = &closure.template;
-    let num_captures = template.num_captures;
-    let num_params = template.num_params;
-    let num_locals = template.num_locals;
-    let lbox_params_mask = template.lbox_params_mask;
-    let lbox_locals_mask = template.lbox_locals_mask;
-
-    let effective_args;
-    let args = match template.arity {
-        crate::value::types::Arity::AtLeast(required) => {
-            let mut collected = Vec::with_capacity(num_params);
-            for arg in args.iter().take(required) {
-                collected.push(*arg);
-            }
-            let rest: Vec<Value> = args[required..].to_vec();
-            let vararg_val = match template.vararg_kind {
-                crate::hir::VarargKind::List => {
-                    let mut list = Value::EMPTY_LIST;
-                    for v in rest.iter().rev() {
-                        list = Value::cons(*v, list);
-                    }
-                    list
-                }
-                _ => Value::array_mut(rest),
-            };
-            collected.push(vararg_val);
-            while collected.len() < num_params {
-                collected.push(Value::NIL);
-            }
-            effective_args = collected;
-            effective_args.as_slice()
-        }
-        _ => args,
-    };
-
-    let extra_locals = num_locals.saturating_sub(num_params);
-    let total_slots = num_captures + num_params + extra_locals;
-    caller.data_mut().inner.env_stack_ptr = env_base + total_slots * 16;
-
-    let memory = caller
-        .get_export("__elle_memory")
-        .and_then(|e| e.into_memory())
-        .expect("prepare_wasm_env_tiered: no memory");
-
-    let needed_bytes = env_base + total_slots * 16;
-    let current_bytes = memory.data_size(&*caller);
-    if needed_bytes > current_bytes {
-        let pages_needed = (needed_bytes - current_bytes).div_ceil(65536) as u64;
-        memory
-            .grow(&mut *caller, pages_needed)
-            .expect("prepare_wasm_env_tiered: grow failed");
-    }
-
-    for (i, val) in closure.env.iter().enumerate() {
-        let (tag, payload) = caller.data_mut().inner.value_to_wasm(*val);
-        let offset = env_base + i * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
-    }
-
-    for (i, arg) in args.iter().enumerate().take(num_params) {
-        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
-            Value::local_lbox(*arg)
-        } else {
-            *arg
-        };
-        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-        let offset = env_base + (num_captures + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
-    }
-
-    for i in args.len()..num_params {
-        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
-            Value::local_lbox(Value::NIL)
-        } else {
-            Value::NIL
-        };
-        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-        let offset = env_base + (num_captures + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
-    }
-
-    for i in 0..extra_locals {
-        let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
-            Value::local_lbox(Value::NIL)
-        } else {
-            Value::NIL
-        };
-        let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
         let offset = env_base + (num_captures + num_params + i) * 16;
         let data = memory.data_mut(&mut *caller);
         data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
@@ -598,16 +488,12 @@ pub fn run_module(
 
     // The entry function may suspend when ev/run's scheduler does I/O
     // (SIG_IO propagates through yield-through-call to the top level).
-    // Drive it to completion by processing I/O inline and re-invoking
-    // the entry function with the resume state from the suspension frame.
-    // The entry function may suspend when ev/run's scheduler does I/O
-    // (SIG_IO propagates through yield-through-call to the top level).
     // Drive it to completion by executing I/O inline and re-calling the
-    // entry function with the resume state.
+    // entry function with the resume state from its outermost frame.
     while status > 0 {
         let value = store.data().wasm_to_value(tag, payload);
 
-        // Execute I/O if the suspension was caused by SIG_IO
+        // Execute I/O if the innermost frame has SIG_IO
         let resume_val = if let Some(frame) = store.data().first_suspension_frame() {
             if frame.signal_bits & SIG_IO.0 != 0 {
                 if let Some(request) = value.as_external::<IoRequest>() {
@@ -623,16 +509,16 @@ pub fn run_module(
             break;
         };
 
-        // Pop all suspension frames (the resume chain will be replayed
-        // by the entry function's CPS from its resume point)
-        let frame = store.data_mut().pop_suspension_frame().unwrap();
-        let resume_state = frame.resume_state as i32;
-        // Drain remaining frames from this yield-through-call chain
+        // Drain all suspension frames. The outermost (last) frame has the
+        // entry function's resume_state; inner frames are discarded because
+        // the entry function's CPS will re-create them on re-entry.
+        let mut resume_state = 0i32;
         while store.data().has_suspension_frames() {
-            store.data_mut().pop_suspension_frame();
+            if let Some(frame) = store.data_mut().pop_suspension_frame() {
+                resume_state = frame.resume_state as i32;
+            }
         }
 
-        // Set resume value and re-call entry with the resume state
         let (resume_tag, resume_pay) = store.data_mut().value_to_wasm(resume_val);
         store.data_mut().resume_value = Some((resume_tag, resume_pay));
 
