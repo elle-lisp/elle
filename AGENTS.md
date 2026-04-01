@@ -156,7 +156,8 @@ The 4 most critical (agents get these wrong):
   causes infinite recursion.**
 - **`#` is comment, `;` is splice.** Not the other way around.
 - **`assign` not `set` for mutation.** `(set x val)` creates a set.
-- **`squelch` takes exactly 2 arguments.** `(squelch closure :keyword)`.
+- **`squelch` takes exactly 2 arguments.** `(squelch closure :keyword)` or
+  `(squelch closure |:kw1 :kw2|)` with a set.
 
 Full list: [`docs/warts.md`](docs/warts.md).
 

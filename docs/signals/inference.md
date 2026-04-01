@@ -61,8 +61,10 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 
 - Takes a closure as the first argument and a signal keyword as the second
 - Returns a **new** closure that, when called, intercepts signals matching the keyword and converts them to `:error` with kind `"signal-violation"`
-- The returned closure shares the same bytecode and environment (Rc clones — cheap)
-- Composable: `(squelch (squelch f :yield) :io)` squelches both `:yield` and `:io`
+- The returned closure shares the same bytecode and environment (Rc clones)
+  — near-zero cost, just swaps the closure header
+- Accepts a keyword or a set: `(squelch f |:yield :io|)`
+- Composable: layering squelch calls ORs the masks together
 - The returned closure's `effective_signal()` reflects the squelch mask (squelched bits are cleared, `SIG_ERROR` is added only if the original closure could emit those bits)
 
 **Contrast with `silence`:**
@@ -75,11 +77,11 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 ```lisp
 (defn f [] (yield 42))
 
-# Basic squelch: forbid yielding in a callback
+# Squelch a single signal
 (def safe-f (squelch f :yield))
 
-# Composable: squelch on top of squelch
-(def f2 (squelch (squelch f :yield) :io))
+# Squelch multiple signals with a set
+(def f2 (squelch f |:yield :io|))
 ```
 
 **Error cases:**
@@ -202,13 +204,14 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 (def squelched (squelch (fn [] (yield 1)) :yield))
 (try (squelched) (catch e (get e :error)))  # => :signal-violation
 
-# Non-squelched signals pass through
-(def sq2 (squelch (fn [] (error "oops")) :yield))
-(try (sq2) (catch e e))  # => "oops" (error passes through)
+# Squelch multiple signals with a set
+(def sq2 (squelch (fn [] (yield 1)) |:yield :io|))
+(try (sq2) (catch e (get e :error)))  # => :signal-violation
 
-# Composable: squelch multiple signals
-(def sq3 (squelch (squelch (fn [] (yield 1)) :yield) :io))
-(try (sq3) (catch e (get e :error)))  # => :signal-violation
+# Composable: layer restrictions from different sources
+(defn make-safe [f]
+  (squelch f :yield))
+(def extra-safe (squelch (make-safe (fn [] (yield 1))) :io))
 ```
 
 

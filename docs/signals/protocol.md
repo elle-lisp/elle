@@ -230,11 +230,11 @@ These are compile-time contracts. The system enforces them statically and at run
 ```lisp
 (defn f [] (yield 42))
 
-# squelch as a primitive function (not a preamble declaration)
+# squelch a single signal
 (def safe-f (squelch f :yield))
 
-# Composable: squelch on top of squelch
-(def f2 (squelch (squelch f :yield) :io))
+# squelch multiple signals with a set
+(def f2 (squelch f |:yield :io|))
 ```
 
 When a squelched closure is called, if it emits a squelched signal, a `signal-violation` error is raised instead. Non-squelched signals pass through normally. Errors are never affected by squelch (they pass through unchanged).

@@ -410,16 +410,16 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 **Location:** `src/primitives/meta.rs`
 
-**Signature:** `(squelch closure :keyword)`
+**Signature:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
 
 **Purpose:** Transform a closure by applying a runtime signal squelch mask.
-Returns a new closure that, when called, intercepts the named signal and
-converts it to `:error` with kind `"signal-violation"`.
+Returns a new closure that, when called, intercepts the named signal(s) and
+converts them to `:error` with kind `"signal-violation"`.
 
 **Behavior:**
-- Takes a closure and a single signal keyword
+- Takes a closure and a signal keyword or set of keywords
 - Returns a **new** closure (same template and environment, new squelch mask)
-- Composable: `(squelch (squelch f :yield) :io)` squelches both
+- `(squelch f |:yield :io|)` squelches both yield and io
 
 **Signal:** `Signal::errors()`
 
