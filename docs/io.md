@@ -73,6 +73,10 @@ All output functions are async — they yield to the scheduler.
 
 ## Subprocesses
 
+### Run to completion
+
+`subprocess/system` runs a command and captures its output:
+
 ```lisp
 # Run to completion — returns {:exit :stdout :stderr}
 (subprocess/system "echo" ["hello"])
@@ -82,6 +86,59 @@ All output functions are async — they yield to the scheduler.
 (subprocess/system "ls" ["-la"] {:cwd "/tmp"})
 (subprocess/system "env" [] {:env {:FOO "bar"}})
 ```
+
+### Long-running subprocesses
+
+`subprocess/exec` spawns a subprocess and returns a handle with stdio
+ports. Use `subprocess/wait` to block until exit, `subprocess/kill` to
+send signals.
+
+```lisp
+# Spawn and interact
+(def proc (subprocess/exec "cat" []))
+(port/write (get proc :stdin) "hello")
+(port/close (get proc :stdin))
+(string (port/read-all (get proc :stdout)))  # => "hello"
+(subprocess/wait proc)                       # => 0
+
+# Spawn, kill, reap
+(def proc (subprocess/exec "sleep" ["60"]))
+(subprocess/kill proc :sigterm)
+(subprocess/wait proc)                       # => non-zero
+```
+
+### Subprocess options
+
+```lisp
+# (subprocess/exec program args)           — default: pipes for all stdio
+# (subprocess/exec program args opts)      — with options struct
+#
+# Options:
+#   :env    — struct of env vars (merged with inherited)
+#   :cwd    — working directory string
+#   :stdin  — :pipe (default) | :null | :inherit
+#   :stdout — :pipe (default) | :null | :inherit
+#   :stderr — :pipe (default) | :null | :inherit
+```
+
+### Supervised subprocesses
+
+For long-running daemons, use `lib/process` to supervise OS subprocesses.
+The supervisor automatically restarts them on crash:
+
+```lisp
+(def process ((import "lib/process")))
+
+(process:start (fn []
+  (process:supervisor-start-link
+    [(process:make-subprocess-child :worker "/usr/bin/worker" []
+       :opts {:env {:PORT "8080"}})
+     (process:make-subprocess-child :monitor "/usr/bin/monitor" [])]
+    :name :daemon-sup
+    :max-restarts 5)))
+```
+
+See [processes.md](processes.md) for the full supervisor API.
 
 ## System args and environment
 
@@ -98,6 +155,7 @@ All output functions are async — they yield to the scheduler.
 
 ## See also
 
+- [processes.md](processes.md) — supervised subprocesses, GenServer, actors
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O
 - [fibers](signals/fibers.md) — fiber-based async model
 - [strings.md](strings.md) — string operations

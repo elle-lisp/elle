@@ -55,3 +55,4 @@ Signals subprocess completion. Used by the async scheduler when a
 - [signals](signals/index.md) — signal system design
 - [fibers](signals/fibers.md) — fiber architecture
 - [scheduler.md](scheduler.md) — async event loop
+- [processes.md](processes.md) — fuel-based preemptive scheduling of Erlang-style processes

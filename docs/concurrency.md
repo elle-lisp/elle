@@ -114,43 +114,79 @@ scheduler — waiting fibers yield rather than blocking the thread.
 
 ## Processes (lib/process)
 
-`lib/process` provides an Erlang-inspired process model: lightweight
-processes with mailboxes, links, monitors, and named registration. Processes
-are fibers driven by a cooperative scheduler with fuel-based preemption.
+`lib/process` provides an Erlang/OTP-inspired process model: lightweight
+processes with mailboxes, links, monitors, named registration, and
+fuel-based preemption. Built entirely on fibers and signals.
 
-```lisp
+On top of the core process API, the module provides:
+
+- **GenServer** — callback-based servers with call/cast/info dispatch
+- **Actor** — simple state wrapper over GenServer
+- **Supervisor** — automatic child restart with strategies and intensity limits
+- **Task** — one-shot async work as a monitored process
+- **EventManager** — pub/sub event dispatching
+
+```elle
 (def process ((import "lib/process")))
 
 (process:start (fn []
-  (let [[pid (process:self)]]
-    (process:send pid :hello)
-    (println "received:" (process:recv)))))
+  # Ping-pong between two processes
+  (let* ([me (process:self)]
+         [peer (process:spawn (fn []
+                 (match (process:recv)
+                   ([from :ping] (process:send from :pong))
+                   (_ nil))))])
+    (process:send peer [me :ping])
+    (assert (= (process:recv) :pong) "pong received"))))
 ```
 
-| Function | Description |
-|----------|-------------|
-| `send pid msg` | Send a message to a process mailbox |
-| `recv` | Block until a message arrives |
-| `recv-match pred` | Block until a message matching `pred` arrives |
-| `recv-timeout ticks` | Receive with timeout |
-| `self` | Current process PID |
-| `spawn fn` | Start a new process |
-| `spawn-link fn` | Start linked (crash propagation) |
-| `spawn-monitor fn` | Start monitored (death notification) |
-| `link pid` / `unlink pid` | Manage crash links |
-| `monitor pid` / `demonitor ref` | Manage monitors |
-| `register name` | Register current process by name |
-| `whereis name` | Look up PID by name |
-| `send-named name msg` | Send to a named process |
-| `exit pid reason` | Terminate a process |
-| `trap-exit flag` | Catch linked exits as messages |
+### GenServer example
 
+```elle
+(def process ((import "lib/process")))
+
+(process:start (fn []
+  (process:gen-server-start-link
+    {:init        (fn [_] 0)
+     :handle-call (fn [req _from state]
+       (case req
+         :inc [:reply (+ state 1) (+ state 1)]
+         :get [:reply state state]))}
+    nil :name :counter)
+  (process:gen-server-call :counter :inc)
+  (process:gen-server-call :counter :inc)
+  (assert (= 2 (process:gen-server-call :counter :get)) "counter is 2")))
+```
+
+### Supervisor example
+
+```elle
+(def process ((import "lib/process")))
+
+(process:start (fn []
+  (let ([me (process:self)])
+    (process:supervisor-start-link
+      [{:id :worker :restart :permanent
+        :start (fn []
+          (process:send me [:started (process:self)])
+          (forever (process:recv)))}]
+      :name :sup
+      :max-restarts 3)
+    (match (process:recv)
+      ([:started pid] (assert (integer? pid) "worker started"))
+      (_ nil)))))
+```
+
+See [processes.md](processes.md) for the complete API reference,
+including supervised subprocesses, deferred replies, restart strategies,
+logging, and structured concurrency inside processes.
 
 ---
 
 ## See also
 
+- [processes.md](processes.md) — full process API, GenServer, supervisors
 - [fibers](signals/fibers.md) — fiber architecture
-- [io.md](io.md) — port I/O
+- [io.md](io.md) — port I/O, subprocesses
 - [threads.md](threads.md) — OS threads for CPU parallelism
 - [signals](signals/index.md) — signal system

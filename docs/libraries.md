@@ -20,7 +20,7 @@ pattern and are imported via `(import "lib/<name>")`.
 | Module | Import | Description |
 |--------|--------|-------------|
 | sync | `(import "lib/sync")` | Locks, semaphores, condvars, rwlocks, barriers, latches, queues |
-| process | `(import "lib/process")` | Erlang-style processes: mailboxes, links, monitors, named registration |
+| process | `(import "lib/process")` | Erlang-style processes: GenServer, Supervisor, Actor, Task, EventManager. See [processes.md](processes.md) |
 
 ## Analysis
 

@@ -50,7 +50,7 @@ make smoke                 # run all tests (~30s)
 | [errors](docs/errors.md) | error, try/catch, protect, defer, with |
 | [signals](docs/signals/) | Signal system, silence, squelch |
 | [fibers](docs/signals/fibers.md) | Fiber basics, signal masks, status |
-| [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope |
+| [concurrency](docs/concurrency.md) | ev/spawn, ev/join, ev/race, ev/scope, processes |
 | [threads](docs/threads.md) | OS threads, channels |
 | [coroutines](docs/coroutines.md) | coro/new, coro/resume, generators |
 | [parameters](docs/parameters.md) | Dynamic parameters, parameterize |
@@ -70,7 +70,7 @@ make smoke                 # run all tests (~30s)
 | [runtime](docs/runtime.md) | Runtime signals, fuel budgets |
 | [scheduler](docs/scheduler.md) | Async scheduler, io_uring |
 | [memory](docs/memory.md) | Arenas, scope allocation |
-| [processes](docs/processes.md) | Erlang-style processes |
+| [processes](docs/processes.md) | Erlang-style processes, GenServer, supervisors |
 
 ## Implementation
 
