@@ -94,6 +94,9 @@ pub struct ElleHost {
     pub closure_bytecodes: Vec<ClosureBytecode>,
     /// Debug logging enabled (set once from ELLE_WASM_DEBUG at construction).
     pub debug: bool,
+    /// Lazily-initialized I/O backend for inline I/O execution.
+    /// Created on first use, reused for subsequent I/O operations.
+    io_backend: Option<AnyBackend>,
 }
 
 impl ElleHost {
@@ -111,6 +114,7 @@ impl ElleHost {
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
             debug: std::env::var_os("ELLE_WASM_DEBUG").is_some(),
+            io_backend: None,
         }
     }
 }
@@ -227,7 +231,7 @@ impl ElleHost {
     /// When inside a fiber (fiber_id_stack is non-empty), propagate
     /// SIG_IO so the scheduler can drive I/O through the event loop.
     /// Otherwise, execute I/O inline via the bound backend or SyncBackend.
-    pub fn maybe_execute_io(&self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
+    pub fn maybe_execute_io(&mut self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
         if bits.raw() & SIG_IO.raw() == 0 {
             return (bits, value);
         }
@@ -257,21 +261,34 @@ impl ElleHost {
                 }
             }
         }
-        // Fallback: create a temporary backend for inline I/O
-        if let Ok(be) = crate::io::aio::AsyncBackend::new() {
-            let any = AnyBackend(Box::new(be));
-            if let Ok(_id) = any.0.submit(request) {
-                if let Ok(completions) = any.0.wait(-1) {
-                    if let Some(c) = completions.into_iter().next() {
-                        return match c.result {
-                            Ok(v) => (crate::value::fiber::SIG_OK, v),
-                            Err(e) => (crate::value::fiber::SIG_ERROR, e),
-                        };
-                    }
+        // Fallback: use the lazily-initialized backend
+        self.execute_io_inline(request)
+    }
+
+    /// Execute an I/O request using the lazily-initialized backend.
+    pub(crate) fn execute_io_inline(
+        &mut self,
+        request: &IoRequest,
+    ) -> (crate::value::fiber::SignalBits, Value) {
+        let backend = self.io_backend.get_or_insert_with(|| {
+            AnyBackend(Box::new(
+                crate::io::aio::AsyncBackend::new().expect("failed to create I/O backend"),
+            ))
+        });
+        if let Ok(_id) = backend.0.submit(request) {
+            if let Ok(completions) = backend.0.wait(-1) {
+                if let Some(c) = completions.into_iter().next() {
+                    return match c.result {
+                        Ok(v) => (crate::value::fiber::SIG_OK, v),
+                        Err(e) => (crate::value::fiber::SIG_ERROR, e),
+                    };
                 }
             }
         }
-        (bits, value)
+        (
+            crate::value::fiber::SIG_ERROR,
+            crate::value::error_val("io-error", "I/O submission failed"),
+        )
     }
 
     /// Search param_frames for a value that is an I/O backend.

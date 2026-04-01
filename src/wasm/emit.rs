@@ -80,28 +80,56 @@ pub(super) const FN_ENTRY: u32 = 11;
 // Linear memory layout
 pub(super) const ARGS_BASE: i32 = 256;
 
-// Data operation codes for rt_data_op
-pub(super) const OP_CONS: i32 = 0;
-pub(super) const OP_CAR: i32 = 1;
-pub(super) const OP_CDR: i32 = 2;
-pub(super) const OP_CAR_DESTRUCTURE: i32 = 3;
-pub(super) const OP_CDR_DESTRUCTURE: i32 = 4;
-pub(super) const OP_CAR_OR_NIL: i32 = 5;
-pub(super) const OP_CDR_OR_NIL: i32 = 6;
-pub(super) const OP_MAKE_ARRAY: i32 = 7;
-pub(super) const OP_MAKE_LBOX: i32 = 8;
-pub(super) const OP_LOAD_LBOX: i32 = 9;
-pub(super) const OP_STORE_LBOX: i32 = 10;
-pub(super) const _OP_MAKE_STRING: i32 = 11;
-pub(super) const OP_ARRAY_REF_DESTRUCTURE: i32 = 12;
-pub(super) const OP_ARRAY_SLICE_FROM: i32 = 13;
-pub(super) const OP_STRUCT_GET_OR_NIL: i32 = 14;
-pub(super) const OP_STRUCT_GET_DESTRUCTURE: i32 = 15;
-pub(super) const OP_ARRAY_EXTEND: i32 = 16;
-pub(super) const OP_ARRAY_PUSH: i32 = 17;
-pub(super) const OP_ARRAY_LEN: i32 = 18;
-pub(super) const OP_ARRAY_REF_OR_NIL: i32 = 19;
-pub(super) const OP_STRUCT_REST: i32 = 20;
+/// Data operation codes for rt_data_op.
+///
+/// These must stay in sync with `dispatch_data_op` in linker.rs.
+#[repr(i32)]
+#[derive(Clone, Copy)]
+pub(super) enum DataOp {
+    Cons = 0,
+    Car = 1,
+    Cdr = 2,
+    CarDestructure = 3,
+    CdrDestructure = 4,
+    CarOrNil = 5,
+    CdrOrNil = 6,
+    MakeArray = 7,
+    MakeLBox = 8,
+    LoadLBox = 9,
+    StoreLBox = 10,
+    // 11 = MakeString (unused)
+    ArrayRefDestructure = 12,
+    ArraySliceFrom = 13,
+    StructGetOrNil = 14,
+    StructGetDestructure = 15,
+    ArrayExtend = 16,
+    ArrayPush = 17,
+    ArrayLen = 18,
+    ArrayRefOrNil = 19,
+    StructRest = 20,
+}
+
+// Re-export as i32 constants for backward compat in instruction.rs
+pub(super) const OP_CONS: i32 = DataOp::Cons as i32;
+pub(super) const OP_CAR: i32 = DataOp::Car as i32;
+pub(super) const OP_CDR: i32 = DataOp::Cdr as i32;
+pub(super) const OP_CAR_DESTRUCTURE: i32 = DataOp::CarDestructure as i32;
+pub(super) const OP_CDR_DESTRUCTURE: i32 = DataOp::CdrDestructure as i32;
+pub(super) const OP_CAR_OR_NIL: i32 = DataOp::CarOrNil as i32;
+pub(super) const OP_CDR_OR_NIL: i32 = DataOp::CdrOrNil as i32;
+pub(super) const OP_MAKE_ARRAY: i32 = DataOp::MakeArray as i32;
+pub(super) const OP_MAKE_LBOX: i32 = DataOp::MakeLBox as i32;
+pub(super) const OP_LOAD_LBOX: i32 = DataOp::LoadLBox as i32;
+pub(super) const OP_STORE_LBOX: i32 = DataOp::StoreLBox as i32;
+pub(super) const OP_ARRAY_REF_DESTRUCTURE: i32 = DataOp::ArrayRefDestructure as i32;
+pub(super) const OP_ARRAY_SLICE_FROM: i32 = DataOp::ArraySliceFrom as i32;
+pub(super) const OP_STRUCT_GET_OR_NIL: i32 = DataOp::StructGetOrNil as i32;
+pub(super) const OP_STRUCT_GET_DESTRUCTURE: i32 = DataOp::StructGetDestructure as i32;
+pub(super) const OP_ARRAY_EXTEND: i32 = DataOp::ArrayExtend as i32;
+pub(super) const OP_ARRAY_PUSH: i32 = DataOp::ArrayPush as i32;
+pub(super) const OP_ARRAY_LEN: i32 = DataOp::ArrayLen as i32;
+pub(super) const OP_ARRAY_REF_OR_NIL: i32 = DataOp::ArrayRefOrNil as i32;
+pub(super) const OP_STRUCT_REST: i32 = DataOp::StructRest as i32;
 
 /// Info about a resume state, used to generate the resume prologue.
 pub(super) struct ResumeStateInfo {

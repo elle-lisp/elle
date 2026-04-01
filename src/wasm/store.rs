@@ -505,27 +505,8 @@ pub fn run_module(
         let resume_val = if let Some(frame) = store.data().first_suspension_frame() {
             if frame.signal_bits & SIG_IO.raw() != 0 {
                 if let Some(request) = value.as_external::<IoRequest>() {
-                    if let Ok(be) = crate::io::aio::AsyncBackend::new() {
-                        let any = crate::io::AnyBackend(Box::new(be));
-                        if let Ok(_id) = any.0.submit(request) {
-                            if let Ok(completions) = any.0.wait(-1) {
-                                if let Some(c) = completions.into_iter().next() {
-                                    match c.result {
-                                        Ok(v) => v,
-                                        Err(e) => e,
-                                    }
-                                } else {
-                                    value
-                                }
-                            } else {
-                                value
-                            }
-                        } else {
-                            value
-                        }
-                    } else {
-                        value
-                    }
+                    let (_bits, result) = store.data_mut().execute_io_inline(request);
+                    result
                 } else {
                     value
                 }

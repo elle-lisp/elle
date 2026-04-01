@@ -307,7 +307,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 .data_mut()
                 .inner
                 .call_primitive(prim_id as u32, &args);
-            let (bits, result) = caller.data().inner.maybe_execute_io(bits, result);
+            let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
             (tag, payload, bits.raw() as i32)
         },
@@ -330,7 +330,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
             if func_val.is_native_fn() {
                 let native_fn = func_val.as_native_fn().unwrap();
                 let (bits, result) = native_fn(&args);
-                let (bits, result) = caller.data().inner.maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
                 return (tag, payload, bits.raw() as i32);
             }

@@ -22,7 +22,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          -> (i64, i64, i32) {
             let args = read_args_from_memory(&mut caller, args_ptr, nargs);
             let (bits, result) = caller.data_mut().call_primitive(prim_id as u32, &args);
-            let (bits, result) = caller.data().maybe_execute_io(bits, result);
+            let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
             (tag, payload, bits.raw() as i32)
         },
@@ -79,7 +79,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                         result
                     );
                 }
-                let (bits, result) = caller.data().maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
 
                 // Handle SIG_RESUME: fiber/resume returns this signal.
                 // Execute the fiber's WASM closure host-side.
@@ -400,7 +400,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     .as_native_fn()
                     .expect("rt_prepare_tail_call: expected NativeFn");
                 let (bits, result) = native_fn(&args);
-                let (bits, result) = caller.data().maybe_execute_io(bits, result);
+                let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
                 // Write non-zero signal to memory[0..4] so handle_wasm_result
                 // picks it up. The WASM tail call dispatch returns immediately
                 // after this host call (just tag/payload/0), so no WASM code
@@ -563,62 +563,52 @@ fn read_reg_pairs(
 
 /// Dispatch a data operation by opcode.
 pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::SignalBits, Value) {
+    use super::emit::DataOp;
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
     use crate::value::heap::TableKey;
 
     let err = |kind: &str, msg: &str| (SIG_ERROR, crate::value::error_val(kind, msg));
 
     match op {
-        0 => (SIG_OK, Value::cons(args[0], args[1])), // OP_CONS
-        1 => match args[0].as_cons() {
-            // OP_CAR
+        x if x == DataOp::Cons as i32 => (SIG_OK, Value::cons(args[0], args[1])),
+        x if x == DataOp::Car as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.first),
             None => (SIG_OK, Value::NIL),
         },
-        2 => match args[0].as_cons() {
-            // OP_CDR
+        x if x == DataOp::Cdr as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.rest),
             None => (SIG_OK, Value::NIL),
         },
-        3 => match args[0].as_cons() {
-            // OP_CAR_DESTRUCTURE
+        x if x == DataOp::CarDestructure as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.first),
             None => err("type-error", "car: not a pair"),
         },
-        4 => match args[0].as_cons() {
-            // OP_CDR_DESTRUCTURE
+        x if x == DataOp::CdrDestructure as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.rest),
             None => err("type-error", "cdr: not a pair"),
         },
-        5 => match args[0].as_cons() {
-            // OP_CAR_OR_NIL
+        x if x == DataOp::CarOrNil as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.first),
             None => (SIG_OK, Value::NIL),
         },
-        6 => match args[0].as_cons() {
-            // OP_CDR_OR_NIL
+        x if x == DataOp::CdrOrNil as i32 => match args[0].as_cons() {
             Some(c) => (SIG_OK, c.rest),
             None => (SIG_OK, Value::EMPTY_LIST),
         },
-        7 => (SIG_OK, Value::array_mut(args.to_vec())), // OP_MAKE_ARRAY
-        8 => (SIG_OK, Value::local_lbox(args[0])),      // OP_MAKE_LBOX
-        9 => {
-            // OP_LOAD_LBOX
-            match args[0].as_lbox() {
-                Some(cell) => (SIG_OK, *cell.borrow()),
-                None => (SIG_OK, args[0]),
-            }
-        }
-        10 => {
-            // OP_STORE_LBOX
+        x if x == DataOp::MakeArray as i32 => (SIG_OK, Value::array_mut(args.to_vec())),
+        x if x == DataOp::MakeLBox as i32 => (SIG_OK, Value::local_lbox(args[0])),
+        x if x == DataOp::LoadLBox as i32 => match args[0].as_lbox() {
+            Some(cell) => (SIG_OK, *cell.borrow()),
+            None => (SIG_OK, args[0]),
+        },
+        x if x == DataOp::StoreLBox as i32 => {
             if let Some(cell) = args[0].as_lbox() {
                 *cell.borrow_mut() = args[1];
             }
             (SIG_OK, Value::NIL)
         }
-        11 => (SIG_OK, Value::NIL), // OP_MAKE_STRING (stub)
-        12 => {
-            // OP_ARRAY_REF_DESTRUCTURE
+        11 => (SIG_OK, Value::NIL), // MakeString (unused)
+        x if x == DataOp::ArrayRefDestructure as i32 => {
             let index = args[1].payload as usize;
             if let Some(arr) = args[0].as_array_mut() {
                 let b = arr.borrow();
@@ -637,8 +627,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 err("type-error", "array ref: not an array")
             }
         }
-        13 => {
-            // OP_ARRAY_SLICE_FROM
+        x if x == DataOp::ArraySliceFrom as i32 => {
             let index = args[1].payload as usize;
             if let Some(arr) = args[0].as_array_mut() {
                 let b = arr.borrow();
@@ -652,8 +641,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 (SIG_OK, Value::array_mut(vec![]))
             }
         }
-        14 => {
-            // OP_STRUCT_GET_OR_NIL
+        x if x == DataOp::StructGetOrNil as i32 => {
             if let Some(s) = args[0].as_struct() {
                 let key = match TableKey::from_value(&args[1]) {
                     Some(k) => k,
@@ -670,8 +658,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 (SIG_OK, Value::NIL)
             }
         }
-        15 => {
-            // OP_STRUCT_GET_DESTRUCTURE
+        x if x == DataOp::StructGetDestructure as i32 => {
             if let Some(s) = args[0].as_struct() {
                 let key = match TableKey::from_value(&args[1]) {
                     Some(k) => k,
@@ -685,8 +672,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 err("type-error", "struct get: not a struct")
             }
         }
-        16 => {
-            // OP_ARRAY_EXTEND
+        x if x == DataOp::ArrayExtend as i32 => {
             if let Some(arr) = args[0].as_array_mut() {
                 let source_elems: Vec<Value> = if let Some(src) = args[1].as_array_mut() {
                     src.borrow().to_vec()
@@ -715,15 +701,13 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 (SIG_OK, args[0])
             }
         }
-        17 => {
-            // OP_ARRAY_PUSH
+        x if x == DataOp::ArrayPush as i32 => {
             if let Some(arr) = args[0].as_array_mut() {
                 arr.borrow_mut().push(args[1]);
             }
             (SIG_OK, args[0])
         }
-        18 => {
-            // OP_ARRAY_LEN
+        x if x == DataOp::ArrayLen as i32 => {
             let len = if let Some(arr) = args[0].as_array_mut() {
                 arr.borrow().len()
             } else if let Some(arr) = args[0].as_array() {
@@ -733,8 +717,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
             };
             (SIG_OK, Value::int(len as i64))
         }
-        19 => {
-            // OP_ARRAY_REF_OR_NIL
+        x if x == DataOp::ArrayRefOrNil as i32 => {
             let index = args[1].payload as usize;
             if let Some(arr) = args[0].as_array_mut() {
                 let b = arr.borrow();
@@ -745,8 +728,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 (SIG_OK, Value::NIL)
             }
         }
-        20 => {
-            // OP_STRUCT_REST: args[0] = struct, args[1..] = exclude keys
+        x if x == DataOp::StructRest as i32 => {
             use std::collections::BTreeMap;
             let exclude_keys: Vec<TableKey> =
                 args[1..].iter().filter_map(TableKey::from_value).collect();
