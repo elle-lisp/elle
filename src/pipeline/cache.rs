@@ -127,6 +127,19 @@ pub fn register_repl_binding(
     });
 }
 
+/// Merge macro definitions into the cached Expander.
+///
+/// Called by the REPL after compiling a form that contains `defmacro`.
+/// The new macros become visible to all subsequent compilations.
+pub fn register_repl_macros(macros: &std::collections::HashMap<String, crate::syntax::MacroDef>) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        if let Some(c) = cache_ref.as_mut() {
+            c.expander.merge_macros(macros);
+        }
+    });
+}
+
 /// Add stdlib exports to the cached PrimitiveMeta.
 ///
 /// Called by `init_stdlib` after compiling and executing stdlib.lisp.

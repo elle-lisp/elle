@@ -153,6 +153,36 @@ fn var_destructure_persists() {
     assert!(out.contains("⟹ 3"), "var destructure sum: {}", out);
 }
 
+// ── Macro persistence ─────────────────────────────────────────────────
+
+#[test]
+fn defmacro_persists() {
+    let (out, _, code) = elle(
+        "(defmacro double (x) (list (quote *) x 2))\n(double 5)\n",
+    );
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 10"), "macro call: {}", out);
+}
+
+#[test]
+fn defmacro_redefinition() {
+    let (out, _, code) = elle(
+        "(defmacro m (x) (list (quote +) x 1))\n(m 10)\n(defmacro m (x) (list (quote +) x 2))\n(m 10)\n",
+    );
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 11"), "first def: {}", out);
+    assert!(out.contains("⟹ 12"), "redefined: {}", out);
+}
+
+#[test]
+fn defmacro_uses_def() {
+    let (out, _, code) = elle(
+        "(def offset 100)\n(defmacro add-offset (x) (list (quote +) x (quote offset)))\n(add-offset 5)\n",
+    );
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 105"), "macro using def: {}", out);
+}
+
 // ── Error handling ───────────────────────────────────────────────────
 
 #[test]

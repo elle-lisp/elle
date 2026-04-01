@@ -76,6 +76,21 @@ impl Expander {
         !self.macros.is_empty()
     }
 
+    /// Return the macro definitions. Used by the REPL to persist
+    /// macros defined during expansion back to the compilation cache.
+    pub fn macros(&self) -> &HashMap<String, MacroDef> {
+        &self.macros
+    }
+
+    /// Merge macro definitions from another Expander. Existing macros
+    /// with the same name are overwritten. Used to persist REPL-defined
+    /// macros back to the compilation cache.
+    pub fn merge_macros(&mut self, other: &HashMap<String, MacroDef>) {
+        for (name, def) in other {
+            self.macros.insert(name.clone(), def.clone());
+        }
+    }
+
     /// Load the standard prelude macros.
     ///
     /// Parses and expands `prelude.lisp`, which registers macro

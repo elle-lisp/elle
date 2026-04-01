@@ -5,7 +5,7 @@
 //! cache (same mechanism as stdlib). Multi-line accumulation detects
 //! incomplete input by checking for "unterminated" reader errors.
 
-use crate::pipeline::{compile_file, register_repl_binding};
+use crate::pipeline::{compile_file_repl, register_repl_binding, register_repl_macros};
 use crate::reader::read_syntax_all;
 use crate::signals::Signal;
 use crate::symbol::SymbolTable;
@@ -315,7 +315,8 @@ fn eval_form(form: &FormInfo, vm: &mut VM, symbols: &mut SymbolTable) -> Result<
         // No bindings or simple def: compile the form as-is.
         // For simple def, the letrec body is the bound name, so the
         // return value IS the bound value.
-        let result = compile_file(&form.source, symbols, "<repl>")?;
+        let (result, expander) = compile_file_repl(&form.source, symbols, "<repl>")?;
+        register_repl_macros(expander.macros());
         let value = vm.execute_scheduled(&result.bytecode, symbols)?;
 
         if let Some(binding) = form.bindings.first() {
@@ -334,7 +335,8 @@ fn eval_form(form: &FormInfo, vm: &mut VM, symbols: &mut SymbolTable) -> Result<
         let trailer = format!("[{}]", names.join(" "));
         let combined = format!("{} {}", form.source, trailer);
 
-        let result = compile_file(&combined, symbols, "<repl>")?;
+        let (result, expander) = compile_file_repl(&combined, symbols, "<repl>")?;
+        register_repl_macros(expander.macros());
         let tuple_val = vm.execute_scheduled(&result.bytecode, symbols)?;
 
         // Register each leaf binding from the tuple.
