@@ -1,12 +1,21 @@
 # Warts
 
-### Cyclic mutable structures crash the process
+### Cyclic mutable structures detected, not crashed
 
-`(def a @[]) (push a a) (println (get a 0))` — Rust stack overflow,
-SIGABRT, process dead. Same for `(= a a)` and `(hash a)`. The Rust
-`Display`, `PartialEq`, and `Hash` impls recurse without cycle
-detection. No `protect`, no `try/catch`, no signal can save you. Fix
-requires a visited-set or thread-local cycle guard in traversal.
+`(def a @[]) (push a a) (println (get a 0))` — prints `@[@[<cycle>]]`
+instead of crashing.  Cycle detection uses:
+
+- **Thread-local visited sets** for mutable containers (`@[]`, `@{}`,
+  `@||`, `LBox`) in `Display`, `Debug`, `Hash`, `PartialEq`, and `Ord`.
+  RAII guards ensure cleanup on all exit paths.
+- **Floyd’s tortoise-and-hare** for cons-cell cdr chains in Display/Debug
+  (belt-and-suspenders; cons cells are immutable so cycles shouldn’t
+  form, but the check is O(1) space and defends against future
+  invariant violations).
+- **Pointer-identity fast path** in `PartialEq` and `Ord` for heap
+  values: same object → equal, before any structural recursion.
+
+See `src/value/cycle.rs`, `src/value/display.rs`, `src/value/repr/traits.rs`.
 
 ### RC without cycle collection
 

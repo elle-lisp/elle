@@ -7,6 +7,7 @@
 use std::hash::{Hash, Hasher};
 
 use super::Value;
+use crate::value::cycle;
 
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
@@ -21,6 +22,11 @@ impl PartialEq for Value {
         // If one is heap and the other isn't, they're not equal.
         if self.is_heap() != other.is_heap() {
             return false;
+        }
+
+        // Pointer-identity fast path: same heap object → equal.
+        if self.payload == other.payload {
+            return true;
         }
 
         // Both are heap values — dereference and compare contents.
@@ -65,7 +71,14 @@ impl PartialEq for Value {
                 (
                     HeapObject::LArrayMut { data: v1, .. },
                     HeapObject::LArrayMut { data: v2, .. },
-                ) => v1.borrow().as_slice() == v2.borrow().as_slice(),
+                ) => {
+                    let _guard =
+                        match cycle::cmp_enter(self.payload as usize, other.payload as usize) {
+                            Some(g) => g,
+                            None => return true, // cycle: assume equal
+                        };
+                    v1.borrow().as_slice() == v2.borrow().as_slice()
+                }
 
                 // Struct: immutable × immutable
                 (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
@@ -80,7 +93,14 @@ impl PartialEq for Value {
                 (
                     HeapObject::LStructMut { data: t1, .. },
                     HeapObject::LStructMut { data: t2, .. },
-                ) => *t1.borrow() == *t2.borrow(),
+                ) => {
+                    let _guard =
+                        match cycle::cmp_enter(self.payload as usize, other.payload as usize) {
+                            Some(g) => g,
+                            None => return true,
+                        };
+                    *t1.borrow() == *t2.borrow()
+                }
 
                 // Bytes: immutable × immutable
                 (HeapObject::LBytes { data: b1, .. }, HeapObject::LBytes { data: b2, .. }) => {
@@ -106,6 +126,11 @@ impl PartialEq for Value {
                 }
                 // @set × @set
                 (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
+                    let _guard =
+                        match cycle::cmp_enter(self.payload as usize, other.payload as usize) {
+                            Some(g) => g,
+                            None => return true,
+                        };
                     *s1.borrow() == *s2.borrow()
                 }
 
@@ -117,6 +142,11 @@ impl PartialEq for Value {
 
                 // Box comparison (compare contents)
                 (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
+                    let _guard =
+                        match cycle::cmp_enter(self.payload as usize, other.payload as usize) {
+                            Some(g) => g,
+                            None => return true,
+                        };
                     *c1.borrow() == *c2.borrow()
                 }
 
@@ -220,24 +250,43 @@ impl Hash for Value {
                 }
 
                 // Structural content types (mutable — hash current contents)
+                // Cycle detection: on re-entry, hash nothing more (the tag
+                // was already hashed above, giving a stable sentinel).
                 HeapObject::LArrayMut { data: rc, .. } => {
-                    let borrowed = rc.borrow();
-                    borrowed.len().hash(state);
-                    for v in borrowed.iter() {
-                        v.hash(state);
+                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
+                        let borrowed = rc.borrow();
+                        borrowed.len().hash(state);
+                        for v in borrowed.iter() {
+                            v.hash(state);
+                        }
                     }
                 }
                 HeapObject::LStructMut { data: rc, .. } => {
-                    let borrowed = rc.borrow();
-                    borrowed.len().hash(state);
-                    for (k, v) in borrowed.iter() {
-                        k.hash(state);
-                        v.hash(state);
+                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
+                        let borrowed = rc.borrow();
+                        borrowed.len().hash(state);
+                        for (k, v) in borrowed.iter() {
+                            k.hash(state);
+                            v.hash(state);
+                        }
                     }
                 }
                 HeapObject::LStringMut { data: rc, .. } => rc.borrow().hash(state),
                 HeapObject::LBytesMut { data: rc, .. } => rc.borrow().hash(state),
-                HeapObject::LBox { cell: rc, .. } => rc.borrow().hash(state),
+                HeapObject::LBox { cell: rc, .. } => {
+                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
+                        rc.borrow().hash(state);
+                    }
+                }
+                HeapObject::LSetMut { data: rc, .. } => {
+                    if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
+                        let borrowed = rc.borrow();
+                        borrowed.len().hash(state);
+                        for v in borrowed.iter() {
+                            v.hash(state);
+                        }
+                    }
+                }
 
                 // Structural-but-special heap types
                 HeapObject::LibHandle(id) => id.hash(state),
@@ -394,6 +443,12 @@ fn cmp_same_rank(a: &Value, b: &Value, rank: u8) -> std::cmp::Ordering {
 /// Both values must be heap pointers (`is_heap()` returns true).
 unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
     use crate::value::heap::{deref, HeapObject};
+    use std::cmp::Ordering;
+
+    // Pointer-identity fast path
+    if a.payload == b.payload {
+        return Ordering::Equal;
+    }
 
     let a_obj = deref(*a);
     let b_obj = deref(*b);
@@ -409,6 +464,10 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
 
         // Array — element-wise lexicographic (borrow)
         (HeapObject::LArrayMut { data: a1, .. }, HeapObject::LArrayMut { data: a2, .. }) => {
+            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
+                Some(g) => g,
+                None => return Ordering::Equal,
+            };
             let b1 = a1.borrow();
             let b2 = a2.borrow();
             b1.as_slice().cmp(b2.as_slice())
@@ -436,8 +495,23 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
             s1.iter().cmp(s2.iter())
         }
 
+        // @struct — entry-wise lexicographic (borrow)
+        (HeapObject::LStructMut { data: t1, .. }, HeapObject::LStructMut { data: t2, .. }) => {
+            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
+                Some(g) => g,
+                None => return Ordering::Equal,
+            };
+            let b1 = t1.borrow();
+            let b2 = t2.borrow();
+            b1.iter().cmp(b2.iter())
+        }
+
         // Box — by contained value (borrow)
         (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
+            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
+                Some(g) => g,
+                None => return Ordering::Equal,
+            };
             let v1 = c1.borrow();
             let v2 = c2.borrow();
             v1.cmp(&*v2)
@@ -453,6 +527,10 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
 
         // LSetMut — element-wise lexicographic (borrow)
         (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
+            let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
+                Some(g) => g,
+                None => return Ordering::Equal,
+            };
             let b1 = s1.borrow();
             let b2 = s2.borrow();
             b1.iter().cmp(b2.iter())
