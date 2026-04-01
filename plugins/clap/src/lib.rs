@@ -1,7 +1,6 @@
 //! Elle clap plugin — CLI argument parsing via the `clap` crate.
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -18,24 +17,7 @@ use std::collections::BTreeMap;
 /// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
 /// `PluginContext` reference. Only safe when called from `load_plugin`.
 #[no_mangle]
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    // Route keyword operations to the host's global name table.
-    // Must be called before any keyword is created or looked up.
-    // We read keyword keys from Elle structs (:name, :args, :action, etc.)
-    // so the host's keyword table must be used.
-    ctx.init_keywords();
-
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short_name = def.name.strip_prefix("clap/").unwrap_or(def.name);
-        fields.insert(
-            TableKey::Keyword(short_name.into()),
-            Value::native_fn(def.func),
-        );
-    }
-    Value::struct_from(fields)
-}
+elle::elle_plugin_init!(PRIMITIVES, "clap/");
 
 // ---------------------------------------------------------------------------
 // Helpers

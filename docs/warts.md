@@ -32,13 +32,6 @@ Process spawning is ~95% duplicated — identical Command::new(), env/cwd
 setup, stdio configuration, pipe conversion. Port buffering logic (~70%
 duplicate). The shared setup code should be factored out.
 
-### Plugin init boilerplate across 30+ plugins
-
-Every plugin crate copy-pastes the same `elle_plugin_init`: create
-BTreeMap, iterate PRIMITIVES, strip prefix, register, build struct. No
-shared macro or `elle::plugin::init!`. ~1,000 lines of duplication
-across the workspace.
-
 ### Thread-local singletons in multiple modules
 
 `context.rs`, `primitives/list/mod.rs`, `primitives/registration.rs`,

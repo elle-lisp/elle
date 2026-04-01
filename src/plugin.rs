@@ -62,6 +62,80 @@ impl PluginContext {
     }
 }
 
+/// Register primitives from a slice and build the module struct.
+///
+/// This is the runtime helper behind `elle_plugin_init!`. Plugins that
+/// need custom init logic before registration can call this directly.
+pub fn register_and_build(
+    ctx: &mut PluginContext,
+    primitives: &'static [PrimitiveDef],
+    prefix: &str,
+) -> Value {
+    use crate::value::types::TableKey;
+    use std::collections::BTreeMap;
+
+    ctx.init_keywords();
+    let mut fields = BTreeMap::new();
+    for def in primitives {
+        ctx.register(def);
+        let short_name = def.name.strip_prefix(prefix).unwrap_or(def.name);
+        fields.insert(
+            TableKey::Keyword(short_name.into()),
+            Value::native_fn(def.func),
+        );
+    }
+    Value::struct_from(fields)
+}
+
+/// Like `register_and_build` but accepts a borrowed slice of references.
+///
+/// Used by plugins that collect primitives from multiple sub-modules
+/// into a `Vec<&'static PrimitiveDef>` at init time.
+pub fn register_and_build_refs(
+    ctx: &mut PluginContext,
+    primitives: &[&'static PrimitiveDef],
+    prefix: &str,
+) -> Value {
+    use crate::value::types::TableKey;
+    use std::collections::BTreeMap;
+
+    ctx.init_keywords();
+    let mut fields = BTreeMap::new();
+    for def in primitives {
+        ctx.register(def);
+        let short_name = def.name.strip_prefix(prefix).unwrap_or(def.name);
+        fields.insert(
+            TableKey::Keyword(short_name.into()),
+            Value::native_fn(def.func),
+        );
+    }
+    Value::struct_from(fields)
+}
+
+/// Generate the boilerplate `elle_plugin_init` entry point.
+///
+/// # Usage
+///
+/// ```ignore
+/// elle::elle_plugin_init!(PRIMITIVES, "mymod/");
+/// ```
+///
+/// Expands to a `#[no_mangle] pub unsafe extern "C" fn elle_plugin_init`
+/// that calls `init_keywords()`, registers every `PrimitiveDef` in the
+/// given static slice, strips the prefix from names to build the module
+/// struct, and returns it.
+#[macro_export]
+macro_rules! elle_plugin_init {
+    ($prims:expr, $prefix:expr) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn elle_plugin_init(
+            ctx: &mut $crate::plugin::PluginContext,
+        ) -> $crate::value::Value {
+            $crate::plugin::register_and_build(ctx, $prims, $prefix)
+        }
+    };
+}
+
 /// The function signature that plugins must export.
 ///
 /// Declared `extern "C"` for symbol visibility (no name mangling), not

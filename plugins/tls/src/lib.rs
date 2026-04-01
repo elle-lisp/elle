@@ -75,14 +75,7 @@ pub struct TlsServerConfig {
 pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
     // Install the ring crypto provider globally. Second call is a no-op (returns Err).
     let _ = rustls::crypto::ring::default_provider().install_default();
-
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short = def.name.strip_prefix("tls/").unwrap_or(def.name);
-        fields.insert(TableKey::Keyword(short.into()), Value::native_fn(def.func));
-    }
-    Value::struct_from(fields)
+    elle::plugin::register_and_build(ctx, PRIMITIVES, "tls/")
 }
 
 // ---------------------------------------------------------------------------
