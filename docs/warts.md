@@ -28,9 +28,9 @@ expansion.
 
 ### SyncBackend + AsyncBackend duplication
 
-Process spawning is ~95% duplicated — identical Command::new(), env/cwd
-setup, stdio configuration, pipe conversion. Port buffering logic (~70%
-duplicate). The shared setup code should be factored out.
+Port buffering logic is ~70% duplicated between the sync and async
+backends. The shared buffering code should be factored out.
+(Process spawning was deduplicated into `SpawnRequest::spawn_to_struct`.)
 
 ### Thread-local singletons in multiple modules
 

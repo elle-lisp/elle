@@ -5,7 +5,7 @@
 //! for execution.
 
 use crate::port::{Direction, Encoding};
-use crate::value::Value;
+use crate::value::{error_val, Value};
 use std::cell::RefCell;
 use std::process::Child;
 use std::time::Duration;
@@ -69,6 +69,82 @@ pub(crate) struct SpawnRequest {
     pub stdin: StdioDisposition,
     pub stdout: StdioDisposition,
     pub stderr: StdioDisposition,
+}
+
+impl StdioDisposition {
+    fn to_std(self) -> std::process::Stdio {
+        match self {
+            StdioDisposition::Pipe => std::process::Stdio::piped(),
+            StdioDisposition::Inherit => std::process::Stdio::inherit(),
+            StdioDisposition::Null => std::process::Stdio::null(),
+        }
+    }
+}
+
+impl SpawnRequest {
+    /// Build a `std::process::Command` from this request.
+    pub(crate) fn build_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new(&self.program);
+        cmd.args(&self.args);
+        if let Some(ref env_pairs) = self.env {
+            cmd.env_clear();
+            for (k, v) in env_pairs {
+                cmd.env(k, v);
+            }
+        }
+        if let Some(ref dir) = self.cwd {
+            cmd.current_dir(dir);
+        }
+        cmd.stdin(self.stdin.to_std());
+        cmd.stdout(self.stdout.to_std());
+        cmd.stderr(self.stderr.to_std());
+        cmd
+    }
+
+    /// Spawn the subprocess and convert it to an Elle struct value.
+    ///
+    /// Returns `Ok(struct)` with `:pid`, `:stdin`, `:stdout`, `:stderr`,
+    /// `:process` fields, or `Err(error_val)` on failure.
+    pub(crate) fn spawn_to_struct(&self) -> Result<Value, Value> {
+        use crate::io::backend::pipe_to_port;
+        use crate::port::{Direction, Encoding};
+        use crate::value::heap::TableKey;
+
+        let mut child = self.build_command().spawn().map_err(|e| {
+            error_val(
+                "exec-error",
+                format!("subprocess/exec: {}: {e}", self.program),
+            )
+        })?;
+
+        let pid = child.id();
+        let stdin_val = child
+            .stdin
+            .take()
+            .map(|s| pipe_to_port(s, Direction::Write, Encoding::Binary, pid, "stdin"))
+            .unwrap_or(Value::NIL);
+        let stdout_val = child
+            .stdout
+            .take()
+            .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stdout"))
+            .unwrap_or(Value::NIL);
+        let stderr_val = child
+            .stderr
+            .take()
+            .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stderr"))
+            .unwrap_or(Value::NIL);
+
+        let handle = ProcessHandle::new(pid, child);
+        let handle_val = Value::external("process", handle);
+
+        let mut fields = std::collections::BTreeMap::new();
+        fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
+        fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
+        fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
+        fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
+        fields.insert(TableKey::Keyword("process".into()), handle_val);
+        Ok(Value::struct_from(fields))
+    }
 }
 
 /// I/O operation descriptor.

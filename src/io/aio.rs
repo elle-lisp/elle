@@ -6,8 +6,7 @@ use crate::io::completion;
 use crate::io::pending::PendingOp;
 use crate::io::pool::BufferPool;
 use crate::io::request::{
-    ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, StdioDisposition,
-    TaskFn,
+    ConnectAddr, IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, TaskFn,
 };
 use crate::io::threadpool::{PoolCompletion, PoolOp, StdinOpKind, StdinThread, ThreadPoolBackend};
 use crate::io::types::{FdState, PortKey};
@@ -835,87 +834,12 @@ impl AsyncBackend {
     }
 
     fn submit_spawn(&self, req: &SpawnRequest) -> Result<u64, String> {
-        use crate::value::heap::TableKey;
-
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
         inner.next_id += 1;
         let buf_handle = inner.buffer_pool.alloc(0);
 
-        let mut cmd = std::process::Command::new(&req.program);
-        cmd.args(&req.args);
-        if let Some(ref env_pairs) = req.env {
-            cmd.env_clear();
-            for (k, v) in env_pairs {
-                cmd.env(k, v);
-            }
-        }
-        if let Some(ref dir) = req.cwd {
-            cmd.current_dir(dir);
-        }
-        cmd.stdin(stdio_to_std(req.stdin));
-        cmd.stdout(stdio_to_std(req.stdout));
-        cmd.stderr(stdio_to_std(req.stderr));
-
-        let result = match cmd.spawn() {
-            Ok(mut child) => {
-                let pid = child.id();
-                let stdin_val = child
-                    .stdin
-                    .take()
-                    .map(|s| {
-                        crate::io::backend::pipe_to_port(
-                            s,
-                            crate::port::Direction::Write,
-                            crate::port::Encoding::Binary,
-                            pid,
-                            "stdin",
-                        )
-                    })
-                    .unwrap_or(Value::NIL);
-                let stdout_val = child
-                    .stdout
-                    .take()
-                    .map(|s| {
-                        crate::io::backend::pipe_to_port(
-                            s,
-                            crate::port::Direction::Read,
-                            crate::port::Encoding::Binary,
-                            pid,
-                            "stdout",
-                        )
-                    })
-                    .unwrap_or(Value::NIL);
-                let stderr_val = child
-                    .stderr
-                    .take()
-                    .map(|s| {
-                        crate::io::backend::pipe_to_port(
-                            s,
-                            crate::port::Direction::Read,
-                            crate::port::Encoding::Binary,
-                            pid,
-                            "stderr",
-                        )
-                    })
-                    .unwrap_or(Value::NIL);
-
-                let handle = ProcessHandle::new(pid, child);
-                let handle_val = Value::external("process", handle);
-
-                let mut fields = std::collections::BTreeMap::new();
-                fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
-                fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
-                fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
-                fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
-                fields.insert(TableKey::Keyword("process".into()), handle_val);
-                Ok(Value::struct_from(fields))
-            }
-            Err(e) => Err(error_val(
-                "exec-error",
-                format!("subprocess/exec: {}: {}", req.program, e),
-            )),
-        };
+        let result = req.spawn_to_struct();
 
         inner.completions.push_back(Completion { id, result });
 
@@ -1578,15 +1502,6 @@ impl AsyncBackendInner {
         for c in completions_to_add {
             self.completions.push_back(c);
         }
-    }
-}
-
-fn stdio_to_std(disp: StdioDisposition) -> std::process::Stdio {
-    use std::process::Stdio;
-    match disp {
-        StdioDisposition::Pipe => Stdio::piped(),
-        StdioDisposition::Inherit => Stdio::inherit(),
-        StdioDisposition::Null => Stdio::null(),
     }
 }
 

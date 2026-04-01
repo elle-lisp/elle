@@ -17,9 +17,7 @@ mod network;
 #[cfg(test)]
 mod tests;
 
-use crate::io::request::{
-    IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest, StdioDisposition,
-};
+use crate::io::request::{IoOp, IoRequest, ProcessHandle, ProcessState, SpawnRequest};
 use crate::io::types::{FdState, FdStatus, PortKey};
 use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -669,73 +667,9 @@ impl SyncBackend {
     }
 
     fn execute_spawn(&self, req: &SpawnRequest) -> (SignalBits, Value) {
-        use crate::value::heap::TableKey;
-        use std::process::{Command, Stdio};
-
-        let mut cmd = Command::new(&req.program);
-        cmd.args(&req.args);
-        if let Some(ref env_pairs) = req.env {
-            cmd.env_clear();
-            for (k, v) in env_pairs {
-                cmd.env(k, v);
-            }
-        }
-        if let Some(ref dir) = req.cwd {
-            cmd.current_dir(dir);
-        }
-        cmd.stdin(match req.stdin {
-            StdioDisposition::Pipe => Stdio::piped(),
-            StdioDisposition::Inherit => Stdio::inherit(),
-            StdioDisposition::Null => Stdio::null(),
-        });
-        cmd.stdout(match req.stdout {
-            StdioDisposition::Pipe => Stdio::piped(),
-            StdioDisposition::Inherit => Stdio::inherit(),
-            StdioDisposition::Null => Stdio::null(),
-        });
-        cmd.stderr(match req.stderr {
-            StdioDisposition::Pipe => Stdio::piped(),
-            StdioDisposition::Inherit => Stdio::inherit(),
-            StdioDisposition::Null => Stdio::null(),
-        });
-
-        match cmd.spawn() {
-            Ok(mut child) => {
-                let pid = child.id();
-                let stdin_val = child
-                    .stdin
-                    .take()
-                    .map(|s| pipe_to_port(s, Direction::Write, Encoding::Binary, pid, "stdin"))
-                    .unwrap_or(Value::NIL);
-                let stdout_val = child
-                    .stdout
-                    .take()
-                    .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stdout"))
-                    .unwrap_or(Value::NIL);
-                let stderr_val = child
-                    .stderr
-                    .take()
-                    .map(|s| pipe_to_port(s, Direction::Read, Encoding::Binary, pid, "stderr"))
-                    .unwrap_or(Value::NIL);
-
-                let handle = ProcessHandle::new(pid, child);
-                let handle_val = Value::external("process", handle);
-
-                let mut fields = std::collections::BTreeMap::new();
-                fields.insert(TableKey::Keyword("pid".into()), Value::int(pid as i64));
-                fields.insert(TableKey::Keyword("stdin".into()), stdin_val);
-                fields.insert(TableKey::Keyword("stdout".into()), stdout_val);
-                fields.insert(TableKey::Keyword("stderr".into()), stderr_val);
-                fields.insert(TableKey::Keyword("process".into()), handle_val);
-                (SIG_OK, Value::struct_from(fields))
-            }
-            Err(e) => (
-                SIG_ERROR,
-                error_val(
-                    "exec-error",
-                    format!("subprocess/exec: {}: {}", req.program, e),
-                ),
-            ),
+        match req.spawn_to_struct() {
+            Ok(val) => (SIG_OK, val),
+            Err(err) => (SIG_ERROR, err),
         }
     }
 
