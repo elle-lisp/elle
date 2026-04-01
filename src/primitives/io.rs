@@ -1,7 +1,6 @@
 //! I/O primitives: type predicates and backend operations.
 
 use crate::io::aio::AsyncBackend;
-use crate::io::backend::SyncBackend;
 use crate::io::mock::MockBackend;
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
@@ -57,10 +56,6 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     match args[0].as_keyword_name().as_deref() {
-        Some("sync") => {
-            let backend = SyncBackend::new();
-            (SIG_OK, Value::external("io-backend", backend))
-        }
         Some("async") => match AsyncBackend::new() {
             Ok(backend) => {
                 let any = AnyBackend(Box::new(backend));
@@ -77,7 +72,7 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
             error_val(
                 "value-error",
                 format!(
-                    "io/backend: unknown kind :{}, expected :sync, :async, or :mock",
+                    "io/backend: unknown kind :{}, expected :async or :mock",
                     other
                 ),
             ),
@@ -90,50 +85,6 @@ fn prim_io_backend(args: &[Value]) -> (SignalBits, Value) {
             ),
         ),
     }
-}
-
-/// (io/execute backend request) → value
-fn prim_io_execute(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "arity-error",
-                format!("io/execute: expected 2 arguments, got {}", args.len()),
-            ),
-        );
-    }
-    let backend = match args[0].as_external::<SyncBackend>() {
-        Some(b) => b,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "io/execute: expected io-backend, got {}",
-                        args[0].type_name()
-                    ),
-                ),
-            )
-        }
-    };
-    let request = match args[1].as_external::<IoRequest>() {
-        Some(r) => r,
-        None => {
-            return (
-                SIG_ERROR,
-                error_val(
-                    "type-error",
-                    format!(
-                        "io/execute: expected io-request, got {}",
-                        args[1].type_name()
-                    ),
-                ),
-            )
-        }
-    };
-    backend.execute(request)
 }
 
 /// (io/submit backend request) → submission-id
@@ -470,21 +421,10 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_io_backend,
         signal: Signal::errors(),
         arity: Arity::Exact(1),
-        doc: "Create an I/O backend. :sync for synchronous, :async for asynchronous.",
+        doc: "Create an I/O backend. :async for asynchronous, :mock for testing.",
         params: &["kind"],
         category: "io",
-        example: "(io/backend :sync) (io/backend :async)",
-        aliases: &[],
-    },
-    PrimitiveDef {
-        name: "io/execute",
-        func: prim_io_execute,
-        signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Execute an I/O request on a backend. Blocking.",
-        params: &["backend", "request"],
-        category: "io",
-        example: "(io/execute backend request)",
+        example: "(io/backend :async)",
         aliases: &[],
     },
     PrimitiveDef {

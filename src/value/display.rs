@@ -4,6 +4,7 @@
 //! for the tagged-union Value type, providing human-readable representations
 //! of values for debugging and user output.
 
+use crate::value::cycle::{fmt_enter, HareState};
 use crate::value::Value;
 use std::fmt;
 
@@ -96,6 +97,10 @@ impl fmt::Display for Value {
 
         // Array
         if let Some(vec_ref) = self.as_array_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@[<cycle>]"),
+            };
             let vec = vec_ref.borrow();
             write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
@@ -109,6 +114,10 @@ impl fmt::Display for Value {
 
         // Table
         if let Some(table_ref) = self.as_struct_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@{{<cycle>}}"),
+            };
             let table = table_ref.borrow();
             write!(f, "@{{")?;
             let mut first = true;
@@ -143,6 +152,10 @@ impl fmt::Display for Value {
 
         // Box
         if let Some(cell_ref) = self.as_lbox() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "<box <cycle>>"),
+            };
             let val = cell_ref.borrow();
             return write!(f, "<box {}>", val);
         }
@@ -243,6 +256,10 @@ impl fmt::Display for Value {
 
         // Set (mutable)
         if let Some(set_ref) = self.as_set_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@|<cycle>|"),
+            };
             let set = set_ref.borrow();
             write!(f, "@|")?;
             for (i, v) in set.iter().enumerate() {
@@ -351,6 +368,10 @@ impl fmt::Debug for Value {
         }
         // Array
         if let Some(vec_ref) = self.as_array_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@[<cycle>]"),
+            };
             let vec = vec_ref.borrow();
             write!(f, "@[")?;
             for (i, v) in vec.iter().enumerate() {
@@ -425,6 +446,10 @@ impl fmt::Debug for Value {
         }
         // Set (mutable)
         if let Some(set_ref) = self.as_set_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@|<cycle>|"),
+            };
             let set = set_ref.borrow();
             write!(f, "@|")?;
             for (i, v) in set.iter().enumerate() {
@@ -450,6 +475,10 @@ impl fmt::Debug for Value {
         }
         // Struct (mutable) — use Debug for keys and values
         if let Some(table_ref) = self.as_struct_mut() {
+            let _guard = match fmt_enter(self.payload as usize) {
+                Some(g) => g,
+                None => return write!(f, "@{{<cycle>}}"),
+            };
             let table = table_ref.borrow();
             write!(f, "@{{")?;
             let mut first = true;
@@ -468,10 +497,12 @@ impl fmt::Debug for Value {
 }
 
 impl Value {
-    /// Format a cons cell (list) with Debug (quoted strings)
+    /// Format a cons cell (list) with Debug (quoted strings).
+    /// Uses Floyd's tortoise-and-hare to detect cycles in the cdr chain.
     fn fmt_cons_debug(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
         let mut current = *self;
+        let mut hare = HareState::new(*self);
         let mut first = true;
         loop {
             if current.is_nil() || current.is_empty_list() {
@@ -484,6 +515,10 @@ impl Value {
             if let Some(c) = current.as_cons() {
                 write!(f, "{:?}", c.first)?;
                 current = c.rest;
+                if current.is_heap() && hare.advance(current) {
+                    write!(f, " . <cycle>")?;
+                    break;
+                }
             } else {
                 write!(f, ". {:?}", current)?;
                 break;
@@ -492,11 +527,13 @@ impl Value {
         write!(f, ")")
     }
 
-    /// Format a cons cell (list) with proper list notation
+    /// Format a cons cell (list) with proper list notation.
+    /// Uses Floyd's tortoise-and-hare to detect cycles in the cdr chain.
     fn fmt_cons(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "(")?;
 
         let mut current = *self;
+        let mut hare = HareState::new(*self);
         let mut first = true;
 
         loop {
@@ -512,6 +549,10 @@ impl Value {
             if let Some(c) = current.as_cons() {
                 write!(f, "{}", c.first)?;
                 current = c.rest;
+                if current.is_heap() && hare.advance(current) {
+                    write!(f, " . <cycle>")?;
+                    break;
+                }
             } else {
                 // Improper list: (a . b)
                 write!(f, ". {}", current)?;

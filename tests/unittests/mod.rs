@@ -23,3 +23,6 @@ mod jit {
 mod table_key {
     include!("table_key.rs");
 }
+mod cycle {
+    include!("cycle.rs");
+}

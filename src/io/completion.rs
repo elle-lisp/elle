@@ -291,7 +291,7 @@ pub(super) fn process_raw_completion(
                 let state = fd_states
                     .entry(port_key.clone())
                     .or_insert_with(FdState::new);
-                state.status = FdStatus::Error(msg.clone());
+                state.status = FdStatus::Error;
                 return Completion {
                     id,
                     result: Err(error_val(error_type, msg)),

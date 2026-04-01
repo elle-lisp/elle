@@ -277,7 +277,7 @@ perform I/O themselves. Instead, they:
 3. Let the scheduler catch the fiber (because `:yield` is in its mask), see
    the `:io` bit, and dispatch the `IoRequest` payload to a backend
 
-The backend (`SyncBackend` in Phase 3) performs the actual I/O and returns
+The backend (`AsyncBackend`) performs the actual I/O and returns
 `(|:ok|, result)` or `(|:error|, error)`. The scheduler resumes the fiber
 with the result.
 

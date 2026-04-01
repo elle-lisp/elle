@@ -90,40 +90,40 @@
 
 (defn rewrite-md-links [html source-dir slug-map]
   "Rewrite .md href links to .html using the slug map."
-  (var result "")
-  (var remaining html)
-  (while (not (= remaining ""))
-    (let [[pos (md:find-closing remaining 0 "href=\"")]]
-      (if (nil? pos)
-        (begin (assign result (append result remaining))
-               (assign remaining ""))
-        (let* [[href-start (+ pos 6)]
-               [href-end (md:find-closing remaining href-start "\"")]]
+  (var result @"")
+  (var pos 0)
+  (var len (length html))
+  (while (< pos len)
+    (let [[found (string/find html "href=\"" pos)]]
+      (if (nil? found)
+        (begin (push result (slice html pos len))
+               (assign pos len))
+        (let* [[href-start (+ found 6)]
+               [href-end (string/find html "\"" href-start)]]
           (if (nil? href-end)
-            (begin (assign result (append result remaining))
-                   (assign remaining ""))
-            (let [[url (slice remaining href-start href-end)]]
+            (begin (push result (slice html pos len))
+                   (assign pos len))
+            (let [[url (slice html href-start href-end)]]
               (if (not (string/ends-with? url ".md"))
                 # Not a .md link: keep as-is
                 (begin
-                  (assign result (append result (slice remaining 0 (+ href-end 1))))
-                  (assign remaining (slice remaining (+ href-end 1) (length remaining))))
+                  (push result (slice html pos (+ href-end 1)))
+                  (assign pos (+ href-end 1)))
                 # Rewrite .md link
                 (let* [[md-path (slice url 0 (- (length url) 3))]
-                       # Resolve relative path from source-dir
                        [resolved (if (= source-dir "")
                                    md-path
-                                   (if (string/starts-with? md-path "../")
-                                     (slice md-path 3 (length md-path))
-                                     (if (string-contains? md-path "/")
-                                       md-path
-                                       (string source-dir "/" md-path))))]
+                                   (cond
+                                     ((string/starts-with? md-path "../")
+                                      (slice md-path 3 (length md-path)))
+                                     ((string-contains? md-path "/") md-path)
+                                     (true (string source-dir "/" md-path))))]
                        [slug (or (get slug-map resolved) resolved)]]
-                  (assign result (string result
-                    (slice remaining 0 href-start)
-                    slug ".html"))
-                  (assign remaining (slice remaining href-end (length remaining)))))))))))
-  result)
+                  (push result (slice html pos href-start))
+                  (push result slug)
+                  (push result ".html")
+                  (assign pos href-end)))))))))
+  (freeze result))
 
 # ── API: Primitives ───────────────────────────────────────────────
 
@@ -520,9 +520,6 @@
          [desc (get page :description)]
          [source-dir (get page :source-dir)]
          [api-name (get page :api)]]
-    (print "Generating: " slug ".html...")
-    (println)
-
     (var body-html
       (if api-name
         # Auto-generated API content
@@ -537,6 +534,8 @@
         (rewrite-md-links (get page :body) source-dir frozen-slug-map)))
 
     (let [[full-html (generate-page site-title title desc slug frozen-nav body-html)]]
-      (spit (path/join output-dir (string slug ".html")) full-html))))
+      (spit (path/join output-dir (string slug ".html")) full-html))
+
+    (println "Generating: " slug ".html...")))
 
 (println "Generated " (string (length all-pages)) " pages in " output-dir "/")

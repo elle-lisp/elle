@@ -922,7 +922,7 @@
 
 (defn port/lines [port]
   "Yields lines from port one at a time. Closes port on exhaustion.
-   Must be called inside a scheduler context (ev/spawn or sync-scheduler)."
+   Must be called inside a scheduler context (ev/spawn)."
   (coro/new (fn []
     (forever
       (let [[line (port/read-line port)]]
@@ -957,22 +957,6 @@
 (def *stderr* (parameter (port/stderr)))
 
 ## ── Scheduler ───────────────────────────────────────────────────────
-
-(defn sync-scheduler [fiber]
-    "Run a fiber to completion, dispatching I/O requests synchronously."
-    (let [[backend (io/backend :sync)]]
-      (fiber/resume fiber)
-      (forever
-       (case (fiber/status fiber)
-         :dead      (break (fiber/value fiber))
-         :error     (fiber/propagate fiber)
-         :paused (cond
-                       ((not (= 0 (bit/and (fiber/bits fiber) 1)))
-                        (fiber/propagate fiber))
-                       ((not (= 0 (bit/and (fiber/bits fiber) 512)))
-                        (fiber/resume fiber (io/execute backend (fiber/value fiber))))
-                       (true
-                        (fiber/resume fiber)))))))
 
 (def *spawn* (make-parameter nil))
 (def *scheduler* (make-parameter nil))
@@ -1658,7 +1642,7 @@
    :fn/cfg-dot fn/cfg-dot :fn/cfg-mermaid fn/cfg-mermaid
    :*stdin* *stdin* :*stdout* *stdout* :*stderr* *stderr*
     :print print :println println :eprint eprint :eprintln eprintln
-    :sync-scheduler sync-scheduler :*spawn* *spawn* :*scheduler* *scheduler* :*io-backend* *io-backend*
+    :*spawn* *spawn* :*scheduler* *scheduler* :*io-backend* *io-backend*
      :ev/spawn ev/spawn :make-async-scheduler make-async-scheduler
      :ev/run ev/run :ev/with-scheduler ev/with-scheduler
      :ev/join ev/join :ev/join-protected ev/join-protected

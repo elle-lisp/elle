@@ -20,13 +20,13 @@ to a backend for execution.
 | `sockaddr.rs` | Sockaddr construction, formatting, parsing — single source of truth |
 | `threadpool.rs` | `ThreadPoolBackend`, `PoolOp`, `PoolCompletion` — typed thread-pool I/O |
 | `uring.rs` | io_uring SQE submission and CQE processing (Linux only) |
-| `backend/` | `SyncBackend` — synchronous I/O execution with per-fd buffering |
+
 
 ## Data Flow
 
 Sync path:
 ```
-Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/execute → SyncBackend → OS
+Stream primitive → (SIG_IO, IoRequest) → Scheduler → io/submit → AsyncBackend → OS
 ```
 
 Async path:
@@ -123,7 +123,7 @@ All formatting uses `std::net::Ipv4Addr`/`Ipv6Addr` for canonical output (proper
 | `io-request?` | silent | Check if value is an I/O request |
 | `io-backend?` | silent | Check if value is an I/O backend |
 | `io/backend` | errors | Create an I/O backend (`:sync` or `:async`) |
-| `io/execute` | errors | Execute an I/O request on a backend (blocking) |
+
 | `io/submit` | errors | Submit async I/O request, return submission ID |
 | `io/reap` | errors | Non-blocking poll for completions (returns array) |
 | `io/wait` | errors | Blocking wait for completions with timeout (returns array) |
@@ -152,26 +152,18 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 
 ### Subprocess Operations
 
-Both `SyncBackend` and `AsyncBackend` implement subprocess spawn and wait:
-
-**`SyncBackend::execute_spawn()`** — Spawns a subprocess synchronously using `std::process::Command`. Returns a struct with fields:
+**`SpawnRequest::spawn_to_struct()`** (in `request.rs`) — Spawns a subprocess using `std::process::Command`. Returns a struct with fields:
 - `:pid` (int) — process ID
 - `:stdin`, `:stdout`, `:stderr` (port or nil) — pipes created per `StdioDisposition`
 - `:process` (external) — `ProcessHandle` for later wait operations
 
-**`SyncBackend::execute_process_wait()`** — Waits for subprocess exit using `child.wait()`. Returns exit code (int). Caches the exit code in `ProcessHandle` for idempotent re-waits.
+**`pipe_to_port()`** (in `request.rs`) — Converts a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value.
 
-**`AsyncBackend::submit_spawn()`** — Spawns a subprocess asynchronously. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
+**`AsyncBackend::submit_spawn()`** — Calls `spawn_to_struct()`. Spawn is an immediate completion (no CQE arrives); the result is pushed directly to the completions queue.
 
 **`AsyncBackend::submit_process_wait()`** — Submits subprocess wait via `IORING_OP_WAITID` (Linux 6.7+). Fast path: if the process has already exited (cached in `ProcessHandle`), returns immediate completion. Otherwise, allocates a `siginfo_t` buffer, submits the SQE, and stores the pending operation.
 
 **`submit_uring_process_wait()`** (in `src/io/uring.rs`) — Low-level io_uring submission for `IORING_OP_WAITID`. Requires Linux 6.7+; older kernels return `-EINVAL` (errno 22) in the CQE. The kernel fills the `siginfo_t` buffer on child exit; completion processing extracts the exit code from `si_code` and `si_status`.
-
-**`pipe_to_port()`** (in `src/io/backend/mod.rs`) — Free function converting a subprocess pipe (ChildStdin, ChildStdout, ChildStderr) to a Port Value. Used by both sync and async backends.
-
-### Encoding Error Handling
-
-`SyncBackend::bytes_to_value()` now returns `SIG_ERROR` with kind `"encoding-error"` when `Encoding::Text` encounters invalid UTF-8, instead of silently replacing invalid bytes with the replacement character. This prevents data corruption and makes encoding errors visible to the caller.
 
 ## Invariants
 
@@ -185,9 +177,8 @@ Both `SyncBackend` and `AsyncBackend` implement subprocess spawn and wait:
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
-11. **Dispatch-before-port-guard:** In both sync and async backends, `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`). This ensures subprocess ops are handled before the code attempts to extract a Port from the request.
-12. **Encoding errors:** `Encoding::Text` read errors now return `SIG_ERROR` with kind `"encoding-error"` instead of silently replacing invalid UTF-8 with the replacement character.
+11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
 13. **ProcessWait siginfo lifetime:** The `siginfo_t` buffer in `PendingOp::ProcessWait` is heap-allocated via `Box::into_raw` and must remain valid until the CQE arrives. Completion processing reclaims it via `Box::from_raw`. The fast path (already exited) never inserts a `PendingOp::ProcessWait`, so the buffer is only allocated for truly pending operations.
 14. **IORING_OP_WAITID requirement:** Linux 6.7+. Thread-pool backend returns error for `ProcessWait`. Older kernels return `-EINVAL` in the CQE.
 15. **Seek/Tell are immediate completions.** `IoOp::Seek` and `IoOp::Tell` are never submitted to io_uring or the thread pool. They call `libc::lseek(2)` synchronously in the backend's submit/execute path and return an immediate completion. `PoolOp` has no `Seek` or `Tell` variant.
-16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). On io_uring platforms, tasks are routed to the network pool to avoid starving fd I/O ops on the main pool. The sync backend runs the closure inline (blocking). The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.
+16. **Task dispatch:** `IoOp::Task` is dispatched before the port guard (it is portless). On io_uring platforms, tasks are routed to the network pool to avoid starving fd I/O ops on the main pool. The `TaskFn` closure is taken exactly once via `RefCell<Option<...>>`; double-take returns an error.

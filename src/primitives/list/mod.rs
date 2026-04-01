@@ -3,54 +3,16 @@ mod advanced;
 
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
-use crate::symbol::SymbolTable;
 use crate::syntax::SyntaxKind;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, list, SymbolId, Value};
-use std::cell::RefCell;
+use crate::value::{error_val, list, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 // Re-export advanced functions for use in PRIMITIVES array
 pub(crate) use advanced::{
     prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_take,
 };
-
-thread_local! {
-    static SYMBOL_TABLE: RefCell<Option<*mut SymbolTable>> = const { RefCell::new(None) };
-}
-
-/// Set the symbol table context for symbol name resolution in length primitive
-///
-/// # Safety
-/// The pointer must remain valid for the duration of use.
-pub fn set_length_symbol_table(symbols: *mut SymbolTable) {
-    SYMBOL_TABLE.with(|st| {
-        *st.borrow_mut() = Some(symbols);
-    });
-}
-
-/// Clear the symbol table context
-pub fn clear_length_symbol_table() {
-    SYMBOL_TABLE.with(|st| {
-        *st.borrow_mut() = None;
-    });
-}
-
-/// Get the symbol name from a symbol ID via the thread-local symbol table
-fn get_symbol_name(sid: SymbolId) -> Option<String> {
-    SYMBOL_TABLE.with(|st| {
-        let ptr = st.borrow();
-        match *ptr {
-            Some(p) => {
-                // SAFETY: Caller ensures pointer validity via set_length_symbol_table
-                let symbols = unsafe { &*p };
-                symbols.name(sid).map(|s| s.to_string())
-            }
-            None => None,
-        }
-    })
-}
 
 /// Construct a cons cell
 pub(crate) fn prim_cons(args: &[Value]) -> (SignalBits, Value) {
@@ -579,7 +541,7 @@ pub(crate) fn prim_length(args: &[Value]) -> (SignalBits, Value) {
         (SIG_OK, Value::int(s.len() as i64))
     } else if let Some(sid) = args[0].as_symbol() {
         // Get the symbol name from the symbol table context
-        if let Some(name) = get_symbol_name(crate::value::SymbolId(sid)) {
+        if let Some(name) = crate::context::resolve_symbol_name(sid) {
             (SIG_OK, Value::int(name.graphemes(true).count() as i64))
         } else {
             (

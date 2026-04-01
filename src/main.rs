@@ -1,6 +1,5 @@
 use elle::context::{clear_vm_context, set_symbol_table, set_vm_context};
 use elle::pipeline::compile_file;
-use elle::primitives::set_length_symbol_table;
 use elle::repl::Repl;
 use elle::{init_stdlib, register_primitives, SymbolTable, VM};
 use std::env;
@@ -215,7 +214,6 @@ fn main() {
     let _signals = register_primitives(&mut vm, &mut symbols);
 
     set_symbol_table(&mut symbols as *mut SymbolTable);
-    set_length_symbol_table(&mut symbols as *mut SymbolTable);
 
     init_stdlib(&mut vm, &mut symbols);
 

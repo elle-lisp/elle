@@ -42,7 +42,7 @@ pub(crate) struct FdState {
 pub(crate) enum FdStatus {
     Open,
     Eof,
-    Error(String),
+    Error,
 }
 
 impl FdState {

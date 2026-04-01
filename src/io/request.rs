@@ -4,7 +4,7 @@
 //! The scheduler catches SIG_IO and passes the request to a backend
 //! for execution.
 
-use crate::port::{Direction, Encoding};
+use crate::port::{Direction, Encoding, Port};
 use crate::value::{error_val, Value};
 use std::cell::RefCell;
 use std::process::Child;
@@ -106,8 +106,6 @@ impl SpawnRequest {
     /// Returns `Ok(struct)` with `:pid`, `:stdin`, `:stdout`, `:stderr`,
     /// `:process` fields, or `Err(error_val)` on failure.
     pub(crate) fn spawn_to_struct(&self) -> Result<Value, Value> {
-        use crate::io::backend::pipe_to_port;
-        use crate::port::{Direction, Encoding};
         use crate::value::heap::TableKey;
 
         let mut child = self.build_command().spawn().map_err(|e| {
@@ -145,6 +143,19 @@ impl SpawnRequest {
         fields.insert(TableKey::Keyword("process".into()), handle_val);
         Ok(Value::struct_from(fields))
     }
+}
+
+/// Convert a subprocess pipe (stdin/stdout/stderr) to a Port value.
+fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
+    pipe: T,
+    direction: Direction,
+    encoding: Encoding,
+    pid: u32,
+    name: &str,
+) -> Value {
+    let fd: std::os::unix::io::OwnedFd = pipe.into();
+    let label = format!("pid:{}:{}", pid, name);
+    Value::external("port", Port::new_pipe(fd, direction, encoding, label))
 }
 
 /// I/O operation descriptor.

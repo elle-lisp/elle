@@ -7,7 +7,7 @@ runs inside it automatically — no setup required.
 
 On Linux, the scheduler is a single-threaded event loop backed by
 `io_uring`. On other platforms (macOS, CI), a threadpool-based
-`SyncBackend` provides the same interface using blocking I/O on
+backend provides the same interface using blocking I/O on
 background threads.
 
 All I/O operations (port reads/writes, TCP, subprocess) yield to the

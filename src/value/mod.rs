@@ -6,6 +6,7 @@
 pub mod allocator;
 pub mod arena;
 pub mod closure;
+pub mod cycle;
 pub mod display;
 pub mod error;
 pub mod ffi;

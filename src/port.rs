@@ -227,6 +227,7 @@ impl Port {
     }
 
     /// The port direction.
+    #[cfg(test)]
     pub fn direction(&self) -> Direction {
         self.direction
     }

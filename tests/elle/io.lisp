@@ -1,32 +1,18 @@
 (elle/epoch 6)
-# I/O — stream primitives, sync scheduler, ev/spawn, async backend
+# I/O — stream primitives, ev/spawn, async backend
 
 
 # === Type predicates ===
 
 (assert (not (io-request? 42)) "io-request? on int")
 (assert (not (io-request? "hello")) "io-request? on string")
-(assert (io-backend? (io/backend :sync)) "io-backend? on sync backend")
+(assert (io-backend? (io/backend :async)) "io-backend? on async backend")
 (assert (not (io-backend? 42)) "io-backend? on int")
 
 # === Scheduler parameter ===
 
 (assert (parameter? *spawn*) "*spawn* is a parameter")
-# In the async-first model, user code runs under the async scheduler.
-# The sync-scheduler is still available but not the default for user code.
 (assert (fn? (*spawn*)) "*spawn* is bound to a function")
-
-# === sync-scheduler with pure fiber ===
-
-(assert (= (sync-scheduler (fiber/new (fn [] (+ 1 2)) (bit/or 1 512))) 3) "sync-scheduler runs pure fiber")
-
-# === sync-scheduler with I/O ===
-
-(spit "/tmp/elle-test-io-lisp" "hello from io test")
-(assert (= (sync-scheduler
-    (fiber/new
-      (fn [] (port/read-all (port/open "/tmp/elle-test-io-lisp" :read)))
-      (bit/or 1 512))) "hello from io test") "sync-scheduler dispatches port/read-all")
 
 # === ev/spawn returns fiber ===
 
@@ -43,8 +29,6 @@
 
 # === Error propagation ===
 
-(let (([ok? _] (protect ((fn () (sync-scheduler (fiber/new (fn [] (error :boom)) (bit/or 1 512)))))))) (assert (not ok?) "sync-scheduler propagates errors"))
-
 # ev/spawn errors propagate via ev/join
 (let (([ok? _] (protect (ev/join (ev/spawn (fn [] (error :kaboom)))))))
   (assert (not ok?) "ev/spawn propagates errors via ev/join"))
@@ -59,27 +43,6 @@
 # === io/backend errors ===
 
 (let (([ok? _] (protect ((fn () (io/backend :invalid)))))) (assert (not ok?) "io/backend :invalid errors"))
-
-# === io/execute roundtrip ===
-
-(spit "/tmp/elle-test-io-exec-lisp" "hello from elle")
-(let* ((backend (io/backend :sync))
-       (port (port/open "/tmp/elle-test-io-exec-lisp" :read))
-       (f (fiber/new (fn [] (port/read-all port)) 512)))
-  (fiber/resume f)
-  (assert (= (io/execute backend (fiber/value f)) "hello from elle") "io/execute roundtrip reads file"))
-
-# === sync-scheduler I/O dispatch ===
-
-(spit "/tmp/elle-test-sched-io-lisp" "scheduler test")
-(assert (= (sync-scheduler
-    (fiber/new
-      (fn [] (port/read-all (port/open "/tmp/elle-test-sched-io-lisp" :read)))
-      (bit/or 1 512))) "scheduler test") "sync-scheduler dispatches I/O")
-
-# === Pure code unchanged with scheduler ===
-
-(assert (= (+ 1 2 3) 6) "pure code works with scheduler")
 
 # === stream I/O ===
 
