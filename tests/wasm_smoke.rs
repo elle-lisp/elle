@@ -375,7 +375,7 @@ fn test_float_division() {
 
 #[test]
 fn test_float_addition() {
-    assert_eq!(eval("(+ 1.5 2.5)"), "4");
+    assert_eq!(eval("(+ 1.5 2.5)"), "4.0");
 }
 
 #[test]
