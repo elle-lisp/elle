@@ -76,3 +76,31 @@ impl Default for HandleTable {
         Self::new()
     }
 }
+
+/// Read `nargs` values from a memory slice at `args_ptr`.
+///
+/// Each value is 16 bytes: `(tag: i64le, payload: i64le)`. Heap values
+/// (tag >= TAG_HEAP_START) are resolved through `handles`.
+pub fn read_args_from_slice(
+    data: &[u8],
+    handles: &HandleTable,
+    args_ptr: usize,
+    nargs: usize,
+) -> Vec<crate::value::Value> {
+    use crate::value::repr::TAG_HEAP_START;
+    use crate::value::Value;
+
+    let mut args = Vec::with_capacity(nargs);
+    for i in 0..nargs {
+        let offset = args_ptr + i * 16;
+        let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()) as u64;
+        let payload = i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap()) as u64;
+        let value = if tag < TAG_HEAP_START {
+            Value { tag, payload }
+        } else {
+            handles.get(payload)
+        };
+        args.push(value);
+    }
+    args
+}

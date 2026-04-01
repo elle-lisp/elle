@@ -764,43 +764,21 @@ fn read_args_from_memory(
     let memory = caller
         .get_export("__elle_memory")
         .and_then(|e| e.into_memory());
-
     let memory = match memory {
         Some(m) => m,
         None => return Vec::new(),
     };
-
-    // Guard against invalid nargs
-    if !(0..=256).contains(&nargs) {
-        panic!(
-            "read_args_from_memory: invalid nargs={} args_ptr={}",
-            nargs, args_ptr
-        );
-    }
-
-    // First pass: read raw (tag, payload) pairs from memory
-    let mut raw_pairs = Vec::with_capacity(nargs as usize);
-    {
-        let data = memory.data(&*caller);
-        for i in 0..nargs as usize {
-            let offset = args_ptr as usize + i * 16;
-            let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()) as u64;
-            let payload =
-                i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap()) as u64;
-            raw_pairs.push((tag, payload));
-        }
-    }
-
-    // Second pass: resolve heap handles
-    let host = caller.data();
-    raw_pairs
-        .into_iter()
-        .map(|(tag, payload)| {
-            if tag < TAG_HEAP_START {
-                Value { tag, payload }
-            } else {
-                host.handles.get(payload)
-            }
-        })
-        .collect()
+    assert!(
+        (0..=256).contains(&nargs),
+        "read_args_from_memory: invalid nargs={} args_ptr={}",
+        nargs,
+        args_ptr
+    );
+    let data = memory.data(&*caller);
+    super::handle::read_args_from_slice(
+        data,
+        &caller.data().handles,
+        args_ptr as usize,
+        nargs as usize,
+    )
 }

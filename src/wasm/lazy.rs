@@ -628,17 +628,10 @@ fn read_args(caller: &mut Caller<'_, TieredHost>, args_ptr: i32, nargs: i32) -> 
         .and_then(|e| e.into_memory())
         .expect("read_args: no memory");
     let data = memory.data(&*caller);
-    let mut args = Vec::with_capacity(nargs.max(0) as usize);
-    for i in 0..nargs.max(0) as usize {
-        let offset = args_ptr as usize + i * 16;
-        let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()) as u64;
-        let payload = i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap()) as u64;
-        let value = if tag < TAG_HEAP_START {
-            Value { tag, payload }
-        } else {
-            caller.data().inner.handles.get(payload)
-        };
-        args.push(value);
-    }
-    args
+    super::handle::read_args_from_slice(
+        data,
+        &caller.data().inner.handles,
+        args_ptr as usize,
+        nargs.max(0) as usize,
+    )
 }
