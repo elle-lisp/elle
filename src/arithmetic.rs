@@ -85,7 +85,6 @@ pub(crate) fn div_values(a: &Value, b: &Value) -> Result<Value, Value> {
         };
     }
     match (a.as_number(), b.as_number()) {
-        (Some(_), Some(0.0)) => Err(error_val("division-by-zero", "/: division by zero")),
         (Some(x), Some(y)) => Ok(Value::float(x / y)),
         _ => Err(error_val(
             "type-error",
@@ -303,9 +302,12 @@ mod tests {
     }
 
     #[test]
-    fn test_div_by_zero_float() {
+    fn test_div_by_zero_float_returns_inf() {
+        // Mixed float/int division follows IEEE 754: float / 0 = Inf.
+        // Only int / int zero is an error.
         let a = Value::float(10.0);
         let b = Value::int(0);
-        assert!(div_values(&a, &b).is_err());
+        let result = div_values(&a, &b).unwrap();
+        assert!(result.as_float().unwrap().is_infinite());
     }
 }
