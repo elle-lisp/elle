@@ -59,6 +59,7 @@ precise timer support without polling.
 ## See also
 
 - [concurrency.md](concurrency.md) — user-facing async primitives
+- [processes.md](processes.md) — Erlang-style processes built on this scheduler
 - [fibers](signals/fibers.md) — fiber architecture
 - [runtime.md](runtime.md) — runtime signals
 - [io.md](io.md) — port I/O

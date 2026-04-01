@@ -250,3 +250,4 @@ See `docs/signals.md` for the signal system design.
 
 - [Signal index](index.md)
 - [Fiber primitives](primitives.md)
+- [Processes](../processes.md) — Erlang-style processes, GenServer, and supervisors built on fibers

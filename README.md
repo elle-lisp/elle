@@ -10,6 +10,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Language](#language)
 - [Types](#types)
 - [Control Flow](#control-flow)
+- [Concurrency](#concurrency)
 - [Memory](#memory)
 - [JIT](#jit)
 - [FFI](#ffi)
@@ -129,6 +130,34 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   The `tmp` introduced by the macro does not shadow the caller's `tmp`. This is guaranteed by scope sets, not by convention.
 
 - **Functions are colorless.** Any function can be called from a fiber. There is no `async`/`await` annotation that marks a function as suspending and forces all its callers to be marked too. Whether something runs concurrently is decided at the call site, not baked into the function definition. In Rust/JS/Python, a suspending `fetch` forces every caller to be `async` too; in Elle, the signal is inferred by the compiler and callers are unaffected.
+
+- **Erlang-style processes fall out of the fiber model.** The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
+
+  ```lisp
+  (def process ((import "lib/process")))
+
+  (process:start (fn []
+    # Start a supervised key-value server
+    (process:supervisor-start-link
+      [{:id :kv :restart :permanent
+        :start (fn []
+          (process:gen-server-start-link
+            {:init        (fn [_] @{})
+             :handle-call (fn [req _from state]
+               (match req
+                 ([:get k]   [:reply (get state k) state])
+                 ([:put k v] (put state k v)
+                             [:reply :ok state])))}
+            nil :name :kv))}]
+      :name :sup
+      :max-restarts 3)
+
+    (process:gen-server-call :kv [:put :lang "elle"])
+    (process:gen-server-call :kv [:get :lang])))  # => "elle"
+  # If the kv server crashes, the supervisor restarts it automatically.
+  ```
+
+  This is what Elle's design is for: fibers provide the mechanism, signals provide the control flow, and user-space libraries provide the policy. See [`docs/processes.md`](docs/processes.md) for the full API.
 
 - **The Rust ecosystem.** FFI without ceremony. Native plugins as Rust cdylib crates. Values are marshalled directly to C types via libffi — no intermediate serialization format, no separate process, no generated bindings.
 
@@ -496,6 +525,73 @@ Exactly two values are falsy. Everything else is truthy.
     (each x in xs
       (if (found? x) (break :outer x))))
   ```
+
+## Concurrency
+
+Elle has three concurrency layers, each built on the one below:
+
+1. **Fibers** — cooperative execution contexts with signal masks. The mechanism.
+2. **Structured concurrency** — `ev/spawn`, `ev/join`, `ev/race`, `ev/scope`. Safe fork/join.
+3. **Processes** — Erlang-style actors with mailboxes, supervision, and GenServers. The full model.
+
+### Structured concurrency
+
+```lisp
+# Parallel work with automatic error propagation
+(ev/scope (fn [spawn]
+  (let ([users    (spawn (fn [] (fetch-users)))]
+        [settings (spawn (fn [] (fetch-settings))])
+    {:users (ev/join users) :settings (ev/join settings)})))
+
+# Race: first to complete wins, rest are aborted
+(ev/race [(ev/spawn (fn [] (fetch-from-primary)))
+          (ev/spawn (fn [] (fetch-from-replica)))])
+```
+
+### Processes
+
+[`lib/process.lisp`](lib/process.lisp) provides a complete Erlang/OTP-style
+process system: lightweight processes with mailboxes, links, monitors,
+named registration, GenServer, Actor, Task, Supervisor, and EventManager.
+
+```lisp
+(def process ((import "lib/process")))
+
+(process:start (fn []
+  # Supervisor manages worker processes
+  (process:supervisor-start-link
+    [{:id :cache :restart :permanent
+      :start (fn []
+        (process:gen-server-start-link
+          {:init        (fn [_] @{})
+           :handle-call (fn [req _from state]
+             (match req
+               ([:get k]   [:reply (get state k) state])
+               ([:put k v] (put state k v) [:reply :ok state])))}
+          nil :name :cache))}]
+    :name :app-sup
+    :max-restarts 5
+    :logger (fn [event] (println "sup:" event)))
+
+  (process:gen-server-call :cache [:put :version 1])
+  (process:gen-server-call :cache [:get :version])))  # => 1
+```
+
+Supervisors can also manage OS subprocesses:
+
+```lisp
+(process:supervisor-start-link
+  [(process:make-subprocess-child :nginx "/usr/sbin/nginx" ["-g" "daemon off;"])
+   (process:make-subprocess-child :redis "/usr/bin/redis-server" [])]
+  :name :daemon-sup :max-restarts 3)
+```
+
+See [`docs/processes.md`](docs/processes.md) for the full API including
+GenServer callbacks, Actor state management, Task async/await, supervision
+strategies, restart intensity limits, and structured logging.
+
+See [`docs/concurrency.md`](docs/concurrency.md) for the structured
+concurrency layer.
 
 ## Memory
 

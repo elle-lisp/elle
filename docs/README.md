@@ -16,6 +16,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
 | Directory | Content |
 |-----------|---------|
+| [processes.md](processes.md) | Erlang-style processes, GenServer, supervisors |
 | [signals/](signals/) | Signal system design, protocol, inference, JIT |
 | [signals/fibers.md](signals/fibers.md) | Fiber architecture |
 
