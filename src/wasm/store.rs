@@ -168,51 +168,48 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
             .expect("prepare_wasm_env: failed to grow memory");
     }
 
-    for (i, val) in closure.env.iter().enumerate() {
-        let (tag, payload) = caller.data_mut().value_to_wasm(*val);
-        let offset = env_base + i * 16;
-        let data = memory.data_mut(&mut *caller);
+    // Helper: convert value to WASM repr and write to linear memory.
+    let write_slot = |caller: &mut Caller<'_, T>, memory: &Memory, slot: usize, val: Value| {
+        let (tag, payload) = caller.data_mut().value_to_wasm(val);
+        let offset = env_base + slot * 16;
+        let data = memory.data_mut(caller);
         data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
         data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    };
+
+    // Captures
+    for (i, val) in closure.env.iter().enumerate() {
+        write_slot(&mut *caller, &memory, i, *val);
     }
 
+    // Params (with optional LBox wrapping)
     for (i, arg) in args.iter().enumerate().take(num_params) {
         let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
             Value::local_lbox(*arg)
         } else {
             *arg
         };
-        let (tag, payload) = caller.data_mut().value_to_wasm(val);
-        let offset = env_base + (num_captures + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+        write_slot(&mut *caller, &memory, num_captures + i, val);
     }
 
+    // Remaining params (default nil)
     for i in args.len()..num_params {
         let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
             Value::local_lbox(Value::NIL)
         } else {
             Value::NIL
         };
-        let (tag, payload) = caller.data_mut().value_to_wasm(val);
-        let offset = env_base + (num_captures + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+        write_slot(&mut *caller, &memory, num_captures + i, val);
     }
 
+    // Extra local slots (nil or LBox(nil))
     for i in 0..extra_locals {
         let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
             Value::local_lbox(Value::NIL)
         } else {
             Value::NIL
         };
-        let (tag, payload) = caller.data_mut().value_to_wasm(val);
-        let offset = env_base + (num_captures + num_params + i) * 16;
-        let data = memory.data_mut(&mut *caller);
-        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
-        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+        write_slot(&mut *caller, &memory, num_captures + num_params + i, val);
     }
 }
 
@@ -229,6 +226,11 @@ pub(super) fn handle_wasm_result(
     env_base: usize,
     label: &str,
 ) -> (i64, i64, i32) {
+    let memory = caller
+        .get_export("__elle_memory")
+        .and_then(|e| e.into_memory())
+        .expect("handle_wasm_result: no memory");
+
     match call_result {
         Ok(()) => {
             let tag = results[0].unwrap_i64();
@@ -236,38 +238,24 @@ pub(super) fn handle_wasm_result(
             let status = results[2].unwrap_i32();
 
             if status > 0 {
-                // Suspended: snapshot env and update the front frame.
+                // Suspended: snapshot env and update the back frame.
                 let env_end = caller.data().env_stack_ptr;
                 let env_snapshot = if env_end > env_base {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("handle_wasm_result: no memory");
                     memory.data(&*caller)[env_base..env_end].to_vec()
                 } else {
                     Vec::new()
                 };
 
-                // Update the most recently pushed frame (at back). rt_yield
-                // pushes to the back; during a resume the old frame is still at
-                // the front, so first_suspension_frame_mut() would return the
-                // wrong frame.
                 if let Some(frame) = caller.data_mut().back_suspension_frame_mut() {
                     frame.env_base = env_base;
                     frame.env_snapshot = env_snapshot;
                 }
 
-                // Clear signal word so callers don't see stale SIG_YIELD
-                let memory = caller
-                    .get_export("__elle_memory")
-                    .and_then(|e| e.into_memory())
-                    .expect("handle_wasm_result: no memory");
                 if caller.data().debug {
                     let old = i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
                     eprintln!("[{}] clearing memory[0..4] from {} to 0", label, old);
                 }
                 memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
-
                 caller.data_mut().env_stack_ptr = env_base;
 
                 if caller.data().debug {
@@ -281,19 +269,9 @@ pub(super) fn handle_wasm_result(
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
-                let mut signal = {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("handle_wasm_result: no memory");
-                    let data = memory.data(&*caller);
-                    i32::from_le_bytes(data[0..4].try_into().unwrap())
-                };
+                let mut signal =
+                    i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
                 if signal != 0 {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("handle_wasm_result: no memory");
                     memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
                 }
                 // If a NativeFn tail call returned SIG_IO (written to
