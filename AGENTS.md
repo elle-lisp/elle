@@ -9,8 +9,25 @@ lexical scoping with closure capture analysis, and we have a signal system.
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
+## Before you touch any code
+
+You will write Elle code — in tests, repros, and debugging. You will
+misuse the language if you don't know it.
+
+1. Read [`QUICKSTART.md`](QUICKSTART.md). It is the complete language
+   reference. You need it.
+2. Read [`docs/stdlib.md`](docs/stdlib.md) for the standard library.
+3. The `docs/` directory contains literate Elle programs. Run them
+   with `elle docs/foo.md` to see working examples.
+4. Use `(doc name)` in the REPL to look up any primitive.
+   Use `elle --help` to see all primitives grouped by category.
+5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes
+   for common cross-cutting changes.
+6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization.
+
 ## Contents
 
+- [Before you touch any code](#before-you-touch-any-code)
 - [Architecture](#architecture)
 - [Products](#products)
 - [Directories](#directories)
@@ -19,7 +36,6 @@ tests. Read the error messages. They are designed to be helpful.
 - [Intentional oddities](#intentional-oddities)
 - [Conventions](#conventions)
 - [Maintaining documentation](#maintaining-documentation)
-- [Where to start](#where-to-start)
 
 ## Architecture
 
@@ -195,20 +211,14 @@ current:
 Documentation debt compounds. A few minutes now saves hours of confusion
 later.
 
-## Where to start
+## Implementation entry points
 
-1. Read [`QUICKSTART.md`](QUICKSTART.md) — complete language reference for writing Elle code.
-2. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
-3. Read an example in `examples/` to understand the surface syntax.
-4. Read `value.rs` to understand runtime representation.
-5. Read a failing test to understand what's expected.
+1. Read `pipeline.rs` — it shows the full compilation flow in 50 lines.
+2. Read an example in `examples/` to understand the surface syntax.
+3. Read `value.rs` to understand runtime representation.
+4. Read a failing test to understand what's expected.
 
 When in doubt, run the tests.
-
-5. Read [`docs/cookbook.md`](docs/cookbook.md) for step-by-step recipes for
-   common cross-cutting changes.
-6. Read [`tests/AGENTS.md`](tests/AGENTS.md) for test organization and how
-   to add new tests.
 
 ## MCP Server
 
