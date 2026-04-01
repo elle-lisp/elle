@@ -295,7 +295,6 @@ fn test_dump_closure_let_lir() {
     elle::register_primitives(&mut vm, &mut symbols);
     let sym_ptr: *mut elle::SymbolTable = &mut *symbols;
     elle::context::set_symbol_table(sym_ptr);
-    elle::primitives::set_length_symbol_table(sym_ptr);
     let lir = elle::pipeline::compile_file_to_lir(
         "((fn [] (let* [[x 42]] x)))",
         &mut symbols,

@@ -24,7 +24,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let (bits, result) = caller.data_mut().call_primitive(prim_id as u32, &args);
             let (bits, result) = caller.data().maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
+            (tag, payload, bits.raw() as i32)
         },
     )?;
 
@@ -72,17 +72,18 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     );
                 }
                 let (bits, result) = native_fn(&args);
-                if caller.data().debug && bits.0 != 0 {
+                if caller.data().debug && bits.raw() != 0 {
                     eprintln!(
                         "[rt_call] native returned signal={} value={:?}",
-                        bits.0, result
+                        bits.raw(),
+                        result
                     );
                 }
                 let (bits, result) = caller.data().maybe_execute_io(bits, result);
 
                 // Handle SIG_RESUME: fiber/resume returns this signal.
                 // Execute the fiber's WASM closure host-side.
-                if bits.0 & 8 != 0 {
+                if bits.raw() & 8 != 0 {
                     // SIG_RESUME: result is the fiber value
                     let r = super::resume::handle_fiber_resume(&mut caller, result);
                     if caller.data().debug {
@@ -95,7 +96,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 }
 
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                (tag, payload, bits.0 as i32)
+                (tag, payload, bits.raw() as i32)
             } else if let Some((id, default)) = func_val.as_parameter() {
                 if caller.data().debug {
                     eprintln!("[rt_call] parameter id={} default={:?}", id, default);
@@ -218,7 +219,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 num_params,
                 constants,
                 signal: crate::signals::Signal {
-                    bits: crate::value::fiber::SignalBits(signal_bits),
+                    bits: crate::value::fiber::SignalBits::new(signal_bits),
                     propagates: 0,
                 },
                 lbox_params_mask,
@@ -239,7 +240,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let closure = crate::value::closure::Closure {
                 template,
                 env: std::rc::Rc::new(captures),
-                squelch_mask: 0,
+                squelch_mask: crate::value::fiber::SignalBits::EMPTY,
             };
 
             let value = Value::closure(closure);
@@ -256,7 +257,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let args = read_args_from_memory(&mut caller, args_ptr, nargs);
             let (bits, result) = dispatch_data_op(op, &args);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
+            (tag, payload, bits.raw() as i32)
         },
     )?;
 
@@ -404,17 +405,17 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 // picks it up. The WASM tail call dispatch returns immediately
                 // after this host call (just tag/payload/0), so no WASM code
                 // overwrites memory[0..4] before the function exits.
-                if bits.0 != 0 {
+                if bits.raw() != 0 {
                     if let Some(memory) = caller
                         .get_export("__elle_memory")
                         .and_then(|e| e.into_memory())
                     {
                         memory.data_mut(&mut caller)[0..4]
-                            .copy_from_slice(&(bits.0 as i32).to_le_bytes());
+                            .copy_from_slice(&(bits.raw() as i32).to_le_bytes());
                     }
                 }
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                return (0, 0, 0, tag, payload, bits.0 as i32);
+                return (0, 0, 0, tag, payload, bits.raw() as i32);
             }
 
             if let Some((id, default)) = func_val.as_parameter() {

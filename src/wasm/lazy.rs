@@ -197,7 +197,7 @@ impl WasmTier {
             .map_err(|e| e.to_string())?;
 
         let value = store.data().inner.wasm_to_value(tag, payload);
-        let signal = SignalBits(status as u32);
+        let signal = SignalBits::new(status as u32);
         Ok((value, signal))
     }
 }
@@ -309,7 +309,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 .call_primitive(prim_id as u32, &args);
             let (bits, result) = caller.data().inner.maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
+            (tag, payload, bits.raw() as i32)
         },
     )?;
 
@@ -332,7 +332,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 let (bits, result) = native_fn(&args);
                 let (bits, result) = caller.data().inner.maybe_execute_io(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-                return (tag, payload, bits.0 as i32);
+                return (tag, payload, bits.raw() as i32);
             }
 
             if let Some((id, default)) = func_val.as_parameter() {
@@ -421,7 +421,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                                 return (tag, payload, 0);
                             }
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                            return (tag, payload, signal.0 as i32);
+                            return (tag, payload, signal.raw() as i32);
                         }
                         Err(e) => {
                             let err =
@@ -454,7 +454,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                                 .map(|(_, v)| *v)
                                 .unwrap_or(Value::NIL);
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                            (tag, payload, bits.0 as i32)
+                            (tag, payload, bits.raw() as i32)
                         }
                     }
                     None => {
@@ -471,7 +471,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                             .map(|(b, _)| *b)
                             .unwrap_or(crate::value::SIG_ERROR);
                         let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                        (tag, payload, bits.0 as i32)
+                        (tag, payload, bits.raw() as i32)
                     }
                 }
             } else {
@@ -513,7 +513,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
             let args = read_args(&mut caller, args_ptr, nargs);
             let (bits, result) = super::linker::dispatch_data_op(op, &args);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
+            (tag, payload, bits.raw() as i32)
         },
     )?;
 

@@ -14,7 +14,7 @@ fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u32 {
         .data()
         .first_suspension_frame()
         .map(|f| f.signal_bits)
-        .unwrap_or(crate::value::fiber::SIG_YIELD.0)
+        .unwrap_or(crate::value::fiber::SIG_YIELD.raw())
 }
 
 /// Resume outcome from drive_resume_chain.
@@ -37,7 +37,7 @@ enum ResumeOutcome {
 /// the new yield point. We evict the stale frames so the next
 /// resume starts from the new innermost frame.
 fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -> ResumeOutcome {
-    let yield_signal = crate::value::fiber::SIG_YIELD.0 as i32;
+    let yield_signal = crate::value::fiber::SIG_YIELD.raw() as i32;
     let mut result_val = initial_value;
 
     loop {
@@ -89,7 +89,7 @@ pub(super) fn handle_fiber_resume(
         None => {
             let err = crate::value::error_val("type-error", "fiber/resume: not a fiber");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.0 as i32);
+            return (tag, payload, SIG_ERROR.raw() as i32);
         }
     };
 
@@ -107,11 +107,11 @@ pub(super) fn handle_fiber_resume(
             let err =
                 crate::value::error_val("internal-error", "fiber/resume: bytecode closure in WASM");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.0 as i32);
+            return (tag, payload, SIG_ERROR.raw() as i32);
         }
     };
 
-    let yield_signal = SIG_YIELD.0 as i32;
+    let yield_signal = SIG_YIELD.raw() as i32;
     let fiber_id = fiber_handle.id();
 
     match status {
@@ -198,7 +198,7 @@ pub(super) fn handle_fiber_resume(
         _ => {
             let err = crate::value::error_val("fiber-error", "fiber/resume: fiber not resumable");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, SIG_ERROR.0 as i32)
+            (tag, payload, SIG_ERROR.raw() as i32)
         }
     }
 }

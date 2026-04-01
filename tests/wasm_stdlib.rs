@@ -9,7 +9,6 @@ fn setup() -> (elle::VM, Box<elle::SymbolTable>) {
     elle::register_primitives(&mut vm, &mut symbols);
     let sym_ptr: *mut elle::SymbolTable = &mut *symbols;
     elle::context::set_symbol_table(sym_ptr);
-    elle::primitives::set_length_symbol_table(sym_ptr);
     (vm, symbols)
 }
 

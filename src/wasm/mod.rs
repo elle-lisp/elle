@@ -51,7 +51,6 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     crate::primitives::register_primitives(&mut vm, &mut symbols);
     let sym_ptr: *mut crate::symbol::SymbolTable = &mut *symbols;
     crate::context::set_symbol_table(sym_ptr);
-    crate::primitives::set_length_symbol_table(sym_ptr);
 
     let full_source;
     let stdlib_form_count;

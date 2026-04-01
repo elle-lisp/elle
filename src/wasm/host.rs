@@ -9,7 +9,6 @@
 //! namespace. The main one is `call_primitive(prim_id, args_ptr, nargs, ctx)`
 //! which dispatches to Elle's 331+ primitive functions.
 
-use crate::io::backend::SyncBackend;
 use crate::io::request::IoRequest;
 use crate::io::AnyBackend;
 use crate::primitives::def::PrimitiveDef;
@@ -229,7 +228,7 @@ impl ElleHost {
     /// SIG_IO so the scheduler can drive I/O through the event loop.
     /// Otherwise, execute I/O inline via the bound backend or SyncBackend.
     pub fn maybe_execute_io(&self, bits: SignalBits, value: Value) -> (SignalBits, Value) {
-        if bits.0 & SIG_IO.0 == 0 {
+        if bits.raw() & SIG_IO.raw() == 0 {
             return (bits, value);
         }
 
@@ -257,20 +256,29 @@ impl ElleHost {
                     }
                 }
             }
-            if let Some(sync_be) = backend_val.as_external::<SyncBackend>() {
-                return sync_be.execute(request);
+        }
+        // Fallback: create a temporary backend for inline I/O
+        if let Ok(be) = crate::io::aio::AsyncBackend::new() {
+            let any = AnyBackend(Box::new(be));
+            if let Ok(_id) = any.0.submit(request) {
+                if let Ok(completions) = any.0.wait(-1) {
+                    if let Some(c) = completions.into_iter().next() {
+                        return match c.result {
+                            Ok(v) => (crate::value::fiber::SIG_OK, v),
+                            Err(e) => (crate::value::fiber::SIG_ERROR, e),
+                        };
+                    }
+                }
             }
         }
-        SyncBackend::new().execute(request)
+        (bits, value)
     }
 
     /// Search param_frames for a value that is an I/O backend.
     fn find_io_backend(&self) -> Option<Value> {
         for frame in self.param_frames.iter().rev() {
             for &(_, value) in frame {
-                if value.as_external::<AnyBackend>().is_some()
-                    || value.as_external::<SyncBackend>().is_some()
-                {
+                if value.as_external::<AnyBackend>().is_some() {
                     return Some(value);
                 }
             }

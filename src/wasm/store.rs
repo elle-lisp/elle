@@ -277,7 +277,7 @@ pub(super) fn handle_wasm_result(
                     );
                 }
 
-                (tag, payload, crate::value::fiber::SIG_YIELD.0 as i32)
+                (tag, payload, crate::value::fiber::SIG_YIELD.raw() as i32)
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
@@ -302,8 +302,8 @@ pub(super) fn handle_wasm_result(
                 // of treating it as an error-like early return. The I/O
                 // request is in the return value; the fiber scheduler
                 // will check fiber/bits for SIG_IO and drive the I/O.
-                if signal as u32 & crate::signals::SIG_IO.0 != 0 {
-                    signal = crate::value::fiber::SIG_YIELD.0 as i32;
+                if signal as u32 & crate::signals::SIG_IO.raw() != 0 {
+                    signal = crate::value::fiber::SIG_YIELD.raw() as i32;
                 }
 
                 if caller.data().debug {
@@ -487,7 +487,6 @@ pub fn run_module(
     store: &mut Store<ElleHost>,
     module: &Module,
 ) -> Result<Value> {
-    use crate::io::backend::SyncBackend;
     use crate::io::request::IoRequest;
     use crate::signals::SIG_IO;
 
@@ -504,10 +503,29 @@ pub fn run_module(
 
         // Execute I/O if the innermost frame has SIG_IO
         let resume_val = if let Some(frame) = store.data().first_suspension_frame() {
-            if frame.signal_bits & SIG_IO.0 != 0 {
+            if frame.signal_bits & SIG_IO.raw() != 0 {
                 if let Some(request) = value.as_external::<IoRequest>() {
-                    let (_bits, result) = SyncBackend::new().execute(request);
-                    result
+                    if let Ok(be) = crate::io::aio::AsyncBackend::new() {
+                        let any = crate::io::AnyBackend(Box::new(be));
+                        if let Ok(_id) = any.0.submit(request) {
+                            if let Ok(completions) = any.0.wait(-1) {
+                                if let Some(c) = completions.into_iter().next() {
+                                    match c.result {
+                                        Ok(v) => v,
+                                        Err(e) => e,
+                                    }
+                                } else {
+                                    value
+                                }
+                            } else {
+                                value
+                            }
+                        } else {
+                            value
+                        }
+                    } else {
+                        value
+                    }
                 } else {
                     value
                 }

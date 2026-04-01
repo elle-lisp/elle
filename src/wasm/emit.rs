@@ -1431,7 +1431,7 @@ impl WasmEmitter {
                     },
                     nested.lbox_params_mask as i64,
                     nested.lbox_locals_mask as i64,
-                    nested.signal.bits.0 as i64,
+                    nested.signal.bits.raw() as i64,
                 ];
                 for (i, val) in meta_vals.iter().enumerate() {
                     f.instruction(&Instruction::I32Const(meta_base));
