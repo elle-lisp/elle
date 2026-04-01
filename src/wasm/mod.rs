@@ -14,14 +14,17 @@
 //! Immediate values (int, float, nil, bool, symbol, keyword) are
 //! constructed directly in WASM with no host call.
 
+mod controlflow;
 pub mod emit;
 pub mod handle;
 pub mod host;
+mod instruction;
 pub mod lazy;
 pub mod linker;
 pub mod regalloc;
 pub mod resume;
 pub mod store;
+mod suspend;
 
 use crate::value::Value;
 
