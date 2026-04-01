@@ -12,7 +12,10 @@
 //! into a constant pool during emission. The host pre-loads them into the
 //! handle table at instantiation time.
 
-use crate::lir::{BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, Terminator, UnaryOp};
+use crate::lir::{
+    BasicBlock, BinOp, CmpOp, Label, LirConst, LirFunction, LirInstr, Reg, SpannedTerminator,
+    Terminator, UnaryOp,
+};
 use crate::value::repr::*;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -1946,6 +1949,74 @@ impl WasmEmitter {
         f.instruction(&Instruction::End);
     }
 
+    /// Split blocks at SuspendingCall/CallArrayMut boundaries.
+    ///
+    /// In a single block with N sequential SuspendingCalls, the CPS virtual
+    /// resume block for call K duplicates instructions K+1..N — O(N²) code.
+    /// By splitting the block so each SuspendingCall is the last instruction,
+    /// the continuation is a separate block and no duplication is needed.
+    ///
+    /// Returns a new block list where no block has a SuspendingCall or
+    /// CallArrayMut followed by more instructions. Each such call becomes
+    /// the last instruction in its block, with a Jump terminator to the
+    /// continuation block.
+    fn split_blocks_at_suspending_calls(blocks: &[BasicBlock]) -> Vec<BasicBlock> {
+        let max_label = blocks.iter().map(|b| b.label.0).max().unwrap_or(0);
+        let mut next_label = max_label + 1;
+        let mut result = Vec::new();
+
+        for block in blocks {
+            // Find positions of SuspendingCall/CallArrayMut that aren't the last instruction
+            let call_positions: Vec<usize> = block
+                .instructions
+                .iter()
+                .enumerate()
+                .filter(|(i, si)| {
+                    matches!(
+                        si.instr,
+                        LirInstr::SuspendingCall { .. } | LirInstr::CallArrayMut { .. }
+                    ) && *i < block.instructions.len() - 1
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            if call_positions.is_empty() {
+                // No mid-block suspending calls — keep block as-is
+                result.push(block.clone());
+                continue;
+            }
+
+            // Split at each call position
+            let mut start = 0;
+            let mut current_label = block.label;
+
+            for &call_pos in &call_positions {
+                let cont_label = Label(next_label);
+                next_label += 1;
+
+                // Block from `start` through `call_pos`, terminator = Jump(cont)
+                let mut split_block = BasicBlock::new(current_label);
+                split_block.instructions = block.instructions[start..=call_pos].to_vec();
+                split_block.terminator = SpannedTerminator::new(
+                    Terminator::Jump(cont_label),
+                    block.terminator.span.clone(),
+                );
+                result.push(split_block);
+
+                start = call_pos + 1;
+                current_label = cont_label;
+            }
+
+            // Final block: remaining instructions + original terminator
+            let mut final_block = BasicBlock::new(current_label);
+            final_block.instructions = block.instructions[start..].to_vec();
+            final_block.terminator = block.terminator.clone();
+            result.push(final_block);
+        }
+
+        result
+    }
+
     /// Pre-scan a LirFunction to build the resume_states table.
     /// Must be called before emit_cfg for suspending closures.
     fn pre_scan_resume_states(&mut self, func: &LirFunction) {
@@ -2291,6 +2362,51 @@ impl WasmEmitter {
     /// - Local slots (WASM locals): non-LBox let-bound variables
     /// - Registers (WASM locals): computation intermediates
     fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
+        // Split blocks at SuspendingCall boundaries to avoid O(N²) code
+        // duplication in CPS virtual resume blocks. After splitting, each
+        // SuspendingCall is the last instruction in its block.
+        let split_func;
+        let func = if func.signal.may_suspend() {
+            // Collect original MakeClosure pointers before cloning.
+            let mut orig_closures: Vec<*const LirFunction> = Vec::new();
+            for block in &func.blocks {
+                for si in &block.instructions {
+                    if let LirInstr::MakeClosure { func: nf, .. } = &si.instr {
+                        orig_closures.push(&**nf as *const LirFunction);
+                    }
+                }
+            }
+
+            let split_blocks = Self::split_blocks_at_suspending_calls(&func.blocks);
+
+            // Map cloned MakeClosure pointers to the same table indices.
+            // The split preserves instruction order, so the K-th MakeClosure
+            // in the split blocks corresponds to the K-th original.
+            let mut clone_idx = 0;
+            for block in &split_blocks {
+                for si in &block.instructions {
+                    if let LirInstr::MakeClosure { func: nf, .. } = &si.instr {
+                        let cloned_ptr = &**nf as *const LirFunction;
+                        if clone_idx < orig_closures.len() {
+                            let orig_ptr = orig_closures[clone_idx];
+                            if let Some(&table_idx) = self.closure_table_idx.get(&orig_ptr) {
+                                self.closure_table_idx.insert(cloned_ptr, table_idx);
+                            }
+                        }
+                        clone_idx += 1;
+                    }
+                }
+            }
+
+            split_func = LirFunction {
+                blocks: split_blocks,
+                ..func.clone()
+            };
+            &split_func
+        } else {
+            func
+        };
+
         self.label_to_idx.clear();
         for (idx, block) in func.blocks.iter().enumerate() {
             self.label_to_idx.insert(block.label, idx);
