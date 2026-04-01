@@ -9,6 +9,7 @@ use crate::primitives::intern_primitive_names;
 use crate::reader::{read_syntax, read_syntax_all_for};
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
+use std::collections::HashSet;
 
 /// Compile source code to bytecode.
 ///
@@ -119,9 +120,35 @@ pub fn compile_file(
     // re-entrant. The RefCell borrow was released by get_compilation_cache.
     let macro_vm = unsafe { &mut *macro_vm_ptr };
 
-    // Expand all forms
+    // Expand all forms, splicing include/include-file inline
+    let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
     let mut expanded_forms = Vec::new();
-    for syntax in syntaxes {
+    let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+    while let Some(syntax) = pending.pop_front() {
+        if let Some((spec, is_include)) = extract_include(&syntax) {
+            let path = if is_include {
+                crate::primitives::modules::resolve_import(&spec)
+            } else {
+                resolve_include_file(&spec, source_name)
+            };
+            let path =
+                path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+            if !included.insert(path.clone()) {
+                return Err(format!(
+                    "{}: include: circular dependency on '{}'",
+                    syntax.span, path
+                ));
+            }
+            let contents = std::fs::read_to_string(&path).map_err(|e| {
+                format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
+            })?;
+            let forms = read_syntax_all_for(&contents, &path)?;
+            // Splice at the front so they expand next, in order
+            for (i, form) in forms.into_iter().enumerate() {
+                pending.insert(i, form);
+            }
+            continue;
+        }
         let expanded = expander.expand(syntax, symbols, macro_vm)?;
         expanded_forms.push(expanded);
     }
@@ -172,4 +199,35 @@ pub fn compile_file(
     bytecode.signal = signal;
 
     Ok(CompileResult { bytecode })
+}
+
+/// Extract the spec from `(include-file "path")` or `(include "spec")`.
+/// Returns `(spec, is_include)` where `is_include` means use resolve_import.
+fn extract_include(syntax: &Syntax) -> Option<(String, bool)> {
+    if let SyntaxKind::List(items) = &syntax.kind {
+        if items.len() == 2 {
+            if let Some(head) = items[0].as_symbol() {
+                let is_include = match head {
+                    "include" => true,
+                    "include-file" => false,
+                    _ => return None,
+                };
+                if let SyntaxKind::String(s) = &items[1].kind {
+                    return Some((s.clone(), is_include));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve an include-file path relative to the including file's directory.
+fn resolve_include_file(spec: &str, source_name: &str) -> Option<String> {
+    let base = std::path::Path::new(source_name).parent()?;
+    let path = base.join(spec);
+    if path.is_file() {
+        Some(path.to_string_lossy().into_owned())
+    } else {
+        None
+    }
 }

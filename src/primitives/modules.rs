@@ -26,7 +26,7 @@ fn elle_root() -> Option<PathBuf> {
 }
 
 /// Resolve a module specifier to a concrete file path.
-fn resolve_import(spec: &str) -> Option<String> {
+pub(crate) fn resolve_import(spec: &str) -> Option<String> {
     let as_path = Path::new(spec);
 
     // Virtual prefix: std/X → <repo-root>/lib/X.lisp
