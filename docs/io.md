@@ -27,33 +27,34 @@ the thread pool is shared across all fibers.
 Ports are bidirectional file descriptors. Open with `port/open`, close
 with `port/close`.
 
-```text
-(def p (port/open "data.txt" :read))
+```lisp
+(file/write "/tmp/elle-doc-test.txt" "hello from elle")
+(def p (port/open "/tmp/elle-doc-test.txt" :read))
 (defer (port/close p)
-  (println (port/read-all p)))
+  (port/read-all p))          # => "hello from elle"
+(file/delete "/tmp/elle-doc-test.txt")
 ```
 
 ### Port operations
 
-```text
-(port/open path mode)        # mode: :read, :write, :append, :read-write
-(port/read p n)              # read n bytes
-(port/read-line p)           # read until \n, nil on EOF
-(port/read-all p)            # read everything
-(port/write p data)          # write bytes or string
-(port/flush p)               # flush buffers
-(port/seek p offset)         # seek to byte offset (default: from start)
-(port/seek p off :from :end) # seek from end
-(port/tell p)                # current byte position
-(port/close p)               # close port
+```lisp
+# (port/open path mode)        — mode: :read, :write, :append, :read-write
+# (port/read p n)              — read n bytes
+# (port/read-line p)           — read until \n, nil on EOF
+# (port/read-all p)            — read everything
+# (port/write p data)          — write bytes or string
+# (port/flush p)               — flush buffers
+# (port/seek p offset)         — seek to byte offset (default: from start)
+# (port/tell p)                — current byte position
+# (port/close p)               — close port
 ```
 
 ### Streams from ports
 
-```text
-(port/lines p)               # lazy stream of lines
-(port/chunks p n)            # lazy stream of byte chunks
-(port/writer p)              # writable stream
+```lisp
+# (port/lines p)               — lazy stream of lines
+# (port/chunks p n)            — lazy stream of byte chunks
+# (port/writer p)              — writable stream
 ```
 
 ## Output
@@ -72,7 +73,7 @@ All output functions are async — they yield to the scheduler.
 
 ## Subprocesses
 
-```text
+```lisp
 # Run to completion — returns {:exit :stdout :stderr}
 (subprocess/system "echo" ["hello"])
 # => {:exit 0 :stdout "hello\n" :stderr ""}
@@ -80,21 +81,13 @@ All output functions are async — they yield to the scheduler.
 # With options
 (subprocess/system "ls" ["-la"] {:cwd "/tmp"})
 (subprocess/system "env" [] {:env {:FOO "bar"}})
-
-# Low-level control
-(def proc (subprocess/exec "cat" []))
-(subprocess/pid proc)
-(subprocess/wait proc)
-(subprocess/kill proc)
 ```
 
 ## System args and environment
 
-```text
-# Command-line args after the source file
-# elle script.lisp -- foo bar  =>  ("--" "foo" "bar")
+```lisp
+# sys/args returns args after the source file
 (def args (sys/args))
-(def real-args (drop 1 args))  # skip "--"
 
 # Environment
 (sys/env)              # => struct of all env vars

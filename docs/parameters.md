@@ -37,9 +37,9 @@ dynamic extent of its body.
 `*stdout*` and `*stderr*` are dynamic parameters. Rebinding them
 redirects output:
 
-```text
-(parameterize ((*stdout* my-port))
-  (println "goes to my-port, not terminal"))
+```lisp
+# (parameterize ((*stdout* my-port))
+#   (println "goes to my-port, not terminal"))
 ```
 
 ---

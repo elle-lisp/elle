@@ -23,9 +23,9 @@ modifiers.
 That is the entire mechanism. Everything else in the module system is
 convention built on top of this one primitive.
 
-```text
-(import-file "lib/http.lisp")           # → value (last expr of file)
-(import-file "target/release/libelle_regex.so")  # → value (plugin struct)
+```lisp
+# (import-file "lib/http.lisp")           — value (last expr of file)
+# (import-file "target/release/libelle_regex.so")  — value (plugin struct)
 ```
 
 
@@ -52,10 +52,10 @@ When no virtual prefix matches, `import` searches:
 For each directory, it tries `<dir>/<spec>.lisp`, `<dir>/<spec>` as-is,
 and `<dir>/libelle_<leaf>.so`.
 
-```text
-(import "lib/portrait")         # virtual prefix → lib/portrait.lisp
-(import "plugin/regex")         # virtual prefix → libelle_regex.so
-(import "my/local/utils.lisp")  # search path resolution
+```lisp
+# (import "lib/portrait")         — virtual prefix: lib/portrait.lisp
+# (import "plugin/regex")         — virtual prefix: libelle_regex.so
+# (import "my/local/utils.lisp")  — search path resolution
 ```
 
 Virtual prefixes are the preferred import style. They decouple module
@@ -67,7 +67,7 @@ references from filesystem layout.
 A module file defines private bindings, then exports a subset by returning a
 closure that produces a struct:
 
-```text
+```lisp
 # greet.lisp
 (def greeting "Hello")
 
@@ -79,9 +79,9 @@ closure that produces a struct:
 
 The caller imports, calls the closure, and binds the result:
 
-```text
-(let ([g ((import "greet.lisp"))])
-  (g:greet "world"))       # => "Hello, world!"
+```lisp
+# (let ([g ((import "greet.lisp"))])
+#   (g:greet "world"))       # => "Hello, world!"
 ```
 
 `g:greet` is qualified symbol syntax — the reader lexes `g:greet` as a
@@ -98,36 +98,31 @@ lexical scope, not from access modifiers.
 The closure can accept arguments, making the module configurable at import
 time:
 
-```text
+```lisp
 # formatter.lisp
-(fn (&keys {:prefix prefix :suffix suffix :separator separator})
-  (default prefix "")
-  (default suffix "")
-  (default separator ", ")
-
-  (defn wrap [s]
-    (string prefix s suffix))
-
-  (defn join [items]
-    (string/join (map string items) separator))
-
-  {:wrap wrap :join join})
+# (fn [&named prefix suffix separator]
+#   (default prefix "")
+#   (default suffix "")
+#   (default separator ", ")
+#   (defn wrap [s] (string prefix s suffix))
+#   (defn join [items] (string/join (map string items) separator))
+#   {:wrap wrap :join join})
 ```
 
-```text
-(let ([fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")])
-  (fmt:wrap "hello")          # => "[hello]"
-  (fmt:join [1 2 3]))         # => "1 | 2 | 3"
+```lisp
+# (let ([fmt ((import "formatter.lisp") :prefix "[" :suffix "]" :separator " | ")])
+#   (fmt:wrap "hello")          # => "[hello]"
+#   (fmt:join [1 2 3]))         # => "1 | 2 | 3"
 ```
 
 Each call to the closure captures its own configuration. Two imports with
 different arguments produce independent instances:
 
-```text
-(let ([parens  ((import "formatter.lisp") :prefix "(" :suffix ")")]
-      [angles  ((import "formatter.lisp") :prefix "<" :suffix ">")])
-  (parens:wrap "x")           # => "(x)"
-  (angles:wrap "x"))          # => "<x>"
+```lisp
+# (let ([parens  ((import "formatter.lisp") :prefix "(" :suffix ")")]
+#       [angles  ((import "formatter.lisp") :prefix "<" :suffix ">")])
+#   (parens:wrap "x")           # => "(x)"
+#   (angles:wrap "x"))          # => "<x>"
 ```
 
 This is ML's functor pattern without any dedicated syntax.
@@ -139,28 +134,26 @@ A common pattern: a library module depends on a native plugin but doesn't
 import it directly. Instead, the caller imports the plugin and passes it
 to the library:
 
-```text
+```lisp
 # lib/mqtt.lisp — takes the mqtt plugin as a parameter
-(fn [plugin]
-  (defn connect [host port &keys opts]
-    # ... uses plugin:encode, plugin:decode internally
-    ...)
-  (defn subscribe [conn topics] ...)
-  (defn recv [conn] ...)
-  (defn close [conn] ...)
-  {:connect connect :subscribe subscribe :recv recv :close close})
+# (fn [plugin]
+#   (defn connect [host port &keys opts] ...)
+#   (defn subscribe [conn topics] ...)
+#   (defn recv [conn] ...)
+#   (defn close [conn] ...)
+#   {:connect connect :subscribe subscribe :recv recv :close close})
 ```
 
-```text
+```lisp
 # Caller: import the plugin, pass it to the library
-(def mqtt-plugin (import "plugin/mqtt"))
-(def mqtt ((import "lib/mqtt") mqtt-plugin))
-
-(let [[conn (mqtt:connect "broker.example.com" 1883
-                          :client-id "elle-client")]]
-  (mqtt:subscribe conn [["test/#" 0]])
-  (println "got:" (mqtt:recv conn))
-  (mqtt:close conn))
+# (def mqtt-plugin (import "plugin/mqtt"))
+# (def mqtt ((import "lib/mqtt") mqtt-plugin))
+#
+# (let [[conn (mqtt:connect "broker.example.com" 1883
+#                           :client-id "elle-client")]]
+#   (mqtt:subscribe conn [["test/#" 0]])
+#   (println "got:" (mqtt:recv conn))
+#   (mqtt:close conn))
 ```
 
 This decouples the library from the plugin's path — the library is pure
@@ -174,18 +167,18 @@ library works with mock plugins for testing.
 
 Bind the whole module, access via `mod:name`:
 
-```text
-(def portrait ((import "lib/portrait")))
-(portrait:function analysis :my-fn)
+```lisp
+# (def portrait ((import "lib/portrait")))
+# (portrait:function analysis :my-fn)
 ```
 
 ### Destructured (flat)
 
 Pull specific names into scope:
 
-```text
-(def {:parse parse :pretty pretty} ((import "json.lisp") :pretty-indent 4))
-(pretty (parse input))
+```lisp
+# (def {:parse parse :pretty pretty} ((import "json.lisp") :pretty-indent 4))
+# (pretty (parse input))
 ```
 
 ### Side-effect only
@@ -195,9 +188,9 @@ the file runs for its side effects. But because files are compiled as a single
 letrec, top-level `defn` forms are local to the file — no definitions leak
 into the caller's scope:
 
-```text
-(import "helpers.lisp")
-(double 21)                   # error: undefined variable: double
+```lisp
+# (import "helpers.lisp")
+# (double 21)                   # error: undefined variable: double
 ```
 
 The only way to use a file's definitions is to have the file return them
@@ -208,16 +201,16 @@ explicitly (closure pattern) and bind the result.
 Native plugins return a struct from `elle_plugin_init` and register their
 primitives globally:
 
-```text
-(import "plugin/random")
-(random/int 1 100)
+```lisp
+# (import "plugin/random")
+# (random/int 1 100)
 ```
 
 The return value is also a struct, so the qualified pattern works:
 
-```text
-(let ([rng (import "plugin/random")])
-  (rng:int 1 100))
+```lisp
+# (let ([rng (import "plugin/random")])
+#   (rng:int 1 100))
 ```
 
 
@@ -230,9 +223,9 @@ importing file's compiler. By the time `import` runs, expansion is finished.
 `include` and `include-file` solve this by splicing a file's source forms
 directly into the including file at compile time, before macro expansion:
 
-```text
-(include-file "macros.lisp")      # relative to current file
-(include "lib/macros")            # uses search-path resolution
+```lisp
+# (include-file "macros.lisp")      — relative to current file
+# (include "lib/macros")            — uses search-path resolution
 ```
 
 ### How it works
