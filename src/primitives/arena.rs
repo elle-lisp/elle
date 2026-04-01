@@ -307,7 +307,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/stats",
         func: prim_arena_stats,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Range(0, 1),
         doc: "Return heap arena statistics. With no args: stats for the current fiber. With a fiber arg: stats for a suspended/dead fiber. Returns a struct with :object-count, :peak-count, :allocated-bytes, :object-limit, :scope-depth, :dtor-count, :root-live-count, :root-alloc-count, :shared-count, :active-allocator, :scope-enter-count, :scope-dtor-count.",
         params: &["fiber?"],
@@ -384,7 +384,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "arena/allocs",
         func: prim_arena_allocs,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Run thunk, return (result . net-allocs) where net-allocs is the net heap objects allocated.",
         params: &["thunk"],

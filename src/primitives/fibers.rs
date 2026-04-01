@@ -31,7 +31,7 @@ fn resolve_keyword_slice(
     context: &str,
 ) -> Result<SignalBits, (SignalBits, Value)> {
     let reg = crate::signals::registry::global_registry().lock().unwrap();
-    let mut bits = SignalBits::new(0);
+    let mut bits = SignalBits::EMPTY;
     for elem in elems {
         let name = elem.as_keyword_name().ok_or_else(|| {
             (
@@ -55,7 +55,7 @@ fn resolve_keyword_slice(
                 ),
             )
         })?;
-        bits = SignalBits::new(bits.0 | b.0);
+        bits = bits.union(b);
     }
     Ok(bits)
 }
@@ -66,7 +66,7 @@ pub(crate) fn resolve_signal_bits(
 ) -> Result<SignalBits, (SignalBits, Value)> {
     // 1. Integer passthrough (existing behavior)
     if let Some(i) = val.as_int() {
-        return Ok(SignalBits::new(i as u32));
+        return Ok(SignalBits::from_i64(i));
     }
 
     // 2. Single keyword
@@ -87,7 +87,7 @@ pub(crate) fn resolve_signal_bits(
     // 3. Set of keywords
     if let Some(set) = val.as_set() {
         let reg = crate::signals::registry::global_registry().lock().unwrap();
-        let mut bits = SignalBits::new(0);
+        let mut bits = SignalBits::EMPTY;
         for elem in set.iter() {
             let name = elem.as_keyword_name().ok_or_else(|| {
                 (
@@ -111,7 +111,7 @@ pub(crate) fn resolve_signal_bits(
                     ),
                 )
             })?;
-            bits = SignalBits::new(bits.0 | b.0);
+            bits = bits.union(b);
         }
         return Ok(bits);
     }
@@ -130,7 +130,7 @@ pub(crate) fn resolve_signal_bits(
     // 6. List of keywords (cons chain)
     if val.as_cons().is_some() {
         let reg = crate::signals::registry::global_registry().lock().unwrap();
-        let mut bits = SignalBits::new(0);
+        let mut bits = SignalBits::EMPTY;
         let mut current = *val;
         while let Some(cons) = current.as_cons() {
             let name = cons.first.as_keyword_name().ok_or_else(|| {
@@ -155,7 +155,7 @@ pub(crate) fn resolve_signal_bits(
                     ),
                 )
             })?;
-            bits = SignalBits::new(bits.0 | b.0);
+            bits = bits.union(b);
             current = cons.rest;
         }
         return Ok(bits);
@@ -515,7 +515,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/resume",
         func: prim_fiber_resume,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_RESUME.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_RESUME),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),
@@ -638,14 +638,14 @@ mod tests {
         Value::closure(Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         })
     }
 
     #[test]
     fn test_fiber_new() {
         let closure = make_test_closure();
-        let mask = Value::int((SIG_ERROR | SIG_YIELD).bits() as i64);
+        let mask = Value::int((SIG_ERROR | SIG_YIELD).raw() as i64);
         let (sig, fiber_val) = prim_fiber_new(&[closure, mask]);
         assert_eq!(sig, SIG_OK);
         assert!(fiber_val.is_fiber());
@@ -717,7 +717,7 @@ mod tests {
 
     #[test]
     fn test_fiber_signal() {
-        let bits = Value::int(SIG_YIELD.bits() as i64);
+        let bits = Value::int(SIG_YIELD.raw() as i64);
         let value = Value::int(42);
         let (sig, val) = prim_emit(&[bits, value]);
         assert_eq!(sig, SIG_YIELD);

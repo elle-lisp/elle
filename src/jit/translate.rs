@@ -22,6 +22,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::lir::{Label, LirInstr, Reg, Terminator};
+use crate::value::fiber::SignalBits;
 use crate::value::repr::{TAG_FALSE, TAG_NIL, TAG_TRUE};
 use crate::value::SymbolId;
 
@@ -638,7 +639,7 @@ impl<'a> FunctionTranslator<'a> {
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
                     env: std::rc::Rc::new(vec![]),
-                    squelch_mask: 0,
+                    squelch_mask: SignalBits::EMPTY,
                 };
                 let template_value = crate::value::Value::closure(template_closure);
 
@@ -1040,7 +1041,7 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
-                let allowed_val = builder.ins().iconst(I64, *allowed_bits as i64);
+                let allowed_val = builder.ins().iconst(I64, allowed_bits.raw() as i64);
                 let vm = self.vm_ptr.ok_or_else(|| {
                     JitError::InvalidLir("CheckSignalBound without vm pointer".to_string())
                 })?;

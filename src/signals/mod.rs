@@ -54,7 +54,7 @@ pub const SIG_DEBUG: SignalBits = SignalBits::new(1 << 2); // breakpoint / trace
 pub const SIG_RESUME: SignalBits = SignalBits::new(1 << 3); // fiber resumption (VM-internal)
 pub const SIG_FFI: SignalBits = SignalBits::new(1 << 4); // calls foreign code
 pub const SIG_PROPAGATE: SignalBits = SignalBits::new(1 << 5); // propagate caught signal (VM-internal)
-pub const SIG_ABORT: SignalBits = SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0); // graceful fiber termination with error injection (VM-internal)
+pub const SIG_ABORT: SignalBits = SIG_ERROR.union(SIG_TERMINAL); // graceful fiber termination with error injection (VM-internal)
 pub const SIG_QUERY: SignalBits = SignalBits::new(1 << 7); // VM state query (VM-internal)
 pub const SIG_HALT: SignalBits = SignalBits::new(1 << 8); // graceful VM termination
 pub const SIG_IO: SignalBits = SignalBits::new(1 << 9); // I/O request to scheduler
@@ -117,7 +117,7 @@ impl Signal {
     /// May yield and may error.
     pub const fn yields_errors() -> Self {
         Signal {
-            bits: SignalBits::new(SIG_YIELD.0 | SIG_ERROR.0),
+            bits: SIG_YIELD.union(SIG_ERROR),
             propagates: 0,
         }
     }
@@ -125,7 +125,7 @@ impl Signal {
     /// May halt the VM (non-resumable termination with return value).
     pub const fn halts() -> Self {
         Signal {
-            bits: SignalBits::new(SIG_HALT.0 | SIG_ERROR.0),
+            bits: SIG_HALT.union(SIG_ERROR),
             propagates: 0,
         }
     }
@@ -142,7 +142,7 @@ impl Signal {
     /// Used for FFI primitives that validate arguments before calling C.
     pub const fn ffi_errors() -> Self {
         Signal {
-            bits: SignalBits::new(SIG_FFI.0 | SIG_ERROR.0),
+            bits: SIG_FFI.union(SIG_ERROR),
             propagates: 0,
         }
     }
@@ -167,7 +167,7 @@ impl Signal {
     /// Signal bits are ORed. Propagation masks are ORed.
     pub const fn combine(self, other: Signal) -> Signal {
         Signal {
-            bits: SignalBits::new(self.bits.0 | other.bits.0),
+            bits: self.bits.union(other.bits),
             propagates: self.propagates | other.propagates,
         }
     }
@@ -189,33 +189,32 @@ impl Signal {
     /// Suspension signals: yield, debug. Polymorphic signals may also
     /// suspend (depends on the argument's signal at the call site).
     pub const fn may_suspend(&self) -> bool {
-        const SUSPENSION_BITS: u32 = SIG_YIELD.0 | SIG_DEBUG.0;
-        (self.bits.0 & SUSPENSION_BITS) != 0 || self.propagates != 0
+        self.bits.intersects(SIG_YIELD.union(SIG_DEBUG)) || self.propagates != 0
     }
 
     /// Can this function yield (cooperative suspension)?
     pub const fn may_yield(&self) -> bool {
-        self.bits.0 & SIG_YIELD.0 != 0
+        self.bits.intersects(SIG_YIELD)
     }
 
     /// Can this function error?
     pub const fn may_error(&self) -> bool {
-        self.bits.0 & SIG_ERROR.0 != 0
+        self.bits.intersects(SIG_ERROR)
     }
 
     /// Can this function halt the VM?
     pub const fn may_halt(&self) -> bool {
-        self.bits.0 & SIG_HALT.0 != 0
+        self.bits.intersects(SIG_HALT)
     }
 
     /// Does this function call foreign code?
     pub const fn may_ffi(&self) -> bool {
-        self.bits.0 & SIG_FFI.0 != 0
+        self.bits.intersects(SIG_FFI)
     }
 
     /// Can this function perform I/O?
     pub const fn may_io(&self) -> bool {
-        self.bits.0 & SIG_IO.0 != 0
+        self.bits.intersects(SIG_IO)
     }
 
     /// Does this function's signal depend on its arguments?
@@ -425,11 +424,11 @@ mod tests {
     #[test]
     fn test_sig_exec_bit_is_distinct() {
         // SIG_EXEC must be a unique bit (bit 11).
-        assert_eq!(SIG_EXEC.0, 1 << 11);
+        assert_eq!(SIG_EXEC, SignalBits::from_bit(11));
         // Must not overlap with any other defined signal bits.
-        assert_eq!(SIG_EXEC.0 & SIG_IO.0, 0);
-        assert_eq!(SIG_EXEC.0 & SIG_YIELD.0, 0);
-        assert_eq!(SIG_EXEC.0 & SIG_TERMINAL.0, 0);
+        assert!(!SIG_EXEC.intersects(SIG_IO));
+        assert!(!SIG_EXEC.intersects(SIG_YIELD));
+        assert!(!SIG_EXEC.intersects(SIG_TERMINAL));
     }
 
     #[test]
@@ -440,17 +439,17 @@ mod tests {
         let bit_pos = reg.lookup("exec").expect(":exec must be registered");
         // lookup returns the bit position (11), not the bitmask; verify both.
         assert_eq!(bit_pos, 11);
-        assert_eq!(1u32 << bit_pos, SIG_EXEC.0);
+        assert_eq!(SignalBits::from_bit(bit_pos), SIG_EXEC);
     }
 
     #[test]
     fn test_fuel_bit_is_distinct() {
         // SIG_FUEL must be a unique bit (bit 12).
-        assert_eq!(SIG_FUEL.0, 1 << 12);
+        assert_eq!(SIG_FUEL, SignalBits::from_bit(12));
         // Must not overlap with any other defined signal bits.
-        assert_eq!(SIG_FUEL.0 & SIG_EXEC.0, 0);
-        assert_eq!(SIG_FUEL.0 & SIG_IO.0, 0);
-        assert_eq!(SIG_FUEL.0 & SIG_TERMINAL.0, 0);
+        assert!(!SIG_FUEL.intersects(SIG_EXEC));
+        assert!(!SIG_FUEL.intersects(SIG_IO));
+        assert!(!SIG_FUEL.intersects(SIG_TERMINAL));
     }
 
     #[test]
@@ -459,6 +458,6 @@ mod tests {
         let reg = global_registry().lock().unwrap();
         let bit_pos = reg.lookup("fuel").expect(":fuel must be registered");
         assert_eq!(bit_pos, 12);
-        assert_eq!(1u32 << bit_pos, SIG_FUEL.0);
+        assert_eq!(SignalBits::from_bit(bit_pos), SIG_FUEL);
     }
 }

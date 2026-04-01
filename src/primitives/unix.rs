@@ -164,7 +164,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_unix_accept,
         arity: Arity::AtLeast(1),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Accept a connection on a Unix listener. Returns a stream port.",
@@ -178,7 +178,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_unix_connect,
         arity: Arity::AtLeast(1),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Connect to a Unix domain socket. Returns a stream port.",
@@ -192,7 +192,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_unix_shutdown,
         arity: Arity::Exact(2),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Shutdown a Unix stream. how: :read, :write, or :read-write.",

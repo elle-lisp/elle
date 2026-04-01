@@ -18,7 +18,7 @@ pub(crate) struct TailCallInfo {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
-    pub squelch_mask: u32,
+    pub squelch_mask: SignalBits,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -125,7 +125,7 @@ fn root_closure() -> Rc<Closure> {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     })
 }
 
@@ -555,8 +555,8 @@ impl VM {
                                 self.fiber.suspended.as_ref().map(|v| v.len()).unwrap_or(0);
                             let remaining = frames.len() - i - 1;
                             eprintln!(
-                                "[resume_suspended] frame {} non-OK: bits=0x{:x} susp_frames={} remaining={}",
-                                i, exec.bits.0, susp_len, remaining,
+                                "[resume_suspended] frame {} non-OK: bits={} susp_frames={} remaining={}",
+                                i, exec.bits, susp_len, remaining,
                             );
                         }
                         if !exec.bits.contains(SIG_HALT) && self.fiber.suspended.is_none() {
@@ -612,9 +612,9 @@ mod tests {
     fn test_signal_bits() {
         use crate::value::{SIG_ERROR, SIG_OK, SIG_YIELD};
 
-        assert_eq!(SIG_OK.bits(), 0);
-        assert_eq!(SIG_ERROR.bits(), 1);
-        assert_eq!(SIG_YIELD.bits(), 2);
+        assert_eq!(SIG_OK.raw(), 0);
+        assert_eq!(SIG_ERROR.raw(), 1);
+        assert_eq!(SIG_YIELD.raw(), 2);
 
         let mask = SIG_ERROR | SIG_YIELD;
         assert!(mask.contains(SIG_ERROR));

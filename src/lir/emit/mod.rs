@@ -7,6 +7,7 @@ mod stack;
 
 use super::types::*;
 use crate::compiler::bytecode::{Bytecode, Instruction};
+use crate::value::fiber::SignalBits;
 use crate::value::{Closure, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -341,7 +342,7 @@ impl Emitter {
                 let closure = Closure {
                     template: Rc::new(template),
                     env: Rc::new(vec![]),
-                    squelch_mask: 0,
+                    squelch_mask: SignalBits::EMPTY,
                 };
 
                 // Add closure template to constants
@@ -839,9 +840,10 @@ impl Emitter {
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::CheckSignalBound);
-                // Emit u32 as two u16s (low half first, then high half)
-                self.bytecode.emit_u16(*allowed_bits as u16);
-                self.bytecode.emit_u16((*allowed_bits >> 16) as u16);
+                // Emit SignalBits raw value as two u16s (low half first, then high half)
+                let raw = allowed_bits.raw();
+                self.bytecode.emit_u16(raw as u16);
+                self.bytecode.emit_u16((raw >> 16) as u16);
                 // Value consumed by the check
                 self.pop();
             }

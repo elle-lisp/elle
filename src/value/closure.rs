@@ -8,6 +8,7 @@
 
 use crate::error::LocationMap;
 use crate::signals::Signal;
+use crate::value::fiber::SignalBits;
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -68,9 +69,9 @@ pub struct Closure {
     pub template: Rc<ClosureTemplate>,
     /// Captured environment (upvalues)
     pub env: Rc<Vec<Value>>,
-    /// Per-instance squelch mask. 0 = no squelch; non-zero bits identify
+    /// Per-instance squelch mask. Empty = no squelch; non-empty bits identify
     /// signals that are suppressed at the call boundary and converted to errors.
-    pub squelch_mask: u32,
+    pub squelch_mask: SignalBits,
 }
 
 impl Closure {
@@ -82,19 +83,21 @@ impl Closure {
     /// When the mask doesn't suppress anything the closure emits, returns
     /// the template signal unchanged (no spurious SIG_ERROR added).
     pub fn effective_signal(&self) -> Signal {
-        if self.squelch_mask == 0 {
+        if self.squelch_mask.is_empty() {
             return self.template.signal;
         }
-        let template_bits = self.template.signal.bits.0;
-        let actually_squelched = template_bits & self.squelch_mask;
-        if actually_squelched == 0 {
+        let template_bits = self.template.signal.bits;
+        let actually_squelched = template_bits.intersection(self.squelch_mask);
+        if actually_squelched.is_empty() {
             // Mask doesn't suppress anything this closure actually emits.
             return self.template.signal;
         }
         // Clear squelched bits; add SIG_ERROR (squelch converts to error)
-        let new_bits = (template_bits & !self.squelch_mask) | crate::signals::SIG_ERROR.0;
+        let new_bits = template_bits
+            .subtract(self.squelch_mask)
+            .union(crate::signals::SIG_ERROR);
         Signal {
-            bits: crate::value::fiber::SignalBits(new_bits),
+            bits: new_bits,
             propagates: self.template.signal.propagates,
         }
     }
@@ -173,7 +176,7 @@ mod tests {
         let closure = Closure {
             template: make_template(),
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.signal(), Signal::silent());
         assert_eq!(closure.effective_signal(), Signal::silent());
@@ -205,7 +208,7 @@ mod tests {
         let closure = Closure {
             template,
             env: Rc::new(vec![Value::NIL, Value::NIL]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.env_capacity(), 7);
 
@@ -233,7 +236,7 @@ mod tests {
         let closure2 = Closure {
             template: template2,
             env: Rc::new(vec![Value::NIL]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure2.env_capacity(), 5);
 
@@ -261,7 +264,7 @@ mod tests {
         let closure3 = Closure {
             template: template3,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure3.env_capacity(), 3);
     }
@@ -271,7 +274,7 @@ mod tests {
         let closure = Closure {
             template: make_template(),
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.effective_signal(), Signal::silent());
     }
@@ -286,13 +289,10 @@ mod tests {
         let closure = Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: SIG_YIELD.0,
+            squelch_mask: SIG_YIELD,
         };
         let eff = closure.effective_signal();
-        assert_eq!(
-            eff.bits,
-            crate::value::fiber::SignalBits(crate::signals::SIG_ERROR.0)
-        );
+        assert_eq!(eff.bits, crate::signals::SIG_ERROR);
         assert_eq!(eff.propagates, 0);
     }
 
@@ -302,7 +302,7 @@ mod tests {
         let closure = Closure {
             template: make_template(), // signal = silent()
             env: Rc::new(vec![]),
-            squelch_mask: SIG_YIELD.0,
+            squelch_mask: SIG_YIELD,
         };
         assert_eq!(closure.effective_signal(), Signal::silent());
     }
@@ -312,7 +312,7 @@ mod tests {
         use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
         let template = Rc::new(ClosureTemplate {
             signal: Signal {
-                bits: crate::value::fiber::SignalBits(SIG_YIELD.0 | SIG_IO.0),
+                bits: SIG_YIELD.union(SIG_IO),
                 propagates: 0,
             },
             ..(*make_template()).clone()
@@ -320,13 +320,13 @@ mod tests {
         let closure = Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: SIG_YIELD.0, // only squelch yield
+            squelch_mask: SIG_YIELD, // only squelch yield
         };
         let eff = closure.effective_signal();
         // SIG_YIELD cleared, SIG_IO still set, SIG_ERROR added
-        assert!(eff.bits.0 & SIG_ERROR.0 != 0, "SIG_ERROR should be set");
-        assert!(eff.bits.0 & SIG_YIELD.0 == 0, "SIG_YIELD should be cleared");
-        assert!(eff.bits.0 & SIG_IO.0 != 0, "SIG_IO should remain set");
+        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
+        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
+        assert!(eff.bits.contains(SIG_IO), "SIG_IO should remain set");
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
         use crate::signals::{SIG_ERROR, SIG_IO, SIG_YIELD};
         let template = Rc::new(ClosureTemplate {
             signal: Signal {
-                bits: crate::value::fiber::SignalBits(SIG_YIELD.0 | SIG_IO.0),
+                bits: SIG_YIELD.union(SIG_IO),
                 propagates: 0,
             },
             ..(*make_template()).clone()
@@ -342,17 +342,17 @@ mod tests {
         let closure1 = Closure {
             template: template.clone(),
             env: Rc::new(vec![]),
-            squelch_mask: SIG_YIELD.0,
+            squelch_mask: SIG_YIELD,
         };
         // Simulate composing a second squelch
         let closure2 = Closure {
             template: template.clone(),
             env: Rc::new(vec![]),
-            squelch_mask: closure1.squelch_mask | SIG_IO.0,
+            squelch_mask: closure1.squelch_mask.union(SIG_IO),
         };
         let eff = closure2.effective_signal();
-        assert!(eff.bits.0 & SIG_ERROR.0 != 0, "SIG_ERROR should be set");
-        assert!(eff.bits.0 & SIG_YIELD.0 == 0, "SIG_YIELD should be cleared");
-        assert!(eff.bits.0 & SIG_IO.0 == 0, "SIG_IO should be cleared");
+        assert!(eff.bits.contains(SIG_ERROR), "SIG_ERROR should be set");
+        assert!(!eff.bits.contains(SIG_YIELD), "SIG_YIELD should be cleared");
+        assert!(!eff.bits.contains(SIG_IO), "SIG_IO should be cleared");
     }
 }

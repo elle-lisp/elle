@@ -47,7 +47,7 @@ pub(crate) fn prim_fiber_bits(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let bits = handle.with(|fiber| fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(SIG_OK));
-    (SIG_OK, Value::int(bits.bits() as i64))
+    (SIG_OK, Value::int(bits.raw() as i64))
 }
 
 /// (fiber/mask fiber) → int
@@ -78,7 +78,7 @@ pub(crate) fn prim_fiber_mask(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let mask = handle.with(|fiber| fiber.mask);
-    (SIG_OK, Value::int(mask.bits() as i64))
+    (SIG_OK, Value::int(mask.raw() as i64))
 }
 
 /// (fiber? value) → bool
@@ -395,7 +395,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/cancel",
         func: prim_fiber_cancel,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_TERMINAL.0),
+            bits: SIG_ERROR.union(SIG_TERMINAL),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),
@@ -431,7 +431,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/propagate",
         func: prim_fiber_propagate,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_PROPAGATE.0),
+            bits: SIG_ERROR.union(SIG_PROPAGATE),
             propagates: 0,
         },
         arity: Arity::Exact(1),
@@ -445,7 +445,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/abort",
         func: prim_fiber_abort,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_ABORT.0),
+            bits: SIG_ERROR.union(SIG_ABORT),
             propagates: 0,
         },
         arity: Arity::Range(1, 2),

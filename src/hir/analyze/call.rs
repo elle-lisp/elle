@@ -53,7 +53,7 @@ impl<'a> Analyzer<'a> {
             if let Some(first_arg_kind) = args.first().map(|a| &a.expr.kind) {
                 match first_arg_kind {
                     HirKind::Int(bits) => Signal {
-                        bits: crate::value::fiber::SignalBits(*bits as u32),
+                        bits: crate::value::fiber::SignalBits::from_i64(*bits),
                         propagates: 0,
                     },
                     HirKind::Keyword(kw) => {
@@ -65,9 +65,8 @@ impl<'a> Analyzer<'a> {
                             // Also include the specific user signal bit for accurate
                             // squelch checking at the static type level.
                             Signal {
-                                bits: crate::value::fiber::SignalBits(
-                                    (1 << bit_pos) | crate::signals::SIG_YIELD.0,
-                                ),
+                                bits: crate::value::fiber::SignalBits::from_bit(bit_pos)
+                                    .union(crate::signals::SIG_YIELD),
                                 propagates: 0,
                             }
                         } else {
@@ -300,11 +299,11 @@ impl<'a> Analyzer<'a> {
         // All suspension comes from parameter calls - infer Polymorphic over them.
         // silence-bounded parameters contribute their bound's bits directly (not polymorphic).
         let mut propagates: u32 = 0;
-        let mut bound_bits: u32 = 0;
+        let mut bound_bits = crate::value::fiber::SignalBits::EMPTY;
         for binding_id in &self.current_signal_sources.param_calls {
             if let Some(bound) = self.current_param_bounds.get(binding_id) {
                 // Silence: contribute bound's bits directly (not polymorphic)
-                bound_bits |= bound.bits.0;
+                bound_bits = bound_bits.union(bound.bits);
             } else if let Some(idx) = params.iter().position(|p| p == binding_id) {
                 // Unbounded: polymorphic propagation
                 propagates |= 1 << idx;
@@ -312,7 +311,7 @@ impl<'a> Analyzer<'a> {
         }
 
         Signal {
-            bits: crate::value::fiber::SignalBits(bound_bits),
+            bits: bound_bits,
             propagates,
         }
     }

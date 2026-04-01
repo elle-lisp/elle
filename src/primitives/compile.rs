@@ -783,7 +783,7 @@ fn signal_to_value(sig: &Signal) -> Value {
     // :bits as keyword set
     let mut bit_set = BTreeSet::new();
     for entry in registry.entries() {
-        if sig.bits.0 & (1 << entry.bit_position) != 0 {
+        if sig.bits.has_bit(entry.bit_position) {
             bit_set.insert(Value::keyword(&entry.name));
         }
     }
@@ -799,9 +799,9 @@ fn signal_to_value(sig: &Signal) -> Value {
     fields.insert(kw("propagates"), Value::set(prop_set));
 
     // Derived convenience booleans
-    let silent = sig.bits.0 == 0 && sig.propagates == 0;
+    let silent = sig.bits.is_empty() && sig.propagates == 0;
     let yields = sig.may_suspend();
-    let io = sig.bits.0 & (1 << 9) != 0; // SIG_IO
+    let io = sig.bits.contains(crate::signals::SIG_IO);
     fields.insert(kw("silent"), Value::bool(silent));
     fields.insert(kw("yields"), Value::bool(yields));
     fields.insert(kw("io"), Value::bool(io));
@@ -1113,13 +1113,13 @@ pub(crate) fn prim_compile_query_signal(args: &[Value]) -> (SignalBits, Value) {
         .signal_map
         .iter()
         .filter(|(_, sig)| match query.as_str() {
-            "silent" => sig.bits.0 == 0 && sig.propagates == 0,
+            "silent" => sig.bits.is_empty() && sig.propagates == 0,
             "jit-eligible" => !sig.may_suspend(),
             "yields" => sig.may_suspend(),
             other => {
                 // Look up as a signal name.
                 if let Some(bit_pos) = registry.lookup(other) {
-                    sig.bits.0 & (1 << bit_pos) != 0
+                    sig.bits.has_bit(bit_pos)
                 } else {
                     false
                 }
@@ -2207,7 +2207,7 @@ fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
     };
     drop(registry);
 
-    if sig.bits.0 & (1 << bit) == 0 && sig.propagates & (1 << bit) == 0 {
+    if !sig.bits.has_bit(bit) && sig.propagates & (1 << bit) == 0 {
         return (
             SIG_ERROR,
             error_val(

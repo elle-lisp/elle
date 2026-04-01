@@ -177,22 +177,67 @@ pub enum SuspendedFrame {
 
 /// Signal type bits. The first 16 are compiler-reserved.
 ///
-/// Newtype over `u32` providing named methods (`contains`, `is_ok`, `bits`)
-/// and bitwise operator impls. The inner field is `pub` for `const` contexts
-/// where trait methods cannot be called.
+/// Newtype over `u32` providing named methods and bitwise operator impls.
+///
+/// The inner representation is an implementation detail. All code outside
+/// this impl block should use the provided methods instead of accessing
+/// the raw field. This allows changing the underlying integer width
+/// (e.g. to `u64`) with a single edit to this definition.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignalBits(pub u32);
+pub struct SignalBits(u32);
 
 impl SignalBits {
+    // -- Constructors --------------------------------------------------------
+
+    /// Wrap a raw bitmask.
     pub const fn new(bits: u32) -> Self {
         SignalBits(bits)
     }
-    pub fn is_ok(self) -> bool {
+
+    /// The empty set (no signals).
+    pub const EMPTY: SignalBits = SignalBits(0);
+
+    /// The full set (all bits set).
+    pub const ALL: SignalBits = SignalBits(!0);
+
+    /// A single-bit mask for bit position `pos`.
+    pub const fn from_bit(pos: u32) -> Self {
+        SignalBits(1 << pos)
+    }
+
+    /// Construct from an i64 (e.g. from an Elle integer value).
+    /// Truncates to the inner width.
+    pub const fn from_i64(v: i64) -> Self {
+        SignalBits(v as u32)
+    }
+
+    // -- Predicates ----------------------------------------------------------
+
+    /// True when no bits are set (normal return / no signals).
+    pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
-    pub fn contains(self, other: SignalBits) -> bool {
+
+    /// Alias for `is_empty` — reads better in dispatch contexts.
+    pub const fn is_ok(self) -> bool {
+        self.0 == 0
+    }
+
+    /// True when `self` and `other` share at least one bit.
+    pub const fn intersects(self, other: SignalBits) -> bool {
         self.0 & other.0 != 0
     }
+
+    /// Alias for `intersects` — existing API, kept for compatibility.
+    pub const fn contains(self, other: SignalBits) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// True when `self` has bit at position `pos` set.
+    pub const fn has_bit(self, pos: u32) -> bool {
+        self.0 & (1 << pos) != 0
+    }
+
     /// True iff this mask handles `other` for signal routing purposes.
     ///
     /// Uses overlap (any shared bit) for semantic bits, but requires full
@@ -204,9 +249,41 @@ impl SignalBits {
     pub fn covers(self, other: SignalBits) -> bool {
         use crate::signals::SIG_IO;
         other.is_ok()
-            || (self.0 & other.0 != 0 && (!other.contains(SIG_IO) || self.contains(SIG_IO)))
+            || (self.intersects(other) && (!other.contains(SIG_IO) || self.contains(SIG_IO)))
     }
-    pub fn bits(self) -> u32 {
+
+    // -- Combining -----------------------------------------------------------
+
+    /// Bitwise OR (const-compatible union).
+    pub const fn union(self, other: SignalBits) -> Self {
+        SignalBits(self.0 | other.0)
+    }
+
+    /// Bitwise AND (const-compatible intersection).
+    pub const fn intersection(self, other: SignalBits) -> Self {
+        SignalBits(self.0 & other.0)
+    }
+
+    /// Bits in `self` that are NOT in `other` (const-compatible set difference).
+    pub const fn subtract(self, other: SignalBits) -> Self {
+        SignalBits(self.0 & !other.0)
+    }
+
+    /// Bitwise complement.
+    pub const fn complement(self) -> Self {
+        SignalBits(!self.0)
+    }
+
+    // -- Conversion / inspection ---------------------------------------------
+
+    /// Position of the lowest set bit (for single-bit values).
+    pub const fn trailing_zeros(self) -> u32 {
+        self.0.trailing_zeros()
+    }
+
+    /// Raw bits as `u32`. Prefer named methods; use this only for
+    /// serialization, FFI, or bytecode encoding.
+    pub const fn raw(self) -> u32 {
         self.0
     }
 }
@@ -258,13 +335,13 @@ impl std::fmt::Display for SignalBits {
 
 impl From<u32> for SignalBits {
     fn from(v: u32) -> Self {
-        SignalBits(v)
+        SignalBits::new(v)
     }
 }
 
 impl From<SignalBits> for u32 {
     fn from(v: SignalBits) -> u32 {
-        v.0
+        v.raw()
     }
 }
 
@@ -476,7 +553,7 @@ mod tests {
                 has_outward_heap_set: false,
             }),
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         })
     }
 
@@ -627,11 +704,11 @@ mod tests {
 
     #[test]
     fn test_signal_bits() {
-        assert_eq!(SIG_OK.bits(), 0);
-        assert_eq!(SIG_ERROR.bits(), 1);
-        assert_eq!(SIG_YIELD.bits(), 2);
-        assert_eq!(SIG_DEBUG.bits(), 4);
-        assert_eq!(SIG_RESUME.bits(), 8);
+        assert_eq!(SIG_OK.raw(), 0);
+        assert_eq!(SIG_ERROR.raw(), 1);
+        assert_eq!(SIG_YIELD.raw(), 2);
+        assert_eq!(SIG_DEBUG.raw(), 4);
+        assert_eq!(SIG_RESUME.raw(), 8);
 
         // Mask catches error and yield but not debug
         let mask = SIG_ERROR | SIG_YIELD;

@@ -17,11 +17,11 @@ use elle::value::SignalBits;
 #[test]
 fn signal_combine_commutative_none_none() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -30,11 +30,11 @@ fn signal_combine_commutative_none_none() {
 #[test]
 fn signal_combine_commutative_1_2() {
     let a = Signal {
-        bits: SignalBits(1),
+        bits: SignalBits::new(1),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(2),
+        bits: SignalBits::new(2),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -43,11 +43,11 @@ fn signal_combine_commutative_1_2() {
 #[test]
 fn signal_combine_commutative_3_5() {
     let a = Signal {
-        bits: SignalBits(3),
+        bits: SignalBits::new(3),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(5),
+        bits: SignalBits::new(5),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -56,11 +56,11 @@ fn signal_combine_commutative_3_5() {
 #[test]
 fn signal_combine_commutative_7_7() {
     let a = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b), b.combine(a));
@@ -73,15 +73,15 @@ fn signal_combine_commutative_7_7() {
 #[test]
 fn signal_combine_associative_none_none_none() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     let c = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -90,15 +90,15 @@ fn signal_combine_associative_none_none_none() {
 #[test]
 fn signal_combine_associative_1_2_4() {
     let a = Signal {
-        bits: SignalBits(1),
+        bits: SignalBits::new(1),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(2),
+        bits: SignalBits::new(2),
         propagates: 0,
     };
     let c = Signal {
-        bits: SignalBits(4),
+        bits: SignalBits::new(4),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -107,15 +107,15 @@ fn signal_combine_associative_1_2_4() {
 #[test]
 fn signal_combine_associative_3_5_7() {
     let a = Signal {
-        bits: SignalBits(3),
+        bits: SignalBits::new(3),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(5),
+        bits: SignalBits::new(5),
         propagates: 0,
     };
     let c = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -124,15 +124,15 @@ fn signal_combine_associative_3_5_7() {
 #[test]
 fn signal_combine_associative_all_same() {
     let a = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     let c = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(a.combine(b).combine(c), a.combine(b.combine(c)));
@@ -145,7 +145,7 @@ fn signal_combine_associative_all_same() {
 #[test]
 fn signal_combine_identity_none_right() {
     let e = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     assert_eq!(e.combine(Signal::silent()), e);
@@ -154,7 +154,7 @@ fn signal_combine_identity_none_right() {
 #[test]
 fn signal_combine_identity_none_left() {
     let e = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     assert_eq!(Signal::silent().combine(e), e);
@@ -163,7 +163,7 @@ fn signal_combine_identity_none_left() {
 #[test]
 fn signal_combine_identity_1_right() {
     let e = Signal {
-        bits: SignalBits(1),
+        bits: SignalBits::new(1),
         propagates: 0,
     };
     assert_eq!(e.combine(Signal::silent()), e);
@@ -172,7 +172,7 @@ fn signal_combine_identity_1_right() {
 #[test]
 fn signal_combine_identity_1_left() {
     let e = Signal {
-        bits: SignalBits(1),
+        bits: SignalBits::new(1),
         propagates: 0,
     };
     assert_eq!(Signal::silent().combine(e), e);
@@ -181,7 +181,7 @@ fn signal_combine_identity_1_left() {
 #[test]
 fn signal_combine_identity_7_right() {
     let e = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(e.combine(Signal::silent()), e);
@@ -190,7 +190,7 @@ fn signal_combine_identity_7_right() {
 #[test]
 fn signal_combine_identity_7_left() {
     let e = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(Signal::silent().combine(e), e);
@@ -199,7 +199,7 @@ fn signal_combine_identity_7_left() {
 #[test]
 fn signal_combine_identity_15_right() {
     let e = Signal {
-        bits: SignalBits(15),
+        bits: SignalBits::new(15),
         propagates: 0,
     };
     assert_eq!(e.combine(Signal::silent()), e);
@@ -208,7 +208,7 @@ fn signal_combine_identity_15_right() {
 #[test]
 fn signal_combine_identity_15_left() {
     let e = Signal {
-        bits: SignalBits(15),
+        bits: SignalBits::new(15),
         propagates: 0,
     };
     assert_eq!(Signal::silent().combine(e), e);
@@ -221,7 +221,7 @@ fn signal_combine_identity_15_left() {
 #[test]
 fn signal_combine_idempotent_none() {
     let e = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -230,7 +230,7 @@ fn signal_combine_idempotent_none() {
 #[test]
 fn signal_combine_idempotent_1() {
     let e = Signal {
-        bits: SignalBits(1),
+        bits: SignalBits::new(1),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -239,7 +239,7 @@ fn signal_combine_idempotent_1() {
 #[test]
 fn signal_combine_idempotent_3() {
     let e = Signal {
-        bits: SignalBits(3),
+        bits: SignalBits::new(3),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -248,7 +248,7 @@ fn signal_combine_idempotent_3() {
 #[test]
 fn signal_combine_idempotent_5() {
     let e = Signal {
-        bits: SignalBits(5),
+        bits: SignalBits::new(5),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -257,7 +257,7 @@ fn signal_combine_idempotent_5() {
 #[test]
 fn signal_combine_idempotent_7() {
     let e = Signal {
-        bits: SignalBits(7),
+        bits: SignalBits::new(7),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -266,7 +266,7 @@ fn signal_combine_idempotent_7() {
 #[test]
 fn signal_combine_idempotent_15() {
     let e = Signal {
-        bits: SignalBits(15),
+        bits: SignalBits::new(15),
         propagates: 0,
     };
     assert_eq!(e.combine(e), e);
@@ -279,11 +279,11 @@ fn signal_combine_idempotent_15() {
 #[test]
 fn signal_propagates_combine_none_none() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 0,
     };
     let combined = a.combine(b);
@@ -293,11 +293,11 @@ fn signal_propagates_combine_none_none() {
 #[test]
 fn signal_propagates_combine_1_2() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 1,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 2,
     };
     let combined = a.combine(b);
@@ -307,11 +307,11 @@ fn signal_propagates_combine_1_2() {
 #[test]
 fn signal_propagates_combine_128_255() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 128,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 255,
     };
     let combined = a.combine(b);
@@ -321,11 +321,11 @@ fn signal_propagates_combine_128_255() {
 #[test]
 fn signal_propagates_combine_same() {
     let a = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 42,
     };
     let b = Signal {
-        bits: SignalBits(0),
+        bits: SignalBits::new(0),
         propagates: 42,
     };
     let combined = a.combine(b);

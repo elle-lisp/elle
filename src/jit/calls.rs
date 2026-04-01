@@ -255,14 +255,13 @@ pub extern "C" fn elle_jit_call(
             if let Some((sig, _)) = vm.fiber.signal {
                 if !sig.is_ok() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
                     // Squelch enforcement on the JIT-to-JIT path
-                    if closure_squelch_mask != 0 {
-                        let squelched = sig.0 & closure_squelch_mask;
-                        if squelched != 0 {
+                    if !closure_squelch_mask.is_empty() {
+                        let squelched = sig.intersection(closure_squelch_mask);
+                        if !squelched.is_empty() {
                             let squelched_str = {
                                 let registry =
                                     crate::signals::registry::global_registry().lock().unwrap();
-                                registry
-                                    .format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                                registry.format_signal_bits(squelched)
                             };
                             let err = error_val(
                                 "signal-violation",
@@ -318,16 +317,16 @@ pub extern "C" fn elle_jit_call(
         // Squelch enforcement: if the closure has a squelch mask and the callee
         // returned a suspending signal that matches, convert to signal-violation.
         let bits = result.bits;
-        if closure_squelch_mask != 0
+        if !closure_squelch_mask.is_empty()
             && !bits.is_ok()
             && !bits.contains(SIG_ERROR)
             && !bits.contains(SIG_HALT)
         {
-            let squelched = bits.0 & closure_squelch_mask;
-            if squelched != 0 {
+            let squelched = bits.intersection(closure_squelch_mask);
+            if !squelched.is_empty() {
                 let squelched_str = {
                     let registry = crate::signals::registry::global_registry().lock().unwrap();
-                    registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                    registry.format_signal_bits(squelched)
                 };
                 let err = error_val(
                     "signal-violation",
@@ -543,7 +542,7 @@ pub extern "C" fn elle_jit_make_closure(
     let result = Value::closure(crate::value::Closure {
         template: closure_template,
         env: std::rc::Rc::new(env),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
     JitValue::from_value(result)
 }
@@ -896,7 +895,7 @@ mod tests {
 
     #[test]
     fn user_defined_signal_treated_as_suspension() {
-        let user_bit = SignalBits::new(1 << 16);
+        let user_bit = SignalBits::from_bit(16);
         let mut vm = make_vm();
         vm.fiber.signal = Some((user_bit, Value::NIL));
         let result = jit_handle_primitive_signal(&mut vm, user_bit, Value::NIL);

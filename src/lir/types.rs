@@ -369,7 +369,10 @@ pub enum LirInstr {
     /// If the value in `src` is a closure whose `signal.bits & !allowed_bits != 0`,
     /// signal `:error`. Non-closures pass silently.
     /// If the check passes, execution continues.
-    CheckSignalBound { src: Reg, allowed_bits: u32 },
+    CheckSignalBound {
+        src: Reg,
+        allowed_bits: crate::value::fiber::SignalBits,
+    },
 }
 
 /// Binary operations

@@ -1,4 +1,5 @@
 use super::core::VM;
+use crate::value::fiber::SignalBits;
 use crate::value::{Closure, Value};
 use std::rc::Rc;
 
@@ -32,7 +33,7 @@ pub(crate) fn handle_make_closure(
     let closure = Closure {
         template: template_closure.template.clone(),
         env: Rc::new(captured),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     vm.fiber.stack.push(Value::closure(closure));

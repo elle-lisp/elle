@@ -14,6 +14,7 @@ use super::repr::Value;
 use crate::error::LocationMap;
 use crate::hir::VarargKind;
 use crate::signals::Signal;
+use crate::value::fiber::SignalBits;
 use crate::value::types::Arity;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -45,7 +46,7 @@ pub struct SendableClosure {
     pub doc: Option<Box<SendValue>>,
     pub vararg_kind: VarargKind,
     pub name: Option<String>,
-    pub squelch_mask: u32,
+    pub squelch_mask: SignalBits,
     pub env: Vec<SendValue>,
 }
 
@@ -298,7 +299,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 doc: None,
                 vararg_kind: closure_rc.template.vararg_kind.clone(),
                 name: None,
-                squelch_mask: 0,
+                squelch_mask: SignalBits::EMPTY,
                 env: Vec::new(),
             });
             ctx.visited.insert(key, idx);

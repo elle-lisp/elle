@@ -557,7 +557,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/open",
         func: prim_port_open,
         signal: Signal {
-            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(2),
@@ -571,7 +571,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/open-bytes",
         func: prim_port_open_bytes,
         signal: Signal {
-            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(2),
@@ -586,7 +586,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/close",
         func: prim_port_close,
         signal: Signal {
-            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Exact(1),
@@ -677,7 +677,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/seek",
         func: prim_port_seek,
         signal: Signal {
-            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Range(2, 4),
@@ -691,7 +691,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/tell",
         func: prim_port_tell,
         signal: Signal {
-            bits: crate::value::fiber::SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Exact(1),

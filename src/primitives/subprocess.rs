@@ -730,7 +730,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
             // SIG_EXEC: capability bit for fiber mask access control.
             // SIG_IO: dispatch bit — routes through the I/O scheduler.
             // Both are emitted; dispatch is IO-based; exec bit enables capability gating.
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0 | SIG_EXEC.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
         },
         arity: Arity::Range(2, 3),
@@ -745,7 +745,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_subprocess_wait,
         signal: Signal {
             // SIG_EXEC: capability bit (same fiber mask semantics as subprocess/exec).
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0 | SIG_EXEC.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO).union(SIG_EXEC),
             propagates: 0,
         },
         arity: Arity::Exact(1),

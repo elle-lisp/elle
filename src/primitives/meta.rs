@@ -447,7 +447,7 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
 
     // Resolve signal bits from second argument (keyword, set, array, list, or integer).
     let new_bits = match crate::primitives::fibers::resolve_signal_bits(&args[1], "squelch") {
-        Ok(bits) => bits.0,
+        Ok(bits) => bits,
         Err(err) => return err,
     };
 
@@ -455,7 +455,7 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
     let new_closure = Closure {
         template: closure_rc.template.clone(),
         env: closure_rc.env.clone(),
-        squelch_mask: closure_rc.squelch_mask | new_bits,
+        squelch_mask: closure_rc.squelch_mask.union(new_bits),
     };
 
     (SIG_OK, Value::closure(new_closure))
@@ -692,7 +692,7 @@ mod tests {
         Value::closure(Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         })
     }
 
