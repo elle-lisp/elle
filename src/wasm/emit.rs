@@ -80,6 +80,10 @@ pub(super) const FN_ENTRY: u32 = 11;
 // Linear memory layout
 pub(super) const ARGS_BASE: i32 = 256;
 
+// Global index for the env stack pointer
+#[allow(dead_code)] // used when inline closure calls are emitted
+pub(super) const GLOBAL_ENV_SP: u32 = 0;
+
 /// Data operation codes for rt_data_op.
 ///
 /// These must stay in sync with `dispatch_data_op` in linker.rs.
@@ -336,6 +340,18 @@ impl WasmEmitter {
         });
         module.section(&memories);
 
+        // Global section: env stack pointer for inline closure calls
+        let mut globals = GlobalSection::new();
+        globals.global(
+            GlobalType {
+                val_type: ValType::I32,
+                mutable: true,
+                shared: false,
+            },
+            &ConstExpr::i32_const(super::host::ENV_STACK_BASE as i32),
+        );
+        module.section(&globals);
+
         // Export section
         let mut exports = ExportSection::new();
         exports.export("__elle_entry", ExportKind::Func, FN_ENTRY);
@@ -343,6 +359,7 @@ impl WasmEmitter {
         if num_closures > 0 {
             exports.export("__elle_table", ExportKind::Table, 0);
         }
+        exports.export("__elle_env_sp", ExportKind::Global, 0);
         module.section(&exports);
 
         // Element section
