@@ -31,16 +31,10 @@ Does NOT:
 
 All primitives use a single unified type. No primitive has VM access.
 Return values:
-- `(SIG_OK, value)` — success, push value onto stack
-- `(SIG_ERROR, error_val(kind, msg))` — error, stored in `fiber.signal`
-- `(SIG_RESUME, fiber_value)` — fiber resume, VM handles fiber swap
-- `(SIG_QUERY, cons(keyword, arg))` — VM state query, dispatched by `dispatch_query()` in `signal.rs`
-
-All SIG_RESUME primitives (including coroutine wrappers) return
-`(SIG_RESUME, fiber_value)`. Fiber primitives (`fiber/resume`) return SIG_RESUME with the fiber value.
-The VM swaps the child fiber into `vm.fiber`, executes it, then swaps back.
-`emit` returns the signal bits directly — the VM's catch-all handler
-stores them in `fiber.signal` and suspends the fiber.
+- `(SIG_OK, value)` — success
+- `(SIG_ERROR, error_val(kind, msg))` — error
+- `(SIG_RESUME, fiber_value)` — fiber context switch (see `vm/AGENTS.md`)
+- `(SIG_QUERY, cons(keyword, arg))` — VM state query (see `vm/AGENTS.md`)
 
 ## Adding a primitive
 

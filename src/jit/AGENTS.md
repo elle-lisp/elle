@@ -4,11 +4,10 @@ JIT compilation for Elle using Cranelift.
 
 ## Responsibility
 
-Compile `LirFunction` to native x86_64 code. Functions with `Signal::silent()`
-or `Signal::yields()` are JIT candidates. Polymorphic functions (where
-`signal.propagates != 0`) are rejected. Yielding functions use side-exit:
-JIT code calls a runtime helper that builds a `SuspendedFrame` and returns
-`YIELD_SENTINEL` to the interpreter.
+Compile `LirFunction` to native x86_64 code. Non-polymorphic functions
+are JIT candidates (see `signals/AGENTS.md` for signal definitions).
+Yielding functions use side-exit: JIT code calls a runtime helper that
+builds a `SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
 
 ## Architecture
 
@@ -42,7 +41,7 @@ type JitFn = unsafe extern "C" fn(
 ) -> Value;
 ```
 
-Values are 16 bytes (`(tag: u64, payload: u64)` pair).
+Values are 16-byte tagged unions (see `value/repr/AGENTS.md`).
 
 The 5th parameter `self_bits` enables self-tail-call optimization: when a
 function tail-calls itself, the JIT compares the callee against `self_bits`.
@@ -338,9 +337,9 @@ No errors are silently swallowed.
 10. **No silent error swallowing.** Every error path in dispatch helpers sets
     `vm.fiber.signal` to `(SIG_ERROR, condition)` before returning `TAG_NIL`.
 
-11. **Value is a 16-byte `(tag: u64, payload: u64)` pair.** JIT-to-JIT calling
-    and native function dispatch pass `*const Value` pointers directly.
-    If `Value`'s representation changes, these casts break.
+11. **Value layout is assumed stable.** JIT-to-JIT calling and native function
+    dispatch pass `*const Value` pointers directly. If Value's representation
+    changes (see `value/repr/AGENTS.md`), these casts break.
 
 12. **Yield helpers set fiber.signal and fiber.suspended.** `elle_jit_yield`
      and `elle_jit_yield_through_call` are responsible for building the
