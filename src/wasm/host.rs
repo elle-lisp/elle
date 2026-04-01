@@ -270,11 +270,24 @@ impl ElleHost {
         &mut self,
         request: &IoRequest,
     ) -> (crate::value::fiber::SignalBits, Value) {
-        let backend = self.io_backend.get_or_insert_with(|| {
-            AnyBackend(Box::new(
-                crate::io::aio::AsyncBackend::new().expect("failed to create I/O backend"),
-            ))
-        });
+        let backend = match &self.io_backend {
+            Some(_) => self.io_backend.as_ref().unwrap(),
+            None => match crate::io::aio::AsyncBackend::new() {
+                Ok(be) => {
+                    self.io_backend = Some(AnyBackend(Box::new(be)));
+                    self.io_backend.as_ref().unwrap()
+                }
+                Err(e) => {
+                    return (
+                        crate::value::fiber::SIG_ERROR,
+                        crate::value::error_val(
+                            "io-error",
+                            format!("failed to create I/O backend: {}", e),
+                        ),
+                    );
+                }
+            },
+        };
         if let Ok(_id) = backend.0.submit(request) {
             if let Ok(completions) = backend.0.wait(-1) {
                 if let Some(c) = completions.into_iter().next() {
