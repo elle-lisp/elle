@@ -136,7 +136,10 @@ Properties:
 
 7. **Macro expansion is cached.** The `cache` module maintains a thread-local
     `Expander` and `VM` for macro expansion. This avoids re-parsing the prelude
-    and re-initializing the VM on every compilation.
+    and re-initializing the VM on every compilation. Callers access the VM
+    via `with_compilation_cache(|vm, expander, meta| { ... })` — the `RefCell`
+    borrow is held for the duration of the closure, so re-entrancy is caught
+    by the type system (runtime borrow panic) rather than convention.
 
 ## Files
 

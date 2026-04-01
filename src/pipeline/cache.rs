@@ -31,20 +31,16 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// Get or initialize the compilation cache, returning a VM with reset fiber,
-/// a cloned Expander, and cloned PrimitiveMeta.
+/// Run a closure with access to the cached macro-expansion VM.
 ///
-/// The VM's fiber is always reset before use. The Expander is cloned so that
-/// each pipeline call gets independent expansion state (scope IDs, depth).
-///
-/// # Safety / Lifetime
-///
-/// Returns a raw pointer to the cached VM. The VM lives in a thread-local
-/// RefCell; the borrow is released before this function returns, so the
-/// caller must not call `get_compilation_cache` again while the VM pointer
-/// is live. This is safe because pipeline functions are not re-entrant
-/// (`eval_syntax` receives its own `&mut VM`, not the cache VM).
-pub(super) fn get_compilation_cache() -> (*mut VM, Expander, PrimitiveMeta) {
+/// The VM's fiber is reset before each use. The Expander is cloned so
+/// each call gets independent expansion state. The RefCell borrow is
+/// held for the duration of `f`, so re-entrant calls will panic at the
+/// borrow check — enforced by the type system, not convention.
+pub(super) fn with_compilation_cache<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut VM, Expander, PrimitiveMeta) -> R,
+{
     COMPILATION_CACHE.with(|cache| {
         let mut cache_ref = cache.borrow_mut();
         let c = cache_ref.get_or_insert_with(|| {
@@ -66,8 +62,7 @@ pub(super) fn get_compilation_cache() -> (*mut VM, Expander, PrimitiveMeta) {
 
         let expander = c.expander.clone();
         let meta = c.meta.clone();
-        let vm_ptr = &mut c.vm as *mut VM;
-        (vm_ptr, expander, meta)
+        f(&mut c.vm, expander, meta)
     })
 }
 

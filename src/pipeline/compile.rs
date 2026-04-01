@@ -28,11 +28,10 @@ pub fn compile(
     let syntax = read_syntax(source, source_name)?;
 
     // Phase 2: Macro expansion (cached VM for macro bodies)
-    let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
-    // SAFETY: The cached VM is thread-local and pipeline functions are not
-    // re-entrant. The RefCell borrow was released by get_compilation_cache.
-    let macro_vm = unsafe { &mut *macro_vm_ptr };
-    let expanded = expander.expand(syntax, symbols, macro_vm)?;
+    let (expanded, meta) = cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+        let expanded = expander.expand(syntax, symbols, macro_vm)?;
+        Ok::<_, String>((expanded, meta))
+    })?;
 
     // Phase 3: Analyze to HIR with interprocedural signal and arity tracking
     let mut arena = BindingArena::new();
@@ -133,43 +132,41 @@ fn compile_file_inner(
         crate::epoch::migrate_forms(&mut syntaxes, epoch)?;
     }
 
-    let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
-    // SAFETY: The cached VM is thread-local and pipeline functions are not
-    // re-entrant. The RefCell borrow was released by get_compilation_cache.
-    let macro_vm = unsafe { &mut *macro_vm_ptr };
-
-    // Expand all forms, splicing include/include-file inline
-    let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
-    let mut expanded_forms = Vec::new();
-    let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
-    while let Some(syntax) = pending.pop_front() {
-        if let Some((spec, is_include)) = extract_include(&syntax) {
-            let path = if is_include {
-                crate::primitives::modules::resolve_import(&spec)
-            } else {
-                resolve_include_file(&spec, source_name)
-            };
-            let path =
-                path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
-            if !included.insert(path.clone()) {
-                return Err(format!(
-                    "{}: include: circular dependency on '{}'",
-                    syntax.span, path
-                ));
+    // Phase 2: Macro expansion (cached VM held only for this phase)
+    let (expanded_forms, expander, meta) =
+        cache::with_compilation_cache(|macro_vm, mut expander, meta| {
+            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
+            let mut expanded_forms = Vec::new();
+            let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+            while let Some(syntax) = pending.pop_front() {
+                if let Some((spec, is_include)) = extract_include(&syntax) {
+                    let path = if is_include {
+                        crate::primitives::modules::resolve_import(&spec)
+                    } else {
+                        resolve_include_file(&spec, source_name)
+                    };
+                    let path = path
+                        .ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+                    if !included.insert(path.clone()) {
+                        return Err(format!(
+                            "{}: include: circular dependency on '{}'",
+                            syntax.span, path
+                        ));
+                    }
+                    let contents = std::fs::read_to_string(&path).map_err(|e| {
+                        format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
+                    })?;
+                    let forms = read_syntax_all_for(&contents, &path)?;
+                    for (i, form) in forms.into_iter().enumerate() {
+                        pending.insert(i, form);
+                    }
+                    continue;
+                }
+                let expanded = expander.expand(syntax, symbols, macro_vm)?;
+                expanded_forms.push(expanded);
             }
-            let contents = std::fs::read_to_string(&path).map_err(|e| {
-                format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
-            })?;
-            let forms = read_syntax_all_for(&contents, &path)?;
-            // Splice at the front so they expand next, in order
-            for (i, form) in forms.into_iter().enumerate() {
-                pending.insert(i, form);
-            }
-            continue;
-        }
-        let expanded = expander.expand(syntax, symbols, macro_vm)?;
-        expanded_forms.push(expanded);
-    }
+            Ok((expanded_forms, expander, meta))
+        })?;
 
     // Classify each form
     let forms: Vec<FileForm> = expanded_forms.iter().map(classify_form).collect();
