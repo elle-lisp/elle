@@ -1,17 +1,11 @@
 //! I/O subsystem: request types and backends.
 //!
-//! ## Backend model separation
-//!
-//! `SyncBackend` (in `backend/`) and `IoBackend` (this module) are
-//! intentionally separate interfaces for separate execution models.
-//! `SyncBackend` uses a blocking `execute()` model — one call, one result.
-//! `IoBackend` uses a submission-and-completion async model: `submit` enqueues
-//! a request; `poll`/`wait` harvest completions; `cancel` aborts in-flight
-//! work. They are NOT related by inheritance or trait implementation. Do not
-//! attempt to unify them under a single trait.
+//! `IoBackend` is the async submission-and-completion model: `submit`
+//! enqueues a request; `poll`/`wait` harvest completions; `cancel`
+//! aborts in-flight work.  Implemented by `AsyncBackend` (io_uring or
+//! thread pool) and `MockBackend` (in-memory, deterministic).
 
 pub mod aio;
-pub mod backend;
 pub(crate) mod completion;
 pub(crate) mod mock;
 pub(crate) mod pending;

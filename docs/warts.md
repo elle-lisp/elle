@@ -19,10 +19,6 @@ another.  No unified strategy, no safety wrapper.
 into `context.rs`.  The former `*mut VM` in `pipeline/cache.rs` was
 replaced with a closure-based API that holds the `RefCell` borrow.)
 
-### SyncBackend + AsyncBackend duplication
 
-Port buffering logic is ~70% duplicated between the sync and async
-backends. The shared buffering code should be factored out.
-(Process spawning was deduplicated into `SpawnRequest::spawn_to_struct`.)
 
 
