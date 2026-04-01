@@ -9,14 +9,11 @@
 //!   - `protobuf/fields` — list fields of a message
 //!   - `protobuf/enums` — list enum types in a pool
 
-use std::collections::BTreeMap;
-
-use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::SignalBits;
 use elle::value::types::Arity;
-use elle::value::{TableKey, Value};
+use elle::value::Value;
 
 mod convert;
 mod inspect;
@@ -141,22 +138,4 @@ static PRIMITIVES: &[PrimitiveDef] = &[
 // ---------------------------------------------------------------------------
 // Plugin entry point
 // ---------------------------------------------------------------------------
-
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-#[no_mangle]
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    // Route keyword operations to the host's global name table.
-    // Must be called before any keyword is created or looked up.
-    ctx.init_keywords();
-
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short = def.name.strip_prefix("protobuf/").unwrap_or(def.name);
-        fields.insert(TableKey::Keyword(short.into()), Value::native_fn(def.func));
-    }
-    Value::struct_from(fields)
-}
+elle::elle_plugin_init!(PRIMITIVES, "protobuf/");

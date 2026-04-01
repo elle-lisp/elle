@@ -3,7 +3,6 @@
 //! State-machine pattern: this plugin handles MQTT packet encode/decode only.
 //! All TCP I/O happens in Elle code via `port/read`/`port/write`.
 
-use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::error_val;
@@ -42,21 +41,7 @@ pub struct MqttState {
 // ---------------------------------------------------------------------------
 // Plugin entry point
 // ---------------------------------------------------------------------------
-
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short = def.name.strip_prefix("mqtt/").unwrap_or(def.name);
-        fields.insert(TableKey::Keyword(short.into()), Value::native_fn(def.func));
-    }
-    Value::struct_from(fields)
-}
+elle::elle_plugin_init!(PRIMITIVES, "mqtt/");
 
 // ---------------------------------------------------------------------------
 // Helpers

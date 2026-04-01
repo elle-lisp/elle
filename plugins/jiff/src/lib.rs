@@ -8,7 +8,6 @@ use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::value::fiber::{SignalBits, SIG_ERROR};
 use elle::value::{error_val, TableKey, Value};
-use std::collections::BTreeMap;
 
 pub mod access;
 pub mod arith;
@@ -223,17 +222,8 @@ fn all_primitives() -> Vec<&'static PrimitiveDef> {
 #[no_mangle]
 /// # Safety
 ///
-/// Called by Elle's plugin loader via `dlsym`.  The caller must pass a valid
-/// `PluginContext` reference.
+/// Called by Elle's plugin loader via `dlsym`.
 pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    ctx.init_keywords();
-    let mut fields = BTreeMap::new();
-    for def in all_primitives() {
-        ctx.register(def);
-        fields.insert(
-            TableKey::Keyword(def.name.into()),
-            Value::native_fn(def.func),
-        );
-    }
-    Value::struct_from(fields)
+    let prims = all_primitives();
+    elle::plugin::register_and_build_refs(ctx, &prims, "")
 }

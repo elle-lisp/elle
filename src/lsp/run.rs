@@ -97,6 +97,27 @@ fn extract_prefix_at_position(text: &str, line: u32, character: u32) -> String {
     target_line[start..col].to_string()
 }
 
+/// Extract (uri, line, character) from a textDocument/position request.
+fn extract_position(params: Option<&Value>) -> Option<(&str, u32, u32)> {
+    let params = params?;
+    let uri = params
+        .get("textDocument")
+        .and_then(|d| d.get("uri"))
+        .and_then(|u| u.as_str())?;
+    let position = params.get("position").and_then(|p| p.as_object())?;
+    let line = position.get("line").and_then(|l| l.as_u64())? as u32;
+    let character = position.get("character").and_then(|c| c.as_u64())? as u32;
+    Some((uri, line, character))
+}
+
+/// Extract the textDocument URI from params.
+fn extract_uri(params: Option<&Value>) -> Option<&str> {
+    params?
+        .get("textDocument")
+        .and_then(|d| d.get("uri"))
+        .and_then(|u| u.as_str())
+}
+
 fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value, Vec<Value>) {
     let method = request.get("method").and_then(|v| v.as_str()).unwrap_or("");
     let id = request.get("id");
@@ -275,32 +296,16 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
             })
         }
         "textDocument/hover" => {
-            let mut result = None;
-
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
-                        if let (Some(line), Some(character)) = (
-                            position.get("line").and_then(|l| l.as_u64()),
-                            position.get("character").and_then(|c| c.as_u64()),
-                        ) {
-                            if let Some(doc) = compiler_state.get_document(uri) {
-                                result = hover::find_hover_info(
-                                    line as u32,
-                                    character as u32,
-                                    &doc.symbol_index,
-                                    compiler_state.symbol_table(),
-                                    compiler_state.docs(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            let result = extract_position(params).and_then(|(uri, line, character)| {
+                let doc = compiler_state.get_document(uri)?;
+                hover::find_hover_info(
+                    line,
+                    character,
+                    &doc.symbol_index,
+                    compiler_state.symbol_table(),
+                    compiler_state.docs(),
+                )
+            });
 
             json!({
                 "jsonrpc": "2.0",
@@ -309,43 +314,20 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
             })
         }
         "textDocument/completion" => {
-            let mut items = Vec::new();
-
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
-                        if let (Some(line), Some(character)) = (
-                            position.get("line").and_then(|l| l.as_u64()),
-                            position.get("character").and_then(|c| c.as_u64()),
-                        ) {
-                            let prefix = if let Some(doc) = compiler_state.get_document(uri) {
-                                extract_prefix_at_position(
-                                    &doc.source_text,
-                                    line as u32,
-                                    character as u32,
-                                )
-                            } else {
-                                String::new()
-                            };
-
-                            if let Some(doc) = compiler_state.get_document(uri) {
-                                items = completion::get_completions(
-                                    line as u32,
-                                    character as u32,
-                                    &prefix,
-                                    &doc.symbol_index,
-                                    compiler_state.symbol_table(),
-                                    compiler_state.docs(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            let items = extract_position(params)
+                .and_then(|(uri, line, character)| {
+                    let doc = compiler_state.get_document(uri)?;
+                    let prefix = extract_prefix_at_position(&doc.source_text, line, character);
+                    Some(completion::get_completions(
+                        line,
+                        character,
+                        &prefix,
+                        &doc.symbol_index,
+                        compiler_state.symbol_table(),
+                        compiler_state.docs(),
+                    ))
+                })
+                .unwrap_or_default();
 
             json!({
                 "jsonrpc": "2.0",
@@ -357,31 +339,15 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
             })
         }
         "textDocument/definition" => {
-            let mut result = None;
-
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
-                        if let (Some(line), Some(character)) = (
-                            position.get("line").and_then(|l| l.as_u64()),
-                            position.get("character").and_then(|c| c.as_u64()),
-                        ) {
-                            if let Some(doc) = compiler_state.get_document(uri) {
-                                result = definition::find_definition(
-                                    line as u32,
-                                    character as u32,
-                                    &doc.symbol_index,
-                                    compiler_state.symbol_table(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            let result = extract_position(params).and_then(|(uri, line, character)| {
+                let doc = compiler_state.get_document(uri)?;
+                definition::find_definition(
+                    line,
+                    character,
+                    &doc.symbol_index,
+                    compiler_state.symbol_table(),
+                )
+            });
 
             json!({
                 "jsonrpc": "2.0",
@@ -390,38 +356,23 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
             })
         }
         "textDocument/references" => {
-            let mut results = Vec::new();
-
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
-                        if let (Some(line), Some(character)) = (
-                            position.get("line").and_then(|l| l.as_u64()),
-                            position.get("character").and_then(|c| c.as_u64()),
-                        ) {
-                            let include_declaration = params
-                                .get("context")
-                                .and_then(|ctx| ctx.get("includeDeclaration"))
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-
-                            if let Some(doc) = compiler_state.get_document(uri) {
-                                results = references::find_references(
-                                    line as u32,
-                                    character as u32,
-                                    include_declaration,
-                                    &doc.symbol_index,
-                                    compiler_state.symbol_table(),
-                                );
-                            }
-                        }
-                    }
-                }
-            }
+            let results = extract_position(params)
+                .and_then(|(uri, line, character)| {
+                    let include_declaration = params
+                        .and_then(|p| p.get("context"))
+                        .and_then(|ctx| ctx.get("includeDeclaration"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let doc = compiler_state.get_document(uri)?;
+                    Some(references::find_references(
+                        line,
+                        character,
+                        include_declaration,
+                        &doc.symbol_index,
+                        compiler_state.symbol_table(),
+                    ))
+                })
+                .unwrap_or_default();
 
             json!({
                 "jsonrpc": "2.0",
@@ -430,99 +381,61 @@ fn handle_request(request: &Value, compiler_state: &mut CompilerState) -> (Value
             })
         }
         "textDocument/formatting" => {
-            let mut result = Vec::new();
-            let mut error = None;
+            let uri = extract_uri(params);
+            let fmt_result = uri.and_then(|u| compiler_state.get_document(u)).map(|doc| {
+                let (end_line, end_char) = formatting::document_end_position(&doc.source_text);
+                formatting::format_document(&doc.source_text, end_line, end_char)
+            });
 
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(doc) = compiler_state.get_document(uri) {
-                        let (end_line, end_char) =
-                            formatting::document_end_position(&doc.source_text);
-
-                        match formatting::format_document(&doc.source_text, end_line, end_char) {
-                            Ok(edits) => result = edits,
-                            Err(e) => {
-                                error = Some(json!({
-                                    "code": -32603,
-                                    "message": format!("Formatting error: {}", e)
-                                }));
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(err) = error {
-                json!({
+            match fmt_result {
+                Some(Err(e)) => json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "error": err
-                })
-            } else {
-                json!({
+                    "error": { "code": -32603, "message": format!("Formatting error: {e}") }
+                }),
+                Some(Ok(edits)) => json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": result
-                })
+                    "result": edits
+                }),
+                None => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": []
+                }),
             }
         }
         "textDocument/rename" => {
-            let mut result = None;
-            let mut error = None;
+            let rename_result = extract_position(params).and_then(|(uri, line, character)| {
+                let new_name = params?.get("newName")?.as_str()?;
+                let doc = compiler_state.get_document(uri)?;
+                Some(rename::rename_symbol(
+                    line,
+                    character,
+                    new_name,
+                    &doc.symbol_index,
+                    compiler_state.symbol_table(),
+                    &doc.source_text,
+                    uri,
+                ))
+            });
 
-            if let Some(params) = params {
-                if let Some(uri) = params
-                    .get("textDocument")
-                    .and_then(|d| d.get("uri"))
-                    .and_then(|u| u.as_str())
-                {
-                    if let Some(position) = params.get("position").and_then(|p| p.as_object()) {
-                        if let (Some(line), Some(character)) = (
-                            position.get("line").and_then(|l| l.as_u64()),
-                            position.get("character").and_then(|c| c.as_u64()),
-                        ) {
-                            if let Some(new_name) = params.get("newName").and_then(|n| n.as_str()) {
-                                if let Some(doc) = compiler_state.get_document(uri) {
-                                    match rename::rename_symbol(
-                                        line as u32,
-                                        character as u32,
-                                        new_name,
-                                        &doc.symbol_index,
-                                        compiler_state.symbol_table(),
-                                        &doc.source_text,
-                                        uri,
-                                    ) {
-                                        Ok(workspace_edit) => result = Some(workspace_edit),
-                                        Err(e) => {
-                                            error = Some(json!({
-                                                "code": -32603,
-                                                "message": e.description()
-                                            }));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            if let Some(err) = error {
-                json!({
+            match rename_result {
+                Some(Ok(workspace_edit)) => json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "error": err
-                })
-            } else {
-                json!({
+                    "result": workspace_edit
+                }),
+                Some(Err(e)) => json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": result
-                })
+                    "error": { "code": -32603, "message": e.description() }
+                }),
+                None => json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": null
+                }),
             }
         }
         _ => {

@@ -17,6 +17,17 @@ Plugins are compiled as Rust cdylib crates that export an `elle_plugin_init` fun
 3. The plugin registers its primitives via `context.register(def)`
 4. The loader installs all registered primitives into the VM
 
+Most plugins use the `elle_plugin_init!` macro:
+```rust
+elle::elle_plugin_init!(PRIMITIVES, "mymod/");
+```
+This generates the `#[no_mangle] pub unsafe extern "C" fn elle_plugin_init`,
+calls `init_keywords()`, registers all primitives, strips the prefix to
+build the module struct, and returns it.
+
+For plugins that need custom init logic, call `elle::plugin::register_and_build()`
+directly (see `tls` and `jiff` for examples).
+
 **Important:** Plugins must be compiled against the same version of Elle. There is no stable ABI — version skew will crash.
 
 ## Available plugins
@@ -95,25 +106,31 @@ load_plugin(&mut vm, &mut symbols, "path/to/plugin.so")?;
    ```
 3. Create `src/lib.rs`:
    ```rust
-   use elle::plugin::PluginContext;
    use elle::primitives::def::PrimitiveDef;
+   use elle::signals::Signal;
+   use elle::value::fiber::{SignalBits, SIG_OK};
+   use elle::value::types::Arity;
    use elle::value::Value;
 
-   pub fn prim_my_function(args: &[Value]) -> (SignalBits, Value) {
+   fn prim_my_function(args: &[Value]) -> (SignalBits, Value) {
        // Implementation
    }
 
-   const MY_PRIMITIVE: PrimitiveDef = PrimitiveDef {
-       name: "my/function",
-       func: prim_my_function,
-       // ... other fields
-   };
+   static PRIMITIVES: &[PrimitiveDef] = &[
+       PrimitiveDef {
+           name: "myplugin/function",
+           func: prim_my_function,
+           signal: Signal::silent(),
+           arity: Arity::Exact(1),
+           doc: "Does something.",
+           params: &["x"],
+           category: "myplugin",
+           example: "(myplugin/function 42)",
+           aliases: &[],
+       },
+   ];
 
-   #[no_mangle]
-   pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-       ctx.register(&MY_PRIMITIVE);
-       Value::true_()
-   }
+   elle::elle_plugin_init!(PRIMITIVES, "myplugin/");
    ```
 4. Build: `cargo build --release`
 5. Load: `(import "target/release/libelle_myplugin.so")`

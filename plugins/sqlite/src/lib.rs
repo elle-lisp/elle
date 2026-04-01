@@ -1,6 +1,5 @@
 //! Elle SQLite plugin — database access via the `rusqlite` crate.
 
-use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -10,25 +9,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short_name = def.name.strip_prefix("sqlite/").unwrap_or(def.name);
-        fields.insert(
-            TableKey::Keyword(short_name.into()),
-            Value::native_fn(def.func),
-        );
-    }
-    Value::struct_from(fields)
-}
+elle::elle_plugin_init!(PRIMITIVES, "sqlite/");
 
 // ---------------------------------------------------------------------------
 // Helpers

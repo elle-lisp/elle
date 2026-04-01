@@ -1,6 +1,5 @@
 //! Elle xml plugin — XML parsing and serialization via the `quick-xml` crate.
 
-use elle::plugin::PluginContext;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
@@ -12,30 +11,7 @@ use quick_xml::Writer;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io::Cursor;
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
-    // Route keyword interning to the host's table — required because each
-    // cdylib gets its own copy of `KEYWORD_NAMES`. Without this, keywords
-    // created here are invisible to the host and vice versa.
-    ctx.init_keywords();
-
-    let mut fields = BTreeMap::new();
-    for def in PRIMITIVES {
-        ctx.register(def);
-        let short_name = def.name.strip_prefix("xml/").unwrap_or(def.name);
-        fields.insert(
-            TableKey::Keyword(short_name.into()),
-            Value::native_fn(def.func),
-        );
-    }
-    Value::struct_from(fields)
-}
+elle::elle_plugin_init!(PRIMITIVES, "xml/");
 
 // ---------------------------------------------------------------------------
 // DOM parser helpers

@@ -2,93 +2,78 @@ use super::core::VM;
 use crate::arithmetic;
 use crate::value::{error_val, Value, SIG_ERROR};
 
-pub(crate) fn handle_add_int(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on AddInt");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on AddInt");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "+: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
+// ---------------------------------------------------------------------------
+// Macros to eliminate the binary-op copy-paste
+// ---------------------------------------------------------------------------
+
+/// Binary integer op: pop two ints, apply `$op`, push result.
+macro_rules! int_binop {
+    ($name:ident, $instr:literal, $sym:literal, $op:expr) => {
+        pub(crate) fn $name(vm: &mut VM) {
+            let b_val = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $instr));
+            let a_val = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $instr));
+            let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
+                vm.fiber.signal = Some((
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            concat!($sym, ": expected integers, got {} and {}"),
+                            a_val.type_name(),
+                            b_val.type_name(),
+                        ),
+                    ),
+                ));
+                vm.fiber.stack.push(Value::NIL);
+                return;
+            };
+            vm.fiber.stack.push(Value::int($op(a, b)));
+        }
     };
-    vm.fiber.stack.push(Value::int(a + b));
 }
 
-pub(crate) fn handle_sub_int(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on SubInt");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on SubInt");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "-: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
+/// Generic binary op via arithmetic module: pop two values, delegate.
+macro_rules! generic_binop {
+    ($name:ident, $instr:literal, $arith_fn:path) => {
+        pub(crate) fn $name(vm: &mut VM) {
+            let b = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $instr));
+            let a = vm
+                .fiber
+                .stack
+                .pop()
+                .expect(concat!("VM bug: Stack underflow on ", $instr));
+            match $arith_fn(&a, &b) {
+                Ok(result) => vm.fiber.stack.push(result),
+                Err(err_val) => {
+                    vm.fiber.signal = Some((SIG_ERROR, err_val));
+                    vm.fiber.stack.push(Value::NIL);
+                }
+            }
+        }
     };
-    vm.fiber.stack.push(Value::int(a - b));
 }
 
-pub(crate) fn handle_mul_int(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on MulInt");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on MulInt");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "*: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
-    };
-    vm.fiber.stack.push(Value::int(a * b));
-}
+// ---------------------------------------------------------------------------
+// Integer-specialized ops
+// ---------------------------------------------------------------------------
 
+int_binop!(handle_add_int, "AddInt", "+", |a: i64, b: i64| a + b);
+int_binop!(handle_sub_int, "SubInt", "-", |a: i64, b: i64| a - b);
+int_binop!(handle_mul_int, "MulInt", "*", |a: i64, b: i64| a * b);
+
+// DivInt needs special div-by-zero handling
 pub(crate) fn handle_div_int(vm: &mut VM) {
     let b_val = vm
         .fiber
@@ -123,72 +108,16 @@ pub(crate) fn handle_div_int(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a / b));
 }
 
-pub(crate) fn handle_add(vm: &mut VM) {
-    let b = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Add");
-    let a = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Add");
-    match arithmetic::add_values(&a, &b) {
-        Ok(result) => {
-            vm.fiber.stack.push(result);
-        }
-        Err(err_val) => {
-            vm.fiber.signal = Some((SIG_ERROR, err_val));
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Generic (mixed int/float) ops
+// ---------------------------------------------------------------------------
 
-pub(crate) fn handle_sub(vm: &mut VM) {
-    let b = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Sub");
-    let a = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Sub");
-    match arithmetic::sub_values(&a, &b) {
-        Ok(result) => {
-            vm.fiber.stack.push(result);
-        }
-        Err(err_val) => {
-            vm.fiber.signal = Some((SIG_ERROR, err_val));
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-}
+generic_binop!(handle_add, "Add", arithmetic::add_values);
+generic_binop!(handle_sub, "Sub", arithmetic::sub_values);
+generic_binop!(handle_mul, "Mul", arithmetic::mul_values);
+generic_binop!(handle_rem, "Rem", arithmetic::remainder_values);
 
-pub(crate) fn handle_mul(vm: &mut VM) {
-    let b = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Mul");
-    let a = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Mul");
-    match arithmetic::mul_values(&a, &b) {
-        Ok(result) => {
-            vm.fiber.stack.push(result);
-        }
-        Err(err_val) => {
-            vm.fiber.signal = Some((SIG_ERROR, err_val));
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-}
-
+// Div needs the integer div-by-zero pre-check
 pub(crate) fn handle_div(vm: &mut VM) {
     let b = vm
         .fiber
@@ -212,9 +141,7 @@ pub(crate) fn handle_div(vm: &mut VM) {
     }
 
     match arithmetic::div_values(&a, &b) {
-        Ok(result) => {
-            vm.fiber.stack.push(result);
-        }
+        Ok(result) => vm.fiber.stack.push(result),
         Err(err_val) => {
             vm.fiber.signal = Some((SIG_ERROR, err_val));
             vm.fiber.stack.push(Value::NIL);
@@ -222,115 +149,15 @@ pub(crate) fn handle_div(vm: &mut VM) {
     }
 }
 
-pub(crate) fn handle_rem(vm: &mut VM) {
-    let b = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Rem");
-    let a = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on Rem");
-    match arithmetic::remainder_values(&a, &b) {
-        Ok(result) => {
-            vm.fiber.stack.push(result);
-        }
-        Err(err_val) => {
-            vm.fiber.signal = Some((SIG_ERROR, err_val));
-            vm.fiber.stack.push(Value::NIL);
-        }
-    }
-}
+// ---------------------------------------------------------------------------
+// Bitwise ops
+// ---------------------------------------------------------------------------
 
-pub(crate) fn handle_bit_and(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitAnd");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitAnd");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "bit-and: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
-    };
-    vm.fiber.stack.push(Value::int(a & b));
-}
+int_binop!(handle_bit_and, "BitAnd", "bit-and", |a: i64, b: i64| a & b);
+int_binop!(handle_bit_or, "BitOr", "bit-or", |a: i64, b: i64| a | b);
+int_binop!(handle_bit_xor, "BitXor", "bit-xor", |a: i64, b: i64| a ^ b);
 
-pub(crate) fn handle_bit_or(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitOr");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitOr");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "bit-or: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
-    };
-    vm.fiber.stack.push(Value::int(a | b));
-}
-
-pub(crate) fn handle_bit_xor(vm: &mut VM) {
-    let b_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitXor");
-    let a_val = vm
-        .fiber
-        .stack
-        .pop()
-        .expect("VM bug: Stack underflow on BitXor");
-    let (Some(a), Some(b)) = (a_val.as_int(), b_val.as_int()) else {
-        vm.fiber.signal = Some((
-            SIG_ERROR,
-            error_val(
-                "type-error",
-                format!(
-                    "bit-xor: expected integers, got {} and {}",
-                    a_val.type_name(),
-                    b_val.type_name()
-                ),
-            ),
-        ));
-        vm.fiber.stack.push(Value::NIL);
-        return;
-    };
-    vm.fiber.stack.push(Value::int(a ^ b));
-}
-
+// BitNot is unary — no macro
 pub(crate) fn handle_bit_not(vm: &mut VM) {
     let a_val = vm
         .fiber
@@ -351,6 +178,7 @@ pub(crate) fn handle_bit_not(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(!a));
 }
 
+// Shifts need clamping — keep explicit
 pub(crate) fn handle_shl(vm: &mut VM) {
     let b_val = vm
         .fiber
@@ -377,7 +205,6 @@ pub(crate) fn handle_shl(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    // Clamp shift amount to valid range to avoid panic
     let shift = b.clamp(0, 63) as u32;
     vm.fiber.stack.push(Value::int(a << shift));
 }
@@ -408,7 +235,6 @@ pub(crate) fn handle_shr(vm: &mut VM) {
         vm.fiber.stack.push(Value::NIL);
         return;
     };
-    // Clamp shift amount to valid range to avoid panic
     let shift = b.clamp(0, 63) as u32;
     vm.fiber.stack.push(Value::int(a >> shift));
 }
