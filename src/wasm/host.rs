@@ -88,6 +88,11 @@ pub struct ElleHost {
     /// Populated from EmitResult so rt_make_closure can give WASM closures
     /// valid bytecode for cross-thread execution via spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
+    /// Active resume frame — the frame being used during resume_wasm_closure.
+    /// Popped from the suspension stack before the WASM call so that new
+    /// frames pushed during the call don't interfere. rt_load_saved_reg
+    /// reads from this instead of last_suspension_frame() during resume.
+    pub active_resume_frame: Option<WasmSuspensionFrame>,
 }
 
 impl ElleHost {
@@ -104,6 +109,7 @@ impl ElleHost {
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
+            active_resume_frame: None,
         }
     }
 }

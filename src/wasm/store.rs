@@ -583,7 +583,14 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         "rt_load_saved_reg",
         |caller: Caller<'_, ElleHost>, index: i32| -> (i64, i64) {
             let host = caller.data();
-            if let Some(frame) = host.last_suspension_frame() {
+            // During resume_wasm_closure, the frame is in active_resume_frame
+            // (popped before the WASM call). Fall back to last_suspension_frame
+            // for non-resume contexts (e.g., run_module re-entry).
+            let frame_ref = host
+                .active_resume_frame
+                .as_ref()
+                .or_else(|| host.last_suspension_frame());
+            if let Some(frame) = frame_ref {
                 if (index as usize) < frame.saved_regs.len() {
                     let (tag, pay) = frame.saved_regs[index as usize];
                     if std::env::var_os("ELLE_WASM_DEBUG").is_some() && index < 5 {
@@ -1022,13 +1029,16 @@ pub fn resume_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
     resume_val: Value,
 ) -> Option<(i64, i64, i32)> {
-    // Don't pop the frame yet — rt_load_saved_reg needs to read from it
-    // during the WASM function's resume prologue. Extract metadata first.
-    let frame = caller.data().last_suspension_frame()?;
+    // Pop the frame BEFORE the WASM call. During the call, new frames may
+    // be pushed (yield-through-call), and popping afterwards would remove a
+    // new frame instead of the old one. The frame is stored in
+    // active_resume_frame for rt_load_saved_reg to read during the prologue.
+    let frame = caller.data_mut().pop_suspension_frame()?;
     let wasm_func_idx = frame.wasm_func_idx;
     let resume_state = frame.resume_state;
     let env_base = frame.env_base;
     let env_snapshot = frame.env_snapshot.clone();
+    caller.data_mut().active_resume_frame = Some(frame);
 
     // Set resume value for rt_get_resume_value
     let (resume_tag, resume_pay) = caller.data_mut().value_to_wasm(resume_val);
@@ -1105,10 +1115,9 @@ pub fn resume_wasm_closure(
         &mut results,
     );
 
-    // Clear resume value and pop the old suspension frame
-    // (it was kept alive for rt_load_saved_reg during the prologue)
+    // Clear resume value and active resume frame (already popped before call)
     caller.data_mut().resume_value = None;
-    caller.data_mut().pop_suspension_frame();
+    caller.data_mut().active_resume_frame = None;
 
     match call_result {
         Ok(()) => {
@@ -1140,12 +1149,10 @@ pub fn resume_wasm_closure(
                 if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
                     eprintln!("[resume_wasm_closure] SUSPENDED AGAIN: status={}", status);
                 }
-                let sig = caller
-                    .data()
-                    .last_suspension_frame()
-                    .map(|f| f.signal_bits as i32)
-                    .unwrap_or(crate::value::fiber::SIG_YIELD.0 as i32);
-                Some((tag, payload, sig))
+                // Return SIG_YIELD (not full signal_bits) — consistent with
+                // call_wasm_closure. The full bits are on the suspension frame
+                // for handle_fiber_resume to read.
+                Some((tag, payload, crate::value::fiber::SIG_YIELD.0 as i32))
             } else {
                 // Normal return
                 caller.data_mut().env_stack_ptr = env_base;
@@ -1187,10 +1194,30 @@ pub fn resume_wasm_closure(
 
 /// Handle SIG_RESUME from fiber/resume in the WASM backend.
 ///
+/// Reverse the frame stack for a fiber and return innermost signal_bits.
+///
+/// Frames are pushed inner→outer during yield-through-call, but the
+/// resume chain must pop inner→outer (since `pop()`/`last()` take from
+/// the end). After reversal, `last()` = innermost, `pop()` = innermost
+/// first. The innermost frame's signal_bits carry the original I/O signal;
+/// outer frames only have SIG_YIELD because `call_wasm_closure` strips it.
+fn reverse_frames_and_get_signal(caller: &mut Caller<'_, ElleHost>, fiber_id: usize) -> u32 {
+    use crate::value::fiber::SIG_YIELD;
+    let frames = match caller.data_mut().suspension_frames.get_mut(&fiber_id) {
+        Some(f) if !f.is_empty() => f,
+        _ => return SIG_YIELD.0,
+    };
+    // Innermost frame is first (pushed first). Read its signal_bits.
+    let sig_bits = frames.first().map(|f| f.signal_bits).unwrap_or(SIG_YIELD.0);
+    // Reverse so pop()/last() give innermost first.
+    frames.reverse();
+    sig_bits
+}
+
 /// When `fiber/resume` returns SIG_RESUME, the fiber value contains the
 /// fiber to execute. We extract it, run its WASM closure, update status.
 fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) -> (i64, i64, i32) {
-    use crate::value::fiber::{FiberStatus, SignalBits, SIG_ERROR, SIG_YIELD};
+    use crate::value::fiber::{FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_YIELD};
 
     let fiber_handle = match fiber_value.as_fiber() {
         Some(f) => f.clone(),
@@ -1234,19 +1261,7 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
             };
             caller.data_mut().fiber_id_stack.push(fiber_id);
             let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
-            // Read signal bits from the FIRST (innermost) frame — it has the
-            // original I/O signal. Outer frames from yield-through-call only
-            // have SIG_YIELD because call_wasm_closure strips SIG_IO.
-            let frame_sig_bits = {
-                let id = caller.data().current_fiber_id();
-                caller
-                    .data()
-                    .suspension_frames
-                    .get(&id)
-                    .and_then(|frames| frames.first())
-                    .map(|f| f.signal_bits)
-                    .unwrap_or(SIG_YIELD.0)
-            };
+            let frame_sig_bits = reverse_frames_and_get_signal(caller, fiber_id);
             caller.data_mut().fiber_id_stack.pop();
 
             if signal == yield_signal {
@@ -1265,10 +1280,18 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
                 });
                 (tag, payload, 0) // caught by fiber
             } else if signal != 0 {
-                fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                let err_val = caller.data().wasm_to_value(tag, payload);
+                fiber_handle.with_mut(|f| {
+                    f.status = FiberStatus::Error;
+                    f.signal = Some((SignalBits::new(signal as u32), err_val));
+                });
                 (tag, payload, signal)
             } else {
-                fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                let ret_val = caller.data().wasm_to_value(tag, payload);
+                fiber_handle.with_mut(|f| {
+                    f.status = FiberStatus::Dead;
+                    f.signal = Some((SIG_OK, ret_val));
+                });
                 (tag, payload, 0)
             }
         }
@@ -1277,30 +1300,32 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
 
             caller.data_mut().fiber_id_stack.push(fiber_id);
             let result = resume_wasm_closure(caller, resume_value);
-
             let ret = match result {
                 Some((tag, payload, signal)) => {
                     if signal == yield_signal {
                         let yielded = caller.data().wasm_to_value(tag, payload);
-                        let sig_bits = caller
-                            .data()
-                            .last_suspension_frame()
-                            .map(|f| f.signal_bits)
-                            .unwrap_or(SIG_YIELD.0);
+                        let sig_bits = reverse_frames_and_get_signal(caller, fiber_id);
                         fiber_handle.with_mut(|f| {
                             f.status = FiberStatus::Paused;
                             f.signal = Some((SignalBits::new(sig_bits), yielded));
                         });
                         (tag, payload, 0)
                     } else if signal != 0 {
-                        fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                        let err_val = caller.data().wasm_to_value(tag, payload);
+                        fiber_handle.with_mut(|f| {
+                            f.status = FiberStatus::Error;
+                            f.signal = Some((SignalBits::new(signal as u32), err_val));
+                        });
                         (tag, payload, signal)
                     } else {
                         // Resume chain for yield-through-call
                         let mut result_val = caller.data().wasm_to_value(tag, payload);
                         loop {
                             if !caller.data().has_suspension_frames() {
-                                fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                                fiber_handle.with_mut(|f| {
+                                    f.status = FiberStatus::Dead;
+                                    f.signal = Some((SIG_OK, result_val));
+                                });
                                 let (t, p) = caller.data_mut().value_to_wasm(result_val);
                                 break (t, p, 0);
                             }
@@ -1308,24 +1333,28 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
                                 Some((t, p, s)) => {
                                     if s == yield_signal {
                                         let yielded = caller.data().wasm_to_value(t, p);
-                                        let sig_bits = caller
-                                            .data()
-                                            .last_suspension_frame()
-                                            .map(|f| f.signal_bits)
-                                            .unwrap_or(SIG_YIELD.0);
+                                        let sig_bits =
+                                            reverse_frames_and_get_signal(caller, fiber_id);
                                         fiber_handle.with_mut(|f| {
                                             f.status = FiberStatus::Paused;
                                             f.signal = Some((SignalBits::new(sig_bits), yielded));
                                         });
                                         break (t, p, 0);
                                     } else if s != 0 {
-                                        fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
+                                        let err_val = caller.data().wasm_to_value(t, p);
+                                        fiber_handle.with_mut(|f| {
+                                            f.status = FiberStatus::Error;
+                                            f.signal = Some((SignalBits::new(s as u32), err_val));
+                                        });
                                         break (t, p, s);
                                     }
                                     result_val = caller.data().wasm_to_value(t, p);
                                 }
                                 None => {
-                                    fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                                    fiber_handle.with_mut(|f| {
+                                        f.status = FiberStatus::Dead;
+                                        f.signal = Some((SIG_OK, result_val));
+                                    });
                                     let (t, p) = caller.data_mut().value_to_wasm(result_val);
                                     break (t, p, 0);
                                 }
@@ -1334,7 +1363,10 @@ fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) ->
                     }
                 }
                 None => {
-                    fiber_handle.with_mut(|f| f.status = FiberStatus::Dead);
+                    fiber_handle.with_mut(|f| {
+                        f.status = FiberStatus::Dead;
+                        f.signal = Some((SIG_OK, Value::NIL));
+                    });
                     let (tag, payload) = caller.data_mut().value_to_wasm(Value::NIL);
                     (tag, payload, 0)
                 }
