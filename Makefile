@@ -1,14 +1,14 @@
-.PHONY: all elle dev plugins docs docgen examples smoke test plugin-tests test-git check-plugin-list clean help \
-       examples-vm examples-jit smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit
+.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git check-plugin-list clean help \
+       smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit doctest
+
+.DEFAULT_GOAL := all
 
 ifdef GITHUB_ACTIONS
-  JOBS      ?= 4
-  ELLE      ?= ./target/release/elle
-else      
-  JOBS      ?= 16
-  ELLE      ?= ./target/debug/elle
-  FAST_ELLE ?= ./target/release/elle
-  examples: dev
+  JOBS    ?= 4
+  ELLE    ?= ./target/release/elle
+else
+  JOBS    ?= 16
+  ELLE    ?= ./target/debug/elle
   plugin-tests: plugins
 endif
 TIMEOUT ?= 30s
@@ -20,6 +20,7 @@ PLUGINS := \
     compress \
     crypto \
     csv \
+    egui \
     git \
     glob \
     hash \
@@ -92,49 +93,35 @@ ELLE_JIT_THRESHOLD := 0
 # (eval = dynamic compilation)
 WASM_SKIP := -e eval.lisp
 
-examples-vm:
-	@echo "=== examples (VM, JIT disabled) ==="
-	@export ELLE_JIT=0 &&printf '%s\n' examples/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: examples VM-only pass (JIT was disabled)"; exit 1; }
-
-examples-jit:
-	@echo "=== examples (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) && printf '%s\n' examples/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: examples JIT pass (JIT was enabled, threshold=1)"; exit 1; }
-
-examples: examples-vm examples-jit  ## Run all examples (VM then JIT)
-
-smoke-vm: examples-vm
+smoke-vm:
 	@echo "=== elle scripts (VM, JIT disabled) ==="
-	@export ELLE_JIT=0 && printf '%s\n' tests/elle/*.lisp | \
+	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
 
-smoke-jit: examples-jit
+smoke-jit:
 	@echo "=== elle scripts (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) && printf '%s\n' tests/elle/*.lisp | \
+	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' tests/elle/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
 			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled)"; exit 1; }
+		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
 smoke-wasm:
-	@echo "=== examples (WASM backend) ==="
-	@export ELLE_WASM=1 && printf '%s\n' examples/*.lisp | \
-		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s $(FAST_ELLE) {}' \
-		|| { echo "FAILED: examples WASM pass"; exit 1; }
 	@echo "=== elle scripts (WASM backend) ==="
 	@export ELLE_WASM=1 && printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s $(FAST_ELLE) {}' \
+			'timeout 300s $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
+
+doctest:  ## Test code examples in documentation (literate mode)
+	@echo "=== doctest ==="
+	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: doctest"; exit 1; }
 
 smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest
 	cargo build --release -p elle -q
