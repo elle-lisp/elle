@@ -1983,6 +1983,7 @@ fn prim_compile_extract(args: &[Value]) -> (SignalBits, Value) {
 
     let free_vars: Vec<String> = referenced
         .difference(&defined)
+        .filter(|b| !handle.arena.get(**b).is_primitive)
         .filter_map(|b| {
             symbols
                 .name(handle.arena.get(*b).name)

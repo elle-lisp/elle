@@ -9,6 +9,9 @@ mod error_reporting {
 mod repl_exit_codes {
     include!("repl_exit_codes.rs");
 }
+mod repl {
+    include!("repl.rs");
+}
 mod new_pipeline {
     include!("new_pipeline.rs");
 }
