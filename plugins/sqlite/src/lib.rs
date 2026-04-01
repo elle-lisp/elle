@@ -9,13 +9,6 @@ use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
 elle::elle_plugin_init!(PRIMITIVES, "sqlite/");
 
 // ---------------------------------------------------------------------------

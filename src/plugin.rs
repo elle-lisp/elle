@@ -127,6 +127,12 @@ pub fn register_and_build_refs(
 #[macro_export]
 macro_rules! elle_plugin_init {
     ($prims:expr, $prefix:expr) => {
+        // #[used] ensures clippy's dead-code analysis sees PRIMITIVES as
+        // reachable even in --all-targets (test) builds, where #[no_mangle]
+        // from a macro expansion isn't traced through.
+        #[used]
+        static _ELLE_PLUGIN_PRIMS: &[$crate::primitives::def::PrimitiveDef] = $prims;
+
         #[no_mangle]
         pub unsafe extern "C" fn elle_plugin_init(
             ctx: &mut $crate::plugin::PluginContext,

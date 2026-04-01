@@ -220,6 +220,9 @@ fn all_primitives() -> Vec<&'static PrimitiveDef> {
 }
 
 #[no_mangle]
+/// # Safety
+///
+/// Called by Elle's plugin loader via `dlsym`.
 pub unsafe extern "C" fn elle_plugin_init(ctx: &mut PluginContext) -> Value {
     let prims = all_primitives();
     elle::plugin::register_and_build_refs(ctx, &prims, "")

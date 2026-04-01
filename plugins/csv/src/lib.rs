@@ -7,13 +7,6 @@ use elle::signals::Signal;
 use elle::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use elle::value::types::{Arity, TableKey};
 use elle::value::{error_val, Value};
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
 elle::elle_plugin_init!(PRIMITIVES, "csv/");
 
 // ---------------------------------------------------------------------------

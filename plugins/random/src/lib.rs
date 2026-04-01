@@ -21,13 +21,6 @@ fn csprng() -> &'static Mutex<ChaCha20Rng> {
     static CSPRNG: OnceLock<Mutex<ChaCha20Rng>> = OnceLock::new();
     CSPRNG.get_or_init(|| Mutex::new(ChaCha20Rng::from_os_rng()))
 }
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
 elle::elle_plugin_init!(PRIMITIVES, "random/");
 
 // ---------------------------------------------------------------------------

@@ -18,11 +18,6 @@ use crate::ui::Interactions;
 use crate::window::WindowState;
 
 // ── Entry point ──────────────────────────────────────────────────────
-
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`.
 elle::elle_plugin_init!(PRIMITIVES, "egui/");
 
 // ── Helpers ──────────────────────────────────────────────────────────

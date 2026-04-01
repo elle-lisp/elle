@@ -13,14 +13,6 @@ mod tags;
 use elle::primitives::def::PrimitiveDef;
 use elle::signals::Signal;
 use elle::value::types::Arity;
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-///
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-#[no_mangle]
 elle::elle_plugin_init!(PRIMITIVES, "git/");
 
 // ---------------------------------------------------------------------------

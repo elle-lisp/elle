@@ -7,13 +7,6 @@ use elle::value::types::Arity;
 use elle::value::{error_val, TableKey, Value};
 use regex::Regex;
 use std::collections::BTreeMap;
-
-/// Plugin entry point. Called by Elle when loading the `.so`.
-#[no_mangle]
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
 elle::elle_plugin_init!(PRIMITIVES, "regex/");
 
 // ---------------------------------------------------------------------------

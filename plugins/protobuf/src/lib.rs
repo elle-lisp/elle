@@ -138,10 +138,4 @@ static PRIMITIVES: &[PrimitiveDef] = &[
 // ---------------------------------------------------------------------------
 // Plugin entry point
 // ---------------------------------------------------------------------------
-
-/// # Safety
-///
-/// Called by Elle's plugin loader via `dlsym`. The caller must pass a valid
-/// `PluginContext` reference. Only safe when called from `load_plugin`.
-#[no_mangle]
 elle::elle_plugin_init!(PRIMITIVES, "protobuf/");
