@@ -92,7 +92,7 @@
 # Random number generator (plugin)
 # ---------------------------------------------------------------------------
 
-(def rng (import "target/release/libelle_random.so"))
+(def rng (import "plugin/random"))
 (def rand-float (get rng :float))
 
 # ---------------------------------------------------------------------------
