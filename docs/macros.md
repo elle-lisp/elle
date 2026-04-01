@@ -143,9 +143,10 @@ syntax object makes it truthy (syntax objects are heap-allocated).
 `compile_file` shares a single `Expander` across all top-level forms,
 so macros defined in one form are visible in subsequent forms within the
 same compilation unit. The REPL compiles each form individually via
-`compile_file`, so macros defined in one REPL input are not visible in
-subsequent inputs. Persisting the Expander across REPL inputs is a
-known limitation.
+`compile_file_repl`, which returns the Expander after expansion. New
+macro definitions are merged back into the compilation cache via
+`register_repl_macros`, so macros defined in one REPL input are
+visible in all subsequent inputs.
 
 
 ## The Hygiene Problem
