@@ -212,8 +212,13 @@ enum ReadResult {
 struct FormInfo {
     /// Source text of this form (sliced from accumulated input via span byte offsets).
     source: String,
-    /// If this is `(def name ...)` or `(defn name ...)`, the name.
-    def_name: Option<String>,
+    /// Bindings introduced by this form, if any.
+    bindings: Vec<DefBinding>,
+}
+
+/// A binding introduced by a top-level def/var form.
+struct DefBinding {
+    name: String,
 }
 
 /// Try to parse source into complete forms.
@@ -230,7 +235,7 @@ fn try_read(source: &str) -> ReadResult {
                 .iter()
                 .map(|syn| FormInfo {
                     source: trimmed[syn.span.start..syn.span.end].to_string(),
-                    def_name: extract_def_name(syn),
+                    bindings: extract_def_bindings(syn),
                 })
                 .collect();
             ReadResult::Complete(forms)
@@ -246,35 +251,103 @@ fn is_incomplete_error(msg: &str) -> bool {
     lower.contains("unterminated") || lower.contains("unexpected end of input")
 }
 
-/// Extract the name from `(def name ...)` or `(defn name ...)`.
-fn extract_def_name(syntax: &Syntax) -> Option<String> {
+/// Extract binding names from a def/var/defn form.
+///
+/// Handles:
+/// - `(def name ...)` / `(var name ...)` / `(defn name ...)` → one name
+/// - `(def [a b] ...)` / `(var [a b] ...)` → leaf names from destructure
+/// - `(def {x y} ...)` → leaf names from struct destructure
+fn extract_def_bindings(syntax: &Syntax) -> Vec<DefBinding> {
     if let SyntaxKind::List(items) = &syntax.kind {
         if items.len() >= 2 {
             if let Some(head) = items[0].as_symbol() {
-                if head == "def" || head == "defn" {
-                    return items[1].as_symbol().map(|s| s.to_string());
+                match head {
+                    "def" | "var" => {
+                        if let Some(name) = items[1].as_symbol() {
+                            return vec![DefBinding {
+                                name: name.to_string(),
+                            }];
+                        }
+                        // Destructuring pattern
+                        let mut names = Vec::new();
+                        collect_pattern_names(&items[1], &mut names);
+                        return names;
+                    }
+                    "defn" => {
+                        if let Some(name) = items[1].as_symbol() {
+                            return vec![DefBinding {
+                                name: name.to_string(),
+                            }];
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
-    None
+    Vec::new()
+}
+
+/// Recursively collect leaf symbol names from a destructuring pattern.
+fn collect_pattern_names(syntax: &Syntax, out: &mut Vec<DefBinding>) {
+    match &syntax.kind {
+        SyntaxKind::Symbol(s) if s != "_" => {
+            out.push(DefBinding {
+                name: s.to_string(),
+            });
+        }
+        SyntaxKind::Array(items) | SyntaxKind::List(items) | SyntaxKind::Struct(items) => {
+            for item in items {
+                collect_pattern_names(item, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 // ── Evaluation ───────────────────────────────────────────────────────
 
-/// Compile and execute a single form. If it's a def, register the
-/// binding in the compilation cache so subsequent forms see it.
+/// Compile and execute a single form. If it introduces bindings
+/// (def/var/defn, including destructuring), register each in the
+/// compilation cache so subsequent forms see them.
 fn eval_form(form: &FormInfo, vm: &mut VM, symbols: &mut SymbolTable) -> Result<Value, String> {
-    let result = compile_file(&form.source, symbols, "<repl>")?;
-    let value = vm.execute_scheduled(&result.bytecode, symbols)?;
+    if form.bindings.len() <= 1 {
+        // No bindings or simple def: compile the form as-is.
+        // For simple def, the letrec body is the bound name, so the
+        // return value IS the bound value.
+        let result = compile_file(&form.source, symbols, "<repl>")?;
+        let value = vm.execute_scheduled(&result.bytecode, symbols)?;
 
-    if let Some(ref name) = form.def_name {
-        let sym_id = symbols.intern(name);
-        let (signal, arity) = extract_signal_arity(&value);
-        register_repl_binding(sym_id, value, signal, arity);
+        if let Some(binding) = form.bindings.first() {
+            let sym_id = symbols.intern(&binding.name);
+            let (signal, arity) = extract_signal_arity(&value);
+            register_repl_binding(sym_id, value, signal, arity);
+        }
+
+        Ok(value)
+    } else {
+        // Destructuring def: compile the def followed by a tuple of
+        // all leaf names. compile_file wraps both in a letrec, so the
+        // tuple expression can reference the destructured bindings.
+        // The return value is the tuple; we unpack it to register each.
+        let names: Vec<&str> = form.bindings.iter().map(|b| b.name.as_str()).collect();
+        let trailer = format!("[{}]", names.join(" "));
+        let combined = format!("{} {}", form.source, trailer);
+
+        let result = compile_file(&combined, symbols, "<repl>")?;
+        let tuple_val = vm.execute_scheduled(&result.bytecode, symbols)?;
+
+        // Register each leaf binding from the tuple.
+        if let Some(items) = tuple_val.as_array() {
+            for (binding, val) in form.bindings.iter().zip(items.iter()) {
+                let sym_id = symbols.intern(&binding.name);
+                let (signal, arity) = extract_signal_arity(val);
+                register_repl_binding(sym_id, *val, signal, arity);
+            }
+        }
+
+        Ok(tuple_val)
     }
-
-    Ok(value)
 }
 
 /// Extract signal and arity from a runtime value.

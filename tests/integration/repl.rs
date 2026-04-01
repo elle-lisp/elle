@@ -121,6 +121,38 @@ fn multiline_defn() {
     assert!(out.contains("⟹ 55"), "fib result: {}", out);
 }
 
+// ── Var persistence ─────────────────────────────────────────────────
+
+#[test]
+fn var_persists() {
+    let (out, _, code) = elle("(var x 10)\n(+ x 1)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 11"), "var use: {}", out);
+}
+
+// ── Destructuring def persistence ────────────────────────────────────
+
+#[test]
+fn destructure_tuple_persists() {
+    let (out, _, code) = elle("(def [a b] [1 2])\n(+ a b)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 3"), "destructure sum: {}", out);
+}
+
+#[test]
+fn destructure_struct_persists() {
+    let (out, _, code) = elle("(def {:x a :y b} {:x 10 :y 20})\n(+ a b)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 30"), "struct destructure sum: {}", out);
+}
+
+#[test]
+fn var_destructure_persists() {
+    let (out, _, code) = elle("(var [x y] [1 2])\n(+ x y)\n");
+    assert_eq!(code, 0);
+    assert!(out.contains("⟹ 3"), "var destructure sum: {}", out);
+}
+
 // ── Error handling ───────────────────────────────────────────────────
 
 #[test]
