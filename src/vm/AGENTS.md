@@ -36,7 +36,7 @@ execute_bytecode()  ← public API, wraps slices in Rc once, returns Result<Valu
     │       │
     │       ├─► fetch instruction
     │       ├─► dispatch by opcode
-    │       ├─► modify stack/locals/globals
+    │       ├─► modify stack/locals
     │       ├─► check for errors
     │       └─► loop until Return/Yield/Error
     │       │
@@ -56,7 +56,7 @@ definitions). The dispatch loop handles each signal:
 - `SIG_YIELD`: Fiber yield. Suspended frames in `fiber.suspended`.
 - `SIG_RESUME`: Fiber primitive requests VM-side context switch.
 - `SIG_PROPAGATE`: `fiber/propagate` re-signals caught signal.
-- `SIG_QUERY`: Primitive reads VM state (arena stats, global bindings).
+- `SIG_QUERY`: Primitive reads VM state (arena stats, introspection).
 - `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 The public `execute_bytecode` method is the translation boundary — it converts
@@ -107,7 +107,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Dependents
 
 - `primitives/` - NativeFn primitives; SIG_RESUME signals trigger VM-side execution
-- `repl.rs` - runs compiled code
+- `repl.rs` - REPL session: form-by-form compilation with def persistence across inputs
 - `main.rs` - file execution
 
 ## Invariants
@@ -146,8 +146,6 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 | `fiber` | `Fiber` | Root fiber: stack, call frames, signal state |
 | `current_fiber_handle` | `Option<FiberHandle>` | Handle for current fiber (`None` for root) |
 | `current_fiber_value` | `Option<Value>` | Cached Value for current fiber (`None` for root) |
-| `globals` | `Vec<Value>` | Global bindings by SymbolId |
-| `defined_globals` | `Vec<bool>` | Tracks which global slots have been assigned (shadows `globals`) |
 | `jit_cache` | `FxHashMap<*const u8, Rc<JitCode>>` | JIT code cache (FxHash for pointer keys) |
 | `jit_rejections` | `FxHashMap<*const u8, JitRejectionInfo>` | JIT rejection log: first rejection per closure template |
 | `closure_call_counts` | `FxHashMap<*const u8, usize>` | JIT hotness profiling (FxHash for pointer keys) |
@@ -179,7 +177,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 `execute_bytecode_saving_stack` makes the VM re-entrant. It saves the caller's
 operand stack and active allocator state (`ActiveAlloc`), runs inner bytecode
 from IP 0, then restores both on return. The inner execution sees an empty stack
-and runs on the same fiber (same heap, globals, parameter frames).
+and runs on the same fiber (same heap, parameter frames).
 
 ### Callers
 

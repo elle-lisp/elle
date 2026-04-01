@@ -41,6 +41,11 @@ pub struct BindingInner {
     /// need cells because they may be captured before initialization
     /// (self-recursion, forward references).
     pub is_prebound: bool,
+    /// Whether this binding is a primitive or stdlib function injected
+    /// by `bind_primitives`. Primitive bindings are universally available
+    /// in any compilation unit — they never need to be passed as parameters
+    /// or captured as upvalues across extraction boundaries.
+    pub is_primitive: bool,
 }
 
 impl BindingInner {
@@ -88,6 +93,7 @@ impl BindingArena {
             is_captured: false,
             is_immutable: false,
             is_prebound: false,
+            is_primitive: false,
         });
         Binding(index)
     }

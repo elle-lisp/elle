@@ -140,11 +140,13 @@ syntax object makes it truthy (syntax objects are heap-allocated).
 
 ### Cross-form macro visibility
 
-`compile_all` shares a single `Expander` across all top-level forms,
+`compile_file` shares a single `Expander` across all top-level forms,
 so macros defined in one form are visible in subsequent forms within the
-same compilation unit. `eval` creates a fresh `Expander` per call,
-so macros defined in one REPL input are lost before the next. The REPL
-needs to persist the Expander across inputs.
+same compilation unit. The REPL compiles each form individually via
+`compile_file_repl`, which returns the Expander after expansion. New
+macro definitions are merged back into the compilation cache via
+`register_repl_macros`, so macros defined in one REPL input are
+visible in all subsequent inputs.
 
 
 ## The Hygiene Problem

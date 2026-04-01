@@ -105,6 +105,24 @@ pub fn compile_file(
     symbols: &mut SymbolTable,
     source_name: &str,
 ) -> Result<CompileResult, String> {
+    compile_file_inner(source, symbols, source_name).map(|(result, _)| result)
+}
+
+/// Like `compile_file`, but also returns the Expander after expansion.
+/// The REPL uses this to persist macro definitions across inputs.
+pub fn compile_file_repl(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<(CompileResult, crate::syntax::Expander), String> {
+    compile_file_inner(source, symbols, source_name)
+}
+
+fn compile_file_inner(
+    source: &str,
+    symbols: &mut SymbolTable,
+    source_name: &str,
+) -> Result<(CompileResult, crate::syntax::Expander), String> {
     intern_primitive_names(symbols);
 
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
@@ -198,7 +216,7 @@ pub fn compile_file(
     let (mut bytecode, _, _) = emitter.emit(&lir_func);
     bytecode.signal = signal;
 
-    Ok(CompileResult { bytecode })
+    Ok((CompileResult { bytecode }, expander))
 }
 
 /// Extract the spec from `(include-file "path")` or `(include "spec")`.

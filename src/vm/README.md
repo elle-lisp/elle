@@ -12,10 +12,10 @@ two values, adds them, pushes the result.
 vector, accessed by index via `LoadUpvalue`/`StoreUpvalue`. At top level,
 locals use `LoadLocal`/`StoreLocal` which access the stack directly.
 
-**Globals**: Stored in a HashMap keyed by `SymbolId`. Primitives and top-level
-`def` bindings are globals. The lowerer emits upvalue loads for all variable
-references — there is no separate `LoadGlobal`/`StoreGlobal` instruction; global
-bindings are accessed as depth-0 upvalues in the outermost closure.
+**Primitives**: Primitives and stdlib functions are injected into the
+outermost scope during compilation. There are no runtime globals — all
+variable references (including primitives) are resolved at analysis time
+and accessed as upvalues in the compiled closure.
 
 ## Execution Loop
 

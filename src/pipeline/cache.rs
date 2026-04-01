@@ -103,6 +103,43 @@ pub fn lookup_stdlib_value(sym_id: crate::value::SymbolId) -> Option<crate::valu
     })
 }
 
+/// Register a REPL binding in the compilation cache.
+///
+/// After the REPL evaluates a `def`, the binding's value, signal, and
+/// arity are added to PrimitiveMeta so subsequent compilations see it.
+/// This is the same mechanism as `update_cache_with_stdlib` but for
+/// individual bindings.
+pub fn register_repl_binding(
+    sym_id: crate::value::SymbolId,
+    value: crate::value::Value,
+    signal: crate::signals::Signal,
+    arity: Option<crate::value::types::Arity>,
+) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        if let Some(c) = cache_ref.as_mut() {
+            c.meta.signals.insert(sym_id, signal);
+            c.meta.functions.insert(sym_id, value);
+            if let Some(a) = arity {
+                c.meta.arities.insert(sym_id, a);
+            }
+        }
+    });
+}
+
+/// Merge macro definitions into the cached Expander.
+///
+/// Called by the REPL after compiling a form that contains `defmacro`.
+/// The new macros become visible to all subsequent compilations.
+pub fn register_repl_macros(macros: &std::collections::HashMap<String, crate::syntax::MacroDef>) {
+    COMPILATION_CACHE.with(|cache| {
+        let mut cache_ref = cache.borrow_mut();
+        if let Some(c) = cache_ref.as_mut() {
+            c.expander.merge_macros(macros);
+        }
+    });
+}
+
 /// Add stdlib exports to the cached PrimitiveMeta.
 ///
 /// Called by `init_stdlib` after compiling and executing stdlib.lisp.

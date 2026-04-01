@@ -36,7 +36,7 @@ for closures, reads fields on the `Closure` struct.
 - `coro?` checks `closure.signal.bits & SIG_YIELD != 0`
 - `mutates-params?` checks `closure.lbox_params_mask != 0` (any lbox-wrapped params)
 - `closure?` checks `value.as_closure().is_some()`
-- `global?` takes a symbol, checks `vm.get_global(sym_id).is_some()`
+- `global?` takes a symbol, always returns `false` (no runtime globals exist)
 
 Note: `lbox_params_mask` tracks which *parameters* are mutated inside the
 closure body and need `LocalLBox` wrapping. It does **not** indicate whether

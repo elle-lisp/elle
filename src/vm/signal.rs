@@ -201,12 +201,12 @@ impl VM {
     /// The operation can be a keyword or a string. Keywords are resolved
     /// via the content-addressed keyword registry; strings are used
     /// directly. SIG_QUERY is for questions that can only be answered
-    /// from the VM's context (call counts, global bindings, current fiber).
+    /// from the VM's context (call counts, documentation, current fiber).
     ///
     /// Operations:
     /// - (:"call-count" . closure) — return call count for closure
     /// - (:"doc" . name) — return formatted documentation for a primitive
-    /// - (:"global?" . symbol) — return true if symbol is bound as a global
+    /// - (:"global?" . symbol) — always false (no runtime globals exist)
     /// - (:"fiber/self" . _) — return the currently executing fiber, or nil
     /// - (:"list-primitives" . _) — return sorted list of all primitive names
     /// - (:"primitive-meta" . name) — return struct with primitive metadata
@@ -541,7 +541,7 @@ impl VM {
     /// Handle `arena/allocs` — snapshot count, call thunk, snapshot again.
     ///
     /// Uses `execute_bytecode_saving_stack` (re-entrant VM call). The thunk
-    /// runs on the current fiber — same heap, same globals, same parameter
+    /// runs on the current fiber — same heap, same parameter
     /// frames. Yield from the thunk is propagated upward (not handled here);
     /// callers should only pass non-yielding (silent signal) closures.
     ///

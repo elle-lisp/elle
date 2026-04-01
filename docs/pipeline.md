@@ -43,7 +43,7 @@ pub struct AnalyzeResult {
 
 | Function | Lines | VM for macros | Fixpoint? | Callers |
 |----------|-------|---------------|-----------|---------|
-| `compile` | 119–151 | Internal | No | REPL (`main.rs:169,289`), integration tests |
+| `compile` | 119–151 | Internal | No | Integration tests |
 | `compile_file` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `modules.rs:78` (`import-file`) |
 | `eval` | 266–291 | Borrowed | No | `init_stdlib` (`module_init.rs` — loads `stdlib.lisp`), tests |
 | `eval_all` | 298–309 | Internal (delegates to `compile_file`) | Yes | Tests |
@@ -121,7 +121,7 @@ correctly infer signals for mutually recursive top-level definitions.
 
 When compiling `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (f x)))`,
 the analyzer sees `f` before `g` exists. Without pre-scanning, `g` would be
-treated as an unknown global with `Polymorphic` signal, making `f` also
+treated as an unknown name with `Polymorphic` signal, making `f` also
 `Polymorphic` — even if both are actually `Silent`.
 
 ### Algorithm (in `src/pipeline/fixpoint.rs`)
@@ -134,23 +134,23 @@ count of 10 within phase 4):
    `run_fixpoint`.)
 
 2. **Pre-scan for `(def name (fn ...))` patterns** via `prescan_forms()`.
-    For each match, seed `global_signals` with `Signal::silent()` (optimistic —
-    assume silent) and extract syntactic arity into `global_arities`.
+    For each match, seed `def_signals` with `Signal::silent()` (optimistic —
+    assume silent) and extract syntactic arity into `def_arities`.
 
 3. **Pre-scan for `(def name ...)` patterns** via `prescan_forms()`. Track all
-   `def` bindings as immutable globals for cross-form immutability checking.
+   `def` bindings as immutable for cross-form immutability checking.
 
 4. **Fixpoint iteration** (in `run_fixpoint()`, max 10 iterations):
    - Clear `analysis_results`
    - For each form, create a fresh `Analyzer` seeded with:
-     - `global_signals` from previous iteration (or pre-scan)
-     - `global_arities` from pre-scan + previous forms
-     - `immutable_globals` from pre-scan + previous forms
+     - `def_signals` from previous iteration (or pre-scan)
+     - `def_arities` from pre-scan + previous forms
+     - `immutable_defs` from pre-scan + previous forms
    - Analyze the form, collect actual inferred signals via
-     `analyzer.take_defined_global_signals()`
-   - After all forms: compare `new_global_signals` with `global_signals`
+     `analyzer.take_defined_signals()`
+   - After all forms: compare `new_def_signals` with `def_signals`
    - If equal → converged, break
-   - If different → update `global_signals`, re-analyze all forms
+   - If different → update `def_signals`, re-analyze all forms
 
 5. **Post-analysis callback** (parameterized by `post_analyze` closure):
    - `compile_file` passes `|a| mark_tail_calls(&mut a.hir)` to mark tail calls
@@ -185,9 +185,9 @@ pub(super) fn prescan_forms(
 
 Unified pre-scan that processes all forms in a single pass, calling both
 `scan_define_lambda` and `scan_const_binding` for each form. Returns:
-- `global_signals`: `(def name (fn ...))` patterns seeded with `Signal::silent()`
-- `global_arities`: syntactic arities from lambda parameter lists
-- `immutable_globals`: all `(def name ...)` patterns
+- `def_signals`: `(def name (fn ...))` patterns seeded with `Signal::silent()`
+- `def_arities`: syntactic arities from lambda parameter lists
+- `immutable_defs`: all `(def name ...)` patterns
 
 ### `scan_define_lambda()`
 
@@ -216,8 +216,8 @@ pub(super) fn scan_const_binding(
 ```
 
 Matches `(def name ...)` patterns (not `var`). Returns the `SymbolId`. Used to
-populate `immutable_globals` so the analyzer can reject `(assign name ...)` on
-`def`-bound globals across form boundaries.
+populate `immutable_defs` so the analyzer can reject `(assign name ...)` on
+`def`-bound names across form boundaries.
 
 ## Compilation phases (single-form)
 
@@ -262,7 +262,9 @@ have their own VM.
 
 Single-form functions
 (`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
-a file compiled via `compile` instead of `compile_file` will treat all global
-calls as `Polymorphic`. The REPL uses `compile_file`, so multi-form input and
-cross-form signal inference work. However, definitions from previous inputs
-are not visible to signal inference in later inputs.
+a file compiled via `compile` instead of `compile_file` will treat all
+cross-form calls as `Polymorphic`. The REPL compiles each form individually
+via `compile_file` and registers def bindings in the compilation cache
+(`register_repl_binding`) so they are visible to subsequent compilations.
+However, cross-form signal inference within a single REPL input is limited
+to what `compile_file` can infer for each form in isolation.

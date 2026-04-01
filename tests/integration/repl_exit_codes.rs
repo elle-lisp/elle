@@ -43,8 +43,8 @@ fn test_repl_piped_input_parse_error_exit_code() {
     // Verify error was reported
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Parse error") || stderr.contains("unterminated"),
-        "Expected parse error message in stderr, got: {}",
+        stderr.contains("unterminated"),
+        "Expected unterminated error in stderr, got: {}",
         stderr
     );
 }

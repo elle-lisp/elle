@@ -36,7 +36,7 @@ type JitFn = unsafe extern "C" fn(
     env: *const Value,      // closure environment (captures array)
     args: *const Value,     // arguments array
     nargs: u32,             // number of arguments
-    vm: *mut VM,            // pointer to VM (for globals, function calls)
+    vm: *mut VM,            // pointer to VM (for function calls, fiber access)
     self_bits: u64,         // tag+payload bits of the closure (for self-tail-call detection)
 ) -> Value;
 ```
@@ -62,7 +62,7 @@ The JIT was built incrementally:
 |-------|-------|
 | Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
 | Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
-| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), function calls (`Call`, `TailCall`). VM pointer parameter replaced `globals` pointer. (`LoadGlobal`/`StoreGlobal` were included at this phase but have since been removed — globals are now depth-0 upvalues.) |
+| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), function calls (`Call`, `TailCall`). VM pointer parameter added for call dispatch. |
 | Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
 
 ## Phase 4 Scope (Current)
@@ -214,7 +214,7 @@ Special cases:
 
 ## Direct Self-Calls
 
-Solo-compiled functions with a known SymbolId (i.e., bound to a global) get a
+Solo-compiled functions with a known SymbolId (i.e., bound to a top-level def) get a
 one-entry `scc_peers` map pointing to themselves. This means self-recursive
 calls emit direct Cranelift calls instead of going through `elle_jit_call`.
 
@@ -290,8 +290,7 @@ Key details:
 
 ## Error Handling in Dispatch
 
-All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`,
-`elle_jit_load_global`) set `vm.fiber.signal` to `(SIG_ERROR, error_value)` on
+All dispatch helpers (`elle_jit_call`, `elle_jit_tail_call`) set `vm.fiber.signal` to `(SIG_ERROR, error_value)` on
 error and return `TAG_NIL`. The JIT checks for pending error signals after each
 call via `elle_jit_has_exception` (which checks `fiber.signal` for `SIG_ERROR`).
 No errors are silently swallowed.
@@ -328,7 +327,7 @@ No errors are silently swallowed.
 7. **Always enabled.** JIT is a required dependency (Cranelift). No feature gate.
 
 8. **VM pointer for runtime calls.** The 4th parameter is `vm` to support
-   function calls, global variable access, and yield side-exit helpers.
+   function calls, fiber access, and yield side-exit helpers.
 
 9. **Self-tail-call identity.** The 5th parameter `self_bits` is the
    tagged-union closure pointer. Self-tail-calls are detected by comparing the callee's bits

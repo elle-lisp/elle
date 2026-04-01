@@ -229,6 +229,7 @@ impl<'a> Analyzer<'a> {
         for (&sym_id, &signal) in &meta.signals {
             let binding = self.bind_by_sym(sym_id, BindingScope::Local);
             self.arena.get_mut(binding).is_immutable = true;
+            self.arena.get_mut(binding).is_primitive = true;
             self.signal_env.insert(binding, signal);
             if let Some(&arity) = meta.arities.get(&sym_id) {
                 self.arity_env.insert(binding, arity);

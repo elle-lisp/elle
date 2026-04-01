@@ -109,7 +109,9 @@ Properties:
 
 1. **`compile` and `eval` are single-form entry points.** They parse a single
     expression, expand it, analyze it, and compile/execute it. Used for macro
-    body evaluation. The REPL uses `compile_file` for multi-form support.
+    body evaluation. The REPL compiles each form individually via
+    `compile_file` and injects def bindings into the compilation cache
+    between forms.
 
 2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
     They parse all top-level forms, expand them, classify them, and analyze
@@ -120,7 +122,7 @@ Properties:
     single letrec then executes it. Used by test helpers.
 
 4. **`compile_all` is internal (`pub(crate)`).** Used only by `init_stdlib`
-    to compile stdlib forms as independent globals. Not part of the public API.
+    to compile stdlib forms as independent top-level defs. Not part of the public API.
 
 5. **Primitives are pre-bound in file-level analysis.** `Analyzer.bind_primitives`
     wraps the file's letrec in an outer scope containing all registered primitives.

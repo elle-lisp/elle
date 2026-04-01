@@ -83,12 +83,13 @@ pub mod my_module;
 `register_primitives()` in `registration.rs` iterates `ALL_TABLES`. For
 each `PrimitiveDef`, it:
 - Interns the name via `symbols.intern(def.name)` → `SymbolId`
-- Stores `Value::native_fn(def.func)` in `vm.globals[sym_id]`
+- Records `Value::native_fn(def.func)` in `PrimitiveMeta.functions`
 - Records signal and arity in `PrimitiveMeta`
 - Registers aliases identically
 
-At runtime, the VM fetches the `NativeFn` value from globals and `Call`
-dispatches it via `handle_primitive_signal()` in `src/vm/signal.rs`.
+At compile time, `bind_primitives` injects these values into the outermost
+scope. At runtime, the compiled closure accesses them as upvalues and `Call`
+dispatches native functions via `handle_primitive_signal()` in `src/vm/signal.rs`.
 
 ### Key types
 

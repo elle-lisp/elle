@@ -43,8 +43,16 @@ pub fn read_str(input: &str, symbols: &mut SymbolTable) -> Result<Value, String>
     reader.read(symbols)
 }
 
-/// Parse source code into a Syntax tree
-pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
+/// Tokenized source ready for the syntax parser.
+struct LexedTokens {
+    tokens: Vec<OwnedToken>,
+    locations: Vec<SourceLoc>,
+    lengths: Vec<usize>,
+    byte_offsets: Vec<usize>,
+}
+
+/// Lex source into tokens with source locations and byte offsets.
+fn lex_all(input: &str, source_name: &str) -> Result<LexedTokens, String> {
     // Strip shebang if present
     let input_owned = if input.starts_with("#!") {
         input.lines().skip(1).collect::<Vec<_>>().join("\n")
@@ -56,21 +64,35 @@ pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
     let mut tokens = Vec::new();
     let mut locations = Vec::new();
     let mut lengths = Vec::new();
+    let mut byte_offsets = Vec::new();
 
-    while let Some(token_with_loc) = lexer.next_token_with_loc()? {
-        tokens.push(OwnedToken::from(token_with_loc.token));
-        locations.push(token_with_loc.loc);
-        lengths.push(token_with_loc.len);
+    while let Some(twl) = lexer.next_token_with_loc()? {
+        tokens.push(OwnedToken::from(twl.token));
+        locations.push(twl.loc);
+        lengths.push(twl.len);
+        byte_offsets.push(twl.byte_offset);
     }
 
-    if tokens.is_empty() {
+    Ok(LexedTokens {
+        tokens,
+        locations,
+        lengths,
+        byte_offsets,
+    })
+}
+
+/// Parse source code into a Syntax tree
+pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
+    let lex = lex_all(input, source_name)?;
+
+    if lex.tokens.is_empty() {
         return Err("No input".to_string());
     }
 
-    let mut parser = SyntaxReader::new(tokens, locations, lengths);
+    let mut parser =
+        SyntaxReader::with_byte_offsets(lex.tokens, lex.locations, lex.lengths, lex.byte_offsets);
     let result = parser.read()?;
 
-    // Check for trailing tokens after the expression
     if let Some(err) = parser.check_exhausted() {
         return Err(err);
     }
@@ -80,29 +102,14 @@ pub fn read_syntax(input: &str, source_name: &str) -> Result<Syntax, String> {
 
 /// Parse source code into multiple Syntax trees
 pub fn read_syntax_all(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
-    // Strip shebang if present
-    let input_owned = if input.starts_with("#!") {
-        input.lines().skip(1).collect::<Vec<_>>().join("\n")
-    } else {
-        input.to_string()
-    };
+    let lex = lex_all(input, source_name)?;
 
-    let mut lexer = Lexer::with_file(&input_owned, source_name);
-    let mut tokens = Vec::new();
-    let mut locations = Vec::new();
-    let mut lengths = Vec::new();
-
-    while let Some(token_with_loc) = lexer.next_token_with_loc()? {
-        tokens.push(OwnedToken::from(token_with_loc.token));
-        locations.push(token_with_loc.loc);
-        lengths.push(token_with_loc.len);
-    }
-
-    if tokens.is_empty() {
+    if lex.tokens.is_empty() {
         return Ok(Vec::new());
     }
 
-    let mut parser = SyntaxReader::new(tokens, locations, lengths);
+    let mut parser =
+        SyntaxReader::with_byte_offsets(lex.tokens, lex.locations, lex.lengths, lex.byte_offsets);
     parser.read_all()
 }
 

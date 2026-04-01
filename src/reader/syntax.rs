@@ -14,15 +14,33 @@ pub struct SyntaxReader {
     tokens: Vec<OwnedToken>,
     locations: Vec<SourceLoc>,
     lengths: Vec<usize>,
+    byte_offsets: Vec<usize>,
     pos: usize,
 }
 
 impl SyntaxReader {
     pub fn new(tokens: Vec<OwnedToken>, locations: Vec<SourceLoc>, lengths: Vec<usize>) -> Self {
+        let byte_offsets = vec![0; tokens.len()];
         SyntaxReader {
             tokens,
             locations,
             lengths,
+            byte_offsets,
+            pos: 0,
+        }
+    }
+
+    pub fn with_byte_offsets(
+        tokens: Vec<OwnedToken>,
+        locations: Vec<SourceLoc>,
+        lengths: Vec<usize>,
+        byte_offsets: Vec<usize>,
+    ) -> Self {
+        SyntaxReader {
+            tokens,
+            locations,
+            lengths,
+            byte_offsets,
             pos: 0,
         }
     }
@@ -45,6 +63,10 @@ impl SyntaxReader {
         self.lengths.get(self.pos).copied().unwrap_or(1)
     }
 
+    fn current_byte_offset(&self) -> usize {
+        self.byte_offsets.get(self.pos).copied().unwrap_or(0)
+    }
+
     /// Check if there are remaining tokens. Returns Some with error message if so.
     pub fn check_exhausted(&self) -> Option<String> {
         self.current().map(|token| {
@@ -63,17 +85,11 @@ impl SyntaxReader {
         token
     }
 
-    /// Convert a SourceLoc to a Span
-    fn source_loc_to_span(&self, loc: &SourceLoc, end_offset: usize) -> Span {
-        let file = if loc.is_unknown() {
-            None
-        } else {
-            Some(loc.file.clone())
-        };
-
-        let mut span = Span::new(0, end_offset, loc.line as u32, loc.col as u32);
-        if let Some(f) = file {
-            span = span.with_file(f);
+    /// Build a span from byte offsets and source location.
+    fn make_span(&self, byte_start: usize, byte_end: usize, loc: &SourceLoc) -> Span {
+        let mut span = Span::new(byte_start, byte_end, loc.line as u32, loc.col as u32);
+        if !loc.is_unknown() {
+            span = span.with_file(loc.file.clone());
         }
         span
     }
@@ -82,7 +98,8 @@ impl SyntaxReader {
     pub fn try_read(&mut self) -> Option<Result<Syntax, String>> {
         let token = self.current().cloned()?;
         let loc = self.current_location();
-        Some(self.read_one(&token, &loc))
+        let boff = self.current_byte_offset();
+        Some(self.read_one(&token, &loc, boff))
     }
 
     /// Read a single syntax form. Returns error at EOF.
@@ -105,93 +122,88 @@ impl SyntaxReader {
         Ok(results)
     }
 
-    fn read_one(&mut self, token: &OwnedToken, loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_one(
+        &mut self,
+        token: &OwnedToken,
+        loc: &SourceLoc,
+        boff: usize,
+    ) -> Result<Syntax, String> {
         match token {
-            OwnedToken::LeftParen => self.read_list(loc),
-            OwnedToken::LeftBracket => self.read_array(loc),
-            OwnedToken::LeftBrace => self.read_struct(loc),
-            OwnedToken::ListSugar => self.read_list_sugar(loc),
-            OwnedToken::Pipe => self.read_set(loc),
-            OwnedToken::AtPipe => self.read_set_mut(loc),
-            OwnedToken::BytesBracket => self.read_bytes(loc),
-            OwnedToken::AtBytesBracket => self.read_bytes_mut(loc),
+            OwnedToken::LeftParen => self.read_list(loc, boff),
+            OwnedToken::LeftBracket => self.read_array(loc, boff),
+            OwnedToken::LeftBrace => self.read_struct(loc, boff),
+            OwnedToken::ListSugar => self.read_list_sugar(loc, boff),
+            OwnedToken::Pipe => self.read_set(loc, boff),
+            OwnedToken::AtPipe => self.read_set_mut(loc, boff),
+            OwnedToken::BytesBracket => self.read_bytes(loc, boff),
+            OwnedToken::AtBytesBracket => self.read_bytes_mut(loc, boff),
 
             OwnedToken::Quote => {
-                let len = self.current_length();
                 self.advance();
                 let inner = self.read()?;
-                let start_span = self.source_loc_to_span(loc, loc.col + len);
-                let span = start_span.merge(&inner.span);
+                let span = self.make_span(boff, inner.span.end, loc);
                 Ok(Syntax::new(SyntaxKind::Quote(Box::new(inner)), span))
             }
             OwnedToken::Quasiquote => {
-                let len = self.current_length();
                 self.advance();
                 let inner = self.read()?;
-                let start_span = self.source_loc_to_span(loc, loc.col + len);
-                let span = start_span.merge(&inner.span);
+                let span = self.make_span(boff, inner.span.end, loc);
                 Ok(Syntax::new(SyntaxKind::Quasiquote(Box::new(inner)), span))
             }
             OwnedToken::Unquote => {
-                let len = self.current_length();
                 self.advance();
                 let inner = self.read()?;
-                let start_span = self.source_loc_to_span(loc, loc.col + len);
-                let span = start_span.merge(&inner.span);
+                let span = self.make_span(boff, inner.span.end, loc);
                 Ok(Syntax::new(SyntaxKind::Unquote(Box::new(inner)), span))
             }
             OwnedToken::UnquoteSplicing => {
-                let len = self.current_length();
                 self.advance();
                 let inner = self.read()?;
-                let start_span = self.source_loc_to_span(loc, loc.col + len);
-                let span = start_span.merge(&inner.span);
+                let span = self.make_span(boff, inner.span.end, loc);
                 Ok(Syntax::new(
                     SyntaxKind::UnquoteSplicing(Box::new(inner)),
                     span,
                 ))
             }
             OwnedToken::Splice => {
-                let len = self.current_length();
                 self.advance();
                 let inner = self.read()?;
-                let start_span = self.source_loc_to_span(loc, loc.col + len);
-                let span = start_span.merge(&inner.span);
+                let span = self.make_span(boff, inner.span.end, loc);
                 Ok(Syntax::new(SyntaxKind::Splice(Box::new(inner)), span))
             }
 
             OwnedToken::Integer(n) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Int(*n), span))
             }
             OwnedToken::Float(f) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Float(*f), span))
             }
             OwnedToken::String(s) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::String(s.clone()), span))
             }
             OwnedToken::Bool(b) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Bool(*b), span))
             }
             OwnedToken::Nil => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Nil, span))
             }
             OwnedToken::Symbol(s) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Symbol(s.clone()), span))
             }
             OwnedToken::Keyword(s) => {
-                let span = self.source_loc_to_span(loc, loc.col + self.current_length());
+                let span = self.make_span(boff, boff + self.current_length(), loc);
                 self.advance();
                 Ok(Syntax::new(SyntaxKind::Keyword(s.clone()), span))
             }
@@ -207,7 +219,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_set(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_set(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip opening |
         let mut elements = Vec::new();
 
@@ -220,9 +232,9 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::Pipe) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Set(elements), span));
                 }
                 _ => elements.push(self.read()?),
@@ -230,7 +242,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_set_mut(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_set_mut(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip opening @|
         let mut elements = Vec::new();
 
@@ -243,9 +255,9 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::Pipe) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::SetMut(elements), span));
                 }
                 _ => elements.push(self.read()?),
@@ -253,7 +265,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_bytes(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_bytes(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip b[
         let mut elements = Vec::new();
         loop {
@@ -265,9 +277,9 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::RightBracket) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Bytes(elements), span));
                 }
                 _ => elements.push(self.read()?),
@@ -275,7 +287,11 @@ impl SyntaxReader {
         }
     }
 
-    fn read_bytes_mut(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_bytes_mut(
+        &mut self,
+        start_loc: &SourceLoc,
+        start_boff: usize,
+    ) -> Result<Syntax, String> {
         self.advance(); // skip @b[
         let mut elements = Vec::new();
         loop {
@@ -287,9 +303,9 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::RightBracket) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::BytesMut(elements), span));
                 }
                 _ => elements.push(self.read()?),
@@ -297,7 +313,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_list(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_list(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip (
         let mut elements = Vec::new();
 
@@ -310,14 +326,15 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::RightParen) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::List(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
-                    elements.push(self.read_set(&set_loc)?);
+                    let set_boff = self.current_byte_offset();
+                    elements.push(self.read_set(&set_loc, set_boff)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),
@@ -325,7 +342,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_array(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_array(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip [
         let mut elements = Vec::new();
 
@@ -338,14 +355,15 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::RightBracket) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Array(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
-                    elements.push(self.read_set(&set_loc)?);
+                    let set_boff = self.current_byte_offset();
+                    elements.push(self.read_set(&set_loc, set_boff)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),
@@ -353,7 +371,7 @@ impl SyntaxReader {
         }
     }
 
-    fn read_struct(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_struct(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip {
         let mut elements = Vec::new();
 
@@ -366,15 +384,15 @@ impl SyntaxReader {
                     ));
                 }
                 Some(OwnedToken::RightBrace) => {
-                    let end_loc = self.current_location();
+                    let end = self.current_byte_offset() + self.current_length();
                     self.advance();
-
-                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    let span = self.make_span(start_boff, end, start_loc);
                     return Ok(Syntax::new(SyntaxKind::Struct(elements), span));
                 }
                 Some(OwnedToken::Pipe) => {
                     let set_loc = self.current_location();
-                    elements.push(self.read_set(&set_loc)?);
+                    let set_boff = self.current_byte_offset();
+                    elements.push(self.read_set(&set_loc, set_boff)?);
                     continue;
                 }
                 _ => elements.push(self.read()?),
@@ -382,7 +400,11 @@ impl SyntaxReader {
         }
     }
 
-    fn read_list_sugar(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+    fn read_list_sugar(
+        &mut self,
+        start_loc: &SourceLoc,
+        start_boff: usize,
+    ) -> Result<Syntax, String> {
         self.advance(); // skip @
 
         match self.current() {
@@ -400,10 +422,9 @@ impl SyntaxReader {
                             ));
                         }
                         Some(OwnedToken::RightBracket) => {
-                            let end_loc = self.current_location();
+                            let end = self.current_byte_offset() + self.current_length();
                             self.advance();
-
-                            let span = self.merge_spans(start_loc, &end_loc, &elements);
+                            let span = self.make_span(start_boff, end, start_loc);
                             return Ok(Syntax::new(SyntaxKind::ArrayMut(elements), span));
                         }
                         _ => elements.push(self.read()?),
@@ -424,10 +445,9 @@ impl SyntaxReader {
                             ));
                         }
                         Some(OwnedToken::RightBrace) => {
-                            let end_loc = self.current_location();
+                            let end = self.current_byte_offset() + self.current_length();
                             self.advance();
-
-                            let span = self.merge_spans(start_loc, &end_loc, &elements);
+                            let span = self.make_span(start_boff, end, start_loc);
                             return Ok(Syntax::new(SyntaxKind::StructMut(elements), span));
                         }
                         _ => elements.push(self.read()?),
@@ -437,9 +457,9 @@ impl SyntaxReader {
             Some(OwnedToken::String(s)) => {
                 // @"..." is sugar for (thaw "...")
                 let string_val = s.clone();
-                let len = self.current_length();
+                let end = self.current_byte_offset() + self.current_length();
                 self.advance(); // skip the string token
-                let span = self.source_loc_to_span(start_loc, start_loc.col + len + 1);
+                let span = self.make_span(start_boff, end, start_loc);
                 let sym = Syntax::new(SyntaxKind::Symbol("thaw".to_string()), span.clone());
                 let str_lit = Syntax::new(SyntaxKind::String(string_val), span.clone());
                 Ok(Syntax::new(SyntaxKind::List(vec![sym, str_lit]), span))
@@ -448,17 +468,6 @@ impl SyntaxReader {
                 "{}: @ must be followed by [...], {{...}}, |...|, or \"...\"",
                 start_loc.position()
             )),
-        }
-    }
-
-    /// Merge spans from start location to end location, or use element spans if available
-    fn merge_spans(&self, start_loc: &SourceLoc, end_loc: &SourceLoc, elements: &[Syntax]) -> Span {
-        if elements.is_empty() {
-            // Empty container - use delimiter span
-            self.source_loc_to_span(start_loc, end_loc.col + 1)
-        } else {
-            // Merge from first element to last element
-            elements[0].span.merge(&elements[elements.len() - 1].span)
         }
     }
 }
