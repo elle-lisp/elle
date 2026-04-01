@@ -69,7 +69,6 @@ pub fn emit_single_closure(func: &LirFunction) -> Option<EmitResult> {
 }
 
 // Host function import indices (in order of declaration)
-const _FN_CALL_PRIMITIVE: u32 = 0;
 const FN_RT_CALL: u32 = 1;
 const FN_RT_LOAD_CONST: u32 = 2;
 const FN_RT_DATA_OP: u32 = 3;
@@ -732,9 +731,49 @@ impl WasmEmitter {
             f.instruction(&Instruction::LocalGet(self.resume_pay_local));
             f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
 
-            // Emit remaining instructions from the source block
+            // Emit remaining instructions from the source block.
+            // Must use the same suspending-aware emission as emit_block_instructions
+            // so that SuspendingCall in resume blocks gets yield-through handling.
             let block = &func.blocks[src_block_idx];
-            for spanned in &block.instructions[instr_offset..] {
+            for (rel_idx, spanned) in block.instructions[instr_offset..].iter().enumerate() {
+                let abs_idx = instr_offset + rel_idx;
+                if self.may_suspend {
+                    match &spanned.instr {
+                        LirInstr::SuspendingCall {
+                            dst: call_dst,
+                            func: fn_reg,
+                            args,
+                        } => {
+                            let resume_state = self
+                                .call_state_map
+                                .get(&(src_block_idx, abs_idx))
+                                .copied()
+                                .unwrap_or(0);
+                            self.emit_call_suspending(f, *call_dst, *fn_reg, args, resume_state);
+                            continue;
+                        }
+                        LirInstr::CallArrayMut {
+                            dst: call_dst,
+                            func: fn_reg,
+                            args,
+                        } => {
+                            let resume_state = self
+                                .call_state_map
+                                .get(&(src_block_idx, abs_idx))
+                                .copied()
+                                .unwrap_or(0);
+                            self.emit_call_array_suspending(
+                                f,
+                                *call_dst,
+                                *fn_reg,
+                                *args,
+                                resume_state,
+                            );
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
                 self.emit_instr(f, &spanned.instr);
             }
 
@@ -1576,25 +1615,6 @@ impl WasmEmitter {
     }
 
     /// Like emit_call but drops the signal instead of checking it.
-    /// Used for SuspendingCall in non-suspending contexts (entry function)
-    /// where I/O signals should be ignored — the I/O already completed on the host.
-    #[allow(dead_code)]
-    fn emit_call_ignore_signal(&self, f: &mut Function, dst: Reg, func: Reg, args: &[Reg]) {
-        for (i, arg) in args.iter().enumerate() {
-            self.write_val_to_mem(f, *arg, i);
-        }
-        f.instruction(&Instruction::LocalGet(self.tag_local(func)));
-        f.instruction(&Instruction::LocalGet(self.pay_local(func)));
-        f.instruction(&Instruction::I32Const(ARGS_BASE));
-        f.instruction(&Instruction::I32Const(args.len() as i32));
-        f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::Call(FN_RT_CALL));
-        // Drop signal, keep tag+payload
-        f.instruction(&Instruction::Drop);
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-    }
-
     /// Emit CallArrayMut: call a function with args from an array value.
     fn emit_call_array(&self, f: &mut Function, dst: Reg, func: Reg, args_array: Reg) {
         // Write func and args_array to memory as 2 args, then use rt_data_op
@@ -2243,14 +2263,6 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalGet(self.tag_local(src)));
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(src)));
-        f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
-    }
-
-    #[allow(dead_code)]
-    fn set_nil(&self, f: &mut Function, dst: Reg) {
-        f.instruction(&Instruction::I64Const(TAG_NIL as i64));
-        f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
-        f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::LocalSet(self.pay_local(dst)));
     }
 

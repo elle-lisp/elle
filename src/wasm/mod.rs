@@ -18,7 +18,9 @@ pub mod emit;
 pub mod handle;
 pub mod host;
 pub mod lazy;
+pub mod linker;
 pub mod regalloc;
+pub mod resume;
 pub mod store;
 
 use crate::value::Value;
@@ -113,7 +115,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     // Run on Wasmtime
     let engine = store::create_engine().map_err(|e| e.to_string())?;
     let mut wasm_store = store::create_store(&engine, result.const_pool, result.closure_bytecodes);
-    let linker = store::create_linker(&engine).map_err(|e| e.to_string())?;
+    let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
 
     // Module cache: hash the WASM bytes, check for a cached pre-compiled module.

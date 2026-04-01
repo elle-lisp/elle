@@ -73,7 +73,12 @@ pub struct ElleHost {
     /// Per-fiber suspension frames. Keyed by fiber ID (FiberHandle pointer
     /// address). Each fiber's frames are independent — nested coroutine
     /// resumes don't interfere with the parent fiber's frames.
-    pub suspension_frames: std::collections::HashMap<usize, Vec<WasmSuspensionFrame>>,
+    ///
+    /// Frames are pushed to the back (innermost first during yield-through-call)
+    /// and consumed from the front (innermost first during resume). This avoids
+    /// the need for reversal.
+    pub suspension_frames:
+        std::collections::HashMap<usize, std::collections::VecDeque<WasmSuspensionFrame>>,
     /// Stack of active fiber IDs. Pushed when entering handle_fiber_resume,
     /// popped on exit. rt_yield and rt_load_saved_reg use the top entry
     /// to find the correct fiber's frame list.
@@ -88,11 +93,8 @@ pub struct ElleHost {
     /// Populated from EmitResult so rt_make_closure can give WASM closures
     /// valid bytecode for cross-thread execution via spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
-    /// Active resume frame — the frame being used during resume_wasm_closure.
-    /// Popped from the suspension stack before the WASM call so that new
-    /// frames pushed during the call don't interfere. rt_load_saved_reg
-    /// reads from this instead of last_suspension_frame() during resume.
-    pub active_resume_frame: Option<WasmSuspensionFrame>,
+    /// Debug logging enabled (set once from ELLE_WASM_DEBUG at construction).
+    pub debug: bool,
 }
 
 impl ElleHost {
@@ -109,7 +111,7 @@ impl ElleHost {
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
-            active_resume_frame: None,
+            debug: std::env::var_os("ELLE_WASM_DEBUG").is_some(),
         }
     }
 }
@@ -126,33 +128,43 @@ impl ElleHost {
         self.fiber_id_stack.last().copied().unwrap_or(0)
     }
 
-    /// Push a suspension frame for the current fiber.
+    /// Push a suspension frame for the current fiber (appends to back).
     pub fn push_suspension_frame(&mut self, frame: WasmSuspensionFrame) {
         let id = self.current_fiber_id();
-        self.suspension_frames.entry(id).or_default().push(frame);
+        self.suspension_frames
+            .entry(id)
+            .or_default()
+            .push_back(frame);
     }
 
-    /// Pop the last suspension frame for the current fiber.
+    /// Pop the front suspension frame for the current fiber (innermost first).
     pub fn pop_suspension_frame(&mut self) -> Option<WasmSuspensionFrame> {
         let id = self.current_fiber_id();
         let frames = self.suspension_frames.get_mut(&id)?;
-        let frame = frames.pop();
+        let frame = frames.pop_front();
         if frames.is_empty() {
             self.suspension_frames.remove(&id);
         }
         frame
     }
 
-    /// Get the last suspension frame for the current fiber (immutable).
-    pub fn last_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
+    /// Get the front suspension frame for the current fiber (innermost).
+    pub fn first_suspension_frame(&self) -> Option<&WasmSuspensionFrame> {
         let id = self.current_fiber_id();
-        self.suspension_frames.get(&id)?.last()
+        self.suspension_frames.get(&id)?.front()
     }
 
-    /// Get the last suspension frame for the current fiber (mutable).
-    pub fn last_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
+    /// Get the front suspension frame for the current fiber (innermost, mutable).
+    pub fn first_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
         let id = self.current_fiber_id();
-        self.suspension_frames.get_mut(&id)?.last_mut()
+        self.suspension_frames.get_mut(&id)?.front_mut()
+    }
+
+    /// Get the back suspension frame for the current fiber (most recently pushed).
+    /// Used by handle_wasm_result to update the frame that rt_yield just pushed.
+    pub fn back_suspension_frame_mut(&mut self) -> Option<&mut WasmSuspensionFrame> {
+        let id = self.current_fiber_id();
+        self.suspension_frames.get_mut(&id)?.back_mut()
     }
 
     /// Check if the current fiber has any suspension frames.

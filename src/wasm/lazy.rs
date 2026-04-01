@@ -499,7 +499,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          nargs: i32|
          -> (i64, i64, i32) {
             let args = read_args(&mut caller, args_ptr, nargs);
-            let (bits, result) = super::store::dispatch_data_op(op, &args);
+            let (bits, result) = super::linker::dispatch_data_op(op, &args);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
             (tag, payload, bits.0 as i32)
         },

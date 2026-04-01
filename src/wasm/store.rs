@@ -97,557 +97,12 @@ pub fn create_store(
     Store::new(engine, host)
 }
 
-/// Register host functions and return a Linker.
-pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
-    let mut linker = Linker::new(engine);
-
-    // call_primitive(prim_id: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i32)
-    linker.func_wrap(
-        "elle",
-        "call_primitive",
-        |mut caller: Caller<'_, ElleHost>,
-         prim_id: i32,
-         args_ptr: i32,
-         nargs: i32,
-         _ctx: i32|
-         -> (i64, i64, i32) {
-            let args = read_args_from_memory(&mut caller, args_ptr, nargs);
-            let (bits, result) = caller.data_mut().call_primitive(prim_id as u32, &args);
-            let (bits, result) = caller.data().maybe_execute_io(bits, result);
-            let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
-        },
-    )?;
-
-    // rt_call(func_tag: i64, func_payload: i64, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i32)
-    linker.func_wrap(
-        "elle",
-        "rt_call",
-        |mut caller: Caller<'_, ElleHost>,
-         func_tag: i64,
-         func_payload: i64,
-         args_ptr: i32,
-         nargs: i32,
-         _ctx: i32|
-         -> (i64, i64, i32) {
-            // Resolve the function value
-            let func_val = caller.data().wasm_to_value(func_tag, func_payload);
-
-            // Read args from linear memory.
-            // nargs=-1 is the CallArrayMut protocol: the args array is
-            // at args_ptr + 16 (slot 1). Unpack it into a flat arg list.
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                eprintln!("[rt_call] type={} nargs={}", func_val.type_name(), nargs);
-            }
-            let args = if nargs == -1 {
-                let raw = read_args_from_memory(&mut caller, args_ptr + 16, 1);
-                if let Some(arr) = raw[0].as_array_mut() {
-                    arr.borrow().to_vec()
-                } else if let Some(arr) = raw[0].as_array() {
-                    arr.to_vec()
-                } else {
-                    vec![raw[0]]
-                }
-            } else {
-                read_args_from_memory(&mut caller, args_ptr, nargs)
-            };
-
-            // Dispatch based on function type
-            if func_val.is_native_fn() {
-                let native_fn = func_val.as_native_fn().expect("rt_call: expected NativeFn");
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() && nargs == 2 {
-                    eprintln!(
-                        "[rt_call] native 2args: [{}, {}]",
-                        args[0].type_name(),
-                        args[1].type_name()
-                    );
-                }
-                let (bits, result) = native_fn(&args);
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() && bits.0 != 0 {
-                    eprintln!(
-                        "[rt_call] native returned signal={} value={:?}",
-                        bits.0, result
-                    );
-                }
-                let (bits, result) = caller.data().maybe_execute_io(bits, result);
-
-                // Handle SIG_RESUME: fiber/resume returns this signal.
-                // Execute the fiber's WASM closure host-side.
-                if bits.0 & 8 != 0 {
-                    // SIG_RESUME: result is the fiber value
-                    let r = handle_fiber_resume(&mut caller, result);
-                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                        eprintln!(
-                            "[rt_call] handle_fiber_resume returned: tag={} payload={} signal={}",
-                            r.0, r.1, r.2
-                        );
-                    }
-                    return r;
-                }
-
-                let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                (tag, payload, bits.0 as i32)
-            } else if let Some((id, default)) = func_val.as_parameter() {
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!("[rt_call] parameter id={} default={:?}", id, default);
-                }
-                if !args.is_empty() {
-                    let err = crate::value::error_val(
-                        "arity-error",
-                        format!("parameter call: expected 0 arguments, got {}", args.len()),
-                    );
-                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                    (tag, payload, 1)
-                } else {
-                    let value = caller.data().resolve_parameter(id, default);
-                    let (tag, payload) = caller.data_mut().value_to_wasm(value);
-                    (tag, payload, 0)
-                }
-            } else if let Some(closure) = func_val.as_closure() {
-                if let Some(wasm_idx) = closure.template.wasm_func_idx {
-                    // WASM closure: build env in linear memory and call
-                    call_wasm_closure(&mut caller, closure, wasm_idx, &args)
-                } else {
-                    // Bytecode closure — not supported in WASM backend
-                    let err = crate::value::error_val(
-                        "internal-error",
-                        "rt_call: bytecode closure in WASM backend",
-                    );
-                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                    (tag, payload, 1)
-                }
-            } else {
-                let err = crate::value::error_val(
-                    "type-error",
-                    format!("rt_call: cannot call {}", func_val.type_name()),
-                );
-                let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                (tag, payload, 1)
-            }
-        },
-    )?;
-
-    // rt_load_const(index: i32) -> (tag: i64, payload: i64)
-    linker.func_wrap(
-        "elle",
-        "rt_load_const",
-        |caller: Caller<'_, ElleHost>, index: i32| -> (i64, i64) {
-            let host = caller.data();
-            let value = host.const_pool[index as usize];
-
-            if value.tag < TAG_HEAP_START {
-                (value.tag as i64, value.payload as i64)
-            } else {
-                // Heap value — use pre-computed handle from create_store.
-                let handle = host.pool_to_handle[index as usize];
-                (value.tag as i64, handle as i64)
-            }
-        },
-    )?;
-
-    // rt_make_closure(table_idx: i32, captures_ptr: i32, metadata_ptr: i32) -> (tag: i64, payload: i64)
-    linker.func_wrap(
-        "elle",
-        "rt_make_closure",
-        |mut caller: Caller<'_, ElleHost>,
-         table_idx: i32,
-         captures_ptr: i32,
-         metadata_ptr: i32|
-         -> (i64, i64) {
-            // Read metadata from linear memory
-            let memory = caller
-                .get_export("__elle_memory")
-                .and_then(|e| e.into_memory())
-                .expect("rt_make_closure: no memory");
-            let data = memory.data(&caller);
-            let read_i64 = |offset: usize| -> i64 {
-                i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
-            };
-            let mp = metadata_ptr as usize;
-            let num_captures = read_i64(mp) as u16;
-            let num_params = read_i64(mp + 8) as usize;
-            let num_locals = read_i64(mp + 16) as usize;
-            let arity_kind = read_i64(mp + 24);
-            let arity_count = read_i64(mp + 32) as usize;
-            let lbox_params_mask = read_i64(mp + 40) as u64;
-            let lbox_locals_mask = read_i64(mp + 48) as u64;
-            let signal_bits = read_i64(mp + 56) as u32;
-
-            // Read captures from linear memory
-            let mut captures = Vec::with_capacity(num_captures as usize);
-            for i in 0..num_captures as usize {
-                let offset = captures_ptr as usize + i * 16;
-                let tag = read_i64(offset) as u64;
-                let payload = read_i64(offset + 8) as u64;
-                let value = if tag < TAG_HEAP_START {
-                    Value { tag, payload }
-                } else {
-                    caller.data().handles.get(payload)
-                };
-                captures.push(value);
-            }
-
-            let arity = match arity_kind {
-                0 => crate::value::types::Arity::Exact(arity_count),
-                1 => crate::value::types::Arity::AtLeast(arity_count),
-                _ => crate::value::types::Arity::Exact(arity_count),
-            };
-
-            // Create a ClosureTemplate with wasm_func_idx.
-            // Also populate bytecode from dual-compiled closures so spawn works.
-            let (bytecode, constants) = caller
-                .data()
-                .closure_bytecodes
-                .get(table_idx as usize)
-                .map(|(bc, cs)| (bc.clone(), cs.clone()))
-                .unwrap_or_else(|| (std::rc::Rc::new(vec![]), std::rc::Rc::new(vec![])));
-            let template = std::rc::Rc::new(crate::value::closure::ClosureTemplate {
-                bytecode,
-                arity,
-                num_locals,
-                num_captures: num_captures as usize,
-                num_params,
-                constants,
-                signal: crate::signals::Signal {
-                    bits: crate::value::fiber::SignalBits(signal_bits),
-                    propagates: 0,
-                },
-                lbox_params_mask,
-                lbox_locals_mask,
-                symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
-                location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
-                jit_code: None,
-                lir_function: None,
-                doc: None,
-                syntax: None,
-                vararg_kind: crate::hir::VarargKind::List,
-                name: None,
-                result_is_immediate: false,
-                has_outward_heap_set: false,
-                wasm_func_idx: Some(table_idx as u32),
-            });
-
-            let closure = crate::value::closure::Closure {
-                template,
-                env: std::rc::Rc::new(captures),
-                squelch_mask: 0,
-            };
-
-            let value = Value::closure(closure);
-            let (tag, payload) = caller.data_mut().value_to_wasm(value);
-            (tag, payload)
-        },
-    )?;
-
-    // rt_data_op(op: i32, args_ptr: i32, nargs: i32) -> (tag: i64, payload: i64, signal: i32)
-    linker.func_wrap(
-        "elle",
-        "rt_data_op",
-        |mut caller: Caller<'_, ElleHost>, op: i32, args_ptr: i32, nargs: i32| -> (i64, i64, i32) {
-            let args = read_args_from_memory(&mut caller, args_ptr, nargs);
-            let (bits, result) = dispatch_data_op(op, &args);
-            let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.0 as i32)
-        },
-    )?;
-
-    // rt_push_param(args_ptr: i32, npairs: i32) -> ()
-    linker.func_wrap(
-        "elle",
-        "rt_push_param",
-        |mut caller: Caller<'_, ElleHost>, args_ptr: i32, npairs: i32| {
-            let memory = caller
-                .get_export("__elle_memory")
-                .and_then(|e| e.into_memory())
-                .expect("rt_push_param: no memory");
-
-            // Read (param, value) pairs from linear memory.
-            // Each pair is 32 bytes: param(tag,payload) + value(tag,payload).
-            let mut frame = Vec::with_capacity(npairs as usize);
-            for i in 0..npairs as usize {
-                let base = args_ptr as usize + i * 32;
-                let data = memory.data(&caller);
-                let read_i64 = |offset: usize| -> i64 {
-                    i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap())
-                };
-                let param_tag = read_i64(base) as u64;
-                let param_payload = read_i64(base + 8) as u64;
-                let val_tag = read_i64(base + 16) as u64;
-                let val_payload = read_i64(base + 24) as u64;
-
-                // Resolve param value from handle table
-                let param_val = caller
-                    .data()
-                    .wasm_to_value(param_tag as i64, param_payload as i64);
-                let value = caller
-                    .data()
-                    .wasm_to_value(val_tag as i64, val_payload as i64);
-
-                // Extract parameter id
-                if let Some((id, _)) = param_val.as_parameter() {
-                    frame.push((id, value));
-                }
-            }
-            caller.data_mut().param_frames.push(frame);
-        },
-    )?;
-
-    // rt_pop_param() -> ()
-    linker.func_wrap(
-        "elle",
-        "rt_pop_param",
-        |mut caller: Caller<'_, ElleHost>| {
-            caller.data_mut().param_frames.pop();
-        },
-    )?;
-
-    // rt_prepare_tail_call(func_tag, func_payload, args_ptr, nargs, caller_env_ptr)
-    //   -> (env_ptr, table_idx, is_wasm, tag, payload, signal)
-    //
-    // Prepares a tail call: resolves the target, builds env if WASM closure,
-    // or calls directly if NativeFn/Parameter. Returns enough info for the
-    // WASM caller to either `return_call_indirect` or `return` the result.
-    linker.func_wrap(
-        "elle",
-        "rt_prepare_tail_call",
-        |mut caller: Caller<'_, ElleHost>,
-         func_tag: i64,
-         func_payload: i64,
-         args_ptr: i32,
-         nargs: i32,
-         caller_env_ptr: i32|
-         -> (i32, i32, i32, i64, i64, i32) {
-            let func_val = caller.data().wasm_to_value(func_tag, func_payload);
-
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                let args_debug = read_args_from_memory(&mut caller, args_ptr, nargs);
-                eprintln!(
-                    "[rt_prepare_tail_call] type={} nargs={} args={:?}",
-                    func_val.type_name(),
-                    nargs,
-                    args_debug
-                        .iter()
-                        .map(|v| format!("{}", v))
-                        .collect::<Vec<_>>()
-                );
-            }
-
-            // Read args (same protocol as rt_call: nargs=-1 unpacks array)
-            let args = if nargs == -1 {
-                let raw = read_args_from_memory(&mut caller, args_ptr + 16, 1);
-                if let Some(arr) = raw[0].as_array_mut() {
-                    arr.borrow().to_vec()
-                } else if let Some(arr) = raw[0].as_array() {
-                    arr.to_vec()
-                } else {
-                    vec![raw[0]]
-                }
-            } else {
-                read_args_from_memory(&mut caller, args_ptr, nargs)
-            };
-
-            if let Some(closure) = func_val.as_closure() {
-                if let Some(wasm_idx) = closure.template.wasm_func_idx {
-                    // Reset env_stack_ptr to caller's position (frees caller's env)
-                    let env_base = caller_env_ptr as usize;
-                    caller.data_mut().env_stack_ptr = env_base;
-                    // Build callee's env at the same position
-                    prepare_wasm_env(&mut caller, closure, &args, env_base);
-
-                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                        let env_end = caller.data().env_stack_ptr;
-                        let memory = caller
-                            .get_export("__elle_memory")
-                            .and_then(|e| e.into_memory())
-                            .expect("debug");
-                        let data = memory.data(&caller);
-                        let num_slots = (env_end - env_base) / 16;
-                        let mut slots = Vec::new();
-                        for i in 0..num_slots.min(5) {
-                            let off = env_base + i * 16;
-                            let t = i64::from_le_bytes(data[off..off + 8].try_into().unwrap());
-                            let p = i64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap());
-                            slots.push(format!("({},{})", t, p));
-                        }
-                        eprintln!(
-                            "[rt_prepare_tail_call] env after prepare: base={} end={} slots={:?}",
-                            env_base, env_end, slots
-                        );
-                    }
-
-                    return (env_base as i32, wasm_idx as i32, 1, 0, 0, 0);
-                }
-                let err = crate::value::error_val(
-                    "internal-error",
-                    "rt_prepare_tail_call: bytecode closure in WASM backend",
-                );
-                let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                return (0, 0, 0, tag, payload, 1);
-            }
-
-            if func_val.is_native_fn() {
-                let native_fn = func_val
-                    .as_native_fn()
-                    .expect("rt_prepare_tail_call: expected NativeFn");
-                let (bits, result) = native_fn(&args);
-                let (bits, result) = caller.data().maybe_execute_io(bits, result);
-                let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                return (0, 0, 0, tag, payload, bits.0 as i32);
-            }
-
-            if let Some((id, default)) = func_val.as_parameter() {
-                if !args.is_empty() {
-                    let err = crate::value::error_val(
-                        "arity-error",
-                        format!("parameter call: expected 0 arguments, got {}", args.len()),
-                    );
-                    let (tag, payload) = caller.data_mut().value_to_wasm(err);
-                    return (0, 0, 0, tag, payload, 1);
-                }
-                let value = caller.data().resolve_parameter(id, default);
-                let (tag, payload) = caller.data_mut().value_to_wasm(value);
-                return (0, 0, 0, tag, payload, 0);
-            }
-
-            let err = crate::value::error_val(
-                "type-error",
-                format!("rt_prepare_tail_call: cannot call {}", func_val.type_name()),
-            );
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (0, 0, 0, tag, payload, 1)
-        },
-    )?;
-
-    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32, func_idx: i32, signal_bits: i32)
-    // Save yielded value and live registers to a WasmSuspensionFrame.
-    linker.func_wrap(
-        "elle",
-        "rt_yield",
-        |mut caller: Caller<'_, ElleHost>,
-         tag: i64,
-         payload: i64,
-         resume_state: i32,
-         regs_ptr: i32,
-         num_regs: i32,
-         func_idx: i32,
-         signal_bits: i32| {
-            // Read saved registers from linear memory
-            let saved_regs = read_reg_pairs(&mut caller, regs_ptr, num_regs);
-
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                eprintln!(
-                    "[rt_yield] tag={} payload={} resume_state={} num_regs={} func_idx={} signal_bits={}",
-                    tag, payload, resume_state, num_regs, func_idx, signal_bits
-                );
-            }
-
-            let host = caller.data_mut();
-            host.push_suspension_frame(super::host::WasmSuspensionFrame {
-                wasm_func_idx: func_idx as u32,
-                resume_state: resume_state as u32,
-                saved_regs,
-                env_snapshot: Vec::new(), // filled by call_wasm_closure
-                env_base: 0,              // filled by call_wasm_closure
-                signal_bits: signal_bits as u32,
-            });
-        },
-    )?;
-
-    // rt_get_resume_value() -> (tag: i64, payload: i64)
-    // Return the resume value set by the scheduler.
-    linker.func_wrap(
-        "elle",
-        "rt_get_resume_value",
-        |caller: Caller<'_, ElleHost>| -> (i64, i64) {
-            let host = caller.data();
-            let result = match host.resume_value {
-                Some((tag, payload)) => (tag, payload),
-                None => (crate::value::repr::TAG_NIL as i64, 0),
-            };
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                eprintln!(
-                    "[rt_get_resume_value] tag={} payload={} (resume_value={:?})",
-                    result.0,
-                    result.1,
-                    host.resume_value.is_some()
-                );
-            }
-            result
-        },
-    )?;
-
-    // rt_load_saved_reg(index: i32) -> (tag: i64, payload: i64)
-    // Load a saved register by index from the current suspension frame.
-    linker.func_wrap(
-        "elle",
-        "rt_load_saved_reg",
-        |caller: Caller<'_, ElleHost>, index: i32| -> (i64, i64) {
-            let host = caller.data();
-            // During resume_wasm_closure, the frame is in active_resume_frame
-            // (popped before the WASM call). Fall back to last_suspension_frame
-            // for non-resume contexts (e.g., run_module re-entry).
-            let frame_ref = host
-                .active_resume_frame
-                .as_ref()
-                .or_else(|| host.last_suspension_frame());
-            if let Some(frame) = frame_ref {
-                if (index as usize) < frame.saved_regs.len() {
-                    let (tag, pay) = frame.saved_regs[index as usize];
-                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() && index < 5 {
-                        eprintln!(
-                            "[rt_load_saved_reg] index={} tag={} payload={} (frame has {} regs)",
-                            index,
-                            tag,
-                            pay,
-                            frame.saved_regs.len()
-                        );
-                    }
-                    (tag, pay)
-                } else {
-                    (crate::value::repr::TAG_NIL as i64, 0)
-                }
-            } else {
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!("[rt_load_saved_reg] NO FRAME! index={}", index);
-                }
-                (crate::value::repr::TAG_NIL as i64, 0)
-            }
-        },
-    )?;
-
-    Ok(linker)
-}
-
-/// Read (tag, payload) pairs from linear memory at `regs_ptr`.
-fn read_reg_pairs(
-    caller: &mut Caller<'_, ElleHost>,
-    regs_ptr: i32,
-    num_regs: i32,
-) -> Vec<(i64, i64)> {
-    if num_regs <= 0 {
-        return Vec::new();
-    }
-    let memory = caller
-        .get_export("__elle_memory")
-        .and_then(|e| e.into_memory())
-        .expect("read_reg_pairs: no memory");
-    let data = memory.data(&*caller);
-    let mut pairs = Vec::with_capacity(num_regs as usize);
-    for i in 0..num_regs as usize {
-        let offset = regs_ptr as usize + i * 16;
-        let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        let payload = i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap());
-        pairs.push((tag, payload));
-    }
-    pairs
-}
-
 /// Build a WASM closure's environment in linear memory at `env_base`.
 ///
 /// Layout: `[captures...][params...][local_slots...]`, each slot 16 bytes.
 /// Handles varargs, LBox wrapping, and memory growth.
 /// Updates `env_stack_ptr` to point past the new env region.
-fn prepare_wasm_env(
+pub(super) fn prepare_wasm_env(
     caller: &mut Caller<'_, ElleHost>,
     closure: &std::rc::Rc<crate::value::closure::Closure>,
     args: &[Value],
@@ -871,12 +326,112 @@ pub fn prepare_wasm_env_tiered(
     }
 }
 
+/// Handle the result of a WASM closure call (shared by call and resume paths).
+///
+/// If the function suspended (status > 0): snapshot env to the front frame,
+/// clear memory[0..4], restore env_stack_ptr, return SIG_YIELD.
+/// If normal return: read signal from memory[0..4], clear if non-zero, return.
+/// If error: restore env_stack_ptr, return error.
+pub(super) fn handle_wasm_result(
+    caller: &mut Caller<'_, ElleHost>,
+    call_result: std::result::Result<(), wasmtime::Error>,
+    results: &[Val; 3],
+    env_base: usize,
+    label: &str,
+) -> (i64, i64, i32) {
+    match call_result {
+        Ok(()) => {
+            let tag = results[0].unwrap_i64();
+            let payload = results[1].unwrap_i64();
+            let status = results[2].unwrap_i32();
+
+            if status > 0 {
+                // Suspended: snapshot env and update the front frame.
+                let env_end = caller.data().env_stack_ptr;
+                let env_snapshot = if env_end > env_base {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("handle_wasm_result: no memory");
+                    memory.data(&*caller)[env_base..env_end].to_vec()
+                } else {
+                    Vec::new()
+                };
+
+                // Update the most recently pushed frame (at back). rt_yield
+                // pushes to the back; during a resume the old frame is still at
+                // the front, so first_suspension_frame_mut() would return the
+                // wrong frame.
+                if let Some(frame) = caller.data_mut().back_suspension_frame_mut() {
+                    frame.env_base = env_base;
+                    frame.env_snapshot = env_snapshot;
+                }
+
+                // Clear signal word so callers don't see stale SIG_YIELD
+                let memory = caller
+                    .get_export("__elle_memory")
+                    .and_then(|e| e.into_memory())
+                    .expect("handle_wasm_result: no memory");
+                if caller.data().debug {
+                    let old = i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
+                    eprintln!("[{}] clearing memory[0..4] from {} to 0", label, old);
+                }
+                memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+
+                caller.data_mut().env_stack_ptr = env_base;
+
+                if caller.data().debug {
+                    eprintln!(
+                        "[{}] SUSPENDED: status={} tag={} payload={}",
+                        label, status, tag, payload
+                    );
+                }
+
+                (tag, payload, crate::value::fiber::SIG_YIELD.0 as i32)
+            } else {
+                caller.data_mut().env_stack_ptr = env_base;
+
+                let signal = {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("handle_wasm_result: no memory");
+                    let data = memory.data(&*caller);
+                    i32::from_le_bytes(data[0..4].try_into().unwrap())
+                };
+                if signal != 0 {
+                    let memory = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                        .expect("handle_wasm_result: no memory");
+                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                }
+
+                if caller.data().debug {
+                    let v = caller.data().wasm_to_value(tag, payload);
+                    eprintln!(
+                        "[{}] returned: tag={} payload={} signal={} = {:?}",
+                        label, tag, payload, signal, v
+                    );
+                }
+                (tag, payload, signal)
+            }
+        }
+        Err(e) => {
+            caller.data_mut().env_stack_ptr = env_base;
+            let err = crate::value::error_val("exec-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            (tag, payload, 1)
+        }
+    }
+}
+
 /// Call a WASM closure: build env in linear memory and invoke via table.
 ///
 /// Each call allocates a fresh env region from `ElleHost::env_stack_ptr`
 /// so that nested closure calls (recursion, higher-order) don't overwrite
 /// each other's environments.
-fn call_wasm_closure(
+pub(super) fn call_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
     closure: &std::rc::Rc<crate::value::closure::Closure>,
     wasm_idx: u32,
@@ -885,7 +440,6 @@ fn call_wasm_closure(
     let env_base = caller.data().env_stack_ptr;
     prepare_wasm_env(caller, closure, args, env_base);
 
-    // Look up the WASM function in the table and call it
     let table = caller
         .get_export("__elle_table")
         .and_then(|e| e.into_table())
@@ -902,117 +456,14 @@ fn call_wasm_closure(
         &mut *caller,
         &[
             Val::I32(env_base as i32),
-            Val::I32(0), // args_ptr unused
-            Val::I32(0), // nargs unused
-            Val::I32(0), // ctx
+            Val::I32(0),
+            Val::I32(0),
+            Val::I32(0),
         ],
         &mut results,
     );
 
-    match call_result {
-        Ok(()) => {
-            let tag = results[0].unwrap_i64();
-            let payload = results[1].unwrap_i64();
-            let status = results[2].unwrap_i32();
-
-            if status > 0 {
-                // Suspended: the WASM function yielded (or yield-through-call).
-                // rt_yield already pushed a WasmSuspensionFrame with saved regs.
-                // We need to snapshot the env and set metadata on the frame.
-
-                // Snapshot env from linear memory
-                let env_end = caller.data().env_stack_ptr;
-                let env_size = env_end - env_base;
-                let env_snapshot = if env_size > 0 {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("call_wasm_closure: no memory");
-                    let data = memory.data(&*caller);
-                    data[env_base..env_end].to_vec()
-                } else {
-                    Vec::new()
-                };
-
-                // Update the suspension frame with env + metadata.
-                // Don't overwrite wasm_func_idx — rt_yield already set it
-                // to the correct function (important for tail calls where
-                // the callee, not the original caller, is what yielded).
-                if let Some(frame) = caller.data_mut().last_suspension_frame_mut() {
-                    frame.env_base = env_base;
-                    frame.env_snapshot = env_snapshot;
-                }
-
-                // Clear signal word so callers don't see stale SIG_YIELD
-                {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("call_wasm_closure: no memory");
-                    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                        let old =
-                            i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
-                        eprintln!(
-                            "[call_wasm_closure] clearing memory[0..4] from {} to 0",
-                            old
-                        );
-                    }
-                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
-                }
-
-                // Restore env_stack_ptr (env is saved in snapshot)
-                caller.data_mut().env_stack_ptr = env_base;
-
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!(
-                        "[call_wasm_closure] SUSPENDED: status={} tag={} payload={}",
-                        status, tag, payload
-                    );
-                }
-
-                // Return SIG_YIELD to the calling CPS code. The full signal
-                // bits (including SIG_IO) are on the suspension frame for
-                // handle_fiber_resume to read via last_suspension_frame().
-                (tag, payload, crate::value::fiber::SIG_YIELD.0 as i32)
-            } else {
-                // Normal return — restore env stack pointer
-                caller.data_mut().env_stack_ptr = env_base;
-
-                // Read signal from memory[0..4].
-                let signal = {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("call_wasm_closure: no memory");
-                    let data = memory.data(&*caller);
-                    i32::from_le_bytes(data[0..4].try_into().unwrap())
-                };
-                if signal != 0 {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("call_wasm_closure: no memory");
-                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
-                }
-
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    let v = caller.data().wasm_to_value(tag, payload);
-                    eprintln!(
-                        "[call_wasm_closure] returned: tag={} payload={} signal={} status={} = {:?}",
-                        tag, payload, signal, status, v
-                    );
-                }
-                (tag, payload, signal)
-            }
-        }
-        Err(e) => {
-            // Restore env_stack_ptr on error too
-            caller.data_mut().env_stack_ptr = env_base;
-            let err = crate::value::error_val("exec-error", e.to_string());
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, 1)
-        }
-    }
+    handle_wasm_result(caller, call_result, &results, env_base, "call_wasm_closure")
 }
 
 /// Resume a suspended WASM closure with a resume value.
@@ -1029,16 +480,14 @@ pub fn resume_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
     resume_val: Value,
 ) -> Option<(i64, i64, i32)> {
-    // Pop the frame BEFORE the WASM call. During the call, new frames may
-    // be pushed (yield-through-call), and popping afterwards would remove a
-    // new frame instead of the old one. The frame is stored in
-    // active_resume_frame for rt_load_saved_reg to read during the prologue.
-    let frame = caller.data_mut().pop_suspension_frame()?;
+    // Peek the front frame (innermost). During the WASM call, rt_load_saved_reg
+    // reads from it. New frames pushed by rt_yield go to the back, so they
+    // don't interfere. We pop_front AFTER the call completes.
+    let frame = caller.data().first_suspension_frame()?;
     let wasm_func_idx = frame.wasm_func_idx;
     let resume_state = frame.resume_state;
     let env_base = frame.env_base;
     let env_snapshot = frame.env_snapshot.clone();
-    caller.data_mut().active_resume_frame = Some(frame);
 
     // Set resume value for rt_get_resume_value
     let (resume_tag, resume_pay) = caller.data_mut().value_to_wasm(resume_val);
@@ -1051,7 +500,6 @@ pub fn resume_wasm_closure(
             .and_then(|e| e.into_memory())
             .expect("resume_wasm_closure: no memory");
 
-        // Grow memory if needed
         let needed = env_base + env_snapshot.len();
         let current = memory.data_size(&*caller);
         if needed > current {
@@ -1065,10 +513,9 @@ pub fn resume_wasm_closure(
         data[env_base..env_base + env_snapshot.len()].copy_from_slice(&env_snapshot);
     }
 
-    // Set env_stack_ptr past the restored env
     caller.data_mut().env_stack_ptr = env_base + env_snapshot.len();
 
-    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+    if caller.data().debug {
         eprintln!(
             "[resume_wasm_closure] env_base={} env_size={} resume_state={} wasm_func_idx={}",
             env_base,
@@ -1076,7 +523,6 @@ pub fn resume_wasm_closure(
             resume_state,
             wasm_func_idx
         );
-        // Dump first few env slots
         if !env_snapshot.is_empty() {
             let mut slots = Vec::new();
             let num_slots = env_snapshot.len() / 16;
@@ -1102,546 +548,31 @@ pub fn resume_wasm_closure(
         .unwrap_func()
         .expect("resume_wasm_closure: table entry is not a function");
 
-    // Call with ctx = resume_state
     let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
     let call_result = func.call(
         &mut *caller,
         &[
             Val::I32(env_base as i32),
-            Val::I32(0),                   // args_ptr unused
-            Val::I32(0),                   // nargs unused
-            Val::I32(resume_state as i32), // ctx = resume state
+            Val::I32(0),
+            Val::I32(0),
+            Val::I32(resume_state as i32),
         ],
         &mut results,
     );
 
-    // Clear resume value and active resume frame (already popped before call)
+    // Pop the front frame now that the call is done. If the function yielded
+    // again, rt_yield pushed new frames to the back — they survive this pop.
+    caller.data_mut().pop_suspension_frame();
     caller.data_mut().resume_value = None;
-    caller.data_mut().active_resume_frame = None;
 
-    match call_result {
-        Ok(()) => {
-            let tag = results[0].unwrap_i64();
-            let payload = results[1].unwrap_i64();
-            let status = results[2].unwrap_i32();
-
-            if status > 0 {
-                // Suspended again — snapshot env and update frame (rt_yield pushed a new one)
-                let env_end = caller.data().env_stack_ptr;
-                let env_size = env_end - env_base;
-                let env_snapshot = if env_size > 0 {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("resume_wasm_closure: no memory");
-                    memory.data(&*caller)[env_base..env_end].to_vec()
-                } else {
-                    Vec::new()
-                };
-
-                if let Some(new_frame) = caller.data_mut().last_suspension_frame_mut() {
-                    new_frame.env_base = env_base;
-                    new_frame.env_snapshot = env_snapshot;
-                }
-
-                caller.data_mut().env_stack_ptr = env_base;
-
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!("[resume_wasm_closure] SUSPENDED AGAIN: status={}", status);
-                }
-                // Return SIG_YIELD (not full signal_bits) — consistent with
-                // call_wasm_closure. The full bits are on the suspension frame
-                // for handle_fiber_resume to read.
-                Some((tag, payload, crate::value::fiber::SIG_YIELD.0 as i32))
-            } else {
-                // Normal return
-                caller.data_mut().env_stack_ptr = env_base;
-
-                let signal = {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("resume_wasm_closure: no memory");
-                    let data = memory.data(&*caller);
-                    i32::from_le_bytes(data[0..4].try_into().unwrap())
-                };
-                if signal != 0 {
-                    let memory = caller
-                        .get_export("__elle_memory")
-                        .and_then(|e| e.into_memory())
-                        .expect("resume_wasm_closure: no memory");
-                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
-                }
-
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    let v = caller.data().wasm_to_value(tag, payload);
-                    eprintln!(
-                        "[resume_wasm_closure] returned: tag={} payload={} signal={} = {:?}",
-                        tag, payload, signal, v
-                    );
-                }
-                Some((tag, payload, signal))
-            }
-        }
-        Err(e) => {
-            caller.data_mut().env_stack_ptr = env_base;
-            let err = crate::value::error_val("exec-error", e.to_string());
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            Some((tag, payload, 1))
-        }
-    }
-}
-
-/// Handle SIG_RESUME from fiber/resume in the WASM backend.
-///
-/// Reverse the frame stack for a fiber and return innermost signal_bits.
-///
-/// Frames are pushed inner→outer during yield-through-call, but the
-/// resume chain must pop inner→outer (since `pop()`/`last()` take from
-/// the end). After reversal, `last()` = innermost, `pop()` = innermost
-/// first. The innermost frame's signal_bits carry the original I/O signal;
-/// outer frames only have SIG_YIELD because `call_wasm_closure` strips it.
-fn reverse_frames_and_get_signal(caller: &mut Caller<'_, ElleHost>, fiber_id: usize) -> u32 {
-    use crate::value::fiber::SIG_YIELD;
-    let frames = match caller.data_mut().suspension_frames.get_mut(&fiber_id) {
-        Some(f) if !f.is_empty() => f,
-        _ => return SIG_YIELD.0,
-    };
-    // Innermost frame is first (pushed first). Read its signal_bits.
-    let sig_bits = frames.first().map(|f| f.signal_bits).unwrap_or(SIG_YIELD.0);
-    // Reverse so pop()/last() give innermost first.
-    frames.reverse();
-    sig_bits
-}
-
-/// When `fiber/resume` returns SIG_RESUME, the fiber value contains the
-/// fiber to execute. We extract it, run its WASM closure, update status.
-fn handle_fiber_resume(caller: &mut Caller<'_, ElleHost>, fiber_value: Value) -> (i64, i64, i32) {
-    use crate::value::fiber::{FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_YIELD};
-
-    let fiber_handle = match fiber_value.as_fiber() {
-        Some(f) => f.clone(),
-        None => {
-            let err = crate::value::error_val("type-error", "fiber/resume: not a fiber");
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.0 as i32);
-        }
-    };
-
-    // Extract closure, resume value, and status from the fiber
-    let (closure, resume_value, status) = fiber_handle.with_mut(|fiber| {
-        let closure = fiber.closure.clone();
-        let resume_value = fiber.signal.take().map(|(_, v)| v).unwrap_or(Value::NIL);
-        let status = fiber.status;
-        (closure, resume_value, status)
-    });
-
-    let wasm_idx = match closure.template.wasm_func_idx {
-        Some(idx) => idx,
-        None => {
-            fiber_handle.with_mut(|f| f.status = FiberStatus::Error);
-            let err =
-                crate::value::error_val("internal-error", "fiber/resume: bytecode closure in WASM");
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.0 as i32);
-        }
-    };
-
-    let yield_signal = SIG_YIELD.0 as i32;
-    let fiber_id = fiber_handle.id();
-
-    match status {
-        FiberStatus::New => {
-            fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
-
-            let args = if resume_value.is_nil() {
-                vec![]
-            } else {
-                vec![resume_value]
-            };
-            caller.data_mut().fiber_id_stack.push(fiber_id);
-            let (tag, payload, signal) = call_wasm_closure(caller, &closure, wasm_idx, &args);
-            let frame_sig_bits = reverse_frames_and_get_signal(caller, fiber_id);
-            caller.data_mut().fiber_id_stack.pop();
-
-            if signal == yield_signal {
-                let yielded = caller.data().wasm_to_value(tag, payload);
-                let sig_bits = frame_sig_bits;
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
-                    eprintln!(
-                        "[handle_fiber_resume] New yield: sig_bits={} (SIG_IO={})",
-                        sig_bits,
-                        sig_bits & 512
-                    );
-                }
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Paused;
-                    f.signal = Some((SignalBits::new(sig_bits), yielded));
-                });
-                (tag, payload, 0) // caught by fiber
-            } else if signal != 0 {
-                let err_val = caller.data().wasm_to_value(tag, payload);
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Error;
-                    f.signal = Some((SignalBits::new(signal as u32), err_val));
-                });
-                (tag, payload, signal)
-            } else {
-                let ret_val = caller.data().wasm_to_value(tag, payload);
-                fiber_handle.with_mut(|f| {
-                    f.status = FiberStatus::Dead;
-                    f.signal = Some((SIG_OK, ret_val));
-                });
-                (tag, payload, 0)
-            }
-        }
-        FiberStatus::Paused => {
-            fiber_handle.with_mut(|f| f.status = FiberStatus::Alive);
-
-            caller.data_mut().fiber_id_stack.push(fiber_id);
-            let result = resume_wasm_closure(caller, resume_value);
-            let ret = match result {
-                Some((tag, payload, signal)) => {
-                    if signal == yield_signal {
-                        let yielded = caller.data().wasm_to_value(tag, payload);
-                        let sig_bits = reverse_frames_and_get_signal(caller, fiber_id);
-                        fiber_handle.with_mut(|f| {
-                            f.status = FiberStatus::Paused;
-                            f.signal = Some((SignalBits::new(sig_bits), yielded));
-                        });
-                        (tag, payload, 0)
-                    } else if signal != 0 {
-                        let err_val = caller.data().wasm_to_value(tag, payload);
-                        fiber_handle.with_mut(|f| {
-                            f.status = FiberStatus::Error;
-                            f.signal = Some((SignalBits::new(signal as u32), err_val));
-                        });
-                        (tag, payload, signal)
-                    } else {
-                        // Resume chain for yield-through-call
-                        let mut result_val = caller.data().wasm_to_value(tag, payload);
-                        loop {
-                            if !caller.data().has_suspension_frames() {
-                                fiber_handle.with_mut(|f| {
-                                    f.status = FiberStatus::Dead;
-                                    f.signal = Some((SIG_OK, result_val));
-                                });
-                                let (t, p) = caller.data_mut().value_to_wasm(result_val);
-                                break (t, p, 0);
-                            }
-                            match resume_wasm_closure(caller, result_val) {
-                                Some((t, p, s)) => {
-                                    if s == yield_signal {
-                                        let yielded = caller.data().wasm_to_value(t, p);
-                                        let sig_bits =
-                                            reverse_frames_and_get_signal(caller, fiber_id);
-                                        fiber_handle.with_mut(|f| {
-                                            f.status = FiberStatus::Paused;
-                                            f.signal = Some((SignalBits::new(sig_bits), yielded));
-                                        });
-                                        break (t, p, 0);
-                                    } else if s != 0 {
-                                        let err_val = caller.data().wasm_to_value(t, p);
-                                        fiber_handle.with_mut(|f| {
-                                            f.status = FiberStatus::Error;
-                                            f.signal = Some((SignalBits::new(s as u32), err_val));
-                                        });
-                                        break (t, p, s);
-                                    }
-                                    result_val = caller.data().wasm_to_value(t, p);
-                                }
-                                None => {
-                                    fiber_handle.with_mut(|f| {
-                                        f.status = FiberStatus::Dead;
-                                        f.signal = Some((SIG_OK, result_val));
-                                    });
-                                    let (t, p) = caller.data_mut().value_to_wasm(result_val);
-                                    break (t, p, 0);
-                                }
-                            }
-                        }
-                    }
-                }
-                None => {
-                    fiber_handle.with_mut(|f| {
-                        f.status = FiberStatus::Dead;
-                        f.signal = Some((SIG_OK, Value::NIL));
-                    });
-                    let (tag, payload) = caller.data_mut().value_to_wasm(Value::NIL);
-                    (tag, payload, 0)
-                }
-            };
-            caller.data_mut().fiber_id_stack.pop();
-            ret
-        }
-        _ => {
-            let err = crate::value::error_val("fiber-error", "fiber/resume: fiber not resumable");
-            let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, SIG_ERROR.0 as i32)
-        }
-    }
-}
-
-/// Dispatch a data operation by opcode.
-pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::SignalBits, Value) {
-    use crate::value::fiber::{SIG_ERROR, SIG_OK};
-    use crate::value::heap::TableKey;
-
-    let err = |kind: &str, msg: &str| (SIG_ERROR, crate::value::error_val(kind, msg));
-
-    match op {
-        0 => (SIG_OK, Value::cons(args[0], args[1])), // OP_CONS
-        1 => match args[0].as_cons() {
-            // OP_CAR
-            Some(c) => (SIG_OK, c.first),
-            None => (SIG_OK, Value::NIL),
-        },
-        2 => match args[0].as_cons() {
-            // OP_CDR
-            Some(c) => (SIG_OK, c.rest),
-            None => (SIG_OK, Value::NIL),
-        },
-        3 => match args[0].as_cons() {
-            // OP_CAR_DESTRUCTURE
-            Some(c) => (SIG_OK, c.first),
-            None => err("type-error", "car: not a pair"),
-        },
-        4 => match args[0].as_cons() {
-            // OP_CDR_DESTRUCTURE
-            Some(c) => (SIG_OK, c.rest),
-            None => err("type-error", "cdr: not a pair"),
-        },
-        5 => match args[0].as_cons() {
-            // OP_CAR_OR_NIL
-            Some(c) => (SIG_OK, c.first),
-            None => (SIG_OK, Value::NIL),
-        },
-        6 => match args[0].as_cons() {
-            // OP_CDR_OR_NIL
-            Some(c) => (SIG_OK, c.rest),
-            None => (SIG_OK, Value::EMPTY_LIST),
-        },
-        7 => (SIG_OK, Value::array_mut(args.to_vec())), // OP_MAKE_ARRAY
-        8 => (SIG_OK, Value::local_lbox(args[0])),      // OP_MAKE_LBOX
-        9 => {
-            // OP_LOAD_LBOX
-            match args[0].as_lbox() {
-                Some(cell) => (SIG_OK, *cell.borrow()),
-                None => (SIG_OK, args[0]),
-            }
-        }
-        10 => {
-            // OP_STORE_LBOX
-            if let Some(cell) = args[0].as_lbox() {
-                *cell.borrow_mut() = args[1];
-            }
-            (SIG_OK, Value::NIL)
-        }
-        11 => (SIG_OK, Value::NIL), // OP_MAKE_STRING (stub)
-        12 => {
-            // OP_ARRAY_REF_DESTRUCTURE
-            let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
-                if index < b.len() {
-                    (SIG_OK, b[index])
-                } else {
-                    err("index-error", "array ref: out of bounds")
-                }
-            } else if let Some(arr) = args[0].as_array() {
-                if index < arr.len() {
-                    (SIG_OK, arr[index])
-                } else {
-                    err("index-error", "array ref: out of bounds")
-                }
-            } else {
-                err("type-error", "array ref: not an array")
-            }
-        }
-        13 => {
-            // OP_ARRAY_SLICE_FROM
-            let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
-                (SIG_OK, Value::array_mut(b[index.min(b.len())..].to_vec()))
-            } else if let Some(arr) = args[0].as_array() {
-                (
-                    SIG_OK,
-                    Value::array_mut(arr[index.min(arr.len())..].to_vec()),
-                )
-            } else {
-                (SIG_OK, Value::array_mut(vec![]))
-            }
-        }
-        14 => {
-            // OP_STRUCT_GET_OR_NIL
-            if let Some(s) = args[0].as_struct() {
-                let key = match TableKey::from_value(&args[1]) {
-                    Some(k) => k,
-                    None => return (SIG_OK, Value::NIL),
-                };
-                (SIG_OK, s.get(&key).copied().unwrap_or(Value::NIL))
-            } else if let Some(s) = args[0].as_struct_mut() {
-                let key = match TableKey::from_value(&args[1]) {
-                    Some(k) => k,
-                    None => return (SIG_OK, Value::NIL),
-                };
-                (SIG_OK, s.borrow().get(&key).copied().unwrap_or(Value::NIL))
-            } else {
-                (SIG_OK, Value::NIL)
-            }
-        }
-        15 => {
-            // OP_STRUCT_GET_DESTRUCTURE
-            if let Some(s) = args[0].as_struct() {
-                let key = match TableKey::from_value(&args[1]) {
-                    Some(k) => k,
-                    None => return (SIG_OK, Value::NIL),
-                };
-                match s.get(&key) {
-                    Some(v) => (SIG_OK, *v),
-                    None => err("key-error", "struct get: key not found"),
-                }
-            } else {
-                err("type-error", "struct get: not a struct")
-            }
-        }
-        16 => {
-            // OP_ARRAY_EXTEND
-            if let Some(arr) = args[0].as_array_mut() {
-                let source_elems: Vec<Value> = if let Some(src) = args[1].as_array_mut() {
-                    src.borrow().to_vec()
-                } else if let Some(src) = args[1].as_array() {
-                    src.to_vec()
-                } else if args[1].as_cons().is_some() || args[1].is_empty_list() {
-                    match args[1].list_to_vec() {
-                        Ok(v) => v,
-                        Err(_) => {
-                            return err("type-error", "splice: not a proper list");
-                        }
-                    }
-                } else {
-                    return err(
-                        "type-error",
-                        &format!(
-                            "splice: expected array or list, got {}",
-                            args[1].type_name()
-                        ),
-                    );
-                };
-                let mut vec = arr.borrow().to_vec();
-                vec.extend(source_elems);
-                (SIG_OK, Value::array_mut(vec))
-            } else {
-                (SIG_OK, args[0])
-            }
-        }
-        17 => {
-            // OP_ARRAY_PUSH
-            if let Some(arr) = args[0].as_array_mut() {
-                arr.borrow_mut().push(args[1]);
-            }
-            (SIG_OK, args[0])
-        }
-        18 => {
-            // OP_ARRAY_LEN
-            let len = if let Some(arr) = args[0].as_array_mut() {
-                arr.borrow().len()
-            } else if let Some(arr) = args[0].as_array() {
-                arr.len()
-            } else {
-                0
-            };
-            (SIG_OK, Value::int(len as i64))
-        }
-        19 => {
-            // OP_ARRAY_REF_OR_NIL
-            let index = args[1].payload as usize;
-            if let Some(arr) = args[0].as_array_mut() {
-                let b = arr.borrow();
-                (SIG_OK, b.get(index).copied().unwrap_or(Value::NIL))
-            } else if let Some(arr) = args[0].as_array() {
-                (SIG_OK, arr.get(index).copied().unwrap_or(Value::NIL))
-            } else {
-                (SIG_OK, Value::NIL)
-            }
-        }
-        20 => {
-            // OP_STRUCT_REST: args[0] = struct, args[1..] = exclude keys
-            use std::collections::BTreeMap;
-            let exclude_keys: Vec<TableKey> =
-                args[1..].iter().filter_map(TableKey::from_value).collect();
-            if let Some(s) = args[0].as_struct() {
-                let filtered: BTreeMap<TableKey, Value> = s
-                    .iter()
-                    .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (k.clone(), *v))
-                    .collect();
-                (SIG_OK, Value::struct_from(filtered))
-            } else if let Some(s) = args[0].as_struct_mut() {
-                let b = s.borrow();
-                let filtered: BTreeMap<TableKey, Value> = b
-                    .iter()
-                    .filter(|(k, _)| !exclude_keys.contains(k))
-                    .map(|(k, v)| (k.clone(), *v))
-                    .collect();
-                (SIG_OK, Value::struct_from(filtered))
-            } else {
-                (SIG_OK, Value::struct_from(BTreeMap::new()))
-            }
-        }
-        _ => err("internal-error", &format!("rt_data_op: unknown op {op}")),
-    }
-}
-
-/// Read args from linear memory as `Vec<Value>`.
-fn read_args_from_memory(
-    caller: &mut Caller<'_, ElleHost>,
-    args_ptr: i32,
-    nargs: i32,
-) -> Vec<Value> {
-    let memory = caller
-        .get_export("__elle_memory")
-        .and_then(|e| e.into_memory());
-
-    let memory = match memory {
-        Some(m) => m,
-        None => return Vec::new(),
-    };
-
-    // Guard against invalid nargs
-    if !(0..=256).contains(&nargs) {
-        panic!(
-            "read_args_from_memory: invalid nargs={} args_ptr={}",
-            nargs, args_ptr
-        );
-    }
-
-    // First pass: read raw (tag, payload) pairs from memory
-    let mut raw_pairs = Vec::with_capacity(nargs as usize);
-    {
-        let data = memory.data(&*caller);
-        for i in 0..nargs as usize {
-            let offset = args_ptr as usize + i * 16;
-            let tag = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap()) as u64;
-            let payload =
-                i64::from_le_bytes(data[offset + 8..offset + 16].try_into().unwrap()) as u64;
-            raw_pairs.push((tag, payload));
-        }
-    }
-
-    // Second pass: resolve heap handles
-    let host = caller.data();
-    raw_pairs
-        .into_iter()
-        .map(|(tag, payload)| {
-            if tag < TAG_HEAP_START {
-                Value { tag, payload }
-            } else {
-                host.handles.get(payload)
-            }
-        })
-        .collect()
+    let (t, p, s) = handle_wasm_result(
+        caller,
+        call_result,
+        &results,
+        env_base,
+        "resume_wasm_closure",
+    );
+    Some((t, p, s))
 }
 
 /// Compile WASM bytes into a Module.
@@ -1677,7 +608,7 @@ pub fn run_module(
         let value = store.data().wasm_to_value(tag, payload);
 
         // Execute I/O if the suspension was caused by SIG_IO
-        let resume_val = if let Some(frame) = store.data().last_suspension_frame() {
+        let resume_val = if let Some(frame) = store.data().first_suspension_frame() {
             if frame.signal_bits & SIG_IO.0 != 0 {
                 if let Some(request) = value.as_external::<IoRequest>() {
                     let (_bits, result) = SyncBackend::new().execute(request);
