@@ -55,44 +55,33 @@ back-pointers, avoiding Rc cycles.
 ## Signals
 
 
-Signal types are bit positions in a `u32` bitmask:
+Signal types are bit positions in a `u32` bitmask. User-facing signals
+use keywords in set literals for fiber masks:
 
-| Bit | Constant | Value | Purpose |
-|-----|----------|-------|---------|
-| — | `SIG_OK` | 0 | Normal return (no bits set) |
-| 0 | `SIG_ERROR` | 1 | Error |
-| 1 | `SIG_YIELD` | 2 | Cooperative suspension |
-| 2 | `SIG_DEBUG` | 4 | Breakpoint / trace |
-| 3 | `SIG_RESUME` | 8 | VM-internal: fiber resume request |
-| 4 | `SIG_FFI` | 16 | Calls foreign code |
-| 5 | `SIG_PROPAGATE` | 32 | VM-internal: propagate caught signal |
-| 6 | `SIG_ABORT` | `SIG_ERROR \| SIG_TERMINAL` | VM-internal: graceful fiber termination with error injection |
-| 7 | `SIG_QUERY` | 128 | VM-internal: read VM state |
-| 8 | `SIG_HALT` | 256 | Graceful VM termination |
-| 9 | `SIG_IO` | 512 | I/O request to scheduler |
-| 10 | `SIG_TERMINAL` | 1024 | Uncatchable — passes through mask checks |
-| 11 | `SIG_EXEC` | 2048 | Subprocess completion |
-| 12 | `SIG_FUEL` | 4096 | Instruction budget exhaustion |
-| 13 | `SIG_SWITCH` | 8192 | Context switch |
-| 14 | `SIG_WAIT` | 16384 | Blocking wait |
-| 15 | — | — | Reserved |
-| 16–31 | — | — | User-defined signal types |
+| Keyword | Bit | Purpose |
+|---------|-----|---------|
+| `:error` | 0 | Error propagation |
+| `:yield` | 1 | Cooperative suspension |
+| `:debug` | 2 | Breakpoint / trace |
+| `:ffi` | 4 | Calls foreign code |
+| `:halt` | 8 | Graceful VM termination |
+| `:io` | 9 | I/O request to scheduler |
+| `:exec` | 11 | Subprocess completion |
+| `:fuel` | 12 | Instruction budget exhaustion |
 
-Bits 0–2 are user-facing. Bits 3–10 are VM-internal. Bits 16–31 are for
-user-defined signal types.
+Bits 3, 5–7, 10, 13–15 are VM-internal. Bits 16–31 are for
+user-defined signals (via `(signal :keyword)`).
 
-`SIG_TERMINAL` (bit 10) marks a signal as **uncatchable**. It passes through
-all mask checks regardless of the fiber's mask. `SIG_ABORT` is
-`SIG_ERROR | SIG_TERMINAL` — a composite, not a standalone bit.
+The terminal signal (bit 10) is **uncatchable** — it passes through all
+mask checks. `fiber/cancel` uses this to ensure the fiber dies immediately.
 
 ### Signal emission
 
 When code emits a signal (`emit`):
 
-1. Signal value stored in `fiber.signal`
-2. Fiber status → `Suspended`
-3. Dispatch loop returns `(SignalBits, ip)` to the caller
-4. Parent checks: `child.mask & bits != 0`?
+1. Signal value stored on the fiber
+2. Fiber suspends
+3. Parent checks: does the mask include this signal?
    - **Caught**: parent handles the signal
    - **Not caught**: parent also suspends, signal propagates up the chain
 

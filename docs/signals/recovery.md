@@ -71,8 +71,8 @@ don't resume. No special syntax or VM support is needed.
 
 ## Error Signalling
 
-Errors in Elle are signals — values emitted on the `:error` bit (bit 0,
-`SIG_ERROR`). There is no exception hierarchy, no `Condition` type, no
+Errors in Elle are signals — values emitted on the `:error` bit.
+There is no exception hierarchy, no `Condition` type, no
 `handler-case`. Error handling is fiber signal handling.
 
 ### Error Representation
@@ -141,11 +141,11 @@ fiber primitives. No special VM support.
 
 Errors propagate up the fiber chain until caught:
 
-1. Child signals `SIG_ERROR`
-2. Parent checks: `child.mask & SIG_ERROR != 0`?
-   - **Yes**: parent catches, child stays suspended (or becomes `error` state)
+1. Child signals `:error`
+2. Parent checks: does the mask include `:error`?
+   - **Yes**: parent catches, child stays suspended
    - **No**: parent also suspends, signal propagates to grandparent
-3. At the root fiber: uncaught error becomes `Err(String)` via the public API boundary
+3. At the root fiber: uncaught error terminates the program
 
 `fiber/propagate` re-signals a caught signal, preserving the child chain for
 stack traces. `fiber/cancel` hard-kills a fiber (no unwinding).
@@ -154,14 +154,10 @@ unwinding (defer/protect blocks run).
 
 ### The Public API Boundary
 
-`execute_bytecode` is the translation boundary between the signal-based
-internal VM and the `Result<Value, String>` external API:
+At the root fiber, signals translate to program outcomes:
 
-- `SIG_OK` → `Ok(value)`
-- `SIG_ERROR` → `Err(format_error(signal_value))`
-
-External callers (REPL, file execution, tests) see `Result`. Internal code
-sees `SignalBits`.
+- Normal return → value printed or returned
+- `:error` signal → error message displayed, non-zero exit
 
 
 

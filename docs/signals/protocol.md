@@ -16,7 +16,7 @@ compiler-reserved:
 | 3 | resume | 8 | VM-internal: fiber resume request |
 | 4 | ffi | 16 | Calls foreign code |
 | 5 | propagate | 32 | VM-internal: propagate caught signal |
-| 6 | abort | SIG_ERROR\|SIG_TERMINAL | VM-internal: graceful fiber termination |
+| 6 | abort | :error + terminal | VM-internal: graceful fiber termination |
 | 7 | query | 128 | VM-internal: read VM state |
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
@@ -27,9 +27,8 @@ compiler-reserved:
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
 signal bitfield.
 
-`SIG_RESUME` is how `fiber/resume` works without VM access. The
-primitive returns `(SIG_RESUME, fiber_value)` and the VM dispatch
-loop performs the actual context switch.
+The resume signal is how `fiber/resume` works — the primitive signals
+the VM to perform the actual context switch.
 
 ### Signal Values
 
@@ -255,13 +254,11 @@ When a squelched closure is called, if it emits a squelched signal, a `signal-vi
 
 ## I/O Signals
 
-### SIG_IO and the Scheduler
+### I/O and the Scheduler
 
-I/O signals use the `:io` signal bit (bit 9). A fiber performing I/O signals
-`|:yield :io|` because it wants to both suspend AND request I/O handling.
-This is a convention, not a language rule — the bits compose freely.
-
-**Signal bit**: Bit 9 (`SIG_IO = 1 << 9`)
+I/O signals use the `:io` bit (bit 9). A fiber performing I/O signals
+`:yield` and `:io` because it wants to both suspend AND request I/O
+handling. The bits compose freely.
 
 **Signal constructors**:
 - `Signal::io()` — function may perform I/O

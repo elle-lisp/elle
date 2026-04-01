@@ -21,10 +21,8 @@ User-facing fiber operations and patterns.
 | `fiber/abort` | `(fiber value?) → value` | Graceful: inject error, resume for unwinding |
 | `fiber?` | `(value) → bool` | Type predicate |
 
-All fiber primitives are `NativeFn: fn(&[Value]) -> (SignalBits, Value)`.
-Primitives that need VM-side execution (`fiber/resume`) return
-`(SIG_RESUME, fiber_value)` and the VM dispatch loop handles the context
-switch.
+Primitives that need VM-side execution (`fiber/resume`) signal the VM
+to perform the context switch.
 
 
 
