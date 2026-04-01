@@ -112,7 +112,8 @@ doctest:  ## Test code examples in documentation (literate mode)
 		|| { echo "FAILED: doctest"; exit 1; }
 
 smoke: dev smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
-	$(ELLE) demos/docgen/generate.lisp
+	cargo build --release -p elle -q
+	./target/release/elle demos/docgen/generate.lisp
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)
 	@echo "=== plugin tests (VM, JIT disabled) ==="
