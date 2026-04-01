@@ -223,7 +223,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 ## Types
 
-Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a reference-counted pointer into a heap.
+Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit inline with no allocation. Everything else is a raw pointer into a slab-allocated `HeapObject` owned by the fiber's heap.
 
 ### Immediate types
 
@@ -499,12 +499,15 @@ Exactly two values are falsy. Everything else is truthy.
 
 ## Memory
 
-- **No garbage collector.** Memory is reclaimed deterministically through three mechanisms:
-  - **Per-fiber heaps:** Each fiber allocates into a bump arena. When it finishes, the entire heap is freed in O(1) — no traversal, no mark phase, no sweep. Fibers get strong cache locality.
-  - **Zero-copy inter-fiber sharing:** Yielding fibers route allocations to a shared arena; parents read directly from shared memory. No deep copy, no serialization.
-  - **Escape-analysis-driven scope reclamation:** Compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it frees allocations at scope exit.
+- **No garbage collector.** Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
 
-- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Memory is reclaimed at scope exit or fiber death, without pausing the world.
+  - **Per-fiber heaps:** Each fiber owns a slab allocator (`FiberHeap`) with 256-slot chunks and an intrusive free list. When a fiber finishes, its entire heap is freed — no traversal, no mark phase, no sweep. Slab allocation is O(1) with strong cache locality.
+
+  - **Zero-copy inter-fiber sharing:** The compiler knows at fiber-creation time whether a fiber can yield (signal inference). Yielding fibers route all allocations to a `SharedAllocator` owned by the parent — the parent reads yielded values directly from shared memory. Silent fibers skip this entirely and allocate into their own slab with no indirection. No deep copy, no serialization, no runtime decision.
+
+  - **Escape-analysis-driven scope reclamation:** The compiler analyzes every `let`, `letrec`, `block` scope. When it can prove no allocated value escapes — no captures, no suspension, no outward mutation — it emits `RegionEnter`/`RegionExit` bytecodes that return slab slots to the free list at scope exit, recycling memory without waiting for fiber death.
+
+- **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private slab per fiber, shared slab per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
 
 ## JIT
 
@@ -553,7 +556,7 @@ Exactly two values are falsy. Everything else is truthy.
 
   ```janet
   # math.lisp
-  (fn (scale)
+  (fn [scale]
     {:add (fn (a b) (* (+ a b) scale))
      :mul (fn (a b) (* (* a b) scale))})
 
@@ -624,9 +627,9 @@ Exactly two values are falsy. Everything else is truthy.
 
   ```janet
   # Compile-time errors caught by elle lint:
-  (defn foo (x y) (+ x))  # Error: missing argument y
-  (let ((unused 42)) 100) # Warning: unused binding
-  (fn (a b) (yield))      # Error: pure context, can't yield
+  (defn foo [x y] (+ x))  # Error: missing argument y
+  (let [[unused 42]] 100) # Warning: unused binding
+  (fn [a b] (yield))      # Error: silent context, can't yield
   (match x
     ([a b c] a)           # Error: pattern expects 3 elements
     (v v))                # Error: duplicate pattern variable
@@ -635,8 +638,6 @@ Exactly two values are falsy. Everything else is truthy.
 - **Match exhaustiveness is checked at compile time.** The compiler warns when a match expression has patterns that can never be reached, and when the match may not cover all cases for a known type.
 
 - **Source-to-source rewriting tool.** The `rewrite` subcommand applies pattern-based rules to Elle source files for refactoring and code generation. Rules are pattern-action pairs that match syntax trees and produce transformed output.
-
-- **Formatter for consistent code style.** The `formatter` subcommand formats Elle source files.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
 
@@ -662,7 +663,7 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 ### Prerequisites
 
 - **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
-- **Linux** — Elle uses io-uring for async I/O. macOS and aarch64 Linux
+- **Linux|OS X** — Elle uses io-uring for async I/O. macOS and aarch64 Linux
   are supported in CI but io-uring is Linux-only.
 - **GNU Make** — for the build targets below.
 
