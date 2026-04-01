@@ -62,8 +62,11 @@ The global signal registry maps signal keywords to bit positions. It is a proces
 | `:halt` | 8 | Graceful VM termination |
 | `:io` | 9 | I/O request to scheduler |
 | `:exec` | 11 | Subprocess execution (spawn, wait, kill) |
+| `:fuel` | 12 | Instruction budget exhaustion |
+| `:switch` | 13 | Context switch |
+| `:wait` | 14 | Blocking wait |
 
-Bits 3, 5, 6, 7, 10 are reserved for VM-internal use.
+Bits 3, 5, 6, 7, 10, 15 are VM-internal.
 
 ### User-Defined Signals
 
@@ -140,7 +143,7 @@ Used across the pipeline and the runtime:
 - `lir/emit.rs` — emits signal metadata on closures
 - `value/closure.rs` — `ClosureTemplate` stores its `Signal`
 - `pipeline.rs` — builds primitive signals map, passes to Analyzer
-- `jit/compiler.rs` — JIT gate checks `!signal.may_suspend()`
+- `jit/compiler.rs` — JIT gate rejects polymorphic (`signal.propagates != 0`)
 - `vm/call.rs` — call dispatch checks `!signal.may_suspend()`
 - `primitives/coroutines.rs` — coroutine warnings check `!signal.may_yield()`
 - `primitives/stream.rs` — stream primitives use `SIG_ERROR | SIG_YIELD | SIG_IO`
