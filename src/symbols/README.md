@@ -39,7 +39,7 @@ The symbol system integrates with:
 
 - **HIR analysis**: Extracts symbols from analyzed code
 - **LSP**: Provides symbol information for IDE features
-- **VM**: Looks up global bindings by symbol ID
+- **VM**: Symbol IDs used for documentation lookup and primitive meta
 
 ## See Also
 

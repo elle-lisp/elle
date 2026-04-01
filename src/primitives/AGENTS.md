@@ -48,9 +48,9 @@ pub fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     // Implementation — return (SIG_ERROR, error_val("type-error", "msg")) for errors
 }
 
-pub fn register_arithmetic(vm: &mut VM, symbols: &mut SymbolTable) {
+pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) {
     let sym = symbols.intern("+");
-    vm.set_global(sym.0, Value::native_fn(prim_add));
+    meta.functions.insert(sym, Value::native_fn(prim_add));
 }
 ```
 

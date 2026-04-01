@@ -54,8 +54,8 @@
 //! 3. Do NOT call it with a closure that may yield unless you handle
 //!    `SIG_YIELD` in the return value.
 //! 4. Do NOT assume `fiber.signal` is unchanged after the call.
-//! 5. The inner execution runs on the SAME fiber — same heap, same globals,
-//!    same parameter frames. It is not isolated.
+//! 5. The inner execution runs on the SAME fiber — same heap, same
+//!    parameter frames. It is not isolated.
 
 use crate::error::LocationMap;
 use crate::value::{SignalBits, Value, SIG_ERROR, SIG_HALT, SIG_SWITCH};

@@ -200,7 +200,7 @@ explicitly (closure pattern) and bind the result.
 ### Plugin (shared object)
 
 Native plugins return a struct from `elle_plugin_init` and register their
-primitives globally:
+primitives into the compilation cache (available to all subsequent compilations):
 
 ```lisp
 # (import "plugin/random")

@@ -408,7 +408,7 @@ pub struct CallFrame {
 ///
 /// Holds all per-execution state that was previously on the VM struct:
 /// operand stack, call frames, exception handlers.
-/// The VM retains only global/shared state (globals, modules, JIT cache, FFI).
+/// The VM retains only shared state (modules, JIT cache, FFI, docs).
 pub struct Fiber {
     /// Per-fiber heap for arena-style allocation. Boxed for pointer stability:
     /// the thread-local stores `*mut FiberHeap`, which must survive moves of

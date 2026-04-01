@@ -192,7 +192,7 @@ the IP at exit. This eliminates the former `suspended_ip` staging field.
 pub struct VM {
     pub fiber: Fiber,                          // currently executing fiber (owned)
     pub current_fiber_handle: Option<FiberHandle>, // handle if from fiber/new
-    pub globals: Vec<Value>,                   // global bindings (shared)
+    pub docs: HashMap<String, Doc>,             // builtin documentation (shared)
     pub ffi: FFISubsystem,                     // FFI subsystem (shared)
     pub modules: HashMap<String, HashMap<u32, Value>>,
     pub jit_cache: HashMap<*const u8, Rc<JitCode>>,

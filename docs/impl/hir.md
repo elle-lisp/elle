@@ -10,7 +10,7 @@ signal profiles.
   location, and inferred `Signal`
 - **`HirKind`** — the node variant: literal, variable reference, call,
   lambda, let, if, begin, etc.
-- **`Binding`** — resolved variable reference (local, capture, global,
+- **`Binding`** — resolved variable reference (local, capture, primitive,
   primitive)
 - **`Signal`** — inferred effect profile (Pure, Yields, Polymorphic)
 
