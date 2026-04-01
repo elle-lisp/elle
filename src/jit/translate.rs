@@ -565,6 +565,10 @@ impl<'a> FunctionTranslator<'a> {
                             .map(|arg_reg| self.use_var_pair(builder, arg_reg.0))
                             .collect();
 
+                        // Rotate slab pools: free iteration N-2, preserve N-1
+                        // (argument SSA values are in registers, safe from rotation).
+                        self.call_rotate_pools(builder, vm)?;
+
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);

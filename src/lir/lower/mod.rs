@@ -155,6 +155,17 @@ pub struct Lowerer<'a> {
     discard_slot: Option<u16>,
     /// Symbol ID → name mapping for error messages.
     symbol_names: HashMap<u32, String>,
+    /// Count of pending RegionExit instructions that TailCall emissions
+    /// must emit before replacing the frame. Incremented by `lower_let`
+    /// / `lower_letrec` when the body is a tail call and the scope is
+    /// allocated. Decremented after the body is lowered.
+    ///
+    /// Uses a counter (not a bool) because `if` branches are lowered
+    /// sequentially against the same lowerer state — a bool consumed by
+    /// the first branch's tail call leaves the second branch without
+    /// RegionExit. The counter stays constant across branches so every
+    /// tail-call site emits the correct number of exits.
+    pending_region_exits: u32,
 }
 
 impl<'a> Lowerer<'a> {
@@ -179,6 +190,7 @@ impl<'a> Lowerer<'a> {
             scope_stats: ScopeStats::default(),
             discard_slot: None,
             symbol_names: HashMap::new(),
+            pending_region_exits: 0,
         }
     }
 
@@ -397,7 +409,19 @@ impl<'a> Lowerer<'a> {
         // later create heap objects that escape via side effects (e.g. put
         // to an external mutable struct), and RegionExit would free them
         // while they're still referenced externally.
-        if body.signal.may_suspend() || bindings.iter().any(|(_, init)| init.signal.may_suspend()) {
+        //
+        // Exception: when the body is a PURE tail call (no preceding
+        // expressions that could suspend), the tail call's signal doesn't
+        // matter — RegionExit fires before the tail call executes.
+        // But if the body has non-tail sub-expressions that may suspend
+        // (e.g. `(begin (port/write p x) (tail-call))`), those expressions
+        // run within the scope and suspension is still dangerous.
+        let body_suspends = if Self::body_is_tail_call(body) {
+            Self::non_tail_subexprs_may_suspend(body)
+        } else {
+            body.signal.may_suspend()
+        };
+        if body_suspends || bindings.iter().any(|(_, init)| init.signal.may_suspend()) {
             self.scope_stats.rejected_suspends += 1;
             return false;
         }
@@ -419,20 +443,12 @@ impl<'a> Lowerer<'a> {
         }
 
         // Condition 5: all breaks carry safe immediate values.
-        // A break inside the let body emits compensating RegionExits that pop
-        // the let's region mark. If the break value is heap-allocated inside
-        // the scope, the RegionExit frees it → use-after-free. If the break
-        // value is an immediate, the RegionExit doesn't affect it → safe.
         if !self.all_breaks_have_safe_values(body) {
             self.scope_stats.rejected_break += 1;
             return false;
         }
 
-        // Condition 6: no escaping break. A break targeting a block outside
-        // this let jumps past the let's RegionExit. While compensating exits
-        // handle cleanup, the conservative approach avoids scope allocation
-        // entirely when breaks escape. Breaks targeting blocks defined inside
-        // the let body are safe — they stay within the scope's region.
+        // Condition 6: no escaping break.
         if Self::hir_contains_escaping_break(body) {
             self.scope_stats.rejected_break += 1;
             return false;
@@ -503,6 +519,100 @@ impl<'a> Lowerer<'a> {
 
         self.scope_stats.scopes_qualified += 1;
         true
+    }
+
+    /// Check if a HIR body is a tail call (or control flow where all result
+    /// positions are tail calls). Used to relax the suspension check: a
+    /// tail call replaces the frame, so its signal doesn't affect the
+    /// enclosing scope's lifetime.
+    fn body_is_tail_call(hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Call { is_tail: true, .. } => true,
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => Self::body_is_tail_call(then_branch) && Self::body_is_tail_call(else_branch),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .all(|(_, body)| Self::body_is_tail_call(body))
+                    && else_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::body_is_tail_call(b))
+            }
+            HirKind::Begin(exprs) => exprs.last().is_some_and(Self::body_is_tail_call),
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                Self::body_is_tail_call(body)
+            }
+            HirKind::Match { arms, .. } => arms
+                .iter()
+                .all(|(_, _, body)| Self::body_is_tail_call(body)),
+            _ => false,
+        }
+    }
+
+    /// Check if non-tail sub-expressions within a tail-call body may suspend.
+    ///
+    /// When `body_is_tail_call` returns true, the tail call's own signal
+    /// is irrelevant (RegionExit fires before it). But preceding expressions
+    /// in the body (e.g. side effects before the tail call in a `begin`)
+    /// still execute within the scope and their suspension is dangerous.
+    ///
+    /// Returns true if any non-tail sub-expression may suspend.
+    fn non_tail_subexprs_may_suspend(hir: &Hir) -> bool {
+        match &hir.kind {
+            // A bare tail call has no preceding expressions.
+            HirKind::Call { is_tail: true, .. } => false,
+            // If/Cond: the condition runs before branches.
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                cond.signal.may_suspend()
+                    || Self::non_tail_subexprs_may_suspend(then_branch)
+                    || Self::non_tail_subexprs_may_suspend(else_branch)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses
+                    .iter()
+                    .any(|(c, b)| c.signal.may_suspend() || Self::non_tail_subexprs_may_suspend(b))
+                    || else_branch
+                        .as_ref()
+                        .is_some_and(|b| Self::non_tail_subexprs_may_suspend(b))
+            }
+            // Begin: all expressions except the last are non-tail.
+            HirKind::Begin(exprs) => {
+                let non_tail = &exprs[..exprs.len().saturating_sub(1)];
+                non_tail.iter().any(|e| e.signal.may_suspend())
+                    || exprs
+                        .last()
+                        .is_some_and(Self::non_tail_subexprs_may_suspend)
+            }
+            // Let/Letrec: init expressions are non-tail; recurse into body.
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings.iter().any(|(_, init)| init.signal.may_suspend())
+                    || Self::non_tail_subexprs_may_suspend(body)
+            }
+            // Match: the scrutinee is non-tail; recurse into arm bodies.
+            HirKind::Match { value, arms } => {
+                value.signal.may_suspend()
+                    || arms
+                        .iter()
+                        .any(|(_, _, body)| Self::non_tail_subexprs_may_suspend(body))
+            }
+            // Anything else that body_is_tail_call returned true for:
+            // conservatively say it may suspend.
+            _ => true,
+        }
     }
 }
 

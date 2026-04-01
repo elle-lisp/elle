@@ -56,8 +56,23 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
+        // When the body is a tail call and the scope is allocated, we can't
+        // emit RegionExit after the body — TailCall replaces the frame, making
+        // any post-body instructions dead code. Instead, increment the pending
+        // counter so that TailCall lowering emits raw RegionExit instructions
+        // between arg computation and the TailCall instruction itself.
+        let tail_scoped = scoped && Self::body_is_tail_call(body);
+        if tail_scoped {
+            self.pending_region_exits += 1;
+        }
         let result = self.lower_expr(body)?;
-        if scoped {
+        if tail_scoped {
+            // The raw RegionExits were emitted by lower_call — adjust our
+            // bookkeeping to match. Don't use emit_region_exit() here because
+            // no actual instruction needs emitting at this point.
+            self.pending_region_exits -= 1;
+            self.region_depth -= 1;
+        } else if scoped {
             self.emit_region_exit();
         }
         Ok(result)
@@ -140,8 +155,15 @@ impl<'a> Lowerer<'a> {
                 });
             }
         }
+        let tail_scoped = scoped && Self::body_is_tail_call(body);
+        if tail_scoped {
+            self.pending_region_exits += 1;
+        }
         let result = self.lower_expr(body)?;
-        if scoped {
+        if tail_scoped {
+            self.pending_region_exits -= 1;
+            self.region_depth -= 1;
+        } else if scoped {
             self.emit_region_exit();
         }
         Ok(result)

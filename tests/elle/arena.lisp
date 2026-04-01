@@ -564,10 +564,9 @@
 # test_clear_resets_scope_counters
 # :scope-enter-count and :scope-dtor-count reset to 0 after a fiber is cleared.
 # We verify indirectly: a new child fiber starts with zero scope counters.
-(let* ((f (fiber/new (fn ()
-             (let* ((_ (arena/stats)))  # trigger stats query inside child
-               (arena/stats)))
-           1))
+# Note: the fiber body must not introduce its own scopes (let* with tail-call
+# body scope-allocates since Part A relaxations), so we call arena/stats directly.
+(let* ((f (fiber/new (fn () (arena/stats)) 1))
        (stats (fiber/resume f))
        (enters (get stats :scope-enter-count))
        (dtors-run (get stats :scope-dtor-count)))

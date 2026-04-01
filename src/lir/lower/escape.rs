@@ -142,7 +142,23 @@ impl<'a> Lowerer<'a> {
                 exprs.iter().all(|e| self.result_is_safe(e, scope_bindings))
             }
 
-            // Intrinsic calls that return immediates
+            // Tail call: replaces the frame, so the scope's allocations are
+            // dead. Safe if neither the callee nor any argument references a
+            // scope binding (which would mean a scope-allocated value is used
+            // after RegionExit frees it — the callee is invoked and the args
+            // are passed AFTER the scope exits).
+            HirKind::Call {
+                is_tail: true,
+                func,
+                args,
+            } => {
+                self.result_is_safe(func, scope_bindings)
+                    && args
+                        .iter()
+                        .all(|a| self.result_is_safe(&a.expr, scope_bindings))
+            }
+
+            // Non-tail calls that return immediates
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
 
             // Nested let/letrec: the result is the body's result.
@@ -336,28 +352,39 @@ impl<'a> Lowerer<'a> {
                 .iter()
                 .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
-            HirKind::Call { func, args, .. } => {
-                let callee_is_safe = self.call_result_is_safe(func, args);
-                if !callee_is_safe {
-                    // Check 1: any non-safe callee receiving a heap-allocated
-                    // scope-local argument may store it externally (e.g. push
-                    // into an outer @array).
-                    if args
-                        .iter()
-                        .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
-                    {
-                        return true;
-                    }
-                    // Check 2: user-defined functions (non-primitives) may
-                    // internally allocate heap objects and store them in
-                    // external mutable structures (e.g. via put to an outer
-                    // @struct). Built-in primitives are safe — they only
-                    // produce return values and/or mutate their arguments
-                    // (caught by check 1). Without interprocedural analysis,
-                    // any call to a non-primitive is conservatively treated
-                    // as a potential outward escape.
-                    if !self.callee_is_primitive(func) {
-                        return true;
+            HirKind::Call {
+                func,
+                args,
+                is_tail,
+            } => {
+                // Tail calls replace the frame — the callee runs in a new
+                // context and cannot store scope-allocated values externally
+                // (the scope is gone by the time the callee executes). The
+                // only danger is scope-allocated values flowing into args,
+                // which is caught by condition 3 (result_is_safe).
+                if !*is_tail {
+                    let callee_is_safe = self.call_result_is_safe(func, args);
+                    if !callee_is_safe {
+                        // Check 1: any non-safe callee receiving a heap-allocated
+                        // scope-local argument may store it externally (e.g. push
+                        // into an outer @array).
+                        if args
+                            .iter()
+                            .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                        {
+                            return true;
+                        }
+                        // Check 2: user-defined functions (non-primitives) may
+                        // internally allocate heap objects and store them in
+                        // external mutable structures (e.g. via put to an outer
+                        // @struct). Built-in primitives are safe — they only
+                        // produce return values and/or mutate their arguments
+                        // (caught by check 1). Without interprocedural analysis,
+                        // any call to a non-primitive is conservatively treated
+                        // as a potential outward escape.
+                        if !self.callee_is_primitive(func) {
+                            return true;
+                        }
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)

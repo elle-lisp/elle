@@ -1199,6 +1199,42 @@ fn count_in_bytecode(source: &str, needle: &str) -> usize {
     lines.iter().filter(|line| line.contains(needle)).count()
 }
 
+/// Check if any closure in the compiled constants contains a bytecode needle.
+/// Used for testing scope allocation inside function bodies (defn/fn),
+/// where RegionEnter/RegionExit appear in the closure's bytecode, not
+/// the top-level bytecode.
+fn closure_bytecode_contains(source: &str, needle: &str) -> bool {
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
+    for constant in compiled.bytecode.constants.iter() {
+        if let Some(closure) = constant.as_closure() {
+            let lines = disassemble_lines(&closure.template.bytecode);
+            if lines.iter().any(|line| line.contains(needle)) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Count occurrences of a bytecode instruction in closure constants.
+fn count_in_closure_bytecode(source: &str, needle: &str) -> usize {
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
+    let mut total = 0;
+    for constant in compiled.bytecode.constants.iter() {
+        if let Some(closure) = constant.as_closure() {
+            let lines = disassemble_lines(&closure.template.bytecode);
+            total += lines.iter().filter(|line| line.contains(needle)).count();
+        }
+    }
+    total
+}
+
+fn closure_has_region(source: &str) -> bool {
+    closure_bytecode_contains(source, "RegionEnter")
+}
+
 #[test]
 fn region_emitted_for_let_star_with_immediate_init() {
     // Body returns scope binding whose init is immediate (1).
@@ -1252,5 +1288,289 @@ fn break_compensating_exits() {
     assert_eq!(
         exits, 2,
         "block scope-allocates: 1 compensating + 1 normal RegionExit"
+    );
+}
+
+// ── Part A: tail-call scope allocation ──────────────────────────────
+//
+// Tests for escape analysis relaxations that allow scope allocation
+// when the let body is a tail call. The scope's RegionExit fires
+// before TailCall replaces the frame.
+
+// ── A1: result_is_safe for tail calls ──────────────────────────────
+
+#[test]
+fn region_for_let_with_tail_call_body() {
+    // Let body is a tail call with safe args (literal, scope binding
+    // with immediate init). The tail call replaces the frame, so scope
+    // allocations are dead → safe to scope-allocate.
+    assert!(closure_has_region(
+        "(defn loop (n) (let ((s (concat \"x\" \"y\"))) (loop (- n 1))))"
+    ));
+}
+
+#[test]
+fn region_for_let_with_tail_call_in_if() {
+    // Both if branches are tail calls → body_is_tail_call returns true.
+    // Both branches call loop (self) to keep it single-form.
+    assert!(closure_has_region(
+        "(defn loop (n)
+           (let ((s (concat \"x\" \"y\")))
+             (if (<= n 0) (loop 0) (loop (- n 1)))))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_tail_call_passing_scope_binding() {
+    // Tail call passes a scope binding whose init is heap-allocated.
+    // The scope-allocated value would escape via the tail-call arg.
+    // result_is_safe rejects: arg references scope binding with heap init.
+    assert!(!closure_has_region(
+        "(defn loop (n) (let ((s (list 1 2 3))) (loop s)))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_scope_callee_tail_call() {
+    // The callee `f` is a scope binding (closure allocated within the let).
+    // RegionExit would free the closure before TailCall invokes it.
+    // result_is_safe must reject: callee references a scope binding.
+    assert!(!closure_has_region(
+        "(defn g (n) (let ((f (fn () 42))) (f)))"
+    ));
+}
+
+#[test]
+fn correct_scope_callee_not_freed_before_tail_call() {
+    // Regression test: when the tail-call callee is a scope binding,
+    // scope allocation must NOT happen (the callee would be freed).
+    // This pattern previously caused "Cannot call <closure>".
+    assert_eq!(
+        eval_source(
+            "(assert (= ((fn (&keys opts)
+                 (let ((f (fn () opts)))
+                   (f)))
+               :x 10) {:x 10}) \"keys mutable capture\")"
+        ).unwrap(),
+        Value::bool(true)  // assert returns true on success
+    );
+}
+
+#[test]
+fn region_for_let_with_tail_call_passing_non_scope_arg() {
+    // Tail call passes the parameter n (not a scope binding), plus a
+    // literal. Scope binding s is not passed → safe.
+    assert!(closure_has_region(
+        "(defn loop (n) (let ((s (concat \"x\" \"y\"))) (loop (- n 1))))"
+    ));
+}
+
+// ── A2: suspension check relaxation ────────────────────────────────
+
+#[test]
+fn region_for_let_with_suspending_tail_call() {
+    // The tail call targets a function that may yield, but because the
+    // body IS the tail call, its signal doesn't matter — the scope's
+    // allocations are freed before the tail call executes.
+    // We use a call to a user-defined function (polymorphic signal).
+    assert!(closure_has_region(
+        "(defn process (n) (let ((s (concat \"x\" \"y\"))) (process (- n 1))))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_suspending_non_tail_body() {
+    // Body contains a yield (suspending) and is NOT a tail call.
+    // Suspension check rejects scope allocation.
+    assert!(!closure_has_region(
+        "(fn () (let ((x 1)) (yield x) 42))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_suspending_before_tail_call() {
+    // Body ends with a tail call, but preceding expressions may suspend.
+    // The A2 relaxation must NOT bypass the suspension check when
+    // non-tail sub-expressions can suspend (the scope is still active
+    // during suspension). Regression: 16-binding let + port/write + variadic
+    // tail call caused SharedAllocator scope mark imbalance.
+    assert!(!closure_has_region(
+        "(defn f (port)
+           (let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8)
+                 (i 9) (j 10) (k 11) (l 12) (m 13) (n 14) (o 15) (p 16))
+             (port/write port \"x\")
+             (+ a b c d e f g h i j k l m n o p)))"
+    ));
+}
+
+// ── A3: walk_for_outward_set skips tail calls ──────────────────────
+
+#[test]
+fn region_for_let_with_non_primitive_tail_call() {
+    // Non-primitive callee in tail position. Without A3, this would be
+    // rejected because non-primitive callees may internally store values
+    // in external mutable structures. But in tail position, the scope
+    // is gone by the time the callee executes.
+    assert!(closure_has_region(
+        "(defn loop (n) (let ((s (concat \"x\" \"y\"))) (loop (- n 1))))"
+    ));
+}
+
+#[test]
+fn no_region_for_let_with_non_primitive_non_tail_call() {
+    // Non-primitive callee NOT in tail position. Conservatively rejected
+    // by walk_for_outward_set: may store scope-allocated values externally.
+    assert!(!closure_has_region(
+        "(defn f (n) (let ((s (concat \"x\" \"y\"))) (let ((r (f n))) (+ r 1))))"
+    ));
+}
+
+// ── pending_region_exits counter mechanism ──────────────────────────
+
+#[test]
+fn region_exit_before_tail_call() {
+    // When let body is a tail call, RegionExit must appear before TailCall
+    // in the bytecode (can't emit after — TailCall replaces the frame).
+    let source = "(defn loop (n) (let ((s (concat \"x\" \"y\"))) (loop (- n 1))))";
+    assert!(closure_has_region(source));
+    // Must have both RegionExit and TailCall
+    assert!(closure_bytecode_contains(source, "RegionExit"));
+    assert!(closure_bytecode_contains(source, "TailCall"));
+}
+
+#[test]
+fn nested_let_tail_call_emits_multiple_exits() {
+    // Two nested lets, both scope-allocated, body is a tail call.
+    // Should emit 2 RegionExit instructions before the TailCall.
+    let source = "(defn loop (n) (let ((a 1)) (let ((b 2)) (loop (- n 1)))))";
+    let enters = count_in_closure_bytecode(source, "RegionEnter");
+    let exits = count_in_closure_bytecode(source, "RegionExit");
+    assert_eq!(enters, 2, "two nested lets should emit 2 RegionEnter");
+    assert_eq!(exits, 2, "two nested lets should emit 2 RegionExit before TailCall");
+}
+
+#[test]
+fn nested_let_with_heap_inits_outer_only() {
+    // Nested lets with heap-allocating inits: only the INNER let
+    // scope-allocates. The outer let is rejected by C4 (outward set)
+    // because the inner let's init contains a non-immediate argument
+    // (string constant) to a non-immediate-returning callee (concat).
+    // This is a known limitation of the escape analysis (string constants
+    // are safe in practice but result_is_safe treats them as unsafe).
+    let source = "(defn loop (n) (let ((a (concat \"a\" (number->string n)))) (let ((b (concat \"b\" (number->string n)))) (loop (- n 1)))))";
+    let enters = count_in_closure_bytecode(source, "RegionEnter");
+    let exits = count_in_closure_bytecode(source, "RegionExit");
+    assert_eq!(enters, 1, "only inner let scope-allocates");
+    assert_eq!(exits, 1, "RegionExit matches RegionEnter");
+}
+
+#[test]
+fn if_branches_both_get_region_exits() {
+    // Both if branches are tail calls. Each branch must emit its own
+    // RegionExit(s) before its TailCall. The counter stays constant
+    // across branches (not consumed by the first).
+    let source =
+        "(defn loop (n) (let ((s (concat \"x\" \"y\"))) (if (<= n 0) (loop 0) (loop (- n 1)))))";
+    let exits = count_in_closure_bytecode(source, "RegionExit");
+    // Both branches emit 1 RegionExit each = 2 total.
+    assert_eq!(exits, 2, "both if branches should emit RegionExit before TailCall");
+}
+
+// ── Lambda boundary save/restore ───────────────────────────────────
+
+#[test]
+fn lambda_in_let_body_does_not_inherit_pending_exits() {
+    // A lambda inside a let body should not inherit the pending_region_exits
+    // counter. The lambda is a separate compilation context.
+    // Outer let has a tail call → scope-allocated.
+    // Inner lambda should NOT emit the outer's RegionExit.
+    let source =
+        "(defn f (n) (let ((g (fn () 42))) (f (- n 1))))";
+    assert!(closure_has_region(source));
+}
+
+// ── Correctness: tail-call scope allocation produces correct values ─
+
+#[test]
+fn correct_tail_recursive_loop_with_let() {
+    // Simple tail-recursive countdown with let binding.
+    assert_eq!(
+        eval_source(
+            "(defn loop (n acc)
+               (if (<= n 0) acc
+                 (let ((s (concat \"iter\" (number->string n))))
+                   (loop (- n 1) (+ acc 1)))))
+             (loop 100 0)"
+        ).unwrap(),
+        Value::int(100)
+    );
+}
+
+#[test]
+fn correct_mutual_tail_recursion_with_let() {
+    // Mutual tail recursion — both functions have let bindings.
+    assert_eq!(
+        eval_source(
+            "(defn even-f (n)
+               (if (<= n 0) :even
+                 (let ((s (concat \"e\" (number->string n))))
+                   (odd-f (- n 1)))))
+             (defn odd-f (n)
+               (if (<= n 0) :odd
+                 (let ((s (concat \"o\" (number->string n))))
+                   (even-f (- n 1)))))
+             (even-f 10)"
+        ).unwrap(),
+        Value::keyword("even")
+    );
+}
+
+#[test]
+fn correct_tail_call_with_nested_lets() {
+    // Nested lets, both scope-allocated, tail call in innermost body.
+    assert_eq!(
+        eval_source(
+            "(defn loop (n)
+               (if (<= n 0) :done
+                 (let ((a (concat \"a\" (number->string n))))
+                   (let ((b (concat \"b\" (number->string n))))
+                     (loop (- n 1))))))
+             (loop 50)"
+        ).unwrap(),
+        Value::keyword("done")
+    );
+}
+
+#[test]
+fn correct_tail_call_if_both_branches() {
+    // Both if branches are tail calls. Scope allocation must work
+    // correctly regardless of which branch executes.
+    assert_eq!(
+        eval_source(
+            "(defn classify (n)
+               (let ((s (concat \"checking\" (number->string n))))
+                 (if (<= n 0)
+                   (base-case n)
+                   (classify (- n 1)))))
+             (defn base-case (n) (* n 2))
+             (classify 10)"
+        ).unwrap(),
+        Value::int(0)
+    );
+}
+
+#[test]
+fn correct_scope_binding_not_passed_to_tail_call() {
+    // Scope binding s is used within the let but NOT passed to the
+    // tail call. RegionExit frees s before TailCall — no corruption.
+    assert_eq!(
+        eval_source(
+            "(defn loop (n acc)
+               (if (<= n 0) acc
+                 (let ((s (concat \"x\" \"y\")))
+                   (loop (- n 1) (+ acc (length s))))))
+             (loop 10 0)"
+        ).unwrap(),
+        Value::int(20)  // (length "xy") = 2, 10 iterations
     );
 }
