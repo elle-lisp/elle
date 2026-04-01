@@ -339,6 +339,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    rotation_safe: func.rotation_safe,
                 };
                 let closure = Closure {
                     template: Rc::new(template),

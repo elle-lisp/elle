@@ -645,6 +645,7 @@ impl<'a> FunctionTranslator<'a> {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    rotation_safe: func.rotation_safe,
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),

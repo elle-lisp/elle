@@ -538,6 +538,7 @@ impl VM {
                 env: new_env_rc,
                 location_map: closure.template.location_map.clone(),
                 squelch_mask: closure.squelch_mask,
+                rotation_safe: closure.template.rotation_safe,
             });
 
             self.fiber.signal = Some((SIG_OK, Value::NIL));

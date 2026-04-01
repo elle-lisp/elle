@@ -899,3 +899,116 @@ fn collect_destructure_bindings<'a>(
         }
     }
 }
+
+// ── Rotation-safety analysis ──────────────────────────────────────────
+
+impl<'a> Lowerer<'a> {
+    /// Walk the HIR looking for operations that escape heap values.
+    /// Returns true if any escaping operation is found.
+    ///
+    /// An operation "escapes" when it stores a heap value into a data
+    /// structure that outlives the current stack frame:
+    /// - `assign` to a captured/global binding with a non-immediate value
+    /// - Calls to mutating primitives (push, put, fiber/resume) with
+    ///   non-immediate arguments
+    /// - Calls to non-primitive functions (may internally do the above)
+    /// - `yield` with a non-immediate value
+    ///
+    /// Tail-call sub-expressions are excluded: the tail call replaces
+    /// the frame, so the callee runs in a new context.
+    pub(super) fn body_escapes_heap_values(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Assign { value, .. } => {
+                !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
+            }
+            HirKind::Call { is_tail: true, .. } => false,
+            HirKind::Call {
+                func,
+                args,
+                is_tail: false,
+            } => {
+                if self.callee_is_mutating_primitive(func)
+                    && args.iter().any(|a| !self.result_is_safe(&a.expr, &[]))
+                {
+                    return true;
+                }
+                if !self.callee_is_primitive(func) {
+                    return true;
+                }
+                self.body_escapes_heap_values(func)
+                    || args.iter().any(|a| self.body_escapes_heap_values(&a.expr))
+            }
+            HirKind::Lambda { .. } => false,
+            HirKind::Yield(value) => {
+                !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
+            }
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_) => false,
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.body_escapes_heap_values(cond)
+                    || self.body_escapes_heap_values(then_branch)
+                    || self.body_escapes_heap_values(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs.iter().any(|e| self.body_escapes_heap_values(e)),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.body_escapes_heap_values(c) || self.body_escapes_heap_values(b)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.body_escapes_heap_values(b))
+            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                exprs.iter().any(|e| self.body_escapes_heap_values(e))
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_escapes_heap_values(init))
+                    || self.body_escapes_heap_values(body)
+            }
+            HirKind::Define { value, .. } => self.body_escapes_heap_values(value),
+            HirKind::While { cond, body } => {
+                self.body_escapes_heap_values(cond) || self.body_escapes_heap_values(body)
+            }
+            HirKind::Block { body, .. } => body.iter().any(|e| self.body_escapes_heap_values(e)),
+            HirKind::Break { value, .. } => self.body_escapes_heap_values(value),
+            HirKind::Match { value, arms } => {
+                self.body_escapes_heap_values(value)
+                    || arms
+                        .iter()
+                        .any(|(_, _, body)| self.body_escapes_heap_values(body))
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, v)| self.body_escapes_heap_values(v))
+                    || self.body_escapes_heap_values(body)
+            }
+            _ => true,
+        }
+    }
+
+    fn callee_is_mutating_primitive(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        if !bi.is_immutable || bi.is_mutated {
+            return false;
+        }
+        self.mutating_primitives.contains(&bi.name)
+    }
+}

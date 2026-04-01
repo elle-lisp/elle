@@ -139,6 +139,7 @@ pub struct Lowerer<'a> {
     /// Used by escape analysis (`result_is_safe`) to accept calls to
     /// these primitives in scope-allocated let bodies.
     immediate_primitives: FxHashSet<SymbolId>,
+    mutating_primitives: FxHashSet<SymbolId>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
@@ -184,6 +185,7 @@ impl<'a> Lowerer<'a> {
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
             immediate_primitives: FxHashSet::default(),
+            mutating_primitives: FxHashSet::default(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
@@ -203,6 +205,11 @@ impl<'a> Lowerer<'a> {
     /// Set the whitelist of primitives known to return immediates
     pub fn with_immediate_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
         self.immediate_primitives = set;
+        self
+    }
+
+    pub fn with_mutating_primitives(mut self, set: FxHashSet<SymbolId>) -> Self {
+        self.mutating_primitives = set;
         self
     }
 
@@ -251,6 +258,7 @@ impl<'a> Lowerer<'a> {
         // `fiber/new` as variables.
         self.current_func.result_is_immediate = self.result_is_safe(hir, &[]);
         self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
+        self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
 
         Ok(std::mem::replace(
             &mut self.current_func,

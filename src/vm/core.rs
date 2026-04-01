@@ -19,6 +19,8 @@ pub(crate) struct TailCallInfo {
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
     pub squelch_mask: SignalBits,
+    /// Whether the target function is safe for pool rotation.
+    pub rotation_safe: bool,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -129,6 +131,7 @@ fn root_closure() -> Rc<Closure> {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            rotation_safe: false,
         }),
         env: Rc::new(vec![]),
         squelch_mask: SignalBits::EMPTY,

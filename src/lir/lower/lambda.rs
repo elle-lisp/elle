@@ -260,6 +260,7 @@ impl<'a> Lowerer<'a> {
         self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
         self.current_func.has_outward_heap_set =
             self.body_contains_dangerous_outward_set(body, &[]);
+        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 

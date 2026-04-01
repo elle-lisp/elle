@@ -759,6 +759,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: None,
+                rotation_safe: false,
             });
 
             let val = Value::closure(Closure {
