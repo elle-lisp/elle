@@ -11,7 +11,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Types](#types)
 - [Control Flow](#control-flow)
 - [Memory](#memory)
-- [JIT](#jit)
+- [Execution Backends](#execution-backends)
 - [FFI](#ffi)
 - [Modules](#modules)
 - [Plugins](#plugins)
@@ -509,9 +509,37 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Long-running fiber schedulers don't accumulate garbage.** Each fiber's heap dies with it. Scope reclamation recycles memory within a fiber's lifetime. The ownership topology — private slab per fiber, shared slab per yield boundary — is the minimal structure that gives per-fiber lifecycle management and zero-copy yield simultaneously. See [`docs/memory.md`](docs/memory.md) for the full model.
 
-## JIT
+## Execution Backends
 
-- **JIT compilation is fully automatic.** Pure, non-suspending functions are compiled to native code via Cranelift at runtime. No annotations, no opt-in. The compiler's signal system identifies eligible functions; the JIT fires transparently.
+Elle has two execution backends. Both share the same front end (reader →
+expander → analyzer → HIR → LIR); they diverge at code generation.
+
+### Bytecode VM + Cranelift JIT (default)
+
+The default backend emits bytecode from LIR and runs it on a stack-based
+VM. Hot functions are automatically compiled to native code via Cranelift
+at runtime — no annotations, no opt-in. The compiler's signal system
+identifies eligible functions; the JIT fires transparently.
+
+### WASM backend (experimental)
+
+The WASM backend compiles the entire program (stdlib + user code) into a
+single WebAssembly module and executes it via Wasmtime. It supports
+closures, fibers, tail calls, I/O, and the async scheduler — everything
+except `eval`.
+
+```bash
+ELLE_WASM=1 elle script.lisp
+```
+
+A tiered mode compiles individual hot closures to WASM during bytecode
+VM execution:
+
+```bash
+ELLE_WASM_TIER=1 elle script.lisp
+```
+
+See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## FFI
 
