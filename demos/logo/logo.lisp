@@ -13,34 +13,30 @@
 # Demonstrates: math, closures, structs, arrays, string building, file I/O
 
 
-# ========================================
-# 1. Vector math
-# ========================================
+# ── Vector math ────────────────────────────────────────────────────
 
 (defn v+ [a b]
   "Add two 2D vectors."
-  [(+ (get a 0) (get b 0))
-   (+ (get a 1) (get b 1))])
+  [(+ (a 0) (b 0))
+   (+ (a 1) (b 1))])
 
 (defn v- [a b]
   "Subtract two 2D vectors."
-  [(- (get a 0) (get b 0))
-   (- (get a 1) (get b 1))])
+  [(- (a 0) (b 0))
+   (- (a 1) (b 1))])
 
 (defn v* [s v]
   "Scale a 2D vector by scalar s."
-  [(* s (get v 0))
-   (* s (get v 1))])
+  [(* s (v 0))
+   (* s (v 1))])
 
 (defn vlength [v]
   "Length of a 2D vector."
-  (math/sqrt (+ (* (get v 0) (get v 0))
-                (* (get v 1) (get v 1)))))
+  (math/sqrt (+ (* (v 0) (v 0))
+                (* (v 1) (v 1)))))
 
 
-# ========================================
-# 2. Cubic bezier evaluation
-# ========================================
+# ── Cubic bezier evaluation ────────────────────────────────────────
 
 (defn bezier-eval [seg t]
   "Evaluate cubic bezier at parameter t ∈ [0,1].
@@ -50,10 +46,10 @@
          [u3 (* u2 u)]
          [t2 (* t t)]
          [t3 (* t2 t)]
-         [p0 (get seg :p0)]
-         [p1 (get seg :p1)]
-         [p2 (get seg :p2)]
-         [p3 (get seg :p3)])
+         [p0 seg:p0]
+         [p1 seg:p1]
+         [p2 seg:p2]
+         [p3 seg:p3])
     (v+ (v+ (v* u3 p0)
             (v* (* 3.0 (* u2 t)) p1))
         (v+ (v* (* 3.0 (* u t2)) p2)
@@ -64,10 +60,10 @@
   (let* ([u  (- 1.0 t)]
          [u2 (* u u)]
          [t2 (* t t)]
-         [p0 (get seg :p0)]
-         [p1 (get seg :p1)]
-         [p2 (get seg :p2)]
-         [p3 (get seg :p3)]
+         [p0 seg:p0]
+         [p1 seg:p1]
+         [p2 seg:p2]
+         [p3 seg:p3]
          # derivative: 3(1-t)^2(p1-p0) + 6(1-t)t(p2-p1) + 3t^2(p3-p2)
          [a (v* (* 3.0 u2) (v- p1 p0))]
          [b (v* (* 6.0 (* u t)) (v- p2 p1))]
@@ -77,8 +73,8 @@
 (defn normal-at [seg t]
   "Unit normal (perpendicular to tangent, pointing left) at parameter t."
   (let* ([tang (bezier-tangent seg t)]
-         [dx (get tang 0)]
-         [dy (get tang 1)]
+         [dx (tang 0)]
+         [dy (tang 1)]
          [len (vlength tang)])
     (if (< len 0.001)
       [0.0 0.0]
@@ -92,9 +88,7 @@
     (v+ pt (v* dist n))))
 
 
-# ========================================
-# 3. SVG path generation
-# ========================================
+# ── SVG path generation ────────────────────────────────────────────
 
 (defn round2 [x]
   "Round a float to 1 decimal place for compact SVG output."
@@ -102,9 +96,9 @@
 
 (defn coord-str [pt]
   "Format a point as 'x,y' string."
-  (-> (string (round2 (get pt 0)))
+  (-> (string (round2 (pt 0)))
       (append ",")
-      (append (string (round2 (get pt 1))))))
+      (append (string (round2 (pt 1))))))
 
 (defn taper [global-t]
   "Taper function: 0.3 at endpoints, 1 in the middle. Remapped sin(π·t)."
@@ -140,9 +134,7 @@
   path-str)
 
 
-# ========================================
-# 4. Centerline definition
-# ========================================
+# ── Centerline definition ──────────────────────────────────────────
 #
 # The glyph: a leaning Y.  WHY ELLE?
 #
@@ -190,9 +182,7 @@
 ])
 
 
-# ========================================
-# 5. Fiber configuration
-# ========================================
+# ── Fiber configuration ────────────────────────────────────────────
 
 (def num-fibers 7)
 (def fiber-spread 66.0)    # total width of the fiber bundle
@@ -217,9 +207,7 @@
 (def samples-per-segment 40)
 
 
-# ========================================
-# 6. SVG assembly
-# ========================================
+# ── SVG assembly ───────────────────────────────────────────────────
 
 (defn svg-path [path-data color opacity width]
   "Generate an SVG <path> element string."
@@ -241,8 +229,8 @@
     (let* ([frac (/ (float i) (float (- num-fibers 1)))]
            # offset ranges from -spread/2 to +spread/2
            [dist (- (* frac fiber-spread) (/ fiber-spread 2.0))]
-           [color (get fiber-colors i)]
-           [opacity (get fiber-opacities i)]
+           [color (fiber-colors i)]
+           [opacity (fiber-opacities i)]
            [path-data (fiber-path-data segments dist samples-per-segment)]
            [svg (svg-path path-data color opacity fiber-width)])
       (push paths svg))
@@ -266,9 +254,7 @@
   doc)
 
 
-# ========================================
-# 7. Output
-# ========================================
+# ── Output ─────────────────────────────────────────────────────────
 
 (def output-path "docs/logo.svg")
 (def svg (build-svg))

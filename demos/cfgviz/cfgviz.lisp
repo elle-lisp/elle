@@ -1,3 +1,5 @@
+(elle/epoch 6)
+
 # CFG Visualizer Demo
 #
 # Renders control flow graphs of Elle functions to DOT format.
@@ -8,17 +10,17 @@
 
 # ── Functions to visualize ───────────────────────────────────────────
 
-(defn identity (x)
+(defn identity [x]
   "The simplest function — one block, one return."
   x)
 
-(defn factorial (n)
+(defn factorial [n]
   "Recursive factorial — branching and self-call."
   (if (< n 2)
     1
     (* n (factorial (- n 1)))))
 
-(defn fizzbuzz (n)
+(defn fizzbuzz [n]
   "Classic fizzbuzz — nested branching."
   (cond
     ((= (mod n 15) 0) "fizzbuzz")
@@ -26,11 +28,11 @@
     ((= (mod n 5) 0)  "buzz")
     (true              n)))
 
-(defn make-adder (x)
+(defn make-adder [x]
   "Returns a closure — shows captured variable in LIR."
-  (fn (y) (+ x y)))
+  (fn [y] (+ x y)))
 
-(defn eval-expr (expr)
+(defn eval-expr [expr]
   "Evaluate an arithmetic expression tree.
    Match dispatch, recursion, let-binding, conditional error —
    produces a complex CFG with many blocks and cross-edges."
@@ -50,17 +52,17 @@
 
 # ── Render each function to DOT ─────────────────────────────────────
 
-(defn render-cfg (f name)
+(defn render-cfg [f name]
   "Render a function's CFG to a DOT file."
-  (let* ((dot (fn/cfg f :dot))
-         (path (append "demos/cfgviz/" (append name ".dot"))))
+  (let* ([dot (fn/cfg f :dot)]
+         [path (string "demos/cfgviz/" name ".dot")])
     (file/write path dot)
-    (display (append "  wrote " (append path "\n")))))
+    (println "  wrote " path)))
 
-(display "Rendering control flow graphs to DOT...\n")
+(println "Rendering control flow graphs to DOT...")
 (render-cfg identity "identity")
 (render-cfg factorial "factorial")
 (render-cfg fizzbuzz "fizzbuzz")
 (render-cfg make-adder "make-adder")
 (render-cfg eval-expr "eval-expr")
-(display "Done. Run 'make -C demos/cfgviz' to generate SVGs.\n")
+(println "Done. Run 'make -C demos/cfgviz' to generate SVGs.")

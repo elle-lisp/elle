@@ -19,6 +19,11 @@ Arrays are indexed sequences. Bare `[...]` is immutable; `@[...]` is mutable.
 (length [1 2 3])           # => 3
 (empty? [])                # => true
 (slice [10 20 30 40] 1 3)  # => [20 30]
+
+# callable array syntax — arrays are functions of their index
+(def v [10 20 30])
+(v 0)                      # => 10
+(v -1)                     # => 30
 ```
 
 ## Immutable operations
