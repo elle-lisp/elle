@@ -15,10 +15,11 @@ modifiers.
    single letrec, and whatever its last expression evaluates to becomes
    the return value.
 
-2. For `.so` files: load the shared library, call `elle_plugin_init`, cache
-   the result. Subsequent `import-file` calls for the same `.so` return the
-   cached value without re-loading. (Only plugins are cached — `.lisp` files
-   are always recompiled and re-executed.)
+2. For shared libraries (`.so` on Linux, `.dylib` on macOS): load the
+   library, call `elle_plugin_init`, cache the result. Subsequent
+   `import-file` calls for the same library return the cached value
+   without re-loading. (Only plugins are cached — `.lisp` files are always
+   recompiled and re-executed.)
 
 That is the entire mechanism. Everything else in the module system is
 convention built on top of this one primitive.

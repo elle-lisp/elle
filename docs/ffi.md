@@ -28,12 +28,11 @@ This document describes the implemented system.
 ## Quick Start
 
 ```lisp
-# Load a library
-(def libc (ffi/native nil))              # current process (dlopen(NULL))
-(def libm (ffi/native "libm.so.6"))      # or a specific .so
+# Load the current process (dlopen(NULL)) — works on all platforms
+(def libc (ffi/native nil))
 
 # Look up a symbol
-(def sqrt-ptr (ffi/lookup libm "sqrt"))
+(def sqrt-ptr (ffi/lookup libc "sqrt"))
 
 # Create a signature: return type, [arg types]
 (def sqrt-sig (ffi/signature :double [:double]))
@@ -42,7 +41,7 @@ This document describes the implemented system.
 (ffi/call sqrt-ptr sqrt-sig 2.0)         # => 1.4142135623730951
 
 # Or use the convenience macro
-(ffi/defbind sqrt libm "sqrt" :double [:double])
+(ffi/defbind sqrt libc "sqrt" :double [:double])
 (sqrt 2.0)                               # => 1.4142135623730951
 ```
 
@@ -316,14 +315,13 @@ wrapper function — all at definition time.
 ```lisp
 # Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
 
-(def libc (ffi/native nil))
 (ffi/defbind abs libc "abs" :int [:int])
-(ffi/defbind sqrt libm "sqrt" :double [:double])
+(ffi/defbind my-sqrt libc "sqrt" :double [:double])
 (ffi/defbind strlen libc "strlen" :size [:string])
 
-(abs -42)       # => 42
-(sqrt 2.0)      # => 1.4142135623730951
-(strlen "hello") # => 5
+(abs -42)         # => 42
+(my-sqrt 2.0)     # => 1.4142135623730951
+(strlen "hello")  # => 5
 ```
 
 ### Expansion
@@ -467,8 +465,8 @@ that's kept alive alongside the buffer.
    Elle arrays with exactly the right number of elements. Mismatches are
    errors, not silent truncation or padding.
 
-5. **Platform-guarded loading.** Library loading is Linux-only
-   (`#[cfg(target_os = "linux")]`). Other platforms get error stubs.
+5. **Platform-guarded loading.** Library loading requires Unix
+   (`#[cfg(unix)]` — Linux, macOS, BSD). Non-Unix platforms get error stubs.
 
 6. **No automatic memory management.** `ffi/malloc` memory must be
    explicitly freed with `ffi/free`. Callbacks must be freed with
