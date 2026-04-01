@@ -85,6 +85,7 @@ pub(crate) fn div_values(a: &Value, b: &Value) -> Result<Value, Value> {
         };
     }
     match (a.as_number(), b.as_number()) {
+        (Some(_), Some(0.0)) => Err(error_val("division-by-zero", "/: division by zero")),
         (Some(x), Some(y)) => Ok(Value::float(x / y)),
         _ => Err(error_val(
             "type-error",

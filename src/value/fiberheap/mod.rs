@@ -1,9 +1,9 @@
 //! Per-fiber heap ownership and thread-local current-heap routing.
 //!
-//! `FiberHeap` uses a slab allocator (`RootSlab`) for all allocations.
-//! Destructor tracking ensures that `HeapObject` variants with inner heap
-//! allocations (`Vec`, `Rc`, `BTreeMap`, `Box<str>`, etc.) have their `Drop`
-//! impls called on release/clear.
+//! `FiberHeap` uses a `SlabPool` (slab allocator + allocation tracking +
+//! destructor list) for all allocations. The pool is shared with
+//! `SharedAllocator`, which wraps the same `SlabPool` type for inter-fiber
+//! value exchange.
 //!
 //! `peak_alloc_count` tracks the high-water mark of `alloc_count` since the
 //! last `clear()`. Updated on every `alloc()`. Queryable via `arena/peak`
@@ -50,6 +50,9 @@ mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
 
+pub(crate) mod pool;
+use pool::SlabPool;
+
 /// Tracks objects allocated by a single `with-allocator` invocation.
 ///
 /// # Safety invariant
@@ -74,18 +77,9 @@ pub(crate) struct CustomAllocState {
 }
 
 pub struct FiberHeap {
-    /// Chunk-based slab for all allocations. Slots freed by
-    /// `release()` are returned to the free list for reuse.
-    root_slab: RootSlab,
-    /// All root-slab allocations, in allocation order.
-    /// Tracked so `release(mark)` can dealloc slots allocated after the mark.
-    /// Does NOT include shared-allocator allocations.
-    root_allocs: Vec<*mut HeapObject>,
-    /// Raw pointers to HeapObjects that need Drop.
-    /// Ordered by allocation time (oldest first).
-    dtors: Vec<*mut HeapObject>,
-    /// Total number of objects allocated (including those not needing Drop).
-    alloc_count: usize,
+    /// Slab allocator with allocation and destructor tracking.
+    /// Shared structure with `SharedAllocator`.
+    pool: SlabPool,
     /// Peak number of objects allocated (high-water mark).
     peak_alloc_count: usize,
     /// Stack of scope marks pushed by `RegionEnter`, popped by `RegionExit`.
@@ -100,7 +94,7 @@ pub struct FiberHeap {
     owned_shared: Vec<Box<crate::value::shared_alloc::SharedAllocator>>,
     /// Raw pointer to the shared allocator for inter-fiber value exchange.
     /// When non-null, `alloc()` routes all allocations to this shared
-    /// allocator instead of the private bump. Set by `with_child_fiber`
+    /// allocator instead of the private slab. Set by `with_child_fiber`
     /// for yielding child fibers; nulled on swap-back.
     shared_alloc: *mut crate::value::shared_alloc::SharedAllocator,
     /// Number of `RegionEnter` instructions executed (scope marks pushed).
@@ -127,10 +121,7 @@ pub struct FiberHeap {
 impl FiberHeap {
     pub fn new() -> Self {
         FiberHeap {
-            root_slab: RootSlab::new(),
-            root_allocs: Vec::new(),
-            dtors: Vec::new(),
-            alloc_count: 0,
+            pool: SlabPool::new(),
             peak_alloc_count: 0,
             scope_marks: Vec::new(),
             owned_shared: Vec::new(),
@@ -143,9 +134,6 @@ impl FiberHeap {
             shared_alloc_count: 0,
         }
     }
-
-    /// No-op kept for call-site compatibility (routing.rs and vm/fiber.rs call this).
-    pub fn init_active_allocator(&mut self) {}
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         // When a shared allocator is installed (yielding child fiber),
@@ -173,11 +161,11 @@ impl FiberHeap {
                 unsafe { std::ptr::write(typed, obj) };
                 state.custom_ptrs.push((ptr, size, align));
                 if drop {
-                    self.dtors.push(typed);
+                    self.pool.dtors.push(typed);
                 }
-                self.alloc_count += 1;
-                if self.alloc_count > self.peak_alloc_count {
-                    self.peak_alloc_count = self.alloc_count;
+                self.pool.alloc_count += 1;
+                if self.pool.alloc_count > self.peak_alloc_count {
+                    self.peak_alloc_count = self.pool.alloc_count;
                 }
                 return Value::from_heap_ptr(typed as *const (), value_tag);
             }
@@ -186,24 +174,18 @@ impl FiberHeap {
 
         // Check object limit before allocating
         if let Some(limit) = self.object_limit {
-            if self.alloc_count >= limit {
-                self.alloc_error = Some((self.alloc_count, limit));
+            if self.pool.alloc_count >= limit {
+                self.alloc_error = Some((self.pool.alloc_count, limit));
                 return Value::NIL;
             }
         }
 
-        // Always allocate from the root slab.
-        let needs_drop = needs_drop(obj.tag());
-        let ptr = self.root_slab.alloc(obj);
-        self.root_allocs.push(ptr);
-        if needs_drop {
-            self.dtors.push(ptr);
+        // Allocate from the slab pool.
+        let v = self.pool.alloc(obj);
+        if self.pool.alloc_count > self.peak_alloc_count {
+            self.peak_alloc_count = self.pool.alloc_count;
         }
-        self.alloc_count += 1;
-        if self.alloc_count > self.peak_alloc_count {
-            self.peak_alloc_count = self.alloc_count;
-        }
-        Value::from_heap_ptr(ptr as *const (), value_tag)
+        v
     }
 
     pub fn mark(&self) -> ArenaMark {
@@ -212,10 +194,10 @@ impl FiberHeap {
             .last()
             .map_or(0, |s| s.custom_ptrs.len());
         ArenaMark::new_full(
-            self.alloc_count,
-            self.dtors.len(),
+            self.pool.alloc_count,
+            self.pool.dtors.len(),
             custom_ptrs_len,
-            self.root_allocs.len(),
+            self.pool.allocs.len(),
             self.shared_alloc_count,
         )
     }
@@ -225,16 +207,19 @@ impl FiberHeap {
     /// to return memory to the user's allocator. For root-slab objects, returns
     /// slots to the slab free list.
     pub fn release(&mut self, mark: ArenaMark) {
-        self.run_dtors(mark.dtor_len());
-        self.dtors.truncate(mark.dtor_len());
+        self.pool.run_dtors(mark.dtor_len());
+        self.pool.dtors.truncate(mark.dtor_len());
 
         // Dealloc root-slab slots allocated after the mark.
-        // Iterate in reverse (LIFO) to mirror dtor order, though slab dealloc
-        // order doesn't affect correctness (dtors have already run).
-        for &ptr in self.root_allocs[mark.root_allocs_len()..].iter().rev() {
-            self.root_slab.dealloc(ptr);
+        // Index loop avoids borrowing self.pool immutably (for the slice)
+        // and mutably (for dealloc_slot) at the same time.
+        for i in (mark.root_allocs_len()..self.pool.allocs.len()).rev() {
+            // SAFETY: pool.run_dtors already ran destructors; slots are safe to free.
+            unsafe {
+                self.pool.dealloc_slot(self.pool.allocs[i]);
+            }
         }
-        self.root_allocs.truncate(mark.root_allocs_len());
+        self.pool.allocs.truncate(mark.root_allocs_len());
 
         // Dealloc custom-allocated objects from the exiting scope.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
@@ -245,22 +230,8 @@ impl FiberHeap {
             state.custom_ptrs.truncate(start);
         }
 
-        self.alloc_count = mark.position();
+        self.pool.alloc_count = mark.position();
         self.shared_alloc_count = mark.shared_alloc_count();
-    }
-
-    /// Run destructors in reverse order from `self.dtors[start..]`.
-    ///
-    /// # Safety
-    /// Each pointer in `dtors` must be valid for `drop_in_place`.
-    /// This is guaranteed as long as the bump arena hasn't been reset
-    /// (which would deallocate the memory without calling destructors).
-    fn run_dtors(&self, start: usize) {
-        for i in (start..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
-            }
-        }
     }
 
     /// Push a scope mark onto the scope stack (called by `RegionEnter`).
@@ -293,28 +264,28 @@ impl FiberHeap {
             .scope_marks
             .pop()
             .expect("RegionExit without matching RegionEnter");
-        let dtors_before = self.dtors.len();
+        let dtors_before = self.pool.dtors.len();
         self.release(mark);
-        self.scope_dtors_run += dtors_before - self.dtors.len();
+        self.scope_dtors_run += dtors_before - self.pool.dtors.len();
     }
 
     /// Private heap object count (used by mark/release scoping).
     pub fn len(&self) -> usize {
-        self.alloc_count
+        self.pool.alloc_count
     }
 
     /// Total allocations visible to this fiber, including objects routed
     /// to the parent's shared allocator.  Used by arena/count.
     pub fn visible_len(&self) -> usize {
-        self.alloc_count + self.shared_alloc_count
+        self.pool.alloc_count + self.shared_alloc_count
     }
 
     pub fn is_empty(&self) -> bool {
-        self.alloc_count == 0
+        self.pool.alloc_count == 0
     }
 
     pub fn capacity(&self) -> usize {
-        self.root_slab.capacity_bytes()
+        self.pool.capacity_bytes()
     }
 
     /// Get the current object limit.
@@ -339,7 +310,7 @@ impl FiberHeap {
 
     /// Bytes committed by root slab.
     pub fn allocated_bytes(&self) -> usize {
-        self.root_slab.allocated_bytes()
+        self.pool.allocated_bytes()
     }
 
     /// Number of `RegionEnter` instructions executed (scope regions entered).
@@ -364,17 +335,17 @@ impl FiberHeap {
 
     /// Number of objects in the destructor list.
     pub(crate) fn dtor_count(&self) -> usize {
-        self.dtors.len()
+        self.pool.dtor_count()
     }
 
     /// Number of live slots in the root slab.
     pub(crate) fn root_live(&self) -> usize {
-        self.root_slab.live_count()
+        self.pool.live_count()
     }
 
     /// Number of root allocations tracked for release().
     pub(crate) fn root_alloc_count(&self) -> usize {
-        self.root_allocs.len()
+        self.pool.allocs.len()
     }
 
     /// Number of owned shared allocators.
@@ -382,15 +353,10 @@ impl FiberHeap {
         self.owned_shared.len()
     }
 
-    /// Active allocator discriminant as a keyword (always `"slab"` now).
-    pub(crate) fn active_allocator_keyword(&self) -> &'static str {
-        "slab"
-    }
-
     /// Reset peak to current count. Returns previous peak.
     pub fn reset_peak(&mut self) -> usize {
         let prev = self.peak_alloc_count;
-        self.peak_alloc_count = self.alloc_count;
+        self.peak_alloc_count = self.pool.alloc_count;
         prev
     }
 
@@ -429,11 +395,11 @@ impl FiberHeap {
         for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
             let typed = ptr as *mut HeapObject;
             // Check if this pointer is in dtors and run Drop if so.
-            if let Some(pos) = self.dtors.iter().rposition(|&d| d == typed) {
+            if let Some(pos) = self.pool.dtors.iter().rposition(|&d| d == typed) {
                 // SAFETY: The pointer is valid — it was allocated by the
                 // custom allocator and has not been freed yet.
                 unsafe { std::ptr::drop_in_place(typed) };
-                self.dtors.swap_remove(pos);
+                self.pool.dtors.swap_remove(pos);
             }
             state.allocator.inner.dealloc(ptr, size, align);
         }
@@ -504,9 +470,13 @@ impl FiberHeap {
         self.owned_shared.clear();
         self.shared_alloc = std::ptr::null_mut();
 
-        // Run all destructors before clearing slab memory.
-        self.run_dtors(0);
-        self.dtors.clear();
+        // Dealloc all custom-allocated objects (dtors run by pool.teardown below).
+        // We need to run custom dtors and dealloc before pool.teardown
+        // because pool.teardown will clear dtors.
+        // Actually: run pool dtors first (covers both slab and custom objects),
+        // then dealloc custom memory, then clear pool slab.
+        self.pool.run_dtors(0);
+        self.pool.dtors.clear();
 
         // Dealloc all custom-allocated objects.
         for state in self.custom_alloc_stack.drain(..) {
@@ -516,13 +486,14 @@ impl FiberHeap {
             // Rc<AllocatorBox> dropped here
         }
 
-        // Clear root slab tracking and reset slab (keeps first chunk).
-        self.root_allocs.clear();
-        self.root_slab.clear();
+        // Clear pool slab tracking and reset slab (keeps first chunk).
+        self.pool.allocs.clear();
+        // SAFETY: all dtors have been run above.
+        unsafe { self.pool.clear_slab() };
 
         self.scope_marks.clear();
         self.alloc_error = None;
-        self.alloc_count = 0;
+        self.pool.alloc_count = 0;
         self.peak_alloc_count = 0;
         self.scope_enters = 0;
         self.scope_dtors_run = 0;
@@ -536,15 +507,16 @@ impl Drop for FiberHeap {
             sa.teardown();
         }
         // Run destructors for all tracked objects while slab memory is still valid.
-        self.run_dtors(0);
-        // Dealloc custom-allocated objects. Drop has already run above.
+        self.pool.run_dtors(0);
+        self.pool.dtors.clear(); // Prevent SlabPool::Drop from double-dropping.
+                                 // Dealloc custom-allocated objects. Drop has already run above.
         for state in self.custom_alloc_stack.drain(..) {
             for &(ptr, size, align) in state.custom_ptrs.iter().rev() {
                 state.allocator.inner.dealloc(ptr, size, align);
             }
         }
-        // root_slab drops implicitly here. MaybeUninit slots do not call
-        // HeapObject::drop — dtors have already run above.
+        // pool (and its slab) drops implicitly here. MaybeUninit slots do not
+        // call HeapObject::drop — dtors have already run above.
     }
 }
 

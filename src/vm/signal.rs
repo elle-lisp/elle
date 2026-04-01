@@ -448,7 +448,7 @@ impl VM {
                     );
                     fields.insert(
                         TableKey::Keyword("active-allocator".to_string()),
-                        Value::keyword(heap.active_allocator_keyword()),
+                        Value::keyword("slab"),
                     );
                     fields.insert(
                         TableKey::Keyword("scope-enter-count".to_string()),

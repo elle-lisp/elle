@@ -111,7 +111,7 @@ doctest:  ## Test code examples in documentation (literate mode)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke: smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
+smoke: dev smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
 	$(ELLE) demos/docgen/generate.lisp
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)

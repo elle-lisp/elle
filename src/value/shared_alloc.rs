@@ -1,7 +1,7 @@
 //! Shared slab allocator for zero-copy inter-fiber value exchange.
 //!
 //! `SharedAllocator` is owned by a parent fiber's `FiberHeap` (or by the
-//! child itself for root→child chains). Child fibers receive a raw pointer
+//! child itself for root->child chains). Child fibers receive a raw pointer
 //! and allocate into it during execution. No Rc, no RefCell, no runtime
 //! borrow checks on the allocation path.
 //!
@@ -12,27 +12,17 @@
 //! - Torn down when the owner's `FiberHeap::clear()` runs;
 //!   `teardown()` runs destructors and returns all slab slots to the free list
 
-use crate::value::fiberheap::needs_drop;
-use crate::value::fiberheap::RootSlab;
+use crate::value::fiberheap::pool::SlabPool;
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 /// Saved position for scope-based release within a SharedAllocator.
 struct SharedMark {
-    allocs_len: usize,
-    dtors_len: usize,
+    slab: crate::value::fiberheap::pool::SlabMark,
 }
 
 pub(crate) struct SharedAllocator {
-    slab: RootSlab,
-    /// Raw pointers to slab-allocated HeapObjects that need Drop.
-    /// Ordered by allocation time (oldest first).
-    dtors: Vec<*mut HeapObject>,
-    /// ALL slab allocations (not just drop-needing ones).
-    /// Used by `teardown()` and `Drop` to return every slot to the free list.
-    allocs: Vec<*mut HeapObject>,
-    /// Total number of objects allocated (including those not needing Drop).
-    alloc_count: usize,
+    pool: SlabPool,
     /// Stack of scope marks for RegionEnter/RegionExit on child fibers.
     marks: Vec<SharedMark>,
 }
@@ -40,97 +30,45 @@ pub(crate) struct SharedAllocator {
 impl SharedAllocator {
     pub fn new() -> Self {
         SharedAllocator {
-            slab: RootSlab::new(),
-            dtors: Vec::new(),
-            allocs: Vec::new(),
-            alloc_count: 0,
+            pool: SlabPool::new(),
             marks: Vec::new(),
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
-        let value_tag = obj.value_tag();
-        let drop = needs_drop(obj.tag());
-        let ptr = self.slab.alloc(obj);
-        self.allocs.push(ptr);
-        if drop {
-            self.dtors.push(ptr);
-        }
-        self.alloc_count += 1;
-        Value::from_heap_ptr(ptr as *const (), value_tag)
+        self.pool.alloc(obj)
     }
 
-    /// Push a scope mark recording the current allocs/dtors positions.
+    /// Push a scope mark recording the current pool position.
     pub fn push_mark(&mut self) {
         self.marks.push(SharedMark {
-            allocs_len: self.allocs.len(),
-            dtors_len: self.dtors.len(),
+            slab: self.pool.mark(),
         });
     }
 
     /// Pop the top scope mark and release objects allocated since it was pushed.
-    /// Runs destructors (LIFO), deallocates slab slots, truncates both vecs.
     pub fn pop_mark_and_release(&mut self) {
         let mark = self
             .marks
             .pop()
             .expect("SharedAllocator::pop_mark_and_release without matching push_mark");
-        // Run destructors in reverse for objects allocated since the mark.
-        for i in (mark.dtors_len..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
-            }
-        }
-        self.dtors.truncate(mark.dtors_len);
-        // Return slab slots to free list.
-        for &ptr in self.allocs[mark.allocs_len..].iter().rev() {
-            self.slab.dealloc(ptr);
-        }
-        let released = self.allocs.len() - mark.allocs_len;
-        self.allocs.truncate(mark.allocs_len);
-        self.alloc_count -= released;
+        self.pool.release(&mark.slab);
     }
 
     /// Run destructors, return all slots to the slab free list, and reset.
     pub fn teardown(&mut self) {
-        // Run destructors in reverse order (LIFO).
-        for i in (0..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
-            }
-        }
-        self.dtors.clear();
-        // Return all allocated slots to the slab free list.
-        // Dtors have already run — safe to dealloc.
-        for &ptr in self.allocs.iter().rev() {
-            self.slab.dealloc(ptr);
-        }
-        self.allocs.clear();
-        self.slab.clear();
-        self.alloc_count = 0;
+        self.pool.teardown();
         self.marks.clear();
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn len(&self) -> usize {
-        self.alloc_count
+        self.pool.len()
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_empty(&self) -> bool {
-        self.alloc_count == 0
-    }
-}
-
-impl Drop for SharedAllocator {
-    fn drop(&mut self) {
-        // Run destructors before the slab drops.
-        for i in (0..self.dtors.len()).rev() {
-            unsafe {
-                std::ptr::drop_in_place(self.dtors[i]);
-            }
-        }
-        // slab drops implicitly; MaybeUninit slots do not call HeapObject::drop.
+        self.pool.is_empty()
     }
 }
 
@@ -168,8 +106,8 @@ mod tests {
         let mut sa = SharedAllocator::new();
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
-        assert_eq!(sa.dtors.len(), 0);
-        assert_eq!(sa.allocs.len(), 1);
+        assert_eq!(sa.pool.dtor_count(), 0);
+        assert_eq!(sa.pool.allocs.len(), 1);
     }
 
     #[test]
@@ -181,8 +119,8 @@ mod tests {
         });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
-        assert_eq!(sa.dtors.len(), 1); // only String
-        assert_eq!(sa.allocs.len(), 2);
+        assert_eq!(sa.pool.dtor_count(), 1); // only String
+        assert_eq!(sa.pool.allocs.len(), 2);
     }
 
     #[test]
@@ -198,49 +136,44 @@ mod tests {
         });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 3);
-        assert_eq!(sa.dtors.len(), 2);
+        assert_eq!(sa.pool.dtor_count(), 2);
 
         sa.teardown();
         assert_eq!(sa.len(), 0);
         assert!(sa.is_empty());
-        assert_eq!(sa.dtors.len(), 0);
-        assert_eq!(sa.allocs.len(), 0);
+        assert_eq!(sa.pool.dtor_count(), 0);
+        assert_eq!(sa.pool.allocs.len(), 0);
     }
 
     #[test]
     fn test_shared_alloc_teardown_reuses_memory() {
         let mut sa = SharedAllocator::new();
-        // Alloc 3 objects and teardown.
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         sa.alloc(HeapObject::LString {
             s: "x".into(),
             traits: Value::NIL,
         });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        let live_after_first = sa.slab.live_count();
-        assert_eq!(live_after_first, 3);
+        assert_eq!(sa.pool.live_count(), 3);
         sa.teardown();
-        assert_eq!(sa.slab.live_count(), 0);
+        assert_eq!(sa.pool.live_count(), 0);
         assert_eq!(sa.len(), 0);
 
-        // Alloc again — slab must reuse slots (live_count stays at 3 after 3 allocs).
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         sa.alloc(HeapObject::LString {
             s: "y".into(),
             traits: Value::NIL,
         });
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        assert_eq!(sa.slab.live_count(), 3);
-        // Allocated bytes must not have grown (slots were reused).
-        // With chunk_size=256, one chunk covers 3 objects easily.
-        let bytes_round1 = sa.slab.allocated_bytes();
+        assert_eq!(sa.pool.live_count(), 3);
+        let bytes_round1 = sa.pool.allocated_bytes();
         sa.teardown();
 
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(
-            sa.slab.allocated_bytes(),
+            sa.pool.allocated_bytes(),
             bytes_round1,
             "slab must reuse freed slots, not allocate new chunks"
         );
@@ -263,8 +196,6 @@ mod tests {
         });
         assert_eq!(sa.len(), 2);
 
-        // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
-        // Use another non-drop type instead.
         sa.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
         assert_eq!(sa.len(), 3);
     }
