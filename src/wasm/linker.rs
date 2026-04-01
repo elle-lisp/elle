@@ -400,6 +400,19 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     .expect("rt_prepare_tail_call: expected NativeFn");
                 let (bits, result) = native_fn(&args);
                 let (bits, result) = caller.data().maybe_execute_io(bits, result);
+                // Write non-zero signal to memory[0..4] so handle_wasm_result
+                // picks it up. The WASM tail call dispatch returns immediately
+                // after this host call (just tag/payload/0), so no WASM code
+                // overwrites memory[0..4] before the function exits.
+                if bits.0 != 0 {
+                    if let Some(memory) = caller
+                        .get_export("__elle_memory")
+                        .and_then(|e| e.into_memory())
+                    {
+                        memory.data_mut(&mut caller)[0..4]
+                            .copy_from_slice(&(bits.0 as i32).to_le_bytes());
+                    }
+                }
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
                 return (0, 0, 0, tag, payload, bits.0 as i32);
             }

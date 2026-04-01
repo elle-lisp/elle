@@ -281,7 +281,7 @@ pub(super) fn handle_wasm_result(
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
-                let signal = {
+                let mut signal = {
                     let memory = caller
                         .get_export("__elle_memory")
                         .and_then(|e| e.into_memory())
@@ -295,6 +295,15 @@ pub(super) fn handle_wasm_result(
                         .and_then(|e| e.into_memory())
                         .expect("handle_wasm_result: no memory");
                     memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                }
+                // If a NativeFn tail call returned SIG_IO (written to
+                // memory[0..4] by rt_prepare_tail_call), convert it to
+                // SIG_YIELD so the WASM caller does yield-through instead
+                // of treating it as an error-like early return. The I/O
+                // request is in the return value; the fiber scheduler
+                // will check fiber/bits for SIG_IO and drive the I/O.
+                if signal as u32 & crate::signals::SIG_IO.0 != 0 {
+                    signal = crate::value::fiber::SIG_YIELD.0 as i32;
                 }
 
                 if caller.data().debug {

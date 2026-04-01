@@ -44,20 +44,23 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
         if !caller.data().has_suspension_frames() {
             return ResumeOutcome::Dead(result_val);
         }
-        // Record frame count before resume. resume_wasm_closure pops the
-        // front frame, so frames_before - 1 = old outer frames remaining.
-        // If the resumed frame yields again, rt_yield pushes new frames to
-        // the back. The old outer frames (at the front) are stale.
+        // Record frame count before resume. If the resumed frame
+        // re-yields, new frames are pushed to the back of the deque
+        // while old outer frames remain at the front. We need to
+        // rotate: move old outer frames behind the new ones so the
+        // new inner chain is consumed first on the next resume.
         let frames_before = caller.data().suspension_frame_count();
         match resume_wasm_closure(caller, result_val) {
             Some((t, p, s)) => {
                 if s == yield_signal {
-                    // Evict stale outer frames from the front.
-                    // After pop_front in resume_wasm_closure, there are
-                    // (frames_before - 1) old frames still at the front.
-                    let stale = frames_before.saturating_sub(1);
-                    for _ in 0..stale {
-                        caller.data_mut().pop_suspension_frame();
+                    // After pop in resume_wasm_closure, old outer frames
+                    // are at positions 0..remaining, new frames after.
+                    // Rotate old frames to the back.
+                    let remaining_old = frames_before.saturating_sub(1);
+                    for _ in 0..remaining_old {
+                        if let Some(frame) = caller.data_mut().pop_suspension_frame() {
+                            caller.data_mut().push_suspension_frame(frame);
+                        }
                     }
                     let sig_bits = front_frame_signal(caller);
                     return ResumeOutcome::Yielded(t, p, sig_bits);
