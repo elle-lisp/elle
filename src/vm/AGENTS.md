@@ -107,7 +107,7 @@ On resume, the VM wires up the parent/child chain (Janet semantics):
 ## Dependents
 
 - `primitives/` - NativeFn primitives; SIG_RESUME signals trigger VM-side execution
-- `repl.rs` - runs compiled code
+- `repl.rs` - REPL session: form-by-form compilation with def persistence across inputs
 - `main.rs` - file execution
 
 ## Invariants

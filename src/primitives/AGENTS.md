@@ -57,7 +57,7 @@ pub fn register_arithmetic(meta: &mut PrimitiveMeta, symbols: &mut SymbolTable) 
 ## Dependents
 
 - `vm/call.rs` - dispatches primitive calls, handles signal bits
-- `repl.rs` - registers primitives at startup
+- `repl.rs` - REPL session (form-by-form eval, def persistence)
 - `main.rs` - registers primitives at startup
 
 ## Invariants

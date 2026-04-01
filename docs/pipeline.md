@@ -43,7 +43,7 @@ pub struct AnalyzeResult {
 
 | Function | Lines | VM for macros | Fixpoint? | Callers |
 |----------|-------|---------------|-----------|---------|
-| `compile` | 119–151 | Internal | No | REPL (`main.rs:169,289`), integration tests |
+| `compile` | 119–151 | Internal | No | Integration tests |
 | `compile_file` | 162–261 | Internal | Yes | `main.rs:86` (file/stdin), `modules.rs:78` (`import-file`) |
 | `eval` | 266–291 | Borrowed | No | `init_stdlib` (`module_init.rs` — loads `stdlib.lisp`), tests |
 | `eval_all` | 298–309 | Internal (delegates to `compile_file`) | Yes | Tests |
@@ -263,6 +263,8 @@ have their own VM.
 Single-form functions
 (`compile`, `eval`, `analyze`) don't benefit from cross-form signal inference —
 a file compiled via `compile` instead of `compile_file` will treat all
-cross-form calls as `Polymorphic`. The REPL uses `compile_file`, so multi-form input and
-cross-form signal inference work. However, definitions from previous inputs
-are not visible to signal inference in later inputs.
+cross-form calls as `Polymorphic`. The REPL compiles each form individually
+via `compile_file` and registers def bindings in the compilation cache
+(`register_repl_binding`) so they are visible to subsequent compilations.
+However, cross-form signal inference within a single REPL input is limited
+to what `compile_file` can infer for each form in isolation.

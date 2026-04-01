@@ -109,7 +109,9 @@ Properties:
 
 1. **`compile` and `eval` are single-form entry points.** They parse a single
     expression, expand it, analyze it, and compile/execute it. Used for macro
-    body evaluation. The REPL uses `compile_file` for multi-form support.
+    body evaluation. The REPL compiles each form individually via
+    `compile_file` and injects def bindings into the compilation cache
+    between forms.
 
 2. **`compile_file`, `analyze_file`, `eval_file` are file-level entry points.**
     They parse all top-level forms, expand them, classify them, and analyze
