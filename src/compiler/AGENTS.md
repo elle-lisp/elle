@@ -26,8 +26,7 @@ Bytecode instruction definitions and debug formatting.
 1. **`Instruction` byte values are stable.** Changing them breaks existing
    bytecode. Add new instructions at the end.
 
-2. **Signal inference is conservative.** Unknown calls are `IO`. Only proven
-   silent code is `Silent`.
+2. **Signal inference is conservative.** See `signals/AGENTS.md`.
 
 ## Key types
 

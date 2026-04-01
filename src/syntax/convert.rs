@@ -79,6 +79,20 @@ impl Syntax {
                 let values: Vec<Value> = items.iter().map(|item| item.to_value(symbols)).collect();
                 Value::array_mut(values)
             }
+            SyntaxKind::Bytes(items) => {
+                // Convert to (bytes e1 e2 ...) list
+                let bytes_sym = symbols.intern("bytes");
+                let mut values = vec![Value::symbol(bytes_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
+            SyntaxKind::BytesMut(items) => {
+                // Convert to (@bytes e1 e2 ...) list
+                let bytes_mut_sym = symbols.intern("@bytes");
+                let mut values = vec![Value::symbol(bytes_mut_sym.0)];
+                values.extend(items.iter().map(|item| item.to_value(symbols)));
+                crate::value::list(values)
+            }
             SyntaxKind::Struct(items) => {
                 // Convert to (struct k1 v1 k2 v2 ...) list
                 let struct_sym = symbols.intern("struct");

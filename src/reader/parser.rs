@@ -191,6 +191,20 @@ impl Reader {
                     loc.position()
                 ))
             }
+            OwnedToken::BytesBracket => {
+                let loc = self.current_location();
+                Err(format!(
+                    "{}: bytes literals not supported in legacy parser",
+                    loc.position()
+                ))
+            }
+            OwnedToken::AtBytesBracket => {
+                let loc = self.current_location();
+                Err(format!(
+                    "{}: bytes literals not supported in legacy parser",
+                    loc.position()
+                ))
+            }
             OwnedToken::RightParen => {
                 let loc = self.current_location();
                 Err(format!(

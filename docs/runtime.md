@@ -16,6 +16,7 @@ Signal     Bit   Purpose
 :io         9    Async I/O completion
 :exec      11    Subprocess completion
 :fuel      12    Instruction budget exhaustion
+:switch    13    Context switch
 :wait      14    Blocking wait
 ```
 
@@ -26,13 +27,13 @@ User-defined signals (via `(signal :keyword)`) get bits 16–31.
 Fuel limits instruction execution on a fiber. When fuel runs out,
 the fiber pauses with a `:fuel` signal.
 
-```text
-(def f (fiber/new thunk |:fuel|))
+```lisp
+(def f (fiber/new (fn [] (while true (yield :tick))) |:fuel :yield|))
 (fiber/set-fuel f 1000)    # instruction budget
-(fiber/resume f)           # runs until fuel exhausted
+(fiber/resume f nil)       # runs until fuel exhausted
 (fiber/fuel f)             # => 0 (exhausted)
 (fiber/set-fuel f 10000)   # refuel
-(fiber/resume f)           # resume execution
+(fiber/resume f nil)       # resume execution
 (fiber/clear-fuel f)       # remove budget, unlimited execution
 ```
 
@@ -51,6 +52,6 @@ Signals subprocess completion. Used by the async scheduler when a
 
 ## See also
 
-- [signals.md](signals.md) — signal system design
-- [fibers.md](fibers.md) — fiber architecture
+- [signals](signals/index.md) — signal system design
+- [fibers](signals/fibers.md) — fiber architecture
 - [scheduler.md](scheduler.md) — async event loop

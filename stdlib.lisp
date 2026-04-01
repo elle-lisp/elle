@@ -19,6 +19,7 @@
 ## ── Higher-order functions ──────────────────────────────────────────
 
 (defn map [f coll]
+  "Apply f to each element of coll, returning a new collection of the same type. Type-preserving: lists return lists, arrays return arrays, sets return sets."
   (cond
     ((or (array? coll) (string? coll) (bytes? coll))
      (let* [[len (length coll)]
@@ -40,6 +41,7 @@
     (true (error {:error :type-error :message "map: not a sequence"}))))
 
 (defn filter [p coll]
+  "Return elements of coll for which (p element) is truthy. Type-preserving."
   (cond
     ((or (array? coll) (string? coll) (bytes? coll))
      (let* [[len (length coll)]
@@ -64,6 +66,7 @@
     (true (error {:error :type-error :message "filter: not a sequence"}))))
 
 (defn fold [f init lst]
+  "Reduce lst by applying (f accumulator element) left to right, starting from init. Alias: reduce."
   (if (empty? lst)
     init
     (fold f (f init (first lst)) (rest lst))))
@@ -190,6 +193,7 @@
 ## ── Collection transforms ───────────────────────────────────────────
 
 (defn zip [& colls]
+  "Zip collections element-wise into a collection of lists. Stops at the shortest input."
   (letrec
     ((to-list (fn (c)
        (cond
@@ -526,6 +530,7 @@
       (from-list result coll))))
 
 (defn sort-with [cmp coll]
+  "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp."
   (letrec
     ((to-list (fn (c)
        (cond

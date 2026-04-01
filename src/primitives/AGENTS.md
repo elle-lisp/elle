@@ -31,16 +31,10 @@ Does NOT:
 
 All primitives use a single unified type. No primitive has VM access.
 Return values:
-- `(SIG_OK, value)` — success, push value onto stack
-- `(SIG_ERROR, error_val(kind, msg))` — error, stored in `fiber.signal`
-- `(SIG_RESUME, fiber_value)` — fiber resume, VM handles fiber swap
-- `(SIG_QUERY, cons(keyword, arg))` — VM state query, dispatched by `dispatch_query()` in `signal.rs`
-
-All SIG_RESUME primitives (including coroutine wrappers) return
-`(SIG_RESUME, fiber_value)`. Fiber primitives (`fiber/resume`) return SIG_RESUME with the fiber value.
-The VM swaps the child fiber into `vm.fiber`, executes it, then swaps back.
-`emit` returns the signal bits directly — the VM's catch-all handler
-stores them in `fiber.signal` and suspends the fiber.
+- `(SIG_OK, value)` — success
+- `(SIG_ERROR, error_val(kind, msg))` — error
+- `(SIG_RESUME, fiber_value)` — fiber context switch (see `vm/AGENTS.md`)
+- `(SIG_QUERY, cons(keyword, arg))` — VM state query (see `vm/AGENTS.md`)
 
 ## Adding a primitive
 
@@ -410,31 +404,20 @@ Sets port-level options. Currently supports `:timeout ms` (non-negative integer 
 
 **Location:** `src/primitives/meta.rs`
 
-**Signature:** `(squelch closure :kw1 :kw2 ...)`
+**Signature:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
 
-**Purpose:** Transform a closure by applying a runtime signal squelch mask. Returns a new closure that, when called, intercepts signals matching the keywords and converts them to `:error` with kind `"signal-violation"`.
+**Purpose:** Transform a closure by applying a runtime signal squelch mask.
+Returns a new closure that, when called, intercepts the named signal(s) and
+converts them to `:error` with kind `"signal-violation"`.
 
 **Behavior:**
-- Takes a closure as the first argument
-- Takes one or more signal keywords as remaining arguments
+- Takes a closure and a signal keyword or set of keywords
 - Returns a **new** closure (same template and environment, new squelch mask)
-- When the returned closure is called, if it emits a squelched signal, the signal is converted to `:error`
-- Non-squelched signals pass through normally
-- Errors are never affected by squelch (they pass through unchanged)
-- Composable: `(squelch (squelch f :yield) :io)` squelches both `:yield` and `:io`
+- `(squelch f |:yield :io|)` squelches both yield and io
 
-**Signal:** `Signal::errors()` (can error on bad arguments, otherwise silent)
+**Signal:** `Signal::errors()`
 
-**Arity:** `AtLeast(2)` — closure + at least one keyword
-
-**Error cases:**
-
-| Condition | Error kind | Message |
-|-----------|-----------|---------|
-| `(squelch f)` with no keywords | `arity-error` | `"squelch: expected at least 2 arguments (closure + keywords), got 1"` |
-| `(squelch non-closure :yield)` | `type-error` | `"squelch: first argument must be a closure, got {type}"` |
-| `(squelch f non-keyword)` | `type-error` | `"squelch: expected signal keyword, got {type}"` |
-| Unknown keyword | `error` | `"squelch: signal :X not registered (unknown signal keyword)"` |
+**Arity:** `Exact(2)`
 
 **Implementation details:**
 - Validates first argument is a closure via `as_closure()`

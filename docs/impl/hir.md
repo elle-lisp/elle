@@ -54,4 +54,4 @@ src/hir/analyze/special.rs  More special forms
 
 - [impl/lir.md](lir.md) — lowering HIR to LIR
 - [impl/reader.md](reader.md) — parsing before analysis
-- [signals.md](../signals.md) — signal system design
+- [signals](../signals/index.md) — signal system design

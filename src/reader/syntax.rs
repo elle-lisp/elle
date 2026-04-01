@@ -113,6 +113,8 @@ impl SyntaxReader {
             OwnedToken::ListSugar => self.read_list_sugar(loc),
             OwnedToken::Pipe => self.read_set(loc),
             OwnedToken::AtPipe => self.read_set_mut(loc),
+            OwnedToken::BytesBracket => self.read_bytes(loc),
+            OwnedToken::AtBytesBracket => self.read_bytes_mut(loc),
 
             OwnedToken::Quote => {
                 let len = self.current_length();
@@ -245,6 +247,50 @@ impl SyntaxReader {
                     self.advance();
                     let span = self.merge_spans(start_loc, &end_loc, &elements);
                     return Ok(Syntax::new(SyntaxKind::SetMut(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_bytes(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip b[
+        let mut elements = Vec::new();
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated bytes literal (missing closing ])",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::RightBracket) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::Bytes(elements), span));
+                }
+                _ => elements.push(self.read()?),
+            }
+        }
+    }
+
+    fn read_bytes_mut(&mut self, start_loc: &SourceLoc) -> Result<Syntax, String> {
+        self.advance(); // skip @b[
+        let mut elements = Vec::new();
+        loop {
+            match self.current() {
+                None => {
+                    return Err(format!(
+                        "{}: unterminated @bytes literal (missing closing ])",
+                        start_loc.position()
+                    ));
+                }
+                Some(OwnedToken::RightBracket) => {
+                    let end_loc = self.current_location();
+                    self.advance();
+                    let span = self.merge_spans(start_loc, &end_loc, &elements);
+                    return Ok(Syntax::new(SyntaxKind::BytesMut(elements), span));
                 }
                 _ => elements.push(self.read()?),
             }

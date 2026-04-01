@@ -21,7 +21,7 @@ Does NOT:
 | Type | Purpose |
 |------|---------|
 | `VM` | Global state + root Fiber. Per-execution state lives on `vm.fiber` |
-| `SignalBits` | Internal return type: `SIG_OK`, `SIG_ERROR`, `SIG_YIELD`, `SIG_DEBUG`, `SIG_RESUME`, `SIG_FFI`, `SIG_PROPAGATE`, `SIG_CANCEL`, `SIG_HALT`, `SIG_IO` |
+| `SignalBits` | Internal return type (see `signals/AGENTS.md`) |
 | `CallFrame` | Function name, IP, frame base |
 
 ## Data flow
@@ -49,16 +49,15 @@ Result<Value, String>  ← translation boundary
 
 ## Signal-based returns
 
-Internal VM methods return `SignalBits` (or `(SignalBits, usize)` for the
-inner dispatch loop):
-- `SIG_OK` (0): Normal completion. Value in `fiber.signal`.
-- `SIG_ERROR` (1): Error. Error array in `fiber.signal` as `[:keyword "message"]`.
-- `SIG_YIELD` (2): Fiber yield. Value in `fiber.signal`, suspended frames in `fiber.suspended`.
-- `SIG_RESUME` (8): VM-internal. Fiber primitive requests VM-side execution.
-- `SIG_PROPAGATE` (32): VM-internal. `fiber/propagate` re-signals caught signal.
-- `SIG_CANCEL` (64): VM-internal. `fiber/cancel` injects error into fiber.
-- `SIG_QUERY` (128): VM-internal. Primitive reads VM state (call counts, global bindings, arena stats/count). `arena/allocs` is intercepted before dispatch (re-entrant).
-- `SIG_HALT` (256): Graceful VM termination. Value in `fiber.signal`. Non-resumable; fiber is Dead.
+Internal VM methods return `SignalBits` (see `signals/AGENTS.md` for bit
+definitions). The dispatch loop handles each signal:
+- `SIG_OK`: Normal completion. Value in `fiber.signal`.
+- `SIG_ERROR`: Error struct in `fiber.signal`.
+- `SIG_YIELD`: Fiber yield. Suspended frames in `fiber.suspended`.
+- `SIG_RESUME`: Fiber primitive requests VM-side context switch.
+- `SIG_PROPAGATE`: `fiber/propagate` re-signals caught signal.
+- `SIG_QUERY`: Primitive reads VM state (arena stats, global bindings).
+- `SIG_HALT`: Graceful VM termination. Non-resumable.
 
 The public `execute_bytecode` method is the translation boundary — it converts
 `SignalBits` to `Result<Value, String>` for external callers. On `SIG_ERROR`,

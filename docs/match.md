@@ -1,8 +1,9 @@
 # Pattern Matching
 
 `match` dispatches on the structure and value of data. The compiler
-**errors** on non-exhaustive patterns. Any unbound symbol works as a
-wildcard.
+**errors** on non-exhaustive patterns — every `match` must end with a
+wildcard (`_`) or a variable pattern to cover all cases. Any unbound
+symbol works as a wildcard.
 
 ## Basic patterns
 
@@ -53,11 +54,11 @@ Struct patterns match by key, with literal values for dispatch:
 ```lisp
 (defn area [shape]
   (match shape
-    ({:type :circle :radius r}  (* r r))
+    ({:type :circle :radius r}  (* 3.14159 r r))
     ({:type :square :side s}    (* s s))
     (_                          0)))
 
-(area {:type :circle :radius 5})   # => 25
+(area {:type :circle :radius 5})   # => 78.53975
 (area {:type :square :side 7})     # => 49
 ```
 

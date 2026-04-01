@@ -11,12 +11,13 @@ compiled and executed in the real VM via `pipeline::eval_syntax()`.
 The full language is available in macro bodies: `if`, `let`, closures,
 list operations, recursion — everything.
 
-```text
+```lisp
 (defmacro my-when (test body)
   `(if ,test ,body nil))
 
+(def x 5)
 (my-when (> x 0) (println "positive"))
-;# Expands to: (if (> x 0) (println "positive") nil)
+# Expands to: (if (> x 0) (println "positive") nil)
 ```
 
 ### Features
@@ -296,7 +297,7 @@ macros that intentionally introduce bindings visible at the call site.
   `(let ((,(datum->syntax test 'it) ,test))
      (if ,(datum->syntax test 'it) ,then ,else)))
 
-(aif (+ 1 2) (+ it 10) 0)  ;# → 13
+(aif (+ 1 2) (+ it 10) 0)  # → 13
 ```
 
 If `context` is a syntax object, its scope set and span are copied.

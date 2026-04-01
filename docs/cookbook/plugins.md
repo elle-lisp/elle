@@ -3,7 +3,7 @@
 
 A plugin is a Rust cdylib crate that exports `elle_plugin_init` and
 returns a struct of native functions. Plugins are loaded at runtime via
-`(import-file "path/to/plugin.so")`.
+`(import "plugin/name")`.
 
 ### Files to create / modify (in order)
 
@@ -105,10 +105,10 @@ PR and merge.
 
 **Step 5: Write tests** in `tests/elle/plugins/myplugin.lisp`:
 
-```janet
+```lisp
 (elle/epoch 1)
 
-(def [ok? plugin] (protect (import-file "target/release/libelle_myplugin.so")))
+(def [ok? plugin] (protect (import "plugin/myplugin")))
 (when (not ok?)
   (println "SKIP: myplugin plugin not built")
   (exit 0))

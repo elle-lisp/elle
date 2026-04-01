@@ -151,12 +151,12 @@ Lowerer (&BindingArena) — read-only access to binding metadata
        in `doc`. This field is threaded through LIR into `Closure.doc` and
        used by the `(doc name)` primitive and LSP hover.
 
-16. **Signal bounds are declared via `silence` and `squelch` preambles.**
-        `HirKind::Lambda` has signal-related fields:
-        - `inferred_signals: Signal` (always present) — the minimum guaranteed set of signals the lambda may produce
-        - `param_bounds: Vec<(Binding, Signal)>` (from `(silence param)` or `(squelch param :kw ...)`) — bounds on parameters
-        The programmer-supplied ceiling constraint from `(silence)` declares total silence — the `silence` form requires `inferred_signals.bits == 0`. Signal keywords are not accepted; use `(squelch :kw ...)` for targeted restrictions.
-        When a parameter has a `silence` bound, it is no longer polymorphic — its signal contribution is zero bits.
+16. **Signal bounds are declared via `silence` preambles.**
+        `HirKind::Lambda` has signal-related fields (see `signals/AGENTS.md`):
+        - `inferred_signals: Signal` — the minimum guaranteed signal set
+        - `param_bounds: Vec<(Binding, Signal)>` (from `(silence param)`)
+        `(silence)` declares total silence; `(silence param)` bounds a parameter.
+        `squelch` is a runtime primitive, not a preamble.
         When a parameter has a `squelch` bound, it remains polymorphic — the bound only restricts what signals are forbidden.
 
 17. **Set literals are desugared to constructor calls.**

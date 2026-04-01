@@ -48,38 +48,38 @@ don't resume. No special syntax or VM support is needed.
 
 ### Example
 
-```janet
-;# The callee: signals with available recovery options
-(def (safe-divide a b)
-   (if (= b 0)
-     (emit :error
-       (@struct :error :division-by-zero
-                :options [:use-value :return-zero]))
-     (/ a b)))
+```lisp
+# The callee: signals with available recovery options
+(defn safe-divide [a b]
+  (if (= b 0)
+    (emit :error
+      {:error :division-by-zero
+       :options [:use-value :return-zero]})
+    (/ a b)))
 
-;# The handler: catches the signal, picks a recovery option
-(def (compute)
-   (let ((f (fiber/new (fn () (safe-divide 10 0)) :error)))
-     (let ((result (fiber/resume f nil)))
-       (if (= (fiber/status f) :suspended)
-         ;# Child is suspended — we can resume it with a recovery choice
-         (fiber/resume f (@struct :option :use-value :value 1))
-         result))))
+# The handler: catches the signal, picks a recovery option
+(defn compute []
+  (let [[f (fiber/new (fn [] (safe-divide 10 0)) |:error|)]]
+    (fiber/resume f nil)
+    (if (= (fiber/status f) :suspended)
+      # Child is suspended — we can resume it with a recovery choice
+      (fiber/resume f {:option :use-value :value 1})
+      (fiber/value f))))
 ```
 
 
 
 ## Error Signalling
 
-Errors in Elle are signals — values emitted on the `:error` bit (bit 0,
-`SIG_ERROR`). There is no exception hierarchy, no `Condition` type, no
+Errors in Elle are signals — values emitted on the `:error` bit.
+There is no exception hierarchy, no `Condition` type, no
 `handler-case`. Error handling is fiber signal handling.
 
 ### Error Representation
 
 The stdlib convention is a struct: `{:error :keyword :message "message"}`.
 
-```janet
+```lisp
 # Stdlib primitive errors look like:
 {:error :type-error :message "car: expected pair, got integer"}
 {:error :division-by-zero :message "cannot divide by zero"}
@@ -116,34 +116,22 @@ The VM's dispatch checks signal bits after each primitive call.
 
 **From Elle code**: Use `error` (a prelude macro) or `emit` directly:
 
-```janet
+```lisp
 # Prelude macro — signals {:error :the-kw :message "..."} on SIG_ERROR
-(error {:error :bad-input :message "expected a number"})
-
-# Or emit directly — any value works
-(emit 1 {:error :custom :message "something failed"})
-
-# User-defined error shape — completely valid
-(emit 1 [:my-error "the details"])
+(try (error {:error :bad-input :message "expected a number"})
+  (catch e (get e :error)))  # => :bad-input
 ```
 
 ### Catching Errors
 
 Errors are caught by fibers whose mask includes the `:error` bit:
 
-```janet
+```lisp
 # try/catch is sugar for fiber signal handling
 (try
-  (risky-operation)
+  (error {:error :test :message "boom"})
   (catch e
-    (handle-error e)))
-
-;# Expands to approximately:
-(let ((f (fiber/new (fn () (risky-operation)) 1)))  # mask = SIG_ERROR
-  (fiber/resume f nil)
-  (match (fiber/status f)
-    (:error (handle-error (fiber/value f)))
-    (_ (fiber/value f))))
+    (get e :error)))   # => :test
 ```
 
 The `try`/`catch`, `protect`, `defer`, and `with` macros are all built on
@@ -153,11 +141,11 @@ fiber primitives. No special VM support.
 
 Errors propagate up the fiber chain until caught:
 
-1. Child signals `SIG_ERROR`
-2. Parent checks: `child.mask & SIG_ERROR != 0`?
-   - **Yes**: parent catches, child stays suspended (or becomes `error` state)
+1. Child signals `:error`
+2. Parent checks: does the mask include `:error`?
+   - **Yes**: parent catches, child stays suspended
    - **No**: parent also suspends, signal propagates to grandparent
-3. At the root fiber: uncaught error becomes `Err(String)` via the public API boundary
+3. At the root fiber: uncaught error terminates the program
 
 `fiber/propagate` re-signals a caught signal, preserving the child chain for
 stack traces. `fiber/cancel` hard-kills a fiber (no unwinding).
@@ -166,14 +154,10 @@ unwinding (defer/protect blocks run).
 
 ### The Public API Boundary
 
-`execute_bytecode` is the translation boundary between the signal-based
-internal VM and the `Result<Value, String>` external API:
+At the root fiber, signals translate to program outcomes:
 
-- `SIG_OK` → `Ok(value)`
-- `SIG_ERROR` → `Err(format_error(signal_value))`
-
-External callers (REPL, file execution, tests) see `Result`. Internal code
-sees `SignalBits`.
+- Normal return → value printed or returned
+- `:error` signal → error message displayed, non-zero exit
 
 
 

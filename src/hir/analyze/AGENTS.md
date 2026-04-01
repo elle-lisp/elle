@@ -54,14 +54,14 @@ HIR (binding indices are inline — metadata lives in BindingArena)
 
 ## Interprocedural signal tracking
 
-The analyzer tracks signals across function boundaries:
+The analyzer tracks signals across function boundaries (see
+`signals/AGENTS.md` for signal type definitions):
 
 1. **Signal environment**: Maps `Binding` → `Signal` for locally-defined functions
-2. **Global signals**: Maps `SymbolId` → `Signal` for top-level defines (from previous forms)
+2. **Global signals**: Maps `SymbolId` → `Signal` for top-level defines
 3. **Primitive signals**: Maps `SymbolId` → `Signal` for built-in functions
-4. **Call analysis**: When analyzing a call, looks up the callee's signal and propagates it
-5. **Polymorphic signals**: For higher-order functions like `map`, examines the argument's signal
-6. **Mutation invalidation**: `set!` clears the signal tracking for the mutated binding
+4. **Call analysis**: Looks up callee's signal and propagates it
+5. **Mutation invalidation**: `assign` clears signal tracking for the mutated binding
 
 ## Scope-aware binding resolution
 

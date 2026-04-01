@@ -5,7 +5,7 @@ OS threads for CPU-bound work. For I/O-bound concurrency, prefer
 
 ## spawn and join
 
-```text
+```lisp
 (def handle (sys/spawn (fn [] (+ 1 2))))
 (sys/join handle)          # => 3
 (sys/thread-id)            # current OS thread ID
@@ -20,20 +20,15 @@ open ports) will error at spawn time.
 
 Crossbeam-based channels for inter-fiber and inter-thread messaging.
 
-```text
+```lisp
 (def [tx rx] (chan))           # unbounded channel
-(def [tx rx] (chan 10))        # bounded (capacity 10)
 
-(chan/send tx 42)              # => [:ok], [:full], or [:disconnected]
-(chan/recv rx)                 # => [:ok msg], [:empty], or [:disconnected]
+(chan/send tx 42)              # => [:ok]
+(chan/recv rx)                 # => [:ok 42]
 
 (chan/clone tx)                # clone sender (multiple producers)
 (chan/close tx)                # close sender half
 (chan/close-recv rx)           # close receiver half
-
-# Multiplex: block until one receiver has data
-(chan/select @[r1 r2])         # => [index msg] or [:disconnected]
-(chan/select @[r1 r2] 1000)   # with timeout (ms)
 ```
 
 ---
@@ -41,4 +36,4 @@ Crossbeam-based channels for inter-fiber and inter-thread messaging.
 ## See also
 
 - [concurrency.md](concurrency.md) — async concurrency with ev/spawn
-- [fibers.md](fibers.md) — fiber architecture
+- [fibers](signals/fibers.md) — fiber architecture

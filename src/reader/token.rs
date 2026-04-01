@@ -84,9 +84,11 @@ pub enum Token<'a> {
     Unquote,
     UnquoteSplicing,
     Splice,
-    ListSugar, // @ for list sugar
-    Pipe,      // | delimiter for set literals
-    AtPipe,    // @| for mutable set literals
+    ListSugar,      // @ for list sugar
+    Pipe,           // | delimiter for set literals
+    AtPipe,         // @| for mutable set literals
+    BytesBracket,   // b[ for bytes literals
+    AtBytesBracket, // @b[ for mutable @bytes literals
     Symbol(&'a str),
     Keyword(&'a str),
     Integer(i64),
@@ -113,6 +115,8 @@ pub enum OwnedToken {
     ListSugar,
     Pipe,
     AtPipe,
+    BytesBracket,
+    AtBytesBracket,
     Symbol(String),
     Keyword(String),
     Integer(i64),
@@ -139,6 +143,8 @@ impl<'a> From<Token<'a>> for OwnedToken {
             Token::ListSugar => OwnedToken::ListSugar,
             Token::Pipe => OwnedToken::Pipe,
             Token::AtPipe => OwnedToken::AtPipe,
+            Token::BytesBracket => OwnedToken::BytesBracket,
+            Token::AtBytesBracket => OwnedToken::AtBytesBracket,
             Token::Symbol(s) => OwnedToken::Symbol(s.to_string()),
             Token::Keyword(s) => OwnedToken::Keyword(s.to_string()),
             Token::Integer(i) => OwnedToken::Integer(i),

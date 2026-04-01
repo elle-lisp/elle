@@ -26,7 +26,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   Fibers run as coroutines. A parent spawns a child, drives it step by step, and reads each yielded value:
 
-  ```janet
+  ```lisp
   (defn produce []
     (emit :yield 1)
     (emit :yield 2)
@@ -45,7 +45,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   **Error handling** — a fiber signals an error; the parent catches it:
 
-  ```janet
+  ```lisp
   (defn risky [x]
     (if (< x 0)
       (error {:error :bad-input :message "negative input"})
@@ -61,7 +61,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   **Yielding** — a fiber yields progress updates; the parent drives it to completion:
 
-  ```janet
+  ```lisp
   (defn process-items [items]
     (each item items
       (emit :progress {:item item :result (* item item)})))
@@ -77,7 +77,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   **Parent/child** — a fiber spawns a child and collects its log signals:
 
-  ```janet
+  ```lisp
   (defn child []
     (emit :log "child starting")
     (emit :log "child done")
@@ -101,7 +101,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **A sound signal system, inferred not declared.** Every function is automatically classified as `Silent`, `Yields`, or `Polymorphic`. The compiler enforces this: a silent context cannot call a yielding function. No annotations required.
 
-  ```janet
+  ```lisp
   # Silent — inferred automatically
   (defn add (a b) (+ a b))
 
@@ -117,7 +117,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided.
 
-  ```janet
+  ```lisp
   (defmacro my-swap (a b)
     `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
@@ -138,7 +138,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (array), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (@array), `@{:key val}` (@struct), `@"hello"` (@string).
 
-   ```janet
+   ```lisp
    # Immutable
    (def a [1 2 3])           # array
    (def s {:name "Bob"})     # struct
@@ -158,7 +158,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
 
-  ```janet
+  ```lisp
   (length "café")           # => 4, not 5 bytes
   (get "café" 3)              # => "é"
   (slice "café" 0 2)        # => "ca"
@@ -169,7 +169,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
 
-  ```janet
+  ```lisp
   (def (head & tail) (list 1 2 3 4))
   (def [x _ z] [10 20 30])
   (def {:name n :age a} {:name "Bob" :age 25})
@@ -179,7 +179,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Closures with automatic capture analysis.** The compiler tracks which variables each closure captures. Mutable captures use cells automatically. Enables escape analysis for scope-level memory reclamation.
 
-  ```janet
+  ```lisp
   (defn make-counter [start]
     (var n start)
     (fn []
@@ -200,7 +200,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Splice operator for array spreading.** `;expr` marks a value for spreading at call sites and in data constructors. `(splice expr)` is the long form.
 
-  ```janet
+  ```lisp
   (def args @[2 3])
   (+ 1 ;args)  # => 6, same as (+ 1 2 3)
 
@@ -212,7 +212,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Parameters for dynamic binding.** `parameter` creates a parameter, `parameterize` sets it in a scope, child fibers inherit parent parameter frames.
 
-  ```janet
+  ```lisp
   (def *port* (parameter :stdout))
 
   (parameterize ((*port* :stderr))
@@ -249,14 +249,14 @@ Every collection type has an immutable variant and a mutable variant. Bare liter
 | array | @array | `[1 2 3]` | `@[1 2 3]` |
 | struct | @struct | `{:a 1}` | `@{:a 1}` |
 | string | @string | `"hello"` | `@"hello"` |
-| bytes | @bytes | *(no literal)* | *(no literal)* |
+| bytes | @bytes | `b[1 2 3]` | `@b[1 2 3]` |
 | set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
 
 The `@` prefix means "mutable version of this literal." The types within each pair share the same logical structure but differ in mutability.
 
 **string** — interned text. Equality is O(1) via interning. Indexing and length count grapheme clusters, not bytes.
 
-```janet
+```lisp
 (def s "café")
 (length s)              # => 4 (grapheme clusters, not bytes)
 (get s 3)               # => "é"
@@ -266,7 +266,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 **array** — fixed-length sequence.
 
-```janet
+```lisp
 (def a [1 2 3])
 (get a 0)               # => 1
 (length a)              # => 3
@@ -275,7 +275,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 **struct** — ordered dictionary. Keys are typically keywords.
 
-```janet
+```lisp
 (def s {:name "Bob" :age 25})
 (get s :name)           # => "Bob"
 (keys s)                # => (:name :age)
@@ -285,7 +285,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 **set** — ordered collection of unique values. Mutable values are frozen on insertion.
 
-```janet
+```lisp
 (def s |1 2 3|)
 (contains? s 2)         # => true
 (add s 4)               # => |1 2 3 4|
@@ -297,7 +297,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 **bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
 
-```janet
+```lisp
 (def b (bytes 1 2 3))
 (def b2 (string->bytes "hello"))
 (get b 0)               # => 1
@@ -307,7 +307,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 **@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
 
-```janet
+```lisp
 (def b (@bytes 1 2 3))
 (def b2 (string->@bytes "hello"))
 (get b 0)               # => 1
@@ -319,7 +319,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 
 Singly-linked cons cells. Proper lists terminate with `()` (empty list), **not** `nil`.
 
-```janet
+```lisp
 (list 1 2 3)            # => (1 2 3)
 (cons 1 (list 2 3))     # => (1 2 3)
 (first (list 1 2 3))    # => 1
@@ -329,7 +329,7 @@ Singly-linked cons cells. Proper lists terminate with `()` (empty list), **not**
 
 > **nil vs empty list** — this is the most common gotcha. `nil` represents absence and is **falsy**. `()` is the empty list and is **truthy**. Lists terminate with `()`. Use `empty?` to check for end-of-list, not `nil?`. `nil?` only matches `nil`.
 
-```janet
+```lisp
 (nil? nil)              # => true
 (nil? ())               # => false  — empty list is not nil
 (empty? ())             # => true
@@ -342,7 +342,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 
 **Closures** — compiled functions with captured environment. Captures are by value; mutable captures use compiler-managed cells automatically.
 
-```janet
+```lisp
 (fn (x) (+ x 1))           # anonymous
 (defn add1 (x) (+ x 1))    # named (macro)
 ```
@@ -353,7 +353,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 
 **Fiber** — independent execution context with its own stack, call frames, signal mask, and heap. See [Memory](#memory).
 
-```janet
+```lisp
 (fiber/new (fn () body) mask)
 (fiber/resume f value)
 (fiber/status f)
@@ -439,7 +439,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Conditionals: `if`, `cond`, `when`, `unless`, `case`.** `if` is the primitive, others are macros or sugar.
 
-  ```janet
+  ```lisp
   (if (> x 0) "positive" "non-positive")
 
   (cond
@@ -455,7 +455,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Pattern matching with `match`.** Type guards, element extraction, nested patterns, wildcard `_`, and guard clauses.
 
-  ```janet
+  ```lisp
   (match value
     (0                    "zero")
     (n when (< n 0)       "negative")
@@ -467,7 +467,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Error handling: `try`/`catch`, `protect`, `defer`.** Built on fibers and signals, not exceptions.
 
-  ```janet
+  ```lisp
   (try
     (if (< x 0) (error "negative"))
     (+ x 1)
@@ -484,7 +484,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Loops: `while`, `forever`, `break`.** `while` is the primitive, `forever` is a macro, `break` exits a block.
 
-  ```janet
+  ```lisp
   (while (< i 10)
     (print i)
     (assign i (+ i 1)))
@@ -517,7 +517,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Call C without ceremony.** Load a library, bind a symbol, call it.
 
-  ```janet
+  ```lisp
   (def libc (ffi/native nil))
   (ffi/defbind sqrt libc "sqrt" :double @[:double])
   (sqrt 2.0)  # => 1.4142135623730951
@@ -525,7 +525,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Struct marshalling, variadic calls, callbacks, manual memory management all work.**
 
-  ```janet
+  ```lisp
   (def point-type (ffi/struct @[:double :double]))
   (def p (ffi/malloc (ffi/size point-type)))
   (ffi/write p point-type @[1.5 2.5])
@@ -554,7 +554,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Source modules return their last expression.** A module that defines functions via `def` makes them available as globals; a module that ends with a struct or function hands that value back to the caller.
 
-  ```janet
+  ```lisp
   # math.lisp
   (fn [scale]
     {:add (fn (a b) (* (+ a b) scale))
@@ -571,7 +571,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
 
-  ```janet
+  ```lisp
   (def re (import "plugin/regex"))
   (def pat (re:compile "\\d+"))
   (re:find-all pat "a1b2c3")
@@ -625,7 +625,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 - **Static linter catches errors at compile time.** Wrong arity, unused bindings, signal violations, type mismatches in patterns, duplicate pattern variables.
 
-  ```janet
+  ```lisp
   # Compile-time errors caught by elle lint:
   (defn foo [x y] (+ x))  # Error: missing argument y
   (let [[unused 42]] 100) # Warning: unused binding
@@ -663,8 +663,8 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 ### Prerequisites
 
 - **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
-- **Linux|OS X** — Elle uses io-uring for async I/O. macOS and aarch64 Linux
-  are supported in CI but io-uring is Linux-only.
+- **Linux and macOS** — x86_64 and aarch64. On Linux, Elle uses io_uring for
+  async I/O; on macOS, a thread-pool backend provides the same API.
 - **GNU Make** — for the build targets below.
 
 ### Build and run

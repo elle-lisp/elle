@@ -99,8 +99,8 @@ Syntax        Type       Mutable?
 @"hello"      @string    yes
 |1 2 3|       set        no
 @|1 2 3|      @set       yes
-(bytes 1 2)   bytes      no
-(@bytes 1 2)  @bytes     yes
+b[1 2 3]      bytes      no
+@b[1 2 3]     @bytes     yes
 ```
 
 ```lisp
@@ -137,4 +137,4 @@ Only `nil` and `false` are falsy. Everything else is truthy, including
 
 - [types.md](types.md) — type system and type predicates
 - [macros.md](macros.md) — macro expansion and syntax objects
-- [oddities.md](oddities.md) — intentional differences from other Lisps
+- [warts.md](warts.md) — intentional differences from other Lisps

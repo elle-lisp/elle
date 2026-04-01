@@ -15,7 +15,7 @@ That's it. No Rust changes needed.
 
 **Step 1:** Add the macro to `prelude.lisp` (at the project root):
 
-```janet
+```lisp
 ## my-form - description of what it does
 ## (my-form arg body...) => expansion
 (defmacro my-form (arg & body)
@@ -40,7 +40,7 @@ That's it. No Rust changes needed.
 
 ### Macro syntax reference
 
-```janet
+```lisp
 (defmacro name (param1 param2 & rest-params)
    template)
 ```
@@ -78,8 +78,6 @@ Use a **special form** (Recipe 4) when:
 - Compile-time validation is needed (e.g., `break` checking block scope).
 - The form requires custom LIR emission (e.g., `yield` splitting blocks).
 - The form introduces new binding semantics (e.g., `let`, `fn`).
-
----
 
 ---
 

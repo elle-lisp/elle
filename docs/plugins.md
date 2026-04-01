@@ -6,9 +6,9 @@ functions.
 
 ## Usage pattern
 
-```text
-(def crypto (import "plugin/crypto"))
-(seq->hex (crypto:sha256 "hello"))
+```lisp
+# (def crypto (import "plugin/crypto"))
+# (seq->hex (crypto:sha256 "hello"))
 ```
 
 Build plugins before use: `cargo build --release -p elle-crypto`.

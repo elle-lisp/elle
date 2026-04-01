@@ -7,7 +7,7 @@
 Declares signal bounds on a function or its parameters. Appears as a preamble declaration in lambda bodies (after optional docstring, before first non-declaration expression).
 
 **Syntax:**
-```janet
+```text
 # Function-level restriction (no signals)
 (silence)
 
@@ -32,7 +32,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 ```
 
 **Examples:**
-```janet
+```lisp
 # Silent function
 (defn add (x y)
   (silence)
@@ -44,11 +44,10 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
   (silence f)
   (f x))
 
-# Multiple restrictions (silence + squelch on different params)
+# Parameter restriction only — f must be silent
 (defn map-safe (f xs)
   "Map f over xs. f must be silent."
   (silence f)
-  (silence)
   (map f xs))
 ```
 
@@ -56,18 +55,16 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 
 `squelch` is a **primitive function** that takes a closure and returns a new closure with runtime signal enforcement. It is NOT a preamble declaration.
 
-**Syntax:**
-```janet
-(squelch closure :kw1 :kw2 ...)
-```
+**Syntax:** `(squelch closure :keyword)`
 
 **Semantics:**
 
-- Takes a closure as the first argument
-- Takes one or more signal keywords as remaining arguments
-- Returns a **new** closure that, when called, intercepts signals matching the keywords and converts them to `:error` with kind `"signal-violation"`
-- The returned closure shares the same bytecode and environment (Rc clones — cheap)
-- Composable: `(squelch (squelch f :yield) :io)` squelches both `:yield` and `:io`
+- Takes a closure as the first argument and a signal keyword as the second
+- Returns a **new** closure that, when called, intercepts signals matching the keyword and converts them to `:error` with kind `"signal-violation"`
+- The returned closure shares the same bytecode and environment (Rc clones)
+  — near-zero cost, just swaps the closure header
+- Accepts a keyword or a set: `(squelch f |:yield :io|)`
+- Composable: layering squelch calls ORs the masks together
 - The returned closure's `effective_signal()` reflects the squelch mask (squelched bits are cleared, `SIG_ERROR` is added only if the original closure could emit those bits)
 
 **Contrast with `silence`:**
@@ -77,34 +74,23 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 `squelch` is a **runtime blacklist** (open-world): `(squelch f :yield)` returns a new closure that forbids `:yield` at the call boundary. Everything else is allowed, including user-defined signals not listed. It is a primitive function that can appear anywhere an expression is valid.
 
 **Examples:**
-```janet
-# Basic squelch: forbid yielding in a callback
-(let ((safe-f (squelch f :yield)))
-  (safe-f))
+```lisp
+(defn f [] (yield 42))
 
-# Forbid multiple signals
-(let ((strict-f (squelch f :yield :error)))
-  (strict-f))
+# Squelch a single signal
+(def safe-f (squelch f :yield))
 
-# Composition safety: user-defined signals pass through
-(let ((audit-safe (squelch f :yield)))
-  ;# f may emit :audit, which is not squelched
-  (audit-safe))
-
-# Composable: squelch on top of squelch
-(let ((f1 (squelch f :yield))
-      (f2 (squelch f1 :io)))
-  (f2))  # Both :yield and :io are caught
+# Squelch multiple signals with a set
+(def f2 (squelch f |:yield :io|))
 ```
 
 **Error cases:**
 
 | Condition | Error |
 |-----------|-------|
-| `(squelch f)` with no keywords | `"squelch: expected at least 2 arguments (closure + keywords), got 1"` |
-| `(squelch non-closure :yield)` | `"squelch: first argument must be a closure, got {type}"` (type-error) |
-| `(squelch f non-keyword)` | `"squelch: expected signal keyword, got {type}"` (type-error) |
-| Unknown keyword | `"squelch: signal :X not registered (unknown signal keyword)"` (error) |
+| `(squelch f)` with no keyword | arity error |
+| `(squelch non-closure :yield)` | type-error |
+| `(squelch f non-keyword)` | type-error |
 
 **Known limitation:** Squelch enforcement does not fire when the squelched closure is invoked in tail position (tracked as issue #588). The squelch boundary is at the call site in `call_inner`; tail calls bypass this check.
 
@@ -126,7 +112,7 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 **Silence bounds (total suppression):** The programmer-supplied ceiling constraint from `(silence)` declares that the function must emit no signals. When a `silence` bound is present, the compiler checks that `inferred_signals.bits == 0`. If the check fails, compile-time error.
 
 **Example:**
-```janet
+```lisp
 # Function with parameter bound
 (defn apply-silent (f x)
   (silence f)  # f must be silent
@@ -138,8 +124,9 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 # This works: + is silent
 (apply-silent + 42)
 
-# This fails at compile time: yielding function violates bound
-(apply-silent (fn () (yield 1)) 42)
+# Passing a yielding function would fail at compile time:
+# (apply-silent (fn () (yield 1)) 42)
+# => error: closure may emit {:yield} but parameter is restricted to {}
 ```
 
 ### Silence Bounds Eliminate Polymorphism
@@ -147,7 +134,7 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be silent, so the function's signal is determined by its own body only, not by what `f` might do.
 
 **Example:**
-```janet
+```lisp
 # Without bound: polymorphic
 (defn map-any (f xs)
   (map f xs))
@@ -165,7 +152,7 @@ A function with `(silence f)` is no longer polymorphic with respect to `f`. The 
 When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's signal against the bound at compile time.
 
 **Example:**
-```janet
+```lisp
 (defn apply-silent (f x)
   (silence f)
   (f x))
@@ -173,9 +160,9 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 # Compile-time check passes: + is silent
 (apply-silent + 42)
 
-# Compile-time check fails: yielding function violates bound
-(apply-silent (fn () (yield 1)) 42)
-# Error: argument violates signal bound
+# Passing a yielding function would fail:
+# (apply-silent (fn () (yield 1)) 42)
+# => error: argument violates signal bound
 ```
 
 
@@ -191,15 +178,14 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 - If the check fails, the VM signals `:error` with a descriptive message
 
 **Example:**
-```janet
+```lisp
 (defn apply-silent (f x)
   (silence f)
   (f x))
 
-# At runtime, if f's signal violates the bound, error is signaled
-(var f (eval '(fn () (yield 1))))
-(apply-silent f 42)
-# Runtime error: closure may emit {:yield} but parameter must be silent
+# At runtime, if f's signal violates the bound, error is signaled:
+# (apply-silent some-yielding-fn 42)
+# => Runtime error: closure may emit {:yield} but parameter must be silent
 ```
 
 ### Squelch Enforcement (Runtime Closure Transform)
@@ -213,24 +199,19 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 - Non-squelched signals pass through normally; errors are never affected by squelch
 
 **Example:**
-```janet
-# Squelch a yielding closure
-(let ((f (fn () (yield 1)))
-      (safe-f (squelch f :yield)))
-  (safe-f))
-# Runtime error: signal-violation — :yield caught at boundary
+```lisp
+# Squelch a yielding closure — signal-violation at boundary
+(def squelched (squelch (fn [] (yield 1)) :yield))
+(try (squelched) (catch e (get e :error)))  # => :signal-violation
 
-# Non-squelched signals pass through
-(let ((f (fn () (error "oops")))
-      (safe-f (squelch f :yield)))
-  (safe-f))
-# Runtime error: oops (error passes through, not converted)
+# Squelch multiple signals with a set
+(def sq2 (squelch (fn [] (yield 1)) |:yield :io|))
+(try (sq2) (catch e (get e :error)))  # => :signal-violation
 
-# Composable: squelch multiple signals
-(let ((f (fn () (yield 1)))
-      (safe-f (squelch (squelch f :yield) :io)))
-  (safe-f))
-# Runtime error: signal-violation — :yield caught at boundary
+# Composable: layer restrictions from different sources
+(defn make-safe [f]
+  (squelch f :yield))
+(def extra-safe (squelch (make-safe (fn [] (yield 1))) :io))
 ```
 
 
@@ -238,91 +219,57 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 ### Fiber Primitives
 
-```janet
-;# === Creation and control ===
+```lisp
+# === Creation and control ===
+# (fiber/new fn mask) => fiber
+# (fiber/resume fiber value) => signal-bits
+# (emit bits value) => suspends
 
-;# Create a fiber from a closure with a signal mask
-(fiber/new fn mask) → fiber
+# === Introspection ===
+# (fiber/status fiber) => :new :alive :suspended :dead :error
+# (fiber/value fiber) => value
+# (fiber/bits fiber) => int
+# (fiber/mask fiber) => int
 
-;# Resume a fiber, delivering a value
-(fiber/resume fiber value) → signal-bits
-
-;# Emit a signal from the current fiber (suspends it)
-(emit bits value) → (suspends)
-
-;# === Introspection ===
-
-;# Lifecycle status
-(fiber/status fiber) → keyword  # :new :alive :suspended :dead :error
-
-;# Signal payload from last signal or return value
-(fiber/value fiber) → value
-
-;# Signal bits from last signal
-(fiber/bits fiber) → int
-
-;# Capability mask (set at creation, immutable)
-(fiber/mask fiber) → int
-
-;# === Chain traversal ===
-
-;# Parent fiber (nil at root)
-(fiber/parent fiber) → fiber | nil
-
-;# Most recently resumed child fiber (nil if none)
-(fiber/child fiber) → fiber | nil
-
-;# === Internals (for debugging/tooling) ===
-
-;# The closure this fiber wraps
-(fiber/closure fiber) → closure
-
-;# The operand stack (for debugging)
-(fiber/stack fiber) → array
-
-;# Dynamic bindings (fiber-scoped state)
-(fiber/env fiber) → @struct | nil
+# === Chain traversal ===
+# (fiber/parent fiber) => fiber or nil
+# (fiber/child fiber) => fiber or nil
 ```
 
 ### Sugar and Aliases
 
-```janet
-;# try/catch/finally
-(try body
-  (catch e handler)
-  (finally cleanup))
+```lisp
+# try/catch
+# (try body (catch e handler))
 
-;# yield
-(yield value) → (emit :yield value)
+# yield is sugar for (emit :yield value)
+# error is sugar for (emit 1 value)
 
-;# error (signal an error)
-(error value) → (emit 1 value)
-
-;# Thin aliases
-(coro/new fn) → (fiber/new fn :yield)
-(coro/resume co val) → (fiber/resume co val)
-(coro/status co) → (fiber/status co)
+# coro/ aliases
+# (coro/new fn) => (fiber/new fn |:yield|)
+# (coro/resume co val) => (fiber/resume co val)
+# (coro/status co) => (fiber/status co)
 ```
 
 ### Signal Restrictions
 
-```janet
+```lisp
 # Compile-time silence bounds
 (defn silent-add (x y)
-  (silence)           ;# no signals — silent
+  (silence)           # no signals — silent
   (+ x y))
 
 (defn callback-must-be-silent (f xs)
-  (silence f) ;# f must have no signals
+  (silence f) # f must have no signals
   (map f xs))
 
 # Runtime squelch transform
 (defn safe-apply (f x)
-  (let ((safe-f (squelch f :yield)))  ;# returns a new closure
+  (let ((safe-f (squelch f :yield)))  # returns a new closure
     (safe-f x)))
 
 (defn safe-iterate (f xs)
-  (let ((safe-f (squelch f :yield)))  ;# f must not yield; other signals allowed
+  (let ((safe-f (squelch f :yield)))  # f must not yield; other signals allowed
     (map safe-f xs)))
 ```
 

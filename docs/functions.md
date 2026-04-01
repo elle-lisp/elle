@@ -123,5 +123,5 @@ Tail calls are guaranteed to run in constant stack space.
 
 - [named-args.md](named-args.md) — &named, &keys, &opt, default
 - [destructuring.md](destructuring.md) — unpacking in function params
-- [signals.md](signals.md) — how signals affect function contracts
+- [signals](signals/index.md) — how signals affect function contracts
 - [control.md](control.md) — conditionals and loops

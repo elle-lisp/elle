@@ -73,7 +73,12 @@ Each `coro/new` call creates independent state:
 Coroutines are the basis of Elle's stream system. `stream/map`,
 `stream/filter`, and `stream/take` compose lazily over coroutines.
 
-```text
+```lisp
+(defn naturals []
+  (coro/new (fn []
+    (var n 0)
+    (forever (yield n) (assign n (+ n 1))))))
+
 (stream/collect
   (stream/take 5
     (stream/map (fn [x] (* x x))
@@ -86,5 +91,5 @@ Coroutines are the basis of Elle's stream system. `stream/map`,
 ## See also
 
 - [concurrency.md](concurrency.md) — async concurrency with ev/spawn
-- [fibers.md](fibers.md) — fiber architecture (coroutines are built on fibers)
+- [fibers](signals/fibers.md) — fiber architecture (coroutines are built on fibers)
 - [control.md](control.md) — loops and iteration

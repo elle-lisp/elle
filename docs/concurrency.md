@@ -7,7 +7,7 @@ For CPU parallelism across cores, see [threads.md](threads.md).
 
 ## Spawn and join
 
-```text
+```lisp
 # Spawn a fiber, wait for its result
 (def f (ev/spawn (fn [] (+ 1 2))))
 (ev/join f)                # => 3
@@ -21,35 +21,31 @@ For CPU parallelism across cores, see [threads.md](threads.md).
 
 The most common pattern:
 
-```text
-(ev/map (fn [url] (http/get url)) urls)
-# => [response1 response2 ...]
+```lisp
+(ev/map (fn [x] (* x x)) [1 2 3 4])   # => [1 4 9 16]
 
 # Bounded parallelism (at most n in flight)
-(ev/map-limited (fn [url] (http/get url)) urls 4)
+(ev/map-limited (fn [x] (* x x)) [1 2 3 4] 2)
 ```
 
 ## Error handling
 
 `ev/join-protected` returns `[ok? value]` instead of raising errors:
 
-```text
-(let [[[ok? val] (ev/join-protected (ev/spawn (fn [] (flaky-call))))]]
-  (if ok? val (fallback)))
+```lisp
+(let [[[ok? val] (ev/join-protected (ev/spawn (fn [] (+ 1 2))))]]
+  (if ok? val :failed))   # => 3
 ```
 
 ## Select, race, timeout
 
-```text
+```lisp
 # First to complete wins; abort the rest
-(ev/race [(ev/spawn (fn [] (query-replica-1)))
-          (ev/spawn (fn [] (query-replica-2)))])
+(ev/race [(ev/spawn (fn [] :fast))
+          (ev/spawn (fn [] (ev/sleep 1) :slow))])  # => :fast
 
 # Deadline on a computation
-(ev/timeout 5 (fn [] (slow-operation)))
-
-# Wait for first of N — returns [done remaining]
-(ev/select fibers)
+(ev/timeout 5 (fn [] (+ 1 2)))   # => 3
 ```
 
 ## Scoped concurrency
@@ -57,36 +53,36 @@ The most common pattern:
 All children must finish before scope exits. If one child fails, the
 others are aborted.
 
-```text
+```lisp
 (ev/scope (fn [spawn]
-  (let [[users    (spawn (fn [] (fetch "/users")))]
-        [settings (spawn (fn [] (fetch "/settings")))]]
-    {:users (ev/join users) :settings (ev/join settings)})))
+  (let [[a (spawn (fn [] :users))]
+        [b (spawn (fn [] :settings))]]
+    {:users (ev/join a) :settings (ev/join b)})))
 ```
 
 ## Primitives reference
 
-```text
-(ev/spawn thunk)            # create fiber, returns handle
-(ev/join fiber-or-seq)      # wait for result(s), propagate errors
-(ev/join-protected target)  # wait without raising — [ok? value]
-(ev/abort fiber)            # graceful cancel (defer blocks run)
-(ev/select fibers)          # wait for first → [done remaining]
-(ev/race fibers)            # first wins, abort rest, return value
-(ev/timeout secs thunk)     # deadline — value or {:error :timeout}
-(ev/scope (fn [spawn] ...)) # nursery — children can't outlive scope
-(ev/map f items)            # parallel map, results in order
-(ev/map-limited f items n)  # bounded parallel map
-(ev/as-completed fibers)    # lazy iterator → [next-fn pool]
-(ev/sleep seconds)          # yield for N seconds
+```lisp
+# (ev/spawn thunk)            — create fiber, returns handle
+# (ev/join fiber-or-seq)      — wait for result(s), propagate errors
+# (ev/join-protected target)  — wait without raising: [ok? value]
+# (ev/abort fiber)            — graceful cancel (defer blocks run)
+# (ev/select fibers)          — wait for first: [done remaining]
+# (ev/race fibers)            — first wins, abort rest, return value
+# (ev/timeout secs thunk)     — deadline: value or {:error :timeout}
+# (ev/scope (fn [spawn] ...)) — nursery: children can't outlive scope
+# (ev/map f items)            — parallel map, results in order
+# (ev/map-limited f items n)  — bounded parallel map
+# (ev/as-completed fibers)    — lazy iterator: [next-fn pool]
+# (ev/sleep seconds)          — yield for N seconds
 ```
 
 ## TCP
 
-```text
-(tcp/listen addr port)      # bind and listen, returns listener
-(tcp/accept listener)       # yield until connection, returns port
-(tcp/connect host port)     # yield until connected, returns port
+```lisp
+# (tcp/listen addr port)      — bind and listen, returns listener
+# (tcp/accept listener)       — yield until connection, returns port
+# (tcp/connect host port)     — yield until connected, returns port
 ```
 
 ## Synchronization (lib/sync)
@@ -95,7 +91,7 @@ others are aborted.
 `ev/futex-wait` and `ev/futex-wake`. These cooperate with the async
 scheduler — waiting fibers yield rather than blocking the thread.
 
-```text
+```lisp
 (def sync ((import "lib/sync")))
 
 (def lock (sync:make-lock))
@@ -122,13 +118,13 @@ scheduler — waiting fibers yield rather than blocking the thread.
 processes with mailboxes, links, monitors, and named registration. Processes
 are fibers driven by a cooperative scheduler with fuel-based preemption.
 
-```text
+```lisp
 (def process ((import "lib/process")))
 
 (process:start (fn []
-  (let [[pid (self)]]
-    (send pid :hello)
-    (println "received:" (recv)))))
+  (let [[pid (process:self)]]
+    (process:send pid :hello)
+    (println "received:" (process:recv)))))
 ```
 
 | Function | Description |
@@ -154,7 +150,7 @@ are fibers driven by a cooperative scheduler with fuel-based preemption.
 
 ## See also
 
-- [fibers.md](fibers.md) — fiber architecture
+- [fibers](signals/fibers.md) — fiber architecture
 - [io.md](io.md) — port I/O
 - [threads.md](threads.md) — OS threads for CPU parallelism
-- [signals.md](signals.md) — signal system
+- [signals](signals/index.md) — signal system

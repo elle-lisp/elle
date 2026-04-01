@@ -11,14 +11,15 @@ and exits non-zero on failure.
 
 ### Structure
 
-```janet
-(import-file "./examples/assertions.lisp")
+```lisp
+(defn assert-eq [a b msg]
+  (when (not= a b)
+    (error {:error :assertion :message msg})))
 
 # Description of what this file tests
 
 (assert-eq (+ 1 2) 3 "basic addition")
 (assert-eq (- 10 3) 7 "basic subtraction")
-# ... more assertions ...
 ```
 
 ### Assertion library
@@ -29,9 +30,9 @@ Elle test scripts use `examples/assertions.lisp` which provides:
 
 For runtime error checking, use `protect`:
 
-```janet
+```lisp
 (def [ok? err] (protect (/ 1 0)))
-(assert-false ok? "division by zero should error")
+(assert-eq (not ok?) true "division by zero should error")
 (assert-eq (get err :error) :division-by-zero "error kind")
 ```
 

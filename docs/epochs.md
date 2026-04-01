@@ -22,7 +22,7 @@ program. Files without an epoch declaration target the current epoch.
 To query the current epoch at runtime:
 
 ```lisp
-(elle/epoch)   # => 3
+(elle/epoch)   # returns the current epoch number
 ```
 
 ## What happens at compile time

@@ -16,7 +16,7 @@ compiler-reserved:
 | 3 | resume | 8 | VM-internal: fiber resume request |
 | 4 | ffi | 16 | Calls foreign code |
 | 5 | propagate | 32 | VM-internal: propagate caught signal |
-| 6 | abort | SIG_ERROR\|SIG_TERMINAL | VM-internal: graceful fiber termination |
+| 6 | abort | :error + terminal | VM-internal: graceful fiber termination |
 | 7 | query | 128 | VM-internal: read VM state |
 | 8 | halt | 256 | Graceful VM termination |
 | 9 | io | 512 | I/O request to scheduler |
@@ -27,9 +27,8 @@ compiler-reserved:
 Bit 0 is special: "ok" means no bits are set. A normal return has an empty
 signal bitfield.
 
-`SIG_RESUME` is how `fiber/resume` works without VM access. The
-primitive returns `(SIG_RESUME, fiber_value)` and the VM dispatch
-loop performs the actual context switch.
+The resume signal is how `fiber/resume` works — the primitive signals
+the VM to perform the actual context switch.
 
 ### Signal Values
 
@@ -206,7 +205,7 @@ simple Copy pair.
 
 The programmer can restrict signals on functions using `silence` (compile-time total suppression):
 
-```janet
+```lisp
 # Require the function body to be completely silent
 (defn add (x y)
   (silence)
@@ -215,7 +214,7 @@ The programmer can restrict signals on functions using `silence` (compile-time t
 
 And signal bounds on parameters:
 
-```janet
+```lisp
 (defn fast-map (f xs)
   (silence f)   # f must be completely silent
   (map f xs))
@@ -227,19 +226,14 @@ These are compile-time contracts. The system enforces them statically and at run
 
 `squelch` is a **runtime closure transform primitive** that takes a closure and returns a new closure with runtime signal enforcement:
 
-```janet
-# squelch as a primitive function (not a preamble declaration)
-(let ((safe-f (squelch f :yield)))
-  (safe-f))  # Calling safe-f catches :yield and converts to :error
+```lisp
+(defn f [] (yield 42))
 
-# Composable: squelch multiple signals
-(let ((safe-f (squelch f :yield :io)))
-  (safe-f))
+# squelch a single signal
+(def safe-f (squelch f :yield))
 
-# Composable: squelch on top of squelch
-(let ((f1 (squelch f :yield))
-      (f2 (squelch f1 :io)))
-  (f2))  # Both :yield and :io are caught
+# squelch multiple signals with a set
+(def f2 (squelch f |:yield :io|))
 ```
 
 When a squelched closure is called, if it emits a squelched signal, a `signal-violation` error is raised instead. Non-squelched signals pass through normally. Errors are never affected by squelch (they pass through unchanged).
@@ -260,13 +254,11 @@ When a squelched closure is called, if it emits a squelched signal, a `signal-vi
 
 ## I/O Signals
 
-### SIG_IO and the Scheduler
+### I/O and the Scheduler
 
-I/O signals use the `:io` signal bit (bit 9). A fiber performing I/O signals
-`|:yield :io|` because it wants to both suspend AND request I/O handling.
-This is a convention, not a language rule — the bits compose freely.
-
-**Signal bit**: Bit 9 (`SIG_IO = 1 << 9`)
+I/O signals use the `:io` bit (bit 9). A fiber performing I/O signals
+`:yield` and `:io` because it wants to both suspend AND request I/O
+handling. The bits compose freely.
 
 **Signal constructors**:
 - `Signal::io()` — function may perform I/O
@@ -321,52 +313,27 @@ The signal registry maps signal keywords to bit positions. Built-in signals occu
 | `:halt` | 8 | Graceful VM termination |
 | `:io` | 9 | I/O request to scheduler |
 
-Bits 3, 5, 6, 7, 10–15 are reserved for VM-internal use and are not user-visible.
+Bits 3, 5–7 are VM-internal (resume, propagate, query). Bits 10–14 are
+VM-internal (terminal, exec, fuel, switch, wait). Bit 15 is reserved.
 
 ### User-Defined Signals
 
-User-defined signals are registered via the `(signal :keyword)` form and allocated bits 16–31. Up to 16 user signals are supported per compilation unit.
+User-defined signals are registered via the `(signal :keyword)` special
+form and allocated bits 16–31 sequentially. Up to 16 user signals are
+supported. Registration happens at analysis time.
 
-```janet
-# Register a user-defined signal
+```lisp
 (signal :heartbeat)
 (signal :rate-limit)
-
-# Signals are registered in order of appearance
 # :heartbeat gets bit 16, :rate-limit gets bit 17
-```
 
-Duplicate registration is a compile-time error. Typos in signal keywords used in `silence` that don't match any registered signal are also compile-time errors.
-
-
-## Declaring User Signals
-
-### `(signal :keyword)` Form
-
-Registers a new user-defined signal keyword and returns the keyword value.
-
-**Syntax:**
-```janet
-(signal :keyword)
-```
-
-**Semantics:**
-- Registers `:keyword` in the global signal registry (if not already registered)
-- Returns the keyword value
-- Valid in any position (file scope or expression position)
-- Duplicate registration is a compile-time error
-- Built-in signals (`:error`, `:yield`, `:debug`, `:ffi`, `:halt`, `:io`) cannot be re-registered
-
-**Examples:**
-```janet
-# File scope
-(signal :heartbeat)
-(signal :rate-limit)
-
-# Expression position
+# Expression position — returns the keyword
 (def my-signal (signal :custom))
-my-signal  # ⟹ :custom
+my-signal  # => :custom
 ```
+
+Duplicate registration is a compile-time error. Built-in signal keywords
+cannot be re-registered.
 
 ---
 
