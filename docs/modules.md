@@ -221,6 +221,64 @@ The return value is also a struct, so the qualified pattern works:
 ```
 
 
+## Compile-Time Inclusion
+
+`import` is a runtime operation — it compiles and executes a file, returning a
+value. This means macros defined in an imported file are not available to the
+importing file's compiler. By the time `import` runs, expansion is finished.
+
+`include` and `include-file` solve this by splicing a file's source forms
+directly into the including file at compile time, before macro expansion:
+
+```text
+(include-file "macros.lisp")      # relative to current file
+(include "lib/macros")            # uses search-path resolution
+```
+
+### How it works
+
+When `compile_file` encounters an `include` or `include-file` form, it:
+
+1. Reads and parses the target file (producing syntax objects with the
+   included file's source locations intact)
+2. Splices the parsed forms into the current file's form list at that position
+3. Continues expanding — included `defmacro` forms register in the expander,
+   `def`/`defn` forms enter the file's letrec, everything else expands normally
+
+The included forms become part of the including file as if they were written
+inline. Error messages and stack traces point back to the original file and
+line.
+
+### include vs include-file
+
+| Form | Resolution | Parallel to |
+|------|-----------|-------------|
+| `(include-file "path")` | Relative to including file's directory | `import-file` |
+| `(include "spec")` | Search paths (CWD, ELLE_PATH, ELLE_HOME), `.lisp` probing | `import` |
+
+### When to use include vs import
+
+Use `import` when you want a module boundary — encapsulation, parameterization,
+independent state. The imported file runs in its own scope and returns a value.
+
+Use `include` when you want definitions spliced into the current file's scope —
+primarily for sharing macro definitions across files. Included files have no
+encapsulation: every definition becomes part of the including file's letrec.
+
+### Circular inclusion
+
+Circular includes are detected at compile time. The compiler tracks which files
+have been included (including the root file) and signals an error if a file
+appears twice:
+
+```
+include: circular dependency on 'macros.lisp'
+```
+
+Unlike runtime circular import detection, this happens during compilation —
+the cycle is caught before any code executes.
+
+
 ## Why This Works
 
 **No new concepts.** Modules are closures. Exports are structs. Configuration
@@ -287,6 +345,7 @@ tracking, arity checking, or LSP completion for imported symbols.
 | `src/plugin.rs` | `.so` plugin loading: `dlsym`, `elle_plugin_init`, primitive registration |
 | `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
 | `src/reader/lexer.rs` | Qualified symbol lexing (`a:b` as single token) |
-| `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation |
+| `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing |
 | `tests/elle/modules.lisp` | Behavioral tests for module patterns |
+| `tests/elle/include.lisp` | Behavioral tests for compile-time inclusion |
 | `tests/modules/` | Module fixtures (formatter, counter, test) |
