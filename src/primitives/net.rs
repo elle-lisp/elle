@@ -433,7 +433,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_tcp_accept,
         arity: Arity::AtLeast(1),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Accept a connection on a TCP listener. Returns a stream port.",
@@ -447,7 +447,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_tcp_connect,
         arity: Arity::AtLeast(2),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Connect to a TCP address. Returns a stream port.",
@@ -461,7 +461,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_tcp_shutdown,
         arity: Arity::Exact(2),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Shutdown a TCP stream. how: :read, :write, or :read-write.",
@@ -487,7 +487,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_udp_send_to,
         arity: Arity::AtLeast(4),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Send data to a remote address via UDP. Returns bytes sent.",
@@ -501,7 +501,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_udp_recv_from,
         arity: Arity::AtLeast(2),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Receive data from a UDP socket. Returns {:data :addr :port}.",
@@ -516,7 +516,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         func: prim_sys_resolve,
         arity: Arity::Exact(1),
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         doc: "Resolve a hostname to IP addresses via the system resolver (getaddrinfo). Returns an array of IP address strings.",

@@ -669,7 +669,7 @@ fn test_polymorphic_inference_two_params() {
             assert_eq!(
                 *inferred_signals,
                 Signal {
-                    bits: elle::value::SignalBits(0),
+                    bits: elle::value::SignalBits::new(0),
                     propagates: 0b11, // params 0 and 1
                 },
                 "Function calling two params should propagate params 0 and 1"

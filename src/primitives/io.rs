@@ -535,7 +535,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "ev/sleep",
         func: prim_ev_sleep,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Exact(1),
@@ -549,7 +549,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "ev/poll-fd",
         func: prim_ev_poll_fd,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Range(2, 3),

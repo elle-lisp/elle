@@ -393,7 +393,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/list-primitives",
         func: prim_list_primitives,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Range(0, 1),
         doc: "List registered names as a sorted list of symbols. Optional category filter.",
         params: &["category?"],
@@ -404,7 +404,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/primitive-meta",
         func: prim_primitive_meta,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Get structured metadata for a primitive as a struct.",
         params: &["name"],

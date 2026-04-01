@@ -205,7 +205,7 @@ impl<'a> Lowerer<'a> {
                 });
                 self.emit(LirInstr::CheckSignalBound {
                     src,
-                    allowed_bits: pb.signal.bits.0,
+                    allowed_bits: pb.signal.bits,
                 });
             }
         }

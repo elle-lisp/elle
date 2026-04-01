@@ -199,7 +199,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "watch-next",
         func: prim_watch_next,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::Exact(1),

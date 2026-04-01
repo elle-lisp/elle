@@ -116,8 +116,8 @@ impl VM {
             } else {
                 self.fiber.signal.take();
                 return Err(format!(
-                    "Unexpected signal outside coroutine context: 0x{:x}",
-                    bits.0
+                    "Unexpected signal outside coroutine context: {}",
+                    bits
                 ));
             }
         }
@@ -230,7 +230,7 @@ impl VM {
                 has_outward_heap_set: false,
             }),
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         });
 
         let synthetic_bc = vec![

@@ -1,3 +1,4 @@
+use elle::value::fiber::SignalBits;
 // DEFENSE: Unit tests for closure and lambda primitives
 // Tests the basic building blocks of closure and lambda functionality
 use elle::signals::Signal;
@@ -46,7 +47,7 @@ fn test_closure_type_identification() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     let value = Value::closure(closure);
 
@@ -82,7 +83,7 @@ fn test_closure_display() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     let value = Value::closure(closure);
     let s = format!("{}", value);
@@ -115,7 +116,7 @@ fn test_closure_clone() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![Value::int(42)]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     let value1 = Value::closure(closure.clone());
     let value2 = value1;
@@ -194,7 +195,7 @@ fn test_closure_empty_environment() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 0);
 }
@@ -226,7 +227,7 @@ fn test_closure_single_captured_variable() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(env),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 1);
     assert_eq!(closure.env[0], Value::int(42));
@@ -264,7 +265,7 @@ fn test_closure_multiple_captured_variables() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(env),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 4);
     assert_eq!(closure.env[0], Value::int(1));
@@ -299,7 +300,7 @@ fn test_closure_environment_sharing() {
             has_outward_heap_set: false,
         }),
         env: shared_env.clone(),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     let closure2 = Closure {
@@ -325,7 +326,7 @@ fn test_closure_environment_sharing() {
             has_outward_heap_set: false,
         }),
         env: shared_env.clone(),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     // Both closures share the same environment
@@ -364,7 +365,7 @@ fn test_closure_bytecode_storage() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(*closure.template.bytecode, bytecode);
 }
@@ -396,7 +397,7 @@ fn test_closure_constants_storage() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(*closure.template.constants, constants);
 }
@@ -428,7 +429,7 @@ fn test_closure_num_locals() {
                 has_outward_heap_set: false,
             }),
             env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, num_locals);
     }
@@ -463,7 +464,7 @@ fn test_closure_zero_parameters() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(0));
     assert!(!closure.template.arity.matches(1));
@@ -494,7 +495,7 @@ fn test_closure_single_parameter() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(1));
 }
@@ -524,7 +525,7 @@ fn test_closure_multiple_parameters() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(3));
     assert!(!closure.template.arity.matches(2));
@@ -556,7 +557,7 @@ fn test_closure_variadic_parameters() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(1));
     assert!(closure.template.arity.matches(2));
@@ -593,7 +594,7 @@ fn test_closures_never_equal() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     let closure2 = Value::closure(Closure {
@@ -619,7 +620,7 @@ fn test_closures_never_equal() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     // Even though they're structurally identical, they should not be equal
@@ -652,7 +653,7 @@ fn test_same_closure_reference_equality() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     let value1 = Value::closure((*closure_rc).clone());
@@ -695,7 +696,7 @@ fn test_closure_with_nested_captured_values() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(env),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     assert_eq!(closure.env.len(), 1);
@@ -727,7 +728,7 @@ fn test_closure_with_closure_in_constants() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     let outer_closure = Closure {
@@ -753,7 +754,7 @@ fn test_closure_with_closure_in_constants() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     assert_eq!(outer_closure.template.constants.len(), 1);
@@ -787,7 +788,7 @@ fn test_closure_with_many_upvalues() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(env),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     assert_eq!(closure.env.len(), 100);
@@ -824,7 +825,7 @@ fn test_closure_as_method() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![Value::int(10)]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     let value = Value::closure(closure);
@@ -863,7 +864,7 @@ fn test_closure_type_check() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     assert!(closure.is_closure());
@@ -905,7 +906,7 @@ fn test_closure_environment_isolation() {
             has_outward_heap_set: false,
         }),
         env: env1,
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     let closure2 = Closure {
@@ -931,7 +932,7 @@ fn test_closure_environment_isolation() {
             has_outward_heap_set: false,
         }),
         env: env2,
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     assert_ne!(closure1.env[0], closure2.env[0]);
@@ -964,7 +965,7 @@ fn test_closure_local_variables_count() {
                 has_outward_heap_set: false,
             }),
             env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, locals);
     }
@@ -999,7 +1000,7 @@ fn test_closure_with_empty_bytecode() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.template.bytecode.len(), 0);
 }
@@ -1031,7 +1032,7 @@ fn test_closure_with_large_bytecode() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.template.bytecode.len(), 10000);
 }
@@ -1065,7 +1066,7 @@ fn test_closure_rc_reference_counting() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     // Reference should still be alive
@@ -1102,7 +1103,7 @@ fn test_closure_debug_format() {
             has_outward_heap_set: false,
         }),
         env: Rc::new(vec![Value::int(42)]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     };
 
     let debug_str = format!("{:?}", closure);

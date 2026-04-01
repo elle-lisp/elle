@@ -237,7 +237,7 @@ impl fmt::Display for LirInstr {
             LirInstr::IsSet { dst, src } => write!(f, "{} = is-set {}", dst, src),
             LirInstr::IsSetMut { dst, src } => write!(f, "{} = is-set-mut {}", dst, src),
             LirInstr::CheckSignalBound { src, allowed_bits } => {
-                write!(f, "check-signal-bound {} allowed=0x{:x}", src, allowed_bits)
+                write!(f, "check-signal-bound {} allowed={}", src, allowed_bits)
             }
         }
     }

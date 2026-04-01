@@ -206,7 +206,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/read-line",
         func: prim_stream_read_line,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(1),
@@ -220,7 +220,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/read",
         func: prim_stream_read,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(2),
@@ -234,7 +234,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/read-all",
         func: prim_stream_read_all,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(1),
@@ -248,7 +248,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/write",
         func: prim_stream_write,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(2),
@@ -262,7 +262,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "port/flush",
         func: prim_stream_flush,
         signal: Signal {
-            bits: SignalBits::new(SIG_ERROR.0 | SIG_YIELD.0 | SIG_IO.0),
+            bits: SIG_ERROR.union(SIG_YIELD).union(SIG_IO),
             propagates: 0,
         },
         arity: Arity::AtLeast(1),

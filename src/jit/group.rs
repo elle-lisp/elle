@@ -160,6 +160,7 @@ mod tests {
     };
     use crate::signals::Signal;
     use crate::syntax::Span;
+    use crate::value::fiber::SignalBits;
     use crate::value::Arity;
 
     /// Build a simple LIR function that calls a function loaded via ValueConst.
@@ -254,7 +255,7 @@ mod tests {
         let closure = crate::value::Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
         Value::closure(closure)
     }
@@ -461,7 +462,7 @@ mod tests {
         let closure = crate::value::Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
 
         let mut globals = vec![Value::NIL; 10];

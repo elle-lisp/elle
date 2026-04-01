@@ -159,12 +159,12 @@ impl VM {
             // Squelch enforcement: if the closure has a squelch mask and the
             // signal matches, convert to signal-violation error.
             let squelch_mask = closure.squelch_mask;
-            if squelch_mask != 0 && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
-                let squelched = sig.0 & squelch_mask;
-                if squelched != 0 {
+            if !squelch_mask.is_empty() && !sig.contains(SIG_ERROR) && !sig.contains(SIG_HALT) {
+                let squelched = sig.intersection(squelch_mask);
+                if !squelched.is_empty() {
                     let squelched_str = {
                         let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                        registry.format_signal_bits(squelched)
                     };
                     let err = crate::value::error_val(
                         "signal-violation",
@@ -202,14 +202,13 @@ impl VM {
                     // Suspending signal (SIG_YIELD, SIG_SWITCH, user-defined).
                     // Squelch enforcement on the tail-call path
                     let tail_squelch = tail.squelch_mask | closure.squelch_mask;
-                    if tail_squelch != 0 {
-                        let squelched = eb.0 & tail_squelch;
-                        if squelched != 0 {
+                    if !tail_squelch.is_empty() {
+                        let squelched = eb.intersection(tail_squelch);
+                        if !squelched.is_empty() {
                             let squelched_str = {
                                 let registry =
                                     crate::signals::registry::global_registry().lock().unwrap();
-                                registry
-                                    .format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                                registry.format_signal_bits(squelched)
                             };
                             let err = crate::value::error_val(
                                 "signal-violation",

@@ -490,21 +490,19 @@ impl VM {
                     types::handle_is_set_mut(self);
                 }
                 Instruction::CheckSignalBound => {
-                    // Read u32 as two u16s (low half first, then high half)
+                    // Read SignalBits as two u16s (low half first, then high half)
                     let lo = self.read_u16(bc, &mut ip) as u32;
                     let hi = self.read_u16(bc, &mut ip) as u32;
-                    let allowed_bits = lo | (hi << 16);
+                    let allowed_bits = SignalBits::new(lo | (hi << 16));
                     let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
                     if let Some(closure) = val.as_closure() {
-                        let signal_bits = closure.signal().bits.0;
-                        let excess = signal_bits & !allowed_bits;
-                        if excess != 0 {
+                        let signal_bits = closure.signal().bits;
+                        let excess = signal_bits.subtract(allowed_bits);
+                        if !excess.is_empty() {
                             let registry =
                                 crate::signals::registry::global_registry().lock().unwrap();
-                            let excess_str = registry
-                                .format_signal_bits(crate::value::fiber::SignalBits(excess));
-                            let allowed_str = registry
-                                .format_signal_bits(crate::value::fiber::SignalBits(allowed_bits));
+                            let excess_str = registry.format_signal_bits(excess);
+                            let allowed_str = registry.format_signal_bits(allowed_bits);
                             let err = crate::value::error_val(
                                 "signal-violation",
                                 format!(

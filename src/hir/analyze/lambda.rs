@@ -230,10 +230,9 @@ impl<'a> Analyzer<'a> {
         // Check function-level constraint if present.
         // silence (whitelist): excess = inferred & !ceiling — any excess is an error.
         if let Some(ceiling) = declared_ceiling {
-            let excess_bits = inferred_signals.bits.0 & !ceiling.bits.0;
-            if excess_bits != 0 {
+            let excess = inferred_signals.bits.subtract(ceiling.bits);
+            if !excess.is_empty() {
                 let reg = registry::global_registry().lock().unwrap();
-                let excess = crate::value::fiber::SignalBits(excess_bits);
                 return Err(format!(
                     "{}: function restricted to {} but body may emit {}",
                     span,

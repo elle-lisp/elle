@@ -424,6 +424,7 @@ impl CallbackStore {
 mod tests {
     use super::*;
     use crate::ffi::types::{CallingConvention, Signature, TypeDesc};
+    use crate::value::fiber::SignalBits;
     use crate::value::Closure;
     use std::collections::HashMap;
 
@@ -459,7 +460,7 @@ mod tests {
         Rc::new(Closure {
             template,
             env: Rc::new(vec![]),
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         })
     }
 
@@ -564,7 +565,7 @@ mod tests {
         let closure = Rc::new(Closure {
             template,
             env: Rc::new(vec![Value::int(99)]), // 1 capture
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         });
         let args = vec![Value::int(42)];
         let env = build_callback_env(&closure, &args);

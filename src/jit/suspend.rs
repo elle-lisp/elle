@@ -251,7 +251,7 @@ pub extern "C" fn elle_jit_has_signal(vm: u64) -> JitValue {
 mod tests {
     use super::super::dispatch::YieldPointMeta;
     use super::*;
-    use crate::value::fiber::SIG_YIELD;
+    use crate::value::fiber::{SignalBits, SIG_YIELD};
 
     // =========================================================================
     // JIT yield: SuspendedFrame layout invariant
@@ -300,7 +300,7 @@ mod tests {
         let closure = crate::value::Closure {
             template: template.clone(),
             env,
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
 
         let bytecode_ptr = template.bytecode.as_ptr();
@@ -359,7 +359,7 @@ mod tests {
         let closure = crate::value::Closure {
             template: template.clone(),
             env,
-            squelch_mask: 0,
+            squelch_mask: SignalBits::EMPTY,
         };
 
         let bytecode_ptr = template.bytecode.as_ptr();

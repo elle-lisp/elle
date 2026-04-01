@@ -112,7 +112,7 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
-        let mut accumulated_squelch_mask: u32 = 0;
+        let mut accumulated_squelch_mask = SignalBits::EMPTY;
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -126,16 +126,16 @@ impl VM {
             if !bits.is_ok() {
                 // Enforce accumulated squelch mask before exiting.
                 // Skip enforcement for error and halt signals (already terminal).
-                if accumulated_squelch_mask != 0
+                let squelched = bits.intersection(accumulated_squelch_mask);
+                if !accumulated_squelch_mask.is_empty()
                     && !bits.contains(SIG_ERROR)
                     && !bits.contains(SIG_HALT)
                     && bits != SIG_SWITCH
-                    && bits.0 & accumulated_squelch_mask != 0
+                    && !squelched.is_empty()
                 {
-                    let squelched = bits.0 & accumulated_squelch_mask;
                     let squelched_str = {
                         let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                        registry.format_signal_bits(squelched)
                     };
                     let err = crate::value::error_val(
                         "signal-violation",
@@ -216,7 +216,7 @@ impl VM {
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
-        let mut accumulated_squelch_mask: u32 = 0;
+        let mut accumulated_squelch_mask = SignalBits::EMPTY;
 
         let result = loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -230,16 +230,16 @@ impl VM {
             if !bits.is_ok() {
                 // Enforce accumulated squelch mask before exiting.
                 // Skip enforcement for error and halt signals (already terminal).
-                if accumulated_squelch_mask != 0
+                let squelched = bits.intersection(accumulated_squelch_mask);
+                if !accumulated_squelch_mask.is_empty()
                     && !bits.contains(SIG_ERROR)
                     && !bits.contains(SIG_HALT)
                     && bits != SIG_SWITCH
-                    && bits.0 & accumulated_squelch_mask != 0
+                    && !squelched.is_empty()
                 {
-                    let squelched = bits.0 & accumulated_squelch_mask;
                     let squelched_str = {
                         let registry = crate::signals::registry::global_registry().lock().unwrap();
-                        registry.format_signal_bits(crate::value::fiber::SignalBits(squelched))
+                        registry.format_signal_bits(squelched)
                     };
                     let err = crate::value::error_val(
                         "signal-violation",

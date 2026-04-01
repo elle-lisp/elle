@@ -52,15 +52,15 @@ impl SignalRegistry {
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();
         // These unwraps are safe because we're registering unique built-in names
-        let _ = registry.register_builtin("error", SIG_ERROR.0.trailing_zeros());
-        let _ = registry.register_builtin("yield", SIG_YIELD.0.trailing_zeros());
-        let _ = registry.register_builtin("debug", SIG_DEBUG.0.trailing_zeros());
-        let _ = registry.register_builtin("ffi", SIG_FFI.0.trailing_zeros());
-        let _ = registry.register_builtin("halt", SIG_HALT.0.trailing_zeros());
-        let _ = registry.register_builtin("io", SIG_IO.0.trailing_zeros());
-        let _ = registry.register_builtin("exec", SIG_EXEC.0.trailing_zeros());
-        let _ = registry.register_builtin("fuel", SIG_FUEL.0.trailing_zeros());
-        let _ = registry.register_builtin("wait", SIG_WAIT.0.trailing_zeros());
+        let _ = registry.register_builtin("error", SIG_ERROR.trailing_zeros());
+        let _ = registry.register_builtin("yield", SIG_YIELD.trailing_zeros());
+        let _ = registry.register_builtin("debug", SIG_DEBUG.trailing_zeros());
+        let _ = registry.register_builtin("ffi", SIG_FFI.trailing_zeros());
+        let _ = registry.register_builtin("halt", SIG_HALT.trailing_zeros());
+        let _ = registry.register_builtin("io", SIG_IO.trailing_zeros());
+        let _ = registry.register_builtin("exec", SIG_EXEC.trailing_zeros());
+        let _ = registry.register_builtin("fuel", SIG_FUEL.trailing_zeros());
+        let _ = registry.register_builtin("wait", SIG_WAIT.trailing_zeros());
         registry
     }
 
@@ -124,7 +124,7 @@ impl SignalRegistry {
     /// Returns `Some(SignalBits)` if the signal is registered, `None` otherwise.
     pub fn to_signal_bits(&self, name: &str) -> Option<crate::value::fiber::SignalBits> {
         self.lookup(name)
-            .map(|bit_pos| crate::value::fiber::SignalBits(1 << bit_pos))
+            .map(crate::value::fiber::SignalBits::from_bit)
     }
 
     /// Format signal bits as a human-readable string.
@@ -133,7 +133,7 @@ impl SignalRegistry {
     pub fn format_signal_bits(&self, bits: crate::value::fiber::SignalBits) -> String {
         let mut names = Vec::new();
         for entry in &self.entries {
-            if bits.0 & (1 << entry.bit_position) != 0 {
+            if bits.has_bit(entry.bit_position) {
                 names.push(format!(":{}", entry.name));
             }
         }
@@ -173,13 +173,13 @@ mod tests {
     #[test]
     fn test_builtin_registration() {
         let registry = SignalRegistry::with_builtins();
-        assert_eq!(registry.lookup("error"), Some(SIG_ERROR.0.trailing_zeros()));
-        assert_eq!(registry.lookup("yield"), Some(SIG_YIELD.0.trailing_zeros()));
-        assert_eq!(registry.lookup("debug"), Some(SIG_DEBUG.0.trailing_zeros()));
-        assert_eq!(registry.lookup("ffi"), Some(SIG_FFI.0.trailing_zeros()));
-        assert_eq!(registry.lookup("halt"), Some(SIG_HALT.0.trailing_zeros()));
-        assert_eq!(registry.lookup("io"), Some(SIG_IO.0.trailing_zeros()));
-        assert_eq!(registry.lookup("fuel"), Some(SIG_FUEL.0.trailing_zeros()));
+        assert_eq!(registry.lookup("error"), Some(SIG_ERROR.trailing_zeros()));
+        assert_eq!(registry.lookup("yield"), Some(SIG_YIELD.trailing_zeros()));
+        assert_eq!(registry.lookup("debug"), Some(SIG_DEBUG.trailing_zeros()));
+        assert_eq!(registry.lookup("ffi"), Some(SIG_FFI.trailing_zeros()));
+        assert_eq!(registry.lookup("halt"), Some(SIG_HALT.trailing_zeros()));
+        assert_eq!(registry.lookup("io"), Some(SIG_IO.trailing_zeros()));
+        assert_eq!(registry.lookup("fuel"), Some(SIG_FUEL.trailing_zeros()));
     }
 
     #[test]
@@ -240,13 +240,13 @@ mod tests {
     fn test_to_signal_bits() {
         let registry = SignalRegistry::with_builtins();
         let bits = registry.to_signal_bits("error").unwrap();
-        assert_eq!(bits.0, 1 << 0);
+        assert_eq!(bits, crate::value::fiber::SignalBits::from_bit(0));
     }
 
     #[test]
     fn test_format_signal_bits_single() {
         let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits(1 << 0); // error bit
+        let bits = crate::value::fiber::SignalBits::from_bit(0); // error bit
         let formatted = registry.format_signal_bits(bits);
         assert!(formatted.contains(":error"));
     }
@@ -254,7 +254,8 @@ mod tests {
     #[test]
     fn test_format_signal_bits_multiple() {
         let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits((1 << 0) | (1 << 1)); // error and yield
+        let bits = crate::value::fiber::SignalBits::from_bit(0)
+            .union(crate::value::fiber::SignalBits::from_bit(1)); // error and yield
         let formatted = registry.format_signal_bits(bits);
         assert!(formatted.contains(":error"));
         assert!(formatted.contains(":yield"));
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn test_format_signal_bits_empty() {
         let registry = SignalRegistry::with_builtins();
-        let bits = crate::value::fiber::SignalBits(0);
+        let bits = crate::value::fiber::SignalBits::EMPTY;
         let formatted = registry.format_signal_bits(bits);
         assert_eq!(formatted, "{}");
     }

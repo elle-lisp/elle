@@ -1,3 +1,4 @@
+use elle::value::fiber::SignalBits;
 // DEFENSE: Primitives are the building blocks - must be correct
 use elle::error::LError;
 use elle::pipeline::eval as pipeline_eval;
@@ -1194,7 +1195,7 @@ fn test_spawn_primitive() {
             has_outward_heap_set: false,
         }),
         env: std::rc::Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
 
     let result = call_primitive(&spawn, &[closure]);
@@ -1725,7 +1726,7 @@ fn test_json_serialize_errors() {
             has_outward_heap_set: false,
         }),
         env: std::rc::Rc::new(vec![]),
-        squelch_mask: 0,
+        squelch_mask: SignalBits::EMPTY,
     });
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());

@@ -8,7 +8,7 @@
 //! Re-exported here so `compiler.rs` / `vtable.rs` can reference them as `dispatch::*`.
 
 use crate::jit::value::JitValue;
-use crate::value::fiber::SIG_ERROR;
+use crate::value::fiber::{SignalBits, SIG_ERROR};
 use crate::value::{error_val, Value};
 
 // Re-export split modules so compiler.rs / vtable.rs can still use dispatch::elle_jit_*
@@ -321,15 +321,15 @@ pub extern "C" fn elle_jit_check_signal_bound(
         tag: src_tag,
         payload: src_payload,
     };
-    let allowed = allowed_bits as u32;
+    let allowed = SignalBits::from_i64(allowed_bits as i64);
     if let Some(closure) = val.as_closure() {
-        let signal_bits = closure.signal().bits.0;
-        let excess = signal_bits & !allowed;
-        if excess != 0 {
+        let signal_bits = closure.signal().bits;
+        let excess = signal_bits.subtract(allowed);
+        if !excess.is_empty() {
             let vm_ref = unsafe { &mut *(vm as *mut crate::vm::VM) };
             let registry = crate::signals::registry::global_registry().lock().unwrap();
-            let excess_str = registry.format_signal_bits(crate::value::fiber::SignalBits(excess));
-            let allowed_str = registry.format_signal_bits(crate::value::fiber::SignalBits(allowed));
+            let excess_str = registry.format_signal_bits(excess);
+            let allowed_str = registry.format_signal_bits(allowed);
             drop(registry);
             vm_ref.fiber.signal = Some((
                 SIG_ERROR,

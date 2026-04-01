@@ -396,7 +396,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "doc",
         func: prim_doc,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Look up documentation for a value or builtin. \
               Pass a closure (user-defined or stdlib) to extract its docstring. \
@@ -411,7 +411,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "vm/query",
         func: prim_vm_query,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(2),
         doc: "Query VM state (call-count, doc, global?, fiber/self)",
         params: &["op", "arg"],
@@ -433,7 +433,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "jit/rejections",
         func: prim_jit_rejections,
-        signal: Signal { bits: SignalBits::new(SIG_QUERY.0 | SIG_ERROR.0), propagates: 0 },
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(0),
         doc: "List closures rejected from JIT compilation. Returns list of {:name :reason :calls} structs sorted by call count ascending.",
         params: &[],
