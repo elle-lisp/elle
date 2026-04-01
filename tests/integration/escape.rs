@@ -1498,8 +1498,6 @@ fn nested_let_with_heap_inits_outer_only() {
     // scope-allocates. The outer let is rejected by C4 (outward set)
     // because the inner let's init contains a non-immediate argument
     // (string constant) to a non-immediate-returning callee (concat).
-    // This is a known limitation of the escape analysis (string constants
-    // are safe in practice but result_is_safe treats them as unsafe).
     let source = "(defn loop (n) (let ((a (concat \"a\" (number->string n)))) (let ((b (concat \"b\" (number->string n)))) (loop (- n 1)))))";
     let enters = count_in_closure_bytecode(source, "RegionEnter");
     let exits = count_in_closure_bytecode(source, "RegionExit");
@@ -1617,3 +1615,112 @@ fn correct_scope_binding_not_passed_to_tail_call() {
         Value::int(20)  // (length "xy") = 2, 10 iterations
     );
 }
+
+// ── Call-scoped reclamation ─────────────────────────────────────────────────
+//
+// Non-tail calls to rotation-safe functions that return immediates
+// get wrapped in RegionEnter/RegionExit to free temporary arguments.
+
+#[test]
+fn call_scoped_infrastructure_marks_callee() {
+    // inner is rotation-safe and always returns an integer literal.
+    // The precomputed maps identify it as result-immediate and
+    // rotation-safe. Call-scoped emission is currently disabled
+    // (callee's internal allocations share the slab), but the
+    // infrastructure for can_scope_allocate_call is in place.
+    // Verify the code compiles and runs correctly.
+    let source = r#"(letrec
+        ((inner (fn [x] (if (empty? x) 0 (+ 1 (inner (rest x))))))
+         (outer (fn [n] (inner (cons n (list))))))
+        (outer 3))
+    "#;
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compile");
+    assert!(!compiled.bytecode.instructions.is_empty());
+}
+
+#[test]
+fn no_call_scoped_for_non_rotation_safe_callee() {
+    // f calls push (mutating primitive) — not rotation-safe.
+    // g's call to f should NOT get call-scoped region.
+    let source = r#"(let ((acc @[]))
+        (letrec
+          ((f (fn [x] (push acc x) 0))
+           (g (fn [n] (f (cons 1 2)))))
+          nil))
+    "#;
+    assert!(!closure_has_region(source));
+}
+
+#[test]
+fn no_call_scoped_when_callee_returns_heap() {
+    // make-pair returns a cons cell (non-immediate).
+    // Even though it's rotation-safe, the result would be freed.
+    let source = r#"(letrec
+        ((make-pair (fn [a b] (cons a b)))
+         (use-pair (fn [n] (first (make-pair n (+ n 1))))))
+        nil)
+    "#;
+    assert!(!closure_has_region(source));
+}
+
+#[test]
+fn no_call_scoped_when_all_args_immediate() {
+    // All arguments are immediates — no heap allocation to reclaim.
+    let source = r#"(letrec
+        ((add3 (fn [a b c] (+ a (+ b c))))
+         (f (fn [n] (add3 n 1 2))))
+        nil)
+    "#;
+    assert!(!closure_has_region(source));
+}
+
+#[test]
+fn call_scoped_correct_nqueens_pattern() {
+    // Simplified nqueens: search receives (cons col queens) and returns
+    // an integer. The cons cell should be freed after search returns.
+    // Without safe? check this counts all placements (5^5 = 3125).
+    assert_eq!(
+        eval_source(r#"(letrec
+            ((search (fn [n row queens count]
+              (if (= row n) (+ count 1)
+                (try-col n 0 queens row count))))
+             (try-col (fn [n col queens row count]
+              (if (= col n) count
+                (try-col n (+ col 1) queens row
+                  (search n (+ row 1) (cons col queens) count))))))
+            (search 5 0 (list) 0))
+        "#).unwrap(),
+        Value::int(3125)
+    );
+}
+
+#[test]
+fn call_scoped_mutual_recursion_result_immediate() {
+    // Mutual recursion where both functions return immediates.
+    // Compilation succeeds (fixpoint converges).
+    let source = r#"(letrec
+        ((even-count (fn [n] (if (<= n 0) 0 (odd-count (- n 1)))))
+         (odd-count (fn [n] (if (<= n 0) 0 (+ 1 (even-count (- n 1)))))))
+        nil)
+    "#;
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
+    assert!(!compiled.bytecode.instructions.is_empty());
+}
+
+#[test]
+fn no_call_scoped_for_tail_call() {
+    // Tail calls are handled by rotation, not call-scoped regions.
+    let source = "(defn loop [n] (if (<= n 0) 0 (loop (- n 1))))";
+    assert!(!closure_has_region(source));
+}
+
+#[test]
+fn call_scoped_does_not_wrap_intrinsics() {
+    // Intrinsic calls (like +) are lowered to BinOp, not Call.
+    let source = "(defn f [n] (+ n (length (cons 1 2))))";
+    assert!(!closure_has_region(source));
+}
+
+

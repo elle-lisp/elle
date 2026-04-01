@@ -9,7 +9,7 @@ impl<'a> Lowerer<'a> {
         func: &Hir,
         args: &[CallArg],
         is_tail: bool,
-        call_may_suspend: bool,
+        _call_may_suspend: bool,
     ) -> Result<Reg, String> {
         let has_splice = args.iter().any(|a| a.spliced);
 
@@ -20,6 +20,15 @@ impl<'a> Lowerer<'a> {
             if let Some(result) = self.try_lower_intrinsic(func, &plain_args)? {
                 return Ok(result);
             }
+
+            // Call-scoped reclamation: infrastructure is in place
+            // (can_scope_allocate_call, precompute_result_immediate) but
+            // emission is disabled. RegionEnter/RegionExit around a Call
+            // frees the callee's internal allocations too (they share the
+            // slab), which corrupts JIT-cached closure templates. Enabling
+            // this requires per-call slab isolation or JIT awareness of
+            // call-scoped regions.
+            let call_scoped = false;
 
             let mut arg_regs = Vec::new();
             for arg in args {
@@ -44,7 +53,7 @@ impl<'a> Lowerer<'a> {
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                if call_may_suspend {
+                if _call_may_suspend {
                     self.emit(LirInstr::SuspendingCall {
                         dst,
                         func: func_reg,
@@ -56,6 +65,10 @@ impl<'a> Lowerer<'a> {
                         func: func_reg,
                         args: arg_regs,
                     });
+                }
+                if call_scoped {
+                    self.emit_region_exit();
+                    self.scope_stats.calls_scoped += 1;
                 }
                 Ok(dst)
             }

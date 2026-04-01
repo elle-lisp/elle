@@ -213,14 +213,26 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Check if a function call is to a known intrinsic or immediate-returning
-    /// primitive, meaning its result is guaranteed to be an immediate.
-    fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
-        // Must be a variable reference to a global
+    /// primitive/user function, meaning its result is guaranteed to be an immediate.
+    pub(super) fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
+        // Must be a variable reference
         let HirKind::Var(binding) = &func.kind else {
             return false;
         };
 
-        // Must be an immutable, non-mutated binding (same check as try_lower_intrinsic)
+        // Check precomputed map first — works for letrec bindings which
+        // are technically mutable (two-phase init) but whose result type
+        // is determined by fixpoint analysis.
+        // Note: callee_result_immediate is NOT checked here.
+        // call_result_is_safe is used by result_is_safe which gates
+        // let-scope allocation (conditions 3 and 4). Including user
+        // functions here would change let-scope decisions globally
+        // (e.g. stdlib functions like fold). call_result_is_safe
+        // remains conservative: only intrinsics and whitelisted
+        // primitives. The callee_result_immediate map is used only
+        // by can_scope_allocate_call for targeted call-scoped regions.
+
+        // Must be an immutable, non-mutated binding for intrinsic/primitive checks
         let bi = self.arena.get(*binding);
         if !bi.is_immutable || bi.is_mutated {
             return false;
