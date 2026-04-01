@@ -23,9 +23,8 @@ thread_local! {
 
 /// Ensure the thread-local root heap exists and return a pointer to it.
 ///
-/// Creates the heap on first call (leaking it via `Box::leak`),
-/// initializes `active_allocator`, and stores the pointer. Subsequent
-/// calls return the same pointer.
+/// Creates the heap on first call (leaking it via `Box::leak`)
+/// and stores the pointer. Subsequent calls return the same pointer.
 ///
 /// The returned pointer is valid for the thread's lifetime.
 pub fn ensure_root_heap() -> *mut FiberHeap {
@@ -38,7 +37,6 @@ pub fn ensure_root_heap() -> *mut FiberHeap {
         // storage in Cell<*mut>. The address is stable because Box heap-
         // allocates the value (and we never free it).
         let heap: &'static mut FiberHeap = Box::leak(Box::new(FiberHeap::new()));
-        heap.init_active_allocator();
         let ptr = heap as *mut FiberHeap;
         cell.set(ptr);
         ptr

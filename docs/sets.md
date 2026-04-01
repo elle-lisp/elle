@@ -19,6 +19,11 @@ Sets are unordered collections of unique values. `|...|` is immutable;
 (contains? s 9)      # => false
 (length s)           # => 3
 (empty? ||)          # => true
+
+# callable set syntax — sets are functions of their elements
+(|:a :b :c| :c)     # => true
+(|:a :b :c| :d)     # => false
+(s 2)                # => true
 ```
 
 ## Set operations

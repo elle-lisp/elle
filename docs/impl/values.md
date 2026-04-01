@@ -31,7 +31,10 @@ TAG_PTR (7)    raw pointer
 
 ## Heap types
 
-Heap types store a pointer to a `HeapObject` in the payload.
+Heap types store a raw pointer to a `HeapObject` in the payload. The
+`HeapObject` lives in a slab slot owned by the fiber's `FiberHeap` (or
+the parent's `SharedAllocator` for yielding fibers). `Value` is `Copy` —
+it is just a tag + pointer, not a reference-counted handle.
 
 ```text
 Tag              Pointed-to type
@@ -54,6 +57,27 @@ TAG_BOX (24)     Box<Cell<Value>>
 TAG_PARAMETER (25) DynamicParameter
 TAG_SYNTAX (26)  Syntax object
 ```
+
+### Heap allocation
+
+`HeapObject` is a Rust enum — a fixed-size tagged union. All variants
+occupy the same number of bytes (the size of the largest variant). Each
+`HeapObject` lives in a slot in the fiber's `RootSlab`, a chunk-based
+typed slab allocator with 256 slots per chunk.
+
+The slab stores `HeapObject` shells. Many variants contain inner Rust
+heap data — a `Vec<Value>` inside an array, a `BTreeMap` inside a struct,
+an `Rc<Vec<u8>>` inside a closure's bytecode. The `needs_drop()` function
+tracks which `HeapTag` variants have inner heap allocations that require
+`Drop`. On scope exit or fiber death, destructors run on the `HeapObject`
+(freeing inner data), then the slab slot returns to the free list.
+
+This two-level structure means:
+- **Slab allocation is O(1)** — reuse a free-list slot or bump a cursor
+- **Pointer stability** — a `Value`'s payload pointer never moves
+- **Batch deallocation** — fiber death drops all chunks without per-object traversal
+- **Scope reclamation** — `RegionExit` returns slab slots to the free list
+  for non-escaping allocations (gated by escape analysis)
 
 ## Closures
 
@@ -90,6 +114,9 @@ src/value/repr/mod.rs    Value struct, tag constants
 src/value/types.rs       Type predicates and conversions
 src/value/heap.rs        HeapObject, HeapTag
 src/value/closure.rs     Closure struct
+src/value/fiberheap/     FiberHeap, RootSlab, routing
+src/value/shared_alloc.rs SharedAllocator for inter-fiber exchange
+src/value/arena.rs       alloc/deref, ArenaMark, ArenaGuard
 ```
 
 ---
@@ -98,3 +125,4 @@ src/value/closure.rs     Closure struct
 
 - [impl/vm.md](vm.md) — VM that operates on Values
 - [types.md](../types.md) — user-facing type system
+- [memory.md](../memory.md) — memory model and ownership topology

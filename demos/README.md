@@ -6,44 +6,35 @@ Demonstration programs that dogfood Elle with non-trivial algorithms and serve a
 
 | Demo | Purpose |
 |------|---------|
-| [blas/](blas/) | BLAS-style linear algebra operations |
-| [cfgviz/](cfgviz/) | Configuration visualization generating control flow graphs |
+| [blas/](blas/) | BLAS/LAPACK FFI — optimized linear algebra via CBLAS and LAPACKE |
+| [cfgviz/](cfgviz/) | Control flow graph visualization to DOT/SVG |
+| [conway/](conway/) | Conway's Game of Life — interactive SDL2 demo |
 | [docgen/](docgen/) | Documentation site generator written in Elle |
+| [egui/](egui/) | Immediate-mode GUI via egui plugin |
 | [fib/](fib/) | Recursive Fibonacci benchmark measuring function call overhead |
-| [logo/](logo/) | Logo turtle graphics implementation |
-| [matrix/](matrix/) | Matrix operations reference implementation |
-| [microgpt/](microgpt/) | Micro GPT autograd engine and neural network |
-| [nqueens/](nqueens/) | N-Queens backtracking algorithm solving the classic chess puzzle |
-| [scope-alloc/](scope-alloc/) | Allocator scope testing for memory management |
+| [logo/](logo/) | Elle logo glyph rendered as colored bezier fibers |
+| [mandelbrot/](mandelbrot/) | Interactive Mandelbrot explorer — GTK4 + Cairo |
+| [matrix/](matrix/) | Heat diffusion simulation with ASCII visualization |
+| [microgpt/](microgpt/) | Micro GPT — scalar autograd + character-level transformer |
+| [nqueens/](nqueens/) | N-Queens backtracking algorithm (cons-list and array variants) |
+| [scope-alloc/](scope-alloc/) | Scope allocation workload measuring escape analysis tiers |
 
 ## Running Demos
 
 ```bash
-# Fibonacci
-cargo run --release -- demos/fib/fib.lisp
+elle demos/fib/fib.lisp
+elle demos/nqueens/nqueens.lisp
+elle demos/nqueens/nqueens-array.lisp
+elle demos/blas/blas.lisp
+elle demos/matrix/matrix.lisp
+elle demos/cfgviz/cfgviz.lisp
+elle demos/scope-alloc/scope-alloc.lisp
+elle demos/logo/logo.lisp
+elle demos/docgen/generate.lisp
+elle demos/egui/smoke.lisp
 
-# N-Queens
-cargo run --release -- demos/nqueens/nqueens.lisp
-
-# Configuration visualization
-cargo run --release -- demos/cfgviz/cfgviz.lisp
-
-# Documentation site generator
-cargo build --release && ./target/release/elle demos/docgen/generate.lisp
-
-# Scope allocator
-cargo run --release -- demos/scope-alloc/scope-alloc.lisp
-
-# Other demos
-cargo run --release -- demos/blas/blas.lisp
-cargo run --release -- demos/logo/logo.lisp
-cargo run --release -- demos/matrix/matrix.lisp
+# Interactive (require display + libraries)
+elle demos/conway/conway.lisp         # SDL2
+elle demos/mandelbrot/mandelbrot.lisp # GTK4 + Cairo
+elle demos/egui/counter.lisp          # egui plugin
 ```
-
-## Purpose
-
-These demos validate that Elle can express the same algorithms as other Lisps (Chez Scheme, SBCL, Janet) and identify missing features or pain points. They are executable documentation of Elle's capabilities, not tests.
-
-Each demo typically includes implementations for multiple languages to enable side-by-side comparison of idioms, ergonomics, and performance.
-
-See individual demo directories for detailed documentation and cross-language implementations.

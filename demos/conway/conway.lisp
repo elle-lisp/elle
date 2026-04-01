@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 5)
+(elle/epoch 6)
 
 # Conway's Game of Life — SDL2 demo
 #
@@ -92,8 +92,8 @@
 # Random number generator (plugin)
 # ---------------------------------------------------------------------------
 
-(def rng (import "target/release/libelle_random.so"))
-(def rand-float (get rng :float))
+(def rng (import "plugin/random"))
+(def rand-float rng:float)
 
 # ---------------------------------------------------------------------------
 # Grid — flat mutable array, row-major
@@ -109,7 +109,7 @@
 
 (defn cell-at (g r c)
   (if (and (>= r 0) (< r ROWS) (>= c 0) (< c COLS))
-    (get g (+ (* r COLS) c))
+    (g (+ (* r COLS) c))
     0))
 
 (defn set-cell (g r c v)
@@ -178,7 +178,7 @@
       @[2 5] @[3 5] @[4 5]
       @[5 2] @[5 3] @[5 4]))
   (each off in offsets
-    (let ((dr (get off 0)) (dc (get off 1)))
+    (let ((dr (off 0)) (dc (off 1)))
       # Four-way symmetry
       (set-cell g (+ r dr)         (+ c dc)         1)
       (set-cell g (+ r dr)         (- (+ c 12) dc)  1)
@@ -205,7 +205,7 @@
   (sdl-set-color ren 0 220 100 255)
   (var i 0)
   (while (< i NCELLS)
-    (when (= (get g i) 1)
+    (when (= (g i) 1)
       (let* ((c (mod i COLS))
              (r (/ (- i c) COLS)))
         (draw-rect ren (* c CELL) (* r CELL)
@@ -245,13 +245,13 @@
   (while running
     # --- events ---
     (while (= (sdl-poll-event ev-buf) 1)
-      (let ((etype (get (ffi/read ev-buf ev-type-st) 0)))
+      (let ((etype ((ffi/read ev-buf ev-type-st) 0)))
         (cond
           ((= etype EV_QUIT)
             (assign running false))
 
           ((= etype EV_KEYDOWN)
-            (let ((sym (get (ffi/read ev-buf ev-key-st) 8)))
+            (let ((sym ((ffi/read ev-buf ev-key-st) 8)))
               (cond
                 ((or (= sym KEY_ESCAPE) (= sym KEY_q))
                   (assign running false))
@@ -269,8 +269,8 @@
 
           ((= etype EV_MOUSEDOWN)
             (let* ((mdata (ffi/read ev-buf ev-mouse-st))
-                   (mx    (get mdata 8))
-                   (my    (get mdata 9))
+                   (mx    (mdata 8))
+                   (my    (mdata 9))
                    (gc    (/ mx CELL))
                    (gr    (/ my CELL)))
               (when (and (>= gr 0) (< gr ROWS) (>= gc 0) (< gc COLS))

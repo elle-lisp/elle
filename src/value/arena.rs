@@ -128,7 +128,7 @@ pub fn heap_arena_len() -> usize {
     crate::value::fiberheap::with_current_heap_mut(|h| h.len()).unwrap_or(0)
 }
 
-/// Current capacity (bumpalo chunk bytes) of the root heap.
+/// Current capacity (slab chunk bytes) of the root heap.
 pub fn heap_arena_capacity() -> usize {
     crate::value::fiberheap::with_current_heap_mut(|h| h.capacity()).unwrap_or(0)
 }

@@ -6,7 +6,6 @@ use crate::value::heap::{Cons, HeapObject};
 #[test]
 fn test_fiber_heap_alloc() {
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     let v = heap.alloc(HeapObject::LString {
         s: "hello".into(),
         traits: Value::NIL,
@@ -25,7 +24,6 @@ fn test_fiber_heap_alloc() {
 #[test]
 fn test_fiber_heap_clear_runs_destructors() {
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     heap.alloc(HeapObject::LString {
         s: "a".into(),
         traits: Value::NIL,
@@ -36,7 +34,7 @@ fn test_fiber_heap_clear_runs_destructors() {
     });
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.len(), 3); // 3 total objects allocated
-    assert_eq!(heap.dtors.len(), 2); // 2 need Drop (Strings)
+    assert_eq!(heap.dtor_count(), 2); // 2 need Drop (Strings)
     heap.clear();
     assert_eq!(heap.len(), 0);
     assert!(heap.is_empty());
@@ -45,7 +43,6 @@ fn test_fiber_heap_clear_runs_destructors() {
 #[test]
 fn test_fiber_heap_non_drop_types_not_tracked() {
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     // HeapObject::Float is no longer allocated — floats are immediate in 16-byte Value.
     // Use another non-drop type instead.
@@ -56,7 +53,7 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
         traits: Value::NIL,
     });
     assert_eq!(heap.len(), 3); // 3 total objects
-    assert_eq!(heap.dtors.len(), 0); // None need Drop tracking
+    assert_eq!(heap.dtor_count(), 0); // None need Drop tracking
 }
 
 #[test]
@@ -116,8 +113,6 @@ fn test_no_heap_by_default() {
 fn test_save_restore() {
     let mut heap_a = Box::new(FiberHeap::new());
     let mut heap_b = Box::new(FiberHeap::new());
-    heap_a.init_active_allocator();
-    heap_b.init_active_allocator();
     heap_a.alloc(HeapObject::LString {
         s: "a".into(),
         traits: Value::NIL,
@@ -153,14 +148,6 @@ fn test_save_restore() {
     uninstall_fiber_heap();
 }
 
-#[test]
-fn test_init_active_allocator_is_noop() {
-    let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
-    // Always slab now.
-    assert_eq!(heap.active_allocator_keyword(), "slab");
-}
-
 // ── Scope mark stack tests ────────────────────────────────────
 
 #[test]
@@ -170,7 +157,7 @@ fn test_scope_mark_pop_empty_panics() {
     heap.pop_scope_mark_and_release();
 }
 
-// ── ROOT_HEAP tests (Chunk 1) ─────────────────────────────────────
+// ── ROOT_HEAP tests ─────────────────────────────────────────────
 
 #[test]
 fn test_ensure_root_heap_idempotent() {
@@ -181,14 +168,6 @@ fn test_ensure_root_heap_idempotent() {
     assert!(!p1.is_null());
     assert_eq!(p1, p2);
     assert_eq!(p2, p3);
-}
-
-#[test]
-fn test_root_heap_active_allocator_initialized() {
-    // After ensure_root_heap(), allocator is always slab.
-    let ptr = ensure_root_heap();
-    let heap = unsafe { &*ptr };
-    assert_eq!(heap.active_allocator_keyword(), "slab");
 }
 
 #[test]
@@ -226,7 +205,6 @@ fn test_alloc_without_installed_heap_lazy_inits() {
 #[test]
 fn test_shared_alloc_routing() {
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
 
@@ -236,9 +214,9 @@ fn test_shared_alloc_routing() {
         traits: Value::NIL,
     });
 
-    // Private bump should be untouched
-    assert_eq!(heap.alloc_count, 0);
-    assert_eq!(heap.dtors.len(), 0);
+    // Private pool should be untouched
+    assert_eq!(heap.len(), 0);
+    assert_eq!(heap.dtor_count(), 0);
 
     // Shared allocator should have the allocation
     let sa = unsafe { &*sa_ptr };
@@ -248,16 +226,15 @@ fn test_shared_alloc_routing() {
 #[test]
 fn test_private_alloc_when_no_shared() {
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     // shared_alloc is null by default
-    assert!(heap.shared_alloc.is_null());
+    assert!(heap.shared_alloc().is_null());
 
     heap.alloc(HeapObject::LString {
         s: "private".into(),
         traits: Value::NIL,
     });
-    assert_eq!(heap.alloc_count, 1);
-    assert_eq!(heap.dtors.len(), 1);
+    assert_eq!(heap.len(), 1);
+    assert_eq!(heap.dtor_count(), 1);
 }
 
 #[test]
@@ -265,7 +242,6 @@ fn test_drop_tears_down_owned_shared() {
     // Create a FiberHeap with a shared allocator containing allocations,
     // then drop it. If Drop doesn't teardown, we'd leak inner heap allocs.
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
     heap.alloc(HeapObject::LString {
@@ -283,7 +259,6 @@ fn test_multiple_shared_allocs_all_torn_down() {
     // Create 3 shared allocators, allocate into each, verify clear()
     // tears down all three.
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
 
     // Create 3 shared allocs, allocate strings into each
     let sa1 = heap.create_shared_allocator();
@@ -310,22 +285,21 @@ fn test_multiple_shared_allocs_all_torn_down() {
     });
     heap.clear_shared_alloc();
 
-    assert_eq!(heap.owned_shared.len(), 3);
+    assert_eq!(heap.shared_count(), 3);
     assert_eq!(unsafe { &*sa1 }.len(), 1);
     assert_eq!(unsafe { &*sa2 }.len(), 1);
     assert_eq!(unsafe { &*sa3 }.len(), 1);
 
     heap.clear();
-    assert!(heap.owned_shared.is_empty());
-    assert!(heap.shared_alloc.is_null());
+    assert_eq!(heap.shared_count(), 0);
+    assert!(heap.shared_alloc().is_null());
 }
 
 #[test]
 fn test_shared_alloc_survives_private_clear() {
-    // Shared allocs are NOT affected by private bump operations.
+    // Shared allocs are NOT affected by private pool operations.
     // Private alloc_count/dtors are separate from shared.
     let mut heap = FiberHeap::new();
-    heap.init_active_allocator();
 
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
@@ -340,16 +314,16 @@ fn test_shared_alloc_survives_private_clear() {
         s: "in-private".into(),
         traits: Value::NIL,
     });
-    assert_eq!(heap.alloc_count, 1); // private count
+    assert_eq!(heap.len(), 1); // private count
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared count
 
-    // Mark/release on private bump does not touch shared
+    // Mark/release on private pool does not touch shared
     let mark = heap.mark();
     heap.alloc(HeapObject::LString {
         s: "scoped".into(),
         traits: Value::NIL,
     });
     heap.release(mark);
-    assert_eq!(heap.alloc_count, 1); // back to 1
+    assert_eq!(heap.len(), 1); // back to 1
     assert_eq!(unsafe { &*sa_ptr }.len(), 1); // shared unchanged
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 5)
+(elle/epoch 6)
 
 # Mandelbrot Explorer — GTK4 + Cairo demo
 #
@@ -101,7 +101,7 @@
 (defn now-ms []
   (clock-gettime CLOCK_MONOTONIC ts-buf)
   (let* ((ts (ffi/read ts-buf timespec-type)))
-    (+ (* (get ts 0) 1000) (/ (get ts 1) 1000000))))
+    (+ (* (ts 0) 1000) (/ (ts 1) 1000000))))
 
 # ---------------------------------------------------------------------------
 # View state
@@ -194,7 +194,7 @@
           (let* ((log-zn (/ (math/log (+ zr2 zi2)) 2.0))
                  (smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2)))
                  (idx    (mod (integer (* smooth 3.0)) PALETTE_SIZE)))
-            (get palette idx))))
+            (palette idx))))
 
       (put row-buf px color)
       (assign px (+ px 1)))
@@ -204,9 +204,7 @@
     (assign py (+ py 1)))
 
   (def dt (- (now-ms) t0))
-  (println (string "render: " dt "ms  center: "
-                   view-cx " + " view-cy "i  scale: "
-                   view-scale "  iter: " max-iter)))
+  dt)
 
 # ---------------------------------------------------------------------------
 # Helpers

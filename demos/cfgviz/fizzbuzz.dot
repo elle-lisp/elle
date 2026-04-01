@@ -1,27 +1,27 @@
 digraph {
   label="Classic fizzbuzz — nested branching. arity:1 regs:25 locals:2";
   node [shape=record fontname="monospace" fontsize=10];
-  block0 [color="#cc8800" label="{block0|r1 ← cap[0] @24:14\lr2 ← 15 @24:16\lr3 ← global(6) @24:10\lr4 ← r3(r1, r2) @24:10\lr5 ← 0 @24:20\lr6 ← r4 = r5 @24:20\l|branch r6 → block2 / block5}"];
+  block0 [color="#cc8800" label="{block0|r1 ← cap[0] @26:14\lr2 ← 15 @26:16\lr3 ← val(\<heap:0x4ece43c5ad0\>) @26:10\lr4 ← r3(r1, r2) @26:10\lr5 ← 0 @26:20\lr6 ← r4 = r5 @26:20\l|branch r6 → block2 / block5}"];
   block0 -> block2;
   block0 -> block5;
-  block2 [color="#444444" label="{block2|r7 ← \"fizzbuzz\" @24:23\llocal[1] ← r7 @24:23\l|jump → block1}"];
+  block2 [color="#444444" label="{block2|r7 ← \"fizzbuzz\" @26:23\llocal[1] ← r7 @26:23\l|jump → block1}"];
   block2 -> block1;
-  block5 [color="#cc8800" label="{block5|r8 ← cap[0] @25:14\lr9 ← 3 @25:16\lr10 ← global(6) @25:10\lr11 ← r10(r8, r9) @25:10\lr12 ← 0 @25:19\lr13 ← r11 = r12 @25:19\l|branch r13 → block4 / block7}"];
+  block5 [color="#cc8800" label="{block5|r8 ← cap[0] @27:14\lr9 ← 3 @27:16\lr10 ← val(\<heap:0x4ece43c5ad0\>) @27:10\lr11 ← r10(r8, r9) @27:10\lr12 ← 0 @27:19\lr13 ← r11 = r12 @27:19\l|branch r13 → block4 / block7}"];
   block5 -> block4;
   block5 -> block7;
-  block4 [color="#444444" label="{block4|r14 ← \"fizz\" @25:23\llocal[1] ← r14 @25:23\l|jump → block1}"];
+  block4 [color="#444444" label="{block4|r14 ← \"fizz\" @27:23\llocal[1] ← r14 @27:23\l|jump → block1}"];
   block4 -> block1;
-  block7 [color="#cc8800" label="{block7|r15 ← cap[0] @26:14\lr16 ← 5 @26:16\lr17 ← global(6) @26:10\lr18 ← r17(r15, r16) @26:10\lr19 ← 0 @26:19\lr20 ← r18 = r19 @26:19\l|branch r20 → block6 / block9}"];
+  block7 [color="#cc8800" label="{block7|r15 ← cap[0] @28:14\lr16 ← 5 @28:16\lr17 ← val(\<heap:0x4ece43c5ad0\>) @28:10\lr18 ← r17(r15, r16) @28:10\lr19 ← 0 @28:19\lr20 ← r18 = r19 @28:19\l|branch r20 → block6 / block9}"];
   block7 -> block6;
   block7 -> block9;
-  block6 [color="#444444" label="{block6|r21 ← \"buzz\" @26:23\llocal[1] ← r21 @26:23\l|jump → block1}"];
+  block6 [color="#444444" label="{block6|r21 ← \"buzz\" @28:23\llocal[1] ← r21 @28:23\l|jump → block1}"];
   block6 -> block1;
-  block9 [color="#cc8800" label="{block9|r22 ← true @27:6\l|branch r22 → block8 / block10}"];
+  block9 [color="#cc8800" label="{block9|r22 ← true @29:6\l|branch r22 → block8 / block10}"];
   block9 -> block8;
   block9 -> block10;
-  block8 [color="#444444" label="{block8|r23 ← cap[0] @27:24\llocal[1] ← r23 @27:24\l|jump → block1}"];
+  block8 [color="#444444" label="{block8|r23 ← cap[0] @29:24\llocal[1] ← r23 @29:24\l|jump → block1}"];
   block8 -> block1;
-  block10 [color="#444444" label="{block10|r24 ← nil @27:24\llocal[1] ← r24 @27:24\l|jump → block1}"];
+  block10 [color="#444444" label="{block10|r24 ← nil @29:24\llocal[1] ← r24 @29:24\l|jump → block1}"];
   block10 -> block1;
-  block1 [color="#4444cc" label="{block1|r0 ← local[1] @27:24\l|return r0}"];
+  block1 [color="#4444cc" label="{block1|r0 ← local[1] @29:24\l|return r0}"];
 }

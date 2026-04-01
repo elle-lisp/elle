@@ -1,32 +1,24 @@
-# Utility functions for microgpt
+# ── Utility functions for microgpt ────────────────────────────────
 
-(defn array-map [f arr]
-  "Apply f to each element of an array, returning a new mutable array."
-  (let* ([result @[]])
-    (each v in arr
-      (push result (f v)))
-    result))
+(import "plugin/random")
 
-(defn array-map2 [f a b]
-  "Apply f element-wise to two arrays, returning a new mutable array."
-  (let* ([result @[]])
-    (each i in (range (length a))
-      (push result (f (get a i) (get b i))))
-    result))
+# ── Array shuffling ──────────────────────────────────────────────
 
 (defn shuffle! [arr]
   "Shuffle array in place using Fisher-Yates."
-   (var i (- (length arr) 1))
-    (while (> i 0)
-       (let* ([j (floor (* (random/float) (+ i 1)))]
-              [tmp (get arr i)])
-       (put arr i (get arr j))
+  (var i (- (length arr) 1))
+  (while (> i 0)
+    (let* ([j (floor (* (random/float) (+ i 1)))]
+           [tmp (arr i)])
+      (put arr i (arr j))
       (put arr j tmp))
-     (assign i (- i 1)))
+    (assign i (- i 1)))
   arr)
 
+# ── 2D array construction ───────────────────────────────────────
+
 (defn make-2d [rows cols init-fn]
-  "Create a rows×cols mutable 2D array, calling (init-fn r c) for each cell."
+  "Create a rows x cols mutable 2D array, calling (init-fn r c) for each cell."
   (let* ([result @[]])
     (each r in (range rows)
       (let* ([row @[]])
@@ -34,6 +26,8 @@
           (push row (init-fn r c)))
         (push result row)))
     result))
+
+# ── KV cache construction ───────────────────────────────────────
 
 (defn make-kv-caches [n-layer]
   "Create fresh per-layer KV caches. Returns [keys-cache values-cache]."

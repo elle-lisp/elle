@@ -57,9 +57,7 @@ impl ElleAllocator for NullAllocator {
 
 /// Create an initialized FiberHeap ready for allocation.
 fn make_heap() -> Box<FiberHeap> {
-    let mut heap = Box::new(FiberHeap::new());
-    heap.init_active_allocator();
-    heap
+    Box::new(FiberHeap::new())
 }
 
 // ── Tests ───────────────────────────────────────────────────────────

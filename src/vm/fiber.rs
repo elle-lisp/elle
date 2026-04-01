@@ -77,9 +77,6 @@ impl VM {
                 &mut *self.fiber.heap as *mut crate::value::FiberHeap,
             );
         }
-        // Initialize active_allocator now that the heap is in its stable Box.
-        self.fiber.heap.init_active_allocator();
-
         // 3b. Install shared allocator when escape analysis indicates the fiber
         // body may produce heap values that escape to the parent:
         // - result is not provably immediate (return value could be heap)

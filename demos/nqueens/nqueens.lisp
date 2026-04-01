@@ -1,3 +1,5 @@
+(elle/epoch 6)
+
 # N-Queens Problem Solver in Elle
 #
 # Solves N-Queens via recursive backtracking with cons-list board state.
@@ -39,12 +41,9 @@
   (search n 0 (list) 0))
 
 (defn benchmark [n]
-  (display "Solving N-Queens for N=")
-  (display n)
-  (display "... Found ")
-  (display (solve n))
-  (display " solution(s)\n"))
+  (println "Solving N-Queens for N=" n "... Found " (solve n) " solution(s)"))
 
-(display "=== N-Queens Solver (Elle) ===\n\n")
+(println "=== N-Queens Solver (Elle) ===")
+(println)
 (benchmark 12)
-(display "=== Complete ===\n")
+(println "=== Complete ===")

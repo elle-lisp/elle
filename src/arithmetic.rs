@@ -302,9 +302,12 @@ mod tests {
     }
 
     #[test]
-    fn test_div_by_zero_float() {
+    fn test_div_by_zero_float_returns_inf() {
+        // Mixed float/int division follows IEEE 754: float / 0 = Inf.
+        // Only int / int zero is an error.
         let a = Value::float(10.0);
         let b = Value::int(0);
-        assert!(div_values(&a, &b).is_err());
+        let result = div_values(&a, &b).unwrap();
+        assert!(result.as_float().unwrap().is_infinite());
     }
 }
