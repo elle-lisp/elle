@@ -27,21 +27,21 @@ This document describes the implemented system.
 
 ## Quick Start
 
-```janet
-;# Load a library
+```lisp
+# Load a library
 (def libc (ffi/native nil))              # current process (dlopen(NULL))
 (def libm (ffi/native "libm.so.6"))      # or a specific .so
 
-;# Look up a symbol
+# Look up a symbol
 (def sqrt-ptr (ffi/lookup libm "sqrt"))
 
-;# Create a signature: return type, [arg types]
+# Create a signature: return type, [arg types]
 (def sqrt-sig (ffi/signature :double [:double]))
 
-;# Call it
+# Call it
 (ffi/call sqrt-ptr sqrt-sig 2.0)         # => 1.4142135623730951
 
-;# Or use the convenience macro
+# Or use the convenience macro
 (ffi/defbind sqrt libm "sqrt" :double [:double])
 (sqrt 2.0)                               # => 1.4142135623730951
 ```
@@ -83,7 +83,7 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 
 ### Type introspection
 
-```janet
+```lisp
 (ffi/size :i32)     # => 4
 (ffi/size :double)  # => 8
 (ffi/size :void)    # => nil
@@ -100,14 +100,14 @@ C types are described by keywords at the Elle level. The `TypeDesc` enum in
 Fields are positional (unnamed) and follow C struct layout rules: alignment
 padding between fields, tail padding to the struct's alignment.
 
-```janet
-;# struct { int32_t x# double y# }
+```lisp
+# struct { int32_t x; double y; }
 (def point-type (ffi/struct [:i32 :double]))
 
 (ffi/size point-type)   # => 16  (4 + 4 padding + 8)
 (ffi/align point-type)  # => 8
 
-;# Nested structs
+# Nested structs
 (def inner (ffi/struct [:i8 :i32]))      # 8 bytes (1 + 3 padding + 4)
 (def outer (ffi/struct [:i64 inner]))    # 16 bytes
 ```
@@ -117,12 +117,12 @@ array elements are written into a properly aligned buffer at the computed
 field offsets. When reading from C, the buffer is read back into an Elle
 array.
 
-```janet
-;# Write a struct to memory
+```lisp
+# Write a struct to memory
 (def buf (ffi/malloc (ffi/size point-type)))
 (ffi/write buf point-type [42 1.5])
 
-;# Read it back
+# Read it back
 (ffi/read buf point-type)  # => [42 1.5]
 (ffi/free buf)
 ```
@@ -136,8 +136,8 @@ Constraints:
 
 `ffi/array` creates a fixed-size array type descriptor.
 
-```janet
-;# int32_t[10]
+```lisp
+# int32_t[10]
 (def arr-type (ffi/array :i32 10))
 
 (ffi/size arr-type)   # => 40
@@ -154,12 +154,12 @@ A signature describes a C function's calling convention, return type, and
 argument types. Created by `ffi/signature` and stored as a first-class
 Elle value (`HeapObject::FFISignature`).
 
-```janet
-;# Non-variadic: (return-type [arg-types...])
+```lisp
+# Non-variadic: (return-type [arg-types...])
 (def sig (ffi/signature :int [:int :int]))
 
-;# Variadic: (return-type [all-arg-types...] fixed-count)
-;# For printf(const char *, ...): 1 fixed arg, rest variadic
+# Variadic: (return-type [all-arg-types...] fixed-count)
+# For printf(const char *, ...): 1 fixed arg, rest variadic
 (def printf-sig (ffi/signature :int [:ptr :int] 1))
 ```
 
@@ -175,13 +175,13 @@ Signatures accept both keywords (`:i32`) and compound type values (from
 
 `ffi/call` takes a function pointer, a signature, and the arguments:
 
-```janet
-(ffi/call fn-ptr sig arg1 arg2 ...)
+```lisp
+# (ffi/call fn-ptr sig arg1 arg2 ...)
 ```
 
 The number of arguments must match the signature's argument count exactly.
 
-```janet
+```lisp
 (def libc (ffi/native nil))
 (def abs-ptr (ffi/lookup libc "abs"))
 (def abs-sig (ffi/signature :int [:int]))
@@ -218,7 +218,7 @@ C return values are converted back to Elle values:
 
 Manual memory management for C interop:
 
-```janet
+```lisp
 (def ptr (ffi/malloc 100))       # allocate 100 bytes
 (ffi/write ptr :i32 42)          # write an i32
 (ffi/read ptr :i32)              # => 42
@@ -238,12 +238,14 @@ optional second argument, it reads at most that many bytes (stopping at the
 first null byte within that range). Returns nil for null pointers. Signals
 an error for non-UTF-8 data.
 
-```janet
-(def ptr (ffi/malloc 16))
-;# ... write "hello\0" to ptr ...
-(ffi/string ptr)      # => "hello"
-(ffi/string ptr 3)    # => "hel"
-(ffi/free ptr)
+```lisp
+(def str-ptr (ffi/malloc 16))
+(ffi/write str-ptr :u8 104)   # 'h'
+(ffi/write (ptr/add str-ptr 1) :u8 105) # 'i'
+(ffi/write (ptr/add str-ptr 2) :u8 0)   # null terminator
+(ffi/string str-ptr)           # => "hi"
+(ffi/string str-ptr 1)         # => "h"
+(ffi/free str-ptr)
 ```
 
 
@@ -253,7 +255,7 @@ an error for non-UTF-8 data.
 functions to be passed to C APIs that expect function pointer arguments
 (e.g., `qsort` comparators, iteration callbacks).
 
-```janet
+```lisp
 (def cmp-sig (ffi/signature :int [:ptr :ptr]))
 (def cmp-fn (fn (a b)
   (let ((va (ffi/read a :int))
@@ -261,9 +263,9 @@ functions to be passed to C APIs that expect function pointer arguments
     (- va vb))))
 
 (def cb-ptr (ffi/callback cmp-sig cmp-fn))
-;# cb-ptr is now a C function pointer that can be passed to qsort
+# cb-ptr is now a C function pointer that can be passed to qsort
 
-;# When done:
+# When done:
 (ffi/callback-free cb-ptr)
 ```
 
@@ -311,8 +313,8 @@ argument count. Exact arity must match# `AtLeast(n)` requires
 binding. It looks up the symbol, creates a signature, and defines a
 wrapper function — all at definition time.
 
-```janet
-;# Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
+```lisp
+# Usage: (ffi/defbind name lib "c-name" return-type [arg-types...])
 
 (def libc (ffi/native nil))
 (ffi/defbind abs libc "abs" :int [:int])
@@ -328,7 +330,7 @@ wrapper function — all at definition time.
 
 `(ffi/defbind abs libc "abs" :int [:int])` expands to:
 
-```janet
+```lisp
 (def abs
   (let ((ptr__ (ffi/lookup libc "abs"))
         (sig__ (ffi/signature :int [:int])))

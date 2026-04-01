@@ -86,5 +86,5 @@ Coroutines are the basis of Elle's stream system. `stream/map`,
 ## See also
 
 - [concurrency.md](concurrency.md) — async concurrency with ev/spawn
-- [fibers.md](fibers.md) — fiber architecture (coroutines are built on fibers)
+- [fibers](signals/fibers.md) — fiber architecture (coroutines are built on fibers)
 - [control.md](control.md) — loops and iteration

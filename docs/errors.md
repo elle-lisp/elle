@@ -62,8 +62,11 @@ Bind + branch in one step: runs body only if expr succeeds, returns `nil`
 if it errors.
 
 ```lisp
-# (when-ok [result (parse-json input)]
-#   (println "parsed:" result))
+(when-ok [x (+ 1 2)]
+  (* x 10))               # => 30
+
+(when-ok [x (error "oops")]
+  (* x 10))               # => nil
 ```
 
 ## defer — guaranteed cleanup
@@ -145,6 +148,6 @@ defer         Body value         Propagates          Resource cleanup
 
 ## See also
 
-- [signals.md](signals.md) — signal system underlying errors
-- [fibers.md](fibers.md) — fiber error states and masks
+- [signals](signals/index.md) — signal system underlying errors
+- [fibers](signals/fibers.md) — fiber error states and masks
 - [control.md](control.md) — conditionals and loops

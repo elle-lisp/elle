@@ -52,67 +52,16 @@ bytecode. Error messages include file:line:col information.
   for subprocess lifecycle
 - **`lint`** — Diagnostic types and lint rules
 - **`symbols`** — Symbol index types for IDE features
-- **`primitives`** — Built-in functions; includes:
-  `doc` (returns docstring from closure value, or queries `vm.docs` for
-  native primitives and special forms by name; `(doc name)` is preferred over
-  `(doc "name")` for stdlib functions — the explicit string form cannot find
-  stdlib docs because their docstrings live in the closure value, not `vm.docs`),
-  `port/path`, `port/seek`, `port/tell`, `port/read-line`, `port/read-all`,
-  `string/size-of`,
-  `with-traits`, `traits`,
-  `sys/args` (returns args after the source file in argv as a list, empty list if none),
-  `sys/argv` (returns the full argv as a list: script name as element 0 followed by all
-  user args; element 0 is `"-"` for stdin, the file path for a script, or empty string
-  in REPL mode — in REPL mode the list is empty),
-  `sys/env` (returns env as struct with string keys; optional single-var
-  lookup),
-  `subprocess/exec`, `subprocess/wait`, `subprocess/kill`, `subprocess/pid`,
-  `syntax-pair?`, `syntax-list?`, `syntax-symbol?`, `syntax-keyword?`,
-  `syntax-nil?`,
-  `syntax->list`, `syntax-first`, `syntax-rest`, `syntax-e`,
-  `fiber/set-fuel`, `fiber/fuel`, `fiber/clear-fuel`,
-  `compare` (three-way comparison returning -1/0/1, uses same ordering as
-  `sort`),
-  `meta/origin` (returns source location of a closure as
-  `{:file :line :col}`, or `nil`),
-  `file/stat` (filesystem metadata struct, follows symlinks),
-  `file/lstat` (filesystem metadata struct, does not follow symlinks),
-  `ptr/add`, `ptr/diff`, `ptr/to-int`, `ptr/from-int`
-  (pointer arithmetic: byte offset, distance, address extraction, address
-  construction),
-  `number->string` (optional radix 2–36:
-  `(number->string 255 16)` → `"ff"`),
-  `seq->hex` (hex-encode bytes, @bytes, array, @array, list, or integer;
-  mutability-preserving; `bytes->hex` and `bytes->hex-string` are aliases)
-- **`stdlib`** — Standard library functions (loaded at startup); includes:
-  stream combinators: `port/lines`, `port/chunks`, `port/writer`,
-  `stream/map`, `stream/filter`, `stream/take`, `stream/drop`, `stream/concat`,
-  `stream/zip`, `stream/for-each`, `stream/fold`, `stream/collect`,
-  `stream/into-array`, `stream/pipe`;
-  subprocess convenience: `subprocess/system`
+- **`primitives`** — Built-in functions. Run `(help)` in the REPL for a
+  full list grouped by category. See [`docs/stdlib.md`](docs/stdlib.md).
+- **`stdlib`** — Standard library functions (loaded at startup). See
+  [`docs/stdlib.md`](docs/stdlib.md).
 - **`ffi`** — C interop via libloading/bindgen
 - **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
   functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
 - **`formatter`** — Code formatting for Elle source
-- **`plugin`** — Dynamic plugin loading for Rust cdylib primitives;
-    available plugins: `elle-arrow` (Apache Arrow columnar data and Parquet serialization),
-    `elle-base64` (base64 encoding/decoding), `elle-clap` (CLI argument parsing),
-    `elle-compress` (gzip, deflate, and zstd compression), `elle-crypto`,
-    `elle-csv` (CSV parsing and serialization),
-    `elle-git` (Git repository operations), `elle-glob`,
-    `elle-hash` (universal hashing: MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash),
-    `elle-jiff` (date/time via jiff), `elle-msgpack` (MessagePack binary serialization),
-    `elle-oxigraph` (RDF/SPARQL), `elle-polars` (Polars DataFrames with eager and lazy APIs),
-    `elle-protobuf` (Protocol Buffers encode/decode/introspect),
-    `elle-random`, `elle-regex`, `elle-selkie` (HTTP),
-    `elle-semver` (semantic version parsing and comparison),
-    `elle-sqlite`, `elle-syn` (Rust syntax parsing via syn crate),
-    `elle-tls` (TLS client and server via rustls),
-    `elle-toml` (TOML parsing and serialization),
-    `elle-tree-sitter` (multi-language parsing and structural queries),
-    `elle-uuid` (UUID generation),
-    `elle-xml` (XML parsing/serialization),
-    `elle-yaml` (YAML parsing and serialization)
+- **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.
+  See [`docs/plugins.md`](docs/plugins.md) for the full list.
 - **`path`** — UTF-8 path operations
 - **`pipeline`** — Compilation entry points
   (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
@@ -120,34 +69,13 @@ bytecode. Error messages include file:line:col information.
 
 ### The Value type
 
-`Value` is the runtime representation using a 16-byte tagged union
-`(tag: u64, payload: u64)`. Create values via methods like `Value::int()`,
-`Value::cons()`, `Value::closure()` rather than enum variants. Notable types:
-- `Closure` — bytecode + captured environment + arity + signal +
-  `location_map` + `doc` + `syntax` + `traits`
-- `LBox` / `LocalLBox` — mutable lboxes for captured variables
-- `Fiber` — independent execution context with stack, frames, signal mask
-- `Parameter` — dynamic binding with default value, looked up at runtime
-- `External` — opaque plugin-provided Rust object (`Rc<dyn Any>` with type
-  name)
-
-All heap-allocated values use `Rc`. Mutable values use `RefCell`.
-
-**Trait table field:** Every user-facing heap variant carries a
-`traits: Value` field (16 bytes). Initialized to `Value::NIL` (meaning "no
-traits"). Only an immutable `LStruct` may be stored here; the `with-traits`
-primitive validates this at call time. The field is invisible to structural
-equality, ordering, and hashing.
-
-**Variants that carry `traits` (19 types):** `LArray`, `LArrayMut`,
-`LStruct`, `LStructMut`, `LString`, `LStringMut`, `LBytes`, `LBytesMut`,
-`LSet`, `LSetMut`, `Cons`, `Closure`, `LBox`, `Fiber`, `Syntax`,
-`ManagedPointer`, `External`, `Parameter`, `ThreadHandle`.
-
-**Variants that do NOT carry `traits` (5 infrastructure types):** `Float`,
-`NativeFn`, `LibHandle`, `FFISignature`, `FFIType`. `with-traits`
-on these returns a `:type-error`. (`Binding` is compile-time only, not a
-heap variant.)
+`Value` is a 16-byte tagged union `(tag: u64, payload: u64)`. See
+[`docs/impl/values.md`](docs/impl/values.md) for details. Key points:
+- Create via `Value::int()`, `Value::cons()`, etc. — not enum variants
+- Heap values use `Rc`; mutable values use `RefCell`
+- 19 user-facing heap variants carry a `traits: Value` field
+- 5 infrastructure types (`Float`, `NativeFn`, `LibHandle`, `FFISignature`,
+  `FFIType`) do not carry traits
 
 ## Products
 
@@ -221,41 +149,16 @@ These must remain true. Violating them breaks the system:
 
 ## Intentional oddities
 
-Things that look wrong but aren't. The 4 most critical (agents get these
-wrong):
+The 4 most critical (agents get these wrong):
 
-- **Elle has no `-e` flag.** To run one-liners, use `echo '(expr)' | elle`.
+- **`nil` vs `()` are distinct.** `nil` is falsy; `()` is truthy (empty
+  list). Use `empty?` not `nil?` for end-of-list. **Getting this wrong
+  causes infinite recursion.**
+- **`#` is comment, `;` is splice.** Not the other way around.
+- **`assign` not `set` for mutation.** `(set x val)` creates a set.
+- **`squelch` takes exactly 2 arguments.** `(squelch closure :keyword)`.
 
-- **Elle has no `-` flags at all.** See `elle --help`.
-
-- **`nil` vs `()` are distinct.** `nil` is falsy (absence). `()` is truthy
-  (empty list). Lists terminate with `EMPTY_LIST`. Use `empty?` (not `nil?`)
-  for end-of-list. **Getting this wrong causes infinite recursion.**
-
-- **`#` is comment, `;` is splice.** `#` starts a comment. `;expr` is the
-  splice operator (array-spreading). `true`/`false` are booleans (not
-  `#t`/`#f`).
-
-- **`assign` not `set` for mutation.** `(assign var value)` mutates.
-  `(set x val)` creates a set value. Agents reflexively write `(set x val)`
-  — this is wrong.
-
-- **`silence` is compile-time total suppression; `squelch` is a runtime
-  closure transform.** `(silence param)` inside a lambda body constrains a
-  parameter: it must be a silent closure. `(squelch f :yield)` is a
-  *primitive function call*, not a declaration — it takes a closure and
-  returns a **new** closure that catches `:yield` at runtime and converts it
-  to `:error`. Usage: `(let ((safe-f (squelch f :yield))) (safe-f))`.
-  `(squelch f)` with no keywords is an arity error (requires at least 2
-  arguments). `(squelch non-closure :yield)` is a type error.
-
-- **Collection literals: bare = immutable, `@` = mutable.** `[...]` → array,
-  `@[...]` → @array. `{...}` → struct, `@{...}` → @struct. `|...|` → set,
-  `@|...|` → @set. `"..."` → string, `@"..."` → @string. `(bytes ...)` →
-  bytes, `(@bytes ...)` → @bytes.
-
-For the full list of oddities (18 items):
-[`docs/oddities.md`](docs/oddities.md).
+Full list: [`docs/warts.md`](docs/warts.md).
 
 ## Conventions
 
@@ -283,7 +186,7 @@ current:
   the invariant. Stale invariants are worse than none.
 
 - **When you discover undocumented behavior**, document it. If it's
-  intentional, add to `docs/oddities.md`. If it's a bug, file an issue.
+  intentional, add to `docs/warts.md`. If it's a bug, file an issue.
 
 Documentation debt compounds. A few minutes now saves hours of confusion
 later.
@@ -364,139 +267,7 @@ gitignored.
 | `rust:Type` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
 | `rust:Mod` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
 
-## Standard Library Functions
+## Standard Library
 
-### subprocess/system
-
-**Location:** `stdlib.lisp`
-
-**Signature:** `(subprocess/system program args [opts])`
-
-**Purpose:** Run a command to completion, capturing stdout and stderr as
-text. Returns `{:exit int :stdout string :stderr string}`.
-
-**Behavior:**
-- Spawns a subprocess with the given program and arguments
-- Captures stdout and stderr as binary pipes, then decodes to UTF-8 strings
-- Waits for subprocess exit and returns the exit code
-- Reads pipes before waiting to avoid deadlock when output exceeds OS pipe
-  buffer (~64KB)
-- Optional third argument: opts struct with keys `:env` (struct of env
-  vars), `:cwd` (working directory string), `:stdin` (default `:null`)
-
-**Examples:**
-```lisp
-(subprocess/system "echo" ["hello"])
-#=> {:exit 0 :stdout "hello\n" :stderr ""}
-
-(subprocess/system "false" [])
-#=> {:exit 1 :stdout "" :stderr ""}
-
-(subprocess/system "ls" ["-la"] {:cwd "/tmp"})
-#=> {:exit 0 :stdout "..." :stderr ""}
-```
-
-**Error cases:**
-
-| Condition | Error kind | Message |
-|-----------|-----------|---------|
-| Program not found | `exec-error` | `"subprocess/exec: {program}: {error}"` |
-| Invalid UTF-8 in output | `encoding-error` | `"invalid UTF-8 at byte {offset}"` |
-| I/O error | `exec-error` | `"subprocess/wait: {error}"` |
-
-**Invariants:**
-
-1. **Deadlock prevention.** Pipes are read before `subprocess/wait` to
-   ensure neither side blocks on buffer overflow.
-2. **Text decoding.** Output is decoded as strict UTF-8; invalid UTF-8
-   propagates an error.
-3. **Exit code preservation.** The returned `:exit` code matches the
-   subprocess exit status (0 = success, nonzero = failure).
-4. **Subprocess cleanup.** The process is reaped on exit; no zombies are
-   left behind.
-
-### merge
-
-**Location:** `stdlib.lisp`
-
-**Signature:** `(merge a b)`
-
-**Purpose:** Merges struct `b` into struct `a`. Both must be structs of the
-same mutability. Keys in `b` override keys in `a`.
-
-**Behavior:**
-- Both `a` and `b` must be structs of the same mutability
-- If both are immutable structs `{...}`, returns an immutable struct
-- If both are mutable structs `@{...}`, returns a mutable struct
-- All keys from `a` are preserved
-- All keys from `b` are added or override existing keys in `a`
-
-**Examples:**
-```lisp
-(merge {:x 1 :y 2} {:y 3 :z 4})
-#=> {:x 1 :y 3 :z 4}
-
-(merge @{:x 1 :y 2} @{:y 3 :z 4})
-#=> @{:x 1 :y 3 :z 4}
-
-(merge {:a 1} {})
-#=> {:a 1}
-
-(merge {} {:b 2})
-#=> {:b 2}
-```
-
-**Error cases:**
-
-| Condition | Error kind | Message |
-|-----------|-----------|---------|
-| `a` is not a struct | `type-error` | `"merge: first argument must be a struct"` |
-| `b` is not a struct | `type-error` | `"merge: second argument must be a struct"` |
-| Mutability mismatch | `type-error` | `"merge: mutability mismatch — both arguments must be the same mutability"` |
-| Wrong arity | `arity-error` | `"merge: expected 2 arguments, got N"` |
-
-**Invariants:**
-
-1. **Mutability agreement.** Both arguments must be the same mutability.
-   The result matches.
-2. **Non-destructive.** Neither `a` nor `b` is modified; a new struct is
-   returned.
-3. **Override semantics.** Keys in `b` take precedence over keys in `a`.
-4. **Immutability respected.** If both args are immutable, the result is
-   immutable. If both are mutable, the result is mutable.
-
-### sort-with
-
-**Location:** `stdlib.lisp`
-
-**Signature:** `(sort-with cmp coll)`
-
-**Alias:** `sort-by-cmp`
-
-**Purpose:** Sort a collection using a custom comparator function. The
-comparator receives two elements and returns a negative integer (first <
-second), zero (equal), or positive integer (first > second).
-
-**Behavior:**
-- Type-preserving: lists return lists, arrays return arrays, @arrays return
-  new @arrays
-- Merge sort (stable): equal elements preserve their relative order
-- @arrays are NOT sorted in place (unlike the `sort` primitive) — a new
-  @array is returned
-
-**Examples:**
-```lisp
-(sort-with (fn (a b) (compare b a)) (list 1 3 2))
-#=> (3 2 1)
-
-(sort-with (fn (a b) (- (length a) (length b)))
-           ["bbb" "a" "cc"])
-#=> ["a" "cc" "bbb"]
-```
-
-**Error cases:**
-
-| Condition | Error kind | Message |
-|-----------|-----------|---------|
-| Not a sequence | `type-error` | `"sort-with: not a sequence"` |
-| Comparator returns non-number | `type-error` | (from `<=` primitive) |
+See [`docs/stdlib.md`](docs/stdlib.md) for the full standard library
+reference. Use `(doc name)` in the REPL for any function's documentation.

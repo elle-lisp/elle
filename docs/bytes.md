@@ -1,9 +1,21 @@
 # Bytes
 
-Bytes are sequences of raw byte values (0–255). `(bytes ...)` is immutable;
-`(@bytes ...)` is mutable.
+Bytes are sequences of raw byte values (0–255). `b[...]` is immutable;
+`@b[...]` is mutable.
 
-## Construction
+## Literals
+
+```lisp
+b[1 2 3]                   # immutable bytes
+@b[1 2 3]                  # mutable @bytes
+b[0xff 0x0a 32]            # mixed hex and decimal
+```
+
+The `b[...]` syntax parallels `[...]` for arrays — `b` for bytes.
+
+## Construction (function form)
+
+The `bytes` and `@bytes` functions construct bytes:
 
 ```lisp
 (bytes 1 2 3)              # immutable bytes from integers

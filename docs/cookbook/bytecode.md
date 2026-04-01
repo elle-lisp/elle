@@ -104,8 +104,6 @@ pub fn handle_my_instr(vm: &mut VM) {
 
 ---
 
----
-
 ## See also
 
 - [Cookbook index](index.md)

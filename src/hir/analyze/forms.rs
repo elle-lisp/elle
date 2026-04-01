@@ -101,6 +101,52 @@ impl<'a> Analyzer<'a> {
                 ))
             }
 
+            // Immutable bytes literal b[...] - call bytes primitive
+            SyntaxKind::Bytes(items) => {
+                let mut args = Vec::new();
+                let mut signal = Signal::silent();
+                for item in items {
+                    let (inner, spliced) = Self::unwrap_splice(item);
+                    let hir = self.analyze_expr(inner)?;
+                    signal = signal.combine(hir.signal);
+                    args.push(CallArg { expr: hir, spliced });
+                }
+                let binding = self.resolve_primitive("bytes");
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    signal,
+                ))
+            }
+
+            // Mutable bytes literal @b[...] - call @bytes primitive
+            SyntaxKind::BytesMut(items) => {
+                let mut args = Vec::new();
+                let mut signal = Signal::silent();
+                for item in items {
+                    let (inner, spliced) = Self::unwrap_splice(item);
+                    let hir = self.analyze_expr(inner)?;
+                    signal = signal.combine(hir.signal);
+                    args.push(CallArg { expr: hir, spliced });
+                }
+                let binding = self.resolve_primitive("@bytes");
+                let func = Hir::new(HirKind::Var(binding), span.clone(), Signal::silent());
+                Ok(Hir::new(
+                    HirKind::Call {
+                        func: Box::new(func),
+                        args,
+                        is_tail: false,
+                    },
+                    span,
+                    signal,
+                ))
+            }
+
             // Struct literal {...} - call struct primitive
             SyntaxKind::Struct(items) => {
                 let mut args = Vec::new();

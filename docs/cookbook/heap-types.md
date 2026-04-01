@@ -132,12 +132,19 @@ SendValue::MyType(data) => alloc(HeapObject::MyType(data)),
 HeapObject::MyType(_) => Err("Cannot send my-type".to_string()),
 ```
 
+### Traits field
+
+User-facing heap variants carry a `traits: Value` field (initialized to
+`Value::NIL`). If your type should support `with-traits` / `traits`,
+add this field to `MyTypeData` and handle it in the constructor. See
+`LArray` or `LStruct` for examples. The 19 existing user-facing heap
+variants all carry this field. Infrastructure types (`Float`, `NativeFn`,
+`LibHandle`, `FFISignature`, `FFIType`) do not.
+
 ### After adding the type
 
 You'll likely want primitives to create and manipulate it (see Recipe 1)
 and a type-check predicate in `src/primitives/types.rs`.
-
----
 
 ---
 

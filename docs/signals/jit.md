@@ -16,9 +16,10 @@ fiber's stack. When it calls a function that signals:
 4. If non-zero: propagate the signal to the caller
 
 The JIT doesn't need to capture continuations or switch stacks. It just
-checks a return code and propagates. This means the JIT can compile
-*any* function, not just silent ones. The overhead for non-silent functions
-is one branch per call.
+checks a return code and propagates. The JIT compiles silent, yielding,
+and error-producing functions. Only polymorphic functions (where the
+signal depends on arguments) and functions containing `Eval` are
+rejected. The overhead for non-silent functions is one branch per call.
 
 ## Signal-guided optimization
 

@@ -79,5 +79,5 @@ exit signals as messages instead of propagating errors.
 ## See also
 
 - [concurrency.md](concurrency.md) — lower-level ev/spawn, ev/join
-- [fibers.md](fibers.md) — fiber architecture underlying processes
+- [fibers](signals/fibers.md) — fiber architecture underlying processes
 - [runtime.md](runtime.md) — fuel budgets

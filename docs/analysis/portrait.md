@@ -60,6 +60,6 @@ structured reports.
 
 ## See also
 
-- [signals.md](signals.md) — signal system that portraits analyze
-- [modules.md](modules.md) — module structure
-- [macros.md](macros.md) — macro expansion before analysis
+- [signals](../signals/index.md) — signal system that portraits analyze
+- [modules](../modules.md) — module structure
+- [macros](../macros.md) — macro expansion before analysis

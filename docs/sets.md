@@ -51,7 +51,7 @@ Set literals are the preferred syntax for fiber signal masks:
 
 ```lisp
 # fiber that catches yield and io signals
-# (fiber/new thunk |:yield :io|)
+(fiber/new (fn [] (yield 42)) |:yield :io|)
 ```
 
 ---
@@ -61,4 +61,4 @@ Set literals are the preferred syntax for fiber signal masks:
 - [arrays.md](arrays.md) — array operations
 - [structs.md](structs.md) — struct operations
 - [types.md](types.md) — type predicates and mutability
-- [signals.md](signals.md) — signal masks use set literals
+- [signals](signals/index.md) — signal masks use set literals

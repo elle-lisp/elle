@@ -99,17 +99,18 @@ Use it when you need to distinguish computation time from I/O wait.
 `time/stopwatch` returns a coroutine. Each `coro/resume` yields the total
 seconds elapsed since the stopwatch was created:
 
-```janet
+```lisp
 (var sw (time/stopwatch))
 (coro/resume sw)   # => 0.000234
-;# ... do work ...
+# ... do work ...
 (coro/resume sw)   # => 1.532100  (cumulative, not delta)
 ```
 
 Implementation (in `src/primitives/time_def.rs`):
 
-```janet
-(def time/stopwatch (fn ()
+```lisp
+# time/stopwatch is defined in stdlib as:
+(def my-stopwatch (fn ()
   (coro/new (fn ()
     (let ((start (clock/monotonic)))
       (while true
@@ -118,8 +119,8 @@ Implementation (in `src/primitives/time_def.rs`):
 
 `time/elapsed` takes a thunk and returns a pair of (result, elapsed-seconds):
 
-```janet
-(var result (time/elapsed (fn () (heavy-computation))))
+```lisp
+(var result (time/elapsed (fn () (+ 1 2))))
 (first result)          # => computation result
 (first (rest result))   # => elapsed seconds
 ```

@@ -301,6 +301,17 @@ impl<'a> Lexer<'a> {
                             byte_offset: start_pos,
                         }))
                     }
+                    // @b[ → mutable bytes literal
+                    Some('b') if self.peek(1) == Some('[') => {
+                        self.advance(); // consume 'b'
+                        self.advance(); // consume '['
+                        Ok(Some(TokenWithLoc {
+                            token: Token::AtBytesBracket,
+                            loc,
+                            len: self.pos - start_pos,
+                            byte_offset: start_pos,
+                        }))
+                    }
                     // @symbol → symbol with @ prefix (e.g. @set, @array)
                     Some(c) if is_symbol_start(c) => {
                         let (_, end) = self.read_symbol();
@@ -401,6 +412,18 @@ impl<'a> Lexer<'a> {
                         byte_offset: start_pos,
                     }))
                 }
+            }
+
+            // b[ → bytes literal
+            Some('b') if self.peek(1) == Some('[') => {
+                self.advance(); // consume 'b'
+                self.advance(); // consume '['
+                Ok(Some(TokenWithLoc {
+                    token: Token::BytesBracket,
+                    loc,
+                    len: self.pos - start_pos,
+                    byte_offset: start_pos,
+                }))
             }
 
             Some(_) => {

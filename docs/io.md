@@ -106,5 +106,5 @@ All output functions are async — they yield to the scheduler.
 ## See also
 
 - [concurrency.md](concurrency.md) — ev/spawn, ev/join, parallel I/O
-- [fibers.md](fibers.md) — fiber-based async model
+- [fibers](signals/fibers.md) — fiber-based async model
 - [strings.md](strings.md) — string operations

@@ -82,7 +82,9 @@ impl Syntax {
             | SyntaxKind::Struct(items)
             | SyntaxKind::StructMut(items)
             | SyntaxKind::Set(items)
-            | SyntaxKind::SetMut(items) => {
+            | SyntaxKind::SetMut(items)
+            | SyntaxKind::Bytes(items)
+            | SyntaxKind::BytesMut(items) => {
                 for item in items {
                     item.set_scopes_recursive(scopes);
                 }
@@ -160,6 +162,8 @@ impl Syntax {
             SyntaxKind::StructMut(_) => "@struct",
             SyntaxKind::Set(_) => "set",
             SyntaxKind::SetMut(_) => "mutable set",
+            SyntaxKind::Bytes(_) => "bytes",
+            SyntaxKind::BytesMut(_) => "@bytes",
             SyntaxKind::Quote(_) => "quote",
             SyntaxKind::Quasiquote(_) => "quasiquote",
             SyntaxKind::Unquote(_) => "unquote",
@@ -195,6 +199,10 @@ pub enum SyntaxKind {
     Set(Vec<Syntax>),
     /// Pipe-delimited mutable set literal: `@|...|`
     SetMut(Vec<Syntax>),
+    /// Bytes literal: `b[...]`
+    Bytes(Vec<Syntax>),
+    /// Mutable bytes literal: `@b[...]`
+    BytesMut(Vec<Syntax>),
 
     // Quote forms - preserved as structure for macro handling
     Quote(Box<Syntax>),

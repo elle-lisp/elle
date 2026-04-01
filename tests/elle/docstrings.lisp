@@ -59,7 +59,5 @@
 # Stdlib function WITH a docstring: inc is defined via defn with "Return x + 1."
 (assert (= (doc inc) "Return x + 1.") "stdlib function with docstring should return it via closure path")
 
-# Stdlib function WITHOUT a docstring: map is defined with bare def/fn, no leading string.
-# prim_doc returns the "No documentation found for 'map'" fallback.
-(let ((result (doc map)))
-  (assert (string/contains? result "No documentation found") "stdlib function without docstring should return fallback message"))
+# Stdlib function WITH a docstring: map has a docstring.
+(assert (contains? (doc map) "Apply f") "map should have a docstring")

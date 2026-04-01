@@ -18,8 +18,10 @@ pub(crate) fn prim_ffi_struct(args: &[Value]) -> (SignalBits, Value) {
             error_val("arity-error", "ffi/struct: expected 1 argument"),
         );
     }
-    // Accept array or list of type descriptors
-    let field_vals = if let Some(arr) = args[0].as_array_mut() {
+    // Accept array, @array, or list of type descriptors
+    let field_vals = if let Some(arr) = args[0].as_array() {
+        arr.to_vec()
+    } else if let Some(arr) = args[0].as_array_mut() {
         arr.borrow().clone()
     } else {
         match args[0].list_to_vec() {

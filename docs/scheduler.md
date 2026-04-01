@@ -59,6 +59,6 @@ precise timer support without polling.
 ## See also
 
 - [concurrency.md](concurrency.md) — user-facing async primitives
-- [fibers.md](fibers.md) — fiber architecture
+- [fibers](signals/fibers.md) — fiber architecture
 - [runtime.md](runtime.md) — runtime signals
 - [io.md](io.md) — port I/O

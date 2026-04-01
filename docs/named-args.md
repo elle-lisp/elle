@@ -29,7 +29,9 @@ Parameters after `&named` are passed by keyword at call sites.
 
 ### default
 
-Use `default` to set default values for named parameters:
+`default` is a macro that sets a named parameter's value only when it is
+`nil`. Values like `0`, `false`, and `""` are kept — only `nil` triggers
+the default.
 
 ```lisp
 (defn open-window [&named title width height]
@@ -43,6 +45,10 @@ Use `default` to set default values for named parameters:
 
 (open-window :title "Demo" :width 1024)
 # => {:title "Demo" :width 1024 :height 600}
+
+# false and 0 are NOT replaced by default:
+(defn f [&named flag] (default flag true) flag)
+(f :flag false)        # => false (not true)
 ```
 
 ## &keys — keyword args collected as struct

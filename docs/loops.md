@@ -50,15 +50,6 @@ total                      # => 60
 
 Works on lists, arrays, and other sequences.
 
-## while-let
-
-Loop while a binding succeeds (value is truthy):
-
-```text
-(while-let [[line (port/read-line port)]]
-  (println line))
-```
-
 ## Early exit
 
 Use `block` + `break` for search patterns:

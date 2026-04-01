@@ -45,8 +45,8 @@ Operations on immutable structs return new structs.
 ## Introspection
 
 ```lisp
-(keys {:a 1 :b 2})         # => (:a :b)
-(values {:a 1 :b 2})       # => (1 2)
+(keys {:a 1 :b 2})         # => (:a :b)   (sorted order)
+(values {:a 1 :b 2})       # => (1 2)     (matching key order)
 (from-pairs [[:a 1] [:b 2]])  # => {:a 1 :b 2}
 ```
 

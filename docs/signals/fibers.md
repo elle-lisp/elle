@@ -71,7 +71,11 @@ Signal types are bit positions in a `u32` bitmask:
 | 8 | `SIG_HALT` | 256 | Graceful VM termination |
 | 9 | `SIG_IO` | 512 | I/O request to scheduler |
 | 10 | `SIG_TERMINAL` | 1024 | Uncatchable — passes through mask checks |
-| 11–15 | — | — | Reserved |
+| 11 | `SIG_EXEC` | 2048 | Subprocess completion |
+| 12 | `SIG_FUEL` | 4096 | Instruction budget exhaustion |
+| 13 | `SIG_SWITCH` | 8192 | Context switch |
+| 14 | `SIG_WAIT` | 16384 | Blocking wait |
+| 15 | — | — | Reserved |
 | 16–31 | — | — | User-defined signal types |
 
 Bits 0–2 are user-facing. Bits 3–10 are VM-internal. Bits 16–31 are for
@@ -98,15 +102,17 @@ The mask on a fiber determines which of its signals the parent catches.
 Set at creation time, immutable after. The **caller** decides what to
 handle, not the callee.
 
-```janet
-;# Create a fiber that catches errors from its closure
-(fiber/new my-fn 1)  # mask = SIG_ERROR
+```lisp
+(defn my-fn [] 42)
 
-;# Create a fiber that catches yields
-(fiber/new my-fn 2)  # mask = SIG_YIELD
+# Create a fiber that catches errors from its closure
+(fiber/new my-fn |:error|)
 
-;# Create a fiber that catches both
-(fiber/new my-fn 3)  # mask = SIG_ERROR | SIG_YIELD
+# Create a fiber that catches yields
+(fiber/new my-fn |:yield|)
+
+# Create a fiber that catches both
+(fiber/new my-fn |:error :yield|)
 ```
 
 

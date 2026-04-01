@@ -127,7 +127,9 @@ fn rewrite_node(
         | SyntaxKind::Struct(items)
         | SyntaxKind::StructMut(items)
         | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items) => {
+        | SyntaxKind::SetMut(items)
+        | SyntaxKind::Bytes(items)
+        | SyntaxKind::BytesMut(items) => {
             for item in items.iter_mut() {
                 count += rewrite_node(item, renames, removals, replaces, unwraps)?;
             }
@@ -186,7 +188,9 @@ fn set_span_recursive(syntax: &mut Syntax, span: &Span) {
         | SyntaxKind::Struct(items)
         | SyntaxKind::StructMut(items)
         | SyntaxKind::Set(items)
-        | SyntaxKind::SetMut(items) => {
+        | SyntaxKind::SetMut(items)
+        | SyntaxKind::Bytes(items)
+        | SyntaxKind::BytesMut(items) => {
             for item in items.iter_mut() {
                 set_span_recursive(item, span);
             }
