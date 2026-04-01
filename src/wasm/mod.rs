@@ -1,13 +1,23 @@
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
-//! Replaces the bytecode emitter (`lir/emit/`) and VM dispatch loop (`vm/`)
-//! with WASM module generation and Wasmtime execution.
+//! Two modes:
+//! - Full-module (`ELLE_WASM=1`): compiles stdlib + user code as one WASM
+//!   module, replaces the bytecode VM entirely.
+//! - Tiered (`ELLE_WASM_TIER=1`): compiles individual hot closures to WASM
+//!   on demand, complements the bytecode VM.
 //!
 //! Architecture:
-//! - `emit` — LIR → WASM module bytes (via `wasm-encoder`)
-//! - `handle` — Handle table mapping u64 → `Rc<HeapObject>`
-//! - `host` — Wasmtime host functions (primitive dispatch, runtime support)
-//! - `store` — Engine/Store/Linker management
+//! - `emit` — Module structure, WasmEmitter state, orchestration
+//! - `instruction` — LIR instruction → WASM instruction translation
+//! - `controlflow` — CFG emission, loop+br_table dispatch, terminators
+//! - `suspend` — CPS suspension/resume, spill/restore, block splitting
+//! - `handle` — Handle table mapping u64 handles to `Value`
+//! - `host` — Host state (`ElleHost`), primitive dispatch, I/O
+//! - `linker` — Wasmtime host function registration
+//! - `store` — Engine/Store setup, env preparation, module execution
+//! - `resume` — Fiber resume chain for yield-through-call
+//! - `regalloc` — Virtual register → WASM local compaction
+//! - `lazy` — Tiered compilation (per-closure WASM in VM mode)
 //!
 //! Heap objects live on the host side behind opaque u64 handles.
 //! WASM code passes handles to host functions for all heap operations.

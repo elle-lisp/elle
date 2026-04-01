@@ -80,10 +80,6 @@ pub(super) const FN_ENTRY: u32 = 11;
 // Linear memory layout
 pub(super) const ARGS_BASE: i32 = 256;
 
-// Global index for the env stack pointer
-#[allow(dead_code)] // used when inline closure calls are emitted
-pub(super) const GLOBAL_ENV_SP: u32 = 0;
-
 /// Data operation codes for rt_data_op.
 ///
 /// These must stay in sync with `dispatch_data_op` in linker.rs.
@@ -209,28 +205,34 @@ impl WasmEmitter {
         }
     }
 
-    fn emit_module(&mut self, func: &LirFunction) -> EmitResult {
-        let mut nested_funcs: Vec<&LirFunction> = Vec::new();
-        collect_nested_functions(func, &mut nested_funcs);
-        let num_closures = nested_funcs.len() as u32;
-
-        self.closure_table_idx.clear();
-        for (i, nf) in nested_funcs.iter().enumerate() {
-            self.closure_table_idx
-                .insert(*nf as *const LirFunction, i as u32);
-        }
-
-        let mut module = Module::new();
-
-        // Type section
+    /// Build the WASM type and import sections shared by all module variants.
+    ///
+    /// Type indices:
+    ///   0: entry `(ctx: i32) -> (tag, payload, status)`
+    ///   1: call_primitive `(prim_id, args_ptr, nargs, ctx) -> (tag, payload, signal)`
+    ///   2: rt_call `(func_tag, func_payload, args_ptr, nargs, ctx) -> (tag, payload, signal)`
+    ///   3: rt_load_const `(index) -> (tag, payload)`
+    ///   4: rt_data_op `(op, args_ptr, nargs) -> (tag, payload, signal)`
+    ///   5: closure `(env_ptr, args_ptr, nargs, ctx) -> (tag, payload, status)`
+    ///   6: rt_make_closure `(table_idx, captures_ptr, metadata_ptr) -> (tag, payload)`
+    ///   7: rt_push_param `(args_ptr, npairs) -> ()`
+    ///   8: rt_pop_param `() -> ()`
+    ///   9: rt_prepare_tail_call `(func_tag, func_payload, args_ptr, nargs, env_ptr) -> (env_ptr, table_idx, is_wasm, tag, payload, signal)`
+    ///  10: rt_yield `(tag, payload, resume_state, regs_ptr, num_regs, func_idx, signal_bits) -> ()`
+    ///  11: rt_get_resume_value `() -> (tag, payload)`
+    ///  12: rt_load_saved_reg `(index) -> (tag, payload)`
+    fn emit_types_and_imports(&self, module: &mut Module) {
         let mut types = TypeSection::new();
+        // 0: entry function
         types
             .ty()
             .function([ValType::I32], [ValType::I64, ValType::I64, ValType::I32]);
+        // 1: call_primitive
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I32],
         );
+        // 2: rt_call
         types.ty().function(
             [
                 ValType::I64,
@@ -241,23 +243,30 @@ impl WasmEmitter {
             ],
             [ValType::I64, ValType::I64, ValType::I32],
         );
+        // 3: rt_load_const
         types
             .ty()
             .function([ValType::I32], [ValType::I64, ValType::I64]);
+        // 4: rt_data_op
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I32],
         );
+        // 5: closure function
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64, ValType::I32],
         );
+        // 6: rt_make_closure
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32],
             [ValType::I64, ValType::I64],
         );
+        // 7: rt_push_param
         types.ty().function([ValType::I32, ValType::I32], []);
+        // 8: rt_pop_param
         types.ty().function([], []);
+        // 9: rt_prepare_tail_call
         types.ty().function(
             [
                 ValType::I64,
@@ -275,6 +284,7 @@ impl WasmEmitter {
                 ValType::I32,
             ],
         );
+        // 10: rt_yield
         types.ty().function(
             [
                 ValType::I64,
@@ -287,13 +297,14 @@ impl WasmEmitter {
             ],
             [],
         );
+        // 11: rt_get_resume_value
         types.ty().function([], [ValType::I64, ValType::I64]);
+        // 12: rt_load_saved_reg
         types
             .ty()
             .function([ValType::I32], [ValType::I64, ValType::I64]);
         module.section(&types);
 
-        // Import section
         let mut imports = ImportSection::new();
         imports.import("elle", "call_primitive", EntityType::Function(1));
         imports.import("elle", "rt_call", EntityType::Function(2));
@@ -307,6 +318,21 @@ impl WasmEmitter {
         imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
         imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
         module.section(&imports);
+    }
+
+    fn emit_module(&mut self, func: &LirFunction) -> EmitResult {
+        let mut nested_funcs: Vec<&LirFunction> = Vec::new();
+        collect_nested_functions(func, &mut nested_funcs);
+        let num_closures = nested_funcs.len() as u32;
+
+        self.closure_table_idx.clear();
+        for (i, nf) in nested_funcs.iter().enumerate() {
+            self.closure_table_idx
+                .insert(*nf as *const LirFunction, i as u32);
+        }
+
+        let mut module = Module::new();
+        self.emit_types_and_imports(&mut module);
 
         // Function section
         let mut functions = FunctionSection::new();
@@ -340,18 +366,6 @@ impl WasmEmitter {
         });
         module.section(&memories);
 
-        // Global section: env stack pointer for inline closure calls
-        let mut globals = GlobalSection::new();
-        globals.global(
-            GlobalType {
-                val_type: ValType::I32,
-                mutable: true,
-                shared: false,
-            },
-            &ConstExpr::i32_const(super::host::ENV_STACK_BASE as i32),
-        );
-        module.section(&globals);
-
         // Export section
         let mut exports = ExportSection::new();
         exports.export("__elle_entry", ExportKind::Func, FN_ENTRY);
@@ -359,7 +373,6 @@ impl WasmEmitter {
         if num_closures > 0 {
             exports.export("__elle_table", ExportKind::Table, 0);
         }
-        exports.export("__elle_env_sp", ExportKind::Global, 0);
         module.section(&exports);
 
         // Element section
@@ -405,89 +418,7 @@ impl WasmEmitter {
 
     fn emit_single_closure_module(&mut self, func: &LirFunction) -> EmitResult {
         let mut module = Module::new();
-
-        let mut types = TypeSection::new();
-        types
-            .ty()
-            .function([], [ValType::I64, ValType::I64, ValType::I32]);
-        types.ty().function(
-            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
-        );
-        types.ty().function(
-            [
-                ValType::I64,
-                ValType::I64,
-                ValType::I32,
-                ValType::I32,
-                ValType::I32,
-            ],
-            [ValType::I64, ValType::I64, ValType::I32],
-        );
-        types
-            .ty()
-            .function([ValType::I32], [ValType::I64, ValType::I64]);
-        types.ty().function(
-            [ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
-        );
-        types.ty().function(
-            [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
-        );
-        types.ty().function(
-            [ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64],
-        );
-        types.ty().function([ValType::I32, ValType::I32], []);
-        types.ty().function([], []);
-        types.ty().function(
-            [
-                ValType::I64,
-                ValType::I64,
-                ValType::I32,
-                ValType::I32,
-                ValType::I32,
-            ],
-            [
-                ValType::I32,
-                ValType::I32,
-                ValType::I32,
-                ValType::I64,
-                ValType::I64,
-                ValType::I32,
-            ],
-        );
-        types.ty().function(
-            [
-                ValType::I64,
-                ValType::I64,
-                ValType::I32,
-                ValType::I32,
-                ValType::I32,
-                ValType::I32,
-            ],
-            [],
-        );
-        types.ty().function([], [ValType::I64, ValType::I64]);
-        types
-            .ty()
-            .function([ValType::I32], [ValType::I64, ValType::I64]);
-        module.section(&types);
-
-        let mut imports = ImportSection::new();
-        imports.import("elle", "call_primitive", EntityType::Function(1));
-        imports.import("elle", "rt_call", EntityType::Function(2));
-        imports.import("elle", "rt_load_const", EntityType::Function(3));
-        imports.import("elle", "rt_data_op", EntityType::Function(4));
-        imports.import("elle", "rt_make_closure", EntityType::Function(6));
-        imports.import("elle", "rt_push_param", EntityType::Function(7));
-        imports.import("elle", "rt_pop_param", EntityType::Function(8));
-        imports.import("elle", "rt_prepare_tail_call", EntityType::Function(9));
-        imports.import("elle", "rt_yield", EntityType::Function(10));
-        imports.import("elle", "rt_get_resume_value", EntityType::Function(11));
-        imports.import("elle", "rt_load_saved_reg", EntityType::Function(12));
-        module.section(&imports);
+        self.emit_types_and_imports(&mut module);
 
         let mut functions = FunctionSection::new();
         functions.function(5);
