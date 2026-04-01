@@ -140,6 +140,10 @@ pub struct Lowerer<'a> {
     /// these primitives in scope-allocated let bodies.
     immediate_primitives: FxHashSet<SymbolId>,
     mutating_primitives: FxHashSet<SymbolId>,
+    /// Binding → rotation_safe for lowered lambdas. Populated during
+    /// lowering so that `body_escapes_heap_values` can check callees
+    /// transitively: a call to a rotation-safe function doesn't escape.
+    callee_rotation_safe: HashMap<Binding, bool>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
@@ -186,6 +190,7 @@ impl<'a> Lowerer<'a> {
             intrinsics: FxHashMap::default(),
             immediate_primitives: FxHashSet::default(),
             mutating_primitives: FxHashSet::default(),
+            callee_rotation_safe: HashMap::new(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
@@ -237,6 +242,11 @@ impl<'a> Lowerer<'a> {
 
     /// Lower a HIR expression to LIR
     pub fn lower(&mut self, hir: &Hir) -> Result<LirFunction, String> {
+        // Precompute rotation safety for all function definitions in the
+        // compilation unit. Uses fixpoint iteration to handle mutual
+        // recursion (e.g. try-col ↔ search in nqueens).
+        self.precompute_rotation_safety(hir);
+
         self.current_func = LirFunction::new(Arity::Exact(0));
         self.current_block = BasicBlock::new(Label(0));
         self.next_reg = 0;
@@ -527,6 +537,73 @@ impl<'a> Lowerer<'a> {
 
         self.scope_stats.scopes_qualified += 1;
         true
+    }
+
+    /// Precompute `callee_rotation_safe` for all function definitions.
+    ///
+    /// Walks the HIR to find all `Define` bindings with lambda values,
+    /// then iterates `body_escapes_heap_values` until the map stabilizes.
+    /// This handles mutual recursion: initially all functions are assumed
+    /// safe, and each pass may flip some to unsafe. Converges because
+    /// the only transition is safe→unsafe (monotone).
+    fn precompute_rotation_safety(&mut self, hir: &Hir) {
+        // Collect all (binding, lambda_body) pairs from the HIR.
+        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
+        Self::collect_lambda_defs(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: all functions optimistically safe.
+        for &(binding, _) in &defs {
+            self.callee_rotation_safe.insert(binding, true);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, body) in &defs {
+                let escapes = self.body_escapes_heap_values(body);
+                let was_safe = self.callee_rotation_safe[&binding];
+                if was_safe && escapes {
+                    self.callee_rotation_safe.insert(binding, false);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Collect all `(binding, lambda_body)` pairs from Define nodes.
+    fn collect_lambda_defs<'b>(hir: &'b Hir, out: &mut Vec<(Binding, &'b Hir)>) {
+        match &hir.kind {
+            HirKind::Define { binding, value } => {
+                if let HirKind::Lambda { body, .. } = &value.kind {
+                    out.push((*binding, body));
+                }
+                Self::collect_lambda_defs(value, out);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    Self::collect_lambda_defs(e, out);
+                }
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda { body: lbody, .. } = &init.kind {
+                        out.push((*binding, lbody));
+                    }
+                    Self::collect_lambda_defs(init, out);
+                }
+                Self::collect_lambda_defs(body, out);
+            }
+            // Don't recurse into nested lambdas — they have their own
+            // lowering context and precompute call.
+            HirKind::Lambda { .. } => {}
+            _ => {}
+        }
     }
 
     /// Check if a HIR body is a tail call (or control flow where all result

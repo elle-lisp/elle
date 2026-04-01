@@ -17,6 +17,18 @@ impl<'a> Lowerer<'a> {
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
             let init_reg = self.lower_expr(init)?;
+            // Record rotation_safe for lambda bindings.
+            if matches!(init.kind, HirKind::Lambda { .. }) {
+                if let Some(block) = self.current_func.blocks.last() {
+                    for instr in block.instructions.iter().rev() {
+                        if let LirInstr::MakeClosure { func, .. } = &instr.instr {
+                            self.callee_rotation_safe
+                                .insert(*binding, func.rotation_safe);
+                            break;
+                        }
+                    }
+                }
+            }
             let slot = self.allocate_slot(*binding);
 
             // Check if this binding needs to be wrapped in a cell
@@ -190,6 +202,20 @@ impl<'a> Lowerer<'a> {
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
+
+        // Record rotation_safe for lambda bindings so callers can
+        // check callee safety transitively.
+        if matches!(value.kind, HirKind::Lambda { .. }) {
+            if let Some(lir_instr) = self.current_func.blocks.last() {
+                for instr in lir_instr.instructions.iter().rev() {
+                    if let LirInstr::MakeClosure { func, .. } = &instr.instr {
+                        self.callee_rotation_safe
+                            .insert(binding, func.rotation_safe);
+                        break;
+                    }
+                }
+            }
+        }
 
         if self.in_lambda && needs_lbox {
             self.emit(LirInstr::StoreCapture {

@@ -932,7 +932,7 @@ impl<'a> Lowerer<'a> {
                 {
                     return true;
                 }
-                if !self.callee_is_primitive(func) {
+                if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                     return true;
                 }
                 self.body_escapes_heap_values(func)
@@ -999,6 +999,18 @@ impl<'a> Lowerer<'a> {
             }
             _ => true,
         }
+    }
+
+    /// Check if a callee is a known rotation-safe user function.
+    /// Uses the `callee_rotation_safe` map populated during lowering.
+    fn callee_is_rotation_safe(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        self.callee_rotation_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
     }
 
     fn callee_is_mutating_primitive(&self, func: &Hir) -> bool {

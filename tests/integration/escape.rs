@@ -1388,6 +1388,49 @@ fn no_region_for_let_with_suspending_non_tail_body() {
 }
 
 #[test]
+fn rotation_safe_for_pure_recursive_functions() {
+    // Pure recursive functions (no push/put/assign/fiber-resume,
+    // only primitives and known-safe callees) are rotation-safe.
+    let source = r#"(defn f (n) (if (<= n 0) n (f (- n 1))))"#;
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compile");
+    let closure = compiled.bytecode.constants.iter()
+        .find_map(|c| c.as_closure())
+        .expect("should have a closure");
+    assert!(closure.template.rotation_safe, "pure recursive function should be rotation-safe");
+}
+
+#[test]
+fn rotation_unsafe_for_push_in_body() {
+    let source = r#"(defn f (n) (if (<= n 0) n (begin (push @[] 1) (f (- n 1)))))"#;
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compile");
+    let closure = compiled.bytecode.constants.iter()
+        .find_map(|c| c.as_closure())
+        .expect("should have a closure");
+    assert!(!closure.template.rotation_safe, "function with push should not be rotation-safe");
+}
+
+#[test]
+fn rotation_safe_for_mutual_recursion() {
+    // Mutual recursion between pure functions — both should be rotation-safe.
+    let source = r#"(letrec
+        ((even-f (fn (n) (if (<= n 0) true (odd-f (- n 1)))))
+         (odd-f (fn (n) (if (<= n 0) false (even-f (- n 1))))))
+        nil)"#;
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compile");
+    let closures: Vec<_> = compiled.bytecode.constants.iter()
+        .filter_map(|c| c.as_closure())
+        .collect();
+    assert!(closures.len() >= 2, "should have at least 2 closures");
+    for c in &closures {
+        assert!(c.template.rotation_safe,
+            "pure mutual recursion should be rotation-safe");
+    }
+}
+
+#[test]
 fn no_region_for_let_with_suspending_before_tail_call() {
     // Body ends with a tail call, but preceding expressions may suspend.
     // The A2 relaxation must NOT bypass the suspension check when
