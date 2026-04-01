@@ -163,8 +163,35 @@ pub fn compile_file_to_lir(
     let (macro_vm_ptr, mut expander, meta) = cache::get_compilation_cache();
     let macro_vm = unsafe { &mut *macro_vm_ptr };
 
+    // Expand all forms, splicing include/include-file inline
+    let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
     let mut expanded_forms = Vec::new();
-    for syntax in syntaxes {
+    let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+    while let Some(syntax) = pending.pop_front() {
+        if let Some((spec, is_include)) = extract_include(&syntax) {
+            let path = if is_include {
+                crate::primitives::modules::resolve_import(&spec)
+            } else {
+                resolve_include_file(&spec, source_name)
+            };
+            let path =
+                path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+            if !included.insert(path.clone()) {
+                return Err(format!(
+                    "{}: include: circular dependency on '{}'",
+                    syntax.span, path
+                ));
+            }
+            let contents = std::fs::read_to_string(&path).map_err(|e| {
+                format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
+            })?;
+            let forms = read_syntax_all_for(&contents, &path)?;
+            // Splice at the front so they expand next, in order
+            for (i, form) in forms.into_iter().enumerate() {
+                pending.insert(i, form);
+            }
+            continue;
+        }
         let expanded = expander.expand(syntax, symbols, macro_vm)?;
         expanded_forms.push(expanded);
     }
@@ -324,6 +351,48 @@ fn compile_file_inner(
     bytecode.signal = signal;
 
     Ok((CompileResult { bytecode }, expander))
+}
+
+/// Splice include/include-file directives in source text.
+///
+/// Reads top-level forms, resolves includes, and returns a single string
+/// with all included content inlined. Used by the WASM backend to resolve
+/// includes before wrapping user code in ev/run.
+pub fn splice_includes(source: &str, source_name: &str) -> Result<String, String> {
+    let syntaxes = read_syntax_all_for(source, source_name)?;
+    let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
+    let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
+    let mut parts: Vec<String> = Vec::new();
+
+    while let Some(syntax) = pending.pop_front() {
+        if let Some((spec, is_include)) = extract_include(&syntax) {
+            let path = if is_include {
+                crate::primitives::modules::resolve_import(&spec)
+            } else {
+                resolve_include_file(&spec, source_name)
+            };
+            let path =
+                path.ok_or_else(|| format!("{}: include: '{}' not found", syntax.span, spec))?;
+            if !included.insert(path.clone()) {
+                return Err(format!(
+                    "{}: include: circular dependency on '{}'",
+                    syntax.span, path
+                ));
+            }
+            let contents = std::fs::read_to_string(&path).map_err(|e| {
+                format!("{}: include: failed to read '{}': {}", syntax.span, path, e)
+            })?;
+            let forms = read_syntax_all_for(&contents, &path)?;
+            for (i, form) in forms.into_iter().enumerate() {
+                pending.insert(i, form);
+            }
+            continue;
+        }
+        // Preserve the original source text for this form
+        parts.push(format!("{}", syntax));
+    }
+
+    Ok(parts.join("\n"))
 }
 
 /// Extract the spec from `(include-file "path")` or `(include "spec")`.

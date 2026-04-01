@@ -30,6 +30,12 @@ enum ResumeOutcome {
 /// - A frame yields again → Yielded
 /// - A frame errors → Error
 /// - All frames are consumed → Dead
+///
+/// When a resumed frame yields again (instead of completing), any
+/// remaining old outer frames from the previous yield are stale —
+/// the yield-through mechanism already pushed new outer frames for
+/// the new yield point. We evict the stale frames so the next
+/// resume starts from the new innermost frame.
 fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -> ResumeOutcome {
     let yield_signal = crate::value::fiber::SIG_YIELD.0 as i32;
     let mut result_val = initial_value;
@@ -38,9 +44,21 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
         if !caller.data().has_suspension_frames() {
             return ResumeOutcome::Dead(result_val);
         }
+        // Record frame count before resume. resume_wasm_closure pops the
+        // front frame, so frames_before - 1 = old outer frames remaining.
+        // If the resumed frame yields again, rt_yield pushes new frames to
+        // the back. The old outer frames (at the front) are stale.
+        let frames_before = caller.data().suspension_frame_count();
         match resume_wasm_closure(caller, result_val) {
             Some((t, p, s)) => {
                 if s == yield_signal {
+                    // Evict stale outer frames from the front.
+                    // After pop_front in resume_wasm_closure, there are
+                    // (frames_before - 1) old frames still at the front.
+                    let stale = frames_before.saturating_sub(1);
+                    for _ in 0..stale {
+                        caller.data_mut().pop_suspension_frame();
+                    }
                     let sig_bits = front_frame_signal(caller);
                     return ResumeOutcome::Yielded(t, p, sig_bits);
                 } else if s != 0 {

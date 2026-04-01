@@ -60,15 +60,19 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
             .map(|s| s.len())
             .unwrap_or(0);
+        // Splice include/include-file directives in user source BEFORE
+        // wrapping in ev/run. The directives are top-level in user code
+        // but would become nested (invisible) after the ev/run wrapper.
+        let body_spliced = crate::pipeline::splice_includes(source, source_name)?;
         // Concatenate stdlib + user source wrapped in ev/run so the async
         // scheduler is active (needed for ev/spawn, fibers+I/O, TCP, etc.).
         // I/O inside fibers propagates SIG_IO to the scheduler; top-level
         // I/O executes inline via maybe_execute_io.
         // Epoch directives are hoisted before stdlib for extract_epoch.
-        let (epoch_prefix, body) = if source.starts_with("(elle/epoch") {
-            source.split_once('\n').unwrap_or((source, ""))
+        let (epoch_prefix, body) = if body_spliced.starts_with("(elle/epoch") {
+            body_spliced.split_once('\n').unwrap_or((&body_spliced, ""))
         } else {
-            ("", source)
+            ("", body_spliced.as_str())
         };
         full_source = format!("{}\n{}\n(ev/run (fn []\n{}\n))", epoch_prefix, STDLIB, body);
         full_source.as_str()

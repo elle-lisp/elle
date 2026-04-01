@@ -26,5 +26,4 @@ wip.md
 
 # Node.js dependencies
 node_modules/
-package.json
-package-lock.json
+package*.json

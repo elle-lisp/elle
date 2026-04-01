@@ -175,6 +175,15 @@ impl ElleHost {
             .is_some_and(|f| !f.is_empty())
     }
 
+    /// Count suspension frames for the current fiber.
+    pub fn suspension_frame_count(&self) -> usize {
+        let id = self.current_fiber_id();
+        self.suspension_frames
+            .get(&id)
+            .map(|f| f.len())
+            .unwrap_or(0)
+    }
+
     /// Convert a Value to its WASM representation (tag, payload).
     /// Immediate values pass through directly. Heap values get a handle.
     pub fn value_to_wasm(&mut self, value: Value) -> (i64, i64) {

@@ -634,22 +634,13 @@ impl WasmEmitter {
             return;
         }
 
-        // Single block: no loop needed (unless suspending with call continuations)
-        if num_blocks == 1 && self.call_continuations.is_empty() {
+        // Single block: no loop needed. For suspending closures we
+        // always use the loop/br_table dispatcher so that all call
+        // sites go through emit_call_suspending uniformly.
+        if num_blocks == 1 && !self.may_suspend {
             let block = &func.blocks[0];
             for spanned in &block.instructions {
                 self.emit_instr(f, &spanned.instr);
-                // Yield-through check for calls in suspending functions
-                if self.may_suspend {
-                    match &spanned.instr {
-                        LirInstr::Call { dst, .. } | LirInstr::CallArrayMut { dst, .. } => {
-                            let resume_state = self.next_resume_state;
-                            self.next_resume_state += 1;
-                            self.emit_yield_through_check(f, *dst, resume_state);
-                        }
-                        _ => {}
-                    }
-                }
             }
             self.emit_terminator_return(f, &block.terminator.terminator);
             return;
@@ -1066,57 +1057,6 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::Return);
-        f.instruction(&Instruction::End);
-    }
-
-    /// Emit the SIG_YIELD check after a call in a suspending function.
-    /// If the callee yielded, spill caller state and return suspended.
-    fn emit_yield_through_check(&self, f: &mut Function, dst: Reg, resume_state: u32) {
-        let total_saved = self.num_regs + self.num_stack_locals;
-
-        // The signal is already in memory[0..4] (written by store_result_with_signal)
-        // and the dst register holds the yielded value.
-        // Read full signal bits from memory (for SIG_IO propagation etc.)
-        f.instruction(&Instruction::I32Const(0));
-        f.instruction(&Instruction::I32Load(MemArg {
-            offset: 0,
-            align: 2,
-            memory_index: 0,
-        }));
-        // Save full signal bits on stack, then check SIG_YIELD bit
-        f.instruction(&Instruction::LocalTee(self.signal_local));
-        f.instruction(&Instruction::I32Const(2)); // SIG_YIELD bit
-        f.instruction(&Instruction::I32And);
-        f.instruction(&Instruction::If(BlockType::Empty));
-        {
-            // Clear signal word (so it doesn't affect future calls)
-            f.instruction(&Instruction::I32Const(0));
-            f.instruction(&Instruction::I32Const(0));
-            f.instruction(&Instruction::I32Store(MemArg {
-                offset: 0,
-                align: 2,
-                memory_index: 0,
-            }));
-
-            // Spill all registers + local slots
-            self.emit_spill_all(f);
-
-            // Call rt_yield with the callee's yielded value and full signal bits
-            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
-            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-            f.instruction(&Instruction::I32Const(resume_state as i32));
-            f.instruction(&Instruction::I32Const(ARGS_BASE));
-            f.instruction(&Instruction::I32Const(total_saved as i32));
-            f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
-            f.instruction(&Instruction::LocalGet(self.signal_local));
-            f.instruction(&Instruction::Call(FN_RT_YIELD));
-
-            // Return suspended
-            f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
-            f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-            f.instruction(&Instruction::I32Const(resume_state as i32));
-            f.instruction(&Instruction::Return);
-        }
         f.instruction(&Instruction::End);
     }
 
