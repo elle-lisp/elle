@@ -19,6 +19,7 @@ pub mod signal;
 pub mod stack;
 pub mod types;
 pub mod variables;
+mod wasm_entry;
 
 pub use crate::value::fiber::CallFrame;
 pub use core::VM;
@@ -228,6 +229,7 @@ impl VM {
                 name: None,
                 result_is_immediate: false,
                 has_outward_heap_set: false,
+                wasm_func_idx: None,
             }),
             env: Rc::new(vec![]),
             squelch_mask: SignalBits::EMPTY,

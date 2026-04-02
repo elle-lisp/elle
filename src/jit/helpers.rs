@@ -354,6 +354,16 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
+    /// Map a stack-relative local slot (from LirInstr::LoadLocal/StoreLocal)
+    /// to a JIT variable index.
+    ///
+    /// The dual-address-space lowerer assigns stack-relative slots starting
+    /// at 0 for all non-LBox locals (non-LBox params + let bindings).
+    /// These always map to the local_var_base region.
+    pub(crate) fn local_slot_to_var(&self, slot: u16) -> u32 {
+        self.local_var_base + slot as u32
+    }
+
     /// Convenience: use a (tag, payload) variable pair for register `r`.
     pub(crate) fn use_var_pair(
         &self,

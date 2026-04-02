@@ -387,7 +387,8 @@ impl JitCompiler {
         } else {
             lir.arity.fixed_params() as u16
         };
-        let num_locally_defined = lir.num_locals.saturating_sub(arity_params) as u32;
+        // All num_locals are stack-relative in the dual-address-space lowerer.
+        let num_locally_defined = lir.num_locals as u32;
         let local_var_base = arg_var_base + arity_params as u32;
         let max_logical = std::cmp::max(
             std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),

@@ -1,5 +1,5 @@
 .PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git check-plugin-list clean help \
-       smoke-vm smoke-jit plugin-tests-vm plugin-tests-jit doctest
+       smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit doctest
 
 .DEFAULT_GOAL := all
 
@@ -89,6 +89,10 @@ ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT :=
 ELLE_JIT_THRESHOLD := 0
 
+# WASM backend skip list: tests requiring features not yet in WASM backend
+# (eval = dynamic compilation)
+WASM_SKIP := -e eval.lisp
+
 smoke-vm:
 	@echo "=== elle scripts (VM, JIT disabled) ==="
 	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
@@ -104,6 +108,14 @@ smoke-jit:
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
+smoke-wasm:
+	@echo "=== elle scripts (WASM backend) ==="
+	@export ELLE_WASM=1 && printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(WASM_SKIP) | \
+		parallel -j 1 --halt now,fail=1 --tag \
+			'timeout 300s $(ELLE) {}' \
+		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
+
 doctest:  ## Test code examples in documentation (literate mode)
 	@echo "=== doctest ==="
 	@printf '%s\n' docs/*.md docs/impl/*.md docs/cookbook/*.md docs/signals/*.md docs/analysis/*.md | \
@@ -111,7 +123,7 @@ doctest:  ## Test code examples in documentation (literate mode)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke: dev smoke-vm smoke-jit doctest  ## Run examples + elle scripts (VM then JIT) + docgen + doctest
+smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest
 	cargo build --release -p elle -q
 	./target/release/elle demos/docgen/generate.lisp
 

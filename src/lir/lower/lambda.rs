@@ -142,19 +142,20 @@ impl<'a> Lowerer<'a> {
         let saved_bindings = std::mem::take(&mut self.binding_to_slot);
         let saved_in_lambda = self.in_lambda;
         let saved_num_captures = self.num_captures;
+        let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         let saved_discard_slot = self.discard_slot;
 
         self.next_reg = 0;
         self.next_label = 1;
-        // num_locals should be params + locals (NOT including captures)
-        // This matches the HIR definition and is what the VM expects
-        // The environment layout is: [captures..., parameters..., locally_defined_cells...]
-        // But num_locals only counts the parameters and locally-defined variables
-        self.current_func.num_locals = params.len() as u16;
+        // num_locals starts at 0; non-LBox params and let-bound vars
+        // will increment it as they're allocated.
+        // LBox params go into the env (not counted in num_locals for stack frame).
+        self.current_func.num_locals = 0;
         self.current_func.num_captures = captures.len() as u16;
         self.in_lambda = true;
         self.num_captures = captures.len() as u16;
+        self.num_local_params = 0;
         self.discard_slot = None;
         self.current_func.doc = doc;
         self.current_func.syntax = syntax;
@@ -173,36 +174,65 @@ impl<'a> Lowerer<'a> {
             self.upvalue_bindings.insert(cap.binding);
         }
 
-        // Build lbox_params_mask and bind parameters to upvalue indices
-        // Parameters that need cells will be wrapped by the VM when the closure is called
+        // Build lbox_params_mask and bind parameters.
+        // LBox params → upvalues in the env (LoadCapture/StoreCapture).
+        // Non-LBox params → locals (LoadLocal/StoreLocal), copied from env at entry.
         let mut lbox_params_mask: u64 = 0;
         for (i, param) in params.iter().enumerate() {
-            let upvalue_idx = self.num_captures + i as u16;
-
             let needs_lbox = self.arena.get(*param).needs_lbox();
 
-            if needs_lbox && i < 64 {
-                // Set the bit for this parameter
-                lbox_params_mask |= 1 << i;
+            if needs_lbox {
+                if i < 64 {
+                    lbox_params_mask |= 1 << i;
+                }
+                // LBox param: lives in env as upvalue
+                let upvalue_idx = self.num_captures + i as u16;
+                self.binding_to_slot.insert(*param, upvalue_idx);
+                self.upvalue_bindings.insert(*param);
+            } else {
+                // Non-LBox param: allocate a local slot.
+                // We'll copy from env into this local at function entry.
+                let slot = self.current_func.num_locals;
+                self.current_func.num_locals += 1;
+                self.num_local_params += 1;
+                self.binding_to_slot.insert(*param, slot);
+                // NOT added to upvalue_bindings → uses LoadLocal/StoreLocal
             }
-
-            // All parameters are upvalues - the VM will wrap them in cells if needed
-            self.binding_to_slot.insert(*param, upvalue_idx);
-            self.upvalue_bindings.insert(*param);
         }
         self.current_func.lbox_params_mask = lbox_params_mask;
+
+        // Copy non-LBox params from env into their local slots.
+        // The VM/host populates the env as [captures..., params...].
+        // Non-LBox params are at env index (num_captures + i).
+        for (i, param) in params.iter().enumerate() {
+            let needs_lbox = self.arena.get(*param).needs_lbox();
+            if !needs_lbox {
+                let env_idx = self.num_captures + i as u16;
+                let slot = *self.binding_to_slot.get(param).unwrap();
+                let tmp = self.fresh_reg();
+                self.emit(LirInstr::LoadCaptureRaw {
+                    dst: tmp,
+                    index: env_idx,
+                });
+                self.emit(LirInstr::StoreLocal { slot, src: tmp });
+            }
+        }
+
+        self.current_func.num_local_params = self.num_local_params as usize;
 
         // Emit signal bound checks for each bounded parameter
         for pb in param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {
                 let src = self.fresh_reg();
-                // All params are upvalues in lambda body — use LoadCapture.
-                // LoadCapture auto-unwraps LocalCell, giving us the closure
-                // value (not the cell wrapper).
-                self.emit(LirInstr::LoadCapture {
-                    dst: src,
-                    index: slot,
-                });
+                let is_upvalue = self.upvalue_bindings.contains(&pb.binding);
+                if is_upvalue {
+                    self.emit(LirInstr::LoadCapture {
+                        dst: src,
+                        index: slot,
+                    });
+                } else {
+                    self.emit(LirInstr::LoadLocal { dst: src, slot });
+                }
                 self.emit(LirInstr::CheckSignalBound {
                     src,
                     allowed_bits: pb.signal.bits,
@@ -236,6 +266,7 @@ impl<'a> Lowerer<'a> {
         self.binding_to_slot = saved_bindings;
         self.in_lambda = saved_in_lambda;
         self.num_captures = saved_num_captures;
+        self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
         self.discard_slot = saved_discard_slot;
 

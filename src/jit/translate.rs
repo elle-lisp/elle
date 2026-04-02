@@ -120,12 +120,16 @@ impl<'a> FunctionTranslator<'a> {
         let zero = builder.ins().iconst(I64, 0);
         let lbox_locals_mask = self.lir.lbox_locals_mask;
 
+        // The first num_local_params slots are non-LBox param copies
+        // (initialized at function entry). lbox_locals_mask indexes from
+        // the first let-bound local (after param copies).
+        let nlp = self.lir.num_local_params as u32;
+
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
-            // Wrap in LBox if the mask says so, OR if beyond bit 63 (the
-            // mask can't represent it — be conservative, matching the
-            // emitter which treats beyond-63 locals as cell locals).
-            let needs_lbox = i >= 64 || (lbox_locals_mask & (1 << i)) != 0;
+            let mask_bit = i.saturating_sub(nlp);
+            let needs_lbox =
+                i >= nlp && (mask_bit >= 64 || (lbox_locals_mask & (1 << mask_bit)) != 0);
             if needs_lbox {
                 let (cell_tag, cell_payload) =
                     self.call_helper_value_unary(builder, self.helpers.make_lbox, nil_tag, zero)?;
@@ -161,15 +165,13 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             LirInstr::LoadLocal { dst, slot } => {
-                // Local slots are in the env-relative space; offset by num_regs
-                // to avoid colliding with LIR work registers [0, num_regs).
-                let base = self.lir.num_regs + *slot as u32;
+                let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, base);
                 self.def_var_pair(builder, dst.0, tag, payload);
             }
 
             LirInstr::StoreLocal { slot, src } => {
-                let base = self.lir.num_regs + *slot as u32;
+                let base = self.local_slot_to_var(*slot);
                 let (tag, payload) = self.use_var_pair(builder, src.0);
                 self.def_var_pair(builder, base, tag, payload);
             }
@@ -222,7 +224,8 @@ impl<'a> FunctionTranslator<'a> {
                 } else {
                     // Locally-defined variable
                     let local_index = *index - num_captures - arity;
-                    let base = self.local_var_base + local_index as u32;
+                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     let needs_lbox = (local_index as u32) >= 64
                         || (self.lir.lbox_locals_mask & (1 << local_index)) != 0;
@@ -265,7 +268,8 @@ impl<'a> FunctionTranslator<'a> {
                     self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let base = self.local_var_base + local_index as u32;
+                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     self.def_var_pair(builder, dst.0, tag, payload);
                 }
@@ -421,7 +425,8 @@ impl<'a> FunctionTranslator<'a> {
                     }
                 } else {
                     let local_index = *index - num_captures - arity;
-                    let base = self.local_var_base + local_index as u32;
+                    let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
+                    let base = self.local_var_base + jit_slot;
                     // Use store_lbox if the mask says so, OR if beyond bit 63
                     // (conservative — matches emitter which treats these as cell locals)
                     let needs_lbox = (local_index as u32) >= 64
@@ -635,6 +640,7 @@ impl<'a> FunctionTranslator<'a> {
                     name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
+                    wasm_func_idx: None,
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
@@ -878,6 +884,12 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
+            }
+
+            LirInstr::SuspendingCall { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "SuspendingCall".to_string(),
+                ));
             }
 
             LirInstr::ArrayMutExtend { dst, array, source } => {
@@ -1177,7 +1189,10 @@ impl<'a> FunctionTranslator<'a> {
             .max()
             .unwrap_or(0);
         let max_operands = std::cmp::max(max_yield_operands, max_call_operands);
-        let max_total = num_locals + max_operands;
+        // Spill saves: arity params (arg_vars) + num_locals locals (local_var_base)
+        // + operand stack entries.
+        let arity = self.lir.num_params;
+        let max_total = arity + num_locals + max_operands;
 
         if max_total > 0 {
             // Each Value is 16 bytes
@@ -1201,8 +1216,10 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<cranelift_codegen::ir::Value, JitError> {
         let arity = self.lir.num_params as u16;
         let num_locals = self.lir.num_locals;
-        let num_locally_defined = num_locals.saturating_sub(arity);
-        let total = num_locals as usize + stack_regs.len();
+        // Spill params (from arg vars) + all local vars (from local_var_base).
+        // num_locals includes non-LBox param copies + let-bound locals.
+        let num_locally_defined = num_locals;
+        let total = arity as usize + num_locally_defined as usize + stack_regs.len();
 
         if total == 0 {
             return Ok(builder.ins().iconst(I64, 0)); // null pointer

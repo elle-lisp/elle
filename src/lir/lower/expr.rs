@@ -60,7 +60,7 @@ impl<'a> Lowerer<'a> {
                 func,
                 args,
                 is_tail,
-            } => self.lower_call(func, args.as_slice(), *is_tail),
+            } => self.lower_call(func, args.as_slice(), *is_tail, hir.signal.may_suspend()),
 
             HirKind::Assign { target, value } => self.lower_assign(target, value),
             HirKind::Define { binding, value } => self.lower_define(*binding, value),
@@ -105,10 +105,11 @@ impl<'a> Lowerer<'a> {
 
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
-                // In a lambda, captures, parameters, and locally-defined variables are accessed via LoadCapture
-                // Note: LoadCapture (which emits LoadUpvalue) auto-unwraps LocalCell,
-                // so we don't need to emit LoadLBox for captured variables
-                self.emit(LirInstr::LoadCapture { dst, index: slot });
+                if needs_lbox {
+                    self.emit(LirInstr::LoadCapture { dst, index: slot });
+                } else {
+                    self.emit(LirInstr::LoadCaptureRaw { dst, index: slot });
+                }
                 Ok(dst)
             } else {
                 // Outside lambdas, local variables use LoadLocal
@@ -209,15 +210,15 @@ impl<'a> Lowerer<'a> {
             for binding in bindings_to_preallocate {
                 // Allocate slot now so captures can find it
                 if !self.binding_to_slot.contains_key(&binding) {
+                    let needs_lbox = self.arena.get(binding).needs_lbox();
                     let slot = self.allocate_slot(binding);
 
-                    // Inside lambdas, local variables are part of the closure environment
-                    if self.in_lambda {
+                    // Inside lambdas, only LBox locals live in the closure
+                    // environment (LoadCapture/StoreCapture). Non-LBox locals
+                    // use fast local storage (LoadLocal/StoreLocal).
+                    if self.in_lambda && needs_lbox {
                         self.upvalue_bindings.insert(binding);
                     }
-
-                    // Check if this binding needs a cell
-                    let needs_lbox = self.arena.get(binding).needs_lbox();
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables

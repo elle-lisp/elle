@@ -456,6 +456,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         });
         Rc::new(Closure {
             template,
@@ -560,6 +561,7 @@ mod tests {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         });
 
         let closure = Rc::new(Closure {

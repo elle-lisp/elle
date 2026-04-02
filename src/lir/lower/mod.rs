@@ -124,6 +124,9 @@ pub struct Lowerer<'a> {
     in_lambda: bool,
     /// Number of captured variables (for lambda context)
     num_captures: u16,
+    /// Number of parameters allocated as locals (non-LBox, non-captured params).
+    /// Used by allocate_slot to compute lbox_locals_mask offsets.
+    num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
     upvalue_bindings: std::collections::HashSet<Binding>,
@@ -165,6 +168,7 @@ impl<'a> Lowerer<'a> {
             binding_to_slot: HashMap::new(),
             in_lambda: false,
             num_captures: 0,
+            num_local_params: 0,
             upvalue_bindings: std::collections::HashSet::new(),
             current_span: Span::synthetic(),
             intrinsics: FxHashMap::default(),
@@ -251,21 +255,30 @@ impl<'a> Lowerer<'a> {
     }
 
     fn allocate_slot(&mut self, binding: Binding) -> u16 {
-        // Inside a lambda, slots need to account for the captures offset
-        // Environment layout: [captures..., params..., locally_defined...]
-        // num_locals tracks params + locally_defined (NOT captures)
-        // But binding_to_slot needs the actual index in the environment
+        // Inside a lambda, two address spaces coexist:
+        //   - Env (captures + params + LBox locals): LoadCapture/StoreCapture
+        //   - Stack/register locals (non-LBox let-bound): LoadLocal/StoreLocal
+        //
+        // Environment layout: [captures..., params..., lbox_locals..., nil_placeholders...]
+        // Stack frame layout:  [params..., all_locally_defined...]
+        //
+        // LBox locals get ENV-relative slots (num_captures + num_locals).
+        // Non-LBox locals get STACK-relative slots (num_locals).
+        // Both increment num_locals to keep env placeholder slots aligned.
+        let needs_lbox = self.arena.get(binding).needs_lbox();
         let slot = if self.in_lambda {
-            // Track which locally-defined variables need cells.
-            // Local index = num_locals - num_params (0-based within locally-defined vars).
-            // Must use num_params (not arity.fixed_params()) because num_params includes
-            // the rest parameter slot for variadic functions, matching the environment layout.
-            let num_params = self.current_func.num_params as u16;
-            let local_index = self.current_func.num_locals - num_params;
-            if self.arena.get(binding).needs_lbox() && local_index < 64 {
+            // local_index is relative to locally-defined vars (after param locals)
+            let local_index = self.current_func.num_locals - self.num_local_params;
+            if needs_lbox && local_index < 64 {
                 self.current_func.lbox_locals_mask |= 1 << local_index;
             }
-            self.num_captures + self.current_func.num_locals
+            if needs_lbox {
+                // Env-relative: for LoadCapture/StoreCapture
+                self.num_captures + self.current_func.num_locals
+            } else {
+                // Stack-relative: for LoadLocal/StoreLocal
+                self.current_func.num_locals
+            }
         } else {
             self.current_func.num_locals
         };

@@ -17,9 +17,6 @@ depend on other modules or plugins take them as arguments.
 | `contract.lisp` | Compositional validation for function boundaries |
 | `lua.lisp` | Lua standard library compatibility prelude |
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
-| `portrait.lisp` | Semantic portraits from compile/analyze |
-| `rdf.lisp` | RDF triple generation for the knowledge graph |
-| `watch.lisp` | Fiber-aware filesystem watcher (wraps elle-watch plugin) |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
 
 ---

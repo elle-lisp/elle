@@ -22,8 +22,8 @@ issue-*/
 aws-models/
 lib/aws/*.lisp
 !lib/aws/sigv4.lisp
+wip.md
 
 # Node.js dependencies
 node_modules/
-package.json
-package-lock.json
+package*.json

@@ -92,6 +92,11 @@ pub struct VM {
     /// before it becomes a JIT compilation candidate.
     /// Initialized from `ELLE_JIT_THRESHOLD` env var, defaulting to 10.
     pub jit_hotness_threshold: usize,
+    /// Lazy WASM compilation tier. When `ELLE_WASM=1`, hot closures are
+    /// compiled to per-closure WASM modules and dispatched through Wasmtime.
+    pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
+    /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
+    pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -123,6 +128,7 @@ fn root_closure() -> Rc<Closure> {
             name: None,
             result_is_immediate: false,
             has_outward_heap_set: false,
+            wasm_func_idx: None,
         }),
         env: Rc::new(vec![]),
         squelch_mask: SignalBits::EMPTY,
@@ -163,6 +169,12 @@ impl VM {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(10),
+            wasm_tier: if std::env::var_os("ELLE_WASM_TIER").is_some() {
+                crate::wasm::lazy::WasmTier::new().ok()
+            } else {
+                None
+            },
+            wasm_rejections: FxHashMap::default(),
         }
     }
 

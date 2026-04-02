@@ -87,6 +87,23 @@ fn run_source(
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
+    // WASM backend: compile and run through Wasmtime instead of bytecode VM
+    if std::env::var_os("ELLE_WASM").is_some() {
+        let no_stdlib = std::env::var_os("ELLE_WASM_NO_STDLIB").is_some();
+        let eval_fn = if no_stdlib {
+            elle::wasm::eval_wasm
+        } else {
+            elle::wasm::eval_wasm_with_stdlib
+        };
+        return match eval_fn(contents, source_name) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                eprintln!("{}", e);
+                Err(e)
+            }
+        };
+    }
+
     // Compile file as a single letrec
     let result = match compile_file(contents, symbols, source_name) {
         Ok(r) => r,

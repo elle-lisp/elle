@@ -130,6 +130,11 @@ impl<'a> Analyzer<'a> {
             }
         }
 
+        // Snapshot scope after Pass 1: contains only pre-bound def/var names.
+        // Used by Pass 3 to isolate fixpoint re-analysis from any bindings
+        // that Pass 2 adds while analyzing expression entries.
+        let pass1_scope_snapshot = self.scopes.last().map(|s| s.bindings.clone());
+
         // Pass 2: analyze all initializers sequentially.
         let mut bindings = Vec::new();
         let mut signal = Signal::silent();
@@ -231,11 +236,25 @@ impl<'a> Analyzer<'a> {
         // foo stays Pure even though it calls a Yields function. Fix: re-analyze
         // lambda bindings until signal_env stabilizes.
         //
+        // Scope isolation: Pass 2 may have analyzed expression entries (e.g.,
+        // parameterize bodies) that contain `def` forms. Those defs register
+        // bindings in the file scope. Re-analyzing lambda defs with these
+        // extra bindings visible would produce incorrect capture sets. We
+        // snapshot the scope before Pass 3 and restore it after so that
+        // re-analysis sees only the pre-bound def/var names from Pass 1.
+        //
         // Re-analysis side signals are benign: the side signals of re-analyzing
         // a lambda (additional `mark_captured()`, `mark_mutated()` calls on
         // bindings) are monotonic — they only add flags, never remove them.
         // Re-analysis can only make the result more conservative, never incorrect.
         if !lambda_entries.is_empty() {
+            // Swap in the Pass 1 scope snapshot so re-analysis doesn't see
+            // bindings added by expression entries during Pass 2.
+            let mut pass2_bindings = None;
+            if let (Some(snapshot), Some(scope)) = (&pass1_scope_snapshot, self.scopes.last_mut()) {
+                pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
+            }
+
             const MAX_FIXPOINT_ITERS: usize = 10;
             for _ in 0..MAX_FIXPOINT_ITERS {
                 let mut changed = false;
@@ -260,6 +279,11 @@ impl<'a> Analyzer<'a> {
                 if !changed {
                     break;
                 }
+            }
+
+            // Restore the full scope (with Pass 2 additions) for the body.
+            if let (Some(saved), Some(scope)) = (pass2_bindings, self.scopes.last_mut()) {
+                scope.bindings = saved;
             }
         }
 

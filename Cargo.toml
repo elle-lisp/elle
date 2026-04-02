@@ -68,6 +68,10 @@ cranelift-jit = "0.116"
 cranelift-native = "0.116"
 target-lexicon = "0.13"
 
+# WASM backend (feature-gated behind ELLE_WASM=1)
+wasmtime = { version = "43", features = ["incremental-cache"] }
+wasm-encoder = "0.245"
+
 [dev-dependencies]
 criterion = "0.5"
 proptest = "1.4"
@@ -81,6 +85,9 @@ lto = "fat"
 codegen-units = 1
 opt-level = 3
 strip = "symbols"
+
+[patch.crates-io]
+wasmparser = { path = "patches/wasmparser" }
 
 [profile.profiling]
 inherits = "release"

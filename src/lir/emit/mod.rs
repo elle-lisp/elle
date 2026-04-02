@@ -338,6 +338,7 @@ impl Emitter {
                     name: func.name.clone().map(|s| Rc::from(s.as_str())),
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
+                    wasm_func_idx: None,
                 };
                 let closure = Closure {
                     template: Rc::new(template),
@@ -360,7 +361,7 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::Call { dst, func, args } => {
+            LirInstr::Call { dst, func, args } | LirInstr::SuspendingCall { dst, func, args } => {
                 // Call expects: [arg1, arg2, ..., argN, func] on stack
                 // Check if values are already in the correct positions at the top of the stack
                 let total_values = args.len() + 1; // args + func

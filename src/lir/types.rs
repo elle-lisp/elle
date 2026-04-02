@@ -64,6 +64,10 @@ pub struct LirFunction {
     /// Total number of parameter slots (required + optional + rest if present).
     /// Used by VM populate_env to know how many fixed slots to fill.
     pub num_params: usize,
+    /// Number of non-LBox parameters copied to local slots.
+    /// These occupy the first `num_local_params` positions in `num_locals`.
+    /// The `lbox_locals_mask` indexes from position `num_local_params`.
+    pub num_local_params: usize,
     /// Yield point metadata, populated during bytecode emission.
     /// Indexed by yield point order (0, 1, 2, ...).
     /// Empty for non-yielding functions.
@@ -142,6 +146,7 @@ impl LirFunction {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params,
+            num_local_params: 0,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             result_is_immediate: false,
@@ -226,8 +231,13 @@ pub enum LirInstr {
     },
 
     // === Function Calls ===
-    /// Call a function
+    /// Call a function (callee is known to not suspend).
     Call { dst: Reg, func: Reg, args: Vec<Reg> },
+    /// Call a function that may suspend (yield, I/O, etc.).
+    /// The WASM emitter creates a call-site continuation with spill/restore
+    /// so the caller can resume if the callee yields.
+    /// Only emitted inside functions whose signal includes may_suspend().
+    SuspendingCall { dst: Reg, func: Reg, args: Vec<Reg> },
     /// Tail call (no return)
     TailCall { func: Reg, args: Vec<Reg> },
 

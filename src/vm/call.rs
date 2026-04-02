@@ -203,6 +203,16 @@ impl VM {
                 return None;
             }
 
+            // Tiered WASM compilation and dispatch.
+            // Checked before JIT because WASM is the preferred fast path when enabled.
+            if closure.template.lir_function.is_some() {
+                if let Some(bits) = self.try_wasm_call(closure, &args) {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
+                    return bits;
+                }
+            }
+
             // JIT compilation and dispatch.
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).
@@ -258,6 +268,18 @@ impl VM {
             // borrow lifetime conflicts: `closure` borrows from `func`, and we
             // need `closure_squelch_mask` after the call returns.
             let closure_squelch_mask = closure.squelch_mask;
+
+            // Guard: WASM-compiled closures have empty bytecode. They
+            // cannot be executed by the bytecode VM.
+            if closure.template.bytecode.is_empty() {
+                let err = crate::value::error_val(
+                    "exec-error",
+                    "cannot execute WASM closure in bytecode VM",
+                );
+                self.fiber.stack.push(err);
+                self.fiber.call_depth -= 1;
+                return Some(SIG_ERROR);
+            }
 
             // Execute the closure, saving/restoring the caller's stack.
             // Essential for fiber/signal propagation and yield-through-nested-calls.

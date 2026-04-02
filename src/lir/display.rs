@@ -119,7 +119,7 @@ impl fmt::Display for LirInstr {
             }
 
             // === Function Calls ===
-            LirInstr::Call { dst, func, args } => {
+            LirInstr::Call { dst, func, args } | LirInstr::SuspendingCall { dst, func, args } => {
                 write!(f, "{} ← {}(", dst, func)?;
                 fmt_regs(args, f)?;
                 f.write_str(")")
