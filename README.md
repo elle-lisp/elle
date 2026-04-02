@@ -328,7 +328,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (difference |1 2| |2 3|)    # => |1|
 ```
 
-**bytes** — immutable binary data. Literal syntax: `b[1 2 3]`. Displays as `#bytes[hex ...]`.
+**bytes** — immutable binary data. Literal syntax: `b[1 2 3]`. Displays as `b[hex ...]`.
 
 ```lisp
 (def b b[1 2 3])
@@ -338,7 +338,7 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (bytes->hex b2)         # => "68656c6c6f"
 ```
 
-**@bytes** — mutable binary data. Literal syntax: `@b[1 2 3]`. Displays as `#@bytes[hex ...]`.
+**@bytes** — mutable binary data. Literal syntax: `@b[1 2 3]`. Displays as `@b[hex ...]`.
 
 ```lisp
 (def b @b[1 2 3])
@@ -452,6 +452,7 @@ Exactly two values are falsy. Everything else is truthy.
 | keyword | `:foo` |
 | empty list | `()` |
 | string | `hello` (no quotes) |
+| @string | `@"hello"` |
 | cons | `(1 2 3)` or `(a . b)` for improper |
 | array | `[1 2 3]` |
 | @array | `@[1 2 3]` |
@@ -459,13 +460,12 @@ Exactly two values are falsy. Everything else is truthy.
 | @struct | `@{:a 1}` |
 | set | `\|1 2 3\|` |
 | @set | `@\|1 2 3\|` |
-| bytes | `#bytes[01 02 03]` |
-| @bytes | `#@bytes[01 02 03]` |
+| bytes | `b[01 02 03]` |
+| @bytes | `@b[01 02 03]` |
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
 | box | `<box value>` |
-| @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 
 ## Control Flow
