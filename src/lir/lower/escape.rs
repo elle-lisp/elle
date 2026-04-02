@@ -98,12 +98,14 @@ impl<'a> Lowerer<'a> {
                 // referencing one is not mistaken for an outer (pre-scope)
                 // binding.
                 //
-                // We use a sentinel Hir (a string literal) whose
-                // result_is_safe is false, representing "heap-allocated
-                // inside the scope". The String variant is chosen purely
-                // because result_is_safe already returns false for it.
+                // We use a sentinel Hir whose result_is_safe is false,
+                // representing "heap-allocated inside the scope".
+                // Yield is always unsafe in result_is_safe.
                 let sentinel = Hir::silent(
-                    HirKind::String(String::new()),
+                    HirKind::Yield(Box::new(Hir::silent(
+                        HirKind::Nil,
+                        crate::syntax::Span::synthetic(),
+                    ))),
                     crate::syntax::Span::synthetic(),
                 );
                 let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
@@ -206,8 +208,12 @@ impl<'a> Lowerer<'a> {
             // Parameterize: result is the body's result
             HirKind::Parameterize { body, .. } => self.result_is_safe(body, scope_bindings),
 
+            // String constants live in the constant pool (LoadConst),
+            // not on the fiber heap. Safe to return from a scope.
+            HirKind::String(_) => true,
+
             // Everything else: conservatively unsafe
-            // String, Lambda, Yield, Quote, Eval, Set, Define
+            // Lambda, Yield, Quote, Eval, Set, Define
             _ => false,
         }
     }
@@ -391,9 +397,11 @@ impl<'a> Lowerer<'a> {
                         // external mutable structures (e.g. via put to an outer
                         // @struct). Built-in primitives are safe — they only
                         // produce return values and/or mutate their arguments
-                        // (caught by check 1). Without interprocedural analysis,
-                        // any call to a non-primitive is conservatively treated
-                        // as a potential outward escape.
+                        // (caught by check 1).
+                        //
+                        // TODO: rotation-safe callees should also be safe here,
+                        // but the interaction with yielding code (fiber suspend
+                        // across scope marks) needs investigation first.
                         if !self.callee_is_primitive(func) {
                             return true;
                         }
