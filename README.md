@@ -225,6 +225,10 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
    The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in an lbox automatically. No explicit `box` or `ref` needed.
    </details>
 
+- **Traits on any heap value.** `with-traits` attaches an immutable struct to any value. Traits are invisible to equality, ordering, and hashing — they're metadata. Dispatch on traits via `match` on `(traits v)`.
+
+- **Contracts for function boundaries.** Compositional validators with blame tracking. Wrap any function with pre/post-condition checking: `(contract f arg-validators return-validator)`. Validators compose with `v/and`, `v/or`, `v/optional`, `v/arrayof`, `v/mapof`.
+
 - **Full tail-call optimisation.** All tail calls are optimised — not just self-recursion. Mutually recursive functions, continuation-passing style, and trampolining all work without stack overflow.
 
 - **Splice operator for array spreading.** `;expr` marks a value for spreading at call sites and in data constructors. `(splice expr)` is the long form.
