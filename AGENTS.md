@@ -9,6 +9,13 @@ lexical scoping with closure capture analysis, and we have a signal system.
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
+**`origin/main` is always green.** Every commit on main passes every test —
+Elle scripts, Rust tests, examples, documentation. This is enforced by CI
+and a merge queue. If a test fails on your branch, your branch caused it.
+"Pre-existing defect" is not a valid explanation when main is green. Fix
+every failure before merging — no skip lists, no expected failures, no
+excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
+
 ## Contents
 
 - [Architecture](#architecture)

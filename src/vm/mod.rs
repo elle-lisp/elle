@@ -221,7 +221,6 @@ impl VM {
                 lbox_locals_mask: 0,
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
-                jit_code: None,
                 lir_function: None,
                 doc: None,
                 syntax: None,

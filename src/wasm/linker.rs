@@ -226,7 +226,6 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 lbox_locals_mask,
                 symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
                 location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
-                jit_code: None,
                 lir_function: None,
                 doc: None,
                 syntax: None,

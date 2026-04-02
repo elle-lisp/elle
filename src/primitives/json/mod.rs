@@ -440,7 +440,6 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(std::collections::HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             vararg_kind: crate::hir::VarargKind::List,

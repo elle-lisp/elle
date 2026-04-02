@@ -330,7 +330,6 @@ impl Emitter {
                     lbox_locals_mask: func.lbox_locals_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
-                    jit_code: None,
                     lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc,
                     syntax: func.syntax.clone(),

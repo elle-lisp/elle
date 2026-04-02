@@ -120,7 +120,6 @@ fn root_closure() -> Rc<Closure> {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             syntax: None,

@@ -41,8 +41,6 @@ pub struct ClosureTemplate {
     pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
     pub location_map: Rc<LocationMap>,
-    /// JIT-compiled native code for this closure (if available).
-    pub jit_code: Option<Rc<crate::jit::JitCode>>,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Optional docstring from the source lambda
@@ -163,7 +161,6 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -200,7 +197,6 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -229,7 +225,6 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -258,7 +253,6 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
             lir_function: None,
             doc: None,
             syntax: None,

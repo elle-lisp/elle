@@ -750,7 +750,6 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 lbox_locals_mask: sc.lbox_locals_mask,
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
-                jit_code: None,
                 lir_function: None,
                 doc,
                 syntax: None,
