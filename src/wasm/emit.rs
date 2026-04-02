@@ -11,7 +11,7 @@
 //! - `controlflow.rs` — CFG emission, block dispatch, terminators
 //! - `suspend.rs` — CPS suspension/resume, spill/restore, block splitting
 
-use crate::lir::{ClosureId, Label, LirFunction, Reg, Terminator};
+use crate::lir::{ClosureId, Label, LirFunction, Reg};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -30,8 +30,15 @@ pub struct EmitResult {
 }
 
 /// Emit a WASM module from an LirModule.
-pub fn emit_module(module: &crate::lir::LirModule) -> EmitResult {
+///
+/// Closures in `stubbed` are emitted as minimal stubs (they have
+/// pre-compiled standalone Modules and are dispatched via rt_call).
+pub fn emit_module(
+    module: &crate::lir::LirModule,
+    stubbed: std::collections::HashSet<ClosureId>,
+) -> EmitResult {
     let mut emitter = WasmEmitter::new();
+    emitter.stubbed_closures = stubbed;
     emitter.emit_module_from_lir(module)
 }
 
@@ -41,21 +48,15 @@ pub fn emit_module(module: &crate::lir::LirModule) -> EmitResult {
 /// closures to WASM on demand. The module has the same host imports as
 /// the full module but contains only one function (at table index 0).
 ///
-/// Returns `None` if the function can't be compiled standalone.
+/// Emit a standalone WASM module for a single closure.
 ///
-/// MakeClosure and TailCall are handled via host-mediated dispatch
-/// (rt_make_closure and rt_prepare_tail_call). Yield requires CPS
-/// support in the standalone host and is still rejected.
+/// All instruction types are supported:
+/// - MakeClosure/TailCall via host-mediated dispatch
+/// - Yield via CPS transform (same as full module) + rt_yield on host
 pub fn emit_single_closure(
     func: &LirFunction,
     module: Option<&crate::lir::LirModule>,
 ) -> Option<EmitResult> {
-    for block in &func.blocks {
-        if matches!(block.terminator.terminator, Terminator::Yield { .. }) {
-            return None;
-        }
-    }
-
     let mut emitter = WasmEmitter::new();
     // Provide module context for MakeClosure → ClosureId resolution
     if let Some(m) = module {
@@ -188,6 +189,8 @@ pub(super) struct WasmEmitter {
     pub known_int: std::collections::HashSet<Reg>,
     /// Module's closure list for MakeClosure metadata lookup.
     pub module_closures: Option<Vec<LirFunction>>,
+    /// Closures to emit as stubs (pre-compiled as standalone Modules).
+    pub stubbed_closures: std::collections::HashSet<ClosureId>,
 }
 
 impl WasmEmitter {
@@ -216,6 +219,7 @@ impl WasmEmitter {
             current_num_captures: 0,
             known_int: std::collections::HashSet::new(),
             module_closures: None,
+            stubbed_closures: std::collections::HashSet::new(),
         }
     }
 
@@ -414,8 +418,19 @@ impl WasmEmitter {
         let mut closure_bodies = Vec::with_capacity(lir_module.closures.len());
         for (i, closure_func) in lir_module.closures.iter().enumerate() {
             self.current_table_idx = i as u32;
-            let closure_body = self.emit_closure_function(closure_func);
-            closure_bodies.push(closure_body);
+            if self.stubbed_closures.contains(&ClosureId(i as u32)) {
+                // Emit a minimal stub — this closure is pre-compiled
+                // as a standalone Module and dispatched via rt_call.
+                // The stub is never reached at runtime.
+                let mut stub =
+                    Function::new([(1, ValType::I64), (1, ValType::I64), (1, ValType::I32)]);
+                stub.instruction(&Instruction::Unreachable);
+                stub.instruction(&Instruction::End);
+                closure_bodies.push(stub);
+            } else {
+                let closure_body = self.emit_closure_function(closure_func);
+                closure_bodies.push(closure_body);
+            }
         }
         let entry_body = self.emit_function(&lir_module.entry);
         let mut code = CodeSection::new();

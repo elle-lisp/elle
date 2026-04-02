@@ -41,7 +41,7 @@ fn compile_stdlib_to_lir() {
 fn compile_stdlib_to_wasm() {
     let (_vm, mut symbols) = setup();
     let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir);
+    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
     eprintln!(
         "stdlib WASM: {} bytes, {} constants",
         result.wasm_bytes.len(),
@@ -62,7 +62,7 @@ fn run_stdlib_first_100_lines() {
 "#;
     let (_vm, mut symbols) = setup();
     let lir = elle::pipeline::compile_file_to_lir(source, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir);
+    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
     let engine = elle::wasm::store::create_engine().unwrap();
     match elle::wasm::store::compile_module(&engine, &result.wasm_bytes) {
         Ok(_) => eprintln!("first 100 lines: WASM valid"),
@@ -85,7 +85,7 @@ fn stdlib_with_map() {
 fn run_stdlib_on_wasm() {
     let (_vm, mut symbols) = setup();
     let lir = elle::pipeline::compile_file_to_lir(STDLIB, &mut symbols, "<stdlib>", 0).unwrap();
-    let result = elle::wasm::emit::emit_module(&lir);
+    let result = elle::wasm::emit::emit_module(&lir, std::collections::HashSet::new());
     eprintln!(
         "WASM: {} bytes, {} consts, {} closures",
         result.wasm_bytes.len(),

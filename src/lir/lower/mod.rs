@@ -209,6 +209,7 @@ pub struct Lowerer<'a> {
     /// Incremented on `RegionEnter`, decremented on `RegionExit`.
     /// Used by `lower_break` to emit compensating `RegionExit`s.
     region_depth: u32,
+    pending_region_exits: u32,
     /// Compile-time scope allocation statistics.
     scope_stats: ScopeStats,
     /// Scratch slot for discarding unused intermediate values.
@@ -246,6 +247,7 @@ impl<'a> Lowerer<'a> {
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
+            pending_region_exits: 0,
             scope_stats: ScopeStats::default(),
             discard_slot: None,
             symbol_names: HashMap::new(),
@@ -305,6 +307,15 @@ impl<'a> Lowerer<'a> {
         self.binding_to_slot.clear();
         self.discard_slot = None;
         self.closures.clear();
+
+        // Precompute callee properties for scope allocation decisions.
+        // These scan the HIR for lambda defs and record per-binding
+        // properties (result_is_immediate, return_params, rotation_safe)
+        // which checks callee_result_immediate; rotation_safety depends on
+        // the callee having been lowered, so it reads from closures[].
+        self.precompute_result_immediate(hir);
+        self.precompute_return_params(hir);
+        self.precompute_rotation_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));

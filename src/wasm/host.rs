@@ -23,6 +23,13 @@ use super::handle::HandleTable;
 /// Bytecode + constants for a closure, used by spawn for cross-thread execution.
 pub type ClosureBytecode = (std::rc::Rc<Vec<u8>>, std::rc::Rc<Vec<Value>>);
 
+/// A pre-compiled standalone closure Module with its constant pool.
+#[derive(Clone)]
+pub struct PrecachedClosure {
+    pub module: wasmtime::Module,
+    pub const_pool: Vec<Value>,
+}
+
 /// Base address for the env stack in linear memory.
 /// Each `call_wasm_closure` allocates a region starting from here.
 pub const ENV_STACK_BASE: usize = 4096;
@@ -97,6 +104,10 @@ pub struct ElleHost {
     /// Lazily-initialized I/O backend for inline I/O execution.
     /// Created on first use, reused for subsequent I/O operations.
     io_backend: Option<AnyBackend>,
+    /// Per-closure pre-compiled standalone Modules with their const pools.
+    /// Indexed by table index (= ClosureId). When set, rt_call dispatches
+    /// to the pre-compiled Module instead of call_indirect on the full table.
+    pub precached_closures: Vec<Option<PrecachedClosure>>,
 }
 
 impl ElleHost {
@@ -115,6 +126,7 @@ impl ElleHost {
             closure_bytecodes: Vec::new(),
             debug: crate::config::get().debug_wasm,
             io_backend: None,
+            precached_closures: Vec::new(),
         }
     }
 }

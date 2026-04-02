@@ -689,6 +689,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            module_closures: None,
         });
         Value::closure(Closure {
             template,

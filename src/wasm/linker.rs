@@ -115,8 +115,19 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 }
             } else if let Some(closure) = func_val.as_closure() {
                 if let Some(wasm_idx) = closure.template.wasm_func_idx {
-                    // WASM closure: build env in linear memory and call
-                    super::store::call_wasm_closure(&mut caller, closure, wasm_idx, &args)
+                    // Check for pre-compiled per-closure Module first.
+                    let precached = caller
+                        .data()
+                        .precached_closures
+                        .get(wasm_idx as usize)
+                        .and_then(|opt| opt.as_ref())
+                        .cloned();
+                    if let Some(ref pc) = precached {
+                        super::store::call_precached_closure(&mut caller, closure, pc, &args)
+                    } else {
+                        // Fall back to full module's table
+                        super::store::call_wasm_closure(&mut caller, closure, wasm_idx, &args)
+                    }
                 } else {
                     // Bytecode closure — not supported in WASM backend
                     let err = crate::value::error_val(
@@ -235,6 +246,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: Some(table_idx as u32),
+                module_closures: None,
             });
 
             let closure = crate::value::closure::Closure {

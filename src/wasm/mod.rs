@@ -155,6 +155,40 @@ pub fn eval_wasm_with_stdlib(source: &str, source_name: &str) -> Result<Value, S
     eval_wasm_raw(source, source_name, true)
 }
 
+/// Compile a WASM module, checking the disk cache first.
+///
+/// Returns a compiled Module. On cache miss, compiles from bytes,
+/// serializes, and caches atomically.
+fn compile_or_cache_module(
+    engine: &wasmtime::Engine,
+    wasm_bytes: &[u8],
+) -> Result<wasmtime::Module, String> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    if let Some(cache_dir) = &crate::config::get().cache {
+        let mut hasher = DefaultHasher::new();
+        wasm_bytes.hash(&mut hasher);
+        let hash = hasher.finish();
+        let cache_path =
+            std::path::PathBuf::from(cache_dir).join(format!("closure_{:016x}.bin", hash));
+
+        if let Ok(bytes) = std::fs::read(&cache_path) {
+            return unsafe { wasmtime::Module::deserialize(engine, &bytes) }
+                .map_err(|e| e.to_string());
+        }
+
+        let module = wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())?;
+        if let Ok(serialized) = module.serialize() {
+            std::fs::create_dir_all(cache_dir).ok();
+            store::atomic_write(&cache_path, &serialized);
+        }
+        Ok(module)
+    } else {
+        wasmtime::Module::new(engine, wasm_bytes).map_err(|e| e.to_string())
+    }
+}
+
 fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<Value, String> {
     let mut vm = crate::vm::VM::new();
     let mut symbols = Box::new(crate::symbol::SymbolTable::new());
@@ -225,8 +259,31 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         }
     }
 
-    // LIR → WASM bytes + constant pool
-    let result = emit::emit_module(&lir_module);
+    // Per-closure pre-compilation: compile each closure as a standalone
+    // Module, cached by WASM bytes hash. The full module gets stubs for
+    // pre-compiled closures (tiny, compile instantly). At runtime, rt_call
+    // dispatches to pre-compiled Modules instead of the full module's table.
+    let engine = store::create_engine().map_err(|e| e.to_string())?;
+    let mut precached: Vec<Option<host::PrecachedClosure>> = vec![None; lir_module.closures.len()];
+    let mut stubbed = std::collections::HashSet::new();
+
+    if crate::config::get().cache.is_some() {
+        for (i, closure_func) in lir_module.closures.iter().enumerate() {
+            if let Some(standalone) = emit::emit_single_closure(closure_func, Some(&lir_module)) {
+                if let Ok(module) = compile_or_cache_module(&engine, &standalone.wasm_bytes) {
+                    precached[i] = Some(host::PrecachedClosure {
+                        module,
+                        const_pool: standalone.const_pool,
+                    });
+                    stubbed.insert(crate::lir::ClosureId(i as u32));
+                }
+            }
+        }
+    }
+
+    // LIR → WASM bytes + constant pool. Stubbed closures get minimal
+    // bodies (unreachable) since they're served by pre-compiled Modules.
+    let result = emit::emit_module(&lir_module, stubbed);
     let t2 = std::time::Instant::now();
 
     // Dump WASM for analysis
@@ -234,9 +291,8 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         std::fs::write("/tmp/elle-wasm-dump.wasm", &result.wasm_bytes).ok();
     }
 
-    // Run on Wasmtime
-    let engine = store::create_engine().map_err(|e| e.to_string())?;
     let mut wasm_store = store::create_store(&engine, result.const_pool, result.closure_bytecodes);
+    wasm_store.data_mut().precached_closures = precached;
     let linker = linker::create_linker(&engine).map_err(|e| e.to_string())?;
     let t3 = std::time::Instant::now();
 

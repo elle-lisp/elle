@@ -21,9 +21,11 @@ impl<'a> Lowerer<'a> {
             if matches!(init.kind, HirKind::Lambda { .. }) {
                 if let Some(block) = self.current_func.blocks.last() {
                     for instr in block.instructions.iter().rev() {
-                        if let LirInstr::MakeClosure { func, .. } = &instr.instr {
-                            self.callee_rotation_safe
-                                .insert(*binding, func.rotation_safe);
+                        if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
+                            self.callee_rotation_safe.insert(
+                                *binding,
+                                self.closures[closure_id.0 as usize].rotation_safe,
+                            );
                             break;
                         }
                     }
@@ -208,9 +210,9 @@ impl<'a> Lowerer<'a> {
         if matches!(value.kind, HirKind::Lambda { .. }) {
             if let Some(lir_instr) = self.current_func.blocks.last() {
                 for instr in lir_instr.instructions.iter().rev() {
-                    if let LirInstr::MakeClosure { func, .. } = &instr.instr {
+                    if let LirInstr::MakeClosure { closure_id, .. } = &instr.instr {
                         self.callee_rotation_safe
-                            .insert(binding, func.rotation_safe);
+                            .insert(binding, self.closures[closure_id.0 as usize].rotation_safe);
                         break;
                     }
                 }

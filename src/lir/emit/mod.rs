@@ -411,6 +411,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    module_closures: self.closure_lir_funcs.as_ref().map(|v| Rc::new(v.clone())),
                     rotation_safe: func.rotation_safe,
                 };
                 let closure = Closure {

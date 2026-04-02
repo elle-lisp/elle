@@ -536,3 +536,167 @@ pub fn run_module(
     let value = store.data().wasm_to_value(tag, payload);
     Ok(value)
 }
+
+/// Build closure env in linear memory for a standalone `Store<ElleHost>`.
+///
+/// Same layout as `prepare_wasm_env`: \[captures\]\[params\]\[locals\], each 16 bytes.
+fn build_env_in_store(
+    store: &mut Store<ElleHost>,
+    memory: &Memory,
+    closure: &crate::value::closure::Closure,
+    args: &[crate::value::Value],
+    env_base: usize,
+) {
+    let template = &closure.template;
+    let num_captures = template.num_captures;
+    let num_params = template.num_params;
+    let num_locals = template.num_locals;
+    let lbox_params_mask = template.lbox_params_mask;
+    let lbox_locals_mask = template.lbox_locals_mask;
+    let extra_locals = num_locals.saturating_sub(num_params);
+    let total_slots = num_captures + num_params + extra_locals;
+
+    let needed_bytes = env_base + total_slots * 16;
+    let current_bytes = memory.data_size(&*store);
+    if needed_bytes > current_bytes {
+        let pages_needed = (needed_bytes - current_bytes).div_ceil(65536) as u64;
+        memory.grow(&mut *store, pages_needed).ok();
+    }
+
+    // Write captures
+    for (i, val) in closure.env.iter().enumerate() {
+        let (tag, payload) = store.data_mut().value_to_wasm(*val);
+        let offset = env_base + i * 16;
+        let data = memory.data_mut(&mut *store);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Write params with optional LBox wrapping
+    for (i, arg) in args.iter().enumerate().take(num_params) {
+        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
+            crate::value::Value::local_lbox(*arg)
+        } else {
+            *arg
+        };
+        let (tag, payload) = store.data_mut().value_to_wasm(val);
+        let offset = env_base + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *store);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Remaining params default to nil
+    for i in args.len()..num_params {
+        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
+            crate::value::Value::local_lbox(crate::value::Value::NIL)
+        } else {
+            crate::value::Value::NIL
+        };
+        let (tag, payload) = store.data_mut().value_to_wasm(val);
+        let offset = env_base + (num_captures + i) * 16;
+        let data = memory.data_mut(&mut *store);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+
+    // Extra local slots
+    for i in 0..extra_locals {
+        let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
+            crate::value::Value::local_lbox(crate::value::Value::NIL)
+        } else {
+            crate::value::Value::NIL
+        };
+        let (tag, payload) = store.data_mut().value_to_wasm(val);
+        let offset = env_base + (num_captures + num_params + i) * 16;
+        let data = memory.data_mut(&mut *store);
+        data[offset..offset + 8].copy_from_slice(&tag.to_le_bytes());
+        data[offset + 8..offset + 16].copy_from_slice(&payload.to_le_bytes());
+    }
+}
+
+/// Call a pre-compiled per-closure Module from within a full-module rt_call.
+///
+/// Creates a fresh Store for the standalone Module, builds the closure's
+/// env in the new Store's linear memory, calls the function, and converts
+/// the result back to the caller's handle space.
+pub(super) fn call_precached_closure(
+    caller: &mut Caller<'_, ElleHost>,
+    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    pc: &super::host::PrecachedClosure,
+    args: &[crate::value::Value],
+) -> (i64, i64, i32) {
+    use crate::value::repr::TAG_HEAP_START;
+
+    let engine = caller.engine().clone();
+    let mut host = ElleHost::new();
+
+    // Use the standalone module's OWN const pool — its rt_load_const
+    // indices are relative to this pool, not the full module's.
+    host.const_pool = pc.const_pool.clone();
+    let mut pool_to_handle = Vec::with_capacity(host.const_pool.len());
+    for value in &host.const_pool {
+        if value.tag >= TAG_HEAP_START {
+            let handle = host.handles.insert(*value);
+            pool_to_handle.push(handle);
+        } else {
+            pool_to_handle.push(0);
+        }
+    }
+    host.pool_to_handle = pool_to_handle;
+    // Copy precached_closures so nested calls can dispatch too.
+    host.precached_closures = caller.data().precached_closures.clone();
+
+    let mut store = Store::new(&engine, host);
+    let linker = match super::linker::create_linker(&engine) {
+        Ok(l) => l,
+        Err(e) => {
+            let err = crate::value::error_val("internal-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, 1);
+        }
+    };
+    let instance = match linker.instantiate(&mut store, &pc.module) {
+        Ok(i) => i,
+        Err(e) => {
+            let err = crate::value::error_val("internal-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, 1);
+        }
+    };
+
+    // Build env in the standalone module's linear memory.
+    // Reuse the same layout as prepare_wasm_env: [captures][params][locals]
+    let memory = instance
+        .get_memory(&mut store, "__elle_memory")
+        .expect("precached closure: no memory");
+    let env_base = super::host::ENV_STACK_BASE;
+    build_env_in_store(&mut store, &memory, closure, args, env_base);
+
+    // Call the closure function (exported as __elle_closure)
+    let func = match instance
+        .get_typed_func::<(i32, i32, i32, i32), (i64, i64, i32)>(&mut store, "__elle_closure")
+    {
+        Ok(f) => f,
+        Err(e) => {
+            let err = crate::value::error_val("internal-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            return (tag, payload, 1);
+        }
+    };
+
+    match func.call(&mut store, (env_base as i32, 0, 0, 0)) {
+        Ok((tag, payload, status)) => {
+            // Convert result from standalone store's handle space
+            // back to the caller's handle space.
+            let value = store.data().wasm_to_value(tag, payload);
+            let (caller_tag, caller_payload) = caller.data_mut().value_to_wasm(value);
+            (caller_tag, caller_payload, status)
+        }
+        Err(e) => {
+            let err = crate::value::error_val("internal-error", e.to_string());
+            let (tag, payload) = caller.data_mut().value_to_wasm(err);
+            (tag, payload, 1)
+        }
+    }
+}

@@ -65,30 +65,30 @@ fn flat_repr(val: Value, depth: usize) -> String {
         return format!("({})", parts.join(" "));
     }
 
-    // Arrays
+    // @array (mutable)
     if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         let parts: Vec<String> = vec.iter().map(|v| flat_repr(*v, depth + 1)).collect();
-        return format!("[{}]", parts.join(" "));
+        return format!("@[{}]", parts.join(" "));
     }
 
-    // Tables
+    // @struct (mutable)
     if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
             parts.push(format!("{:?} {}", k, flat_repr(*v, depth + 1)));
         }
-        return format!("{{{}}}", parts.join(" "));
+        return format!("@{{{}}}", parts.join(" "));
     }
 
-    // Structs
+    // struct (immutable)
     if let Some(struct_map) = val.as_struct() {
         let mut parts = Vec::new();
         for (k, v) in struct_map.iter() {
             parts.push(format!("{:?} {}", k, flat_repr(*v, depth + 1)));
         }
-        return format!("#{{{}}}", parts.join(" "));
+        return format!("{{{}}}", parts.join(" "));
     }
 
     // Closures
@@ -182,45 +182,45 @@ fn pretty_print_impl(val: Value, indent: usize, remaining_width: usize, depth: u
         return format!("({})", parts.join("\n"));
     }
 
-    // Arrays: break with elements indented
+    // @array: break with elements indented
     if let Some(vec_ref) = val.as_array_mut() {
         let vec = vec_ref.borrow();
         if vec.is_empty() {
-            return "[]".to_string();
+            return "@[]".to_string();
         }
         let mut parts = Vec::new();
         for v in vec.iter() {
             let part = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
             parts.push(format!("{}{}", next_indent_str, part));
         }
-        return format!("[\n{}]", parts.join("\n"));
+        return format!("@[\n{}]", parts.join("\n"));
     }
 
-    // Tables: break with key-value pairs indented
+    // @struct: break with key-value pairs indented
     if let Some(table_ref) = val.as_struct_mut() {
         let table = table_ref.borrow();
         if table.is_empty() {
-            return "{}".to_string();
+            return "@{}".to_string();
         }
         let mut parts = Vec::new();
         for (k, v) in table.iter() {
             let v_str = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
             parts.push(format!("{}{:?} {}", next_indent_str, k, v_str));
         }
-        return format!("{{\n{}}}", parts.join("\n"));
+        return format!("@{{\n{}}}", parts.join("\n"));
     }
 
-    // Structs: break with key-value pairs indented
+    // struct: break with key-value pairs indented
     if let Some(struct_map) = val.as_struct() {
         if struct_map.is_empty() {
-            return "#{}".to_string();
+            return "{}".to_string();
         }
         let mut parts = Vec::new();
         for (k, v) in struct_map.iter() {
             let v_str = pretty_print_impl(*v, next_indent, DEFAULT_WIDTH - next_indent, depth + 1);
             parts.push(format!("{}{:?} {}", next_indent_str, k, v_str));
         }
-        return format!("#{{\\n{}}}", parts.join("\n"));
+        return format!("{{\n{}}}", parts.join("\n"));
     }
 
     // Fallback

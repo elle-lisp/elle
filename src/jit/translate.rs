@@ -22,6 +22,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::lir::{Label, LirInstr, Reg, Terminator};
+use crate::value::fiber::SignalBits;
 use crate::value::repr::{TAG_FALSE, TAG_NIL, TAG_TRUE};
 use crate::value::SymbolId;
 
@@ -67,6 +68,8 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) closure_constants: Vec<crate::value::Value>,
     /// Symbol name map for nested emitters (MakeClosure).
     pub(crate) symbol_names: HashMap<u32, String>,
+    /// Module's closure list for MakeClosure → ClosureId lookup.
+    pub(crate) module_closures: Vec<crate::lir::LirFunction>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -93,6 +96,7 @@ impl<'a> FunctionTranslator<'a> {
             shared_spill_slot: None,
             closure_constants: Vec::new(),
             symbol_names: HashMap::new(),
+            module_closures: Vec::new(),
         }
     }
 
@@ -617,10 +621,108 @@ impl<'a> FunctionTranslator<'a> {
                 closure_id,
                 captures,
             } => {
-                // The JIT gate rejects functions containing MakeClosure.
-                // If we somehow reach here, return the expected error.
-                let _ = (dst, closure_id, captures);
-                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+                // Look up the nested LirFunction by ClosureId from module context.
+                let func = self
+                    .module_closures
+                    .get(closure_id.0 as usize)
+                    .ok_or_else(|| {
+                        JitError::InvalidLir(format!(
+                            "MakeClosure: invalid ClosureId({})",
+                            closure_id.0
+                        ))
+                    })?
+                    .clone();
+
+                let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
+                let module_closures_rc = std::rc::Rc::new(self.module_closures.clone());
+                let lir_module = crate::lir::LirModule {
+                    entry: func.clone(),
+                    closures: self.module_closures.clone(),
+                };
+                let (nested_bytecode, nested_yield_points, nested_call_sites) =
+                    emitter.emit_module(&lir_module);
+                // emit_module returns the entry result; we want the closure's bytecode.
+                // Actually, we need to emit just this closure with module context.
+                // Use emit_module_closures to get per-closure bytecodes, then index.
+                drop(nested_bytecode);
+                drop(nested_yield_points);
+                drop(nested_call_sites);
+                let mut emitter2 = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
+                let all_compiled = emitter2.emit_module_closures(&lir_module);
+                let (nested_bytecode, nested_yield_points, nested_call_sites) =
+                    all_compiled.into_iter().nth(closure_id.0 as usize).unwrap();
+
+                let mut nested_lir = func.clone();
+                nested_lir.yield_points = nested_yield_points;
+                nested_lir.call_sites = nested_call_sites;
+
+                let template = crate::value::ClosureTemplate {
+                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
+                    arity: func.arity,
+                    num_locals: func.num_locals as usize,
+                    num_captures: captures.len(),
+                    num_params: func.num_params,
+                    constants: std::rc::Rc::new(nested_bytecode.constants),
+                    signal: func.signal,
+                    lbox_params_mask: func.lbox_params_mask,
+                    lbox_locals_mask: func.lbox_locals_mask,
+                    symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
+                    location_map: std::rc::Rc::new(nested_bytecode.location_map),
+                    rotation_safe: func.rotation_safe,
+                    lir_function: Some(std::rc::Rc::new(nested_lir)),
+                    module_closures: Some(module_closures_rc),
+                    doc: func.doc,
+                    syntax: func.syntax.clone(),
+                    vararg_kind: func.vararg_kind.clone(),
+                    name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
+                    result_is_immediate: func.result_is_immediate,
+                    has_outward_heap_set: func.has_outward_heap_set,
+                    wasm_func_idx: None,
+                };
+                let template_closure = crate::value::Closure {
+                    template: std::rc::Rc::new(template),
+                    env: std::rc::Rc::new(vec![]),
+                    squelch_mask: SignalBits::EMPTY,
+                };
+
+                let template_value = crate::value::Value::closure(template_closure);
+
+                self.closure_constants.push(template_value);
+
+                let template_tag = builder.ins().iconst(I64, template_value.tag as i64);
+                let template_payload = builder.ins().iconst(I64, template_value.payload as i64);
+
+                let (captures_ptr, count_val) = if captures.is_empty() {
+                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
+                } else {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (captures.len() * 16) as u32,
+                            0,
+                        ));
+                    for (i, cap_reg) in captures.iter().enumerate() {
+                        let (ct, cp) = self.use_var_pair(builder, cap_reg.0);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(ct, slot, tag_offset);
+                        builder.ins().stack_store(cp, slot, payload_offset);
+                    }
+                    let ptr = builder.ins().stack_addr(I64, slot, 0);
+                    let cnt = builder.ins().iconst(I64, captures.len() as i64);
+                    (ptr, cnt)
+                };
+
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.make_closure, builder.func);
+                let call = builder.ins().call(
+                    func_ref,
+                    &[template_tag, template_payload, captures_ptr, count_val],
+                );
+                let rt = builder.inst_results(call)[0];
+                let rp = builder.inst_results(call)[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
             }
 
             LirInstr::LoadResumeValue { dst } => {

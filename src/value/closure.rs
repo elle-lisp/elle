@@ -47,6 +47,9 @@ pub struct ClosureTemplate {
     pub rotation_safe: bool,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
+    /// Module's closure list for JIT MakeClosure resolution.
+    /// Shared (Rc) across all closures from the same compilation unit.
+    pub module_closures: Option<Rc<Vec<crate::lir::LirFunction>>>,
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
     /// Original syntax node for eval environment reconstruction
@@ -174,6 +177,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            module_closures: None,
         })
     }
 
@@ -211,6 +215,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            module_closures: None,
         });
         let closure = Closure {
             template,
@@ -240,6 +245,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            module_closures: None,
         });
         let closure2 = Closure {
             template: template2,
@@ -269,6 +275,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            module_closures: None,
         });
         let closure3 = Closure {
             template: template3,
