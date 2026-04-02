@@ -141,25 +141,6 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut active: HashMap<Reg, u32> = HashMap::new(); // reg → pool slot
 
         for (idx, si) in block.instructions.iter().enumerate() {
-            // Free registers whose last use was a previous instruction.
-            // We cannot free at the same instruction as the last use because
-            // the instruction reads its operands before writing its result —
-            // reusing the slot would clobber a live value.
-            let mut to_free = Vec::new();
-            for (reg, slot) in &active {
-                if let Some(last) = last_use.get(reg).copied() {
-                    if last < idx {
-                        to_free.push((*reg, *slot));
-                    }
-                }
-            }
-            // Sort by slot to ensure deterministic free_pool ordering.
-            to_free.sort_by_key(|(_, slot)| *slot);
-            for (reg, slot) in to_free {
-                active.remove(&reg);
-                free_pool.push(slot);
-            }
-
             // Allocate for defs in this instruction.
             for_each_def(&si.instr, |reg| {
                 if local_set.contains(&reg) {
@@ -172,6 +153,20 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
                     active.insert(reg, slot);
                 }
             });
+
+            // Free registers whose last use is this instruction.
+            // Sort by slot to ensure deterministic free_pool ordering.
+            let mut to_free = Vec::new();
+            for (reg, slot) in &active {
+                if last_use.get(reg).copied() == Some(idx) {
+                    to_free.push((*reg, *slot));
+                }
+            }
+            to_free.sort_by_key(|(_, slot)| *slot);
+            for (reg, slot) in to_free {
+                active.remove(&reg);
+                free_pool.push(slot);
+            }
         }
 
         // Free registers whose last use is the terminator.
@@ -263,6 +258,7 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::TailCallArrayMut { .. }
         | LirInstr::RegionEnter
         | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
         | LirInstr::CheckSignalBound { .. } => {}
@@ -371,7 +367,10 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::PopParamFrame => {}
+        LirInstr::RegionEnter
+        | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
+        | LirInstr::PopParamFrame => {}
     }
 }
 
@@ -437,9 +436,8 @@ mod tests {
         let alloc = allocate(&func, 0);
 
         // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
-        // We cannot free r0/r1 at the same instruction where they're used
-        // (the instruction reads operands before writing the result), so
-        // r2 gets its own slot. Total: 3 slots.
+        // Defs are allocated before frees at the same instruction, so r2
+        // gets its own slot before r0/r1 are freed. Total: 3 slots.
         assert_eq!(alloc.max_slots, 3);
     }
 

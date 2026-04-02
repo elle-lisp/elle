@@ -71,11 +71,10 @@ impl WasmTier {
         config.wasm_multi_value(true);
         // Fast compile for per-closure modules (they're tiny).
         config.cranelift_opt_level(OptLevel::Speed);
-        config.cranelift_regalloc_algorithm(RegallocAlgorithm::SinglePass);
 
         // Disk cache for incremental compilation
         if let Some(cache_dir) = &crate::config::get().cache {
-            let path = std::path::PathBuf::from(cache_dir).join("tiered");
+            let path = std::path::PathBuf::from(&cache_dir).join("tiered");
             std::fs::create_dir_all(&path).ok();
             let cache = super::store::DiskCache::new(path);
             config

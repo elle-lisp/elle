@@ -18,6 +18,7 @@ pub(crate) struct TailCallInfo {
     pub constants: Rc<Vec<Value>>,
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
+    pub rotation_safe: bool,
     pub squelch_mask: SignalBits,
 }
 
@@ -120,7 +121,7 @@ fn root_closure() -> Rc<Closure> {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
-            jit_code: None,
+            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -164,9 +165,13 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
-            jit_enabled: crate::config::get().jit_enabled(),
-            jit_hotness_threshold: crate::config::get().jit_threshold(),
-            wasm_tier: if crate::config::get().wasm_tier_enabled() {
+            jit_enabled: crate::config::get().jit > 0,
+            jit_hotness_threshold: if crate::config::get().jit > 0 {
+                (crate::config::get().jit - 1) as usize
+            } else {
+                0
+            },
+            wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None

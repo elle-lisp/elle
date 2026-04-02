@@ -98,12 +98,14 @@ impl<'a> Lowerer<'a> {
                 // referencing one is not mistaken for an outer (pre-scope)
                 // binding.
                 //
-                // We use a sentinel Hir (a string literal) whose
-                // result_is_safe is false, representing "heap-allocated
-                // inside the scope". The String variant is chosen purely
-                // because result_is_safe already returns false for it.
+                // We use a sentinel Hir whose result_is_safe is false,
+                // representing "heap-allocated inside the scope".
+                // Yield is always unsafe in result_is_safe.
                 let sentinel = Hir::silent(
-                    HirKind::String(String::new()),
+                    HirKind::Yield(Box::new(Hir::silent(
+                        HirKind::Nil,
+                        crate::syntax::Span::synthetic(),
+                    ))),
                     crate::syntax::Span::synthetic(),
                 );
                 let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
@@ -142,7 +144,23 @@ impl<'a> Lowerer<'a> {
                 exprs.iter().all(|e| self.result_is_safe(e, scope_bindings))
             }
 
-            // Intrinsic calls that return immediates
+            // Tail call: replaces the frame, so the scope's allocations are
+            // dead. Safe if neither the callee nor any argument references a
+            // scope binding (which would mean a scope-allocated value is used
+            // after RegionExit frees it — the callee is invoked and the args
+            // are passed AFTER the scope exits).
+            HirKind::Call {
+                is_tail: true,
+                func,
+                args,
+            } => {
+                self.result_is_safe(func, scope_bindings)
+                    && args
+                        .iter()
+                        .all(|a| self.result_is_safe(&a.expr, scope_bindings))
+            }
+
+            // Non-tail calls that return immediates
             HirKind::Call { func, args, .. } => self.call_result_is_safe(func, args),
 
             // Nested let/letrec: the result is the body's result.
@@ -190,21 +208,37 @@ impl<'a> Lowerer<'a> {
             // Parameterize: result is the body's result
             HirKind::Parameterize { body, .. } => self.result_is_safe(body, scope_bindings),
 
+            // String constants live in the constant pool (LoadConst),
+            // not on the fiber heap. Safe to return from a scope.
+            HirKind::String(_) => true,
+
             // Everything else: conservatively unsafe
-            // String, Lambda, Yield, Quote, Eval, Set, Define
+            // Lambda, Yield, Quote, Eval, Set, Define
             _ => false,
         }
     }
 
     /// Check if a function call is to a known intrinsic or immediate-returning
-    /// primitive, meaning its result is guaranteed to be an immediate.
-    fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
-        // Must be a variable reference to a global
+    /// primitive/user function, meaning its result is guaranteed to be an immediate.
+    pub(super) fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
+        // Must be a variable reference
         let HirKind::Var(binding) = &func.kind else {
             return false;
         };
 
-        // Must be an immutable, non-mutated binding (same check as try_lower_intrinsic)
+        // Check precomputed map first — works for letrec bindings which
+        // are technically mutable (two-phase init) but whose result type
+        // is determined by fixpoint analysis.
+        // Note: callee_result_immediate is NOT checked here.
+        // call_result_is_safe is used by result_is_safe which gates
+        // let-scope allocation (conditions 3 and 4). Including user
+        // functions here would change let-scope decisions globally
+        // (e.g. stdlib functions like fold). call_result_is_safe
+        // remains conservative: only intrinsics and whitelisted
+        // primitives. The callee_result_immediate map is used only
+        // by can_scope_allocate_call for targeted call-scoped regions.
+
+        // Must be an immutable, non-mutated binding for intrinsic/primitive checks
         let bi = self.arena.get(*binding);
         if !bi.is_immutable || bi.is_mutated {
             return false;
@@ -336,28 +370,44 @@ impl<'a> Lowerer<'a> {
                 .iter()
                 .any(|e| self.walk_for_outward_set(e, scope_bindings)),
 
-            HirKind::Call { func, args, .. } => {
-                let callee_is_safe = self.call_result_is_safe(func, args);
-                if !callee_is_safe {
-                    // Check 1: any non-safe callee receiving a heap-allocated
-                    // scope-local argument may store it externally (e.g. push
-                    // into an outer @array).
-                    if args
-                        .iter()
-                        .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
-                    {
-                        return true;
-                    }
-                    // Check 2: user-defined functions (non-primitives) may
-                    // internally allocate heap objects and store them in
-                    // external mutable structures (e.g. via put to an outer
-                    // @struct). Built-in primitives are safe — they only
-                    // produce return values and/or mutate their arguments
-                    // (caught by check 1). Without interprocedural analysis,
-                    // any call to a non-primitive is conservatively treated
-                    // as a potential outward escape.
-                    if !self.callee_is_primitive(func) {
-                        return true;
+            HirKind::Call {
+                func,
+                args,
+                is_tail,
+            } => {
+                // Tail calls replace the frame — the callee runs in a new
+                // context and cannot store scope-allocated values externally
+                // (the scope is gone by the time the callee executes). The
+                // only danger is scope-allocated values flowing into args,
+                // which is caught by condition 3 (result_is_safe).
+                if !*is_tail {
+                    let callee_is_safe = self.call_result_is_safe(func, args);
+                    if !callee_is_safe {
+                        // Check 1: any non-safe callee receiving a heap-allocated
+                        // scope-local argument may store it externally (e.g. push
+                        // into an outer @array).
+                        if args
+                            .iter()
+                            .any(|a| !self.result_is_safe(&a.expr, scope_bindings))
+                        {
+                            return true;
+                        }
+                        // Check 2: user-defined functions (non-primitives) may
+                        // internally allocate heap objects and store them in
+                        // external mutable structures (e.g. via put to an outer
+                        // @struct). Built-in primitives are safe — they only
+                        // produce return values and/or mutate their arguments
+                        // (caught by check 1).
+                        //
+                        // Safe if the callee is a built-in primitive (only
+                        // produces return values / mutates args, caught by
+                        // check 1) OR rotation-safe (proven not to escape
+                        // heap values to external structures). Rotation-safety
+                        // transitively checks for internal allocations stored
+                        // externally via mutating primitives.
+                        if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
+                            return true;
+                        }
                     }
                 }
                 self.walk_for_outward_set(func, scope_bindings)
@@ -870,5 +920,135 @@ fn collect_destructure_bindings<'a>(
                 collect_destructure_bindings(first, sentinel, out);
             }
         }
+    }
+}
+
+// ── Rotation-safety analysis ──────────────────────────────────────────
+
+impl<'a> Lowerer<'a> {
+    /// Walk the HIR looking for operations that escape heap values.
+    /// Returns true if any escaping operation is found.
+    ///
+    /// An operation "escapes" when it stores a heap value into a data
+    /// structure that outlives the current stack frame:
+    /// - `assign` to a captured/global binding with a non-immediate value
+    /// - Calls to mutating primitives (push, put, fiber/resume) with
+    ///   non-immediate arguments
+    /// - Calls to non-primitive functions (may internally do the above)
+    /// - `yield` with a non-immediate value
+    ///
+    /// Tail-call sub-expressions are excluded: the tail call replaces
+    /// the frame, so the callee runs in a new context.
+    pub(super) fn body_escapes_heap_values(&self, hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Assign { value, .. } => {
+                !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
+            }
+            HirKind::Call {
+                func,
+                args,
+                is_tail,
+            } => {
+                // Mutating primitives escape even in tail position:
+                // (put table key @{...}) stores a heap value externally
+                // before returning, regardless of tail-call optimization.
+                if self.callee_is_mutating_primitive(func)
+                    && args.iter().any(|a| !self.result_is_safe(&a.expr, &[]))
+                {
+                    return true;
+                }
+                // Non-tail, non-mutating calls: check callee safety.
+                // Tail calls to non-mutating callees are safe — the frame
+                // is replaced and the callee runs in a new context.
+                if *is_tail {
+                    return false;
+                }
+                if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
+                    return true;
+                }
+                self.body_escapes_heap_values(func)
+                    || args.iter().any(|a| self.body_escapes_heap_values(&a.expr))
+            }
+            HirKind::Lambda { .. } => false,
+            HirKind::Yield(value) => {
+                !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
+            }
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Var(_) => false,
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.body_escapes_heap_values(cond)
+                    || self.body_escapes_heap_values(then_branch)
+                    || self.body_escapes_heap_values(else_branch)
+            }
+            HirKind::Begin(exprs) => exprs.iter().any(|e| self.body_escapes_heap_values(e)),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.body_escapes_heap_values(c) || self.body_escapes_heap_values(b)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.body_escapes_heap_values(b))
+            }
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                exprs.iter().any(|e| self.body_escapes_heap_values(e))
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.body_escapes_heap_values(init))
+                    || self.body_escapes_heap_values(body)
+            }
+            HirKind::Define { value, .. } => self.body_escapes_heap_values(value),
+            HirKind::While { cond, body } => {
+                self.body_escapes_heap_values(cond) || self.body_escapes_heap_values(body)
+            }
+            HirKind::Block { body, .. } => body.iter().any(|e| self.body_escapes_heap_values(e)),
+            HirKind::Break { value, .. } => self.body_escapes_heap_values(value),
+            HirKind::Match { value, arms } => {
+                self.body_escapes_heap_values(value)
+                    || arms
+                        .iter()
+                        .any(|(_, _, body)| self.body_escapes_heap_values(body))
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, v)| self.body_escapes_heap_values(v))
+                    || self.body_escapes_heap_values(body)
+            }
+            _ => true,
+        }
+    }
+
+    /// Check if a callee is a known rotation-safe user function.
+    /// Uses the `callee_rotation_safe` map populated during lowering.
+    fn callee_is_rotation_safe(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        self.callee_rotation_safe
+            .get(binding)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    fn callee_is_mutating_primitive(&self, func: &Hir) -> bool {
+        let HirKind::Var(binding) = &func.kind else {
+            return false;
+        };
+        let bi = self.arena.get(*binding);
+        self.mutating_primitives.contains(&bi.name)
     }
 }

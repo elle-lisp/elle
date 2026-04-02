@@ -82,7 +82,13 @@ impl VM {
         let mut current_location_map = Rc::new(self.location_map.clone());
 
         // Initial execution with tail-call loop.
+        // Pool rotation: when a tail call is rotation-safe, release the
+        // previous iteration's temporaries via rotate_pools(). The tail
+        // call's env (arguments) was built before release, so referenced
+        // values survive. Only unreferenced temporaries are freed.
         let mut bits;
+        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
+        let mut prev_rotation_safe = true;
         loop {
             let (b, _ip) = self.execute_bytecode_inner_impl(
                 &current_bytecode,
@@ -93,6 +99,17 @@ impl VM {
             );
             bits = b;
             if let Some(tail) = self.pending_tail_call.take() {
+                if prev_rotation_safe {
+                    if let Some(ref base) = rotation_base {
+                        self.fiber.heap.rotate_pools(base);
+                    } else {
+                        rotation_base = Some(self.fiber.heap.rotation_mark());
+                    }
+                } else {
+                    rotation_base = None;
+                }
+                prev_rotation_safe = tail.rotation_safe;
+
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;
@@ -221,7 +238,7 @@ impl VM {
                 lbox_locals_mask: 0,
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
-                jit_code: None,
+                rotation_safe: false,
                 lir_function: None,
                 doc: None,
                 syntax: None,

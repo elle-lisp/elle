@@ -86,9 +86,7 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # Per-pass skip lists: tests that fail in one mode can still run in the other.
 # jit-rejections    — requires JIT active (tests rejection tracking)
 ELLE_SKIP_VM  := -e jit-rejections.lisp
-ELLE_SKIP_JIT :=
-# --jit=1 means threshold 0 (compile on first call)
-ELLE_JIT_ARG := --jit=1
+ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
 
 # WASM backend skip list: tests requiring features not yet in WASM backend
 # (eval = dynamic compilation)
@@ -103,18 +101,19 @@ smoke-vm:
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
 
 smoke-jit:
-	@echo "=== elle scripts (JIT enabled, $(ELLE_JIT_ARG)) ==="
+	@echo "=== elle scripts (JIT enabled, threshold=1) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
+		grep -v $(ELLE_SKIP_JIT) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) $(ELLE_JIT_ARG) {}' \
+			'timeout $(TIMEOUT) $(ELLE) --jit=1 {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke-wasm:
+smoke-wasm: elle
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s $(ELLE) --wasm=full {}' \
+			'timeout 300s ./target/release/elle --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)

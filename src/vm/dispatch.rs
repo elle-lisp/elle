@@ -433,6 +433,9 @@ impl VM {
                 Instruction::RegionExit => {
                     crate::value::fiberheap::region_exit();
                 }
+                Instruction::RegionExitCall => {
+                    crate::value::fiberheap::region_exit_call();
+                }
 
                 // Dynamic parameter frame management
                 Instruction::PushParamFrame => {

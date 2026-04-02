@@ -9,6 +9,13 @@ lexical scoping with closure capture analysis, and we have a signal system.
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
 
+**`origin/main` is always green.** Every commit on main passes every test —
+Elle scripts, Rust tests, examples, documentation. This is enforced by CI
+and a merge queue. If a test fails on your branch, your branch caused it.
+"Pre-existing defect" is not a valid explanation when main is green. Fix
+every failure before merging — no skip lists, no expected failures, no
+excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
+
 ## Contents
 
 - [Architecture](#architecture)
@@ -60,7 +67,7 @@ bytecode. Error messages include file:line:col information.
 - **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
   functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
 - **`wasm`** — WASM backend via Wasmtime; full-module compilation
-  (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
+  (`ELLE_WASM=1`) or per-closure tiered compilation (`ELLE_WASM_TIER=1`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.

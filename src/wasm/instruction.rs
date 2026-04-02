@@ -187,7 +187,7 @@ impl WasmEmitter {
                     self.emit_tail_call_dispatch(f);
                 }
             }
-            LirInstr::RegionEnter | LirInstr::RegionExit => {}
+            LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::RegionExitCall => {}
             LirInstr::Cons { dst, head, tail } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }

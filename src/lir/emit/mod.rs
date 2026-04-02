@@ -330,7 +330,6 @@ impl Emitter {
                     lbox_locals_mask: func.lbox_locals_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
-                    jit_code: None,
                     lir_function: Some(Rc::new(nested_lir)),
                     doc: func.doc,
                     syntax: func.syntax.clone(),
@@ -339,6 +338,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    rotation_safe: func.rotation_safe,
                 };
                 let closure = Closure {
                     template: Rc::new(template),
@@ -815,6 +815,11 @@ impl Emitter {
 
             LirInstr::RegionExit => {
                 self.bytecode.emit(Instruction::RegionExit);
+                // No stack effect
+            }
+
+            LirInstr::RegionExitCall => {
+                self.bytecode.emit(Instruction::RegionExitCall);
                 // No stack effect
             }
 
