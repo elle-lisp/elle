@@ -167,6 +167,27 @@ impl Emitter {
             .collect()
     }
 
+    /// Set module context for MakeClosure resolution without
+    /// pre-compiling all closures. Used by the JIT to compile a
+    /// single closure that may contain MakeClosure instructions.
+    pub fn set_module_context(&mut self, closures: &[LirFunction]) {
+        self.closure_lir_funcs = Some(closures.to_vec());
+        // Pre-compile all closures so MakeClosure can look them up.
+        // Uses reverse order (children before parents).
+        let n = closures.len();
+        let mut compiled: Vec<Option<ClosureCompiled>> = (0..n).map(|_| None).collect();
+        for i in (0..n).rev() {
+            let result = self.emit(&closures[i]);
+            compiled[i] = Some(result);
+        }
+        self.compiled_closures = Some(
+            compiled
+                .into_iter()
+                .map(|opt: Option<ClosureCompiled>| opt.unwrap())
+                .collect(),
+        );
+    }
+
     /// Emit bytecode from a single LIR function.
     pub fn emit(&mut self, func: &LirFunction) -> ClosureCompiled {
         let mut bytecode = Bytecode::new();

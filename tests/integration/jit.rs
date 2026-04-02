@@ -712,11 +712,10 @@ fn test_jit_call_compiles() {
 }
 
 #[test]
-fn test_jit_compiles_make_closure() {
-    // MakeClosure is supported — the JIT looks up the nested closure
-    // by ClosureId from the module_closures list.
-    let inner = LirFunction::new(Arity::Exact(0));
-
+fn test_jit_rejects_make_closure() {
+    // MakeClosure is rejected at the gate — the per-compilation cost of
+    // emitting module closures' bytecodes is too high. Functions with
+    // MakeClosure fall back to the interpreter.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
@@ -740,12 +739,12 @@ fn test_jit_compiles_make_closure() {
         &func,
         None,
         std::collections::HashMap::new(),
-        vec![inner],
+        Vec::new(),
     );
     assert!(
-        result.is_ok(),
-        "MakeClosure should compile successfully: {:?}",
-        result
+        matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
+        "MakeClosure should be rejected: {:?}",
+        result,
     );
 }
 

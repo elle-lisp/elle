@@ -123,6 +123,19 @@ impl JitCompiler {
             ));
         }
 
+        // Functions containing MakeClosure fall back to the interpreter.
+        // The JIT has the infrastructure to handle MakeClosure (module_closures
+        // lookup + bytecode emission), but the per-compilation cost of emitting
+        // all module closures' bytecodes is too high for --jit=1 threshold.
+        // TODO: cache compiled module closures across JIT compilations.
+        for block in &lir.blocks {
+            for si in &block.instructions {
+                if matches!(si.instr, crate::lir::LirInstr::MakeClosure { .. }) {
+                    return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+                }
+            }
+        }
+
         // Create function signature
         let sig = self.make_jit_signature();
 
