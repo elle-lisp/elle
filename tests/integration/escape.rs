@@ -1040,7 +1040,7 @@ fn regression_captured_binding_not_freed() {
 fn regression_yielded_value_not_freed() {
     let result = eval_source(
         "(def gen (fn () (let ((x (list 1 2 3))) (yield x) nil)))
-         (def f (fiber/new gen 2))
+         (def f (fiber/new |:yield| gen))
          (def yielded (fiber/resume f))
          (length yielded)",
     )

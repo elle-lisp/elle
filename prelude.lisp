@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Elle standard prelude
 ##
 ## Loaded automatically by the Expander before user code expansion.
@@ -116,7 +117,7 @@
          [body-forms (butlast forms)]
          [err-binding (first (rest catch-clause))]
          [handler-body (rest (rest catch-clause))]]
-    `(let ((f (fiber/new (fn () ,;body-forms) 1)))
+    `(let ((f (fiber/new |:error| (fn () ,;body-forms))))
        (fiber/resume f nil)
        (if (= (fiber/status f) :dead)
          (fiber/value f)
@@ -131,7 +132,7 @@
 ## (port/open, port/read-line, tcp/connect, etc.). Use protect inside
 ## ev/spawn if you need error capture around async work.
 (defmacro protect (& body)
-  `(let ((f (fiber/new (fn () ,;body) 1)))
+  `(let ((f (fiber/new |:error| (fn () ,;body))))
      (fiber/resume f nil)
      [(= (fiber/status f) :dead) (fiber/value f)]))
 
@@ -147,7 +148,7 @@
 ##     (defer (port/close p)         # cleanup: always runs, closes port
 ##       (port/read-all p)))       # body: reads contents, return value
 (defmacro defer (cleanup & body)
-  `(let ((f (fiber/new (fn () ,;body) 1)))
+  `(let ((f (fiber/new |:error| (fn () ,;body))))
      (fiber/resume f nil)
      ,cleanup
      (if (= (fiber/status f) :dead)

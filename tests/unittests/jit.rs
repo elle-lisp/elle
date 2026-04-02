@@ -265,7 +265,7 @@ mod jit_tests {
                 # Call f enough times to make it hot, then call with 0
                 (f 1) (f 2) (f 3) (f 4) (f 5)
                 (f 6) (f 7) (f 8) (f 9) (f 10)
-                (let ((fib (fiber/new (fn () (f 0)) 1)))
+                (let ((fib (fiber/new |:error| (fn () (f 0)))))
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -1 0)))"#,
         );
@@ -292,7 +292,7 @@ mod jit_tests {
                 (f 1) (f 2) (f 5) (f 10) (f 1)
                 (f 2) (f 5) (f 10) (f 1) (f 2)
                 # Now trigger exception
-                (let ((fib (fiber/new (fn () (f 0)) 1)))
+                (let ((fib (fiber/new |:error| (fn () (f 0)))))
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -42 0)))"#,
         );
@@ -314,7 +314,7 @@ mod jit_tests {
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 (outer 1) (outer 2) (outer 4) (outer 5) (outer 10)
                 # Trigger exception deep in the call chain
-                (let ((fib (fiber/new (fn () (outer 0)) 1)))
+                (let ((fib (fiber/new |:error| (fn () (outer 0)))))
                   (fiber/resume fib)
                   (if (= (fiber/bits fib) 1) -999 0)))"#,
         );
@@ -358,7 +358,7 @@ mod jit_tests {
                 (defn make-fibers (n)
                   (if (= n 0) true
                     (begin
-                      (fiber/new (fn () n) 1)
+                      (fiber/new |:error| (fn () n))
                       (make-fibers (- n 1)))))
                 (make-fibers 20))"#,
         );
@@ -372,7 +372,7 @@ mod jit_tests {
         // Check status of a fiber repeatedly in a hot loop.
         let result = eval_source(
             r#"(begin
-                (var f (fiber/new (fn () 42) 1))
+                (var f (fiber/new |:error| (fn () 42)))
                 (defn check-status (n)
                   (if (= n 0) (= (fiber/status f) :new)
                     (begin (fiber/status f) (check-status (- n 1)))))
@@ -396,7 +396,7 @@ mod jit_tests {
             r#"(begin
                 (defn resume-fiber (f)
                   (fiber/resume f))
-                (var f (fiber/new (fn () 42) 0))
+                (var f (fiber/new || (fn () 42)))
                 (resume-fiber f))"#,
         );
         assert!(
@@ -416,7 +416,7 @@ mod jit_tests {
             r#"(begin
                 (defn pure-add (x y) (+ x y))
                 (defn use-fiber (x)
-                  (var f (fiber/new (fn () x) 0))
+                  (var f (fiber/new || (fn () x)))
                   (fiber/resume f)
                   (fiber/value f))
                 # Warm up pure-add (should get JIT-compiled)

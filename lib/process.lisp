@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/process.lisp — Erlang-inspired process module
 ##
 ## Loaded via: (def process ((import-file "lib/process.lisp")))
@@ -79,7 +80,7 @@
 
     (var sched-spawn (fn [closure]
       (let ([pid   (length procs)]
-            [fiber (fiber/new closure |:yield :error :fuel :io :exec :wait|)])
+            [fiber (fiber/new |:yield :error :fuel :io :exec :wait| closure)])
         (push procs @{:pid pid :fiber fiber :mbox @[] :resume nil
                       :status :alive :links @||
                       :monitors @{} :monitored-by @{}

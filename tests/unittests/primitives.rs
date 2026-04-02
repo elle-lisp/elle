@@ -1929,7 +1929,7 @@ fn test_fiber_self_from_root_is_nil() {
 #[test]
 fn test_fiber_self_from_fiber_is_fiber() {
     let result = eval_full(
-        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+        "(let ((f (fiber/new || (fn () (fiber/self)))))
            (fiber/resume f nil)
            (fiber/value f))",
     )
@@ -1944,7 +1944,7 @@ fn test_fiber_self_from_fiber_is_fiber() {
 fn test_fiber_self_identity() {
     // fiber/self should return the same fiber that the parent holds
     let result = eval_full(
-        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+        "(let ((f (fiber/new || (fn () (fiber/self)))))
            (fiber/resume f nil)
             (identical? f (fiber/value f)))",
     )

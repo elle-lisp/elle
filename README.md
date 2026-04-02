@@ -33,7 +33,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     (emit :yield 2)
     (emit :yield 3))
 
-  (def f (fiber/new produce |:yield|))
+  (def f (fiber/new |:yield| produce))
 
   (fiber/resume f) (print (fiber/value f))  # => 1
   (fiber/resume f) (print (fiber/value f))  # => 2
@@ -52,7 +52,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
       (error {:error :bad-input :message "negative input"})
       (* x x)))
 
-  (def f (fiber/new (fn () (risky -1)) |:error|))
+  (def f (fiber/new |:error| (fn () (risky -1))))
   (fiber/resume f)
 
   (if (= (fiber/status f) :paused)
@@ -67,7 +67,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     (each item items
       (emit :progress {:item item :result (* item item)})))
 
-  (def f (fiber/new (fn () (process-items [1 2 3])) |:progress|))
+  (def f (fiber/new |:progress| (fn () (process-items [1 2 3]))))
 
   (forever
     (fiber/resume f)
@@ -85,7 +85,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     42)
 
   (defn parent []
-    (def f (fiber/new child |:log|))
+    (def f (fiber/new |:log| child))
     (forever
       (fiber/resume f)
       (match (fiber/status f)
@@ -265,7 +265,7 @@ Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit 
 | nil | `nil` | Absence of a value. Falsy. |
 | boolean | `true`, `false` | `false` is falsy; `true` is truthy. |
 | integer | `42`, `-17` | Full-range i64. No auto-coercion to float. Overflow wraps. |
-| float | `3.14`, `1e10` | IEEE 754 double. NaN/Infinity are heap-allocated. |
+| float | `3.14`, `1e10` | IEEE 754 double. |
 | symbol | `foo`, `'foo` | Interned identifier. |
 | keyword | `:foo` | Self-evaluating interned name. Used for keys and tags. |
 | empty list | `()`, `'()` | Terminates proper lists. **Truthy** — not the same as nil. |
@@ -387,7 +387,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 **Fiber** — independent execution context with its own stack, call frames, signal mask, and heap. See [Memory](#memory).
 
 ```lisp
-(fiber/new (fn () body) mask)
+(fiber/new mask (fn () body))
 (fiber/resume f value)
 (fiber/status f)
 ```

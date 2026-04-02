@@ -95,13 +95,13 @@ handle, not the callee.
 (defn my-fn [] 42)
 
 # Create a fiber that catches errors from its closure
-(fiber/new my-fn |:error|)
+(fiber/new |:error| my-fn)
 
 # Create a fiber that catches yields
-(fiber/new my-fn |:yield|)
+(fiber/new |:yield| my-fn)
 
 # Create a fiber that catches both
-(fiber/new my-fn |:error :yield|)
+(fiber/new |:error :yield| my-fn)
 ```
 
 

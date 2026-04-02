@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Tests for using fibers and closures as @struct keys
 
 
@@ -5,41 +6,41 @@
 # Fiber keys
 # ============================================================================
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((t @{}))
       (put t f :running)
       (get t f))) :running) "fiber as @struct key")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((t @{}))
       (put t f 1)
       (put t f 2)
       (get t f))) 2) "fiber key overwrites same key")
 
-(assert (= (let ((f1 (fiber/new (fn () 1) 0))
-        (f2 (fiber/new (fn () 2) 0)))
+(assert (= (let ((f1 (fiber/new || (fn () 1)))
+        (f2 (fiber/new || (fn () 2))))
     (let ((t @{}))
       (put t f1 :a)
       (put t f2 :b)
       (get t f1))) :a) "different fibers are different keys")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((t @{}))
       (put t f 1)
       (has? t f))) true) "has-key with fiber")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((t @{}))
       (put t f 1)
       (del t f)
       (has? t f))) false) "del with fiber key")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((t @{}))
       (put t f 1)
       (identical? (first (keys t)) f))) true) "keys roundtrip identity fiber")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0)))
+(assert (= (let ((f (fiber/new || (fn () 1))))
     (let ((s (struct f :val)))
       (get s f))) :val) "fiber as struct key")
 
@@ -78,7 +79,7 @@
 # Mixed keys
 # ============================================================================
 
-(assert (= (let ((f (fiber/new (fn () 1) 0))
+(assert (= (let ((f (fiber/new || (fn () 1)))
         (c (fn () 2)))
     (let ((t @{}))
       (put t :name "proc")
@@ -86,7 +87,7 @@
       (put t c :closure-data)
       (get t f))) :fiber-data) "mixed keys fiber closure keyword")
 
-(assert (= (let ((f (fiber/new (fn () 1) 0))
+(assert (= (let ((f (fiber/new || (fn () 1)))
         (c (fn () 2)))
     (let ((t @{}))
       (put t f :fib)

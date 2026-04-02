@@ -221,7 +221,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 ```lisp
 # === Creation and control ===
-# (fiber/new fn mask) => fiber
+# (fiber/new mask fn) => fiber
 # (fiber/resume fiber value) => signal-bits
 # (emit bits value) => suspends
 
@@ -246,7 +246,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 # error is sugar for (emit 1 value)
 
 # coro/ aliases
-# (coro/new fn) => (fiber/new fn |:yield|)
+# (coro/new fn) => (fiber/new |:yield| fn)
 # (coro/resume co val) => (fiber/resume co val)
 # (coro/status co) => (fiber/status co)
 ```

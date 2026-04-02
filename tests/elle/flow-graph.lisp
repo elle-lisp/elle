@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## ════════════════════════════════════════════════════════════════════════════
 ## fn/flow and fn/cfg integration tests
@@ -92,10 +93,10 @@
 
 ## ── fn/cfg: Fiber support ───────────────────────────────────────────────────
 
-(def r14 (fn/cfg (fiber/new (fn (m) 42) 0)))
+(def r14 (fn/cfg (fiber/new || (fn (m) 42))))
 (assert (string? r14) "fn/cfg fiber")
 
-(def r15 (fn/flow (fiber/new (fn (n) 42) 0)))
+(def r15 (fn/flow (fiber/new || (fn (n) 42))))
 (assert (struct? r15) "fn/flow fiber")
 
 ## ── fn/cfg: Mermaid format visualization ────────────────────────────────────

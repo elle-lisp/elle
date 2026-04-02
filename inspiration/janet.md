@@ -279,7 +279,7 @@ All error-handling forms are trivially built on fibers:
 
 ```
 (protect & body)
-→ (let [f (fiber/new (fn [] ,;body) :ie)
+→ (let [f (fiber/new :ie (fn [] ,;body))
         r (resume f)]
     [(not= :error (fiber/status f)) r])
 ```
@@ -291,7 +291,7 @@ returns `[success? value]`.
 
 ```
 (try body [err fib] catch-body)
-→ (let [f (fiber/new (fn [] ,body) :ie)
+→ (let [f (fiber/new :ie (fn [] ,body))
         r (resume f)]
     (if (= (fiber/status f) :error)
       (do (def err r) (def fib f) ,;catch-body)
@@ -306,7 +306,7 @@ error value and the fiber (for stack trace inspection).
 ```
 (defer cleanup-form & body)
 → (do
-    (def f (fiber/new (fn [] ,;body) :ti))
+    (def f (fiber/new :ti (fn [] ,;body)))
     (def r (resume f))
     cleanup-form
     (if (= (fiber/status f) :dead)
@@ -342,7 +342,7 @@ Fibers double as generators through the yield signal:
 
 ```
 (generate head & body)
-→ (fiber/new (fn [] (loop head (yield (do ,;body)))) :yi)
+→ (fiber/new :yi (fn [] (loop head (yield (do ,;body)))))
 ```
 
 Creates a fiber with `:yi` (catch yield + inherit environment). The body loops,

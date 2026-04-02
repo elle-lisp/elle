@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 
 # Scope Allocation Workload — measuring escape analysis tiers
 #
@@ -15,7 +15,7 @@
 
 (defn run [thunk]
   "Execute thunk in a non-yielding child fiber."
-  (fiber/resume (fiber/new thunk 1)))
+  (fiber/resume (fiber/new |:error| thunk)))
 
 
 # ── Tier 1: primitive whitelist ──────────────────────────────────────

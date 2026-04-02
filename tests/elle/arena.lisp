@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Integration tests for arena/stats, arena/count, arena/allocs, and fiber heap isolation
 #
 # Migrated from tests/integration/arena.rs
@@ -68,14 +69,14 @@
 # which starts empty. The child's count should be much smaller than
 # the parent's (which includes all stdlib/primitive allocations).
 (let* ((parent-count (arena/count))
-       (f (fiber/new (fn () (arena/count)) 1))
+       (f (fiber/new |:error| (fn () (arena/count))))
        (child-count (fiber/resume f)))
   (assert (= (< child-count parent-count) true) "child fiber arena-count is less than parent's"))
 
 # test_child_fiber_arena_starts_near_zero
 # A child fiber's FiberHeap starts empty. The arena/count inside
 # should be small (just overhead from the count query itself).
-(let* ((f (fiber/new (fn () (arena/count)) 1))
+(let* ((f (fiber/new |:error| (fn () (arena/count))))
        (child-count (fiber/resume f)))
   (assert (= (< child-count 10) true) "child fiber arena starts near zero"))
 
@@ -83,10 +84,9 @@
 # After a child fiber completes, the parent's arena/count should
 # continue from where it left off (not include child allocations).
 (let* ((before (arena/count))
-       (f (fiber/new (fn ()
+       (f (fiber/new |:error| (fn ()
              (list 1 2 3 4 5)
-             (list 6 7 8 9 10))
-           1))
+             (list 6 7 8 9 10))))
        (_ (fiber/resume f))
        (after (arena/count)))
   # The difference should be small (just the fiber handle + overhead),
@@ -96,12 +96,11 @@
 # test_child_fiber_allocations_tracked_separately
 # Child fiber allocations go to its own FiberHeap.
 # Verify by checking the count increases inside the child.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:error| (fn ()
              (let* ((before (arena/count))
                     (_ (list 1 2 3 4 5))
                     (after (arena/count)))
-               (- after before)))
-           1)))
+               (- after before))))))
    (let ((allocs (fiber/resume f)))
      # list of 5 = 5 cons cells (arena/count has zero overhead)
      (assert (= allocs 5) "child sees exactly 5 allocations from list")))
@@ -109,12 +108,11 @@
 # test_nested_fiber_heap_isolation
 # Three levels: root → outer fiber → inner fiber.
 # Each should have its own arena view.
-(let* ((inner (fiber/new (fn () (arena/count)) 1))
-       (outer (fiber/new (fn ()
+(let* ((inner (fiber/new |:error| (fn () (arena/count))))
+       (outer (fiber/new |:error| (fn ()
                 (let* ((outer-count (arena/count))
                        (inner-count (fiber/resume inner)))
-                  (list outer-count inner-count)))
-              1))
+                  (list outer-count inner-count)))))
        (counts (fiber/resume outer)))
   # Both outer and inner counts should be small (near zero)
   (let* ((outer-c (first counts))
@@ -125,10 +123,9 @@
 # test_fiber_heap_survives_yield_resume
 # Values allocated in a child fiber survive across yield/resume cycles
 # because the FiberHeap persists on the Fiber struct.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
              (emit 2 (cons 1 2))
-             (cons 3 4))
-           2))
+             (cons 3 4))))
        (first-val (fiber/resume f))
        (second-val (fiber/resume f)))
   (assert (= (first first-val) 1) "first yield value first element")
@@ -161,24 +158,23 @@
 # test_yielding_child_yields_string
 # A yielding child allocates a string and yields it.
 # The parent should be able to read the string after resume.
-(let* ((f (fiber/new (fn () (emit 2 "hello")) 2))
+(let* ((f (fiber/new |:yield| (fn () (emit 2 "hello"))))
        (result (fiber/resume f)))
   (assert (= result "hello") "yielding child yields string"))
 
 # test_non_yielding_child_no_overhead
 # A non-yielding fiber (mask catches error only) should not get
 # a shared allocator. The result is an immediate — no heap involved.
-(let* ((f (fiber/new (fn () 42) 1))
+(let* ((f (fiber/new |:error| (fn () 42)))
        (result (fiber/resume f)))
   (assert (= result 42) "non-yielding child returns immediate"))
 
 # test_yield_resume_multiple_cycles
 # Fiber yields twice (two resume cycles). Both values readable.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
              (emit 2 "first")
              (emit 2 "second")
-             "done")
-           2))
+             "done")))
        (v1 (fiber/resume f))
        (v2 (fiber/resume f))
        (v3 (fiber/resume f)))
@@ -189,28 +185,26 @@
 # test_abc_chain_yield_through
 # A→B→C: C yields a string, B catches and re-yields to A.
 # Tests transitive shared_alloc propagation.
-(let* ((c (fiber/new (fn () (emit 2 "from-c")) 2))
-       (b (fiber/new (fn ()
+(let* ((c (fiber/new |:yield| (fn () (emit 2 "from-c"))))
+       (b (fiber/new |:yield| (fn ()
              (let* ((val (fiber/resume c)))
-               (emit 2 val)))
-           2))
+               (emit 2 val)))))
        (a-result (fiber/resume b)))
   (assert (= a-result "from-c") "abc chain yield through"))
 
 # test_root_child_yield
 # Root resumes a yielding child. Child yields a string.
-(let* ((f (fiber/new (fn () (emit 2 "from-child")) 2))
+(let* ((f (fiber/new |:yield| (fn () (emit 2 "from-child"))))
        (result (fiber/resume f)))
   (assert (= result "from-child") "root child yield"))
 
 # test_root_child_grandchild_yield
 # Root→child→grandchild. Grandchild yields string,
 # child yields it to root.
-(let* ((gc (fiber/new (fn () (emit 2 "from-gc")) 2))
-       (child (fiber/new (fn ()
+(let* ((gc (fiber/new |:yield| (fn () (emit 2 "from-gc"))))
+       (child (fiber/new |:yield| (fn ()
                 (let* ((val (fiber/resume gc)))
-                  (emit 2 val)))
-              2)))
+                  (emit 2 val))))))
   (let ((result (fiber/resume child)))
     (assert (= result "from-gc") "root child grandchild yield")))
 
@@ -218,21 +212,19 @@
 # Child yields a string then completes (dies).
 # The yielded string should survive child death because it's
 # in the shared allocator (owned by parent or child).
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
              (emit 2 "alive")
-             "done")
-           2))
+             "done")))
        (yielded (fiber/resume f))
        (_ (fiber/resume f)))  # child dies here
   (assert (= yielded "alive") "child death value survives"))
 
 # test_multi_resume_yield_basic
 # Multiple yields without letrec — tests shared alloc across resumes.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
               (emit 2 0)
               (emit 2 1)
-              (emit 2 2))
-            2)))
+              (emit 2 2)))))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
         (v3 (fiber/resume f)))
@@ -243,11 +235,10 @@
 # test_multi_resume_yield_heap_values
 # Yield heap-allocated values across multiple resumes.
 # Tests that shared alloc keeps values alive for the parent.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
               (emit 2 "hello")
               (emit 2 "world")
-              (emit 2 "done"))
-            2)))
+              (emit 2 "done")))))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
         (v3 (fiber/resume f)))
@@ -257,11 +248,10 @@
 
 # test_multi_resume_yield_mixed_values
 # Yield a mix of immediate and heap values across resumes.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:yield| (fn ()
               (emit 2 42)
               (emit 2 (list 1 2 3))
-              (emit 2 "end"))
-            2)))
+              (emit 2 "end")))))
   (let ((v1 (fiber/resume f))
         (v2 (fiber/resume f))
         (v3 (fiber/resume f)))
@@ -273,8 +263,8 @@
 # Parent resumes two different yielding children.
 # Both yield strings. Both readable.
 # Tests owned_shared Vec growth doesn't invalidate earlier pointers.
-(let* ((f1 (fiber/new (fn () (emit 2 "from-f1")) 2))
-       (f2 (fiber/new (fn () (emit 2 "from-f2")) 2))
+(let* ((f1 (fiber/new |:yield| (fn () (emit 2 "from-f1"))))
+       (f2 (fiber/new |:yield| (fn () (emit 2 "from-f2"))))
        (v1 (fiber/resume f1))
        (v2 (fiber/resume f2)))
   (assert (= v1 "from-f1") "multiple children: first")
@@ -285,14 +275,14 @@
 # test_yield_immediate_no_shared_alloc_needed
 # Yielding an immediate (int) requires no heap allocation.
 # The shared alloc infrastructure should not interfere.
-(let* ((f (fiber/new (fn () (emit 2 42)) 2))
+(let* ((f (fiber/new |:yield| (fn () (emit 2 42))))
        (result (fiber/resume f)))
   (assert (= result 42) "yield immediate no shared alloc"))
 
 # test_yield_list_parent_traverses
 # Fiber yields a cons list. Parent traverses all elements.
 # The list cells are heap-allocated — they go to shared alloc.
-(let* ((f (fiber/new (fn () (emit 2 (list 10 20 30))) 2))
+(let* ((f (fiber/new |:yield| (fn () (emit 2 (list 10 20 30)))))
        (lst (fiber/resume f)))
   (assert (= (first lst) 10) "yield list: first")
   (assert (= (first (rest lst)) 20) "yield list: second")
@@ -316,7 +306,7 @@
 # test_error_in_child_with_shared_alloc
 # Child fiber signals an error. The error value (a struct/tuple)
 # is in shared space. Parent catches and reads the error message.
-(let* ((f (fiber/new (fn () (error "test error")) 1))
+(let* ((f (fiber/new |:error| (fn () (error "test error"))))
        (_ (fiber/resume f))
        (val (fiber/value f)))
   (assert (not (nil? val)) "error in child with shared alloc"))
@@ -324,10 +314,9 @@
 # test_cancel_child_with_shared_alloc
 # Parent cancels a suspended child that has a shared allocator.
 # Mask 3 catches both error (1) and yield (2) so cancel doesn't propagate.
-(let* ((f (fiber/new (fn ()
+(let* ((f (fiber/new |:error :yield| (fn ()
               (emit 2 "yielded")
-              "never-reached")
-            3))
+              "never-reached")))
        (v1 (fiber/resume f)))      # child suspends
   (fiber/cancel f "cancelled")
   (let ((status (string (fiber/status f))))
@@ -493,7 +482,7 @@
 
 # test_arena_fiber_stats_via_unified_interface
 # arena/stats with a fiber arg returns stats for that fiber.
-(let* ((f (fiber/new (fn () 42) 1))
+(let* ((f (fiber/new |:error| (fn () 42)))
        (_ (fiber/resume f))
        (s (arena/stats f)))
   (assert (struct? s) "arena/stats with fiber arg returns struct")
@@ -504,7 +493,7 @@
 # test_arena_fiber_stats_no_capacity_field
 # The old arena/fiber-stats had no :capacity field. The new unified
 # struct also has no :capacity field.
-(let* ((f (fiber/new (fn () 42) 1))
+(let* ((f (fiber/new |:error| (fn () 42)))
        (_ (fiber/resume f))
        (s (arena/stats f)))
   (assert (nil? (get s :capacity)) "unified fiber stats has no :capacity field"))
@@ -566,7 +555,7 @@
 # We verify indirectly: a new child fiber starts with zero scope counters.
 # Note: the fiber body must not introduce its own scopes (let* with tail-call
 # body scope-allocates since Part A relaxations), so we call arena/stats directly.
-(let* ((f (fiber/new (fn () (arena/stats)) 1))
+(let* ((f (fiber/new |:error| (fn () (arena/stats))))
        (stats (fiber/resume f))
        (enters (get stats :scope-enter-count))
        (dtors-run (get stats :scope-dtor-count)))
@@ -650,8 +639,8 @@
 # :shared-count is a non-negative integer. The internal tracking of shared
 # allocators is on the VM fiber's heap, not the ROOT_HEAP thread-local that
 # arena/stats reads from root context. Verify the field is structurally valid.
-(let* ((f1 (fiber/new (fn () (emit 2 "y1")) 2))
-       (f2 (fiber/new (fn () (emit 2 "y2")) 2))
+(let* ((f1 (fiber/new |:yield| (fn () (emit 2 "y1"))))
+       (f2 (fiber/new |:yield| (fn () (emit 2 "y2"))))
        (_ (fiber/resume f1))
        (_ (fiber/resume f2))
        (s (arena/stats)))
