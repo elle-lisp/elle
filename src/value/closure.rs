@@ -41,6 +41,10 @@ pub struct ClosureTemplate {
     pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
     pub location_map: Rc<LocationMap>,
+    /// True when pool rotation is safe during tail-call iteration.
+    /// A rotation-safe function doesn't escape heap values to external
+    /// mutable structures, so temporaries can be freed between iterations.
+    pub rotation_safe: bool,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
     /// Optional docstring from the source lambda
@@ -161,6 +165,7 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
+            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -197,6 +202,7 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
+            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -225,6 +231,7 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
+            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,
@@ -253,6 +260,7 @@ mod tests {
             lbox_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
+            rotation_safe: false,
             lir_function: None,
             doc: None,
             syntax: None,

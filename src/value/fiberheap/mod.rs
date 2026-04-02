@@ -46,6 +46,17 @@ use crate::value::Value;
 mod routing;
 pub use routing::*;
 
+/// Base mark for tail-call pool rotation, capturing the heap state at
+/// trampoline entry. Objects allocated before this mark are never freed
+/// by rotation.
+#[derive(Clone)]
+pub struct RotationBase {
+    heap_mark: ArenaMark,
+    /// Scope depth at mark time. Rotation is skipped when scope depth
+    /// differs (unbalanced due to error exit).
+    scope_depth: usize,
+}
+
 mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
@@ -76,10 +87,32 @@ pub(crate) struct CustomAllocState {
     custom_ptrs: Vec<(*mut u8, usize, usize)>,
 }
 
+/// Previous tail-call iteration's allocations, preserved for one rotation.
+///
+/// Objects remain in the parent `FiberHeap`'s `root_slab`; the `SwapPool`
+/// tracks which slots and destructors belong to the previous iteration so
+/// they can be freed at the next rotation. The one-iteration lag ensures
+/// that argument values from the previous iteration (which may reference
+/// swap pool objects) remain valid until the next tail-call boundary.
+struct SwapPool {
+    /// Slab slot pointers from the previous iteration.
+    root_allocs: Vec<*mut HeapObject>,
+    /// Destructors from the previous iteration (subset of root_allocs that need Drop).
+    dtors: Vec<*mut HeapObject>,
+}
+
 pub struct FiberHeap {
     /// Slab allocator with allocation and destructor tracking.
     /// Shared structure with `SharedAllocator`.
     pool: SlabPool,
+    /// Previous tail-call iteration's allocations, held for one rotation.
+    /// See [`SwapPool`] for the rotation protocol.
+    swap_pool: Option<SwapPool>,
+    /// Number of objects freed by tail-call pool rotation (for diagnostics).
+    rotation_freed: usize,
+    /// Saved base mark for JIT self-tail-call rotation. Set by the first
+    /// `rotate_pools_jit()` call; cleared when the JIT function exits.
+    jit_rotation_base: Option<RotationBase>,
     /// Peak number of objects allocated (high-water mark).
     peak_alloc_count: usize,
     /// Stack of scope marks pushed by `RegionEnter`, popped by `RegionExit`.
@@ -122,6 +155,9 @@ impl FiberHeap {
     pub fn new() -> Self {
         FiberHeap {
             pool: SlabPool::new(),
+            swap_pool: None,
+            rotation_freed: 0,
+            jit_rotation_base: None,
             peak_alloc_count: 0,
             scope_marks: Vec::new(),
             owned_shared: Vec::new(),
@@ -248,6 +284,13 @@ impl FiberHeap {
         self.scope_enters += 1;
     }
 
+    /// Discard the top scope mark without releasing any objects.
+    /// Used by the tail-call trampoline on normal return: the return
+    /// value may reference objects allocated in this iteration.
+    pub fn discard_scope_mark(&mut self) {
+        self.scope_marks.pop();
+    }
+
     /// Pop the top scope mark and release objects allocated since it
     /// was pushed (called by `RegionExit`).
     ///
@@ -267,6 +310,47 @@ impl FiberHeap {
         let dtors_before = self.pool.dtors.len();
         self.release(mark);
         self.scope_dtors_run += dtors_before - self.pool.dtors.len();
+    }
+
+    /// Pop two scope marks and release only the range between them.
+    ///
+    /// Used by `RegionExitCall`: mark2 (top) is the barrier pushed
+    /// after arg evaluation; mark1 (below) is the region start.
+    /// Objects in [mark1..mark2) (arg temporaries) are freed.
+    /// Objects after mark2 (callee's allocations) are preserved.
+    ///
+    /// Panics if fewer than two marks are on the stack.
+    pub fn pop_call_scope_marks_and_release(&mut self) {
+        let mark2 = self
+            .scope_marks
+            .pop()
+            .expect("RegionExitCall: missing barrier mark");
+        let mark1 = self
+            .scope_marks
+            .pop()
+            .expect("RegionExitCall: missing region mark");
+
+        // Run dtors in reverse for objects allocated between mark1 and mark2.
+        for i in (mark1.dtor_len()..mark2.dtor_len()).rev() {
+            unsafe {
+                std::ptr::drop_in_place(self.pool.dtors[i]);
+            }
+        }
+        let dtors_freed = mark2.dtor_len() - mark1.dtor_len();
+        self.pool.dtors.drain(mark1.dtor_len()..mark2.dtor_len());
+        self.scope_dtors_run += dtors_freed;
+
+        // Dealloc slab slots for the range, then drain the entries.
+        for i in (mark1.root_allocs_len()..mark2.root_allocs_len()).rev() {
+            unsafe {
+                self.pool.dealloc_slot(self.pool.allocs[i]);
+            }
+        }
+        self.pool
+            .allocs
+            .drain(mark1.root_allocs_len()..mark2.root_allocs_len());
+
+        self.pool.alloc_count -= mark2.position() - mark1.position();
     }
 
     /// Private heap object count (used by mark/release scoping).
@@ -358,6 +442,85 @@ impl FiberHeap {
         let prev = self.peak_alloc_count;
         self.peak_alloc_count = self.pool.alloc_count;
         prev
+    }
+
+    /// Capture a rotation base mark for tail-call pool rotation.
+    pub fn rotation_mark(&self) -> RotationBase {
+        RotationBase {
+            heap_mark: self.mark(),
+            scope_depth: self.scope_marks.len(),
+        }
+    }
+
+    /// Rotate slab pools at a tail-call boundary.
+    ///
+    /// `base` captures the heap state at trampoline entry — objects
+    /// allocated before the trampoline are never freed by rotation.
+    /// Only objects allocated AFTER the base mark are subject to rotation.
+    ///
+    /// When the shared allocator is active (yielding child fiber),
+    /// rotation is performed on the shared allocator instead of the
+    /// private pool, since that's where allocations actually go.
+    pub fn rotate_pools(&mut self, base: &RotationBase) {
+        if !self.shared_alloc.is_null() {
+            // Skip rotation when shared allocator is active — rotation state
+            // is per-fiber, not per-shared-allocator. Cooperative scheduling
+            // means no interleaving within a single trampoline iteration.
+            return;
+        }
+
+        // Defect 2: scope depth must match the depth at base-mark time.
+        // If not (unbalanced due to error exit), skip rotation to avoid
+        // invalidating scope marks.
+        if self.scope_marks.len() != base.scope_depth {
+            return;
+        }
+
+        let base_allocs = base.heap_mark.root_allocs_len();
+        let base_dtors = base.heap_mark.dtor_len();
+        let base_count = base.heap_mark.position();
+
+        // 1. Teardown the swap pool (iteration N-2's allocations are dead).
+        if let Some(old) = self.swap_pool.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+            for &ptr in old.root_allocs.iter().rev() {
+                unsafe { self.pool.dealloc_slot(ptr) };
+            }
+            self.rotation_freed += old.root_allocs.len();
+        }
+
+        // 2. Move current iteration's objects (after base_mark) to swap.
+        let iter_allocs = self.pool.allocs.split_off(base_allocs);
+        let iter_dtors = self.pool.dtors.split_off(base_dtors);
+
+        self.swap_pool = if iter_allocs.is_empty() {
+            None
+        } else {
+            Some(SwapPool {
+                root_allocs: iter_allocs,
+                dtors: iter_dtors,
+            })
+        };
+
+        // 3. Reset alloc tracking to base level (peak stays).
+        self.pool.alloc_count = base_count;
+    }
+
+    /// Rotate pools for JIT self-tail-call loops.
+    ///
+    /// On first call, captures the current state as the base mark.
+    /// Subsequent calls rotate relative to that base.
+    pub fn rotate_pools_jit(&mut self) {
+        let base = match self.jit_rotation_base {
+            Some(ref b) => b.clone(),
+            None => {
+                self.jit_rotation_base = Some(self.rotation_mark());
+                return;
+            }
+        };
+        self.rotate_pools(&base);
     }
 
     /// Push a custom allocator onto the stack. Allocations will route
@@ -463,7 +626,15 @@ impl FiberHeap {
     /// Also tears down all owned shared allocators and nulls the
     /// shared_alloc pointer.
     pub fn clear(&mut self) {
-        // Tear down owned shared allocators first.
+        // Run swap pool dtors first (their objects live in root_slab).
+        if let Some(old) = self.swap_pool.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+            // Slab slots freed by root_slab.clear() below.
+        }
+
+        // Tear down owned shared allocators.
         for sa in &mut self.owned_shared {
             sa.teardown();
         }
@@ -497,11 +668,18 @@ impl FiberHeap {
         self.peak_alloc_count = 0;
         self.scope_enters = 0;
         self.scope_dtors_run = 0;
+        self.jit_rotation_base = None;
     }
 }
 
 impl Drop for FiberHeap {
     fn drop(&mut self) {
+        // Run swap pool dtors first (their objects live in root_slab).
+        if let Some(old) = self.swap_pool.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+        }
         // Tear down owned shared allocators before our slab is dropped.
         for sa in &mut self.owned_shared {
             sa.teardown();

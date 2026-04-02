@@ -221,6 +221,7 @@ impl fmt::Display for LirInstr {
             // === Allocation Regions ===
             LirInstr::RegionEnter => f.write_str("region-enter"),
             LirInstr::RegionExit => f.write_str("region-exit"),
+            LirInstr::RegionExitCall => f.write_str("region-exit-call"),
 
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {

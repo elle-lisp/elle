@@ -159,6 +159,15 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "nan",
 ];
 
+/// Primitives that store their argument(s) into external mutable data
+/// structures. Calls to these with non-immediate arguments can cause
+/// heap values to escape the current tail-call iteration.
+///
+/// Used by rotation-safety analysis: a tail-call loop containing calls
+/// to any of these with a heap argument is not safe for pool rotation.
+#[allow(dead_code)]
+const MUTATING_PRIMITIVES: &[&str] = &["push", "put", "del", "pop", "fiber/resume", "assign"];
+
 /// Build the set of primitive SymbolIds known to return immediates.
 ///
 /// Used by escape analysis to accept `(let (...) (length x))` and
@@ -167,6 +176,18 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
 pub(crate) fn build_immediate_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
     let mut set = FxHashSet::default();
     for &name in IMMEDIATE_PRIMITIVES {
+        if let Some(id) = symbols.get(name) {
+            set.insert(id);
+        }
+    }
+    set
+}
+
+/// Build the set of primitive SymbolIds that store heap values externally.
+#[allow(dead_code)]
+pub(crate) fn build_mutating_primitives(symbols: &SymbolTable) -> FxHashSet<SymbolId> {
+    let mut set = FxHashSet::default();
+    for &name in MUTATING_PRIMITIVES {
         if let Some(id) = symbols.get(name) {
             set.insert(id);
         }

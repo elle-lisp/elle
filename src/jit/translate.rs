@@ -565,6 +565,10 @@ impl<'a> FunctionTranslator<'a> {
                             .map(|arg_reg| self.use_var_pair(builder, arg_reg.0))
                             .collect();
 
+                        // Rotate slab pools: free iteration N-2, preserve N-1
+                        // (argument SSA values are in registers, safe from rotation).
+                        self.call_rotate_pools(builder, vm)?;
+
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
                             self.def_var_pair(builder, base, at, ap);
@@ -640,6 +644,7 @@ impl<'a> FunctionTranslator<'a> {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    rotation_safe: func.rotation_safe,
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
@@ -984,6 +989,13 @@ impl<'a> FunctionTranslator<'a> {
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.region_exit, builder.func);
+                let call = builder.ins().call(func_ref, &[]);
+                let _ = builder.inst_results(call);
+            }
+            LirInstr::RegionExitCall => {
+                let func_ref = self
+                    .module
+                    .declare_func_in_func(self.helpers.region_exit_call, builder.func);
                 let call = builder.ins().call(func_ref, &[]);
                 let _ = builder.inst_results(call);
             }

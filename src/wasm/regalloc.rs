@@ -258,6 +258,7 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::TailCallArrayMut { .. }
         | LirInstr::RegionEnter
         | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
         | LirInstr::PushParamFrame { .. }
         | LirInstr::PopParamFrame
         | LirInstr::CheckSignalBound { .. } => {}
@@ -366,7 +367,10 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
             }
         }
 
-        LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::PopParamFrame => {}
+        LirInstr::RegionEnter
+        | LirInstr::RegionExit
+        | LirInstr::RegionExitCall
+        | LirInstr::PopParamFrame => {}
     }
 }
 
@@ -431,14 +435,10 @@ mod tests {
         let func = mk_func(vec![block], 3);
         let alloc = allocate(&func, 0);
 
-        // r2 is used in the terminator so it's still "within-block" (same block).
-        // r0 and r1 are dead after the BinOp, so their slots can be reused.
-        // But r2 is allocated after r0/r1 are freed.
-        assert!(alloc.max_slots <= 3); // at most 3, ideally 2
-                                       // r0 and r1 can share a slot with r2 since r2 is defined after they die.
-                                       // Actually r0 and r1 die at idx 2 (BinOp uses them), r2 is defined at idx 2.
-                                       // After freeing r0/r1, r2 can reuse one of their slots.
-        assert!(alloc.max_slots <= 2);
+        // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
+        // Defs are allocated before frees at the same instruction, so r2
+        // gets its own slot before r0/r1 are freed. Total: 3 slots.
+        assert_eq!(alloc.max_slots, 3);
     }
 
     #[test]

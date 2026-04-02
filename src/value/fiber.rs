@@ -549,6 +549,7 @@ mod tests {
                 lbox_locals_mask: 0,
                 symbol_names: Rc::new(HashMap::new()),
                 location_map: Rc::new(LocationMap::new()),
+                rotation_safe: false,
                 lir_function: None,
                 doc: None,
                 syntax: None,

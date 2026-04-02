@@ -113,6 +113,8 @@ impl VM {
         let mut current_location_map = location_map.clone();
         let mut current_ip = start_ip;
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
+        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
+        let mut prev_rotation_safe = true;
 
         loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -171,6 +173,17 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
+                if prev_rotation_safe {
+                    if let Some(ref base) = rotation_base {
+                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
+                    } else {
+                        rotation_base =
+                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
+                    }
+                } else {
+                    rotation_base = None;
+                }
+                prev_rotation_safe = tail.rotation_safe;
                 accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
@@ -217,6 +230,9 @@ impl VM {
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
         let mut accumulated_squelch_mask = SignalBits::EMPTY;
+        // Base mark for tail-call pool rotation: lazy-initialized on first tail call.
+        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
+        let mut prev_rotation_safe = true;
 
         let result = loop {
             let (bits, ip) = self.execute_bytecode_inner_impl(
@@ -277,6 +293,17 @@ impl VM {
             }
 
             if let Some(tail) = self.pending_tail_call.take() {
+                if prev_rotation_safe {
+                    if let Some(ref base) = rotation_base {
+                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
+                    } else {
+                        rotation_base =
+                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
+                    }
+                } else {
+                    rotation_base = None;
+                }
+                prev_rotation_safe = tail.rotation_safe;
                 accumulated_squelch_mask |= tail.squelch_mask;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
@@ -324,6 +351,8 @@ impl VM {
         let mut current_constants = constants.clone();
         let mut current_env = closure_env.clone();
         let mut current_location_map = location_map.clone();
+        let mut rotation_base: Option<crate::value::fiberheap::RotationBase> = None;
+        let mut prev_rotation_safe = true;
 
         loop {
             let (bits, _ip) = self.execute_bytecode_inner_impl(
@@ -335,6 +364,17 @@ impl VM {
             );
 
             if let Some(tail) = self.pending_tail_call.take() {
+                if prev_rotation_safe {
+                    if let Some(ref base) = rotation_base {
+                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
+                    } else {
+                        rotation_base =
+                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
+                    }
+                } else {
+                    rotation_base = None;
+                }
+                prev_rotation_safe = tail.rotation_safe;
                 current_bytecode = tail.bytecode;
                 current_constants = tail.constants;
                 current_env = tail.env;
