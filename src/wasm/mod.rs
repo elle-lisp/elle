@@ -200,7 +200,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     // Compile source → LIR (file mode = letrec for mutual recursion)
     let t0 = std::time::Instant::now();
-    let lir_func = crate::pipeline::compile_file_to_lir(
+    let lir_module = crate::pipeline::compile_file_to_lir(
         compile_source,
         &mut symbols,
         source_name,
@@ -210,12 +210,13 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
 
     if crate::config::get().wasm_lir {
         eprintln!(
-            "[lir] entry: regs={} locals={} blocks={}",
-            lir_func.num_regs,
-            lir_func.num_locals,
-            lir_func.blocks.len()
+            "[lir] entry: regs={} locals={} blocks={} closures={}",
+            lir_module.entry.num_regs,
+            lir_module.entry.num_locals,
+            lir_module.entry.blocks.len(),
+            lir_module.closures.len(),
         );
-        for block in &lir_func.blocks {
+        for block in &lir_module.entry.blocks {
             eprintln!("[lir]   {:?}:", block.label);
             for si in &block.instructions {
                 eprintln!("[lir]     {:?}", si.instr);
@@ -225,7 +226,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     }
 
     // LIR → WASM bytes + constant pool
-    let result = emit::emit_module(&lir_func);
+    let result = emit::emit_module(&lir_module);
     let t2 = std::time::Instant::now();
 
     // Dump WASM for analysis
@@ -269,26 +270,32 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
 
-    eprintln!("[wasm] funcs: {}  elle→LIR: {:.3}s  LIR→wasm: {:.3}s  wasmtime compile: {:.3}s  execute: {:.3}s  total: {:.3}s  wasm_bytes: {}",
-        {
-            fn count_nested(f: &crate::lir::LirFunction) -> usize {
-                let mut n = 0;
-                for block in &f.blocks {
-                    for spanned in &block.instructions {
-                        if let crate::lir::LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
-                            n += 1 + count_nested(nested);
-                        }
-                    }
+    let funcs = 1 + lir_module.closures.len();
+    let lir_secs = (t1 - t0).as_secs_f64();
+    let emit_secs = (t2 - t1).as_secs_f64();
+    let compile_secs = (t4 - t3).as_secs_f64();
+    let exec_secs = (t5 - t4).as_secs_f64();
+    let total_secs = (t5 - t0).as_secs_f64();
+    let wasm_bytes = result.wasm_bytes.len();
+
+    if crate::config::get().json {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "wasm": {
+                    "funcs": funcs,
+                    "lir_secs": lir_secs,
+                    "emit_secs": emit_secs,
+                    "compile_secs": compile_secs,
+                    "exec_secs": exec_secs,
+                    "total_secs": total_secs,
+                    "wasm_bytes": wasm_bytes,
                 }
-                n
-            }
-            1 + count_nested(&lir_func)
-        },
-        (t1 - t0).as_secs_f64(),
-        (t2 - t1).as_secs_f64(),
-        (t4 - t3).as_secs_f64(),
-        (t5 - t4).as_secs_f64(),
-        (t5 - t0).as_secs_f64(),
-        result.wasm_bytes.len());
+            })
+        );
+    } else {
+        eprintln!("[wasm] funcs: {}  elle→LIR: {:.3}s  LIR→wasm: {:.3}s  wasmtime compile: {:.3}s  execute: {:.3}s  total: {:.3}s  wasm_bytes: {}",
+            funcs, lir_secs, emit_secs, compile_secs, exec_secs, total_secs, wasm_bytes);
+    }
     ret
 }

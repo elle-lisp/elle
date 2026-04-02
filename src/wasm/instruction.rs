@@ -283,10 +283,10 @@ impl WasmEmitter {
             }
             LirInstr::MakeClosure {
                 dst,
-                func: nested,
+                closure_id,
                 captures,
             } => {
-                self.emit_make_closure(f, *dst, nested, captures);
+                self.emit_make_closure(f, *dst, *closure_id, captures);
             }
             LirInstr::PushParamFrame { pairs } => {
                 for (i, (param_reg, val_reg)) in pairs.iter().enumerate() {
@@ -338,14 +338,19 @@ impl WasmEmitter {
         &mut self,
         f: &mut Function,
         dst: Reg,
-        nested: &crate::lir::LirFunction,
+        closure_id: crate::lir::ClosureId,
         captures: &[Reg],
     ) {
         let table_idx = self
-            .closure_table_idx
-            .get(&(nested as *const crate::lir::LirFunction))
+            .closure_id_to_table_idx
+            .get(&closure_id)
             .copied()
-            .expect("MakeClosure: nested function not found in table");
+            .expect("MakeClosure: ClosureId not found in table map");
+        let nested = self
+            .module_closures
+            .as_ref()
+            .expect("MakeClosure: no module_closures context")[closure_id.0 as usize]
+            .clone();
 
         for (i, cap) in captures.iter().enumerate() {
             self.write_val_to_mem(f, *cap, i);

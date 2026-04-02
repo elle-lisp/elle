@@ -156,7 +156,7 @@ fn has_unsupported_instructions(lir: &LirFunction) -> bool {
 mod tests {
     use super::*;
     use crate::lir::{
-        BasicBlock, Label, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
+        BasicBlock, ClosureId, Label, LirInstr, Reg, SpannedInstr, SpannedTerminator, Terminator,
     };
     use crate::signals::Signal;
     use crate::syntax::Span;
@@ -353,7 +353,7 @@ mod tests {
         entry.instructions.push(SpannedInstr::new(
             LirInstr::MakeClosure {
                 dst: Reg(1),
-                func: Box::new(make_leaf()),
+                closure_id: ClosureId(0),
                 captures: vec![],
             },
             Span::synthetic(),

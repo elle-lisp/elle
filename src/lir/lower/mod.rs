@@ -217,17 +217,10 @@ pub struct Lowerer<'a> {
     discard_slot: Option<u16>,
     /// Symbol ID → name mapping for error messages.
     symbol_names: HashMap<u32, String>,
-    /// Count of pending RegionExit instructions that TailCall emissions
-    /// must emit before replacing the frame. Incremented by `lower_let`
-    /// / `lower_letrec` when the body is a tail call and the scope is
-    /// allocated. Decremented after the body is lowered.
-    ///
-    /// Uses a counter (not a bool) because `if` branches are lowered
-    /// sequentially against the same lowerer state — a bool consumed by
-    /// the first branch's tail call leaves the second branch without
-    /// RegionExit. The counter stays constant across branches so every
-    /// tail-call site emits the correct number of exits.
-    pending_region_exits: u32,
+    /// Flat list of closure bodies. `MakeClosure` instructions reference
+    /// closures by `ClosureId` (index into this list). Built depth-first
+    /// during lowering.
+    closures: Vec<LirFunction>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -256,7 +249,7 @@ impl<'a> Lowerer<'a> {
             scope_stats: ScopeStats::default(),
             discard_slot: None,
             symbol_names: HashMap::new(),
-            pending_region_exits: 0,
+            closures: Vec::new(),
         }
     }
 
@@ -299,26 +292,19 @@ impl<'a> Lowerer<'a> {
         &self.scope_stats
     }
 
-    /// Lower a HIR expression to LIR
-    pub fn lower(&mut self, hir: &Hir) -> Result<LirFunction, String> {
-        // Precompute interprocedural properties for all function definitions
-        // in the compilation unit. Uses fixpoint iteration to handle mutual
-        // recursion (e.g. try-col ↔ search in nqueens).
-        //
-        // Order matters: result_immediate depends on call_result_is_safe
-        // which checks callee_result_immediate; rotation_safety depends on
-        // body_escapes_heap_values which checks callee_rotation_safe.
-        // Both converge independently.
-        self.precompute_result_immediate(hir);
-        self.precompute_return_params(hir);
-        self.precompute_rotation_safety(hir);
-
+    /// Lower a HIR expression to an LIR module.
+    ///
+    /// Returns an `LirModule` with the entry function and a flat list of
+    /// closure bodies. Each closure is an independent compilation unit
+    /// referenced by `ClosureId`.
+    pub fn lower(&mut self, hir: &Hir) -> Result<LirModule, String> {
         self.current_func = LirFunction::new(Arity::Exact(0));
         self.current_block = BasicBlock::new(Label(0));
         self.next_reg = 0;
         self.next_label = 1;
         self.binding_to_slot.clear();
         self.discard_slot = None;
+        self.closures.clear();
 
         let result_reg = self.lower_expr(hir)?;
         self.terminate(Terminator::Return(result_reg));
@@ -336,10 +322,9 @@ impl<'a> Lowerer<'a> {
         self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
 
-        Ok(std::mem::replace(
-            &mut self.current_func,
-            LirFunction::new(Arity::Exact(0)),
-        ))
+        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
+        let closures = std::mem::take(&mut self.closures);
+        Ok(LirModule { entry, closures })
     }
 
     // === Helper Methods ===
@@ -1157,7 +1142,7 @@ mod tests {
         let mut lowerer = Lowerer::new(&arena);
         let hir = Hir::silent(HirKind::Int(42), make_span());
         let func = lowerer.lower(&hir).unwrap();
-        assert!(!func.blocks.is_empty());
+        assert!(!func.entry.blocks.is_empty());
     }
 
     #[test]
@@ -1174,10 +1159,10 @@ mod tests {
         );
         let func = lowerer.lower(&hir).unwrap();
         // If now creates multiple blocks: entry, then, else, merge
-        assert_eq!(func.blocks.len(), 4);
+        assert_eq!(func.entry.blocks.len(), 4);
         // Entry block should have a Branch terminator
         assert!(matches!(
-            func.blocks[0].terminator.terminator,
+            func.entry.blocks[0].terminator.terminator,
             Terminator::Branch { .. }
         ));
     }
@@ -1194,6 +1179,6 @@ mod tests {
             make_span(),
         );
         let func = lowerer.lower(&hir).unwrap();
-        assert!(!func.blocks.is_empty());
+        assert!(!func.entry.blocks.is_empty());
     }
 }

@@ -720,12 +720,11 @@ fn test_jit_compiles_make_closure() {
     func.num_captures = 0;
     func.signal = Signal::silent();
 
-    let inner_func = Box::new(LirFunction::new(Arity::Exact(0)));
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
         LirInstr::MakeClosure {
             dst: Reg(0),
-            func: inner_func,
+            closure_id: elle::lir::ClosureId(0),
             captures: vec![],
         },
         span(),

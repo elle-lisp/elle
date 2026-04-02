@@ -8,6 +8,24 @@ use crate::value::{Arity, SymbolId, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Reg(pub u32);
 
+/// Index into an `LirModule`'s closure list.
+///
+/// `MakeClosure` references closures by ID rather than owning them,
+/// so each closure is an independent compilation unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClosureId(pub u32);
+
+/// A module: an entry function plus independently compiled closures.
+///
+/// The entry function's `MakeClosure` instructions reference closures
+/// by `ClosureId` (index into `closures`). Nested closures within
+/// closures also reference by ID — the list is flat, depth-first.
+#[derive(Debug, Clone)]
+pub struct LirModule {
+    pub entry: LirFunction,
+    pub closures: Vec<LirFunction>,
+}
+
 impl Reg {
     pub fn new(id: u32) -> Self {
         Reg(id)
@@ -27,6 +45,9 @@ impl Label {
 /// A LIR function (compilation unit)
 #[derive(Debug, Clone)]
 pub struct LirFunction {
+    /// This closure's identity in the module's closure list.
+    /// `None` for the entry function and standalone tests.
+    pub closure_id: Option<ClosureId>,
     /// Function name (for debugging)
     pub name: Option<String>,
     /// Function arity (Exact for fixed, AtLeast for variadic)
@@ -133,6 +154,7 @@ impl LirFunction {
     pub fn new(arity: Arity) -> Self {
         let num_params = arity.fixed_params();
         LirFunction {
+            closure_id: None,
             name: None,
             arity,
             blocks: Vec::new(),
@@ -226,10 +248,11 @@ pub enum LirInstr {
     /// Store to capture (handles cells automatically)
     StoreCapture { index: u16, src: Reg },
     // === Closures ===
-    /// Create a closure
+    /// Create a closure. The closure body is in the module's closure
+    /// list at the given `ClosureId`, not owned by this instruction.
     MakeClosure {
         dst: Reg,
-        func: Box<LirFunction>,
+        closure_id: ClosureId,
         captures: Vec<Reg>,
     },
 

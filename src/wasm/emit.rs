@@ -11,7 +11,7 @@
 //! - `controlflow.rs` — CFG emission, block dispatch, terminators
 //! - `suspend.rs` — CPS suspension/resume, spill/restore, block splitting
 
-use crate::lir::{Label, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::{ClosureId, Label, LirFunction, LirInstr, Reg, Terminator};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -29,10 +29,10 @@ pub struct EmitResult {
     pub closure_bytecodes: Vec<super::host::ClosureBytecode>,
 }
 
-/// Emit a WASM module from a top-level LirFunction.
-pub fn emit_module(func: &LirFunction) -> EmitResult {
+/// Emit a WASM module from an LirModule.
+pub fn emit_module(module: &crate::lir::LirModule) -> EmitResult {
     let mut emitter = WasmEmitter::new();
-    emitter.emit_module(func)
+    emitter.emit_module_from_lir(module)
 }
 
 /// Emit a WASM module containing a single closure function.
@@ -157,7 +157,7 @@ pub(super) struct WasmEmitter {
     pub num_regs: u32,
     pub is_closure: bool,
     pub const_pool: Vec<Value>,
-    pub closure_table_idx: HashMap<*const LirFunction, u32>,
+    pub closure_id_to_table_idx: HashMap<ClosureId, u32>,
     pub local_offset: u32,
     pub signal_local: u32,
     pub num_stack_locals: u32,
@@ -175,6 +175,8 @@ pub(super) struct WasmEmitter {
     pub env_lbox_mask: u64,
     pub current_num_captures: u16,
     pub known_int: std::collections::HashSet<Reg>,
+    /// Module's closure list for MakeClosure metadata lookup.
+    pub module_closures: Option<Vec<LirFunction>>,
 }
 
 impl WasmEmitter {
@@ -184,7 +186,7 @@ impl WasmEmitter {
             num_regs: 0,
             is_closure: false,
             const_pool: Vec::new(),
-            closure_table_idx: HashMap::new(),
+            closure_id_to_table_idx: HashMap::new(),
             local_offset: 0,
             signal_local: 0,
             num_stack_locals: 0,
@@ -202,6 +204,7 @@ impl WasmEmitter {
             env_lbox_mask: 0,
             current_num_captures: 0,
             known_int: std::collections::HashSet::new(),
+            module_closures: None,
         }
     }
 
@@ -320,16 +323,18 @@ impl WasmEmitter {
         module.section(&imports);
     }
 
-    fn emit_module(&mut self, func: &LirFunction) -> EmitResult {
-        let mut nested_funcs: Vec<&LirFunction> = Vec::new();
-        collect_nested_functions(func, &mut nested_funcs);
-        let num_closures = nested_funcs.len() as u32;
+    pub(super) fn emit_module_from_lir(
+        &mut self,
+        lir_module: &crate::lir::LirModule,
+    ) -> EmitResult {
+        let num_closures = lir_module.closures.len() as u32;
 
-        self.closure_table_idx.clear();
-        for (i, nf) in nested_funcs.iter().enumerate() {
-            self.closure_table_idx
-                .insert(*nf as *const LirFunction, i as u32);
+        self.closure_id_to_table_idx.clear();
+        for i in 0..lir_module.closures.len() {
+            self.closure_id_to_table_idx
+                .insert(ClosureId(i as u32), i as u32);
         }
+        self.module_closures = Some(lir_module.closures.clone());
 
         let mut module = Module::new();
         self.emit_types_and_imports(&mut module);
@@ -395,13 +400,13 @@ impl WasmEmitter {
         // WASM bytes, so stable indices → cache hits across programs.
         // The code section must list functions in declaration order
         // (entry first), so we buffer the closure bodies.
-        let mut closure_bodies = Vec::with_capacity(nested_funcs.len());
-        for (i, nested) in nested_funcs.iter().enumerate() {
+        let mut closure_bodies = Vec::with_capacity(lir_module.closures.len());
+        for (i, closure_func) in lir_module.closures.iter().enumerate() {
             self.current_table_idx = i as u32;
-            let closure_body = self.emit_closure_function(nested);
+            let closure_body = self.emit_closure_function(closure_func);
             closure_bodies.push(closure_body);
         }
-        let entry_body = self.emit_function(func);
+        let entry_body = self.emit_function(&lir_module.entry);
         let mut code = CodeSection::new();
         code.function(&entry_body);
         for closure_body in &closure_bodies {
@@ -409,11 +414,12 @@ impl WasmEmitter {
         }
         module.section(&code);
 
-        // Dual-compile bytecode for spawn
-        let mut closure_bytecodes = Vec::with_capacity(nested_funcs.len());
+        // Dual-compile bytecode for spawn.
+        // Use emit_module which handles MakeClosure → ClosureId resolution.
         let mut bc_emitter = crate::lir::Emitter::new();
-        for nf in &nested_funcs {
-            let (bytecode, _, _) = bc_emitter.emit(nf);
+        let bc_compiled = bc_emitter.emit_module_closures(lir_module);
+        let mut closure_bytecodes = Vec::with_capacity(bc_compiled.len());
+        for (bytecode, _, _) in bc_compiled {
             closure_bytecodes.push((
                 std::rc::Rc::new(bytecode.instructions),
                 std::rc::Rc::new(bytecode.constants),
@@ -516,33 +522,9 @@ impl WasmEmitter {
     pub(super) fn emit_closure_function(&mut self, func: &LirFunction) -> Function {
         let split_func;
         let func = if func.signal.may_suspend() {
-            let mut orig_closures: Vec<*const LirFunction> = Vec::new();
-            for block in &func.blocks {
-                for si in &block.instructions {
-                    if let LirInstr::MakeClosure { func: nf, .. } = &si.instr {
-                        orig_closures.push(&**nf as *const LirFunction);
-                    }
-                }
-            }
-
+            // ClosureId is Copy and survives block splitting/cloning
+            // — no pointer remapping needed.
             let split_blocks = Self::split_blocks_at_suspending_calls(&func.blocks);
-
-            let mut clone_idx = 0;
-            for block in &split_blocks {
-                for si in &block.instructions {
-                    if let LirInstr::MakeClosure { func: nf, .. } = &si.instr {
-                        let cloned_ptr = &**nf as *const LirFunction;
-                        if clone_idx < orig_closures.len() {
-                            let orig_ptr = orig_closures[clone_idx];
-                            if let Some(&table_idx) = self.closure_table_idx.get(&orig_ptr) {
-                                self.closure_table_idx.insert(cloned_ptr, table_idx);
-                            }
-                        }
-                        clone_idx += 1;
-                    }
-                }
-            }
-
             split_func = LirFunction {
                 blocks: split_blocks,
                 ..func.clone()
@@ -675,17 +657,5 @@ impl WasmEmitter {
 
     pub(super) fn local_slot_pay(&self, slot: u16) -> u32 {
         self.local_offset + 2 * self.num_regs + self.num_stack_locals + slot as u32
-    }
-}
-
-/// Recursively collect all nested LirFunctions from MakeClosure instructions.
-fn collect_nested_functions<'a>(func: &'a LirFunction, out: &mut Vec<&'a LirFunction>) {
-    for block in &func.blocks {
-        for spanned in &block.instructions {
-            if let LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
-                out.push(nested);
-                collect_nested_functions(nested, out);
-            }
-        }
     }
 }

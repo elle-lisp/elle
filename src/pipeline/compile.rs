@@ -14,12 +14,12 @@ use std::collections::HashSet;
 /// Compile source code to LIR (for the WASM backend).
 ///
 /// Runs phases 1-4 (parse, expand, analyze, lower) and returns the
-/// LirFunction before bytecode emission.
+/// LirModule before bytecode emission.
 pub fn compile_to_lir(
     source: &str,
     symbols: &mut SymbolTable,
     source_name: &str,
-) -> Result<crate::lir::LirFunction, String> {
+) -> Result<crate::lir::LirModule, String> {
     intern_primitive_names(symbols);
 
     let syntax = read_syntax(source, source_name)?;
@@ -107,12 +107,11 @@ pub fn compile(
         .with_mutating_primitives(mut_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
-    let lir_func = lowerer.lower(&analysis.hir)?;
-    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
+    let lir_module = lowerer.lower(&analysis.hir)?;
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new_with_symbols(symbol_names);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     Ok(CompileResult { bytecode })
 }
@@ -154,7 +153,7 @@ pub fn compile_file_to_lir(
     symbols: &mut SymbolTable,
     source_name: &str,
     epoch_skip: usize,
-) -> Result<crate::lir::LirFunction, String> {
+) -> Result<crate::lir::LirModule, String> {
     intern_primitive_names(symbols);
 
     let mut syntaxes = read_syntax_all_for(source, source_name)?;
@@ -355,13 +354,12 @@ fn compile_file_inner(
         .with_mutating_primitives(mut_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
-    let lir_func = lowerer.lower(&hir)?;
-    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
+    let lir_module = lowerer.lower(&hir)?;
 
     // Emit bytecode
-    let signal = lir_func.signal;
+    let signal = lir_module.entry.signal;
     let mut emitter = Emitter::new_with_symbols(symbol_names);
-    let (mut bytecode, _, _) = emitter.emit(&lir_func);
+    let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
 
     Ok((CompileResult { bytecode }, expander))

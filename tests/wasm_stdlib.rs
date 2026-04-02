@@ -28,9 +28,9 @@ fn compile_stdlib_to_lir() {
         Ok(lir) => {
             eprintln!(
                 "stdlib LIR: {} blocks, {} regs, {} locals",
-                lir.blocks.len(),
-                lir.num_regs,
-                lir.num_locals
+                lir.entry.blocks.len(),
+                lir.entry.num_regs,
+                lir.entry.num_locals
             );
         }
         Err(e) => panic!("stdlib compilation to LIR failed: {}", e),
@@ -90,7 +90,8 @@ fn run_stdlib_on_wasm() {
         "WASM: {} bytes, {} consts, {} closures",
         result.wasm_bytes.len(),
         result.const_pool.len(),
-        lir.blocks
+        lir.entry
+            .blocks
             .iter()
             .flat_map(|b| b.instructions.iter())
             .filter(|i| matches!(i.instr, elle::lir::LirInstr::MakeClosure { .. }))

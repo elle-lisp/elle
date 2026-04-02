@@ -133,14 +133,14 @@ fn eval_inner(vm: &mut VM, expr_value: Value, symbols: &mut SymbolTable) -> LRes
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbols.all_names());
-    let lir_func = lowerer
+    let lir_module = lowerer
         .lower(&analysis.hir)
         .map_err(|e| LError::generic(format!("eval: lowering failed: {}", e)))?;
 
     // Emit
     let symbol_snapshot = symbols.all_names();
     let mut emitter = Emitter::new_with_symbols(symbol_snapshot);
-    let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
+    let (bytecode, _yield_points, _call_sites) = emitter.emit_module(&lir_module);
 
     // Execute
     let bc_rc = Rc::new(bytecode.instructions);

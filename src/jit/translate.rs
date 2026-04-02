@@ -22,7 +22,6 @@ use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
 
 use crate::lir::{Label, LirInstr, Reg, Terminator};
-use crate::value::fiber::SignalBits;
 use crate::value::repr::{TAG_FALSE, TAG_NIL, TAG_TRUE};
 use crate::value::SymbolId;
 
@@ -615,81 +614,13 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::MakeClosure {
                 dst,
-                func,
+                closure_id,
                 captures,
             } => {
-                let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
-                let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
-                let mut nested_lir = func.as_ref().clone();
-                nested_lir.yield_points = nested_yield_points;
-                nested_lir.call_sites = nested_call_sites;
-
-                let template = crate::value::ClosureTemplate {
-                    bytecode: std::rc::Rc::new(nested_bytecode.instructions),
-                    arity: func.arity,
-                    num_locals: func.num_locals as usize,
-                    num_captures: captures.len(),
-                    num_params: func.num_params,
-                    constants: std::rc::Rc::new(nested_bytecode.constants),
-                    signal: func.signal,
-                    lbox_params_mask: func.lbox_params_mask,
-                    lbox_locals_mask: func.lbox_locals_mask,
-                    symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
-                    location_map: std::rc::Rc::new(nested_bytecode.location_map),
-                    lir_function: Some(std::rc::Rc::new(nested_lir)),
-                    doc: func.doc,
-                    syntax: func.syntax.clone(),
-                    vararg_kind: func.vararg_kind.clone(),
-                    name: func.name.clone().map(|s| std::rc::Rc::from(s.as_str())),
-                    result_is_immediate: func.result_is_immediate,
-                    has_outward_heap_set: func.has_outward_heap_set,
-                    wasm_func_idx: None,
-                    rotation_safe: func.rotation_safe,
-                };
-                let template_closure = crate::value::Closure {
-                    template: std::rc::Rc::new(template),
-                    env: std::rc::Rc::new(vec![]),
-                    squelch_mask: SignalBits::EMPTY,
-                };
-                let template_value = crate::value::Value::closure(template_closure);
-
-                self.closure_constants.push(template_value);
-
-                let template_tag = builder.ins().iconst(I64, template_value.tag as i64);
-                let template_payload = builder.ins().iconst(I64, template_value.payload as i64);
-
-                // Spill captures to a stack slot (16 bytes each)
-                let (captures_ptr, count_val) = if captures.is_empty() {
-                    (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
-                } else {
-                    let slot =
-                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
-                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
-                            (captures.len() * 16) as u32,
-                            0,
-                        ));
-                    for (i, cap_reg) in captures.iter().enumerate() {
-                        let (ct, cp) = self.use_var_pair(builder, cap_reg.0);
-                        let tag_offset = (i * 16) as i32;
-                        let payload_offset = (i * 16 + 8) as i32;
-                        builder.ins().stack_store(ct, slot, tag_offset);
-                        builder.ins().stack_store(cp, slot, payload_offset);
-                    }
-                    let ptr = builder.ins().stack_addr(I64, slot, 0);
-                    let cnt = builder.ins().iconst(I64, captures.len() as i64);
-                    (ptr, cnt)
-                };
-
-                let func_ref = self
-                    .module
-                    .declare_func_in_func(self.helpers.make_closure, builder.func);
-                let call = builder.ins().call(
-                    func_ref,
-                    &[template_tag, template_payload, captures_ptr, count_val],
-                );
-                let rt = builder.inst_results(call)[0];
-                let rp = builder.inst_results(call)[1];
-                self.def_var_pair(builder, dst.0, rt, rp);
+                // The JIT gate rejects functions containing MakeClosure.
+                // If we somehow reach here, return the expected error.
+                let _ = (dst, closure_id, captures);
+                return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
             }
 
             LirInstr::LoadResumeValue { dst } => {
