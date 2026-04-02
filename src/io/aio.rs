@@ -135,7 +135,7 @@ impl AsyncBackend {
 
     #[cfg(target_os = "linux")]
     fn create_platform_backend() -> PlatformBackend {
-        if std::env::var("ELLE_NO_URING").is_ok() {
+        if crate::config::get().no_uring {
             return PlatformBackend::ThreadPool(ThreadPoolBackend::new());
         }
         match io_uring::IoUring::new(256) {

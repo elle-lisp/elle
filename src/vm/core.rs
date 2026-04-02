@@ -164,12 +164,9 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
-            jit_enabled: std::env::var("ELLE_JIT").map(|v| v != "0").unwrap_or(true),
-            jit_hotness_threshold: std::env::var("ELLE_JIT_THRESHOLD")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(10),
-            wasm_tier: if std::env::var_os("ELLE_WASM_TIER").is_some() {
+            jit_enabled: crate::config::get().jit_enabled(),
+            jit_hotness_threshold: crate::config::get().jit_threshold(),
+            wasm_tier: if crate::config::get().wasm_tier_enabled() {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None
@@ -501,7 +498,7 @@ impl VM {
                         self.fiber.stack.push(current_value);
                     }
 
-                    if std::env::var("ELLE_DEBUG_STACK").is_ok() {
+                    if crate::config::get().debug_stack {
                         let opcode = if frame.ip < frame.bytecode.len() {
                             frame.bytecode[frame.ip]
                         } else {
@@ -552,7 +549,7 @@ impl VM {
 
                     if exec.bits.is_ok() {
                         let (_, v) = self.fiber.signal.take().unwrap();
-                        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                        if crate::config::get().debug_resume {
                             eprintln!(
                                 "[resume_suspended] frame {} OK: val_type={} total_frames={}",
                                 i,
@@ -562,7 +559,7 @@ impl VM {
                         }
                         current_value = v;
                     } else {
-                        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                        if crate::config::get().debug_resume {
                             let susp_len =
                                 self.fiber.suspended.as_ref().map(|v| v.len()).unwrap_or(0);
                             let remaining = frames.len() - i - 1;

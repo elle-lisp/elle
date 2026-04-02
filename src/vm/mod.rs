@@ -133,7 +133,7 @@ impl VM {
             .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
         let caller_frames = self.fiber.suspended.take().unwrap_or_default();
         self.fiber.signal.take();
-        if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+        if crate::config::get().debug_resume {
             eprintln!(
                 "[handle_sig_switch] caller_frames={} fiber_status={:?}",
                 caller_frames.len(),
