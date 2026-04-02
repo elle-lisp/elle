@@ -399,10 +399,13 @@ impl<'a> Lowerer<'a> {
                         // produce return values and/or mutate their arguments
                         // (caught by check 1).
                         //
-                        // TODO: rotation-safe callees should also be safe here,
-                        // but the interaction with yielding code (fiber suspend
-                        // across scope marks) needs investigation first.
-                        if !self.callee_is_primitive(func) {
+                        // Safe if the callee is a built-in primitive (only
+                        // produces return values / mutates args, caught by
+                        // check 1) OR rotation-safe (proven not to escape
+                        // heap values to external structures). Rotation-safety
+                        // transitively checks for internal allocations stored
+                        // externally via mutating primitives.
+                        if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                             return true;
                         }
                     }
@@ -941,16 +944,24 @@ impl<'a> Lowerer<'a> {
             HirKind::Assign { value, .. } => {
                 !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
             }
-            HirKind::Call { is_tail: true, .. } => false,
             HirKind::Call {
                 func,
                 args,
-                is_tail: false,
+                is_tail,
             } => {
+                // Mutating primitives escape even in tail position:
+                // (put table key @{...}) stores a heap value externally
+                // before returning, regardless of tail-call optimization.
                 if self.callee_is_mutating_primitive(func)
                     && args.iter().any(|a| !self.result_is_safe(&a.expr, &[]))
                 {
                     return true;
+                }
+                // Non-tail, non-mutating calls: check callee safety.
+                // Tail calls to non-mutating callees are safe — the frame
+                // is replaced and the callee runs in a new context.
+                if *is_tail {
+                    return false;
                 }
                 if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                     return true;
@@ -1038,9 +1049,6 @@ impl<'a> Lowerer<'a> {
             return false;
         };
         let bi = self.arena.get(*binding);
-        if !bi.is_immutable || bi.is_mutated {
-            return false;
-        }
         self.mutating_primitives.contains(&bi.name)
     }
 }
