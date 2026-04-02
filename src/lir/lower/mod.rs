@@ -155,6 +155,10 @@ pub struct Lowerer<'a> {
     /// Precomputed via fixpoint iteration so that `call_result_is_safe`
     /// can identify user functions that always return immediates.
     callee_result_immediate: HashMap<Binding, bool>,
+    /// Binding → bitmask of parameter indices that may flow to return.
+    /// Precomputed via fixpoint iteration. Bit i set means param i
+    /// might be returned identity-unchanged by the function.
+    callee_return_params: HashMap<Binding, u64>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
@@ -203,6 +207,7 @@ impl<'a> Lowerer<'a> {
             mutating_primitives: FxHashSet::default(),
             callee_rotation_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
+            callee_return_params: HashMap::new(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
@@ -263,6 +268,7 @@ impl<'a> Lowerer<'a> {
         // body_escapes_heap_values which checks callee_rotation_safe.
         // Both converge independently.
         self.precompute_result_immediate(hir);
+        self.precompute_return_params(hir);
         self.precompute_rotation_safety(hir);
 
         self.current_func = LirFunction::new(Arity::Exact(0));
@@ -582,17 +588,24 @@ impl<'a> Lowerer<'a> {
             return false;
         }
 
-        // Condition 2: callee returns an immediate.
-        // Intrinsics and immediate primitives are already handled by
-        // try_lower_intrinsic / emit inline — no call instruction to wrap.
-        // We need the callee to be a user function in the precomputed map.
-        if !self
-            .callee_result_immediate
+        // Condition 2: callee's return value won't alias a freed arg.
+        // With the two-mark protocol, RegionExitCall only frees
+        // [mark1..mark2] (arg temporaries). The callee's return value
+        // is above mark2 and always survives. The danger: the callee
+        // returns a heap-allocated argument identity-unchanged, and
+        // that argument was created in [mark1..mark2].
+        //
+        // Check: for each arg position i in the callee's return_params,
+        // if arg i is heap-allocating (!result_is_safe), reject.
+        let callee_rp = self
+            .callee_return_params
             .get(binding)
             .copied()
-            .unwrap_or(false)
-        {
-            return false;
+            .unwrap_or(!0); // unknown callee: assume all params returned
+        for (i, arg) in args.iter().enumerate() {
+            if i < 64 && (callee_rp & (1u64 << i)) != 0 && !self.result_is_safe(&arg.expr, &[]) {
+                return false;
+            }
         }
 
         // Condition 3: callee doesn't escape heap values.
@@ -653,6 +666,204 @@ impl<'a> Lowerer<'a> {
             if !changed {
                 break;
             }
+        }
+    }
+
+    /// Precompute `callee_return_params` for all function definitions.
+    ///
+    /// For each function, compute a bitmask of parameter indices that may
+    /// flow to the return position. Fixpoint iteration: seed all functions
+    /// with empty bitmask (optimistic — no params returned), then widen
+    /// until stable.
+    fn precompute_return_params(&mut self, hir: &Hir) {
+        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
+        Self::collect_lambda_defs_with_params(hir, &mut defs);
+        if defs.is_empty() {
+            return;
+        }
+
+        // Seed: no params flow to return.
+        for &(binding, _, _) in &defs {
+            self.callee_return_params.insert(binding, 0);
+        }
+
+        // Iterate until stable.
+        loop {
+            let mut changed = false;
+            for &(binding, ref params, body) in &defs {
+                let mask = self.compute_return_params(body, params);
+                let old = self.callee_return_params[&binding];
+                if mask != old {
+                    self.callee_return_params.insert(binding, mask | old);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    /// Compute return-params bitmask for a HIR expression.
+    ///
+    /// Returns a u64 bitmask where bit i is set if parameter i (from
+    /// `params`) may flow to the return position of this expression.
+    fn compute_return_params(&self, hir: &Hir, params: &[Binding]) -> u64 {
+        match &hir.kind {
+            // A variable reference: if it's one of our params, set its bit
+            HirKind::Var(binding) => {
+                if let Some(idx) = params.iter().position(|p| p == binding) {
+                    if idx < 64 {
+                        1u64 << idx
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            }
+
+            // Literals never return a parameter
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Lambda { .. }
+            | HirKind::Quote(_) => 0,
+
+            // Control flow: union of all result positions
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                self.compute_return_params(then_branch, params)
+                    | self.compute_return_params(else_branch, params)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                let mut mask = 0u64;
+                for (_, body) in clauses {
+                    mask |= self.compute_return_params(body, params);
+                }
+                if let Some(b) = else_branch {
+                    mask |= self.compute_return_params(b, params);
+                }
+                mask
+            }
+            HirKind::Begin(exprs) => exprs
+                .last()
+                .map(|e| self.compute_return_params(e, params))
+                .unwrap_or(0),
+            HirKind::And(exprs) | HirKind::Or(exprs) => {
+                let mut mask = 0u64;
+                for e in exprs {
+                    mask |= self.compute_return_params(e, params);
+                }
+                mask
+            }
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.compute_return_params(body, params)
+            }
+            HirKind::Block { body, .. } => body
+                .last()
+                .map(|e| self.compute_return_params(e, params))
+                .unwrap_or(0),
+            HirKind::Match { arms, .. } => {
+                let mut mask = 0u64;
+                for (_, _, body) in arms {
+                    mask |= self.compute_return_params(body, params);
+                }
+                mask
+            }
+            HirKind::While { .. } | HirKind::Destructure { .. } => 0, // returns nil
+
+            // Tail call: map callee's return_params through our args
+            HirKind::Call {
+                func,
+                args,
+                is_tail: true,
+                ..
+            } => {
+                let callee_rp = if let HirKind::Var(b) = &func.kind {
+                    self.callee_return_params.get(b).copied().unwrap_or(0)
+                } else {
+                    // Unknown callee — conservatively assume it could
+                    // return any arg. But we can't map, so return 0.
+                    return 0;
+                };
+                // Map callee's return_params through call-site args:
+                // if callee returns its param j, and arg j at this call
+                // site is Var(param_k) of our function, then our
+                // return_params includes k.
+                let mut mask = 0u64;
+                for (j, arg) in args.iter().enumerate() {
+                    if j < 64 && (callee_rp & (1u64 << j)) != 0 {
+                        if let HirKind::Var(b) = &arg.expr.kind {
+                            if let Some(k) = params.iter().position(|p| p == b) {
+                                if k < 64 {
+                                    mask |= 1u64 << k;
+                                }
+                            }
+                        }
+                        // Non-Var arg (like (search ...)) doesn't map
+                        // to any of our params — no bits set.
+                    }
+                }
+                mask
+            }
+
+            // Non-tail call: the callee's return value is freshly
+            // computed, not one of our params passed through.
+            HirKind::Call { .. } => 0,
+
+            // Parameterize: result is body's result
+            HirKind::Parameterize { body, .. } => self.compute_return_params(body, params),
+
+            // Assign, Define, Yield, Eval, Break — not return positions
+            // or covered by other analysis.
+            _ => 0,
+        }
+    }
+
+    /// Collect top-level function definitions with their parameter bindings.
+    fn collect_lambda_defs_with_params<'b>(
+        hir: &'b Hir,
+        out: &mut Vec<(Binding, Vec<Binding>, &'b Hir)>,
+    ) {
+        match &hir.kind {
+            HirKind::Define { binding, value } => {
+                if let HirKind::Lambda { params, body, .. } = &value.kind {
+                    out.push((*binding, params.clone(), body));
+                }
+                Self::collect_lambda_defs_with_params(value, out);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    Self::collect_lambda_defs_with_params(e, out);
+                }
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda {
+                        params,
+                        body: lbody,
+                        ..
+                    } = &init.kind
+                    {
+                        out.push((*binding, params.clone(), lbody));
+                    }
+                    Self::collect_lambda_defs_with_params(init, out);
+                }
+                Self::collect_lambda_defs_with_params(body, out);
+            }
+            HirKind::Lambda { .. } => {}
+            _ => {}
         }
     }
 
