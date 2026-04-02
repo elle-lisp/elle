@@ -114,6 +114,9 @@ pub struct Config {
 
     /// Print LIR before WASM emission.
     pub wasm_lir: bool,
+
+    /// Chunk user expressions into sub-thunks (experimental).
+    pub wasm_chunk: bool,
 }
 
 impl Default for Config {
@@ -136,6 +139,7 @@ impl Default for Config {
             debug_wasm: false,
             wasm_dump: false,
             wasm_lir: false,
+            wasm_chunk: false,
         }
     }
 }
@@ -233,6 +237,7 @@ impl Config {
                 "--debug-wasm" => config.debug_wasm = true,
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
+                "--wasm-chunk" => config.wasm_chunk = true,
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {

@@ -183,15 +183,14 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         } else {
             ("", body_spliced.as_str())
         };
-        // Split user code into chunks, each wrapped in its own thunk.
-        // This prevents one giant WASM function for files with many
-        // top-level expressions (e.g., 170 asserts → 10MB function).
-        // Each chunk becomes a separate WASM function that Wasmtime
-        // can compile in parallel.
-        let chunked_body = chunk_user_forms(body, source_name);
+        let wrapped_body = if crate::config::get().wasm_chunk {
+            chunk_user_forms(body, source_name)
+        } else {
+            format!("((fn []\n{}\n))", body)
+        };
         full_source = format!(
             "{}\n{}\n(ev/run (fn []\n{}\n))",
-            epoch_prefix, STDLIB, chunked_body
+            epoch_prefix, STDLIB, wrapped_body
         );
         full_source.as_str()
     } else {
