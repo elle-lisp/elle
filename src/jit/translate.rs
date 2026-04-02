@@ -437,7 +437,7 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::Call { dst, func, args } | LirInstr::SuspendingCall { dst, func, args } => {
+            LirInstr::Call { dst, func, args } => {
                 let (ft, fp) = self.use_var_pair(builder, func.0);
                 let vm = self
                     .vm_ptr
@@ -877,6 +877,12 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::Eval { .. } => {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
+            }
+
+            LirInstr::SuspendingCall { .. } => {
+                return Err(JitError::UnsupportedInstruction(
+                    "SuspendingCall".to_string(),
+                ));
             }
 
             LirInstr::ArrayMutExtend { dst, array, source } => {
