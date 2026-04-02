@@ -101,35 +101,21 @@ impl Emitter {
         // This way a parent's MakeClosure can look up its child's
         // pre-compiled bytecode.
         let n = module.closures.len();
-        let mut compiled: Vec<Option<ClosureCompiled>> = (0..n).map(|_| None).collect();
         self.closure_lir_funcs = Some(module.closures.clone());
-        self.compiled_closures = Some(Vec::new()); // placeholder
+        // Pre-allocate with placeholders. Entries are filled in reverse
+        // order; the MakeClosure handler only accesses children (higher
+        // indices), which are filled before their parents.
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
         for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
             let result = self.emit(&module.closures[i]);
-            compiled[i] = Some(result);
-            // Update the compiled_closures so subsequent (lower-index)
-            // closures can look up this one.
-            if let Some(ref mut cc) = self.compiled_closures {
-                // Rebuild the full vec from compiled so far
-                *cc = compiled
-                    .iter()
-                    .map(|opt: &Option<ClosureCompiled>| {
-                        opt.clone().unwrap_or_else(|| {
-                            // Not yet compiled — placeholder (never looked up
-                            // because we compile children before parents)
-                            (Bytecode::new(), Vec::new(), Vec::new())
-                        })
-                    })
-                    .collect();
-            }
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
         }
-        // All closures compiled. Set final compiled_closures.
-        self.compiled_closures = Some(
-            compiled
-                .into_iter()
-                .map(|opt: Option<ClosureCompiled>| opt.unwrap())
-                .collect(),
-        );
+        // All closures compiled.
+        self.compiled_closures = Some(compiled);
         let result = self.emit(&module.entry);
         self.compiled_closures = None;
         self.closure_lir_funcs = None;
@@ -143,28 +129,19 @@ impl Emitter {
     /// for dual-compile (bytecode for spawn).
     pub fn emit_module_closures(&mut self, module: &LirModule) -> Vec<ClosureCompiled> {
         let n = module.closures.len();
-        let mut compiled: Vec<Option<ClosureCompiled>> = (0..n).map(|_| None).collect();
         self.closure_lir_funcs = Some(module.closures.clone());
-        self.compiled_closures = Some(Vec::new());
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
         for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
             let result = self.emit(&module.closures[i]);
-            compiled[i] = Some(result);
-            if let Some(ref mut cc) = self.compiled_closures {
-                *cc = compiled
-                    .iter()
-                    .map(|opt: &Option<ClosureCompiled>| {
-                        opt.clone()
-                            .unwrap_or_else(|| (Bytecode::new(), Vec::new(), Vec::new()))
-                    })
-                    .collect();
-            }
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
         }
         self.compiled_closures = None;
         self.closure_lir_funcs = None;
         compiled
-            .into_iter()
-            .map(|opt: Option<ClosureCompiled>| opt.unwrap())
-            .collect()
     }
 
     /// Set module context for MakeClosure resolution without
@@ -175,17 +152,16 @@ impl Emitter {
         // Pre-compile all closures so MakeClosure can look them up.
         // Uses reverse order (children before parents).
         let n = closures.len();
-        let mut compiled: Vec<Option<ClosureCompiled>> = (0..n).map(|_| None).collect();
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
         for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
             let result = self.emit(&closures[i]);
-            compiled[i] = Some(result);
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
         }
-        self.compiled_closures = Some(
-            compiled
-                .into_iter()
-                .map(|opt: Option<ClosureCompiled>| opt.unwrap())
-                .collect(),
-        );
+        self.compiled_closures = Some(compiled);
     }
 
     /// Emit bytecode from a single LIR function.
