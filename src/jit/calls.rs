@@ -768,7 +768,13 @@ pub(crate) fn build_closure_env_for_jit(
         crate::value::Arity::AtLeast(n) => n,
         crate::value::Arity::Range(min, _) => min,
     };
-    let num_locally_defined = closure.template.num_locals.saturating_sub(num_params);
+    // num_locals counts non-LBox params + let-bound locals.
+    // The env already has param entries; only let-bound locals need env slots.
+    let num_lbox_params = (0..num_params.min(64))
+        .filter(|i| closure.template.lbox_params_mask & (1 << i) != 0)
+        .count();
+    let num_local_params = num_params - num_lbox_params;
+    let num_locally_defined = closure.template.num_locals.saturating_sub(num_local_params);
 
     for i in 0..num_locally_defined {
         if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {

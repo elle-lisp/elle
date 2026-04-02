@@ -218,6 +218,8 @@ impl<'a> Lowerer<'a> {
             }
         }
 
+        self.current_func.num_local_params = self.num_local_params as usize;
+
         // Emit signal bound checks for each bounded parameter
         for pb in param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {

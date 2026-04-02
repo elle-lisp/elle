@@ -355,20 +355,13 @@ impl<'a> FunctionTranslator<'a> {
     }
 
     /// Map a stack-relative local slot (from LirInstr::LoadLocal/StoreLocal)
-    /// to a JIT variable index. Inside lambdas, slots start at num_params
-    /// (the lowerer initializes num_locals = num_params). The JIT variable
-    /// space puts locally-defined vars at local_var_base, so we subtract
-    /// num_params and add local_var_base.
+    /// to a JIT variable index.
+    ///
+    /// The dual-address-space lowerer assigns stack-relative slots starting
+    /// at 0 for all non-LBox locals (non-LBox params + let bindings).
+    /// These always map to the local_var_base region.
     pub(crate) fn local_slot_to_var(&self, slot: u16) -> u32 {
-        let num_params = self.lir.num_params as u16;
-        if slot >= num_params {
-            // Locally-defined variable: map to the local_var_base region
-            self.local_var_base + (slot - num_params) as u32
-        } else {
-            // Slot < num_params: this is a parameter slot (shouldn't happen
-            // from the lowerer, but handle defensively)
-            self.arg_var_base + slot as u32
-        }
+        self.local_var_base + slot as u32
     }
 
     /// Convenience: use a (tag, payload) variable pair for register `r`.

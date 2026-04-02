@@ -64,6 +64,10 @@ pub struct LirFunction {
     /// Total number of parameter slots (required + optional + rest if present).
     /// Used by VM populate_env to know how many fixed slots to fill.
     pub num_params: usize,
+    /// Number of non-LBox parameters copied to local slots.
+    /// These occupy the first `num_local_params` positions in `num_locals`.
+    /// The `lbox_locals_mask` indexes from position `num_local_params`.
+    pub num_local_params: usize,
     /// Yield point metadata, populated during bytecode emission.
     /// Indexed by yield point order (0, 1, 2, ...).
     /// Empty for non-yielding functions.
@@ -142,6 +146,7 @@ impl LirFunction {
             syntax: None,
             vararg_kind: crate::hir::VarargKind::List,
             num_params,
+            num_local_params: 0,
             yield_points: Vec::new(),
             call_sites: Vec::new(),
             result_is_immediate: false,
