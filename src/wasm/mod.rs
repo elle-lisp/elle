@@ -41,6 +41,103 @@ use crate::value::Value;
 /// Standard library source, embedded at compile time.
 const STDLIB: &str = include_str!("../../stdlib.lisp");
 
+/// Maximum number of top-level forms per user-code thunk.
+/// Balances WASM function size (Wasmtime compile time) against
+/// thunk-call overhead. 25 forms keeps each chunk under ~200KB of
+/// WASM text while allowing Wasmtime to parallelize compilation.
+const CHUNK_SIZE: usize = 25;
+
+/// Split user source forms into thunks for parallel WASM compilation.
+///
+/// Forms that define bindings (def, defn, var, defmacro, signal) stay
+/// at the top level so they're visible to subsequent chunks.
+/// Expression forms (asserts, bare calls) are grouped into chunks,
+/// each wrapped in `((fn [] ...))`. The last chunk's return value
+/// is the overall return value.
+///
+/// If the source has few forms or is unparseable, returns it unchanged
+/// wrapped in a single thunk.
+fn chunk_user_forms(source: &str, source_name: &str) -> String {
+    let forms = match crate::reader::read_syntax_all(source, source_name) {
+        Ok(f) => f,
+        Err(_) => return format!("((fn []\n{}\n))", source),
+    };
+
+    // Classify forms: definitions stay top-level, expressions get chunked.
+    // Track byte ranges so we can slice the original source.
+    let mut parts: Vec<(bool, usize, usize)> = Vec::new(); // (is_def, start, end)
+    for form in &forms {
+        let is_def = form
+            .as_list()
+            .and_then(|l| l.first())
+            .and_then(|s| s.as_symbol())
+            .is_some_and(|s| {
+                // Conservative: treat any form that might define a binding
+                // as a definition. This includes macros like ffi/defbind
+                // that expand to (def ...). Better to under-chunk than to
+                // break scoping.
+                s.starts_with("def")
+                    || s.starts_with("var")
+                    || s == "signal"
+                    || s.starts_with("include")
+                    || s.contains("/def")
+            });
+        parts.push((is_def, form.span.start, form.span.end));
+    }
+
+    // Count expression forms
+    let expr_count = parts.iter().filter(|(is_def, _, _)| !is_def).count();
+    if expr_count <= CHUNK_SIZE {
+        // Small enough — single thunk, no chunking needed.
+        return format!("((fn []\n{}\n))", source);
+    }
+
+    // Build output: defs at top level, expressions in chunked thunks.
+    let mut output = String::new();
+    let mut expr_chunk: Vec<&str> = Vec::new();
+
+    for (is_def, start, end) in &parts {
+        let slice = &source[*start..*end];
+        if *is_def {
+            // Flush pending expression chunk before the def
+            if !expr_chunk.is_empty() {
+                output.push_str("((fn []\n");
+                for e in &expr_chunk {
+                    output.push_str(e);
+                    output.push('\n');
+                }
+                output.push_str("))\n");
+                expr_chunk.clear();
+            }
+            output.push_str(slice);
+            output.push('\n');
+        } else {
+            expr_chunk.push(slice);
+            if expr_chunk.len() >= CHUNK_SIZE {
+                output.push_str("((fn []\n");
+                for e in &expr_chunk {
+                    output.push_str(e);
+                    output.push('\n');
+                }
+                output.push_str("))\n");
+                expr_chunk.clear();
+            }
+        }
+    }
+
+    // Flush remaining expressions
+    if !expr_chunk.is_empty() {
+        output.push_str("((fn []\n");
+        for e in &expr_chunk {
+            output.push_str(e);
+            output.push('\n');
+        }
+        output.push_str("))\n");
+    }
+
+    output
+}
+
 /// Compile and execute Elle source through the WASM backend.
 ///
 /// Full pipeline: source → reader → expander → analyzer → HIR → LIR → WASM → Wasmtime.
@@ -86,13 +183,15 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         } else {
             ("", body_spliced.as_str())
         };
-        // Wrap user code in its own thunk so the ev/run callback is small
-        // and invariant. This keeps stdlib closure WASM bytes identical
-        // across programs, enabling incremental compilation cache hits.
-        // The user thunk is a separate WASM function that compiles fast.
+        // Split user code into chunks, each wrapped in its own thunk.
+        // This prevents one giant WASM function for files with many
+        // top-level expressions (e.g., 170 asserts → 10MB function).
+        // Each chunk becomes a separate WASM function that Wasmtime
+        // can compile in parallel.
+        let chunked_body = chunk_user_forms(body, source_name);
         full_source = format!(
-            "{}\n{}\n(ev/run (fn [] ((fn []\n{}\n))))",
-            epoch_prefix, STDLIB, body
+            "{}\n{}\n(ev/run (fn []\n{}\n))",
+            epoch_prefix, STDLIB, chunked_body
         );
         full_source.as_str()
     } else {
