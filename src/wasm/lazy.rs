@@ -98,7 +98,7 @@ impl WasmTier {
             return true;
         }
 
-        let result = match emit::emit_single_closure(lir_func) {
+        let result = match emit::emit_single_closure(lir_func, None) {
             Some(r) => r,
             None => return false, // Can't compile this closure standalone
         };
@@ -584,7 +584,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
         },
     )?;
 
-    // rt_yield — stub (we reject Yield at emit time)
+    // rt_yield — stub (yield not yet supported in tiered/standalone mode)
     linker.func_wrap(
         "elle",
         "rt_yield",
@@ -594,7 +594,8 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          _resume_state: i32,
          _regs_ptr: i32,
          _num_regs: i32,
-         _func_idx: i32|
+         _func_idx: i32,
+         _signal_bits: i32|
          -> () {
             panic!("rt_yield called in tiered mode — should not happen");
         },

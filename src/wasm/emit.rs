@@ -11,7 +11,7 @@
 //! - `controlflow.rs` — CFG emission, block dispatch, terminators
 //! - `suspend.rs` — CPS suspension/resume, spill/restore, block splitting
 
-use crate::lir::{ClosureId, Label, LirFunction, LirInstr, Reg, Terminator};
+use crate::lir::{ClosureId, Label, LirFunction, Reg, Terminator};
 use crate::value::Value;
 use std::collections::HashMap;
 use wasm_encoder::*;
@@ -41,24 +41,35 @@ pub fn emit_module(module: &crate::lir::LirModule) -> EmitResult {
 /// closures to WASM on demand. The module has the same host imports as
 /// the full module but contains only one function (at table index 0).
 ///
-/// Returns `None` if the function can't be compiled standalone (contains
-/// MakeClosure, TailCall, or yield points).
-pub fn emit_single_closure(func: &LirFunction) -> Option<EmitResult> {
+/// Returns `None` if the function can't be compiled standalone.
+///
+/// MakeClosure and TailCall are handled via host-mediated dispatch
+/// (rt_make_closure and rt_prepare_tail_call). Yield requires CPS
+/// support in the standalone host and is still rejected.
+pub fn emit_single_closure(
+    func: &LirFunction,
+    module: Option<&crate::lir::LirModule>,
+) -> Option<EmitResult> {
     for block in &func.blocks {
-        for si in &block.instructions {
-            match &si.instr {
-                LirInstr::MakeClosure { .. }
-                | LirInstr::TailCall { .. }
-                | LirInstr::TailCallArrayMut { .. } => return None,
-                _ => {}
-            }
-        }
         if matches!(block.terminator.terminator, Terminator::Yield { .. }) {
             return None;
         }
     }
 
     let mut emitter = WasmEmitter::new();
+    // Provide module context for MakeClosure → ClosureId resolution
+    if let Some(m) = module {
+        emitter.module_closures = Some(m.closures.clone());
+        // In standalone mode, closure_id maps to table index 0
+        // (the closure itself). Nested closures go through rt_make_closure
+        // which creates host-side Closure values dispatched via rt_call.
+        // The table_idx in rt_make_closure is used by the host, not the table.
+        for i in 0..m.closures.len() {
+            emitter
+                .closure_id_to_table_idx
+                .insert(ClosureId(i as u32), i as u32);
+        }
+    }
     Some(emitter.emit_single_closure_module(func))
 }
 
