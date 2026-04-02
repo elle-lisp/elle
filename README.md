@@ -196,7 +196,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (length "👨‍👩‍👧")   # => 1
   ```
 
-- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
+- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values and wrong types are runtime errors.
 
   ```lisp
   (def (head & tail) (list 1 2 3 4))
