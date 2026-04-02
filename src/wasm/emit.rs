@@ -388,13 +388,24 @@ impl WasmEmitter {
         }
 
         // Code section
-        let mut code = CodeSection::new();
-        let entry_body = self.emit_function(func);
-        code.function(&entry_body);
+        //
+        // Emit closures BEFORE the entry function so that stdlib closure
+        // constants get stable pool indices regardless of user code.
+        // Wasmtime's incremental compilation cache keys on per-function
+        // WASM bytes, so stable indices → cache hits across programs.
+        // The code section must list functions in declaration order
+        // (entry first), so we buffer the closure bodies.
+        let mut closure_bodies = Vec::with_capacity(nested_funcs.len());
         for (i, nested) in nested_funcs.iter().enumerate() {
             self.current_table_idx = i as u32;
             let closure_body = self.emit_closure_function(nested);
-            code.function(&closure_body);
+            closure_bodies.push(closure_body);
+        }
+        let entry_body = self.emit_function(func);
+        let mut code = CodeSection::new();
+        code.function(&entry_body);
+        for closure_body in &closure_bodies {
+            code.function(closure_body);
         }
         module.section(&code);
 

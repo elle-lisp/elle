@@ -86,7 +86,14 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         } else {
             ("", body_spliced.as_str())
         };
-        full_source = format!("{}\n{}\n(ev/run (fn []\n{}\n))", epoch_prefix, STDLIB, body);
+        // Wrap user code in its own thunk so the ev/run callback is small
+        // and invariant. This keeps stdlib closure WASM bytes identical
+        // across programs, enabling incremental compilation cache hits.
+        // The user thunk is a separate WASM function that compiles fast.
+        full_source = format!(
+            "{}\n{}\n(ev/run (fn [] ((fn []\n{}\n))))",
+            epoch_prefix, STDLIB, body
+        );
         full_source.as_str()
     } else {
         stdlib_form_count = 0;
@@ -153,7 +160,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
                 store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
             if let Ok(serialized) = module.serialize() {
                 std::fs::create_dir_all(cache_dir).ok();
-                std::fs::write(&cache_path, &serialized).ok();
+                store::atomic_write(&cache_path, &serialized);
             }
             module
         }

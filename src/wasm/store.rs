@@ -25,8 +25,27 @@ impl wasmtime::CacheStore for DiskCache {
 
     fn insert(&self, key: &[u8], value: Vec<u8>) -> bool {
         let path = self.0.join(hex_name(key));
-        std::fs::write(&path, &value).is_ok()
+        atomic_write(&path, &value)
     }
+}
+
+/// Write data to a file atomically: write to a temp file in the same
+/// directory, then rename into place. Prevents readers from seeing
+/// partial writes.
+pub(crate) fn atomic_write(path: &std::path::Path, data: &[u8]) -> bool {
+    use std::io::Write;
+    let dir = match path.parent() {
+        Some(d) => d,
+        None => return false,
+    };
+    let mut tmp = match tempfile::NamedTempFile::new_in(dir) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    if tmp.write_all(data).is_err() {
+        return false;
+    }
+    tmp.persist(path).is_ok()
 }
 
 fn hex_name(key: &[u8]) -> String {

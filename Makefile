@@ -112,8 +112,8 @@ smoke-wasm: elle
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
-		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s ./target/release/elle --wasm=full {}' \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)
