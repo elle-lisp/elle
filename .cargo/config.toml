@@ -1,2 +1,0 @@
-[env]
-RUST_TEST_THREADS = { value = "16", force = false }

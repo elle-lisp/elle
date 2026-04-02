@@ -113,7 +113,7 @@ impl ElleHost {
             resume_value: None,
             pool_to_handle: Vec::new(),
             closure_bytecodes: Vec::new(),
-            debug: std::env::var_os("ELLE_WASM_DEBUG").is_some(),
+            debug: crate::config::get().debug_wasm,
             io_backend: None,
         }
     }

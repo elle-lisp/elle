@@ -61,7 +61,7 @@ impl VM {
                         (*closure.template.symbol_names).clone(),
                     ) {
                         Ok(jit_code) => {
-                            if std::env::var("ELLE_DEBUG_JIT").is_ok() {
+                            if crate::config::get().debug_jit {
                                 // Dump first few LIR blocks to identify the function
                                 let block_info: Vec<String> = lir_func
                                     .blocks

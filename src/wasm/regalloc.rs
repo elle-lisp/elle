@@ -141,20 +141,8 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut active: HashMap<Reg, u32> = HashMap::new(); // reg → pool slot
 
         for (idx, si) in block.instructions.iter().enumerate() {
-            // Allocate for defs in this instruction.
-            for_each_def(&si.instr, |reg| {
-                if local_set.contains(&reg) {
-                    let slot = free_pool.pop().unwrap_or_else(|| {
-                        let s = pool_high_water;
-                        pool_high_water += 1;
-                        s
-                    });
-                    reg_to_slot.insert(reg, cross_block_count + slot);
-                    active.insert(reg, slot);
-                }
-            });
-
-            // Free registers whose last use is this instruction.
+            // Free registers whose last use is this instruction
+            // (before allocating defs, so slots can be reused immediately).
             // Sort by slot to ensure deterministic free_pool ordering.
             let mut to_free = Vec::new();
             for (reg, slot) in &active {
@@ -167,6 +155,19 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
                 active.remove(&reg);
                 free_pool.push(slot);
             }
+
+            // Allocate for defs in this instruction.
+            for_each_def(&si.instr, |reg| {
+                if local_set.contains(&reg) {
+                    let slot = free_pool.pop().unwrap_or_else(|| {
+                        let s = pool_high_water;
+                        pool_high_water += 1;
+                        s
+                    });
+                    reg_to_slot.insert(reg, cross_block_count + slot);
+                    active.insert(reg, slot);
+                }
+            });
         }
 
         // Free registers whose last use is the terminator.
@@ -186,7 +187,7 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
     let max_slots = cross_block_count + pool_high_water;
 
     // Debug: check for any registers in 0..num_regs not in the map
-    if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+    if crate::config::get().debug_wasm {
         for reg_id in 0..func.num_regs {
             if !reg_to_slot.contains_key(&Reg(reg_id)) {
                 eprintln!(

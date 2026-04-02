@@ -548,7 +548,7 @@ impl WasmEmitter {
 
         let alloc = super::regalloc::allocate(func, 0);
         let n = alloc.max_slots;
-        if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+        if crate::config::get().debug_wasm {
             eprintln!(
                 "[emit] closure {:?}: {} virtual regs → {} slots",
                 func.name, func.num_regs, n
@@ -591,7 +591,7 @@ impl WasmEmitter {
             self.pre_scan_resume_states(func);
             self.next_resume_state = 1;
 
-            if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+            if crate::config::get().debug_wasm {
                 eprintln!(
                     "[emit] suspending closure: name={:?} regs={} locals={} captures={} params={}",
                     func.name, func.num_regs, func.num_locals, func.num_captures, func.num_params

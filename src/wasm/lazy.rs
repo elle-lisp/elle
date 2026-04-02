@@ -71,10 +71,11 @@ impl WasmTier {
         config.wasm_multi_value(true);
         // Fast compile for per-closure modules (they're tiny).
         config.cranelift_opt_level(OptLevel::Speed);
+        config.cranelift_regalloc_algorithm(RegallocAlgorithm::SinglePass);
 
         // Disk cache for incremental compilation
-        if let Ok(cache_dir) = std::env::var("ELLE_WASM_CACHE") {
-            let path = std::path::PathBuf::from(&cache_dir).join("tiered");
+        if let Some(cache_dir) = &crate::config::get().cache {
+            let path = std::path::PathBuf::from(cache_dir).join("tiered");
             std::fs::create_dir_all(&path).ok();
             let cache = super::store::DiskCache::new(path);
             config
@@ -105,7 +106,7 @@ impl WasmTier {
 
         match Module::new(&self.engine, &result.wasm_bytes) {
             Ok(module) => {
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                if crate::config::get().debug_wasm {
                     eprintln!(
                         "[wasm-tier] compiled {:?} ({} bytes, {} consts)",
                         lir_func.name,
@@ -123,7 +124,7 @@ impl WasmTier {
                 true
             }
             Err(e) => {
-                if std::env::var_os("ELLE_WASM_DEBUG").is_some() {
+                if crate::config::get().debug_wasm {
                     eprintln!("[wasm-tier] compile failed for {:?}: {}", lir_func.name, e);
                 }
                 false

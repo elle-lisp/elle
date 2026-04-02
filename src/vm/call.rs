@@ -346,7 +346,7 @@ impl VM {
                     let (_, value) = self.fiber.signal.take().unwrap();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    if std::env::var("ELLE_DEBUG_STACK").is_ok() && caller_stack.len() <= 5 {
+                    if crate::config::get().debug_stack && caller_stack.len() <= 5 {
                         eprintln!(
                             "[call_inner suspend] ip={} bc_len={} stack_depth={}",
                             *ip,
@@ -368,7 +368,7 @@ impl VM {
                     });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
-                    if std::env::var("ELLE_DEBUG_RESUME").is_ok() {
+                    if crate::config::get().debug_resume {
                         eprintln!(
                             "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
                             bits, *ip, bytecode.len(), frames.len(), closure_env.len(),

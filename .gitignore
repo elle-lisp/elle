@@ -27,3 +27,4 @@ wip.md
 # Node.js dependencies
 node_modules/
 package*.json
+.pi/

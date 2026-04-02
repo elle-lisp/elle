@@ -87,7 +87,8 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 # jit-rejections    — requires JIT active (tests rejection tracking)
 ELLE_SKIP_VM  := -e jit-rejections.lisp
 ELLE_SKIP_JIT :=
-ELLE_JIT_THRESHOLD := 0
+# --jit=1 means threshold 0 (compile on first call)
+ELLE_JIT_ARG := --jit=1
 
 # WASM backend skip list: tests requiring features not yet in WASM backend
 # (eval = dynamic compilation)
@@ -95,25 +96,25 @@ WASM_SKIP := -e eval.lisp
 
 smoke-vm:
 	@echo "=== elle scripts (VM, JIT disabled) ==="
-	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/*.lisp | \
+	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(ELLE_SKIP_VM) | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
+			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
 		|| { echo "FAILED: elle scripts VM-only pass (JIT was disabled)"; exit 1; }
 
 smoke-jit:
-	@echo "=== elle scripts (JIT enabled, threshold=$(ELLE_JIT_THRESHOLD)) ==="
-	@export ELLE_JIT_THRESHOLD=$(ELLE_JIT_THRESHOLD) &&printf '%s\n' tests/elle/*.lisp | \
+	@echo "=== elle scripts (JIT enabled, $(ELLE_JIT_ARG)) ==="
+	@printf '%s\n' tests/elle/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
+			'timeout $(TIMEOUT) $(ELLE) $(ELLE_JIT_ARG) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
 smoke-wasm:
 	@echo "=== elle scripts (WASM backend) ==="
-	@export ELLE_WASM=1 && printf '%s\n' tests/elle/*.lisp | \
+	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s $(ELLE) {}' \
+			'timeout 300s $(ELLE) --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)
@@ -129,9 +130,9 @@ smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)
 	@echo "=== plugin tests (VM, JIT disabled) ==="
-	@export ELLE_JIT=0 &&printf '%s\n' tests/elle/plugins/*.lisp | \
+	@printf '%s\n' tests/elle/plugins/*.lisp | \
 		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
+			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
 		|| { echo "FAILED: plugin tests VM-only pass (JIT was disabled)"; exit 1; }
 
 plugin-tests-jit:  ## Run plugin tests (JIT enabled)

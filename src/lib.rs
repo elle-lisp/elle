@@ -37,6 +37,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod arithmetic;
 pub mod compiler;
+pub mod config;
 pub mod context;
 pub mod epoch;
 pub mod error;

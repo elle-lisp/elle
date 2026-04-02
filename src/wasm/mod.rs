@@ -103,7 +103,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     )?;
     let t1 = std::time::Instant::now();
 
-    if std::env::var_os("ELLE_WASM_LIR").is_some() {
+    if crate::config::get().wasm_lir {
         eprintln!(
             "[lir] entry: regs={} locals={} blocks={}",
             lir_func.num_regs,
@@ -124,7 +124,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let t2 = std::time::Instant::now();
 
     // Dump WASM for analysis
-    if std::env::var_os("ELLE_WASM_DUMP").is_some() {
+    if crate::config::get().wasm_dump {
         std::fs::write("/tmp/elle-wasm-dump.wasm", &result.wasm_bytes).ok();
     }
 
@@ -135,7 +135,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let t3 = std::time::Instant::now();
 
     // Module cache: hash the WASM bytes, check for a cached pre-compiled module.
-    let module = if let Ok(cache_dir) = std::env::var("ELLE_WASM_CACHE") {
+    let module = if let Some(cache_dir) = &crate::config::get().cache {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
@@ -152,7 +152,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
             let module =
                 store::compile_module(&engine, &result.wasm_bytes).map_err(|e| e.to_string())?;
             if let Ok(serialized) = module.serialize() {
-                std::fs::create_dir_all(&cache_dir).ok();
+                std::fs::create_dir_all(cache_dir).ok();
                 std::fs::write(&cache_path, &serialized).ok();
             }
             module
@@ -164,26 +164,43 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     let ret = store::run_module(&linker, &mut wasm_store, &module).map_err(|e| e.to_string());
     let t5 = std::time::Instant::now();
 
-    eprintln!("[wasm] funcs: {}  elle→LIR: {:.3}s  LIR→wasm: {:.3}s  wasmtime compile: {:.3}s  execute: {:.3}s  total: {:.3}s  wasm_bytes: {}",
-        {
-            fn count_nested(f: &crate::lir::LirFunction) -> usize {
-                let mut n = 0;
-                for block in &f.blocks {
-                    for spanned in &block.instructions {
-                        if let crate::lir::LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
-                            n += 1 + count_nested(nested);
-                        }
-                    }
+    fn count_nested(f: &crate::lir::LirFunction) -> usize {
+        let mut n = 0;
+        for block in &f.blocks {
+            for spanned in &block.instructions {
+                if let crate::lir::LirInstr::MakeClosure { func: nested, .. } = &spanned.instr {
+                    n += 1 + count_nested(nested);
                 }
-                n
             }
-            1 + count_nested(&lir_func)
-        },
-        (t1 - t0).as_secs_f64(),
-        (t2 - t1).as_secs_f64(),
-        (t4 - t3).as_secs_f64(),
-        (t5 - t4).as_secs_f64(),
-        (t5 - t0).as_secs_f64(),
-        result.wasm_bytes.len());
+        }
+        n
+    }
+    let funcs = 1 + count_nested(&lir_func);
+    let lir_secs = (t1 - t0).as_secs_f64();
+    let emit_secs = (t2 - t1).as_secs_f64();
+    let compile_secs = (t4 - t3).as_secs_f64();
+    let exec_secs = (t5 - t4).as_secs_f64();
+    let total_secs = (t5 - t0).as_secs_f64();
+    let wasm_bytes = result.wasm_bytes.len();
+
+    if crate::config::get().json {
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "wasm": {
+                    "funcs": funcs,
+                    "lir_secs": lir_secs,
+                    "emit_secs": emit_secs,
+                    "compile_secs": compile_secs,
+                    "exec_secs": exec_secs,
+                    "total_secs": total_secs,
+                    "wasm_bytes": wasm_bytes,
+                }
+            })
+        );
+    } else {
+        eprintln!("[wasm] funcs: {}  elle→LIR: {:.3}s  LIR→wasm: {:.3}s  wasmtime compile: {:.3}s  execute: {:.3}s  total: {:.3}s  wasm_bytes: {}",
+            funcs, lir_secs, emit_secs, compile_secs, exec_secs, total_secs, wasm_bytes);
+    }
     ret
 }
