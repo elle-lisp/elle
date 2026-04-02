@@ -15,6 +15,62 @@ use crate::port::{Direction, Encoding, Port, PortKind};
 use crate::value::{error_val, Value};
 
 use std::cell::RefCell;
+
+/// Convert a `StdinCompletion` into a `Completion`, releasing the buffer.
+fn stdin_to_completion(
+    sc: crate::io::threadpool::StdinCompletion,
+    pending: &mut HashMap<u64, PendingOp>,
+    buffer_pool: &mut BufferPool,
+) -> Option<Completion> {
+    let pending_op = pending.remove(&sc.id)?;
+    buffer_pool.release(pending_op.buffer_handle());
+    Some(match sc.result {
+        Ok(data) if data.is_empty() => Completion {
+            id: sc.id,
+            result: Ok(Value::NIL),
+        },
+        Ok(data) => Completion {
+            id: sc.id,
+            result: Ok(Value::string(
+                String::from_utf8_lossy(&data)
+                    .trim_end_matches('\n')
+                    .trim_end_matches('\r'),
+            )),
+        },
+        Err(e) => Completion {
+            id: sc.id,
+            result: Err(error_val("io-error", e)),
+        },
+    })
+}
+
+/// Convert a `PoolCompletion` into a `Completion`, handling Connect fd stash.
+fn pool_to_completion(
+    pc: PoolCompletion,
+    pending: &mut HashMap<u64, PendingOp>,
+    fd_states: &mut HashMap<PortKey, FdState>,
+    buffer_pool: &mut BufferPool,
+) -> Option<Completion> {
+    let mut pending_op = pending.remove(&pc.id)?;
+    if let PendingOp::Connect {
+        ref mut connect_fd, ..
+    } = pending_op
+    {
+        if pc.result_code > 0 {
+            *connect_fd = Some(pc.result_code);
+        }
+    }
+    let bh = pending_op.buffer_handle();
+    Some(completion::process_raw_completion(
+        pc.id,
+        pc.result_code,
+        pc.data,
+        &pending_op,
+        fd_states,
+        buffer_pool,
+        bh,
+    ))
+}
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::os::unix::io::AsRawFd;
@@ -1044,26 +1100,10 @@ impl AsyncBackend {
                     None => stdin_thread.receiver().recv().ok(),
                 };
                 if let Some(sc) = recv_result {
-                    if let Some(pending_op) = inner.pending.remove(&sc.id) {
-                        inner.buffer_pool.release(pending_op.buffer_handle());
-                        let c = match sc.result {
-                            Ok(data) if data.is_empty() => Completion {
-                                id: sc.id,
-                                result: Ok(Value::NIL), // EOF
-                            },
-                            Ok(data) => Completion {
-                                id: sc.id,
-                                result: Ok(Value::string(
-                                    String::from_utf8_lossy(&data)
-                                        .trim_end_matches('\n')
-                                        .trim_end_matches('\r'),
-                                )),
-                            },
-                            Err(e) => Completion {
-                                id: sc.id,
-                                result: Err(error_val("io-error", e)),
-                            },
-                        };
+                    let inner = &mut *inner;
+                    if let Some(c) =
+                        stdin_to_completion(sc, &mut inner.pending, &mut inner.buffer_pool)
+                    {
                         inner.completions.push_back(c);
                     }
                 }
@@ -1072,6 +1112,19 @@ impl AsyncBackend {
         }
 
         // Destructure to get independent borrows of each field.
+        // Check if any pending op is a stdin op — needed by the uring
+        // branch below.  Computed before the destructure borrow.
+        let has_stdin_pending = inner.stdin_thread.is_some()
+            && inner.pending.values().any(|op| {
+                matches!(
+                    op,
+                    PendingOp::Port {
+                        port_key: PortKey::Stdin,
+                        ..
+                    }
+                )
+            });
+
         // Scoped so the borrows end before drain_stdin_completions.
         {
             let AsyncBackendInner {
@@ -1081,17 +1134,20 @@ impl AsyncBackend {
                 ref mut buffer_pool,
                 ref mut fd_states,
                 ref mut completions,
+                ref stdin_thread,
                 ..
             } = *inner;
 
             match platform {
                 #[cfg(target_os = "linux")]
                 PlatformBackend::Uring(ring) => {
-                    if network_pool.has_in_flight() {
-                        // Network pool has in-flight ops (Resolve, hostname Connect
-                        // fallback). Poll uring non-blocking, then wait on network
-                        // pool with the caller's timeout so we don't miss completions
-                        // from either source.
+                    if has_stdin_pending || network_pool.has_in_flight() {
+                        // Stdin reads go through StdinThread, not io_uring.
+                        // Network pool ops also bypass io_uring.  In both
+                        // cases we must poll uring non-blocking and then
+                        // wait on the channel source(s) so we don't block
+                        // forever inside wait_uring while a completion sits
+                        // on a channel.
                         crate::io::uring::wait_uring(
                             ring,
                             Some(0), // poll only
@@ -1100,34 +1156,39 @@ impl AsyncBackend {
                             fd_states,
                             completions,
                         )?;
-                        let raw = network_pool.wait(Some(timeout.unwrap_or(100).min(100)))?;
-                        for crate::io::threadpool::PoolCompletion {
-                            id: cid,
-                            result_code,
-                            data,
-                        } in raw
-                        {
-                            if let Some(mut pending_op) = pending.remove(&cid) {
-                                if let PendingOp::Connect {
-                                    ref mut connect_fd, ..
-                                } = pending_op
-                                {
-                                    if result_code > 0 {
-                                        *connect_fd = Some(result_code);
+
+                        // Wait on whichever channel sources are active.
+                        let wait_ms = timeout.unwrap_or(100).min(100);
+                        let wait_dur = std::time::Duration::from_millis(wait_ms);
+
+                        let stdin_rx = if has_stdin_pending {
+                            stdin_thread.as_ref().unwrap().receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+                        let net_rx = if network_pool.has_in_flight() {
+                            network_pool.receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+
+                        crossbeam_channel::select! {
+                            recv(stdin_rx) -> msg => {
+                                if let Ok(sc) = msg {
+                                    if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
+                                        completions.push_back(c);
                                     }
                                 }
-                                let bh = pending_op.buffer_handle();
-                                let c = completion::process_raw_completion(
-                                    cid,
-                                    result_code,
-                                    data,
-                                    &pending_op,
-                                    fd_states,
-                                    buffer_pool,
-                                    bh,
-                                );
-                                completions.push_back(c);
                             }
+                            recv(net_rx) -> msg => {
+                                if let Ok(pc) = msg {
+                                    network_pool.record_completion();
+                                    if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                        completions.push_back(c);
+                                    }
+                                }
+                            }
+                            default(wait_dur) => {}
                         }
                     } else {
                         crate::io::uring::wait_uring(
@@ -1141,67 +1202,107 @@ impl AsyncBackend {
                     }
                 }
                 PlatformBackend::ThreadPool(pool) => {
-                    // If platform pool has in-flight ops, wait on it.
-                    // If only network pool has in-flight ops, wait on network pool.
-                    // If both have ops, use select across both receivers.
-                    let raw_completions = if pool.has_in_flight() && !network_pool.has_in_flight() {
-                        pool.wait(timeout)?
-                    } else if !pool.has_in_flight() && network_pool.has_in_flight() {
-                        network_pool.wait(timeout)?
-                    } else if pool.has_in_flight() && network_pool.has_in_flight() {
-                        // Both have in-flight ops: select across both receivers.
-                        let timeout_dur = timeout.map(std::time::Duration::from_millis);
-                        let mut results = Vec::new();
-                        // Try non-blocking drain first
-                        results.extend(pool.poll());
-                        results.extend(network_pool.poll());
-                        if results.is_empty() {
-                            // Block waiting for either
-                            crossbeam_channel::select! {
-                                recv(pool.receiver()) -> msg => {
-                                    if let Ok(item) = msg {
-                                        pool.record_completion();
-                                        results.push(item);
-                                        // Drain any extras
-                                        results.extend(pool.poll());
-                                        results.extend(network_pool.poll());
-                                    }
-                                }
-                                recv(network_pool.receiver()) -> msg => {
-                                    if let Ok(item) = msg {
-                                        network_pool.record_completion();
-                                        results.push(item);
-                                        // Drain any extras
-                                        results.extend(pool.poll());
-                                        results.extend(network_pool.poll());
-                                    }
-                                }
-                                default(timeout_dur.unwrap_or(std::time::Duration::MAX)) => {}
+                    // Three possible channel sources:
+                    //   1. platform pool (file I/O, timers, ev/spawn work)
+                    //   2. network pool  (connect, accept, etc.)
+                    //   3. stdin thread  (port/read-line on stdin)
+                    //
+                    // We select across all active sources using never()
+                    // for inactive ones so those arms are never chosen.
+                    let pool_active = pool.has_in_flight();
+                    let net_active = network_pool.has_in_flight();
+
+                    if !pool_active && !net_active && !has_stdin_pending {
+                        // Nothing to wait for.
+                    } else if !pool_active && !net_active {
+                        // Only stdin — handled by drain_stdin_completions below.
+                    } else if !has_stdin_pending && pool_active && !net_active {
+                        // Single source fast path — platform pool only.
+                        for pc in pool.wait(timeout)? {
+                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
+                            {
+                                completions.push_back(c);
                             }
                         }
-                        results
+                    } else if !has_stdin_pending && !pool_active && net_active {
+                        // Single source fast path — network pool only.
+                        for pc in network_pool.wait(timeout)? {
+                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
+                            {
+                                completions.push_back(c);
+                            }
+                        }
                     } else {
-                        // Neither has in-flight ops — nothing to wait for.
-                        Vec::new()
-                    };
-                    for PoolCompletion {
-                        id,
-                        result_code,
-                        data,
-                    } in raw_completions
-                    {
-                        if let Some(pending_op) = pending.remove(&id) {
-                            let buf_handle = pending_op.buffer_handle();
-                            let c = completion::process_raw_completion(
-                                id,
-                                result_code,
-                                data,
-                                &pending_op,
-                                fd_states,
-                                buffer_pool,
-                                buf_handle,
-                            );
-                            completions.push_back(c);
+                        // Multiple sources — select across all active.
+                        let wait_ms = timeout.unwrap_or(100).min(100);
+                        let wait_dur = std::time::Duration::from_millis(wait_ms);
+
+                        let stdin_rx = if has_stdin_pending {
+                            stdin_thread.as_ref().unwrap().receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+                        let pool_rx = if pool_active {
+                            pool.receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+                        let net_rx = if net_active {
+                            network_pool.receiver().clone()
+                        } else {
+                            crossbeam_channel::never()
+                        };
+
+                        // Non-blocking drain first.
+                        let mut got = false;
+                        for sc in stdin_rx.try_iter() {
+                            if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
+                                completions.push_back(c);
+                            }
+                            got = true;
+                        }
+                        for pc in pool.poll() {
+                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
+                            {
+                                completions.push_back(c);
+                            }
+                            got = true;
+                        }
+                        for pc in network_pool.poll() {
+                            if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool)
+                            {
+                                completions.push_back(c);
+                            }
+                            got = true;
+                        }
+
+                        if !got {
+                            crossbeam_channel::select! {
+                                recv(stdin_rx) -> msg => {
+                                    if let Ok(sc) = msg {
+                                        if let Some(c) = stdin_to_completion(sc, pending, buffer_pool) {
+                                            completions.push_back(c);
+                                        }
+                                    }
+                                }
+                                recv(pool_rx) -> msg => {
+                                    if let Ok(pc) = msg {
+                                        pool.record_completion();
+                                        if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                            completions.push_back(c);
+                                        }
+                                    }
+                                }
+                                recv(net_rx) -> msg => {
+                                    if let Ok(pc) = msg {
+                                        network_pool.record_completion();
+                                        if let Some(c) = pool_to_completion(pc, pending, fd_states, buffer_pool) {
+                                            completions.push_back(c);
+                                        }
+                                    }
+                                }
+                                default(wait_dur) => {}
+                            }
                         }
                     }
                 }
@@ -1468,39 +1569,12 @@ impl AsyncBackendInner {
 
     /// Drain stdin completions.
     fn drain_stdin_completions(&mut self) {
-        let completions_to_add: Vec<Completion> = if let Some(ref stdin_thread) = self.stdin_thread
-        {
-            stdin_thread
-                .poll_completions()
-                .into_iter()
-                .filter_map(|sc| {
-                    if let Some(pending) = self.pending.remove(&sc.id) {
-                        self.buffer_pool.release(pending.buffer_handle());
-                        let c = match sc.result {
-                            Ok(data) if data.is_empty() => Completion {
-                                id: sc.id,
-                                result: Ok(Value::NIL), // EOF
-                            },
-                            Ok(data) => Completion {
-                                id: sc.id,
-                                result: Ok(Value::string(String::from_utf8_lossy(&data).as_ref())),
-                            },
-                            Err(msg) => Completion {
-                                id: sc.id,
-                                result: Err(error_val("io-error", msg)),
-                            },
-                        };
-                        Some(c)
-                    } else {
-                        None // Cancelled — discard
-                    }
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        for c in completions_to_add {
-            self.completions.push_back(c);
+        if let Some(ref stdin_thread) = self.stdin_thread {
+            for sc in stdin_thread.poll_completions() {
+                if let Some(c) = stdin_to_completion(sc, &mut self.pending, &mut self.buffer_pool) {
+                    self.completions.push_back(c);
+                }
+            }
         }
     }
 }

@@ -25,6 +25,19 @@ exceptions. If a test fails on your branch, you have two options:
 There is no third option. "Skip the test" is not an option. "Mark it
 known-failing" is not an option. "It's pre-existing" is not an option.
 
+### Do not check out main to "verify" a failure
+
+A common anti-pattern: a test fails, and the agent thinks "let me just
+check if this fails on main too." This involves `git stash`, checking
+out main, rebuilding, running the test, checking out the branch again,
+`git stash pop`, rebuilding again. All to discover what we already
+know: main passes the tests.
+
+This is expensive, risky (stash conflicts, dirty working trees), and
+pointless. Main is green. That is proven by CI on every merge. Do not
+spend tokens and wall-clock time confirming a known fact. When a test
+fails on your branch, your branch broke it. Fix it.
+
 ### Why "pre-existing" is not an excuse
 
 Because main is green, every test that fails on your branch either:
