@@ -302,8 +302,8 @@ fn region_emitted_for_match_with_intrinsic_arms() {
 
 #[test]
 fn no_region_when_match_arm_returns_string() {
-    // One match arm returns a string (heap) → unsafe
-    assert!(!has_region(r#"(let ((x 1)) (match x (0 :ok) (_ "bad")))"#));
+    // One match arm returns a list (heap) → unsafe
+    assert!(!has_region(r#"(let ((x 1)) (match x (0 :ok) (_ (list 1))))"#));
 }
 
 #[test]
@@ -384,14 +384,21 @@ fn no_region_when_inner_let_returns_heap_binding() {
 
 #[test]
 fn no_region_when_nested_block_returns_string() {
-    // Block's last expression is a string literal — heap.
-    assert!(!has_region(r#"(let ((x 1)) (block "heap"))"#));
+    // Block's last expression is a list — heap.
+    assert!(!has_region(r#"(let ((x 1)) (block (list 1)))"#));
 }
 
 #[test]
-fn no_region_when_result_is_string() {
-    // String literal is heap-allocated
-    assert!(!has_region(r#"(let ((x 1)) "hello")"#));
+fn no_region_when_result_is_list() {
+    // list call returns heap-allocated value
+    assert!(!has_region(r#"(let ((x 1)) (list 1))"#));
+}
+
+#[test]
+fn region_emitted_when_result_is_string() {
+    // String literals are LoadConst (constant pool), not heap-allocated.
+    // Safe to return from a scope-allocated let.
+    assert!(has_region(r#"(let ((x 1)) "hello")"#));
 }
 
 #[test]
@@ -453,8 +460,8 @@ fn no_region_when_result_is_lambda() {
 
 #[test]
 fn no_region_when_if_branch_unsafe() {
-    // One branch returns a string → unsafe
-    assert!(!has_region(r#"(let ((x 1)) (if true 42 "bad"))"#));
+    // One branch returns a list → unsafe
+    assert!(!has_region(r#"(let ((x 1)) (if true 42 (list 1)))"#));
 }
 
 #[test]
@@ -560,17 +567,17 @@ fn no_region_fn_body() {
 
 #[test]
 fn no_region_for_block_with_heap_break() {
-    // Break carries a string (heap-allocated) → unsafe
+    // Break carries a list (heap-allocated) → unsafe
     assert!(!has_region(
-        r#"(block :done (if true (break :done "heap") 0))"#
+        r#"(block :done (if true (break :done (list 1)) 0))"#
     ));
 }
 
 #[test]
 fn no_region_for_block_with_mixed_breaks() {
-    // One break is safe (int), other is unsafe (string) → unsafe
+    // One break is safe (int), other is unsafe (list) → unsafe
     assert!(!has_region(
-        r#"(block :done (if true (break :done 42) (break :done "heap")))"#
+        r#"(block :done (if true (break :done 42) (break :done (list 1))))"#
     ));
 }
 
@@ -590,9 +597,9 @@ fn no_region_for_let_with_block_var_break() {
 
 #[test]
 fn no_region_for_let_with_break_carrying_heap_value() {
-    // Break carries a heap value past the let's scope
+    // Break carries a heap value (list) past the let's scope
     assert!(!has_region(
-        r#"(block :outer (let ((x 1)) (break :outer "heap") 42))"#
+        r#"(block :outer (let ((x 1)) (break :outer (list 1)) 42))"#
     ));
 }
 
@@ -616,7 +623,7 @@ fn no_region_for_block_with_list_break() {
 fn no_region_for_while_with_heap_break() {
     // while's implicit Block wraps the While node. A break targeting the
     // while-block with a heap value must prevent scope allocation.
-    assert!(!has_region(r#"(while true (break :while "heap"))"#));
+    assert!(!has_region(r#"(while true (break :while (list 1)))"#));
 }
 
 // ── Negative: bug regression tests ──────────────────────────────────────
@@ -643,19 +650,19 @@ fn no_region_when_break_in_nested_block_targets_outer() {
 fn no_region_when_and_has_unsafe_element() {
     // (and ...) short-circuits: any sub-expression could be the result.
     // If any element is unsafe, the whole result is unsafe.
-    assert!(!has_region(r#"(let ((x 1)) (and true "heap"))"#));
+    assert!(!has_region(r#"(let ((x 1)) (and true (list 1)))"#));
 }
 
 #[test]
 fn no_region_when_or_has_unsafe_element() {
-    assert!(!has_region(r#"(let ((x 1)) (or false "heap"))"#));
+    assert!(!has_region(r#"(let ((x 1)) (or false (list 1)))"#));
 }
 
 #[test]
 fn no_region_when_cond_clause_body_unsafe() {
-    // A cond clause body returns a string → heap-allocated → unsafe
+    // A cond clause body returns a list → heap-allocated → unsafe
     assert!(!has_region(
-        r#"(let ((x 1)) (cond (true "bad") (else 42)))"#
+        r#"(let ((x 1)) (cond (true (list 1)) (else 42)))"#
     ));
 }
 
