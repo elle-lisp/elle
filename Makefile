@@ -109,12 +109,12 @@ smoke-jit:
 			'timeout $(TIMEOUT) $(ELLE) $(ELLE_JIT_ARG) {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke-wasm:
+smoke-wasm: elle
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
 		parallel -j 1 --halt now,fail=1 --tag \
-			'timeout 300s $(ELLE) --wasm=full {}' \
+			'timeout 300s ./target/release/elle --wasm=full {}' \
 		|| { echo "FAILED: elle scripts WASM pass"; exit 1; }
 
 doctest:  ## Test code examples in documentation (literate mode)

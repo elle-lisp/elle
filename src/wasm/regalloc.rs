@@ -141,19 +141,15 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut active: HashMap<Reg, u32> = HashMap::new(); // reg → pool slot
 
         for (idx, si) in block.instructions.iter().enumerate() {
-            // Free registers whose last use was a previous instruction.
-            // We cannot free at the same instruction as the last use because
-            // the instruction reads its operands before writing its result —
-            // reusing the slot would clobber a live value.
+            // Free registers whose last use is this instruction
+            // BEFORE allocating defs — allows the def to reuse a
+            // slot freed by an operand it consumes.
             let mut to_free = Vec::new();
             for (reg, slot) in &active {
-                if let Some(last) = last_use.get(reg).copied() {
-                    if last < idx {
-                        to_free.push((*reg, *slot));
-                    }
+                if last_use.get(reg).copied() == Some(idx) {
+                    to_free.push((*reg, *slot));
                 }
             }
-            // Sort by slot to ensure deterministic free_pool ordering.
             to_free.sort_by_key(|(_, slot)| *slot);
             for (reg, slot) in to_free {
                 active.remove(&reg);
@@ -440,11 +436,10 @@ mod tests {
         let func = mk_func(vec![block], 3);
         let alloc = allocate(&func, 0);
 
+        // r2 is used in the terminator so it's still "within-block" (same block).
         // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
-        // We cannot free r0/r1 at the same instruction where they're used
-        // (the instruction reads operands before writing the result), so
-        // r2 gets its own slot. Total: 3 slots.
-        assert_eq!(alloc.max_slots, 3);
+        // Free-before-def: r0/r1 freed, then r2 reuses a slot. 2 slots.
+        assert_eq!(alloc.max_slots, 2);
     }
 
     #[test]
