@@ -175,6 +175,9 @@ Buffered data is never lost on EOF or error. The backend drains buffered data be
 6. Buffer drain invariant: buffered data is never lost on EOF or error.
 7. Buffers passed to io_uring must not move while the kernel holds them.
 8. stdin reads in async mode go through a dedicated OS thread, not io_uring.
+   When stdin reads are pending alongside io_uring ops (e.g. file watchers),
+   the wait path polls io_uring non-blocking and then selects on the stdin
+   receiver channel so neither source starves the other.
 9. `io/submit`, `io/reap`, `io/wait`, `io/cancel` only work with async backends.
 10. Network operations are yielding (`SIG_IO`). Synchronous network setup (tcp/listen, udp/bind, unix/listen) does not yield.
 11. **Dispatch-before-port-guard:** `Spawn` and `ProcessWait` must be dispatched before the `as_external::<Port>()` guard. `Spawn` has `Value::NIL` as its port field; `ProcessWait` has a `ProcessHandle` in the port field (not a `Port`).
