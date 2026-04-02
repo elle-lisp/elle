@@ -234,7 +234,6 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 name: None,
                 result_is_immediate: false,
                 has_outward_heap_set: false,
-                rotation_safe: false,
                 wasm_func_idx: Some(table_idx as u32),
             });
 

@@ -17,18 +17,6 @@ impl<'a> Lowerer<'a> {
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
             let init_reg = self.lower_expr(init)?;
-            // Record rotation_safe for lambda bindings.
-            if matches!(init.kind, HirKind::Lambda { .. }) {
-                if let Some(block) = self.current_func.blocks.last() {
-                    for instr in block.instructions.iter().rev() {
-                        if let LirInstr::MakeClosure { func, .. } = &instr.instr {
-                            self.callee_rotation_safe
-                                .insert(*binding, func.rotation_safe);
-                            break;
-                        }
-                    }
-                }
-            }
             let slot = self.allocate_slot(*binding);
 
             // Check if this binding needs to be wrapped in a cell
@@ -68,23 +56,8 @@ impl<'a> Lowerer<'a> {
                 }
             }
         }
-        // When the body is a tail call and the scope is allocated, we can't
-        // emit RegionExit after the body — TailCall replaces the frame, making
-        // any post-body instructions dead code. Instead, increment the pending
-        // counter so that TailCall lowering emits raw RegionExit instructions
-        // between arg computation and the TailCall instruction itself.
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
-        if tail_scoped {
-            self.pending_region_exits += 1;
-        }
         let result = self.lower_expr(body)?;
-        if tail_scoped {
-            // The raw RegionExits were emitted by lower_call — adjust our
-            // bookkeeping to match. Don't use emit_region_exit() here because
-            // no actual instruction needs emitting at this point.
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if scoped {
+        if scoped {
             self.emit_region_exit();
         }
         Ok(result)
@@ -167,15 +140,8 @@ impl<'a> Lowerer<'a> {
                 });
             }
         }
-        let tail_scoped = scoped && Self::body_is_tail_call(body);
-        if tail_scoped {
-            self.pending_region_exits += 1;
-        }
         let result = self.lower_expr(body)?;
-        if tail_scoped {
-            self.pending_region_exits -= 1;
-            self.region_depth -= 1;
-        } else if scoped {
+        if scoped {
             self.emit_region_exit();
         }
         Ok(result)
@@ -202,20 +168,6 @@ impl<'a> Lowerer<'a> {
 
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
-
-        // Record rotation_safe for lambda bindings so callers can
-        // check callee safety transitively.
-        if matches!(value.kind, HirKind::Lambda { .. }) {
-            if let Some(lir_instr) = self.current_func.blocks.last() {
-                for instr in lir_instr.instructions.iter().rev() {
-                    if let LirInstr::MakeClosure { func, .. } = &instr.instr {
-                        self.callee_rotation_safe
-                            .insert(binding, func.rotation_safe);
-                        break;
-                    }
-                }
-            }
-        }
 
         if self.in_lambda && needs_lbox {
             self.emit(LirInstr::StoreCapture {

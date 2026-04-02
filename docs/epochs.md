@@ -213,16 +213,3 @@ The old `stream/` names remain as aliases.
 
 `elle rewrite` now updates the `(elle/epoch N)` tag to the current epoch
 instead of stripping it.
-
-### Epoch 6 — remove ev/run wrapper
-
-User code already runs inside the async scheduler. `(ev/run (fn [] body...))`
-is unwrapped to `body...` by the migration pass. Non-matching uses produce
-a compile error.
-
-### Epoch 7 — fiber/new: mask before closure
-
-`(fiber/new closure mask)` becomes `(fiber/new mask closure)`. The signal
-mask is a short static declaration that reads like a header; the closure is
-typically multi-line and belongs last so the form closes with `)` instead
-of `|:io :error|)`.

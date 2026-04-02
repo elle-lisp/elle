@@ -207,7 +207,7 @@ impl fmt::Display for Value {
 
         // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "b[")?;
+            write!(f, "#bytes[")?;
             for (i, byte) in b.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -220,7 +220,7 @@ impl fmt::Display for Value {
         // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "@b[")?;
+            write!(f, "#@bytes[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -401,7 +401,7 @@ impl fmt::Debug for Value {
         }
         // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "b[")?;
+            write!(f, "#bytes[")?;
             for (i, byte) in b.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
@@ -413,7 +413,7 @@ impl fmt::Debug for Value {
         // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "@b[")?;
+            write!(f, "#@bytes[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;

@@ -19,8 +19,6 @@ pub(crate) struct TailCallInfo {
     pub env: Rc<Vec<Value>>,
     pub location_map: Rc<LocationMap>,
     pub squelch_mask: SignalBits,
-    /// Whether the target function is safe for pool rotation.
-    pub rotation_safe: bool,
 }
 
 /// Pending fiber resume for the trampoline.
@@ -131,7 +129,6 @@ fn root_closure() -> Rc<Closure> {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         }),
         env: Rc::new(vec![]),
         squelch_mask: SignalBits::EMPTY,
@@ -167,9 +164,13 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
-            jit_enabled: crate::config::get().jit_enabled(),
-            jit_hotness_threshold: crate::config::get().jit_threshold(),
-            wasm_tier: if crate::config::get().wasm_tier_enabled() {
+            jit_enabled: crate::config::get().jit > 0,
+            jit_hotness_threshold: if crate::config::get().jit > 0 {
+                (crate::config::get().jit - 1) as usize
+            } else {
+                0
+            },
+            wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None

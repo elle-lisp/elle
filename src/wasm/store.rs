@@ -48,22 +48,15 @@ pub fn create_engine() -> Result<Engine> {
     config.wasm_tail_call(true);
     config.wasm_multi_value(true);
 
-    let cfg = crate::config::get();
-    if !cfg.jit_enabled() {
+    if crate::config::get().jit == 0 {
         config.cranelift_opt_level(OptLevel::None);
     } else {
         config.cranelift_opt_level(OptLevel::Speed);
     }
 
-    // Use single-pass register allocator. The backtracking allocator is
-    // superlinear on large functions (the stdlib entry can exceed 2M WASM
-    // instructions). Single-pass compiles 20x faster with acceptable
-    // code quality for our use case (most hot paths are host calls anyway).
-    config.cranelift_regalloc_algorithm(RegallocAlgorithm::SinglePass);
-
     // Disk-backed compilation cache: reuses compiled machine code across runs.
     // Keyed on WASM bytecode content, so stdlib compilation is amortized.
-    if let Some(cache_dir) = &cfg.cache {
+    if let Some(cache_dir) = &crate::config::get().cache {
         let path = std::path::PathBuf::from(cache_dir);
         std::fs::create_dir_all(&path).ok();
         let cache = DiskCache(path);

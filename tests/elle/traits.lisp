@@ -1,4 +1,3 @@
-(elle/epoch 7)
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.
@@ -258,7 +257,7 @@
   (assert (= (traits (with-traits (make-parameter 0) t)) t) "with-traits works on Parameter")
 
   # Fiber (user-constructible via fiber/new)
-  (assert (= (traits (with-traits (fiber/new || (fn () 1)) t)) t) "with-traits works on Fiber")
+  (assert (= (traits (with-traits (fiber/new (fn () 1) 0) t)) t) "with-traits works on Fiber")
 
   # Syntax, ManagedPointer, External, ThreadHandle:
   # These types require FFI, plugins, or thread spawning to construct in Elle
@@ -266,7 +265,7 @@
 )
 
 # traits returns nil for untraited fiber
-(assert (nil? (traits (fiber/new || (fn () 1)))) "traits returns nil for untraited fiber")
+(assert (nil? (traits (fiber/new (fn () 1) 0))) "traits returns nil for untraited fiber")
 
 # traits returns nil for untraited parameter
 (assert (nil? (traits (make-parameter 0))) "traits returns nil for untraited parameter")

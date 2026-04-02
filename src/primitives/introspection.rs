@@ -31,11 +31,8 @@ pub(crate) fn prim_is_jit(args: &[Value]) -> (SignalBits, Value) {
             ),
         );
     }
-    if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.template.jit_code.is_some()))
-    } else {
-        (SIG_OK, Value::FALSE)
-    }
+    // SIG_QUERY to the VM, which checks jit_cache by bytecode pointer.
+    (SIG_QUERY, Value::cons(Value::keyword("jit?"), args[0]))
 }
 
 /// (silent? value) — true if closure is silent (does not suspend: no yield/debug/polymorphic)
@@ -308,7 +305,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "jit?",
         func: prim_is_jit,
-        signal: Signal::errors(),
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Exact(1),
         doc: "Returns true if closure has JIT-compiled code",
         params: &["value"],

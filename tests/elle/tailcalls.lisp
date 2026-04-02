@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # Tests for tail call optimization
 #
 # Comprehensive tests for tail call optimization including:
@@ -157,7 +156,7 @@
 (defn fiber-tail-test [n]
   "Test fiber/resume in tail position"
   (block :b
-    (let ([f (fiber/new |:error| (fn () (sum-to n 0)))])
+    (let ([f (fiber/new (fn () (sum-to n 0)) 1)])
       (fiber/resume f nil))))
 
 (assert (= (fiber-tail-test 10) 55) "fiber/resume in tail position")
@@ -167,7 +166,7 @@
 (defn fiber-cancel-tail-test [n]
   "Test fiber/cancel in tail position"
   (block :b
-    (let ([f (fiber/new |:error| (fn () (sum-to n 0)))])
+    (let ([f (fiber/new (fn () (sum-to n 0)) 1)])
       (fiber/cancel f))))
 
 (assert (= (fiber-cancel-tail-test 10) nil) "fiber/cancel in tail position")

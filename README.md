@@ -33,7 +33,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     (emit :yield 2)
     (emit :yield 3))
 
-  (def f (fiber/new |:yield| produce))
+  (def f (fiber/new produce |:yield|))
 
   (fiber/resume f) (print (fiber/value f))  # => 1
   (fiber/resume f) (print (fiber/value f))  # => 2
@@ -52,7 +52,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
       (error {:error :bad-input :message "negative input"})
       (* x x)))
 
-  (def f (fiber/new |:error| (fn () (risky -1))))
+  (def f (fiber/new (fn () (risky -1)) |:error|))
   (fiber/resume f)
 
   (if (= (fiber/status f) :paused)
@@ -67,7 +67,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     (each item items
       (emit :progress {:item item :result (* item item)})))
 
-  (def f (fiber/new |:progress| (fn () (process-items [1 2 3]))))
+  (def f (fiber/new (fn () (process-items [1 2 3])) |:progress|))
 
   (forever
     (fiber/resume f)
@@ -85,7 +85,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     42)
 
   (defn parent []
-    (def f (fiber/new |:log| child))
+    (def f (fiber/new child |:log|))
     (forever
       (fiber/resume f)
       (match (fiber/status f)
@@ -180,9 +180,9 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
    (def buf @"hello")        # @string
    (def ms @|1 2 3|)         # @set
 
-   # Bytes and @bytes
-   (def b b[1 2 3])           # bytes
-   (def bl @b[1 2 3])         # @bytes
+   # Bytes and @bytes (no literal syntax)
+   (def b (bytes 1 2 3))     # bytes
+   (def bl (@bytes 1 2 3))   # @bytes
    ```
 
 - **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
@@ -196,7 +196,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (length "👨‍👩‍👧")   # => 1
   ```
 
-- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values and wrong types are runtime errors.
+- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
 
   ```lisp
   (def (head & tail) (list 1 2 3 4))
@@ -224,10 +224,6 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
    The closure captures `n` by value. The compiler detects that `n` is mutated, so it wraps it in an lbox automatically. No explicit `box` or `ref` needed.
    </details>
-
-- **Traits on any heap value.** `with-traits` attaches an immutable struct to any value. Traits are invisible to equality, ordering, and hashing — they're metadata. Dispatch on traits via `match` on `(traits v)`.
-
-- **Contracts for function boundaries.** Compositional validators with blame tracking. Wrap any function with pre/post-condition checking: `(contract f arg-validators return-validator)`. Validators compose with `v/and`, `v/or`, `v/optional`, `v/arrayof`, `v/mapof`.
 
 - **Full tail-call optimisation.** All tail calls are optimised — not just self-recursion. Mutually recursive functions, continuation-passing style, and trampolining all work without stack overflow.
 
@@ -265,7 +261,7 @@ Immediates (nil, booleans, integers, floats, symbols, keywords, empty list) fit 
 | nil | `nil` | Absence of a value. Falsy. |
 | boolean | `true`, `false` | `false` is falsy; `true` is truthy. |
 | integer | `42`, `-17` | Full-range i64. No auto-coercion to float. Overflow wraps. |
-| float | `3.14`, `1e10` | IEEE 754 double. |
+| float | `3.14`, `1e10` | IEEE 754 double. NaN/Infinity are heap-allocated. |
 | symbol | `foo`, `'foo` | Interned identifier. |
 | keyword | `:foo` | Self-evaluating interned name. Used for keys and tags. |
 | empty list | `()`, `'()` | Terminates proper lists. **Truthy** — not the same as nil. |
@@ -328,20 +324,20 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (difference |1 2| |2 3|)    # => |1|
 ```
 
-**bytes** — immutable binary data. Literal syntax: `b[1 2 3]`. Displays as `b[hex ...]`.
+**bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
 
 ```lisp
-(def b b[1 2 3])
+(def b (bytes 1 2 3))
 (def b2 (string->bytes "hello"))
 (get b 0)               # => 1
 (length b)              # => 5
 (bytes->hex b2)         # => "68656c6c6f"
 ```
 
-**@bytes** — mutable binary data. Literal syntax: `@b[1 2 3]`. Displays as `@b[hex ...]`.
+**@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
 
 ```lisp
-(def b @b[1 2 3])
+(def b (@bytes 1 2 3))
 (def b2 (string->@bytes "hello"))
 (get b 0)               # => 1
 (length b)              # => 5
@@ -387,7 +383,7 @@ Lists are linked; tuples and arrays are contiguous in memory. They are not inter
 **Fiber** — independent execution context with its own stack, call frames, signal mask, and heap. See [Memory](#memory).
 
 ```lisp
-(fiber/new mask (fn () body))
+(fiber/new (fn () body) mask)
 (fiber/resume f value)
 (fiber/status f)
 ```
@@ -452,7 +448,6 @@ Exactly two values are falsy. Everything else is truthy.
 | keyword | `:foo` |
 | empty list | `()` |
 | string | `hello` (no quotes) |
-| @string | `@"hello"` |
 | cons | `(1 2 3)` or `(a . b)` for improper |
 | array | `[1 2 3]` |
 | @array | `@[1 2 3]` |
@@ -460,12 +455,13 @@ Exactly two values are falsy. Everything else is truthy.
 | @struct | `@{:a 1}` |
 | set | `\|1 2 3\|` |
 | @set | `@\|1 2 3\|` |
-| bytes | `b[01 02 03]` |
-| @bytes | `@b[01 02 03]` |
+| bytes | `#bytes[01 02 03]` |
+| @bytes | `#@bytes[01 02 03]` |
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
 | box | `<box value>` |
+| @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 
 ## Control Flow

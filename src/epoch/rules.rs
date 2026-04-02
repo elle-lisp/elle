@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 7;
+pub const CURRENT_EPOCH: u64 = 6;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -192,17 +192,6 @@ static MIGRATIONS: &[Migration] = &[
             message: "user code already runs in the async scheduler; remove the ev/run wrapper",
         }],
     },
-    Migration {
-        epoch: 7,
-        summary: "fiber/new: mask before closure",
-        rules: &[
-            MigrationRule::Replace {
-                symbol: "fiber/new",
-                arity: 2,
-                template: "(fiber/new $2 $1)",
-            },
-        ],
-    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -330,15 +319,6 @@ mod tests {
         let removals = removals_in_range(0, CURRENT_EPOCH);
         assert!(removals.contains_key("write"));
         assert_eq!(removals.len(), 1);
-    }
-
-    #[test]
-    fn test_replace_rules_epoch_7() {
-        let replaces = replace_rules_in_range(6, 7);
-        assert_eq!(replaces.len(), 1);
-        assert_eq!(replaces[0].0, "fiber/new");
-        assert_eq!(replaces[0].1, 2);
-        assert_eq!(replaces[0].2, "(fiber/new $2 $1)");
     }
 
     #[test]

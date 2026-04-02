@@ -145,8 +145,6 @@ impl<'a> Lowerer<'a> {
         let saved_num_local_params = self.num_local_params;
         let saved_upvalue_bindings = std::mem::take(&mut self.upvalue_bindings);
         let saved_discard_slot = self.discard_slot;
-        let saved_pending_region_exits = self.pending_region_exits;
-        let saved_region_depth = self.region_depth;
 
         self.next_reg = 0;
         self.next_label = 1;
@@ -159,8 +157,6 @@ impl<'a> Lowerer<'a> {
         self.num_captures = captures.len() as u16;
         self.num_local_params = 0;
         self.discard_slot = None;
-        self.pending_region_exits = 0;
-        self.region_depth = 0;
         self.current_func.doc = doc;
         self.current_func.syntax = syntax;
         self.current_func.vararg_kind = vararg_kind.clone();
@@ -260,7 +256,6 @@ impl<'a> Lowerer<'a> {
         self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
         self.current_func.has_outward_heap_set =
             self.body_contains_dangerous_outward_set(body, &[]);
-        self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 
@@ -274,8 +269,6 @@ impl<'a> Lowerer<'a> {
         self.num_local_params = saved_num_local_params;
         self.upvalue_bindings = saved_upvalue_bindings;
         self.discard_slot = saved_discard_slot;
-        self.pending_region_exits = saved_pending_region_exits;
-        self.region_depth = saved_region_depth;
 
         Ok(func)
     }

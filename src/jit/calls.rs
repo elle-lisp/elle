@@ -395,17 +395,6 @@ pub extern "C" fn elle_jit_resolve_tail_call(
     }
 }
 
-/// Rotate slab pools at a self-tail-call boundary in JIT code.
-///
-/// Called from the JIT self-tail-call loop after reading argument values
-/// but before writing them back. The argument SSA values are in registers;
-/// the rotation frees iteration N-2's slab slots while iteration N-1's
-/// slots (referenced by argument values) remain in the swap pool.
-#[no_mangle]
-pub extern "C" fn elle_jit_rotate_pools(_vm: *mut ()) {
-    crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools_jit());
-}
-
 /// Increment call depth and check for stack overflow.
 ///
 /// Returns FALSE on success, or TRUE if the call depth exceeds 1000
@@ -639,7 +628,6 @@ pub extern "C" fn elle_jit_tail_call(
             env: new_env,
             location_map: closure.template.location_map.clone(),
             squelch_mask: closure.squelch_mask,
-            rotation_safe: closure.template.rotation_safe,
         });
 
         return TAIL_CALL_SENTINEL;

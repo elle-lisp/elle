@@ -296,7 +296,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         });
 
         let closure = crate::value::Closure {
@@ -357,7 +356,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         });
 
         let closure = crate::value::Closure {

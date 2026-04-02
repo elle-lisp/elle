@@ -213,6 +213,7 @@ impl VM {
     /// - (:"arena/stats" . nil) — return unified stats struct (12 fields) for current fiber
     /// - (:"arena/stats" . fiber) — return unified stats struct for a suspended/dead fiber
     /// - (:"arena/count" . _) — return heap arena object count as int (zero overhead)
+    /// - (:"jit?" . closure) — true if closure has JIT-compiled native code
     pub(crate) fn dispatch_query(&self, value: Value) -> (SignalBits, Value) {
         let cons = match value.as_cons() {
             Some(c) => c,
@@ -525,6 +526,14 @@ impl VM {
                     })
                     .collect();
                 (SIG_OK, crate::value::list(structs))
+            }
+            "jit?" => {
+                if let Some(closure) = arg.as_closure() {
+                    let ptr = closure.template.bytecode.as_ptr();
+                    (SIG_OK, Value::bool(self.jit_cache.contains_key(&ptr)))
+                } else {
+                    (SIG_OK, Value::FALSE)
+                }
             }
             _ => (
                 SIG_ERROR,

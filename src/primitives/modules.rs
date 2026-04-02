@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 /// Resolve the Elle project root.
 /// Checks `ELLE_HOME` env var first, then walks up from the binary to find `Cargo.toml`.
 fn elle_root() -> Option<PathBuf> {
-    if let Some(home) = &crate::config::get().home {
+    if let Ok(home) = std::env::var("ELLE_HOME") {
         let p = PathBuf::from(home);
         if p.is_dir() {
             return Some(p);
@@ -73,8 +73,8 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         search_dirs.push(cwd);
     }
 
-    // --path (colon-separated)
-    if let Some(elle_path) = &crate::config::get().path {
+    // ELLE_PATH (colon-separated)
+    if let Ok(elle_path) = std::env::var("ELLE_PATH") {
         for entry in elle_path.split(':') {
             let p = PathBuf::from(entry);
             if p.is_dir() {
@@ -83,12 +83,10 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         }
     }
 
-    // --home (default: directory of the elle binary)
-    let elle_home = crate::config::get()
-        .home
-        .as_ref()
+    // ELLE_HOME (default: directory of the elle binary)
+    let elle_home = std::env::var("ELLE_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
+        .unwrap_or_else(|_| {
             std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))

@@ -778,7 +778,7 @@ fn test_fiber_new_and_status() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        r#"(let ((f (fiber/new || (fn () 42))))
+        r#"(let ((f (fiber/new (fn () 42) 0)))
              (= (fiber/status f) :new))"#,
         &mut symbols,
         &mut vm,
@@ -796,7 +796,7 @@ fn test_fiber_resume_simple() {
     // A fiber that just returns a value
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(let ((f (fiber/new || (fn () 42))))
+        r#"(let ((f (fiber/new (fn () 42) 0)))
              (fiber/resume f))"#,
         &mut symbols,
         &mut vm,
@@ -814,7 +814,7 @@ fn test_fiber_resume_dead_status() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        r#"(let ((f (fiber/new || (fn () 42))))
+        r#"(let ((f (fiber/new (fn () 42) 0)))
              (fiber/resume f)
              (= (fiber/status f) :dead))"#,
         &mut symbols,
@@ -834,7 +834,7 @@ fn test_fiber_emit_and_resume() {
     let (mut symbols, mut vm) = setup();
     // SIG_YIELD = 2, mask catches it
     let result = eval(
-        r#"(let ((f (fiber/new |:yield| (fn () (emit 2 99) 42))))
+        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
              (fiber/resume f)
              (fiber/value f))"#,
         &mut symbols,
@@ -852,7 +852,7 @@ fn test_fiber_emit_resume_continues() {
     // Resume after emit should continue execution and return final value
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(let ((f (fiber/new |:yield| (fn () (emit 2 99) 42))))
+        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
              (fiber/resume f)
              (fiber/resume f))"#,
         &mut symbols,
@@ -869,7 +869,7 @@ fn test_fiber_emit_resume_continues() {
 fn test_fiber_is_fiber() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(fiber? (fiber/new || (fn () 42)))"#,
+        r#"(fiber? (fiber/new (fn () 42) 0))"#,
         &mut symbols,
         &mut vm,
         "<test>",
@@ -898,7 +898,7 @@ fn test_fiber_emit_through_nested_call() {
     let result = eval(
         r#"(begin
              (defn inner () (emit 2 99))
-             (let ((f (fiber/new |:yield| (fn () (inner) 42))))
+             (let ((f (fiber/new (fn () (inner) 42) 2)))
                (fiber/resume f)
                (fiber/value f)))"#,
         &mut symbols,
@@ -915,7 +915,7 @@ fn test_fiber_emit_through_nested_call() {
 fn test_fiber_mask() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(fiber/mask (fiber/new |:error :yield| (fn () 42)))"#,
+        r#"(fiber/mask (fiber/new (fn () 42) 3))"#,
         &mut symbols,
         &mut vm,
         "<test>",

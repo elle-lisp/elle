@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 6)
 # I/O — stream primitives, ev/spawn, async backend
 
 
@@ -63,7 +63,7 @@
 (spit "/tmp/elle-test-submit-lisp" "test")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-submit-lisp" :read))
-       (f (fiber/new |:io| (fn [] (port/read-all port)))))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (assert (int? (io/submit backend (fiber/value f))) "io/submit returns int"))
 
@@ -83,7 +83,7 @@
 (let ((submit-sync-port (port/open "/tmp/elle-test-submit-sync-lisp" :read)))
   (let (([ok? _] (protect ((fn ()
       (let* ((backend (io/backend :sync))
-             (f (fiber/new |:io| (fn [] (port/read-all submit-sync-port)))))
+             (f (fiber/new (fn [] (port/read-all submit-sync-port)) 512)))
         (fiber/resume f)
         (io/submit backend (fiber/value f)))))))) (assert (not ok?) "io/submit on sync backend errors")))
 
@@ -92,7 +92,7 @@
 (spit "/tmp/elle-test-submit-wait-lisp" "roundtrip")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-submit-wait-lisp" :read))
-       (f (fiber/new |:io| (fn [] (port/read-all port)))))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
@@ -103,7 +103,7 @@
 (spit "/tmp/elle-test-comp-id-lisp" "test")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-comp-id-lisp" :read))
-       (f (fiber/new |:io| (fn [] (port/read-all port)))))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))
@@ -114,7 +114,7 @@
 (spit "/tmp/elle-test-comp-val-lisp" "hello async")
 (let* ((backend (io/backend :async))
        (port (port/open "/tmp/elle-test-comp-val-lisp" :read))
-       (f (fiber/new |:io| (fn [] (port/read-all port)))))
+       (f (fiber/new (fn [] (port/read-all port)) 512)))
   (fiber/resume f)
   (let ((id (io/submit backend (fiber/value f))))
     (let ((completions (io/wait backend -1)))

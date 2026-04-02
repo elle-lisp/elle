@@ -63,8 +63,6 @@ pub struct ClosureTemplate {
     /// WASM function table index (if compiled to WASM backend).
     /// When set, rt_call dispatches to this WASM function instead of bytecode.
     pub wasm_func_idx: Option<u32>,
-    /// True when the function body is safe for tail-call pool rotation.
-    pub rotation_safe: bool,
 }
 
 /// Closure with captured environment
@@ -174,7 +172,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         })
     }
 
@@ -212,7 +209,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         });
         let closure = Closure {
             template,
@@ -242,7 +238,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         });
         let closure2 = Closure {
             template: template2,
@@ -272,7 +267,6 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
-            rotation_safe: false,
         });
         let closure3 = Closure {
             template: template3,

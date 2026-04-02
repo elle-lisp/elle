@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # Structured concurrency tests
 #
 # User code runs inside the async scheduler (via execute_scheduled),
@@ -56,7 +55,7 @@
 
 # === 8. fiber/abort — on :new fiber works ===
 
-(let ([f (fiber/new |:error :io :exec :wait| (fn [] 42))])
+(let ([f (fiber/new (fn [] 42) |:error :io :exec :wait|)])
   (fiber/abort f {:error :aborted})
   (assert (= :error (fiber/status f)) "8a: fiber/abort on :new sets to :error"))
 

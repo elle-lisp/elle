@@ -395,7 +395,7 @@ fn test_basic_yield() {
     // A fiber that yields 42, then returns 99
     assert_eq!(
         eval(concat!(
-            "(let* [[f (fiber/new |:yield| (fn [] (yield 42) 99))]]\n",
+            "(let* [[f (fiber/new (fn [] (yield 42) 99) |:yield|)]]\n",
             "  (fiber/resume f))"
         )),
         "42"
@@ -407,7 +407,7 @@ fn test_yield_resume_value() {
     // Resume a fiber with a value; the yield expression evaluates to it
     assert_eq!(
         eval(concat!(
-            "(let* [[f (fiber/new |:yield| (fn [] (+ 1 (yield 0))))]]\n",
+            "(let* [[f (fiber/new (fn [] (+ 1 (yield 0))) |:yield|)]]\n",
             "  (fiber/resume f)\n",   // yields 0, fiber paused
             "  (fiber/resume f 10))"  // resumes with 10, returns 1+10=11
         )),
@@ -420,7 +420,7 @@ fn test_multiple_yields() {
     // Fiber yields 1, 2, 3 in sequence
     assert_eq!(
         eval(concat!(
-            "(let* [[f (fiber/new |:yield| (fn [] (yield 1) (yield 2) 3))]]\n",
+            "(let* [[f (fiber/new (fn [] (yield 1) (yield 2) 3) |:yield|)]]\n",
             "  (let* [[a (fiber/resume f)]\n",
             "         [b (fiber/resume f)]\n",
             "         [c (fiber/resume f)]]\n",
@@ -435,7 +435,7 @@ fn test_fiber_dead_after_return() {
     // After a fiber returns, it's dead
     assert_eq!(
         eval(concat!(
-            "(let* [[f (fiber/new |:yield| (fn [] 42))]]\n",
+            "(let* [[f (fiber/new (fn [] 42) |:yield|)]]\n",
             "  (fiber/resume f))"
         )),
         "42"
@@ -449,7 +449,7 @@ fn test_yield_through_call() {
         eval(concat!(
             "(defn inner [] (yield 77))\n",
             "(defn outer [] (+ 1 (inner)))\n",
-            "(let* [[f (fiber/new |:yield| outer)]]\n",
+            "(let* [[f (fiber/new outer |:yield|)]]\n",
             "  (fiber/resume f))"
         )),
         "77"
@@ -464,7 +464,7 @@ fn test_yield_through_call_resume() {
         eval(concat!(
             "(defn inner [] (yield 0))\n",
             "(defn outer [] (+ 1 (inner)))\n",
-            "(let* [[f (fiber/new |:yield| outer)]]\n",
+            "(let* [[f (fiber/new outer |:yield|)]]\n",
             "  (fiber/resume f)\n",   // yields 0
             "  (fiber/resume f 10))"  // resumes inner with 10, outer returns 11
         )),
@@ -477,11 +477,11 @@ fn test_generator_pattern() {
     // Generator: yields successive values
     assert_eq!(
         eval(concat!(
-            "(let* [[g (fiber/new |:yield| (fn []\n",
+            "(let* [[g (fiber/new (fn []\n",
             "           (yield 10)\n",
             "           (yield 20)\n",
             "           (yield 30)\n",
-            "           0))]]\n",
+            "           0) |:yield|)]]\n",
             "  (let* [[a (fiber/resume g)]\n",
             "         [b (fiber/resume g)]\n",
             "         [c (fiber/resume g)]]\n",
@@ -499,7 +499,7 @@ fn test_yield_in_loop() {
             "(defn count-up [n max]\n",
             "  (if (> n max) nil\n",
             "    (let* [[_ (yield n)]] (count-up (+ n 1) max))))\n",
-            "(let* [[f (fiber/new |:yield| (fn [] (count-up 1 3)))]]\n",
+            "(let* [[f (fiber/new (fn [] (count-up 1 3)) |:yield|)]]\n",
             "  (let* [[a (fiber/resume f)]\n",
             "         [b (fiber/resume f)]\n",
             "         [c (fiber/resume f)]]\n",
@@ -519,7 +519,7 @@ fn test_three_sequential_yields_through_call() {
     assert_eq!(
         eval(concat!(
             "(defn inner [x] (yield x))\n",
-            "(let* [[f (fiber/new |:yield| (fn [] (inner 1) (inner 2) (inner 3) :done))]]\n",
+            "(let* [[f (fiber/new (fn [] (inner 1) (inner 2) (inner 3) :done) |:yield|)]]\n",
             "  (let* [[a (fiber/resume f)]\n",
             "         [b (fiber/resume f)]\n",
             "         [c (fiber/resume f)]\n",
@@ -536,9 +536,9 @@ fn test_five_sequential_yields_through_call() {
     assert_eq!(
         eval(concat!(
             "(defn inner [x] (yield x))\n",
-            "(let* [[f (fiber/new |:yield| (fn []\n",
+            "(let* [[f (fiber/new (fn []\n",
             "         (inner 10) (inner 20) (inner 30) (inner 40) (inner 50)\n",
-            "         :done))]]\n",
+            "         :done) |:yield|)]]\n",
             "  (let* [[a (fiber/resume f)]\n",
             "         [b (fiber/resume f)]\n",
             "         [c (fiber/resume f)]\n",
@@ -559,7 +559,7 @@ fn test_yield_through_deep_call_stack() {
             "(defn level3 [] (yield 99))\n",
             "(defn level2 [] (+ 1 (level3)))\n",
             "(defn level1 [] (+ 10 (level2)))\n",
-            "(let* [[f (fiber/new |:yield| level1)]]\n",
+            "(let* [[f (fiber/new level1 |:yield|)]]\n",
             "  (fiber/resume f))"
         )),
         "99"
@@ -574,7 +574,7 @@ fn test_yield_through_deep_resume() {
             "(defn level3 [] (yield 0))\n",
             "(defn level2 [] (+ 1 (level3)))\n",
             "(defn level1 [] (+ 10 (level2)))\n",
-            "(let* [[f (fiber/new |:yield| level1)]]\n",
+            "(let* [[f (fiber/new level1 |:yield|)]]\n",
             "  (fiber/resume f)\n",
             "  (fiber/resume f 5))"
         )),
@@ -587,10 +587,10 @@ fn test_nested_fiber_resume() {
     // fiber/resume inside another fiber's execution
     assert_eq!(
         eval(concat!(
-            "(let* [[inner (fiber/new |:yield| (fn [] (yield 42) 99))]\n",
-            "       [outer (fiber/new |:yield| (fn []\n",
+            "(let* [[inner (fiber/new (fn [] (yield 42) 99) |:yield|)]\n",
+            "       [outer (fiber/new (fn []\n",
             "                (let* [[a (fiber/resume inner)]]\n",
-            "                  (+ a (fiber/resume inner)))))]]\n",
+            "                  (+ a (fiber/resume inner)))) |:yield|)]]\n",
             "  (fiber/resume outer))"
         )),
         "141"
@@ -603,10 +603,10 @@ fn test_yield_through_call_multiple_resumes() {
     assert_eq!(
         eval(concat!(
             "(defn helper [x] (+ x (yield x)))\n",
-            "(let* [[f (fiber/new |:yield| (fn []\n",
+            "(let* [[f (fiber/new (fn []\n",
             "         (let* [[a (helper 1)]\n",
             "                [b (helper 2)]]\n",
-            "           (+ a b))))]]\n",
+            "           (+ a b))) |:yield|)]]\n",
             "  (fiber/resume f)\n",    // yields 1
             "  (fiber/resume f 10)\n", // helper returns 1+10=11, then yields 2
             "  (fiber/resume f 20))"   // helper returns 2+20=22, result = 11+22=33

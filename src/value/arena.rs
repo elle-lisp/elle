@@ -18,7 +18,6 @@ use super::Value;
 /// Opaque mark for arena scope management.
 ///
 /// Stores the FiberHeap alloc position and destructor list length at mark time.
-#[derive(Clone)]
 pub struct ArenaMark {
     position: usize,
     dtor_len: usize,

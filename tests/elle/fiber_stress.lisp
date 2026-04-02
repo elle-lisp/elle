@@ -1,4 +1,3 @@
-(elle/epoch 7)
 ## Fiber control-passing stress tests
 ##
 ## Tests sustained resume loops and deep nesting to verify
@@ -54,12 +53,13 @@
 # ============================================================================
 
 (begin
-  (let ((f (fiber/new |:yield| (fn []
+  (let ((f (fiber/new (fn []
               (let ((i 0))
                 (while (< i 20)
                   (emit 2 i)
                   (assign i (+ i 1)))
-                :done)))))
+                :done))
+            2)))
     (let ((i 0))
       (while (< i 20)
         (assert (= (fiber/resume f) i)
@@ -91,20 +91,22 @@
 # ============================================================================
 
 (begin
-  (let ((inner (fiber/new |:yield| (fn []
+  (let ((inner (fiber/new (fn []
                   (let ((i 0))
                     (while (< i 15)
                       (emit 2 i)
                       (assign i (+ i 1)))
-                    :inner-done)))))
-    (let ((outer (fiber/new || (fn []
+                    :inner-done))
+                2)))
+    (let ((outer (fiber/new (fn []
                     (let ((i 0)
                           (results @[]))
                       (while (< i 15)
                         (push results (fiber/resume inner))
                         (assign i (+ i 1)))
                       (push results (fiber/resume inner))
-                      results)))))
+                      results))
+                  0)))
       (let ((result (fiber/resume outer)))
         (assert (= (length result) 16) "nested sustained: got 16 results")
         (assert (= (get result 0) 0) "nested sustained: first is 0")

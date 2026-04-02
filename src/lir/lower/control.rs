@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::hir::{CallArg, HirPattern};
-use crate::value::fiber::SignalBits;
 
 impl<'a> Lowerer<'a> {
     pub(super) fn lower_call(
@@ -10,7 +9,7 @@ impl<'a> Lowerer<'a> {
         func: &Hir,
         args: &[CallArg],
         is_tail: bool,
-        call_signals: SignalBits,
+        call_may_suspend: bool,
     ) -> Result<Reg, String> {
         let has_splice = args.iter().any(|a| a.spliced);
 
@@ -22,35 +21,13 @@ impl<'a> Lowerer<'a> {
                 return Ok(result);
             }
 
-            // Call-scoped reclamation: wrap the call in two RegionEnters
-            // (before args, after args) + RegionExitCall (after Call).
-            // RegionExitCall pops both marks and frees only the arg range
-            // [mark1..mark2), leaving the callee's allocations intact.
-            let call_scoped = !is_tail && self.can_scope_allocate_call(func, args, call_signals);
-            if call_scoped {
-                self.emit_region_enter(); // mark1: before arg evaluation
-            }
-
             let mut arg_regs = Vec::new();
             for arg in args {
                 arg_regs.push(self.lower_expr(&arg.expr)?);
             }
             let func_reg = self.lower_expr(func)?;
 
-            if call_scoped {
-                self.emit_region_enter(); // mark2: barrier before Call
-            }
-
             if is_tail {
-                // Emit pending RegionExits before TailCall — the scope's
-                // allocations must be freed before the frame is replaced.
-                // Args are already in registers, so they're not affected.
-                // Emit raw instructions (not emit_region_exit()) — region_depth
-                // must not change because both branches of an `if` emit the
-                // same exits but only one executes at runtime.
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,
@@ -58,9 +35,7 @@ impl<'a> Lowerer<'a> {
                 Ok(self.fresh_reg())
             } else {
                 let dst = self.fresh_reg();
-                if call_signals
-                    .intersects(crate::signals::SIG_YIELD.union(crate::signals::SIG_DEBUG))
-                {
+                if call_may_suspend {
                     self.emit(LirInstr::SuspendingCall {
                         dst,
                         func: func_reg,
@@ -72,11 +47,6 @@ impl<'a> Lowerer<'a> {
                         func: func_reg,
                         args: arg_regs,
                     });
-                }
-                if call_scoped {
-                    self.emit(LirInstr::RegionExitCall);
-                    self.region_depth -= 2; // both marks consumed
-                    self.scope_stats.calls_scoped += 1;
                 }
                 Ok(dst)
             }
@@ -151,9 +121,6 @@ impl<'a> Lowerer<'a> {
             });
 
             if is_tail {
-                for _ in 0..self.pending_region_exits {
-                    self.emit(LirInstr::RegionExit);
-                }
                 self.emit(LirInstr::TailCallArrayMut {
                     func: func_reg,
                     args: final_args,

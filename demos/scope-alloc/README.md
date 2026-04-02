@@ -123,7 +123,7 @@ The `run` helper executes the workload in a non-yielding child fiber:
 ```janet
 (defn run [thunk]
   "Execute thunk in a non-yielding child fiber."
-  (fiber/resume (fiber/new 1 thunk)))
+  (fiber/resume (fiber/new thunk 1)))
 ```
 
 ## Sample Output

@@ -7,7 +7,7 @@ User-facing fiber operations and patterns.
 
 | Primitive | Signature | Purpose |
 |-----------|-----------|---------|
-| `fiber/new` | `(mask fn) → fiber` | Create fiber from signal mask and closure |
+| `fiber/new` | `(fn mask) → fiber` | Create fiber from closure with signal mask |
 | `fiber/resume` | `(fiber value) → value` | Resume fiber, delivering a value# returns signal value |
 | `emit` | `(bits value) → (suspends)` | Emit signal from current fiber |
 | `fiber/status` | `(fiber) → keyword` | `:new`, `:alive`, `:suspended`, `:dead`, `:error` |
@@ -33,7 +33,7 @@ A coroutine is a usage pattern, not a type. It's a fiber whose closure
 yields:
 
 ```lisp
-(def gen (fiber/new |:yield| (fn () (yield 1) (yield 2) (yield 3))))
+(def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) |:yield|))
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 1
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 2
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 3
@@ -108,7 +108,7 @@ frame execution, no defer/protect unwinding. The fiber is dead.
 - Other-cancel returns `SIG_OK` with the error value
 
 ```text
-(def f (fiber/new |:error :yield| (fn [] (defer (print :cleanup) (yield) :done))))
+(def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) |:error :yield|))
 (fiber/resume f)          # f is now :paused
 (fiber/cancel f :reason)  # f is now :error, :cleanup never printed
 ```
@@ -126,7 +126,7 @@ child's actual outcome determines what the parent sees.
   the fiber may end up `:dead` instead of `:error`
 
 ```elle
-(def f (fiber/new |:error :yield| (fn [] (defer (print :cleanup) (yield) :done))))
+(def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) |:error :yield|))
 (fiber/resume f)          # f is now :paused
 (fiber/abort f :reason)   # :cleanup printed, f is now :error
 ```

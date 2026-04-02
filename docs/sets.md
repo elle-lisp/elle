@@ -51,7 +51,7 @@ Set literals are the preferred syntax for fiber signal masks:
 
 ```lisp
 # fiber that catches yield and io signals
-(fiber/new |:yield :io| (fn [] (yield 42)))
+(fiber/new (fn [] (yield 42)) |:yield :io|)
 ```
 
 ---

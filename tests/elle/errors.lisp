@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # tests/elle/errors.lisp
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.
@@ -25,7 +24,7 @@
   (assert (string? (get err :path)) "slurp error has :path field"))
 
 # ── state-error (fiber) ──────────────────────────────────────────────────────
-(let ((f (fiber/new || (fn [] 42))))
+(let ((f (fiber/new (fn [] 42) 0)))
   (fiber/resume f)
   (let (([ok? err] (protect ((fn [] (fiber/resume f)))))) (assert (not ok?) "resume completed fiber") (assert (= (get err :error) :state-error) "resume completed fiber")))
 
@@ -35,7 +34,7 @@
   (let (([ok? err] (protect ((fn [] (chan/clone tx)))))) (assert (not ok?) "clone closed sender") (assert (= (get err :error) :state-error) "clone closed sender")))
 
 # ── signal-error ─────────────────────────────────────────────────────────────
-(let (([ok? err] (protect ((fn [] (fiber/new :not-a-signal-keyword (fn [] 42))))))) (assert (not ok?) "fiber/new unknown signal keyword") (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
+(let (([ok? err] (protect ((fn [] (fiber/new (fn [] 42) :not-a-signal-keyword)))))) (assert (not ok?) "fiber/new unknown signal keyword") (assert (= (get err :error) :signal-error) "fiber/new unknown signal keyword"))
 
 # ── stack-overflow ────────────────────────────────────────────────────────────
 # stack-overflow is hard to reliably trigger without killing the test process;

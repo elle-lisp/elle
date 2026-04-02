@@ -134,12 +134,3 @@ pub fn region_exit() {
         unsafe { (*ptr).pop_scope_mark_and_release() };
     }
 }
-
-/// Pop two scope marks and release only the range between them
-/// (called by VM `RegionExitCall`).
-pub fn region_exit_call() {
-    let ptr = current_heap_ptr();
-    if !ptr.is_null() {
-        unsafe { (*ptr).pop_call_scope_marks_and_release() };
-    }
-}

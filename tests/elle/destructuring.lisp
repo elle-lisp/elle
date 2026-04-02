@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # Integration tests for destructuring patterns in def, var, let, let*, fn, defn
 #
 # Migrated from tests/integration/destructuring.rs
@@ -493,7 +492,7 @@
 # Helper: produce an error struct via fiber
 (defn make-error-struct []
   "Trigger division-by-zero and capture the error struct"
-  (let ([f (fiber/new |:error| (fn () (/ 1 0)))])
+  (let ([f (fiber/new (fn () (/ 1 0)) 1)])
     (fiber/resume f nil)
     (fiber/value f)))
 

@@ -82,8 +82,6 @@ pub struct LirFunction {
     /// True when the body contains `set!` to a captured binding with a
     /// potentially heap-allocated value. Used by fiber resume.
     pub has_outward_heap_set: bool,
-    /// True when the function body is safe for tail-call pool rotation.
-    pub rotation_safe: bool,
 }
 
 /// Metadata about a yield point, collected during bytecode emission.
@@ -153,7 +151,6 @@ impl LirFunction {
             call_sites: Vec::new(),
             result_is_immediate: false,
             has_outward_heap_set: false,
-            rotation_safe: false,
         }
     }
 }
@@ -368,11 +365,6 @@ pub enum LirInstr {
     /// Exit an allocation region (scope boundary for allocator).
     /// No registers produced or consumed.
     RegionExit,
-    /// Exit a call-scoped allocation region. Pops two scope marks:
-    /// the barrier (top) and the region start (below). Frees only
-    /// objects between the two marks (arg temporaries), leaving the
-    /// callee's allocations intact.
-    RegionExitCall,
 
     // === Dynamic Parameters ===
     /// Push a parameter frame. `pairs` contains (param_reg, value_reg) pairs.

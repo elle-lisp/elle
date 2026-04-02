@@ -1,4 +1,3 @@
-(elle/epoch 7)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -993,7 +992,7 @@
 
 (defn ev/spawn [closure]
     "Spawn a closure in a new fiber managed by the current scheduler."
-    (let [[fiber (fiber/new |:error :io :exec :wait| closure)]]
+    (let [[fiber (fiber/new closure |:error :io :exec :wait|)]]
       ((*spawn*) fiber)))
 
 ## ── Async scheduler ─────────────────────────────────────────────────

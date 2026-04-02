@@ -226,11 +226,6 @@ pub enum Instruction {
     /// Effective for all fibers including root (after issue-525).
     RegionExit,
 
-    /// Exit a call-scoped allocation region.
-    /// No operands. Pops two scope marks (barrier + region start),
-    /// frees only the range between them (arg temporaries).
-    RegionExitCall,
-
     /// Push a parameter frame onto the fiber's param_frames stack.
     /// Operand: u8 count (number of (param, value) pairs on the stack).
     /// Stack: [param1, val1, param2, val2, ...] → [] (all consumed).
@@ -495,7 +490,7 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
                 // No operands (arg count is dynamic, determined by array length)
             }
-            Instruction::RegionEnter | Instruction::RegionExit | Instruction::RegionExitCall => {
+            Instruction::RegionEnter | Instruction::RegionExit => {
                 // No operands
             }
             Instruction::PushParamFrame => {

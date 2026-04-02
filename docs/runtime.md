@@ -28,7 +28,7 @@ Fuel limits instruction execution on a fiber. When fuel runs out,
 the fiber pauses with a `:fuel` signal.
 
 ```lisp
-(def f (fiber/new |:fuel :yield| (fn [] (while true (yield :tick)))))
+(def f (fiber/new (fn [] (while true (yield :tick))) |:fuel :yield|))
 (fiber/set-fuel f 1000)    # instruction budget
 (fiber/resume f nil)       # runs until fuel exhausted
 (fiber/fuel f)             # => 0 (exhausted)

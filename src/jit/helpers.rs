@@ -250,20 +250,6 @@ impl<'a> FunctionTranslator<'a> {
         Ok((builder.inst_results(call)[0], builder.inst_results(call)[1]))
     }
 
-    /// Call elle_jit_rotate_pools to rotate slab pools at a self-tail-call boundary.
-    /// Signature: (vm) -> void
-    pub(crate) fn call_rotate_pools(
-        &mut self,
-        builder: &mut FunctionBuilder,
-        vm: cranelift_codegen::ir::Value,
-    ) -> Result<(), JitError> {
-        let func_ref = self
-            .module
-            .declare_func_in_func(self.helpers.rotate_pools, builder.func);
-        builder.ins().call(func_ref, &[vm]);
-        Ok(())
-    }
-
     /// Call the elle_jit_call helper.
     /// Signature: (func_tag, func_payload, args_ptr, nargs, vm) -> (tag, payload)
     pub(crate) fn call_helper_call(
