@@ -141,15 +141,19 @@ pub fn allocate(func: &LirFunction, pinned_regs: u32) -> RegAlloc {
         let mut active: HashMap<Reg, u32> = HashMap::new(); // reg → pool slot
 
         for (idx, si) in block.instructions.iter().enumerate() {
-            // Free registers whose last use is this instruction
-            // (before allocating defs, so slots can be reused immediately).
-            // Sort by slot to ensure deterministic free_pool ordering.
+            // Free registers whose last use was a previous instruction.
+            // We cannot free at the same instruction as the last use because
+            // the instruction reads its operands before writing its result —
+            // reusing the slot would clobber a live value.
             let mut to_free = Vec::new();
             for (reg, slot) in &active {
-                if last_use.get(reg).copied() == Some(idx) {
-                    to_free.push((*reg, *slot));
+                if let Some(last) = last_use.get(reg).copied() {
+                    if last < idx {
+                        to_free.push((*reg, *slot));
+                    }
                 }
             }
+            // Sort by slot to ensure deterministic free_pool ordering.
             to_free.sort_by_key(|(_, slot)| *slot);
             for (reg, slot) in to_free {
                 active.remove(&reg);
@@ -432,14 +436,11 @@ mod tests {
         let func = mk_func(vec![block], 3);
         let alloc = allocate(&func, 0);
 
-        // r2 is used in the terminator so it's still "within-block" (same block).
-        // r0 and r1 are dead after the BinOp, so their slots can be reused.
-        // But r2 is allocated after r0/r1 are freed.
-        assert!(alloc.max_slots <= 3); // at most 3, ideally 2
-                                       // r0 and r1 can share a slot with r2 since r2 is defined after they die.
-                                       // Actually r0 and r1 die at idx 2 (BinOp uses them), r2 is defined at idx 2.
-                                       // After freeing r0/r1, r2 can reuse one of their slots.
-        assert!(alloc.max_slots <= 2);
+        // r0 and r1 are last used at idx 2 (BinOp), r2 is defined at idx 2.
+        // We cannot free r0/r1 at the same instruction where they're used
+        // (the instruction reads operands before writing the result), so
+        // r2 gets its own slot. Total: 3 slots.
+        assert_eq!(alloc.max_slots, 3);
     }
 
     #[test]
