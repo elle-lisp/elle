@@ -19,6 +19,35 @@ use crate::value::{Arity, SymbolId, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Mutex;
+
+static GLOBAL_SCOPE_STATS: Mutex<ScopeStats> = Mutex::new(ScopeStats {
+    scopes_analyzed: 0,
+    scopes_qualified: 0,
+    rejected_captured: 0,
+    rejected_suspends: 0,
+    rejected_unsafe_result: 0,
+    rejected_outward_set: 0,
+    rejected_break: 0,
+    calls_scoped: 0,
+    rotation_analyzed: 0,
+    rotation_safe: 0,
+});
+
+/// Merge local scope stats into the global accumulator.
+pub fn accumulate_scope_stats(stats: &ScopeStats) {
+    if let Ok(mut global) = GLOBAL_SCOPE_STATS.lock() {
+        global.merge(stats);
+    }
+}
+
+/// Read the global scope stats.
+pub fn global_scope_stats() -> ScopeStats {
+    GLOBAL_SCOPE_STATS
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
 
 /// Compile-time scope allocation statistics.
 ///
@@ -42,8 +71,12 @@ pub struct ScopeStats {
     pub rejected_outward_set: usize,
     /// Scopes rejected because body contains break (condition 5)
     pub rejected_break: usize,
-    /// Non-tail calls wrapped in RegionEnter/RegionExit
+    /// Non-tail calls wrapped in RegionEnter/RegionExitCall
     pub calls_scoped: usize,
+    /// Functions analyzed for rotation safety
+    pub rotation_analyzed: usize,
+    /// Functions that qualified as rotation-safe
+    pub rotation_safe: usize,
 }
 
 impl ScopeStats {
@@ -62,6 +95,8 @@ impl ScopeStats {
         self.rejected_outward_set += other.rejected_outward_set;
         self.rejected_break += other.rejected_break;
         self.calls_scoped += other.calls_scoped;
+        self.rotation_analyzed += other.rotation_analyzed;
+        self.rotation_safe += other.rotation_safe;
     }
 }
 
@@ -95,6 +130,13 @@ impl fmt::Display for ScopeStats {
         }
         if self.calls_scoped > 0 {
             writeln!(f, "  call-scoped:   {}", self.calls_scoped)?;
+        }
+        if self.rotation_analyzed > 0 {
+            writeln!(
+                f,
+                "  rotation:      {}/{} safe",
+                self.rotation_safe, self.rotation_analyzed
+            )?;
         }
         Ok(())
     }
@@ -969,6 +1011,10 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
+
+        // Record stats
+        self.scope_stats.rotation_analyzed = defs.len();
+        self.scope_stats.rotation_safe = self.callee_rotation_safe.values().filter(|&&v| v).count();
     }
 
     /// Collect all `(binding, lambda_body)` pairs from Define nodes.

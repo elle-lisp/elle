@@ -51,7 +51,9 @@ pub fn compile_to_lir(
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names);
-    lowerer.lower(&analysis.hir)
+    let result = lowerer.lower(&analysis.hir);
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
+    result
 }
 
 /// Compile source code to bytecode.
@@ -102,6 +104,7 @@ pub fn compile(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
 
     // Phase 5: Emit bytecode with symbol names for cross-thread portability
     let mut emitter = Emitter::new_with_symbols(symbol_names);
@@ -228,7 +231,9 @@ pub fn compile_file_to_lir(
         .with_immediate_primitives(imm_prims)
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names);
-    lowerer.lower(&hir)
+    let result = lowerer.lower(&hir);
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
+    result
 }
 
 /// Compile a file as a single synthetic letrec.
@@ -343,6 +348,7 @@ fn compile_file_inner(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&hir)?;
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
 
     // Emit bytecode
     let signal = lir_func.signal;

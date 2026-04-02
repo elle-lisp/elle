@@ -52,6 +52,7 @@ pub fn eval_syntax(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
 
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);
@@ -97,6 +98,7 @@ pub fn eval(
         .with_primitive_values(prim_values)
         .with_symbol_names(symbol_names.clone());
     let lir_func = lowerer.lower(&analysis.hir)?;
+    crate::lir::lower::accumulate_scope_stats(lowerer.scope_stats());
 
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (bytecode, _yield_points, _call_sites) = emitter.emit(&lir_func);

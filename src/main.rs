@@ -283,6 +283,10 @@ fn main() {
     clear_vm_context();
 
     if elle::config::get().stats {
+        let scope_stats = elle::lir::lower::global_scope_stats();
+        if scope_stats.scopes_analyzed > 0 {
+            eprint!("{}", scope_stats);
+        }
         print_jit_stats(&vm);
     }
 

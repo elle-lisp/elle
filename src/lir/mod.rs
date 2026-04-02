@@ -11,7 +11,7 @@
 mod display;
 mod emit;
 pub mod intrinsics;
-mod lower;
+pub mod lower;
 mod types;
 
 pub use display::terminator_kind;
