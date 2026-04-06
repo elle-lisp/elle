@@ -634,7 +634,7 @@ impl<'a> FunctionTranslator<'a> {
                     .clone();
 
                 let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
-                let module_closures_rc = std::rc::Rc::new(self.module_closures.clone());
+
                 let lir_module = crate::lir::LirModule {
                     entry: func.clone(),
                     closures: self.module_closures.clone(),
@@ -670,7 +670,6 @@ impl<'a> FunctionTranslator<'a> {
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
                     rotation_safe: func.rotation_safe,
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
-                    module_closures: Some(module_closures_rc),
                     doc: func.doc,
                     syntax: func.syntax.clone(),
                     vararg_kind: func.vararg_kind.clone(),

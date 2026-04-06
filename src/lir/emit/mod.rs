@@ -48,7 +48,7 @@ pub struct Emitter {
     compiled_closures: Option<Vec<ClosureCompiled>>,
     /// LirFunction metadata for each closure. Parallel to `compiled_closures`.
     /// Needed by MakeClosure to build ClosureTemplates.
-    closure_lir_funcs: Option<Vec<LirFunction>>,
+    closure_lir_funcs: Option<Rc<[LirFunction]>>,
 }
 
 impl Emitter {
@@ -101,7 +101,7 @@ impl Emitter {
         // This way a parent's MakeClosure can look up its child's
         // pre-compiled bytecode.
         let n = module.closures.len();
-        self.closure_lir_funcs = Some(module.closures.clone());
+        self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
         // Pre-allocate with placeholders. Entries are filled in reverse
         // order; the MakeClosure handler only accesses children (higher
         // indices), which are filled before their parents.
@@ -129,7 +129,7 @@ impl Emitter {
     /// for dual-compile (bytecode for spawn).
     pub fn emit_module_closures(&mut self, module: &LirModule) -> Vec<ClosureCompiled> {
         let n = module.closures.len();
-        self.closure_lir_funcs = Some(module.closures.clone());
+        self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
         let mut compiled: Vec<ClosureCompiled> = (0..n)
             .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
             .collect();
@@ -148,7 +148,7 @@ impl Emitter {
     /// pre-compiling all closures. Used by the JIT to compile a
     /// single closure that may contain MakeClosure instructions.
     pub fn set_module_context(&mut self, closures: &[LirFunction]) {
-        self.closure_lir_funcs = Some(closures.to_vec());
+        self.closure_lir_funcs = Some(Rc::from(closures));
         // Pre-compile all closures so MakeClosure can look them up.
         // Uses reverse order (children before parents).
         let n = closures.len();
@@ -408,7 +408,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
-                    module_closures: self.closure_lir_funcs.as_ref().map(|v| Rc::new(v.clone())),
+
                     rotation_safe: func.rotation_safe,
                 };
                 let closure = Closure {
