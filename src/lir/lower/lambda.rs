@@ -90,8 +90,14 @@ impl<'a> Lowerer<'a> {
             }
         }
 
-        // Lower the lambda body to a separate LirFunction
-        let nested_lir = self.lower_lambda_body(
+        // Reserve a slot in the module's closure list BEFORE lowering
+        // the body. This gives pre-order numbering: parent IDs are lower
+        // than children's. Matches collect_nested_functions traversal order.
+        let closure_id = ClosureId(self.closures.len() as u32);
+        self.closures.push(LirFunction::new(Arity::Exact(0))); // placeholder
+
+        // Lower the lambda body — children get higher IDs
+        let mut nested_lir = self.lower_lambda_body(
             params,
             num_required,
             rest_param,
@@ -104,12 +110,16 @@ impl<'a> Lowerer<'a> {
             doc,
             syntax,
         )?;
+        nested_lir.closure_id = Some(closure_id);
 
-        // Create closure with the nested function
+        // Fill the reserved slot
+        self.closures[closure_id.0 as usize] = nested_lir;
+
+        // Create closure referencing it by ID
         let dst = self.fresh_reg();
         self.emit(LirInstr::MakeClosure {
             dst,
-            func: Box::new(nested_lir),
+            closure_id,
             captures: capture_regs,
         });
         Ok(dst)

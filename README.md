@@ -180,9 +180,9 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
    (def buf @"hello")        # @string
    (def ms @|1 2 3|)         # @set
 
-   # Bytes and @bytes (no literal syntax)
-   (def b (bytes 1 2 3))     # bytes
-   (def bl (@bytes 1 2 3))   # @bytes
+   # Bytes and @bytes
+   (def b b[1 2 3])           # bytes
+   (def bl @b[1 2 3])         # @bytes
    ```
 
 - **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
@@ -275,9 +275,9 @@ Every collection type has an immutable variant and a mutable variant. Bare liter
 
 | Immutable | Mutable | Literal | `@`-literal |
 |-----------|---------|---------|-------------|
+| string | @string | `"hello"` | `@"hello"` |
 | array | @array | `[1 2 3]` | `@[1 2 3]` |
 | struct | @struct | `{:a 1}` | `@{:a 1}` |
-| string | @string | `"hello"` | `@"hello"` |
 | bytes | @bytes | `b[1 2 3]` | `@b[1 2 3]` |
 | set | @set | `\|1 2 3\|` | `@\|1 2 3\|` |
 
@@ -324,23 +324,23 @@ The `@` prefix means "mutable version of this literal." The types within each pa
 (difference |1 2| |2 3|)    # => |1|
 ```
 
-**bytes** — immutable binary data. No literal syntax. Displays as `#bytes[hex ...]`.
+**bytes** — immutable binary data. Literal syntax `b[1 2 3]`.
 
 ```lisp
-(def b (bytes 1 2 3))
+(def b b[1 2 3])
 (def b2 (string->bytes "hello"))
 (get b 0)               # => 1
-(length b)              # => 5
+(length b)              # => 3
 (bytes->hex b2)         # => "68656c6c6f"
 ```
 
-**@bytes** — mutable binary data. No literal syntax. Displays as `#@bytes[hex ...]`.
+**@bytes** — mutable binary data. Literal syntax `@b[1 2 3]`.
 
 ```lisp
-(def b (@bytes 1 2 3))
+(def b @b[1 2 3])
 (def b2 (string->@bytes "hello"))
 (get b 0)               # => 1
-(length b)              # => 5
+(length b)              # => 3
 (bytes->hex b2)         # => "68656c6c6f"
 ```
 
@@ -448,6 +448,7 @@ Exactly two values are falsy. Everything else is truthy.
 | keyword | `:foo` |
 | empty list | `()` |
 | string | `hello` (no quotes) |
+| @string | `@"hello"` |
 | cons | `(1 2 3)` or `(a . b)` for improper |
 | array | `[1 2 3]` |
 | @array | `@[1 2 3]` |
@@ -455,13 +456,12 @@ Exactly two values are falsy. Everything else is truthy.
 | @struct | `@{:a 1}` |
 | set | `\|1 2 3\|` |
 | @set | `@\|1 2 3\|` |
-| bytes | `#bytes[01 02 03]` |
-| @bytes | `#@bytes[01 02 03]` |
+| bytes | `b[1 2 3]` |
+| @bytes | `@b[1 2 3]` |
 | closure | `<closure>` |
 | native fn | `<native-fn>` |
 | fiber | `<fiber:status>` |
 | box | `<box value>` |
-| @string | `@"hello"` |
 | pointer | `<pointer 0x...>` |
 
 ## Control Flow

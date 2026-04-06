@@ -47,6 +47,7 @@ pub struct ClosureTemplate {
     pub rotation_safe: bool,
     /// LIR function for deferred JIT compilation.
     pub lir_function: Option<Rc<crate::lir::LirFunction>>,
+    /// Module's closure list for JIT MakeClosure resolution.
     /// Optional docstring from the source lambda
     pub doc: Option<Value>,
     /// Original syntax node for eval environment reconstruction

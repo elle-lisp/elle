@@ -95,6 +95,7 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) pop_param_frame: FuncId,
     pub(crate) call_array: FuncId,
     pub(crate) tail_call_array: FuncId,
+    #[allow(dead_code)] // infrastructure for future JIT MakeClosure support
     pub(crate) make_closure: FuncId,
     pub(crate) jit_yield: FuncId,
     pub(crate) jit_yield_through_call: FuncId,

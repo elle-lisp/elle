@@ -59,6 +59,7 @@ impl VM {
                         lir_func,
                         self_sym,
                         (*closure.template.symbol_names).clone(),
+                        Vec::new(),
                     ) {
                         Ok(jit_code) => {
                             if crate::config::get().debug_jit {

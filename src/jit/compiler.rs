@@ -103,6 +103,7 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
         symbol_names: HashMap<u32, String>,
+        module_closures: Vec<LirFunction>,
     ) -> Result<JitCode, JitError> {
         // Only reject polymorphic signals (signal depends on arguments).
         // Yielding functions are now supported via side-exit.
@@ -120,6 +121,19 @@ impl JitCompiler {
             return Err(JitError::UnsupportedInstruction(
                 "variadic function with struct/named varargs".to_string(),
             ));
+        }
+
+        // Functions containing MakeClosure fall back to the interpreter.
+        // The JIT has the infrastructure to handle MakeClosure (module_closures
+        // lookup + bytecode emission), but the per-compilation cost of emitting
+        // all module closures' bytecodes is too high for --jit=1 threshold.
+        // TODO: cache compiled module closures across JIT compilations.
+        for block in &lir.blocks {
+            for si in &block.instructions {
+                if matches!(si.instr, crate::lir::LirInstr::MakeClosure { .. }) {
+                    return Err(JitError::UnsupportedInstruction("MakeClosure".to_string()));
+                }
+            }
         }
 
         // Create function signature
@@ -151,6 +165,7 @@ impl JitCompiler {
             scc_peers.as_ref(),
             self_sym,
             symbol_names,
+            module_closures,
         )?;
 
         // Compile the function
@@ -232,6 +247,7 @@ impl JitCompiler {
             scc_peers.as_ref(),
             self_sym,
             HashMap::new(),
+            Vec::new(),
         )?;
         // closure_constants from clif_text are discarded — diagnostic only
 
@@ -306,6 +322,7 @@ impl JitCompiler {
                 Some(&scc_peers),
                 Some(member.sym),
                 symbol_names.clone(),
+                Vec::new(),
             )?;
             all_closure_constants.push((member.sym, closure_constants));
 
@@ -355,6 +372,7 @@ impl JitCompiler {
         scc_peers: Option<&HashMap<SymbolId, FuncId>>,
         self_sym: Option<SymbolId>,
         symbol_names: HashMap<u32, String>,
+        module_closures: Vec<LirFunction>,
     ) -> Result<Vec<crate::value::Value>, JitError> {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(func, &mut builder_ctx);
@@ -362,6 +380,7 @@ impl JitCompiler {
         // Create translator context
         let mut translator = FunctionTranslator::new(&mut self.module, &self.helpers, lir);
         translator.symbol_names = symbol_names;
+        translator.module_closures = module_closures;
 
         translator.self_sym = self_sym;
 
@@ -834,7 +853,7 @@ mod tests {
         let lir = make_simple_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let code = compiler
-            .compile(&lir, None, HashMap::new())
+            .compile(&lir, None, HashMap::new(), Vec::new())
             .expect("Failed to compile");
 
         // Call the compiled function with self_tag=0, self_payload=0 (no self-tail-call)
@@ -858,7 +877,7 @@ mod tests {
         let lir = make_add_lir();
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let code = compiler
-            .compile(&lir, None, HashMap::new())
+            .compile(&lir, None, HashMap::new(), Vec::new())
             .expect("Failed to compile");
 
         // Call the compiled function with self_tag=0, self_payload=0
@@ -883,7 +902,7 @@ mod tests {
         lir.signal = Signal::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new());
+        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
         assert!(matches!(result, Err(JitError::Polymorphic)));
     }
 
@@ -894,7 +913,7 @@ mod tests {
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         // Should compile (no Yield terminators in this simple LIR)
-        let result = compiler.compile(&lir, None, HashMap::new());
+        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
         assert!(result.is_ok());
     }
 
@@ -1136,7 +1155,7 @@ mod tests {
         }];
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&func, None, HashMap::new());
+        let result = compiler.compile(&func, None, HashMap::new(), Vec::new());
         assert!(
             result.is_ok(),
             "Yielding function should compile: {:?}",
@@ -1152,7 +1171,7 @@ mod tests {
         lir.vararg_kind = crate::hir::VarargKind::Struct;
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new());
+        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
             "Struct variadic functions should be rejected: {:?}",
@@ -1167,7 +1186,7 @@ mod tests {
         lir.vararg_kind = crate::hir::VarargKind::StrictStruct(vec!["key".to_string()]);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new());
+        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
         assert!(
             matches!(result, Err(JitError::UnsupportedInstruction(_))),
             "StrictStruct variadic functions should be rejected: {:?}",
@@ -1185,7 +1204,7 @@ mod tests {
         lir.num_params = 2; // x + rest
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
-        let result = compiler.compile(&lir, None, HashMap::new());
+        let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
         assert!(
             result.is_ok(),
             "List variadic functions should compile: {:?}",

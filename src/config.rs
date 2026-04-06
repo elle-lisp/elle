@@ -7,6 +7,23 @@ use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
+/// Default cache directory.
+///
+/// Resolution order:
+/// 1. `ELLE_CACHE` env var (empty string = no caching)
+/// 2. `$TMPDIR/elle-cache`
+/// 3. `$TMP/elle-cache`
+/// 4. No caching
+fn default_cache_dir() -> Option<String> {
+    if let Ok(v) = std::env::var("ELLE_CACHE") {
+        return if v.is_empty() { None } else { Some(v) };
+    }
+    let base = std::env::var("TMPDIR")
+        .or_else(|_| std::env::var("TMP"))
+        .ok()?;
+    Some(format!("{}/elle-cache", base))
+}
+
 /// Read the global config. Returns default if `init` hasn't been called.
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(Config::default)
@@ -57,6 +74,8 @@ pub struct Config {
     pub wasm_no_stdlib: bool,
 
     /// Disk cache directory (WASM compilation, future uses).
+    /// `None` = caching disabled (explicit `--cache=""`).
+    /// `Some(path)` = cache at that path.
     pub cache: Option<String>,
 
     // -- I/O --
@@ -95,6 +114,9 @@ pub struct Config {
 
     /// Print LIR before WASM emission.
     pub wasm_lir: bool,
+
+    /// Chunk user expressions into sub-thunks (experimental).
+    pub wasm_chunk: bool,
 }
 
 impl Default for Config {
@@ -105,7 +127,7 @@ impl Default for Config {
             wasm: 0,
             wasm_full: false,
             wasm_no_stdlib: false,
-            cache: std::env::var("ELLE_CACHE").ok(),
+            cache: default_cache_dir(),
             no_uring: false,
             home: std::env::var("ELLE_HOME").ok(),
             path: std::env::var("ELLE_PATH").ok(),
@@ -117,6 +139,7 @@ impl Default for Config {
             debug_wasm: false,
             wasm_dump: false,
             wasm_lir: false,
+            wasm_chunk: false,
         }
     }
 }
@@ -182,7 +205,11 @@ impl Config {
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--cache=") {
-                config.cache = Some(rest.to_string());
+                config.cache = if rest.is_empty() {
+                    None
+                } else {
+                    Some(rest.to_string())
+                };
                 i += 1;
                 continue;
             }
@@ -210,6 +237,7 @@ impl Config {
                 "--debug-wasm" => config.debug_wasm = true,
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
+                "--wasm-chunk" => config.wasm_chunk = true,
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {

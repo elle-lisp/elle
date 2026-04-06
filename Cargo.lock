@@ -1717,6 +1717,7 @@ dependencies = [
  "smallvec",
  "stats_alloc",
  "target-lexicon",
+ "tempfile",
  "unicode-segmentation",
  "wasm-encoder 0.245.1",
  "wasmtime",

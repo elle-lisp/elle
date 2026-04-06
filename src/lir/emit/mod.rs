@@ -12,6 +12,9 @@ use crate::value::{Closure, Value};
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// Per-closure compilation result: bytecode, yield points, call sites.
+type ClosureCompiled = (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>);
+
 /// Emits bytecode from LIR
 pub struct Emitter {
     /// Output bytecode
@@ -40,6 +43,12 @@ pub struct Emitter {
     /// Recorded in yield points and call sites so the JIT can spill
     /// local values into the SuspendedFrame stack.
     current_func_num_locals: u16,
+    /// Pre-compiled closure bytecodes for `emit_module`. Indexed by `ClosureId`.
+    /// `None` when emitting a standalone function (tests, nested emit).
+    compiled_closures: Option<Vec<ClosureCompiled>>,
+    /// LirFunction metadata for each closure. Parallel to `compiled_closures`.
+    /// Needed by MakeClosure to build ClosureTemplates.
+    closure_lir_funcs: Option<Rc<[LirFunction]>>,
 }
 
 impl Emitter {
@@ -56,6 +65,8 @@ impl Emitter {
             call_sites: Vec::new(),
             current_func_may_suspend: false,
             current_func_num_locals: 0,
+            compiled_closures: None,
+            closure_lir_funcs: None,
         }
     }
 
@@ -73,14 +84,88 @@ impl Emitter {
             call_sites: Vec::new(),
             current_func_may_suspend: false,
             current_func_num_locals: 0,
+            compiled_closures: None,
+            closure_lir_funcs: None,
         }
     }
 
-    /// Emit bytecode from a LIR function
-    pub fn emit(
-        &mut self,
-        func: &LirFunction,
-    ) -> (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>) {
+    /// Emit bytecode from an LIR module.
+    ///
+    /// Each closure is compiled independently via `emit`. The entry
+    /// function's `MakeClosure` instructions reference pre-compiled
+    /// closures by `ClosureId`.
+    pub fn emit_module(&mut self, module: &LirModule) -> ClosureCompiled {
+        // Compile closures in REVERSE order (post-order). Parents have
+        // lower IDs than children (pre-order assignment), so compiling
+        // in reverse ensures children are compiled before their parents.
+        // This way a parent's MakeClosure can look up its child's
+        // pre-compiled bytecode.
+        let n = module.closures.len();
+        self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
+        // Pre-allocate with placeholders. Entries are filled in reverse
+        // order; the MakeClosure handler only accesses children (higher
+        // indices), which are filled before their parents.
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
+        for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
+            let result = self.emit(&module.closures[i]);
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
+        }
+        // All closures compiled.
+        self.compiled_closures = Some(compiled);
+        let result = self.emit(&module.entry);
+        self.compiled_closures = None;
+        self.closure_lir_funcs = None;
+        result
+    }
+
+    /// Compile all closures in a module, returning per-closure bytecodes.
+    ///
+    /// Like `emit_module` but returns the individual closure results
+    /// instead of the entry function result. Used by the WASM backend
+    /// for dual-compile (bytecode for spawn).
+    pub fn emit_module_closures(&mut self, module: &LirModule) -> Vec<ClosureCompiled> {
+        let n = module.closures.len();
+        self.closure_lir_funcs = Some(Rc::from(module.closures.as_slice()));
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
+        for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
+            let result = self.emit(&module.closures[i]);
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
+        }
+        self.compiled_closures = None;
+        self.closure_lir_funcs = None;
+        compiled
+    }
+
+    /// Set module context for MakeClosure resolution without
+    /// pre-compiling all closures. Used by the JIT to compile a
+    /// single closure that may contain MakeClosure instructions.
+    pub fn set_module_context(&mut self, closures: &[LirFunction]) {
+        self.closure_lir_funcs = Some(Rc::from(closures));
+        // Pre-compile all closures so MakeClosure can look them up.
+        // Uses reverse order (children before parents).
+        let n = closures.len();
+        let mut compiled: Vec<ClosureCompiled> = (0..n)
+            .map(|_| (Bytecode::new(), Vec::new(), Vec::new()))
+            .collect();
+        for i in (0..n).rev() {
+            self.compiled_closures = Some(compiled);
+            let result = self.emit(&closures[i]);
+            compiled = self.compiled_closures.take().unwrap();
+            compiled[i] = result;
+        }
+        self.compiled_closures = Some(compiled);
+    }
+
+    /// Emit bytecode from a single LIR function.
+    pub fn emit(&mut self, func: &LirFunction) -> ClosureCompiled {
         let mut bytecode = Bytecode::new();
         // Copy symbol names to the new bytecode for cross-thread portability
         bytecode.symbol_names = self.symbol_names.clone();
@@ -137,40 +222,6 @@ impl Emitter {
     }
 
     /// Emit bytecode from a nested LIR function (for closures)
-    fn emit_nested_function(
-        &mut self,
-        func: &LirFunction,
-    ) -> (Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>) {
-        // Save current state
-        let saved_bytecode = std::mem::take(&mut self.bytecode);
-        let saved_label_offsets = std::mem::take(&mut self.label_offsets);
-        let saved_pending_jumps = std::mem::take(&mut self.pending_jumps);
-        let saved_stack = std::mem::take(&mut self.stack);
-        let saved_reg_to_stack = std::mem::take(&mut self.reg_to_stack);
-        let saved_yield_stack_state = std::mem::take(&mut self.yield_stack_state);
-        let saved_yield_points = std::mem::take(&mut self.yield_points);
-        let saved_call_sites = std::mem::take(&mut self.call_sites);
-        let saved_may_suspend = self.current_func_may_suspend;
-        let saved_num_locals = self.current_func_num_locals;
-
-        // Emit the nested function
-        let result = self.emit(func);
-
-        // Restore state
-        self.bytecode = saved_bytecode;
-        self.label_offsets = saved_label_offsets;
-        self.pending_jumps = saved_pending_jumps;
-        self.stack = saved_stack;
-        self.reg_to_stack = saved_reg_to_stack;
-        self.yield_stack_state = saved_yield_stack_state;
-        self.yield_points = saved_yield_points;
-        self.call_sites = saved_call_sites;
-        self.current_func_may_suspend = saved_may_suspend;
-        self.current_func_num_locals = saved_num_locals;
-
-        result
-    }
-
     fn emit_block(&mut self, block: &BasicBlock, func: &LirFunction) {
         // Check if this block has saved stack state from a yield
         if let Some((saved_stack, saved_reg_map)) = self.yield_stack_state.remove(&block.label) {
@@ -287,7 +338,7 @@ impl Emitter {
 
             LirInstr::MakeClosure {
                 dst,
-                func,
+                closure_id,
                 captures,
             } => {
                 // Check if captures are already in order on top of stack
@@ -310,10 +361,29 @@ impl Emitter {
                     }
                 }
 
-                // Recursively emit the nested function
-                let (nested_bytecode, nested_yield_points, nested_call_sites) =
-                    self.emit_nested_function(func);
-                let mut nested_lir = func.as_ref().clone();
+                // Look up the pre-compiled closure by ClosureId.
+                // In emit_module mode, closures are pre-compiled.
+                // In standalone emit mode (tests), this panics — callers
+                // must use emit_module for code with MakeClosure.
+                let compiled = self
+                    .compiled_closures
+                    .as_ref()
+                    .expect("MakeClosure without compiled_closures context")
+                    .get(closure_id.0 as usize)
+                    .expect("MakeClosure: invalid ClosureId");
+                let (nested_bytecode, nested_yield_points, nested_call_sites) = compiled.clone();
+
+                // Look up the LirFunction from the module for metadata.
+                // We need the LirFunction for the ClosureTemplate (arity,
+                // signal, lbox masks, etc). The compiled_closures Vec is
+                // parallel to the module's closures Vec.
+                let func = &self
+                    .closure_lir_funcs
+                    .as_ref()
+                    .expect("MakeClosure without closure_lir_funcs context")
+                    [closure_id.0 as usize];
+
+                let mut nested_lir = func.clone();
                 nested_lir.yield_points = nested_yield_points;
                 nested_lir.call_sites = nested_call_sites;
 
@@ -338,6 +408,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+
                     rotation_safe: func.rotation_safe,
                 };
                 let closure = Closure {

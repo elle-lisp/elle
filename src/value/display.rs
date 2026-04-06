@@ -112,7 +112,7 @@ impl fmt::Display for Value {
             return write!(f, "]");
         }
 
-        // Table
+        // @struct (mutable)
         if let Some(table_ref) = self.as_struct_mut() {
             let _guard = match fmt_enter(self.payload as usize) {
                 Some(g) => g,
@@ -126,12 +126,12 @@ impl fmt::Display for Value {
                     write!(f, " ")?;
                 }
                 first = false;
-                write!(f, "{} {}", k, v)?;
+                write!(f, "{} {:?}", k, v)?;
             }
             return write!(f, "}}");
         }
 
-        // Struct
+        // struct (immutable)
         if let Some(struct_map) = self.as_struct() {
             write!(f, "{{")?;
             let mut first = true;
@@ -207,12 +207,12 @@ impl fmt::Display for Value {
 
         // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "#bytes[")?;
+            write!(f, "b[")?;
             for (i, byte) in b.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
                 }
-                write!(f, "{:02x}", byte)?;
+                write!(f, "{}", byte)?;
             }
             return write!(f, "]");
         }
@@ -220,12 +220,12 @@ impl fmt::Display for Value {
         // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "#@bytes[")?;
+            write!(f, "@b[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
                 }
-                write!(f, "{:02x}", byte)?;
+                write!(f, "{}", byte)?;
             }
             return write!(f, "]");
         }
@@ -401,24 +401,24 @@ impl fmt::Debug for Value {
         }
         // Bytes (immutable binary data)
         if let Some(b) = self.as_bytes() {
-            write!(f, "#bytes[")?;
+            write!(f, "b[")?;
             for (i, byte) in b.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
                 }
-                write!(f, "{:02x}", byte)?;
+                write!(f, "{}", byte)?;
             }
             return write!(f, "]");
         }
         // @bytes (mutable binary data)
         if let Some(blob_ref) = self.as_bytes_mut() {
             let borrowed = blob_ref.borrow();
-            write!(f, "#@bytes[")?;
+            write!(f, "@b[")?;
             for (i, byte) in borrowed.iter().enumerate() {
                 if i > 0 {
                     write!(f, " ")?;
                 }
-                write!(f, "{:02x}", byte)?;
+                write!(f, "{}", byte)?;
             }
             return write!(f, "]");
         }

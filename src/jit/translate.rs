@@ -68,6 +68,8 @@ pub(crate) struct FunctionTranslator<'a> {
     pub(crate) closure_constants: Vec<crate::value::Value>,
     /// Symbol name map for nested emitters (MakeClosure).
     pub(crate) symbol_names: HashMap<u32, String>,
+    /// Module's closure list for MakeClosure → ClosureId lookup.
+    pub(crate) module_closures: Vec<crate::lir::LirFunction>,
 }
 
 impl<'a> FunctionTranslator<'a> {
@@ -94,6 +96,7 @@ impl<'a> FunctionTranslator<'a> {
             shared_spill_slot: None,
             closure_constants: Vec::new(),
             symbol_names: HashMap::new(),
+            module_closures: Vec::new(),
         }
     }
 
@@ -615,12 +618,41 @@ impl<'a> FunctionTranslator<'a> {
 
             LirInstr::MakeClosure {
                 dst,
-                func,
+                closure_id,
                 captures,
             } => {
+                // Look up the nested LirFunction by ClosureId from module context.
+                let func = self
+                    .module_closures
+                    .get(closure_id.0 as usize)
+                    .ok_or_else(|| {
+                        JitError::InvalidLir(format!(
+                            "MakeClosure: invalid ClosureId({})",
+                            closure_id.0
+                        ))
+                    })?
+                    .clone();
+
                 let mut emitter = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
-                let (nested_bytecode, nested_yield_points, nested_call_sites) = emitter.emit(func);
-                let mut nested_lir = func.as_ref().clone();
+
+                let lir_module = crate::lir::LirModule {
+                    entry: func.clone(),
+                    closures: self.module_closures.clone(),
+                };
+                let (nested_bytecode, nested_yield_points, nested_call_sites) =
+                    emitter.emit_module(&lir_module);
+                // emit_module returns the entry result; we want the closure's bytecode.
+                // Actually, we need to emit just this closure with module context.
+                // Use emit_module_closures to get per-closure bytecodes, then index.
+                drop(nested_bytecode);
+                drop(nested_yield_points);
+                drop(nested_call_sites);
+                let mut emitter2 = crate::lir::Emitter::new_with_symbols(self.symbol_names.clone());
+                let all_compiled = emitter2.emit_module_closures(&lir_module);
+                let (nested_bytecode, nested_yield_points, nested_call_sites) =
+                    all_compiled.into_iter().nth(closure_id.0 as usize).unwrap();
+
+                let mut nested_lir = func.clone();
                 nested_lir.yield_points = nested_yield_points;
                 nested_lir.call_sites = nested_call_sites;
 
@@ -636,6 +668,7 @@ impl<'a> FunctionTranslator<'a> {
                     lbox_locals_mask: func.lbox_locals_mask,
                     symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
+                    rotation_safe: func.rotation_safe,
                     lir_function: Some(std::rc::Rc::new(nested_lir)),
                     doc: func.doc,
                     syntax: func.syntax.clone(),
@@ -644,13 +677,13 @@ impl<'a> FunctionTranslator<'a> {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
-                    rotation_safe: func.rotation_safe,
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
                     env: std::rc::Rc::new(vec![]),
                     squelch_mask: SignalBits::EMPTY,
                 };
+
                 let template_value = crate::value::Value::closure(template_closure);
 
                 self.closure_constants.push(template_value);
@@ -658,7 +691,6 @@ impl<'a> FunctionTranslator<'a> {
                 let template_tag = builder.ins().iconst(I64, template_value.tag as i64);
                 let template_payload = builder.ins().iconst(I64, template_value.payload as i64);
 
-                // Spill captures to a stack slot (16 bytes each)
                 let (captures_ptr, count_val) = if captures.is_empty() {
                     (builder.ins().iconst(I64, 0), builder.ins().iconst(I64, 0))
                 } else {

@@ -304,9 +304,9 @@ fn test_dump_closure_let_lir() {
     .unwrap();
     eprintln!(
         "Entry: num_regs={} num_locals={} num_captures={} num_params={}",
-        lir.num_regs, lir.num_locals, lir.num_captures, lir.num_params
+        lir.entry.num_regs, lir.entry.num_locals, lir.entry.num_captures, lir.entry.num_params
     );
-    for block in &lir.blocks {
+    for block in &lir.entry.blocks {
         eprintln!("Block {:?}:", block.label);
         for si in &block.instructions {
             eprintln!("  {:?}", si.instr);
@@ -314,12 +314,13 @@ fn test_dump_closure_let_lir() {
         eprintln!("  term: {:?}", block.terminator);
     }
     // Find nested closures
-    for block in &lir.blocks {
+    for block in &lir.entry.blocks {
         for si in &block.instructions {
-            if let elle::lir::LirInstr::MakeClosure { func, .. } = &si.instr {
+            if let elle::lir::LirInstr::MakeClosure { closure_id, .. } = &si.instr {
+                let func = &lir.closures[closure_id.0 as usize];
                 eprintln!(
-                    "\nClosure: num_regs={} num_locals={} num_captures={} num_params={}",
-                    func.num_regs, func.num_locals, func.num_captures, func.num_params
+                    "\nClosure {:?}: num_regs={} num_locals={} num_captures={} num_params={}",
+                    closure_id, func.num_regs, func.num_locals, func.num_captures, func.num_params
                 );
                 for b in &func.blocks {
                     eprintln!("  Block {:?}:", b.label);

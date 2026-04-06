@@ -34,7 +34,7 @@ fn load_arg(dst: Reg, arg_index: u16) -> SpannedInstr {
 
 fn compile_and_call(lir: &LirFunction, args: &[Value]) -> Result<Value, JitError> {
     let compiler = JitCompiler::new()?;
-    let code = compiler.compile(lir, None, std::collections::HashMap::new())?;
+    let code = compiler.compile(lir, None, std::collections::HashMap::new(), Vec::new())?;
     // self_tag/self_payload = 0 since we're not testing self-tail-calls in these basic tests
     let result = unsafe {
         code.call(
@@ -675,7 +675,7 @@ fn test_jit_accepts_yielding() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept yielding functions via side-exit: {:?}",
@@ -706,26 +706,26 @@ fn test_jit_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
     // Call should now compile successfully
     assert!(result.is_ok(), "Call should compile: {:?}", result);
 }
 
 #[test]
-fn test_jit_compiles_make_closure() {
-    // MakeClosure is now supported — a function that creates an inner closure
-    // should compile successfully and return a closure value.
+fn test_jit_rejects_make_closure() {
+    // MakeClosure is rejected at the gate — the per-compilation cost of
+    // emitting module closures' bytecodes is too high. Functions with
+    // MakeClosure fall back to the interpreter.
     let mut func = LirFunction::new(Arity::Exact(0));
     func.num_regs = 1;
     func.num_captures = 0;
     func.signal = Signal::silent();
 
-    let inner_func = Box::new(LirFunction::new(Arity::Exact(0)));
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(SpannedInstr::new(
         LirInstr::MakeClosure {
             dst: Reg(0),
-            func: inner_func,
+            closure_id: elle::lir::ClosureId(0),
             captures: vec![],
         },
         span(),
@@ -735,11 +735,16 @@ fn test_jit_compiles_make_closure() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(
+        &func,
+        None,
+        std::collections::HashMap::new(),
+        Vec::new(),
+    );
     assert!(
-        result.is_ok(),
-        "MakeClosure should compile successfully: {:?}",
-        result
+        matches!(result, Err(elle::jit::JitError::UnsupportedInstruction(_))),
+        "MakeClosure should be rejected: {:?}",
+        result,
     );
 }
 
@@ -1349,7 +1354,7 @@ fn test_jit_tail_call_compiles() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
     // TailCall should now compile successfully
     assert!(result.is_ok(), "TailCall should compile: {:?}", result);
 }
@@ -1804,7 +1809,7 @@ fn test_jit_accepts_yields_errors_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept yields_errors signal via side-exit: {:?}",
@@ -1835,7 +1840,7 @@ fn test_jit_accepts_errors_only_signal() {
     func.entry = Label(0);
 
     let compiler = JitCompiler::new().unwrap();
-    let result = compiler.compile(&func, None, std::collections::HashMap::new());
+    let result = compiler.compile(&func, None, std::collections::HashMap::new(), Vec::new());
     assert!(
         result.is_ok(),
         "JIT should accept errors-only signal: {:?}",

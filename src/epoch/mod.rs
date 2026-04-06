@@ -59,6 +59,19 @@ pub fn extract_epoch(forms: &mut Vec<Syntax>) -> Result<Option<u64>, String> {
                     ));
                 }
                 forms.remove(0);
+
+                // Reject duplicate epoch declarations.
+                for form in forms.iter() {
+                    if let SyntaxKind::List(items) = &form.kind {
+                        if items.len() == 2 && items[0].is_symbol("elle/epoch") {
+                            return Err(format!(
+                                "duplicate (elle/epoch) at {}; only one epoch declaration is allowed per file",
+                                form.span
+                            ));
+                        }
+                    }
+                }
+
                 return Ok(Some(epoch));
             }
         }

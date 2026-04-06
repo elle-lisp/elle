@@ -7,7 +7,6 @@
 # hot path.  The board is a cons list: (cons col queens) to place,
 # (rest queens) to backtrack.  This is the natural representation for
 # backtracking search.
-(elle/epoch 0)
 
 (defn check-safe [col remaining offset]
   "Walk placed queens checking column conflicts and diagonals."
