@@ -14,7 +14,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Memory](#memory)
 - [Execution Backends](#execution-backends)
 - [FFI](#ffi)
-- [Modules](#modules)
+- [Module System](#module-system)
 - [Standard Library Modules](#standard-library-modules)
 - [Plugins](#plugins)
 - [Epochs — Versioned Syntax Migration](#epochs--versioned-syntax-migration)
@@ -673,9 +673,9 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 - **FFI calls are tagged in the signal system.** Compiler knows where Elle's safety guarantees end and C's begin.
 
-## Modules
+## Module System
 
-- **Module system is minimal and parametric.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. Elle modules are closures that return structs; call the closure to instantiate. Parameters to the closure configure the module — inject dependencies, toggle features, pass credentials.
+- **Minimal and parametric.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. Elle modules are closures that return structs; call the closure to instantiate. Parameters to the closure configure the module — inject dependencies, toggle features, pass credentials.
 
   ```lisp
   ## Simple module — call the returned closure
@@ -704,6 +704,8 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
   (def {:add add :mul mul} ((import "std/math") 2))
   (add 1 2)  # => 6
   ```
+
+- **`include` splices source at compile time.** Unlike `import` which compiles and runs a separate file, `include` inserts another file's forms directly into the current compilation unit — they share scope. Use `include` for splitting large files; use `import` for separate modules.
 
 - **Module system is user-replaceable.** `import` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
 
