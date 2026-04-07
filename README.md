@@ -19,6 +19,7 @@ Elle is a Lisp. If you know [Janet](https://janet-lang.org), think Janet on ster
 - [Plugins](#plugins)
 - [Epochs — Versioned Syntax Migration](#epochs--versioned-syntax-migration)
 - [Tooling](#tooling)
+- [Documentation](#documentation)
 - [Coming from Another Language](#coming-from-another-language)
 - [Getting Started](#getting-started)
 - [License](#license)
@@ -797,6 +798,8 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 - **Source-to-source rewriting tool.** The `rewrite` subcommand applies pattern-based rules to Elle source files for refactoring and code generation. Rules are pattern-action pairs that match syntax trees and produce transformed output.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
+
+- **MCP server for AI coding assistants.** ([docs/mcp.md](docs/mcp.md)) An [MCP](https://modelcontextprotocol.io) server written in Elle that gives AI agents deep structural access to the codebase. Maintains a persistent RDF knowledge graph of both Elle and Rust source. 15 tools covering static analysis (`analyze_file`, `portrait`, `signal_query`, `impact`), refactoring (`compile_rename`, `compile_extract`, `compile_parallelize`), cross-language tracing (`trace`), and direct SPARQL queries. Complements the LSP server — LSP handles real-time editing; MCP handles AI-driven code understanding.
 
 ## Documentation
 
