@@ -10,15 +10,21 @@
 | `aws/` | Generated AWS service modules + SigV4 | [`aws/README.md`](aws/README.md) |
 | `contract.lisp` | Compositional validation for function boundaries | |
 | `lua.lisp` | Lua standard library compatibility prelude | |
+| `gtk4.lisp` | GTK4 declarative UI (widgets, events, CSS, WebKit) | |
+| `gtk4/` | GTK4 sub-modules: bind, widgets, webview | |
+| `sdl.lisp` | SDL3 bindings for games/graphics | |
+| `zmq.lisp` | ZeroMQ bindings | | |
 
-Each module is a closure. `import-file` loads it; calling the result
+Each module is a closure. `import` loads it; calling the result
 initializes the module and returns a struct of its exports. Modules
 that depend on other modules or plugins take them as arguments.
+The `std/` prefix resolves to `lib/`.
 
 ```lisp
-(def http ((import-file "lib/http.lisp")))
-(def tls  ((import-file "lib/tls.lisp") tls-plugin))
-(def aws  ((import-file "lib/aws.lisp") crypto jiff tls))
+(def http ((import "std/http")))
+(def gtk  ((import "std/gtk4")))
+(def tls  ((import "std/tls") tls-plugin))
+(def aws  ((import "std/aws") crypto jiff tls))
 ```
 
 ---
