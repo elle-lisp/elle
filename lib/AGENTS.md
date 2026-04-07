@@ -18,7 +18,7 @@ depend on other modules or plugins take them as arguments.
 | `lua.lisp` | Lua standard library compatibility prelude |
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
-| `agent.lisp` | LLM agent subprocess abstraction (Claude Code / OpenCode) |
+| `agent.lisp` | LLM agent subprocess abstraction (Claude Code / OpenCode / Pi) |
 
 ---
 
@@ -28,9 +28,10 @@ Agent guide for `lib/agent.lisp` — LLM agent subprocess abstraction.
 
 ## Purpose
 
-Runtime abstraction over Claude Code and OpenCode subprocesses. One subprocess
-per turn, session continuation via `--resume` (Claude) or `--session --continue`
-(OpenCode). The handle is mutable and tracks the session ID across sends.
+Runtime abstraction over Claude Code, OpenCode, and Pi subprocesses. One
+subprocess per turn, session continuation via `--resume` (Claude) or
+`--session --continue` (OpenCode / Pi). The handle is mutable and tracks
+the session ID across sends.
 
 ## Data flow
 
@@ -53,19 +54,19 @@ send handle prompt → build-args → subprocess/exec → port/read-line loop
 
 ## Config keys
 
-| Key | Type | Claude flag | OpenCode flag |
-|-----|------|-------------|---------------|
-| `:backend` | `:claude`/`:opencode` | — | — |
-| `:model` | string | `--model` | `-m` |
-| `:system-prompt` | string | `--system-prompt` | `--prompt` |
-| `:allowed-tools` | array | `--allowedTools` | — |
-| `:denied-tools` | array | `--disallowedTools` | — |
-| `:skip-permissions` | bool | `--dangerously-skip-permissions` | — |
-| `:dir` | string | `--add-dir` | `--dir` |
-| `:effort` | keyword | `--effort` | `--variant` |
-| `:max-budget` | float | `--max-budget-usd` | — |
-| `:opts` | array | passthrough | passthrough |
-| `:command` | array | overrides build-args | for testing |
+| Key | Type | Claude flag | OpenCode flag | Pi flag |
+|-----|------|-------------|---------------|----------|
+| `:backend` | `:claude`/`:opencode`/`:pi` | — | — | — |
+| `:model` | string | `--model` | `-m` | `--model` |
+| `:system-prompt` | string | `--system-prompt` | `--prompt` | `--system-prompt` |
+| `:allowed-tools` | array | `--allowedTools` (each) | — | `--tools` (comma-joined) |
+| `:denied-tools` | array | `--disallowedTools` | — | — |
+| `:skip-permissions` | bool | `--dangerously-skip-permissions` | — | — |
+| `:dir` | string | `--add-dir` | `--dir` | — |
+| `:effort` | keyword | `--effort` | `--variant` | `--thinking` |
+| `:max-budget` | float | `--max-budget-usd` | — | — |
+| `:opts` | array | passthrough | passthrough | passthrough |
+| `:command` | array | overrides build-args | for testing | for testing |
 
 ## Chunk types
 
@@ -85,16 +86,37 @@ send handle prompt → build-args → subprocess/exec → port/read-line loop
   (when (not ok?) (agent:kill handle)))
 ```
 
+## Chunk contracts
+
+Every chunk yielded by `send` is validated against a contract (via
+`lib/contract.lisp`) before being yielded. The contracts enforce:
+
+| Chunk type | Required fields | Types |
+|------------|----------------|-------|
+| `:text` | `:type`, `:text` | keyword, string |
+| `:tool-use` | `:type`, `:name`, `:id` | keyword, string, string |
+| `:tool-input` | `:type`, `:text` | keyword, string |
+| `:stderr` | `:type`, `:text` | keyword, string |
+| `:result` | `:type`, `:text`, `:cost` | keyword, string, number |
+| | `:session-id` (optional) | string or nil |
+| | `:tokens` (optional) | `{:input int :output int}` or nil |
+
+A normalizer that produces a chunk with the wrong shape gets a clear
+`:agent-error` at the validation boundary, not a mysterious failure
+downstream.
+
 ## Invariants
 
 1. One subprocess per `send` call. No long-lived child process.
-2. Session continuity via `--resume` / `--session --continue`.
+2. Session continuity via `--resume` (Claude) / `--session --continue` (OpenCode / Pi).
 3. Handle `:session-id` and `:total-cost` are updated after each result chunk.
 4. Handle `:proc` is set during `send`, cleared on completion or `kill`.
 5. Stderr is drained in parallel via `ev/spawn`; yielded as `:stderr` chunks.
 6. NDJSON parse errors are yielded as `:stderr` chunks, not swallowed.
 7. Nonzero exit without a result chunk signals `:agent-error`.
 8. Flag table drives config→CLI mapping; adding a flag is one table row.
+9. Chunk contracts are enforced at the normalizer boundary; invalid shapes
+   signal `:agent-error` immediately.
 
 ## Running tests
 

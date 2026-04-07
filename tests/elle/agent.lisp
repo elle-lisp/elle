@@ -74,6 +74,38 @@
   (assert (has-flag-pair args "--max-budget-usd" "1.5") "build-args: max-budget pair")
   (assert (any? (fn [x] (= x "--extra")) args) "build-args: passthrough opt"))
 
+# Pi basic args
+(let [[args (agent:build-args {:backend :pi} "hello" nil)]]
+  (assert (= (first args) "pi") "build-args: pi binary")
+  (assert (has-flag-pair args "--mode" "json") "build-args: pi mode json")
+  (assert (= (last args) "hello") "build-args: pi prompt is last")
+  (assert (has-flag-pair args "-p" "hello") "build-args: pi -p prompt pair"))
+
+# Pi with model
+(let [[args (agent:build-args {:backend :pi :model "sonnet"} "hi" nil)]]
+  (assert (has-flag-pair args "--model" "sonnet") "build-args: pi --model pair"))
+
+# Pi with session resume
+(let [[args (agent:build-args {:backend :pi} "hi" "pi-sess-1")]]
+  (assert (has-flag-pair args "--session" "pi-sess-1") "build-args: pi --session pair")
+  (assert (any? (fn [x] (= x "--continue")) args) "build-args: pi --continue flag"))
+
+# Pi with system-prompt and effort (maps to --thinking)
+(let [[args (agent:build-args {:backend :pi
+                                :system-prompt "be brief"
+                                :effort :high}
+                               "task" nil)]]
+  (assert (has-flag-pair args "--system-prompt" "be brief") "build-args: pi system-prompt")
+  (assert (has-flag-pair args "--thinking" "high") "build-args: pi --thinking pair"))
+
+# Pi with allowed-tools (comma-separated --tools)
+(let [[args (agent:build-args {:backend :pi :allowed-tools ["read" "bash" "edit"]} "hi" nil)]]
+  (assert (has-flag-pair args "--tools" "read,bash,edit") "build-args: pi --tools comma-separated"))
+
+# Pi-only flags ignored for claude
+(let [[args (agent:build-args {:backend :claude :allowed-tools ["Read"]} "hi" nil)]]
+  (assert (not (any? (fn [x] (= x "--tools")) args)) "build-args: --tools not used for claude"))
+
 # Unknown backend errors
 (let [[[ok? err] (protect (agent:build-args {:backend :unknown} "hi" nil))]]
   (assert (not ok?) "build-args: unknown backend errors")
@@ -151,6 +183,89 @@
     (assert (= c1:cost 0.03) "send opencode: result cost")))
 
 (file/delete oc-mock)
+
+
+# ── send via mock subprocess (Pi) ───────────────────────────────────────────
+
+(def pi-mock "tests/elle/agent-pi-mock.lisp")
+
+(file/write pi-mock
+  (string
+    "(println (json/serialize {\"type\" \"session\" \"version\" 3 \"id\" \"pi-sess-1\" \"timestamp\" \"2025-01-01\" \"cwd\" \"/tmp\"}))\n"
+    "(println (json/serialize {\"type\" \"message_update\" \"assistantMessageEvent\" {\"type\" \"text_delta\" \"contentIndex\" 1 \"delta\" \"hello\"}}))\n"
+    "(println (json/serialize {\"type\" \"message_update\" \"assistantMessageEvent\" {\"type\" \"text_delta\" \"contentIndex\" 1 \"delta\" \" world\"}}))\n"
+    "(println (json/serialize {\"type\" \"message_end\" \"message\" {\"role\" \"assistant\" \"usage\" {\"input\" 100 \"output\" 50 \"cost\" {\"total\" 0.04}}}}))\n"))
+
+(let* [[handle (agent:make-handle {:backend :pi
+                                    :command [elle-bin pi-mock]})]
+       [chunks (stream/collect (agent:send handle "ignored"))]]
+
+  (assert (= (length chunks) 3) "send pi: got 3 chunks (session skipped)")
+
+  (let* [[c0 (first chunks)]
+         [c1 (second chunks)]
+         [c2 (last chunks)]]
+    (assert (= c0:type :text) "send pi: chunk 0 is text")
+    (assert (= c0:text "hello") "send pi: chunk 0 text")
+    (assert (= c1:text " world") "send pi: chunk 1 text")
+    (assert (= c2:type :result) "send pi: result type")
+    (assert (= c2:cost 0.04) "send pi: result cost")
+    (assert (= c2:session-id "pi-sess-1") "send pi: result session-id")
+    (assert (= (get c2:tokens :input) 100) "send pi: input tokens")
+    (assert (= (get c2:tokens :output) 50) "send pi: output tokens"))
+
+  # Session-id written back to handle
+  (assert (= handle:session-id "pi-sess-1") "send pi: handle session-id updated"))
+
+
+# ── pi tool-use chunks ──────────────────────────────────────────────────────
+
+(def pi-tool-mock "tests/elle/agent-pi-tool-mock.lisp")
+
+(file/write pi-tool-mock
+  (string
+    "(println (json/serialize {\"type\" \"session\" \"id\" \"pi-tool-s\"}))\n"
+    "(println (json/serialize {\"type\" \"message_update\" \"assistantMessageEvent\" {\"type\" \"toolcall_start\" \"contentIndex\" 0 \"partial\" {\"content\" [{\"type\" \"toolCall\" \"id\" \"tc_1\" \"name\" \"bash\"}]}}}))\n"
+    "(println (json/serialize {\"type\" \"message_update\" \"assistantMessageEvent\" {\"type\" \"toolcall_delta\" \"contentIndex\" 0 \"delta\" \"{\\\"command\\\": \\\"ls\\\"}\"}}))\n"
+    "(println (json/serialize {\"type\" \"message_update\" \"assistantMessageEvent\" {\"type\" \"text_delta\" \"contentIndex\" 1 \"delta\" \"done\"}}))\n"
+    "(println (json/serialize {\"type\" \"message_end\" \"message\" {\"role\" \"assistant\" \"usage\" {\"input\" 10 \"output\" 5 \"cost\" {\"total\" 0.01}}}}))\n"))
+
+(let* [[handle (agent:make-handle {:backend :pi
+                                    :command [elle-bin pi-tool-mock]})]
+       [chunks (stream/collect (agent:send handle "x"))]]
+  (let* [[tool-uses  (filter (fn [c] (= c:type :tool-use)) chunks)]
+         [tool-input (filter (fn [c] (= c:type :tool-input)) chunks)]
+         [texts      (filter (fn [c] (= c:type :text)) chunks)]]
+    (assert (= (length tool-uses) 1) "pi tool-use: got tool-use chunk")
+    (assert (= (get (first tool-uses) :name) "bash") "pi tool-use: name is bash")
+    (assert (= (get (first tool-uses) :id) "tc_1") "pi tool-use: id is tc_1")
+    (assert (= (length tool-input) 1) "pi tool-use: got tool-input chunk")
+    (assert (= (length texts) 1) "pi tool-use: got text chunk")))
+
+(file/delete pi-tool-mock)
+
+
+# ── pi send-collect ─────────────────────────────────────────────────────────
+
+(let* [[handle (agent:make-handle {:backend :pi
+                                    :command [elle-bin pi-mock]})]
+       [result (agent:send-collect handle "x")]]
+  (assert (= result:text "hello world") "pi send-collect: concatenated text")
+  (assert (= result:cost 0.04) "pi send-collect: cost preserved")
+  (assert (= result:session-id "pi-sess-1") "pi send-collect: session-id preserved"))
+
+
+# ── pi multi-turn: session continuation ─────────────────────────────────────
+
+(let [[handle (agent:make-handle {:backend :pi
+                                   :command [elle-bin pi-mock]})]]
+  (stream/for-each (fn [_] nil) (agent:send handle "first"))
+  (assert (= handle:session-id "pi-sess-1") "pi multi-turn: session-id set")
+  (let [[args (agent:build-args handle:config "second" handle:session-id)]]
+    (assert (has-flag-pair args "--session" "pi-sess-1") "pi multi-turn: --session pair")
+    (assert (any? (fn [x] (= x "--continue")) args) "pi multi-turn: --continue flag")))
+
+(file/delete pi-mock)
 
 
 # ── stream combinators work on send output ──────────────────────────────────
@@ -298,6 +413,38 @@
                                    :command [elle-bin mock-script]})]]
   (stream/for-each (fn [_] nil) (agent:send handle "x"))
   (assert (nil? handle:proc) "proc: cleared after normal completion"))
+
+
+# ── chunk contract validation ────────────────────────────────────────────────
+
+# Bad chunk: :cost is string instead of number
+(def bad-cost-mock "tests/elle/agent-bad-cost.lisp")
+(file/write bad-cost-mock
+  (string
+    "(println (json/serialize {\"type\" \"step_finish\" \"part\" {\"cost\" \"expensive\"}}))"))
+
+(let* [[handle (agent:make-handle {:backend :opencode
+                                    :command [elle-bin bad-cost-mock]})]
+       [[ok? err] (protect (stream/collect (agent:send handle "x")))]]
+  (assert (not ok?) "contract: non-number cost rejected")
+  (assert (= err:error :agent-error) "contract: cost error is :agent-error"))
+
+(file/delete bad-cost-mock)
+
+# Bad chunk: :text is integer instead of string
+(def bad-text-mock "tests/elle/agent-bad-text.lisp")
+(file/write bad-text-mock
+  (string
+    "(println (json/serialize {\"type\" \"content_block_delta\" \"delta\" {\"type\" \"text_delta\" \"text\" 42}}))\n"
+    "(println (json/serialize {\"type\" \"result\" \"result\" \"ok\" \"total_cost_usd\" 0.01 \"session_id\" \"s\" \"usage\" {\"input_tokens\" 1 \"output_tokens\" 1}}))"))
+
+(let* [[handle (agent:make-handle {:backend :claude
+                                    :command [elle-bin bad-text-mock]})]
+       [[ok? err] (protect (stream/collect (agent:send handle "x")))]]
+  (assert (not ok?) "contract: non-string text rejected")
+  (assert (= err:error :agent-error) "contract: text error is :agent-error"))
+
+(file/delete bad-text-mock)
 
 
 # ── cleanup ─────────────────────────────────────────────────────────────────

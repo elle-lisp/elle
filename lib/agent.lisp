@@ -7,11 +7,46 @@
 ##     (fn [c] (print c:text))
 ##     (agent:send handle "review lib/http.lisp"))
 ##
+## Backends: :claude, :opencode, :pi
 ## One subprocess per turn. Session continuation via --resume (Claude)
-## or --session + --continue (OpenCode). The handle is mutable and
-## tracks the session ID across sends.
+## or --session + --continue (OpenCode / Pi). The handle is mutable
+## and tracks the session ID across sends.
 ##
 ## Chunk types: :text, :tool-use, :tool-input, :stderr, :result
+
+
+# ============================================================================
+# Chunk contracts — enforced at the normalizer boundary
+# ============================================================================
+
+(def cv ((import-file "lib/contract.lisp")))
+
+(def tokens-shape
+  (cv:compile-validator {:input integer? :output integer?}))
+
+(def chunk-validators
+  {:text       (cv:compile-validator {:type (cv:v/oneof :text)       :text string?})
+   :tool-use   (cv:compile-validator {:type (cv:v/oneof :tool-use)   :name string? :id string?})
+   :tool-input (cv:compile-validator {:type (cv:v/oneof :tool-input) :text string?})
+   :stderr     (cv:compile-validator {:type (cv:v/oneof :stderr)     :text string?})
+   :result     (cv:compile-validator {:type    (cv:v/oneof :result)
+                                      :text    string?
+                                      :cost    number?
+                                      :session-id (cv:v/optional string?)
+                                      :tokens  (cv:v/optional tokens-shape)})})
+
+(defn validate-chunk [chunk]
+  "Validate a chunk against its contract. Returns the chunk, or signals :agent-error."
+  (let [[v (get chunk-validators chunk:type nil)]]
+    (when (nil? v)
+      (error {:error :agent-error
+              :message (string "unknown chunk type: " chunk:type)}))
+    (let [[explanation (cv:explain v chunk)]]
+      (when (not (nil? explanation))
+        (error {:error   :agent-error
+                :message (string "invalid " chunk:type " chunk: " explanation)
+                :chunk   chunk})))
+    chunk))
 
 
 # ============================================================================
@@ -26,14 +61,14 @@
 #   :coerce — emit [flag (string value)]
 
 (def flag-table
-  [{:key :model          :claude "--model"                       :opencode "-m"        :type :val}
-   {:key :system-prompt  :claude "--system-prompt"               :opencode "--prompt"   :type :val}
-   {:key :dir            :claude "--add-dir"                     :opencode "--dir"      :type :val}
-   {:key :effort         :claude "--effort"                      :opencode "--variant"  :type :coerce}
-   {:key :max-budget     :claude "--max-budget-usd"              :opencode nil          :type :coerce}
-   {:key :skip-permissions :claude "--dangerously-skip-permissions" :opencode nil       :type :bool}
-   {:key :allowed-tools  :claude "--allowedTools"                :opencode nil          :type :each}
-   {:key :denied-tools   :claude "--disallowedTools"             :opencode nil          :type :each}])
+  [{:key :model          :claude "--model"                       :opencode "-m"        :pi "--model"          :type :val}
+   {:key :system-prompt  :claude "--system-prompt"               :opencode "--prompt"   :pi "--system-prompt"  :type :val}
+   {:key :dir            :claude "--add-dir"                     :opencode "--dir"      :pi nil                :type :val}
+   {:key :effort         :claude "--effort"                      :opencode "--variant"  :pi "--thinking"       :type :coerce}
+   {:key :max-budget     :claude "--max-budget-usd"              :opencode nil          :pi nil                :type :coerce}
+   {:key :skip-permissions :claude "--dangerously-skip-permissions" :opencode nil       :pi nil                :type :bool}
+   {:key :allowed-tools  :claude "--allowedTools"                :opencode nil          :pi nil                :type :each}
+   {:key :denied-tools   :claude "--disallowedTools"             :opencode nil          :pi nil                :type :each}])
 
 
 # ============================================================================
@@ -52,6 +87,8 @@
                        (push args "--verbose"))
       :opencode (begin (push args "opencode")
                        (push args "--format") (push args "json"))
+      :pi       (begin (push args "pi")
+                       (push args "--mode") (push args "json"))
       (error {:error :agent-error
               :message (string "unknown backend: " backend)}))
 
@@ -60,6 +97,8 @@
       (case backend
         :claude   (begin (push args "--resume") (push args session-id))
         :opencode (begin (push args "--session") (push args session-id)
+                         (push args "--continue"))
+        :pi       (begin (push args "--session") (push args session-id)
                          (push args "--continue"))))
 
     # Table-driven flags
@@ -73,6 +112,15 @@
             :bool   (push args flag)
             :each   (each item in val
                       (push args flag) (push args item))))))
+
+    # Pi-specific: --tools as comma-separated
+    (when (= backend :pi)
+      (let [[tools (get config :allowed-tools nil)]]
+        (when (not (nil? tools))
+          (push args "--tools")
+          (push args (fold (fn [acc t]
+                             (if (= acc "") t (string acc "," t)))
+                           "" tools)))))
 
     # Passthrough opts
     (when (not (nil? (get config :opts nil)))
@@ -128,10 +176,51 @@
       (let [[part (get obj :part {})]]
         (case obj:type
           "text"        {:text part:text :type :text}
-          "step_finish" {:type   :result
+          "step_finish" (let [[tok (get part :tokens nil)]]
+                        {:type   :result
                          :cost   (get part :cost 0)
-                         :tokens (get part :tokens nil)
-                         :text   ""}
+                         :tokens (if (nil? tok) nil
+                                   {:input  (get tok :input 0)
+                                    :output (get tok :output 0)})
+                         :text   ""})
+          nil)))))
+
+
+# ============================================================================
+# normalize-pi — stateful: JSON line → chunk or nil, tracks session-id
+# ============================================================================
+
+(defn make-pi-normalizer []
+  "Create a stateful pi normalizer that tracks session-id."
+  (var sid nil)
+  (fn [line]
+    (let [[obj (json/parse line :keys :keyword)]]
+      (when (not (nil? obj))
+        (case obj:type
+          "session"
+            (begin (assign sid obj:id) nil)
+          "message_update"
+            (let [[evt (get obj :assistantMessageEvent {})]]
+              (case evt:type
+                "text_delta"     {:type :text :text evt:delta}
+                "toolcall_start"
+                  (let* [[ci      (get evt :contentIndex 0)]
+                         [partial (get evt :partial {})]
+                         [content (get partial :content [])]
+                         [tc      (get content ci {})]]
+                    {:type :tool-use :name tc:name :id tc:id})
+                "toolcall_delta" {:type :tool-input :text evt:delta}
+                nil))
+          "message_end"
+            (let* [[msg   (get obj :message {})]
+                   [usage (get msg :usage {})]
+                   [cost  (get usage :cost {})]]
+              {:type       :result
+               :text       ""
+               :cost       (get cost :total 0)
+               :session-id sid
+               :tokens     {:input  (get usage :input 0)
+                            :output (get usage :output 0)}})
           nil)))))
 
 
@@ -174,7 +263,8 @@
          [rest-args  (slice args 1)]
          [normalize  (case backend
                        :claude   normalize-claude
-                       :opencode normalize-opencode)]]
+                       :opencode normalize-opencode
+                       :pi       (make-pi-normalizer))]]
     (coro/new (fn []
       # TODO: swap :null for :nil when subprocess is updated
       (let* [[proc   (subprocess/exec program rest-args)]
@@ -205,6 +295,7 @@
                   (if (not ok?)
                     (yield {:type :stderr :text (string "parse error: " parsed)})
                     (when (not (nil? parsed))
+                      (validate-chunk parsed)
                       (assign lc parsed)
                       (yield parsed)))))))
 
