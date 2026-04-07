@@ -92,7 +92,7 @@
     (let [[parsed (parse-uuid uuid-str)]]
       ## Version is the high nibble of byte 6, which is char at position 14
       (let [[v (hex->nibble (parsed 14))]]
-        (if (= v 0) nil v))))
+        (if (zero? v) nil v))))
 
   ## ── v5 (requires hash plugin) ─────────────────────────────────
 

@@ -1682,15 +1682,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elle-compress"
-version = "1.0.0"
-dependencies = [
- "elle",
- "flate2",
- "zstd",
-]
-
-[[package]]
 name = "elle-crypto"
 version = "1.0.0"
 dependencies = [

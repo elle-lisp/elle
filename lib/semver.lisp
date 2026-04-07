@@ -70,7 +70,7 @@
                                 [[nil _]   1]
                                 [[_ nil]  -1]
                                 [_  (compare an bn)])]]
-                      (if (= r 0) (cmp-ids (inc ai) (inc bi)) r))))))
+                      (if (zero? r) (cmp-ids (inc ai) (inc bi)) r))))))
             (cmp-ids 0 0))))))
 
   (defn semver-compare [a b]
@@ -79,7 +79,7 @@
       (defn cmp-fields [fields]
         (if (empty? fields) (compare-pre va:pre vb:pre)
           (let* [[f (first fields)] [d (compare (va f) (vb f))]]
-            (if (= d 0) (cmp-fields (rest fields)) d))))
+            (if (zero? d) (cmp-fields (rest fields)) d))))
       (cmp-fields (list :major :minor :patch))))
 
   (defn parse-op [s]
@@ -105,15 +105,15 @@
         ["<=" (<= c 0)]
         [">"  (> c 0)]
         ["<"  (< c 0)]
-        ["="  (= c 0)]
-        ["!=" (not (= c 0))]
+        ["="  (zero? c)]
+        ["!=" (not (zero? c))]
         ["^"  (let [[rv (parse ver-str)] [pv (parse ver)]]
                 (and (>= c 0)
                      (if (> rv:major 0)
                        (= pv:major rv:major)
                        (if (> rv:minor 0)
-                         (and (= pv:major 0) (= pv:minor rv:minor))
-                         (and (= pv:major 0) (= pv:minor 0)
+                         (and (zero? pv:major) (= pv:minor rv:minor))
+                         (and (zero? pv:major) (zero? pv:minor)
                               (<= pv:patch rv:patch))))))]
         ["~"  (let [[rv (parse ver-str)] [pv (parse ver)]]
                 (and (>= c 0)

@@ -3,7 +3,6 @@ members = [
     ".",
     "plugins/arrow",
 
-    "plugins/compress",
     "plugins/crypto",
     "plugins/csv",
     "plugins/git",
