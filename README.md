@@ -17,7 +17,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Modules](#modules)
 - [Standard Library Modules](#standard-library-modules)
 - [Plugins](#plugins)
-- [Epochs](#epochs)
+- [Epochs — Versioned Syntax Migration](#epochs--versioned-syntax-migration)
 - [Tooling](#tooling)
 - [Getting Started](#getting-started)
 - [License](#license)
@@ -776,7 +776,7 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
   | `xml` | XML parsing and generation |
   | `yaml` | YAML parsing and generation |
 
-## Epochs
+## Epochs — Versioned Syntax Migration
 
 - **Breaking changes are versioned.** Each source file can declare an epoch — `(elle/epoch N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
 
