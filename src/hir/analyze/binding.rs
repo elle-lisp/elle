@@ -231,6 +231,19 @@ impl<'a> Analyzer<'a> {
         // before lowering any lambda values — lambdas may capture
         // destructured leaf bindings. Destructure nodes in the body then
         // update the leaf binding slots.
+        //
+        // Seed signal_env for all pre-bound simple bindings with Silent.
+        // Without this, forward-referenced letrec siblings default to
+        // Signal::yields() (the unknown-binding fallback in
+        // get_raw_callee_signal), causing spurious SuspendingCall
+        // instructions. This matches analyze_file_letrec's optimistic
+        // seeding strategy.
+        for entry in &entries {
+            if let LetrecEntry::Simple(binding, _) = entry {
+                self.signal_env.insert(*binding, Signal::silent());
+            }
+        }
+
         let mut bindings = Vec::new();
         let mut destructures = Vec::new();
         let mut signal = Signal::silent();
