@@ -221,6 +221,12 @@ pub extern "C" fn elle_jit_call(
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
 
+            // Save/restore rotation base so nested self-tail-call loops
+            // don't corrupt the caller's rotation state.
+            let saved_rotation_base =
+                crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
+                    .flatten();
+
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
             } else {
@@ -239,6 +245,11 @@ pub extern "C" fn elle_jit_call(
             };
 
             vm.fiber.call_depth -= 1;
+
+            // Restore rotation base for the caller's self-tail-call loop.
+            crate::value::fiberheap::with_current_heap_mut(|h| {
+                h.restore_jit_rotation_base(saved_rotation_base.clone());
+            });
 
             // Check for exception (error or halt) — use contains for compound signals
             if vm
