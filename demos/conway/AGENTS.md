@@ -1,16 +1,16 @@
 # conway
 
-Conway's Game of Life rendered via `std/sdl` (SDL3 pure FFI).
+Conway's Game of Life rendered via `std/sdl3` (SDL3 pure FFI).
 
 ## Responsibility
 
 Demonstrate interactive graphics programming in Elle using SDL3 through
-the `std/sdl` library. Exercises module import, event handling
+the `std/sdl3` library. Exercises module import, event handling
 (keyboard + mouse), draw primitives, debug text, blend modes, and
 dynamic window titles.
 
 Does NOT:
-- Use raw FFI directly (uses std/sdl)
+- Use raw FFI directly (uses std/sdl3)
 - Require any Rust plugins
 - Require the async scheduler (synchronous main loop)
 
@@ -22,7 +22,7 @@ Does NOT:
 
 ## Dependencies
 
-- `std/sdl` via `(import "std/sdl")`
+- `std/sdl3` via `(import "std/sdl3")`
 - `libSDL3.so` system library
 
 ## Running

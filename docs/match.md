@@ -7,6 +7,8 @@ symbol works as a wildcard.
 
 ## Basic patterns
 
+Literal values (numbers, keywords, strings, booleans) match by equality:
+
 ```lisp
 (defn describe [val]
   (match val
@@ -21,7 +23,10 @@ symbol works as a wildcard.
 
 ## Binding patterns
 
-Unbound symbols in patterns bind the matched value.
+Unbound symbols in patterns **bind** the matched value — they do not
+compare against variables in scope. Use `case` (see
+[control.md](control.md)) for equality dispatch against evaluated
+expressions.
 
 ```lisp
 (defn first-or-default [lst fallback]
@@ -31,6 +36,47 @@ Unbound symbols in patterns bind the matched value.
 
 (first-or-default (list 10 20) :none)  # => 10
 (first-or-default (list) :none)        # => :none
+```
+
+**Important:** a bare symbol always binds, never compares:
+
+```lisp
+(def x 42)
+(match 99
+  (x x)     # x binds to 99, body returns 99
+  (_ :no))  # => 99, NOT :no
+```
+
+To dispatch against a variable's value, use `case` or a guard:
+
+```
+(def quit-code 0x100)
+
+# case — evaluates keys, compares with =
+(case etype
+  quit-code :quit
+  :other)
+
+# match — guard compares explicitly
+(match etype
+  (t when (= t quit-code) :quit)
+  (_ :other))
+```
+
+## Or-patterns
+
+`(or ...)` in a pattern matches any of the listed alternatives:
+
+```lisp
+(defn parity [n]
+  (match n
+    ((or 1 3 5 7 9) :odd)
+    ((or 0 2 4 6 8) :even)
+    (_              :out-of-range)))
+
+(parity 3)                 # => :odd
+(parity 4)                 # => :even
+(parity 42)                # => :out-of-range
 ```
 
 ## Array and struct patterns
@@ -78,18 +124,53 @@ Patterns compose to any depth:
 
 ## Guards
 
-`when` clauses add conditions to patterns:
+`when` inside an arm adds a condition. The syntax is
+`(pattern when condition body)` — `when` is a bare keyword
+between the pattern and the body, **not** wrapped in parentheses:
 
 ```lisp
 (defn classify [n]
   (match n
-    (x (when (> x 0)) :positive)
-    (0                 :zero)
-    (x                 :negative)))
+    (x when (> x 0) :positive)
+    (0               :zero)
+    (x               :negative)))
 
 (classify 5)               # => :positive
 (classify 0)               # => :zero
 (classify -3)              # => :negative
+```
+
+Guards can reference bindings from the pattern:
+
+```lisp
+(defn describe-pair [p]
+  (match p
+    ([a b] when (> a b) "descending")
+    ([a b] when (= a b) "equal")
+    ([a b]              "ascending")
+    (_                  "not a pair")))
+```
+
+## match vs case
+
+| | `match` | `case` |
+|---|---------|--------|
+| **Patterns** | structural (literals, destructuring, guards) | equality (`=`) against evaluated expressions |
+| **Variables** | bare symbols **bind** | keys are **evaluated** and compared |
+| **Use when** | dispatching on shape, type, or literal values | dispatching against runtime values (constants, computed keys) |
+
+```
+# match: literal keyword patterns
+(match event-type
+  (:quit      (handle-quit))
+  (:key-down  (handle-key ev))
+  (_          nil))
+
+# case: dispatch against variables holding event codes
+(case raw-event-code
+  event-quit      (handle-quit)
+  event-key-down  (handle-key ev)
+  (handle-unknown))
 ```
 
 ---
@@ -97,5 +178,6 @@ Patterns compose to any depth:
 ## See also
 
 - [destructuring.md](destructuring.md) — destructuring in bindings
-- [control.md](control.md) — if, cond, case
+- [destructuring-advanced.md](destructuring-advanced.md) — rest, nesting, match integration
+- [control.md](control.md) — if, cond, case, when, unless
 - [errors.md](errors.md) — error handling

@@ -40,6 +40,7 @@ bytecode. Error messages include file:line:col information.
 
 ### Key modules
 
+**Pipeline (compilation order):**
 - **`reader`** — Lexing and parsing to `Syntax`
 - **`syntax`** — Syntax types, macro expansion
 - **`hir`** — Binding resolution, capture analysis, signal inference, linting,
@@ -47,9 +48,18 @@ bytecode. Error messages include file:line:col information.
 - **`lir`** — SSA form with virtual registers, basic blocks, `SpannedInstr`
   for source tracking
 - **`compiler`** — Bytecode instruction definitions, debug formatting
+- **`pipeline`** — Compilation entry points
+  (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
+
+**Runtime:**
 - **`vm`** — Bytecode execution, builtin documentation storage
 - **`value`** — Runtime value representation (tagged-union); trait table field on
   19 user-facing heap variants
+- **`primitives`** — Built-in functions. Run `(help)` in the REPL for a
+  full list grouped by category. See [`docs/stdlib.md`](docs/stdlib.md).
+- **`stdlib`** — Standard library functions (`stdlib.lisp`, loaded at startup).
+  See [`docs/stdlib.md`](docs/stdlib.md).
+- **`arithmetic`** — Unified arithmetic operations (shared by VM and primitives)
 - **`signals`** — Signal type (`Silent`, `Yields`, `Polymorphic`), signal
   registry for keyword-to-bit mapping;
   includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL`
@@ -57,25 +67,31 @@ bytecode. Error messages include file:line:col information.
 - **`io`** — I/O request types, backends, timeout handling;
   includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle`
   for subprocess lifecycle
-- **`lint`** — Diagnostic types and lint rules
-- **`symbols`** — Symbol index types for IDE features
-- **`primitives`** — Built-in functions. Run `(help)` in the REPL for a
-  full list grouped by category. See [`docs/stdlib.md`](docs/stdlib.md).
-- **`stdlib`** — Standard library functions (loaded at startup). See
-  [`docs/stdlib.md`](docs/stdlib.md).
-- **`ffi`** — C interop via libloading/bindgen
+- **`port`** — Port type (file descriptor wrapper with direction, encoding, kind)
+- **`error`** — `LocationMap` for bytecode offset → source location mapping
+- **`context`** — Thread-local VM and symbol table context management
+- **`symbol`** — Symbol interning table
+- **`config`** — Global CLI configuration (parsed once at startup)
+
+**Backends:**
 - **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
   functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
 - **`wasm`** — WASM backend via Wasmtime; full-module compilation
   (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
+- **`ffi`** — C interop via libloading/bindgen
+
+**Tooling:**
+- **`lint`** — Diagnostic types and lint rules
+- **`symbols`** — Symbol index types for IDE features
+- **`lsp`** — Language server protocol implementation
+- **`rewrite`** — Source-to-source token-level rewriting engine
 - **`formatter`** — Code formatting for Elle source
+- **`epoch`** — Epoch-based migration system for breaking changes
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.
   See [`docs/plugins.md`](docs/plugins.md) for the full list.
 - **`path`** — UTF-8 path operations
-- **`pipeline`** — Compilation entry points
-  (see [`src/pipeline/AGENTS.md`](src/pipeline/AGENTS.md))
-- **`error`** — `LocationMap` for bytecode offset → source location mapping
+- **`repl`** — Read-eval-print loop with multi-line accumulation
 
 ### The Value type
 
@@ -93,6 +109,8 @@ bytecode. Error messages include file:line:col information.
 |---------|------|---------|
 | elle | `src/` | Interpreter/compiler (includes `lint`, `lsp`, and `rewrite` subcommands) |
 | docgen | `demos/docgen/` | Documentation site generator (written in Elle) |
+| conway | `demos/conway/` | Conway's Game of Life (SDL3 demo) |
+| lib/sdl3.lisp | `lib/` | SDL3 bindings via FFI (window, renderer, events, audio, TTF) |
 | lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
 | lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
 
@@ -103,12 +121,12 @@ bytecode. Error messages include file:line:col information.
 | `src/` | Core interpreter/compiler |
 | `src/io/` | I/O request types and backends |
 | `src/lsp/` | Language server protocol implementation |
-| `lib/` | Reusable Elle modules (HTTP, TLS, Redis, DNS, AWS, etc.) |
-| `examples/` | Executable semantics documentation |
+| `lib/` | Reusable Elle modules (SDL, HTTP, TLS, Redis, DNS, AWS, etc.) |
+| `stdlib.lisp` | Standard library (loaded at startup) |
 | `tests/` | Unit, integration, property tests |
 | `benches/` | Criterion and IAI benchmarks |
 | `docs/` | Design documents and guides |
-| `demos/` | Comparison implementations |
+| `demos/` | Demo applications (conway, docgen, mandelbrot, etc.) |
 | `plugins/` | Dynamically-loaded plugin crates (cdylib) |
 | `tools/` | MCP server, graph extractor, codemod scripts |
 | `site/` | Generated documentation site |

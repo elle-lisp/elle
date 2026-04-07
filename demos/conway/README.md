@@ -2,11 +2,11 @@
 
 ## What This Demo Does
 
-Interactive cellular automaton rendered via `std/sdl` (pure SDL3 FFI).
+Interactive cellular automaton rendered via `std/sdl3` (pure SDL3 FFI).
 An 80×60 grid of cells at 10px each gives an 800×600 window with vsync.
 
 **Key features demonstrated:**
-- Module import (`(import "std/sdl")`, closure-as-module pattern)
+- Module import (`(import "std/sdl3")`, closure-as-module pattern)
 - SDL3 window, renderer, events, timing, debug text, blend modes
 - Event-driven main loop with keyboard, mouse click, and mouse drag
 - Mutable flat array as a grid (row-major indexing)

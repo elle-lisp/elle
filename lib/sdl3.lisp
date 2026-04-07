@@ -1,4 +1,4 @@
-## std/sdl — SDL3 bindings for Elle via FFI
+## std/sdl3 — SDL3 bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libSDL3. No Rust plugin needed.
 ##
@@ -7,7 +7,7 @@
 ##   - ffi primitives (ffi/native, ffi/defbind, ffi/malloc, etc.)
 ##
 ## Usage:
-##   (def sdl ((import "std/sdl")))
+##   (def sdl ((import "std/sdl3")))
 ##   (sdl:init)
 ##   (def win (sdl:create-window "Hello" 640 480))
 ##   (def ren (sdl:create-renderer win))
@@ -445,22 +445,18 @@
 (defn marshal-event [buf]
   "Read one event from a 128-byte buffer. Returns a struct or nil."
   (let ([etype (read-u32 buf 0)])
-    (cond
-      ((= etype event-quit)
-        {:type :quit :timestamp (read-u64 buf 8)})
-      ((or (= etype event-key-down) (= etype event-key-up))
-        (marshal-keyboard buf etype))
-      ((= etype event-mouse-motion)
-        (marshal-mouse-motion buf))
-      ((or (= etype event-mouse-button-down) (= etype event-mouse-button-up))
-        (marshal-mouse-button buf etype))
-      ((= etype event-mouse-wheel)
-        (marshal-mouse-wheel buf))
-      ((and (>= etype event-window-first) (<= etype event-window-last))
-        (marshal-window buf etype))
-      ((= etype event-text-input)
-        (marshal-text-input buf))
-      (true
+    (case etype
+      event-quit
+        {:type :quit :timestamp (read-u64 buf 8)}
+      event-key-down       (marshal-keyboard buf etype)
+      event-key-up         (marshal-keyboard buf etype)
+      event-mouse-motion   (marshal-mouse-motion buf)
+      event-mouse-button-down (marshal-mouse-button buf etype)
+      event-mouse-button-up   (marshal-mouse-button buf etype)
+      event-mouse-wheel    (marshal-mouse-wheel buf)
+      event-text-input     (marshal-text-input buf)
+      (if (and (>= etype event-window-first) (<= etype event-window-last))
+        (marshal-window buf etype)
         {:type :unknown :raw-type etype :timestamp (read-u64 buf 8)}))))
 
 # ── Public API ─────────────────────────────────────────────────────────
@@ -476,7 +472,7 @@
                   (if events   init-events   0)
                   (if sensor   init-sensor   0)
                   (if camera   init-camera   0))])
-    (let ([f (if (= flags 0) init-video flags)])
+    (let ([f (if (zero? flags) init-video flags)])
       (check-bool (sdl-init f) "sdl/init"))))
 
 (defn sdl/quit []

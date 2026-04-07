@@ -2,7 +2,7 @@
 
 # Conway's Game of Life — SDL3 demo
 #
-# Interactive cellular automaton rendered via std/sdl (pure FFI).
+# Interactive cellular automaton rendered via std/sdl3 (pure FFI).
 #
 # Controls:
 #   Click / drag  toggle cells
@@ -13,7 +13,7 @@
 #   +/-           speed up / slow down
 #   Escape / Q    quit
 
-(def sdl ((import "std/sdl")))
+(def sdl ((import "std/sdl3")))
 
 # ── Grid parameters ───────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@
   (var n 0)
   (var i 0)
   (while (< i ncells)
-    (when (= (g i) 1) (assign n (+ n 1)))
+    (when (nonzero? (g i)) (assign n (+ n 1)))
     (assign i (+ i 1)))
   n)
 
@@ -166,7 +166,7 @@
   (sdl:set-color ren 0 220 100)
   (var i 0)
   (while (< i ncells)
-    (when (= (g i) 1)
+    (when (nonzero? (g i))
       (let* ([c (mod i cols)]
              [r (/ (- i c) cols)])
         (sdl:fill-rect ren
@@ -194,49 +194,41 @@
 
 # ── Event handling ────────────────────────────────────────────────────
 
+(defn handle-key [state ev]
+  (case ev:scancode
+    sdl:scancode-escape  (put state :running false)
+    20                   (put state :running false)          # q
+    sdl:scancode-space   (put state :paused (not (state :paused)))
+    21  (do (put state :grid (randomize (make-grid)))        # r
+            (put state :gen 0))
+    6   (do (put state :grid (make-grid))                    # c
+            (put state :gen 0))
+    46  (put state :speed (min 20 (+ (state :speed) 1)))     # +
+    45  (put state :speed (max 1 (- (state :speed) 1)))      # -
+    10  (put state :show-grid (not (state :show-grid)))      # g
+    nil))
+
+(defn handle-mouse [state ev]
+  (when (or (= ev:type :mouse-down)
+            (and (= ev:type :mouse-motion) (nonzero? ev:state)))
+    (let* ([gc (int (/ ev:x (float cell)))]
+           [gr (int (/ ev:y (float cell)))])
+      (when (and (>= gr 0) (< gr rows) (>= gc 0) (< gc cols))
+        (set-cell (state :grid) gr gc
+          (if (= ev:type :mouse-down)
+            (if (nonzero? (cell-at (state :grid) gr gc)) 0 1)
+            1))))))
+
 (defn handle-events [state]
-  (let ([events (sdl:poll-events)])
-    (each ev events
-      (let ([etype ev:type])
-        (cond
-          ((= etype :quit)
-            (put state :running false))
+  (each ev (sdl:poll-events)
+    (match ev:type
+      (:quit         (put state :running false))
+      (:key-down     (handle-key state ev))
+      (:mouse-down   (handle-mouse state ev))
+      (:mouse-motion (handle-mouse state ev))
+      (_             nil)))
+  state)
 
-          ((= etype :key-down)
-            (let ([sc ev:scancode])
-              (cond
-                ((or (= sc sdl:scancode-escape) (= sc 20))  # q
-                  (put state :running false))
-                ((= sc sdl:scancode-space)
-                  (put state :paused (not (state :paused))))
-                ((= sc 21)  # r
-                  (put state :grid (randomize (make-grid)))
-                  (put state :gen 0))
-                ((= sc 6)   # c
-                  (put state :grid (make-grid))
-                  (put state :gen 0))
-                ((= sc 46)  # = / +
-                  (put state :speed (min 20 (+ (state :speed) 1))))
-                ((= sc 45)  # -
-                  (put state :speed (max 1 (- (state :speed) 1))))
-                ((= sc 10)  # g
-                  (put state :show-grid (not (state :show-grid)))))))
-
-          ((or (= etype :mouse-down) (= etype :mouse-motion))
-            (when (or (= etype :mouse-down)
-                      (and (= etype :mouse-motion)
-                           (> ev:state 0)))
-              (let* ([mx ev:x]
-                     [my ev:y]
-                     [gc (int (/ mx (float cell)))]
-                     [gr (int (/ my (float cell)))])
-                (when (and (>= gr 0) (< gr rows) (>= gc 0) (< gc cols))
-                  (let ([g (state :grid)])
-                    (set-cell g gr gc
-                      (if (= etype :mouse-down)
-                        (if (= (cell-at g gr gc) 1) 0 1)
-                        1))))))))))
-    state))
 
 # ── Main ──────────────────────────────────────────────────────────────
 
