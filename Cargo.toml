@@ -7,7 +7,6 @@ members = [
     "plugins/crypto",
     "plugins/csv",
     "plugins/git",
-    "plugins/glob",
     "plugins/hash",
     "plugins/jiff",
     "plugins/mqtt",
@@ -24,7 +23,6 @@ members = [
     "plugins/tls",
     "plugins/toml",
     "plugins/tree-sitter",
-    "plugins/uuid",
 
     "plugins/xml",
     "plugins/yaml",

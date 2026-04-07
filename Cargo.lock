@@ -1732,14 +1732,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "elle-glob"
-version = "1.0.0"
-dependencies = [
- "elle",
- "glob",
-]
-
-[[package]]
 name = "elle-hash"
 version = "1.0.0"
 dependencies = [
@@ -1883,14 +1875,6 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-c",
  "tree-sitter-rust",
-]
-
-[[package]]
-name = "elle-uuid"
-version = "1.0.0"
-dependencies = [
- "elle",
- "uuid",
 ]
 
 [[package]]
@@ -5779,12 +5763,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha1_smol"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
-
-[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6675,7 +6653,6 @@ checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
  "getrandom 0.4.2",
  "js-sys",
- "sha1_smol",
  "wasm-bindgen",
 ]
 
