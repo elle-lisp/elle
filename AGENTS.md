@@ -237,6 +237,8 @@ When in doubt, run the tests.
 
 ## MCP Server
 
+See [`docs/mcp.md`](docs/mcp.md) for full documentation.
+
 `tools/mcp-server.lisp` is an MCP (Model Context Protocol) server that
 exposes an oxigraph RDF store over SPARQL via JSON-RPC 2.0 on stdio.
 
