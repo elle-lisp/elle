@@ -409,33 +409,16 @@ Exactly two values are falsy. Everything else is truthy.
 
 ### Type predicates
 
-| Predicate | Matches |
-|-----------|---------|
-| `nil?` | `nil` only |
-| `boolean?` | `true` or `false` |
-| `number?` | integer or float |
-| `integer?` | integer only |
-| `float?` | float only |
-| `symbol?` | symbol |
-| `keyword?` | keyword |
-| `string?` | string |
-| `pair?` | cons cell |
-| `list?` | cons cell or empty list |
-| `empty?` | empty list, empty @array, empty array, empty @struct, empty struct, empty @string |
-| `array?` | array (immutable or @array) |
-| `struct?` | struct (immutable or @struct) |
-| `set?` | set (immutable or @set) |
-| `bytes?` | bytes (immutable or @bytes) |
-| `function?` | closure or native function |
-| `closure?` | closure only |
-| `primitive?` | native function only |
-| `fiber?` | fiber |
-| `box?` | box (mutable box) |
-| `parameter?` | dynamic parameter |
-| `mutable?` | any mutable value (@array, @string, @bytes, @struct, @set, box, parameter) |
-| `ptr?` / `pointer?` | raw or managed C pointer |
-| `zero?` | zero (integer or float) |
-| `type` / `type-of` | returns type as keyword (`:integer`, `:string`, etc.) |
+Every type has a predicate: `nil?`, `integer?`, `string?`, `array?`, `struct?`, `pair?`, `bytes?`, `set?`, `fiber?`, `closure?`, `mutable?`, etc. `type-of` returns the type as a keyword.
+
+```lisp
+(type-of 42)        # => :integer
+(string? "hello")   # => true
+(mutable? @[1 2])   # => true
+(mutable? [1 2])    # => false
+```
+
+See [docs/types.md](docs/types.md) for the full list.
 
 ### Display format
 
