@@ -71,4 +71,13 @@
 (assert (= (butlast (list 1 2 3)) (list 1 2)) "butlast: list")
 (assert (= (take 2 (list 1 2 3)) (list 1 2)) "take: list")
 
+## ── bytes idempotency (bugfix) ─────────────────────────────────────────
+
+(let [[b (bytes "hello")]]
+  (assert (identical? (bytes b) b) "bytes: idempotent on bytes")
+  (assert (= (bytes b) b) "bytes: equal on bytes"))
+(let [[mb (@bytes 1 2 3)]]
+  (assert (identical? (@bytes mb) mb) "@bytes: idempotent on @bytes"))
+(assert (identical? (bytes (bytes 1 2 3)) (bytes 1 2 3)) "bytes: nested idempotent")
+
 (println "migrated: all tests passed")

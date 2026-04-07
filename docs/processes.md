@@ -9,7 +9,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 ## Loading
 
 ```text
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 ```
 
 ## Starting a process system
@@ -18,7 +18,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 process. It blocks until all processes complete and returns the scheduler.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (println "hello from process 0")))
@@ -37,7 +37,7 @@ Every process has a mailbox. `send` delivers a message; `recv` blocks
 until one arrives.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -52,7 +52,7 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 (death notification without crashing the parent).
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let* ([me (process:self)]
@@ -70,7 +70,7 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 matches, leaving non-matching messages in the mailbox in order.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -88,7 +88,7 @@ matches, leaving non-matching messages in the mailbox in order.
 given number of scheduler ticks.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (assert (= (process:recv-timeout 1) :timeout) "timed out")))
@@ -100,7 +100,7 @@ Linked processes crash together. When a linked child crashes, the parent
 crashes too — unless the parent is trapping exits.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (process:trap-exit true)
@@ -121,7 +121,7 @@ Monitors deliver a `[:DOWN ref pid reason]` message when the monitored
 process dies, without affecting the monitoring process.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([[child-pid ref] (process:spawn-monitor (fn [] :done))])
@@ -140,7 +140,7 @@ Processes can register under a keyword name. `whereis` looks up PIDs
 by name; `send-named` sends to a registered name.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -163,7 +163,7 @@ Each process has a private key-value store. Useful for per-process
 configuration that doesn't belong in the main state.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (process:put-dict :counter 0)
@@ -180,7 +180,7 @@ process gets preempted after exhausting its fuel, allowing other
 processes to run.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -217,7 +217,7 @@ down after replying.
 ## Key-value store example
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([pid (process:gen-server-start-link
@@ -240,7 +240,7 @@ down after replying.
 callback runs before it exits.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -278,7 +278,7 @@ Actor wraps GenServer with a simpler API: just an init function and
 get/update operations on state.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (process:actor-start-link (fn [] 0) :name :counter)
@@ -296,7 +296,7 @@ Task runs a one-shot function as a supervised process and returns the
 result. Like `ev/spawn` but the work has a PID and can be monitored.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let* ([t1 (process:task-async (fn [] (* 6 7)))]
@@ -338,7 +338,7 @@ Each child is a struct with:
 ## Basic supervisor
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])
@@ -508,7 +508,7 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 tracked by the scheduler and participate in I/O completion.
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let* ([f1 (ev/spawn (fn [] (+ 10 20)))]

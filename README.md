@@ -134,7 +134,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - **Erlang-style processes fall out of the fiber model.** The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
 
   ```lisp
-  (def process ((import "lib/process")))
+  (def process ((import "std/process")))
 
   (process:start (fn []
     # Start a supervised key-value server
@@ -555,7 +555,7 @@ process system: lightweight processes with mailboxes, links, monitors,
 named registration, GenServer, Actor, Task, Supervisor, and EventManager.
 
 ```lisp
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   # Supervisor manages worker processes

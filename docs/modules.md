@@ -37,7 +37,7 @@ search-path resolution and virtual prefixes:
 
 | Prefix | Resolves to | Example |
 |--------|-------------|---------|
-| `lib/X` | `<root>/lib/X.lisp` | `(import "lib/portrait")` |
+| `std/X` | `<root>/lib/X.lisp` | `(import "std/portrait")` |
 | `plugin/X` | `<root>/target/<profile>/libelle_X.so` | `(import "plugin/regex")` |
 
 The project root is `ELLE_HOME`, or auto-detected by walking up from the
@@ -54,7 +54,7 @@ For each directory, it tries `<dir>/<spec>.lisp`, `<dir>/<spec>` as-is,
 and `<dir>/libelle_<leaf>.so`.
 
 ```lisp
-# (import "lib/portrait")         — virtual prefix: lib/portrait.lisp
+# (import "std/portrait")         — virtual prefix: std/portrait → lib/portrait.lisp
 # (import "plugin/regex")         — virtual prefix: libelle_regex.so
 # (import "my/local/utils.lisp")  — search path resolution
 ```
@@ -148,7 +148,7 @@ to the library:
 ```lisp
 # Caller: import the plugin, pass it to the library
 # (def mqtt-plugin (import "plugin/mqtt"))
-# (def mqtt ((import "lib/mqtt") mqtt-plugin))
+# (def mqtt ((import "std/mqtt") mqtt-plugin))
 #
 # (let [[conn (mqtt:connect "broker.example.com" 1883
 #                           :client-id "elle-client")]]
@@ -169,7 +169,7 @@ library works with mock plugins for testing.
 Bind the whole module, access via `mod:name`:
 
 ```lisp
-# (def portrait ((import "lib/portrait")))
+# (def portrait ((import "std/portrait")))
 # (portrait:function analysis :my-fn)
 ```
 

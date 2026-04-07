@@ -127,7 +127,7 @@ For long-running daemons, use `lib/process` to supervise OS subprocesses.
 The supervisor automatically restarts them on crash:
 
 ```lisp
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (process:supervisor-start-link

@@ -5,7 +5,7 @@
 ## kernel delivers filesystem events.
 ##
 ## Usage:
-##   (def w ((import "lib/watch")))
+##   (def w ((import "std/watch")))
 ##   (def h (w:start "lib/" :filter ".lisp"))
 ##   (w:each h (fn [event] (println "changed:" (get event :path))))
 ##   (w:stop h)

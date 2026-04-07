@@ -10,7 +10,7 @@
 ##
 ## Usage:
 ##   (def egui-plugin (import "target/release/libelle_egui.so"))
-##   (def ui ((import "lib/egui.lisp") egui-plugin))
+##   (def ui ((import "std/egui") egui-plugin))
 ##
 ##   (var count 0)
 ##   (def win (ui:open :title "Counter"))

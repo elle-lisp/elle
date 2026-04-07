@@ -1,6 +1,6 @@
 # ── portrait library tests ──────────────────────────────────────────────
 
-(def portrait ((import "lib/portrait.lisp")))
+(def portrait ((import "std/portrait")))
 
 # ── Pure function portrait ──────────────────────────────────────────────
 

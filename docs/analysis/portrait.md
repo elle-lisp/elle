@@ -40,7 +40,7 @@ The `lib/portrait.lisp` library wraps the raw analysis APIs into
 structured reports.
 
 ```text
-(def portrait ((import "lib/portrait.lisp")))
+(def portrait ((import "std/portrait.lisp")))
 
 # Function portrait — signal profile, captures, callees
 (println (portrait:render (portrait:function a :validate)))

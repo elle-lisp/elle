@@ -12,8 +12,16 @@ use unicode_segmentation::UnicodeSegmentation;
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
-    // Single-argument string, @string, or keyword: convert to bytes
+    // Single-argument coercion: string/keyword → bytes, bytes → passthrough
     if args.len() == 1 {
+        // bytes → bytes (idempotent)
+        if args[0].as_bytes().is_some() {
+            return (SIG_OK, args[0]);
+        }
+        // @bytes → @bytes (idempotent)
+        if args[0].as_bytes_mut().is_some() {
+            return (SIG_OK, args[0]);
+        }
         // @string → @bytes (preserves mutability)
         if let Some(buf_ref) = args[0].as_string_mut() {
             return (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone()));
@@ -64,8 +72,16 @@ pub(crate) fn prim_bytes(args: &[Value]) -> (SignalBits, Value) {
 /// With a single string argument: encodes as UTF-8 bytes.
 /// With a single keyword argument: converts keyword name to UTF-8 bytes.
 pub(crate) fn prim_blob(args: &[Value]) -> (SignalBits, Value) {
-    // Single-argument string, @string, or keyword: convert to bytes
+    // Single-argument coercion: string/keyword → @bytes, bytes → passthrough
     if args.len() == 1 {
+        // @bytes → @bytes (idempotent)
+        if args[0].as_bytes_mut().is_some() {
+            return (SIG_OK, args[0]);
+        }
+        // bytes → bytes (idempotent, preserves immutability)
+        if args[0].as_bytes().is_some() {
+            return (SIG_OK, args[0]);
+        }
         if let Some(buf_ref) = args[0].as_string_mut() {
             return (SIG_OK, Value::bytes_mut(buf_ref.borrow().clone()));
         }

@@ -1,7 +1,7 @@
 ## Lua compatibility prelude
 ##
 ## Provides Lua standard library functions mapped to Elle primitives.
-## Usage from .lua files:  `(import "lib/lua.lisp")
+## Usage from .lua files:  `(import "std/lua")
 
 # ============================================================================
 # Type system

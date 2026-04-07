@@ -6,13 +6,13 @@
 ## schema for the knowledge graph.
 ##
 ## Usage:
-##   (def rdf ((import "lib/rdf.lisp")))
+##   (def rdf ((import "std/rdf")))
 ##   (def triples (rdf:primitives))       # N-Triples string for all Rust prims
 ##   (def triples (rdf:file analysis "path.lisp"))  # for an analyzed Elle file
 
 (fn []
 
-(def portrait-lib ((import "lib/portrait.lisp")))
+(def portrait-lib ((import "std/portrait")))
 
 # ── Namespace ──────────────────────────────────────────────────────────
 
