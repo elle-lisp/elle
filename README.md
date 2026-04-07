@@ -675,7 +675,22 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## Modules
 
-- **Module system is minimal by design.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. No module declarations, no export lists, no special import form. It's a function call.
+- **Module system is minimal and parametric.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. Elle modules are closures that return structs; call the closure to instantiate. Parameters to the closure configure the module — inject dependencies, toggle features, pass credentials.
+
+  ```lisp
+  ## Simple module — call the returned closure
+  (def b64 ((import "std/base64")))
+  (b64:encode "hello")
+
+  ## Parametric module — pass the hash plugin to enable UUID v5
+  (def hash-plugin (import "plugin/hash"))
+  (def uuid ((import "std/uuid") hash-plugin))
+  (uuid:v5 "6ba7b810-9dad-11d1-80b4-00c04fd430c8" "example.com")
+
+  ## Plugin — import returns a struct directly (no closure call)
+  (def re (import "plugin/regex"))
+  (re:match "\\d+" "abc123")
+  ```
 
 - **Source modules return their last expression.** A module that defines functions via `def` makes them available as globals; a module that ends with a struct or function hands that value back to the caller.
 
@@ -727,11 +742,13 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## Plugins
 
-- **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`.
+- **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
 
   ```lisp
   (def re (import "plugin/regex"))
-  (re:match "\\d+" "abc123")  # => {:match "123" ...}
+  (def pat (re:compile "\\d+"))
+  (re:find-all pat "a1b2c3")
+  # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
 - **20 plugins ship with Elle:**
