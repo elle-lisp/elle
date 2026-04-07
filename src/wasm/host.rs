@@ -99,7 +99,7 @@ pub struct ElleHost {
     /// Populated from EmitResult so rt_make_closure can give WASM closures
     /// valid bytecode for cross-thread execution via spawn.
     pub closure_bytecodes: Vec<ClosureBytecode>,
-    /// Debug logging enabled (set once from ELLE_WASM_DEBUG at construction).
+    /// Debug logging enabled (set once from `config.debug_wasm` at construction).
     pub debug: bool,
     /// Lazily-initialized I/O backend for inline I/O execution.
     /// Created on first use, reused for subsequent I/O operations.

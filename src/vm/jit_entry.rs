@@ -67,15 +67,18 @@ impl VM {
                                 let block_info: Vec<String> = lir_func
                                     .blocks
                                     .iter()
-                                    .take(1)
                                     .map(|b| {
                                         let instrs: Vec<String> = b
                                             .instructions
                                             .iter()
-                                            .take(5)
-                                            .map(|i| format!("{:?}", i))
+                                            .map(|i| format!("{:?}", i.instr))
                                             .collect();
-                                        format!("L{}:[{}]", b.label.0, instrs.join(", "))
+                                        format!(
+                                            "L{}:[{}] term={:?}",
+                                            b.label.0,
+                                            instrs.join(", "),
+                                            b.terminator.terminator
+                                        )
                                     })
                                     .collect();
                                 eprintln!(

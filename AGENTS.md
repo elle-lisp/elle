@@ -67,7 +67,7 @@ bytecode. Error messages include file:line:col information.
 - **`jit`** — JIT compilation via Cranelift; compiles silent and yielding
   functions (rejects polymorphic); `JitRejectionInfo` tracks rejections
 - **`wasm`** — WASM backend via Wasmtime; full-module compilation
-  (`ELLE_WASM=1`) or per-closure tiered compilation (`ELLE_WASM_TIER=1`).
+  (`--wasm=full`) or per-closure tiered compilation (`--wasm=N`).
   See [`docs/impl/wasm.md`](docs/impl/wasm.md).
 - **`formatter`** — Code formatting for Elle source
 - **`plugin`** — Dynamic plugin loading for Rust cdylib primitives.

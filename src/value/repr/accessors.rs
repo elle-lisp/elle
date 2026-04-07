@@ -708,6 +708,16 @@ impl Value {
             if current.is_nil() || current.is_empty_list() {
                 return Ok(result);
             }
+            // Syntax-wrapped nil or empty list (e.g. from letrec in macros)
+            if let Some(syntax) = current.as_syntax() {
+                match &syntax.kind {
+                    crate::syntax::SyntaxKind::Nil => return Ok(result),
+                    crate::syntax::SyntaxKind::List(items) if items.is_empty() => {
+                        return Ok(result)
+                    }
+                    _ => {}
+                }
+            }
             if let Some(cons) = current.as_cons() {
                 result.push(cons.first);
                 current = cons.rest;

@@ -206,44 +206,20 @@ impl<'a> FunctionTranslator<'a> {
                     )?;
                     self.def_var_pair(builder, dst.0, val_tag, val_payload);
                 } else if *index < num_captures + arity {
-                    // Load from arg variables
+                    // Load from arg variables (non-lbox only;
+                    // lbox params use LoadCaptureRaw + LoadLBox)
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    if (param_index as u32) < 64
-                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
-                    {
-                        // cell-wrapped param: auto-unwrap via load_lbox
-                        let (rt, rp) = self.call_helper_value_unary(
-                            builder,
-                            self.helpers.load_lbox,
-                            tag,
-                            payload,
-                        )?;
-                        self.def_var_pair(builder, dst.0, rt, rp);
-                    } else {
-                        self.def_var_pair(builder, dst.0, tag, payload);
-                    }
+                    self.def_var_pair(builder, dst.0, tag, payload);
                 } else {
-                    // Locally-defined variable
+                    // Locally-defined variable (non-lbox only;
+                    // lbox locals use LoadCaptureRaw + LoadLBox)
                     let local_index = *index - num_captures - arity;
                     let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
-                    let needs_lbox = (local_index as u32) >= 64
-                        || (self.lir.lbox_locals_mask & (1 << local_index)) != 0;
-                    if needs_lbox {
-                        // cell-wrapped: auto-unwrap via load_lbox
-                        let (rt, rp) = self.call_helper_value_unary(
-                            builder,
-                            self.helpers.load_lbox,
-                            tag,
-                            payload,
-                        )?;
-                        self.def_var_pair(builder, dst.0, rt, rp);
-                    } else {
-                        self.def_var_pair(builder, dst.0, tag, payload);
-                    }
+                    self.def_var_pair(builder, dst.0, tag, payload);
                 }
             }
 
@@ -411,39 +387,18 @@ impl<'a> FunctionTranslator<'a> {
                     let call = builder.ins().call(func_ref, &[env_ptr, idx_val, vt, vp]);
                     let _ = builder.inst_results(call);
                 } else if *index < num_captures + arity {
-                    // Store to a param slot — use store_lbox if lbox-wrapped
+                    // Store to a param slot (non-lbox only;
+                    // lbox params use LoadCaptureRaw + StoreLBox)
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
-                    if (param_index as u32) < 64
-                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
-                    {
-                        let (ct, cp) = self.use_var_pair(builder, base);
-                        let func_ref = self
-                            .module
-                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
-                        let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
-                        let _ = builder.inst_results(call);
-                    } else {
-                        self.def_var_pair(builder, base, vt, vp);
-                    }
+                    self.def_var_pair(builder, base, vt, vp);
                 } else {
+                    // Locally-defined variable (non-lbox only;
+                    // lbox locals use LoadCaptureRaw + StoreLBox)
                     let local_index = *index - num_captures - arity;
                     let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
-                    // Use store_lbox if the mask says so, OR if beyond bit 63
-                    // (conservative — matches emitter which treats these as cell locals)
-                    let needs_lbox = (local_index as u32) >= 64
-                        || (self.lir.lbox_locals_mask & (1 << local_index)) != 0;
-                    if needs_lbox {
-                        let (ct, cp) = self.use_var_pair(builder, base);
-                        let func_ref = self
-                            .module
-                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
-                        let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
-                        let _ = builder.inst_results(call);
-                    } else {
-                        self.def_var_pair(builder, base, vt, vp);
-                    }
+                    self.def_var_pair(builder, base, vt, vp);
                 }
             }
 
@@ -922,10 +877,44 @@ impl<'a> FunctionTranslator<'a> {
                 return Err(JitError::UnsupportedInstruction("Eval".to_string()));
             }
 
-            LirInstr::SuspendingCall { .. } => {
-                return Err(JitError::UnsupportedInstruction(
-                    "SuspendingCall".to_string(),
-                ));
+            LirInstr::SuspendingCall { dst, func, args } => {
+                // SuspendingCall: the callee may yield. Handled identically
+                // to Call, with an unconditional yield check after the call.
+                // LBox cells are first-class values in registers (no auto-
+                // unwrap), so yield-through-call spills them correctly.
+                let (ft, fp) = self.use_var_pair(builder, func.0);
+                let vm = self.vm_ptr.ok_or_else(|| {
+                    JitError::InvalidLir("SuspendingCall without vm pointer".to_string())
+                })?;
+
+                if args.is_empty() {
+                    let null_ptr = builder.ins().iconst(I64, 0);
+                    let nargs = builder.ins().iconst(I64, 0);
+                    let (rt, rp) = self.call_helper_call(builder, ft, fp, null_ptr, nargs, vm)?;
+                    self.def_var_pair(builder, dst.0, rt, rp);
+                } else {
+                    let slot =
+                        builder.create_sized_stack_slot(cranelift_codegen::ir::StackSlotData::new(
+                            cranelift_codegen::ir::StackSlotKind::ExplicitSlot,
+                            (args.len() * 16) as u32,
+                            0,
+                        ));
+                    for (i, arg_reg) in args.iter().enumerate() {
+                        let (at, ap) = self.use_var_pair(builder, arg_reg.0);
+                        let tag_offset = (i * 16) as i32;
+                        let payload_offset = (i * 16 + 8) as i32;
+                        builder.ins().stack_store(at, slot, tag_offset);
+                        builder.ins().stack_store(ap, slot, payload_offset);
+                    }
+                    let args_addr = builder.ins().stack_addr(I64, slot, 0);
+                    let nargs = builder.ins().iconst(I64, args.len() as i64);
+                    let (rt, rp) = self.call_helper_call(builder, ft, fp, args_addr, nargs, vm)?;
+                    self.def_var_pair(builder, dst.0, rt, rp);
+                }
+                self.emit_exception_check_after_call(builder)?;
+                let idx = self.call_site_index;
+                self.call_site_index += 1;
+                self.emit_yield_check_after_call(builder, idx)?;
             }
 
             LirInstr::ArrayMutExtend { dst, array, source } => {

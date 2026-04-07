@@ -957,11 +957,11 @@ impl<'a> Lowerer<'a> {
                 {
                     return true;
                 }
-                // Non-tail, non-mutating calls: check callee safety.
-                // Tail calls to non-mutating callees are safe — the frame
-                // is replaced and the callee runs in a new context.
+                // Tail calls: safe only if no argument is a heap-allocating
+                // expression. Rotation recycles the caller's arena, so any
+                // heap value passed as an argument would dangle.
                 if *is_tail {
-                    return false;
+                    return args.iter().any(|a| !self.result_is_safe(&a.expr, &[]));
                 }
                 if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                     return true;

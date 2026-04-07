@@ -163,12 +163,12 @@ Non-deterministic runtime values (symbol IDs, keyword hashes) are routed
 through the constant pool (`rt_load_const`) instead of inlined as `i64.const`.
 Register allocation uses deterministic slot freeing order.
 
-This enables reliable module caching: `ELLE_WASM_CACHE=/path` hashes the
+This enables reliable module caching: `--cache=/path` hashes the
 WASM bytes and reuses pre-compiled modules on cache hit (~3ms vs ~400ms).
 
 ## Tiered compilation (lazy WASM)
 
-`ELLE_WASM_TIER=1` enables tiered execution: the bytecode VM runs by default,
+`--wasm=N` enables tiered execution: the bytecode VM runs by default,
 and hot closures are compiled to per-closure WASM modules on demand.
 
 **Constraints on per-closure compilation:**

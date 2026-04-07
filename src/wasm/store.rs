@@ -59,7 +59,7 @@ fn hex_name(key: &[u8]) -> String {
 
 /// Create a Wasmtime Engine with tail-call support.
 ///
-/// Honors `ELLE_JIT`:
+/// Honors `config.jit_enabled()` for cranelift optimization:
 ///   - unset or non-zero: aggressive cranelift optimization (OptLevel::Speed)
 ///   - "0": cranelift optimization disabled (OptLevel::None) for faster compile
 pub fn create_engine() -> Result<Engine> {

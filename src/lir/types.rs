@@ -178,6 +178,15 @@ impl LirFunction {
             rotation_safe: false,
         }
     }
+
+    /// True if any block contains a SuspendingCall instruction.
+    pub fn has_suspending_call(&self) -> bool {
+        self.blocks.iter().any(|b| {
+            b.instructions
+                .iter()
+                .any(|si| matches!(si.instr, LirInstr::SuspendingCall { .. }))
+        })
+    }
 }
 
 /// An LIR instruction with source location
