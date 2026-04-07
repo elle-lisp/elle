@@ -34,11 +34,14 @@ pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
     /// Number of spilled values that constitute the operand stack.
+    /// Single source of truth — the JIT yield helper reads this, not a parameter.
     pub num_spilled: u16,
-    /// Number of locally-defined variable slots (excludes params).
+    /// Number of local variable slots (params + locally-defined).
+    /// The JIT spills locals first, then operand stack registers.
+    /// The runtime helper uses this to split the spilled buffer into
+    /// locals and operands, matching the interpreter's stack layout:
+    /// `[local_0, ..., local_{n-1}, operand_0, ..., operand_m]`.
     pub num_locals: u16,
-    /// Number of function parameters (spilled from arg_var_base).
-    pub num_params: u16,
 }
 
 /// Metadata for a single call site in JIT-compiled code.
@@ -49,12 +52,10 @@ pub(crate) struct YieldPointMeta {
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
-    /// Number of spilled operand stack values.
+    /// Total number of spilled values (locals + operands).
     pub num_spilled: u16,
-    /// Number of locally-defined variable slots (excludes params).
+    /// Number of local variable slots (params + locally-defined).
     pub num_locals: u16,
-    /// Number of function parameters (spilled from arg_var_base).
-    pub num_params: u16,
 }
 
 // =============================================================================
