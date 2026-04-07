@@ -199,10 +199,10 @@
     sdl:scancode-escape  (put state :running false)
     20                   (put state :running false)          # q
     sdl:scancode-space   (put state :paused (not (state :paused)))
-    21  (do (put state :grid (randomize (make-grid)))        # r
-            (put state :gen 0))
-    6   (do (put state :grid (make-grid))                    # c
-            (put state :gen 0))
+    21  (begin (put state :grid (randomize (make-grid)))      # r
+               (put state :gen 0))
+    6   (begin (put state :grid (make-grid))                  # c
+               (put state :gen 0))
     46  (put state :speed (min 20 (+ (state :speed) 1)))     # +
     45  (put state :speed (max 1 (- (state :speed) 1)))      # -
     10  (put state :show-grid (not (state :show-grid)))      # g
