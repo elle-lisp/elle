@@ -24,7 +24,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 ## What Makes Elle Different
 
-- **Fibers are the concurrency primitive.** A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. The parent drives execution by calling `fiber/resume`. When a fiber emits a signal, it suspends and the parent decides what to do next.
+- **Fibers are the concurrency primitive.** ([docs/concurrency.md](docs/concurrency.md)) A fiber is an independent execution context — its own stack, call frames, signal mask, and heap. Fibers are cooperative and explicitly resumed. The parent drives execution by calling `fiber/resume`. When a fiber emits a signal, it suspends and the parent decides what to do next.
 
   Fibers run as coroutines. A parent spawns a child, drives it step by step, and reads each yielded value:
 
@@ -43,7 +43,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
   When a fiber finishes, its entire heap is freed in O(1) — no GC pause, no reference counting.
 
-- **Signals are typed, cooperative flow-control interrupts.** A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up. The compiler infers which functions can emit signals and enforces that silent contexts don't call yielding ones.
+- **Signals are typed, cooperative flow-control interrupts.** ([docs/runtime.md](docs/runtime.md)) A signal is a keyword — `:error`, `:log`, `:abort`, or any user-defined name — that a fiber emits to its parent. The parent's signal mask determines which signals surface; unmasked signals propagate further up. The compiler infers which functions can emit signals and enforces that silent contexts don't call yielding ones.
 
   **Error handling** — a fiber signals an error; the parent catches it:
 
@@ -117,7 +117,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     (map f xs))  # signal = signal of f
   ```
 
-- **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided.
+- **Fully hygienic macros that operate on syntax objects, not text or s-expressions.** ([docs/macros.md](docs/macros.md)) Macros receive and return `Syntax` objects carrying scope information (Racket-style scope sets). Name capture is structurally impossible, not just conventionally avoided.
 
   ```lisp
   (defmacro my-swap (a b)
@@ -132,7 +132,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Functions are colorless.** Any function can be called from a fiber. There is no `async`/`await` annotation that marks a function as suspending and forces all its callers to be marked too. Whether something runs concurrently is decided at the call site, not baked into the function definition. In Rust/JS/Python, a suspending `fetch` forces every caller to be `async` too; in Elle, the signal is inferred by the compiler and callers are unaffected.
 
-- **Erlang-style processes fall out of the fiber model.** The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
+- **Erlang-style processes fall out of the fiber model.** ([docs/processes.md](docs/processes.md)) The same fibers that drive coroutines and I/O compose into a full process system: mailboxes, links, monitors, named registration, supervisors, and GenServers — implemented entirely in Elle as [`lib/process.lisp`](lib/process.lisp). No VM changes, no special runtime support. A supervisor is a process that traps exits and restarts children; a GenServer is a process in a receive loop with call/cast dispatch. The signal system makes this possible: `yield` delivers scheduler commands, `:error` propagates crashes through links, `:fuel` enables preemptive scheduling, and `:io` lets processes do async I/O without blocking the scheduler.
 
   ```lisp
   (def process ((import "std/process")))
@@ -164,9 +164,9 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 ## Language
 
-- **Modern Lisp syntax with no parser ambiguity.** Macros operate on syntax trees, not text. See [`prelude.lisp`](prelude.lisp) for hygienic macros and standard forms.
+- **Modern Lisp syntax with no parser ambiguity.** ([docs/syntax.md](docs/syntax.md)) Macros operate on syntax trees, not text. See [`prelude.lisp`](prelude.lisp) for hygienic macros and standard forms.
 
-- **Collection literals with mutable/immutable split.** Bare delimiters are immutable: `[1 2 3]` (array), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (@array), `@{:key val}` (@struct), `@"hello"` (@string).
+- **Collection literals with mutable/immutable split.** ([docs/types.md](docs/types.md)) Bare delimiters are immutable: `[1 2 3]` (array), `{:key val}` (struct), `"hello"` (string). `@`-prefixed are mutable: `@[1 2 3]` (@array), `@{:key val}` (@struct), `@"hello"` (@string).
 
    ```lisp
    # Immutable
@@ -186,7 +186,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
    (def bl @b[1 2 3])         # @bytes
    ```
 
-- **Strings are sequences of grapheme clusters.** `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
+- **Strings are sequences of grapheme clusters.** ([docs/strings.md](docs/strings.md)) `length`, slicing, indexing, and iteration all count grapheme clusters — not bytes, not codepoints.
 
   ```lisp
   (length "café")           # => 4, not 5 bytes
@@ -197,7 +197,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
   (length "👨‍👩‍👧")   # => 1
   ```
 
-- **Destructuring in all binding positions.** `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
+- **Destructuring in all binding positions.** ([docs/destructuring.md](docs/destructuring.md)) `def`, `let`, `let*`, `var`, `fn` parameters, `match` patterns — missing values become `nil`, wrong types become `nil`.
 
   ```lisp
   (def (head & tail) (list 1 2 3 4))
@@ -207,7 +207,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
     {:config {:db {:host "localhost"}}})
   ```
 
-- **Closures with automatic capture analysis.** The compiler tracks which variables each closure captures. Mutable captures use cells automatically. Enables escape analysis for scope-level memory reclamation.
+- **Closures with automatic capture analysis.** ([docs/functions.md](docs/functions.md)) The compiler tracks which variables each closure captures. Mutable captures use cells automatically. Enables escape analysis for scope-level memory reclamation.
 
   ```lisp
   (defn make-counter [start]
@@ -240,7 +240,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 
 - **Reader macros for quasiquote and unquote.** `` ` `` for quasiquote, `,` for unquote, `,;` for unquote-splice (inside quasiquote).
 
-- **Parameters for dynamic binding.** `parameter` creates a parameter, `parameterize` sets it in a scope, child fibers inherit parent parameter frames.
+- **Parameters for dynamic binding.** ([docs/parameters.md](docs/parameters.md)) `parameter` creates a parameter, `parameterize` sets it in a scope, child fibers inherit parent parameter frames.
 
   ```lisp
   (def *port* (parameter :stdout))
@@ -467,7 +467,7 @@ Exactly two values are falsy. Everything else is truthy.
 
 ## Control Flow
 
-- **Conditionals: `if`, `cond`, `when`, `unless`, `case`.** `if` is the primitive, others are macros or sugar.
+- **Conditionals: `if`, `cond`, `when`, `unless`, `case`.** ([docs/control.md](docs/control.md)) `if` is the primitive, others are macros or sugar.
 
   ```lisp
   (if (> x 0) "positive" "non-positive")
@@ -483,7 +483,7 @@ Exactly two values are falsy. Everything else is truthy.
     ("other"))
   ```
 
-- **Pattern matching with `match`.** Type guards, element extraction, nested patterns, wildcard `_`, and guard clauses.
+- **Pattern matching with `match`.** ([docs/match.md](docs/match.md)) Type guards, element extraction, nested patterns, wildcard `_`, and guard clauses.
 
   ```lisp
   (match value
@@ -495,7 +495,7 @@ Exactly two values are falsy. Everything else is truthy.
     (_                    "no match"))
   ```
 
-- **Error handling: `try`/`catch`, `protect`, `defer`.** Built on fibers and signals, not exceptions.
+- **Error handling: `try`/`catch`, `protect`, `defer`.** ([docs/errors.md](docs/errors.md)) Built on fibers and signals, not exceptions.
 
   ```lisp
   (try
@@ -512,7 +512,7 @@ Exactly two values are falsy. Everything else is truthy.
     (do-work))  # cleanup runs after do-work
   ```
 
-- **Loops: `while`, `forever`, `break`.** `while` is the primitive, `forever` is a macro, `break` exits a block.
+- **Loops: `while`, `forever`, `break`.** ([docs/loops.md](docs/loops.md)) `while` is the primitive, `forever` is a macro, `break` exits a block.
 
   ```lisp
   (while (< i 10)
@@ -528,6 +528,8 @@ Exactly two values are falsy. Everything else is truthy.
   ```
 
 ## Concurrency
+
+See [docs/concurrency.md](docs/concurrency.md), [docs/scheduler.md](docs/scheduler.md), and [docs/io.md](docs/io.md).
 
 Elle has three concurrency layers, each built on the one below:
 
@@ -596,7 +598,7 @@ concurrency layer.
 
 ## Memory
 
-- **No garbage collector.** Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
+- **No garbage collector.** ([docs/memory.md](docs/memory.md)) Memory is reclaimed deterministically through three mechanisms, all derived from the same static analysis that drives the signal system:
 
   - **Per-fiber heaps:** Each fiber owns a slab allocator (`FiberHeap`) with 256-slot chunks and an intrusive free list. When a fiber finishes, its entire heap is freed — no traversal, no mark phase, no sweep. Slab allocation is O(1) with strong cache locality.
 
@@ -640,7 +642,7 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## FFI
 
-- **Call C without ceremony.** Load a library, bind a symbol, call it.
+- **Call C without ceremony.** ([docs/ffi.md](docs/ffi.md)) Load a library, bind a symbol, call it.
 
   ```lisp
   (def libc (ffi/native nil))
@@ -675,7 +677,7 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## Module System
 
-- **Minimal and parametric.** `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. Elle modules are closures that return structs; call the closure to instantiate. Parameters to the closure configure the module — inject dependencies, toggle features, pass credentials.
+- **Minimal and parametric.** ([docs/modules.md](docs/modules.md)) `import` loads a file — Elle source or native `.so` plugin — compiles and executes it, returns the last expression's value. Elle modules are closures that return structs; call the closure to instantiate. Parameters to the closure configure the module — inject dependencies, toggle features, pass credentials.
 
   ```lisp
   ## Simple module — call the returned closure
@@ -710,6 +712,8 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 - **Module system is user-replaceable.** `import` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
 
 ## Standard Library Modules
+
+See [docs/libraries.md](docs/libraries.md) for full documentation.
 
 - **Pure Elle and FFI modules require no compilation.** Import with the `std/` prefix. Modules that wrap C libraries (sqlite, compress, git) use Elle's FFI — the system library must be installed, but no Rust build step is needed.
 
@@ -753,7 +757,7 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **20 plugins ship with Elle:**
+- **20 plugins ship with Elle.** See [docs/plugins.md](docs/plugins.md) for details.
 
   | Plugin | Description |
   |--------|-------------|
@@ -780,7 +784,7 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 ## Epochs — Versioned Syntax Migration
 
-- **Breaking changes are versioned.** Each source file can declare an epoch — `(elle/epoch N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
+- **Breaking changes are versioned.** ([docs/epochs.md](docs/epochs.md)) Each source file can declare an epoch — `(elle/epoch N)` — to pin the syntax version it was written for. The compiler transparently rewrites old-epoch syntax before macro expansion. Files without an epoch declaration target the current epoch.
 
 - **Three migration rule types.** `Rename` swaps symbols mechanically. `Replace` restructures call forms using templates with positional placeholders. `Remove` flags deleted forms with a compile error and guidance message.
 
