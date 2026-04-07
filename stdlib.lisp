@@ -1618,6 +1618,45 @@
   "Product of a sequence of numbers. (product [1 2 3]) => 6"
   (fold * 1 xs))
 
+## ── Migrated from Rust primitives ───────────────────────────────────
+
+(defn drop [n lst]
+  "Drop the first n elements of a list."
+  (when (< n 0)
+    (error {:error :argument-error
+            :message (string "drop: count must be non-negative, got " n)}))
+  (if (or (= n 0) (empty? lst)) lst
+    (drop (- n 1) (rest lst))))
+
+(defn range [& args]
+  "Generate a range of numbers as a mutable array.
+   (range end) — 0 to end-1
+   (range start end) — start to end-1
+   (range start end step) — custom step"
+  (let* [[nargs (length args)]
+         [start (cond ((= nargs 1) 0)
+                      ((or (= nargs 2) (= nargs 3)) (get args 0))
+                      (true (error {:error :arity-error
+                                    :message (string "range: expected 1-3 arguments, got " nargs)})))]
+         [end   (cond ((= nargs 1) (get args 0))
+                      (true (get args 1)))]
+         [step  (cond ((< nargs 3) 1)
+                      (true (let [[s (get args 2)]]
+                              (when (= s 0)
+                                (error {:error :argument-error
+                                        :message "range: step cannot be zero"}))
+                              s)))]
+         [result @[]]]
+    (var current start)
+    (if (> step 0)
+      (while (< current end)
+        (push result current)
+        (assign current (+ current step)))
+      (while (> current end)
+        (push result current)
+        (assign current (+ current step))))
+    result))
+
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.
@@ -1665,4 +1704,5 @@
         :sort-with sort-with :sort-by-cmp sort-by-cmp
         :ffi/pin ffi/pin
         :from-pairs from-pairs :sum sum :product product
-        :update update :get-in get-in :put-in put-in :update-in update-in})
+        :update update :get-in get-in :put-in put-in :update-in update-in
+        :drop drop :range range})
