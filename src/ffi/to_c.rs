@@ -190,16 +190,22 @@ impl MarshalledArg {
             }
 
             TypeDesc::Str => {
-                let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
-                    LError::ffi_type_error(
-                        "string",
-                        format!("expected string, got {}", value.type_name()),
-                    )
-                })?;
-                let cstring = CString::new(s.as_str())
-                    .map_err(|_| LError::ffi_type_error("string", "contains interior null byte"))?;
-                let ptr = cstring.as_ptr();
-                ArgStorage::Str(cstring, ptr)
+                // nil → NULL pointer
+                if value.is_nil() {
+                    ArgStorage::Ptr(std::ptr::null_mut())
+                } else {
+                    let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
+                        LError::ffi_type_error(
+                            "string",
+                            format!("expected string or nil, got {}", value.type_name()),
+                        )
+                    })?;
+                    let cstring = CString::new(s.as_str()).map_err(|_| {
+                        LError::ffi_type_error("string", "contains interior null byte")
+                    })?;
+                    let ptr = cstring.as_ptr();
+                    ArgStorage::Str(cstring, ptr)
+                }
             }
 
             TypeDesc::Struct(sd) => {
@@ -436,12 +442,17 @@ pub fn write_value_to_buffer(
         }
 
         TypeDesc::Str => {
+            // nil → NULL pointer
+            if value.is_nil() {
+                unsafe { *(ptr as *mut *const std::ffi::c_char) = std::ptr::null() };
+                return Ok(Vec::new());
+            }
             // Create a CString, write its pointer into the buffer, and
             // return a MarshalledArg that owns the CString.
             let s = value.with_string(|s| s.to_string()).ok_or_else(|| {
                 LError::ffi_type_error(
                     "string",
-                    format!("expected string, got {}", value.type_name()),
+                    format!("expected string or nil, got {}", value.type_name()),
                 )
             })?;
             let cstring = CString::new(s.as_str())

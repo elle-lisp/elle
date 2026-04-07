@@ -10,7 +10,7 @@ pub(crate) fn handle_make_closure(
     constants: &[Value],
 ) {
     let idx = vm.read_u16(bytecode, ip) as usize;
-    let num_upvalues = vm.read_u8(bytecode, ip) as usize;
+    let num_upvalues = vm.read_u16(bytecode, ip) as usize;
 
     // Get the closure template from constants
     let template_closure = constants[idx]

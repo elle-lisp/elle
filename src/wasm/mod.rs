@@ -1,9 +1,9 @@
 //! WASM backend: LIR → WASM emission and Wasmtime execution.
 //!
 //! Two modes:
-//! - Full-module (`ELLE_WASM=1`): compiles stdlib + user code as one WASM
+//! - Full-module: compiles stdlib + user code as one WASM
 //!   module, replaces the bytecode VM entirely.
-//! - Tiered (`ELLE_WASM_TIER=1`): compiles individual hot closures to WASM
+//! - Tiered: compiles individual hot closures to WASM
 //!   on demand, complements the bytecode VM.
 //!
 //! Architecture:
@@ -141,7 +141,7 @@ fn chunk_user_forms(source: &str, source_name: &str) -> String {
 /// Compile and execute Elle source through the WASM backend.
 ///
 /// Full pipeline: source → reader → expander → analyzer → HIR → LIR → WASM → Wasmtime.
-/// Used for testing and as the `ELLE_WASM=1` entry point.
+/// Used for testing and as the full-module WASM entry point.
 pub fn eval_wasm(source: &str, source_name: &str) -> Result<Value, String> {
     eval_wasm_raw(source, source_name, false)
 }

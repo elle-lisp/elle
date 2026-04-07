@@ -306,7 +306,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::LoadUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_byte(*index as u8);
+                    self.bytecode.emit_u16(*index);
                 }
                 self.push_reg(*dst);
             }
@@ -315,7 +315,7 @@ impl Emitter {
                 // Load without unwrapping cells - used for forwarding captures
                 self.bytecode.emit(Instruction::LoadUpvalueRaw);
                 self.bytecode.emit_byte(0); // depth (currently unused)
-                self.bytecode.emit_byte(*index as u8);
+                self.bytecode.emit_u16(*index);
                 self.push_reg(*dst);
             }
 
@@ -328,7 +328,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::StoreUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_byte(*index as u8);
+                    self.bytecode.emit_u16(*index);
                 }
                 // Both StoreLocal and StoreUpvalue pop-then-push-back.
                 // Auto-pop: consume the pushed-back value.
@@ -423,7 +423,7 @@ impl Emitter {
                 // Emit MakeClosure instruction
                 self.bytecode.emit(Instruction::MakeClosure);
                 self.bytecode.emit_u16(const_idx);
-                self.bytecode.emit_byte(captures.len() as u8);
+                self.bytecode.emit_u16(captures.len() as u16);
 
                 // Pop captures, push closure
                 for _ in captures {
@@ -462,7 +462,7 @@ impl Emitter {
                 }
 
                 self.bytecode.emit(Instruction::Call);
-                self.bytecode.emit_byte(args.len() as u8);
+                self.bytecode.emit_u16(args.len() as u16);
                 let call_resume_ip = self.bytecode.current_pos();
 
                 // Pop func and args from simulated stack
@@ -513,7 +513,7 @@ impl Emitter {
                     self.ensure_on_top(*func);
                 }
                 self.bytecode.emit(Instruction::TailCall);
-                self.bytecode.emit_byte(args.len() as u8);
+                self.bytecode.emit_u16(args.len() as u16);
             }
 
             LirInstr::Cons { dst, head, tail } => {

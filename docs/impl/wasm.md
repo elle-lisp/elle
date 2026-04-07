@@ -7,24 +7,24 @@ front end (reader → expander → analyzer → HIR → LIR).
 ## Quick start
 
 ```bash
-# Run a program through the WASM backend
-ELLE_WASM=1 elle script.lisp
+# Full-module WASM backend
+elle --wasm=full script.lisp
 
 # With disk cache (amortizes Wasmtime compilation)
-ELLE_WASM=1 ELLE_WASM_CACHE=/tmp/elle-wasm elle script.lisp
+elle --wasm=full --cache=/tmp/elle-wasm script.lisp
 
 # Debug output (host call tracing)
-ELLE_WASM=1 ELLE_WASM_DEBUG=1 elle script.lisp
+elle --wasm=full --debug-wasm script.lisp
 
 # Dump the generated WASM module
-ELLE_WASM=1 ELLE_WASM_DUMP=1 elle script.lisp
+elle --wasm=full --wasm-dump script.lisp
 # => writes /tmp/elle-wasm-dump.wasm (inspect with wasm-tools)
 
 # Without stdlib (for testing the emitter in isolation)
-ELLE_WASM=1 ELLE_WASM_NO_STDLIB=1 elle script.lisp
+elle --wasm=full --wasm-no-stdlib script.lisp
 
 # Tiered mode: JIT individual hot closures to WASM during VM execution
-ELLE_WASM_TIER=1 elle script.lisp
+elle --wasm=11 script.lisp
 ```
 
 ## Architecture
@@ -35,12 +35,12 @@ LIR → WasmEmitter → WASM module bytes → Wasmtime → execution
 
 Two execution modes:
 
-- **Full-module** (`ELLE_WASM=1`): compiles stdlib + user code as a
+- **Full-module** (`--wasm=full`): compiles stdlib + user code as a
   single WASM module. Replaces the bytecode VM entirely. Supports
   closures, fibers, yield, tail calls, I/O, and the async scheduler.
   Missing: `eval` (dynamic compilation).
 
-- **Tiered** (`ELLE_WASM_TIER=1`): compiles individual hot closures
+- **Tiered** (`--wasm=N`): compiles individual hot closures
   to WASM on demand during bytecode VM execution. Complements the VM
   rather than replacing it. Currently limited to leaf functions
   (no closures, tail calls, or yield).
@@ -154,7 +154,7 @@ The gap is the WASM→host→WASM boundary crossing on every closure call
 (~400ns per call via `rt_call` + wasmtime trampolines, vs ~20ns for
 the bytecode VM's direct dispatch).
 
-Wasmtime compilation: ~830ms cold, ~3ms with `ELLE_WASM_CACHE`.
+Wasmtime compilation: ~830ms cold, ~3ms with `--cache`.
 Arithmetic and comparisons are already inline WASM (no host calls).
 
 ### What's fast
@@ -193,24 +193,24 @@ Arithmetic and comparisons are already inline WASM (no host calls).
 make smoke-wasm
 
 # Individual test
-ELLE_WASM=1 elle tests/elle/arithmetic.lisp
+elle --wasm=full tests/elle/arithmetic.lisp
 
 # Tiered mode test
-ELLE_WASM_TIER=1 elle tests/elle/wasm-tier.lisp
+elle --wasm=11 tests/elle/wasm-tier.lisp
 
 # Rust-side WASM tests
 cargo test wasm
 ```
 
-## Environment variables
+## CLI flags
 
-| Variable | Effect |
-|----------|--------|
-| `ELLE_WASM=1` | Use full-module WASM backend |
-| `ELLE_WASM_TIER=1` | Enable tiered WASM compilation in VM mode |
-| `ELLE_WASM_CACHE=path` | Disk cache for compiled WASM modules |
-| `ELLE_WASM_DEBUG=1` | Print host call traces to stderr |
-| `ELLE_WASM_DUMP=1` | Write WASM bytes to `/tmp/elle-wasm-dump.wasm` |
-| `ELLE_WASM_LIR=1` | Print LIR before WASM emission |
-| `ELLE_WASM_NO_STDLIB=1` | Skip stdlib (for emitter testing) |
-| `ELLE_JIT=0` | Disable cranelift optimization in Wasmtime |
+| Flag | Effect |
+|------|--------|
+| `--wasm=full` | Full-module WASM backend |
+| `--wasm=N` | Tiered WASM compilation (threshold N-1) |
+| `--cache=path` | Disk cache for compiled WASM modules |
+| `--debug-wasm` | Print host call traces to stderr |
+| `--wasm-dump` | Write WASM bytes to `/tmp/elle-wasm-dump.wasm` |
+| `--wasm-lir` | Print LIR before WASM emission |
+| `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
+| `--jit=0` | Disable cranelift optimization in Wasmtime |

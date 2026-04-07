@@ -1,29 +1,32 @@
 # conway
 
-Conway's Game of Life rendered via SDL2 FFI.
+Conway's Game of Life rendered via `std/sdl3` (SDL3 pure FFI).
 
 ## Responsibility
 
-Demonstrate interactive graphics programming in Elle using SDL2 through the FFI system. Exercises library loading, struct marshalling, event polling, and mutable array manipulation.
+Demonstrate interactive graphics programming in Elle using SDL3 through
+the `std/sdl3` library. Exercises module import, event handling
+(keyboard + mouse), draw primitives, debug text, blend modes, and
+dynamic window titles.
 
 Does NOT:
-- Use any Elle GUI abstraction (raw FFI only)
+- Use raw FFI directly (uses std/sdl3)
+- Require any Rust plugins
 - Require the async scheduler (synchronous main loop)
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `conway.lisp` | Complete demo — SDL2 bindings, grid logic, event loop, rendering |
+| `conway.lisp` | Complete demo — grid logic, event loop, rendering |
 
-## FFI surface
+## Dependencies
 
-- `libSDL2-2.0.so.0` — window, renderer, events, timing
-- `target/release/libelle_random.so` — random float for grid randomization
+- `std/sdl3` via `(import "std/sdl3")`
+- `libSDL3.so` system library
 
 ## Running
 
 ```bash
-cargo build --release -p elle-random
 cargo run --release -- demos/conway/conway.lisp
 ```

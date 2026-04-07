@@ -105,11 +105,10 @@ impl JitCompiler {
         symbol_names: HashMap<u32, String>,
         module_closures: Vec<LirFunction>,
     ) -> Result<JitCode, JitError> {
-        // Only reject polymorphic signals (signal depends on arguments).
-        // Yielding functions are now supported via side-exit.
-        if lir.signal.propagates != 0 {
-            return Err(JitError::Polymorphic);
-        }
+        // Polymorphic and yielding functions are supported via side-exit.
+        // The runtime helper elle_jit_call handles arbitrary callables
+        // (closures, arrays, structs), and emit_yield_check_after_call
+        // builds a yield-through-call frame if the callee suspends.
 
         // Variadic functions with struct/named varargs require fiber access
         // for error reporting on invalid keyword arguments. The JIT entry
@@ -187,6 +186,7 @@ impl JitCompiler {
                 resume_ip: yp.resume_ip,
                 num_spilled: yp.stack_regs.len() as u16,
                 num_locals: yp.num_locals,
+                num_params: lir.num_params as u16,
             })
             .collect();
 
@@ -198,6 +198,7 @@ impl JitCompiler {
                 resume_ip: cs.resume_ip,
                 num_spilled: cs.stack_regs.len() as u16,
                 num_locals: cs.num_locals,
+                num_params: lir.num_params as u16,
             })
             .collect();
 
@@ -218,10 +219,6 @@ impl JitCompiler {
         lir: &LirFunction,
         self_sym: Option<SymbolId>,
     ) -> Result<Vec<String>, JitError> {
-        if lir.signal.propagates != 0 {
-            return Err(JitError::Polymorphic);
-        }
-
         let sig = self.make_jit_signature();
 
         let func_name = lir.name.as_deref().unwrap_or("jit_func");
@@ -761,6 +758,7 @@ impl JitCompiler {
 
         builder.seal_all_blocks();
         builder.finalize();
+
         Ok(translator.closure_constants)
     }
 }
@@ -897,13 +895,17 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_polymorphic() {
+    fn test_accept_polymorphic() {
         let mut lir = make_simple_lir();
         lir.signal = Signal::polymorphic(0);
 
         let compiler = JitCompiler::new().expect("Failed to create compiler");
         let result = compiler.compile(&lir, None, HashMap::new(), Vec::new());
-        assert!(matches!(result, Err(JitError::Polymorphic)));
+        assert!(
+            result.is_ok(),
+            "JIT should accept polymorphic functions (runtime dispatch handles callables): {:?}",
+            result,
+        );
     }
 
     #[test]

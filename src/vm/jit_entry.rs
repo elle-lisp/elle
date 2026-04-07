@@ -67,15 +67,18 @@ impl VM {
                                 let block_info: Vec<String> = lir_func
                                     .blocks
                                     .iter()
-                                    .take(1)
                                     .map(|b| {
                                         let instrs: Vec<String> = b
                                             .instructions
                                             .iter()
-                                            .take(5)
-                                            .map(|i| format!("{:?}", i))
+                                            .map(|i| format!("{:?}", i.instr))
                                             .collect();
-                                        format!("L{}:[{}]", b.label.0, instrs.join(", "))
+                                        format!(
+                                            "L{}:[{}] term={:?}",
+                                            b.label.0,
+                                            instrs.join(", "),
+                                            b.terminator.terminator
+                                        )
                                     })
                                     .collect();
                                 eprintln!(
@@ -253,7 +256,13 @@ impl VM {
             closure.env.as_ptr()
         };
 
-        unsafe {
+        // Save/restore rotation base so nested self-tail-call loops
+        // don't corrupt the caller's rotation state.
+        let saved_rotation_base =
+            crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
+                .flatten();
+
+        let result = unsafe {
             jit_code.call(
                 env_ptr,
                 args.as_ptr(),
@@ -262,7 +271,13 @@ impl VM {
                 func_value.tag,
                 func_value.payload,
             )
-        }
+        };
+
+        crate::value::fiberheap::with_current_heap_mut(|h| {
+            h.restore_jit_rotation_base(saved_rotation_base.clone());
+        });
+
+        result
     }
 
     /// Try batch JIT compilation for a hot function and its call peers.

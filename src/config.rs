@@ -1,7 +1,7 @@
 //! Global configuration parsed from CLI arguments.
 //!
 //! Set once at startup via `init`, read anywhere via `get`.
-//! Replaces all `ELLE_*` environment variables.
+//! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
 use std::sync::OnceLock;
 
@@ -44,7 +44,7 @@ pub fn init(config: Config) {
 /// - `N` — JIT enabled, compile after N-1 calls
 ///   (so `--jit=1` compiles on first call, `--jit=11` compiles after 10)
 ///
-/// Default: 11 (threshold 10, matching the old `ELLE_JIT_THRESHOLD=10`).
+/// Default: 11 (threshold 10).
 ///
 /// ## `--wasm=N`
 ///

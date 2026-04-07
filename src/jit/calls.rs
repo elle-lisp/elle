@@ -34,14 +34,11 @@ pub(crate) struct YieldPointMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
     /// Number of spilled values that constitute the operand stack.
-    /// Single source of truth — the JIT yield helper reads this, not a parameter.
     pub num_spilled: u16,
-    /// Number of local variable slots (params + locally-defined).
-    /// The JIT spills locals first, then operand stack registers.
-    /// The runtime helper uses this to split the spilled buffer into
-    /// locals and operands, matching the interpreter's stack layout:
-    /// `[local_0, ..., local_{n-1}, operand_0, ..., operand_m]`.
+    /// Number of locally-defined variable slots (excludes params).
     pub num_locals: u16,
+    /// Number of function parameters (spilled from arg_var_base).
+    pub num_params: u16,
 }
 
 /// Metadata for a single call site in JIT-compiled code.
@@ -52,10 +49,12 @@ pub(crate) struct YieldPointMeta {
 pub(crate) struct CallSiteMeta {
     /// Bytecode IP to resume at (matches the interpreter's SuspendedFrame.ip)
     pub resume_ip: usize,
-    /// Total number of spilled values (locals + operands).
+    /// Number of spilled operand stack values.
     pub num_spilled: u16,
-    /// Number of local variable slots (params + locally-defined).
+    /// Number of locally-defined variable slots (excludes params).
     pub num_locals: u16,
+    /// Number of function parameters (spilled from arg_var_base).
+    pub num_params: u16,
 }
 
 // =============================================================================
@@ -222,6 +221,12 @@ pub extern "C" fn elle_jit_call(
         if let Some(jit_code) = vm.jit_cache.get(&bytecode_ptr).cloned() {
             vm.fiber.call_depth += 1;
 
+            // Save/restore rotation base so nested self-tail-call loops
+            // don't corrupt the caller's rotation state.
+            let saved_rotation_base =
+                crate::value::fiberheap::with_current_heap_mut(|h| h.save_jit_rotation_base())
+                    .flatten();
+
             let env_ptr = if closure.env.is_empty() {
                 std::ptr::null()
             } else {
@@ -240,6 +245,11 @@ pub extern "C" fn elle_jit_call(
             };
 
             vm.fiber.call_depth -= 1;
+
+            // Restore rotation base for the caller's self-tail-call loop.
+            crate::value::fiberheap::with_current_heap_mut(|h| {
+                h.restore_jit_rotation_base(saved_rotation_base.clone());
+            });
 
             // Check for exception (error or halt) — use contains for compound signals
             if vm

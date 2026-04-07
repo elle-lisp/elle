@@ -48,7 +48,7 @@ impl VM {
         location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         let bc: &[u8] = bytecode;
-        let arg_count = self.read_u8(bc, ip) as usize;
+        let arg_count = self.read_u16(bc, ip) as usize;
         let func = self
             .fiber
             .stack
@@ -425,7 +425,7 @@ impl VM {
         ip: &mut usize,
         bytecode: &[u8],
     ) -> Option<SignalBits> {
-        let arg_count = self.read_u8(bytecode, ip) as usize;
+        let arg_count = self.read_u16(bytecode, ip) as usize;
         let func = self
             .fiber
             .stack

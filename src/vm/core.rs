@@ -72,7 +72,7 @@ pub struct VM {
     pub docs: HashMap<String, Doc>,
     /// JIT rejection log: bytecode pointer → rejection info.
     /// Records first rejection per closure template. Used by
-    /// `(jit/rejections)` primitive and `ELLE_JIT_STATS` env var.
+    /// `(jit/rejections)` primitive and `--stats` CLI flag.
     pub jit_rejections: FxHashMap<*const u8, JitRejectionInfo>,
     /// Cached Expander for runtime `eval`. Avoids re-loading the prelude
     /// on every eval call. Taken out during eval, put back after.
@@ -86,14 +86,14 @@ pub struct VM {
     /// Read by `sys/argv`. Empty string means REPL mode.
     pub source_arg: String,
     /// Whether JIT compilation is enabled.
-    /// Controlled by `ELLE_JIT` env var: `0` disables, any other value enables.
+    /// Controlled by `--jit=N` CLI flag: `0` disables, `N>0` enables.
     /// Defaults to `true`.
     pub jit_enabled: bool,
     /// JIT hotness threshold: a closure must be called this many times
     /// before it becomes a JIT compilation candidate.
-    /// Initialized from `ELLE_JIT_THRESHOLD` env var, defaulting to 10.
+    /// Set by `--jit=N` (threshold = N-1), defaulting to 10.
     pub jit_hotness_threshold: usize,
-    /// Lazy WASM compilation tier. When `ELLE_WASM=1`, hot closures are
+    /// Lazy WASM compilation tier. When `--wasm=N`, hot closures are
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
     pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
     /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
@@ -269,8 +269,7 @@ impl VM {
     }
 
     /// Record a closure call and return whether it's "hot" (called N+ times,
-    /// where N is `jit_hotness_threshold`, default 10, overridable via
-    /// `ELLE_JIT_THRESHOLD` env var).
+    /// where N is `jit_hotness_threshold`, default 10, set via `--jit=N`).
     pub fn record_closure_call(&mut self, bytecode_ptr: *const u8) -> bool {
         let count = self.closure_call_counts.entry(bytecode_ptr).or_insert(0);
         *count += 1;

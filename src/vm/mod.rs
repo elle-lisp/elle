@@ -260,7 +260,8 @@ impl VM {
             0,
             1,
             Instruction::Call as u8,
-            1,
+            0,
+            1, // arg_count as u16be
             Instruction::Return as u8,
         ];
         let synthetic_constants = vec![thunk, ev_run];

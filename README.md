@@ -625,14 +625,14 @@ closures, fibers, tail calls, I/O, and the async scheduler — everything
 except `eval`.
 
 ```bash
-ELLE_WASM=1 elle script.lisp
+elle --wasm=full script.lisp
 ```
 
 A tiered mode compiles individual hot closures to WASM during bytecode
 VM execution:
 
 ```bash
-ELLE_WASM_TIER=1 elle script.lisp
+elle --wasm=11 script.lisp
 ```
 
 See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.

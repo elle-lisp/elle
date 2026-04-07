@@ -2098,3 +2098,479 @@ fn test_jit_batch_global_mutation_known_limitation() {
     let val = result.unwrap();
     assert!(val.is_string(), "Expected a string result, got: {:?}", val);
 }
+
+#[test]
+fn test_jit_self_tail_call_with_list_rotation() {
+    // Self-recursive function that tail-calls itself with (rest lst).
+    // If JIT rotation frees the list's cons cells, this crashes.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((count-list (fn (lst acc)
+               (if (empty? lst) acc
+                 (count-list (rest lst) (+ acc 1))))))
+            (count-list (range 200) 0))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "count-list failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(200));
+}
+
+#[test]
+fn test_jit_letrec_mutual_recursion_simple() {
+    // Minimal mutual recursion via letrec expression.
+    // f calls g (non-tail), g calls f (non-tail). Both are silent.
+    //
+    // Depth 100: non-tail mutual recursion uses native stack frames.
+    // Same limit as test_jit_mutual_recursion_deep.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((f (fn (n) (if (<= n 0) 0 (+ 1 (g (- n 1))))))
+             (g (fn (n) (if (<= n 0) 0 (+ 1 (f (- n 1)))))))
+            (f 100))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "mutual recursion failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(100));
+}
+
+#[test]
+fn test_nqueens_eval_signals_are_silent() {
+    // Verify that nqueens functions compiled via eval() get correct
+    // (silent) signals, not SIG_YIELD from forward-ref defaults.
+    use elle::pipeline::compile;
+    use elle::symbol::SymbolTable;
+
+    let source = r#"(letrec
+     ((check-safe-helper
+        (fn (col remaining row-offset)
+          (if (empty? remaining) true
+            (let ((placed-col (first remaining)))
+              (if (or (= col placed-col)
+                      (= row-offset (abs (- col placed-col))))
+                false
+                (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+      (safe? (fn (col queens) (check-safe-helper col queens 1)))
+     (try-cols-helper
+       (fn (n col queens row)
+         (if (= col n) (list)
+           (if (safe? col queens)
+             (let ((new-queens (cons col queens)))
+               (append (solve-helper n (+ row 1) new-queens)
+                       (try-cols-helper n (+ col 1) queens row)))
+             (try-cols-helper n (+ col 1) queens row)))))
+     (solve-helper
+       (fn (n row queens)
+         (if (= row n) (list (reverse queens))
+           (try-cols-helper n 0 queens row))))
+     (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+     (length (solve-nqueens 8)))"#;
+
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
+
+    for constant in compiled.bytecode.constants.iter() {
+        if let Some(closure) = constant.as_closure() {
+            if let Some(lir) = closure.template.lir_function.as_ref() {
+                let has_sc = lir.has_suspending_call();
+                let signal = lir.signal;
+                let name = lir.name.as_deref().unwrap_or("<anon>");
+                assert!(
+                    !signal.may_suspend(),
+                    "nqueens closure '{}' should be silent, got signal {:?}",
+                    name, signal
+                );
+                assert!(
+                    !has_sc,
+                    "nqueens closure '{}' should not have SuspendingCall",
+                    name
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_nqueens_letrec_no_jit() {
+    // Same nqueens letrec as test_jit_mutual_recursion_nqueens_small,
+    // but with JIT disabled. If this passes and the JIT version crashes,
+    // the bug is in JIT compilation of letrec closures with captures.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    vm.jit_enabled = false;
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+         ((check-safe-helper
+            (fn (col remaining row-offset)
+              (if (empty? remaining) true
+                (let ((placed-col (first remaining)))
+                  (if (or (= col placed-col)
+                          (= row-offset (abs (- col placed-col))))
+                    false
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+          (safe? (fn (col queens) (check-safe-helper col queens 1)))
+         (try-cols-helper
+           (fn (n col queens row)
+             (if (= col n) (list)
+               (if (safe? col queens)
+                 (let ((new-queens (cons col queens)))
+                   (append (solve-helper n (+ row 1) new-queens)
+                           (try-cols-helper n (+ col 1) queens row)))
+                 (try-cols-helper n (+ col 1) queens row)))))
+         (solve-helper
+           (fn (n row queens)
+             (if (= row n) (list (reverse queens))
+               (try-cols-helper n 0 queens row))))
+         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+         (length (solve-nqueens 8)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "nqueens (no JIT) failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(92));
+}
+
+#[test]
+fn test_jit_letrec_single_with_captures() {
+    // Single self-recursive closure in a letrec (has captures from
+    // the letrec environment). Tests JIT solo compilation of closures
+    // with captures and list operations.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst)))))))
+            (count (list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "letrec single failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(20));
+}
+
+#[test]
+fn test_jit_letrec_two_closures_with_lists() {
+    // Two mutually recursive closures in letrec with list operations.
+    // f counts elements, g filters and calls f.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst))))))
+             (count-after-skip (fn (lst n)
+               (if (<= n 0) (count lst)
+                 (if (empty? lst) 0
+                   (count-after-skip (rest lst) (- n 1)))))))
+            (count-after-skip (list 1 2 3 4 5 6 7 8 9 10) 3))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "letrec two closures failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(7));
+}
+
+#[test]
+fn test_jit_letrec_nqueens_4queens() {
+    // Nqueens with N=4 (only 2 solutions). Less JIT pressure than N=8.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+         ((check-safe-helper
+            (fn (col remaining row-offset)
+              (if (empty? remaining) true
+                (let ((placed-col (first remaining)))
+                  (if (or (= col placed-col)
+                          (= row-offset (abs (- col placed-col))))
+                    false
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+          (safe? (fn (col queens) (check-safe-helper col queens 1)))
+         (try-cols-helper
+           (fn (n col queens row)
+             (if (= col n) (list)
+               (if (safe? col queens)
+                 (let ((new-queens (cons col queens)))
+                   (append (solve-helper n (+ row 1) new-queens)
+                           (try-cols-helper n (+ col 1) queens row)))
+                 (try-cols-helper n (+ col 1) queens row)))))
+         (solve-helper
+           (fn (n row queens)
+             (if (= row n) (list (reverse queens))
+               (try-cols-helper n 0 queens row))))
+         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+         (length (solve-nqueens 4)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "4-queens failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(2));
+}
+
+#[test]
+fn test_nqueens_4queens_no_jit() {
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    vm.jit_enabled = false;
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+         ((check-safe-helper
+            (fn (col remaining row-offset)
+              (if (empty? remaining) true
+                (let ((placed-col (first remaining)))
+                  (if (or (= col placed-col)
+                          (= row-offset (abs (- col placed-col))))
+                    false
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
+          (safe? (fn (col queens) (check-safe-helper col queens 1)))
+         (try-cols-helper
+           (fn (n col queens row)
+             (if (= col n) (list)
+               (if (safe? col queens)
+                 (let ((new-queens (cons col queens)))
+                   (append (solve-helper n (+ row 1) new-queens)
+                           (try-cols-helper n (+ col 1) queens row)))
+                 (try-cols-helper n (+ col 1) queens row)))))
+         (solve-helper
+           (fn (n row queens)
+             (if (= row n) (list (reverse queens))
+               (try-cols-helper n 0 queens row))))
+         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+         (length (solve-nqueens 4)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "4-queens (no JIT) failed: {:?}", result);
+    assert_eq!(result.unwrap().as_int(), Some(2));
+}
+
+#[test]
+fn test_jit_letrec_forward_ref_multiarg() {
+    // Forward reference call with multiple arguments in letrec.
+    // f calls g (forward ref) with 3 args.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((f (fn (n)
+               (if (<= n 0) (list)
+                 (append (g n 1 (list n)) (f (- n 1))))))
+             (g (fn (n offset acc)
+               (if (<= offset n)
+                 (g n (+ offset 1) (cons offset acc))
+                 (reverse acc)))))
+            (length (f 5)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "forward ref multiarg failed: {:?}", result);
+    // g(n,1,[n]) produces [n,1,2,...,n] = n+1 elements
+    // f(5) = 6 + 5 + 4 + 3 + 2 + 0 = 20
+    assert_eq!(result.unwrap().as_int(), Some(20));
+}
+
+// ── Nested self-tail-call rotation base tests ──────────────────────────
+//
+// Hypothesis: `jit_rotation_base` is a single field on `FiberHeap`.
+// When an inner JIT function's self-tail-call loop calls
+// `rotate_pools_jit()`, it sets this field.  The value persists after
+// the inner function returns.  If the outer function then self-tail-
+// calls with its own `rotate_pools_jit()`, it rotates relative to the
+// inner's stale base mark — freeing objects allocated between the
+// inner's base and the outer's iteration, including the outer's live
+// heap values.
+//
+// Fix: save `jit_rotation_base` to `None` before every JIT call and
+// restore after it returns (`call_jit` and `elle_jit_call`).
+//
+// Test design:
+//   - Tests 1–2: nested self-tail-call patterns that exercise the
+//     hypothesis.  Without the fix these SIGSEGV or corrupt values.
+//   - Test 3: control — single (non-nested) self-tail-call loop.
+//     Passes regardless of whether the fix is present because there
+//     is no inner call to corrupt the rotation base.
+
+#[test]
+fn test_jit_nested_rotation_base_two_deep() {
+    // Outer (`outer-loop`): self-tail-call loop that builds a list via
+    //   cons and passes the growing list to the next iteration.
+    // Inner (`inner-loop`): self-tail-call loop that traverses a list.
+    //   This triggers `rotate_pools_jit()`, setting `jit_rotation_base`.
+    //
+    // Without save/restore, the outer's next `rotate_pools_jit()` uses
+    // the inner's stale base, which was captured deep inside the call
+    // stack.  Objects the outer allocated after that mark (cons cells)
+    // get swept into the swap pool and freed one rotation later.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((inner-loop (fn (lst acc)
+               (if (empty? lst) acc
+                 (inner-loop (rest lst) (+ acc (first lst))))))
+             (outer-loop (fn (n acc-list)
+               (if (= n 0)
+                 (inner-loop acc-list 0)
+                 (let ((new-list (cons n acc-list)))
+                   (let ((_ (inner-loop new-list 0)))
+                     (outer-loop (- n 1) new-list)))))))
+            (outer-loop 50 (list)))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "two-deep rotation failed: {:?}", result);
+    // Final inner-loop sums 1+2+…+50 = 1275
+    assert_eq!(result.unwrap().as_int(), Some(1275));
+}
+
+#[test]
+fn test_jit_nested_rotation_base_three_deep() {
+    // Three levels of nested self-tail-call loops:
+    //   c → b → a, each with self-tail-call + rotation.
+    // c allocates cons cells; a and b just do integer arithmetic.
+    // Without save/restore, a's rotation base leaks through b into c.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((a (fn (n acc)
+               (if (= n 0) acc
+                 (a (- n 1) (+ acc 1)))))
+             (b (fn (n acc)
+               (if (= n 0) acc
+                 (let ((inner-sum (a 10 0)))
+                   (b (- n 1) (+ acc inner-sum))))))
+             (c (fn (n result-list)
+               (if (= n 0) result-list
+                 (let ((val (b 5 0)))
+                   (c (- n 1) (cons val result-list)))))))
+            (let ((result (c 20 (list))))
+              (list (length result) (first result))))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "three-deep rotation failed: {:?}", result);
+    let val = result.unwrap();
+    // c: 20 iterations, each calling b(5,0) = 5×a(10,0) = 5×10 = 50
+    // result = (20 50)
+    assert_eq!(val.as_cons().map(|c| c.first.as_int()), Some(Some(20)));
+    assert_eq!(
+        val.as_cons()
+            .and_then(|c| c.rest.as_cons().map(|c2| c2.first.as_int())),
+        Some(Some(50))
+    );
+}
+
+#[test]
+fn test_jit_single_self_tail_rotation_control() {
+    // Control: single self-tail-call loop traversing a list.
+    // No nested JIT calls → no rotation base corruption possible.
+    // Must pass regardless of whether the save/restore fix is present.
+    use elle::pipeline::eval;
+    use elle::primitives::register_primitives;
+    use elle::symbol::SymbolTable;
+    use elle::vm::VM;
+
+    let mut symbols = SymbolTable::new();
+    let mut vm = VM::new();
+    let _signals = register_primitives(&mut vm, &mut symbols);
+
+    let result = eval(
+        r#"(letrec
+            ((sum-list (fn (lst acc)
+               (if (empty? lst) acc
+                 (sum-list (rest lst) (+ acc (first lst)))))))
+            (sum-list (range 500) 0))"#,
+        &mut symbols,
+        &mut vm,
+        "<test>",
+    );
+    assert!(result.is_ok(), "control rotation failed: {:?}", result);
+    // range 500 = 0..499, sum = 499×500/2 = 124750
+    assert_eq!(result.unwrap().as_int(), Some(124750));
+}
+

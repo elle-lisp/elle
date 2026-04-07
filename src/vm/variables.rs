@@ -28,7 +28,7 @@ pub(crate) fn handle_load_upvalue(
     closure_env: Option<&std::rc::Rc<Vec<Value>>>,
 ) {
     let _depth = vm.read_u8(bytecode, ip);
-    let idx = vm.read_u8(bytecode, ip) as usize;
+    let idx = vm.read_u16(bytecode, ip) as usize;
 
     // Load from closure environment
     let env = closure_env.expect("VM bug: LoadUpvalue used outside of closure");
@@ -66,7 +66,7 @@ pub(crate) fn handle_load_upvalue_raw(
     closure_env: Option<&std::rc::Rc<Vec<Value>>>,
 ) {
     let _depth = vm.read_u8(bytecode, ip);
-    let idx = vm.read_u8(bytecode, ip) as usize;
+    let idx = vm.read_u16(bytecode, ip) as usize;
 
     // Load from closure environment WITHOUT unwrapping cells
     // This is used when forwarding captures to nested closures
@@ -88,7 +88,7 @@ pub(crate) fn handle_store_upvalue(
     closure_env: Option<&std::rc::Rc<Vec<Value>>>,
 ) {
     let _depth = vm.read_u8(bytecode, ip);
-    let idx = vm.read_u8(bytecode, ip) as usize;
+    let idx = vm.read_u16(bytecode, ip) as usize;
     let val = vm
         .fiber
         .stack

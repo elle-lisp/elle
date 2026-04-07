@@ -1,6 +1,6 @@
 //! WASM tiered compilation entry points.
 //!
-//! When `ELLE_WASM=1`, hot closures are compiled to per-closure WASM
+//! When `--wasm=N`, hot closures are compiled to per-closure WASM
 //! modules and dispatched through Wasmtime. This mirrors the JIT path
 //! in `jit_entry.rs` but targets WASM instead of Cranelift.
 

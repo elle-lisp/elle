@@ -422,18 +422,18 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
             }
             Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue => {
-                if i + 1 < instructions.len() {
+                if i + 2 < instructions.len() {
                     let depth = instructions[i];
-                    let index = instructions[i + 1];
+                    let index = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
                     line.push_str(&format!(" (depth={}, index={})", depth, index));
-                    i += 2;
+                    i += 3;
                 }
             }
             Instruction::Call | Instruction::TailCall => {
-                if i < instructions.len() {
-                    let arg_count = instructions[i];
+                if i + 1 < instructions.len() {
+                    let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
                     line.push_str(&format!(" (args={})", arg_count));
-                    i += 1;
+                    i += 2;
                 }
             }
             Instruction::DupN => {
@@ -444,14 +444,15 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
             }
             Instruction::MakeClosure => {
-                if i + 2 < instructions.len() {
+                if i + 3 < instructions.len() {
                     let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    let num_captures = instructions[i + 2];
+                    let num_captures =
+                        ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
                     line.push_str(&format!(
                         " (const_idx={}, num_captures={})",
                         const_idx, num_captures
                     ));
-                    i += 3;
+                    i += 4;
                 }
             }
             Instruction::ArrayMutRefDestructure

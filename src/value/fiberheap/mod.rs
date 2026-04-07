@@ -523,6 +523,22 @@ impl FiberHeap {
         self.rotate_pools(&base);
     }
 
+    /// Save the current JIT rotation base and reset it to `None`.
+    ///
+    /// Must be called before entering a nested JIT function call.
+    /// The returned value must be restored via `restore_jit_rotation_base`
+    /// after the call returns. Without this, nested self-tail-call loops
+    /// share a single rotation base, causing the outer loop to rotate
+    /// with the inner loop's stale base mark — freeing live objects.
+    pub fn save_jit_rotation_base(&mut self) -> Option<RotationBase> {
+        self.jit_rotation_base.take()
+    }
+
+    /// Restore a previously saved JIT rotation base.
+    pub fn restore_jit_rotation_base(&mut self, saved: Option<RotationBase>) {
+        self.jit_rotation_base = saved;
+    }
+
     /// Push a custom allocator onto the stack. Allocations will route
     /// to this allocator until it is popped.
     pub fn push_custom_allocator(&mut self, allocator: Rc<AllocatorBox>) {
