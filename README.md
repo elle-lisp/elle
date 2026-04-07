@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/elle-lisp/elle/actions/workflows/main.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/main.yml)
 
-Elle is a Lisp. What separates it from other Lisps is the depth of its static analysis: full binding resolution, capture analysis, and signal inference happen at compile time, before any code runs. This gives Elle a sound signal system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
+Elle is a Lisp. If you know [Janet](https://janet-lang.org), think Janet on steroids — the same practical spirit (embeddable, batteries-included, modern syntax), but with a compilation pipeline that does deep static analysis before any code runs: full binding resolution, capture analysis, and signal inference at compile time. This gives Elle a sound signal system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
 
 ## Contents
 
@@ -826,6 +826,7 @@ differences, concept mappings, and gotchas:
 [Clojure](docs/coming-from.md#clojure) ·
 [Common Lisp / Scheme](docs/coming-from.md#common-lisp--scheme) ·
 [Erlang / Elixir](docs/coming-from.md#erlang--elixir) ·
+[Janet](docs/coming-from.md#janet) ·
 [C](docs/coming-from.md#c)
 
 ## Getting Started

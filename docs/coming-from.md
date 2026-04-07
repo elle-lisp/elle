@@ -13,6 +13,7 @@ to their Elle equivalents.
 - [Clojure](#clojure)
 - [Common Lisp / Scheme](#common-lisp--scheme)
 - [Erlang / Elixir](#erlang--elixir)
+- [Janet](#janet)
 - [C](#c)
 
 ---
@@ -211,6 +212,57 @@ supervisors, pattern matching, immutable-by-default data.
   budget-based preemption via the scheduler).
 - No distributed Erlang — single-process only.
 - Process linking and monitoring work the same conceptually.
+
+## Janet
+
+**You'll feel at home with:** almost everything. Elle shares Janet's
+philosophy: practical, batteries-included, modern Lisp syntax, struct
+literals, mutable/immutable split, C FFI, single-binary deployment.
+Elle started from a similar place and pushed further on static analysis,
+concurrency, and compilation.
+
+**Key differences:**
+
+| Janet | Elle | Notes |
+|-------|------|-------|
+| `(def x 5)` | `(def x 5)` | Same |
+| `(var x 5)` | `(var x 5)` | Same |
+| `(set x 10)` | `(assign x 10)` | `set` creates a set in Elle |
+| `(defn f [x] ...)` | `(defn f [x] ...)` | Same |
+| `(fn [x] ...)` | `(fn [x] ...)` | Same |
+| `@[1 2 3]` | `@[1 2 3]` | Same — mutable array |
+| `[1 2 3]` | `[1 2 3]` | Same — immutable |
+| `@{:a 1}` | `@{:a 1}` | Same — mutable struct |
+| `{:a 1}` | `{:a 1}` | Same — immutable struct |
+| `(get ds :k)` | `ds:k` | Colon accessor syntax |
+| `(ev/spawn f)` | `(ev/spawn f)` | Both have structured concurrency |
+| `(fiber/new f)` | `(fiber/new f)` | Both have fibers |
+| `#` comment | `##` comment | Double hash |
+| `(import mod)` | `(import "std/mod")` | String path, returns a value |
+| PEG | `(import "plugin/regex")` | No built-in PEG; regex plugin |
+| `(os/shell ...)` | `(subprocess/system ...)` | |
+| Dynamic binding | `(make-parameter)` | Racket-style parameters |
+
+**What Elle adds beyond Janet:**
+- **Signal system.** Compile-time inference of which functions can error,
+  yield, or do I/O. Janet has no equivalent — effects are invisible.
+- **Hygienic macros.** Racket-style scope sets, not `gensym` discipline.
+- **Deep static analysis.** Binding resolution, capture analysis, escape
+  analysis, and lint passes before execution.
+- **Deterministic memory.** No GC — scope-based reclamation + per-fiber
+  heaps. Janet uses a tracing GC.
+- **JIT compilation.** Silent functions compile to native code via
+  Cranelift. Janet interprets bytecode.
+- **WASM backend.** Entire modules compile to WebAssembly.
+- **Process model.** Erlang-style GenServer/Supervisor/Actor in pure Elle.
+- **FFI from the language.** `ffi/defbind` in the prelude, `ffi/call` as
+  a primitive — no C glue code. Janet requires C extensions.
+
+**Watch out for:**
+- `set` creates a set literal, not mutation. Use `assign`.
+- `##` for comments, not `#`. Single `#` is reader syntax.
+- `;` is splice, not comment.
+- Modules are closures that return structs — call them: `((import "std/x"))`.
 
 ## C
 
