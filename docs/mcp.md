@@ -3,7 +3,7 @@
 Elle ships with an [MCP](https://modelcontextprotocol.io) (Model Context
 Protocol) server that gives AI coding assistants deep, structured access
 to an Elle codebase. The server is itself written in Elle
-(`tools/mcp-server.lisp`) and communicates via JSON-RPC 2.0 on stdio.
+([`tools/mcp-server.lisp`](../tools/mcp-server.lisp)) and communicates via JSON-RPC 2.0 on stdio.
 
 ## What it does
 
@@ -51,7 +51,7 @@ code through the graph rather than through ad-hoc text searches.
 ## Knowledge graph schema
 
 The graph is populated by `analyze_file` (Elle sources) and the
-supporting `tools/elle-graph.lisp` and `tools/rust-graph.lisp` scripts.
+supporting [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) and [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) scripts.
 
 ### Elle entities (`urn:elle:` namespace)
 
@@ -107,6 +107,51 @@ elle tools/elle-graph.lisp
 elle tools/rust-graph.lisp
 ```
 
+## What can an AI agent do with it?
+
+**Understand code across language boundaries.** Ask the `trace` tool to
+follow `map` from Elle into Rust:
+
+```
+trace(path: "stdlib.lisp", function: "map")
+```
+
+Returns the full call chain: `map` (Elle) → calls `cons`, `first`,
+`rest` (primitives) → Rust `prim_cons`, `prim_first`, `prim_rest` →
+`Value::cons()`, `Cons::first`, `Cons::rest`.
+
+**Assess refactoring impact.** Before changing `prim_first`:
+
+```
+impact(path: "src/primitives/list/mod.rs", function: "prim_first")
+```
+
+Returns every Elle function that calls `first`, what their signals are,
+and whether any are JIT-compiled.
+
+**Find functions by behavior.** Which functions do I/O?
+
+```
+signal_query(path: "lib/http.lisp", query: "io")
+```
+
+**Refactor safely.** Rename a function and all its references:
+
+```
+compile_rename(path: "lib/process.lisp", old_name: "helper", new_name: "dispatch")
+```
+
+The rename respects lexical scope — shadowed bindings are left alone.
+
+**Query the graph directly.** Any SPARQL query works:
+
+```sparql
+# Which files import the most modules?
+SELECT ?file (COUNT(*) AS ?imports) WHERE {
+  ?s a <urn:elle:Import> ; <urn:elle:file> ?file
+} GROUP BY ?file ORDER BY DESC(?imports)
+```
+
 ## Example SPARQL queries
 
 Find all functions that can error:
@@ -130,7 +175,7 @@ SELECT ?name ?file WHERE {
 }
 ```
 
-See `tools/demo-queries.lisp` for more examples.
+See [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) for more examples.
 
 ## IDE integration
 
@@ -147,13 +192,13 @@ and code understanding.
 
 | File | Purpose |
 |------|---------|
-| `tools/elle-graph.lisp` | Extract RDF triples from Elle source files |
-| `tools/rust-graph.lisp` | Extract RDF triples from Rust source files via syn plugin |
-| `tools/rust-rdf-lib.lisp` | Shared library for Rust→RDF extraction |
-| `tools/load-all.lisp` | Extract both graphs and load into the store |
-| `tools/demo-queries.lisp` | Example SPARQL queries |
-| `tools/test-mcp.lisp` | Smoke test: spawns server, exercises all tools |
-| `tools/semantic-graph.lisp` | Semantic graph analysis utilities |
+| [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) | Extract RDF triples from Elle source files |
+| [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
+| [`tools/rust-rdf-lib.lisp`](../tools/rust-rdf-lib.lisp) | Shared library for Rust→RDF extraction |
+| [`tools/load-all.lisp`](../tools/load-all.lisp) | Extract both graphs and load into the store |
+| [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) | Example SPARQL queries |
+| [`tools/test-mcp.lisp`](../tools/test-mcp.lisp) | Smoke test: spawns server, exercises all tools |
+| [`tools/semantic-graph.lisp`](../tools/semantic-graph.lisp) | Semantic graph analysis utilities |
 
 ## Dependencies
 

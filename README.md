@@ -799,7 +799,18 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 
 - **Compilation pipeline is fully documented.** See [`docs/pipeline.md`](docs/pipeline.md) for data flow across boundaries and [`AGENTS.md`](AGENTS.md) for architecture details.
 
-- **MCP server for AI coding assistants.** ([docs/mcp.md](docs/mcp.md)) An [MCP](https://modelcontextprotocol.io) server written in Elle that gives AI agents deep structural access to the codebase. Maintains a persistent RDF knowledge graph of both Elle and Rust source. 15 tools covering static analysis (`analyze_file`, `portrait`, `signal_query`, `impact`), refactoring (`compile_rename`, `compile_extract`, `compile_parallelize`), cross-language tracing (`trace`), and direct SPARQL queries. Complements the LSP server — LSP handles real-time editing; MCP handles AI-driven code understanding.
+- **MCP server for AI coding assistants.** ([docs/mcp.md](docs/mcp.md)) An [MCP](https://modelcontextprotocol.io) server written in Elle that gives AI agents deep structural access to the codebase. Maintains a persistent RDF knowledge graph of both Elle and Rust source. 15 tools for static analysis, refactoring, and cross-language tracing. Complements the LSP server — LSP handles real-time editing; MCP handles AI-driven code understanding.
+
+  **What can an AI agent do with it?**
+
+  - *"What does `fold` do?"* — `portrait` returns the full effect profile, failure modes, and composition properties.
+  - *"What breaks if I change `prim_first`?"* — `impact` traces all callers and downstream signal changes.
+  - *"Trace `map` from Elle through primitives into Rust."* — `trace` follows the call chain: Elle stdlib → `cons`/`first`/`rest` primitives → Rust `prim_cons`/`prim_first`/`prim_rest` → `Value::cons()`/`as_cons()`.
+  - *"Which functions are JIT-eligible?"* — `signal_query` with `jit-eligible` returns all silent functions.
+  - *"Rename `helper` to `utils` across the whole file."* — `compile_rename` rewrites all references, respecting lexical scope.
+  - *"Find all Rust structs that have a `signal` field."* — direct SPARQL: `SELECT ?name WHERE { ?s a rust:Struct ; rust:field "signal" ; rust:name ?name }`
+
+  See [`tools/demo-queries.lisp`](tools/demo-queries.lisp) for more examples.
 
 ## Documentation
 
