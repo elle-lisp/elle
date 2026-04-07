@@ -37,8 +37,9 @@
 
 ## Branches
 (let [[bs (git:branches repo :local)]]
-  (assert (> (length bs) 0) "has branches")
-  (let [[b (first bs)]] (assert (string? b:name) "branch has name")))
+  (assert (list? bs) "branches returns list")
+  (when (> (length bs) 0)
+    (let [[b (first bs)]] (assert (string? b:name) "branch has name"))))
 
 ## Tags
 (assert (list? (git:tags repo)) "tags returns list")

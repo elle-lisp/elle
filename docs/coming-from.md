@@ -285,7 +285,7 @@ Elle wraps C libraries directly via FFI — no binding generators,
 no wrapper crates. See [docs/ffi.md](ffi.md) and the `lib/sqlite.lisp`,
 `lib/compress.lisp`, `lib/git.lisp` modules for real-world examples.
 
-```lisp
+```
 (def libc (ffi/native "libc.so.6"))
 (ffi/defbind c-getpid libc "getpid" :int @[])
 (println (c-getpid))
