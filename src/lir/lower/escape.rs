@@ -220,6 +220,32 @@ impl<'a> Lowerer<'a> {
 
     /// Check if a function call is to a known intrinsic or immediate-returning
     /// primitive/user function, meaning its result is guaranteed to be an immediate.
+    /// Check if an argument to a tail call is safe (won't dangle after rotation).
+    ///
+    /// Like `result_is_safe` but also checks `callee_result_immediate`:
+    /// a call to a user function known to return immediates cannot produce
+    /// a heap pointer that would dangle when the caller's arena is recycled.
+    fn tail_arg_is_safe(&self, hir: &Hir) -> bool {
+        // First try the standard result_is_safe check
+        if self.result_is_safe(hir, &[]) {
+            return true;
+        }
+        // For Call expressions: check callee_result_immediate
+        if let HirKind::Call { func, .. } = &hir.kind {
+            if let HirKind::Var(binding) = &func.kind {
+                if self
+                    .callee_result_immediate
+                    .get(binding)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub(super) fn call_result_is_safe(&self, func: &Hir, args: &[CallArg]) -> bool {
         // Must be a variable reference
         let HirKind::Var(binding) = &func.kind else {
@@ -960,8 +986,12 @@ impl<'a> Lowerer<'a> {
                 // Tail calls: safe only if no argument is a heap-allocating
                 // expression. Rotation recycles the caller's arena, so any
                 // heap value passed as an argument would dangle.
+                //
+                // Use tail_arg_is_safe which extends result_is_safe with
+                // callee_result_immediate: a call to a user function known
+                // to return immediates cannot produce a dangling heap pointer.
                 if *is_tail {
-                    return args.iter().any(|a| !self.result_is_safe(&a.expr, &[]));
+                    return args.iter().any(|a| !self.tail_arg_is_safe(&a.expr));
                 }
                 if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                     return true;

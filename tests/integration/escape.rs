@@ -1720,6 +1720,86 @@ fn no_call_scoped_for_tail_call() {
 }
 
 #[test]
+fn tail_call_with_heap_arg_marks_callee_unsafe() {
+    // P0 fix: a tail call that passes a heap-allocated argument (cons n (list))
+    // makes the CALLER not-rotation-safe, because rotation would recycle
+    // the arena containing the cons cell before the callee reads it.
+    //
+    // inner is rotation-safe (returns immediates, no heap escape).
+    // outer calls inner in tail position with (cons n (list)) — heap arg.
+    // Therefore outer is NOT rotation-safe.
+    //
+    // inner's non-tail self-call (+ 1 (inner (rest x))) should still get
+    // call-scoped reclamation because inner itself IS rotation-safe.
+    let source = r#"(letrec
+        ((inner (fn [x] (if (empty? x) 0 (+ 1 (inner (rest x))))))
+         (outer (fn [n] (inner (cons n (list))))))
+        nil)
+    "#;
+
+    // inner is rotation-safe: its body returns 0 or (+ 1 ...), both immediate.
+    // inner's non-tail self-call should get call-scoped reclamation.
+    // outer's tail call to inner should NOT (tail calls never do).
+    // The original call_scoped_emits_region_exit_call test already checks
+    // that RegionEnter appears somewhere — this test verifies the split:
+    // exactly one closure has RegionEnter (inner), one doesn't (outer).
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(source, &mut symbols, "<test>").expect("compilation failed");
+    let mut regions: Vec<bool> = Vec::new();
+    for constant in compiled.bytecode.constants.iter() {
+        if let Some(closure) = constant.as_closure() {
+            let lines = disassemble_lines(&closure.template.bytecode);
+            regions.push(lines.iter().any(|l| l.contains("RegionEnter")));
+        }
+    }
+    // Exactly one closure should have RegionEnter
+    let count = regions.iter().filter(|&&r| r).count();
+    assert_eq!(count, 1, "exactly one closure should have RegionEnter, got {}", count);
+}
+
+#[test]
+fn self_recursive_with_primitive_tail_call_is_rotation_safe() {
+    // f calls itself non-tail inside (+ 1 (f (rest x))).
+    // The + call is in tail position and receives (f (rest x)) as an arg.
+    // f always returns an integer (0 or result of +).
+    //
+    // body_escapes_heap_values sees the tail call to + and checks
+    // result_is_safe on each arg. (f (rest x)) is a user-function call;
+    // result_is_safe returns false for user calls. If body_escapes
+    // uses result_is_safe, f is marked not-rotation-safe, and the
+    // non-tail self-call loses its call-scoped region.
+    //
+    // The correct behavior: f IS rotation-safe because it returns
+    // immediates and doesn't escape heap values. The tail call to +
+    // passes an integer (f's return value), not a heap-allocated object.
+    let source = r#"(letrec
+        ((f (fn [x] (if (empty? x) 0 (+ 1 (f (rest x)))))))
+        nil)"#;
+    assert!(
+        closure_bytecode_contains(source, "RegionEnter"),
+        "f's non-tail self-call should get call-scoped reclamation"
+    );
+}
+
+#[test]
+fn non_tail_call_to_immediate_returning_fn_gets_region() {
+    // g calls f in non-tail position. f returns immediates (0 or int).
+    // The argument (cons 1 2) heap-allocates. f is rotation-safe.
+    // Therefore g's call to f should get call-scoped reclamation.
+    //
+    // This confirms callee_result_immediate recognizes f as immediate-returning
+    // and can_scope_allocate_call accepts the call.
+    let source = r#"(letrec
+        ((f (fn [x] (if (empty? x) 0 (+ 1 (f (rest x))))))
+         (g (fn [n] (+ (f (cons n (list))) 1))))
+        nil)"#;
+    assert!(
+        closure_bytecode_contains(source, "RegionEnter"),
+        "g's non-tail call to f should get call-scoped reclamation"
+    );
+}
+
+#[test]
 fn call_scoped_does_not_wrap_intrinsics() {
     // Intrinsic calls (like +) are lowered to BinOp, not Call.
     let source = "(defn f [n] (+ n (length (cons 1 2))))";
