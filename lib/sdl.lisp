@@ -144,6 +144,27 @@
 (def font-underline     0x04)
 (def font-strikethrough 0x08)
 
+# ── Constants: audio ──────────────────────────────────────────────────
+
+(def audio-u8       0x0008)
+(def audio-s16      0x8010)
+(def audio-s32      0x8020)
+(def audio-f32      0x8120)
+(def audio-device-default-playback  0xFFFFFFFF)
+(def audio-device-default-recording 0xFFFFFFFE)
+
+# ── Constants: message box ────────────────────────────────────────────
+
+(def msgbox-error       0x00000010)
+(def msgbox-warning     0x00000020)
+(def msgbox-information 0x00000040)
+
+# ── Constants: flash operation ────────────────────────────────────────
+
+(def flash-cancel         0)
+(def flash-briefly        1)
+(def flash-until-focused  2)
+
 # ── Constants: window event subtypes ──────────────────────────────────
 
 (def window-event-names
@@ -168,6 +189,8 @@
 # SDL_Vertex = SDL_FPoint position + SDL_FColor color + SDL_FPoint tex_coord
 (def vertex-type (ffi/struct @[:float :float :float :float :float :float :float :float]))
 (def vertex-size (ffi/size vertex-type))
+# SDL_AudioSpec = {SDL_AudioFormat(u32), channels(int), freq(int)} = 12 bytes
+(def audio-spec-type (ffi/struct @[:u32 :int :int]))
 
 # Pre-allocated buffers — reused across calls to avoid per-frame allocation
 (def rect-buf   (ffi/malloc (ffi/size frect-type)))
@@ -256,6 +279,45 @@
 (ffi/defbind ttf-set-font-style   libttf "TTF_SetFontStyle"       :void [:ptr :int])
 (ffi/defbind ttf-get-string-size  libttf "TTF_GetStringSize"      :bool [:ptr :string :size :ptr :ptr])
 (ffi/defbind ttf-render-blended   libttf "TTF_RenderText_Blended"  :ptr  [:ptr :string :size color-type])
+
+# Audio
+(ffi/defbind sdl-open-audio-device-stream libsdl "SDL_OpenAudioDeviceStream" :ptr [:u32 :ptr :ptr :ptr])
+(ffi/defbind sdl-resume-audio    libsdl "SDL_ResumeAudioStreamDevice"  :bool [:ptr])
+(ffi/defbind sdl-pause-audio     libsdl "SDL_PauseAudioStreamDevice"   :bool [:ptr])
+(ffi/defbind sdl-put-audio-data  libsdl "SDL_PutAudioStreamData"       :bool [:ptr :ptr :int])
+(ffi/defbind sdl-clear-audio     libsdl "SDL_ClearAudioStream"         :bool [:ptr])
+(ffi/defbind sdl-destroy-audio   libsdl "SDL_DestroyAudioStream"       :void [:ptr])
+(ffi/defbind sdl-load-wav        libsdl "SDL_LoadWAV"                  :bool [:string :ptr :ptr :ptr])
+(ffi/defbind sdl-get-audio-playback-devices libsdl "SDL_GetAudioPlaybackDevices" :ptr [:ptr])
+
+# Input
+(ffi/defbind sdl-get-keyboard-state libsdl "SDL_GetKeyboardState"      :ptr  [:ptr])
+(ffi/defbind sdl-get-mouse-state   libsdl "SDL_GetMouseState"         :u32  [:ptr :ptr])
+(ffi/defbind sdl-warp-mouse        libsdl "SDL_WarpMouseInWindow"     :void [:ptr :float :float])
+(ffi/defbind sdl-show-cursor       libsdl "SDL_ShowCursor"            :bool [])
+(ffi/defbind sdl-hide-cursor       libsdl "SDL_HideCursor"            :bool [])
+(ffi/defbind sdl-set-relative-mouse libsdl "SDL_SetWindowRelativeMouseMode" :bool [:ptr :bool])
+(ffi/defbind sdl-start-text-input  libsdl "SDL_StartTextInput"        :bool [:ptr])
+(ffi/defbind sdl-stop-text-input   libsdl "SDL_StopTextInput"         :bool [:ptr])
+(ffi/defbind sdl-set-keyboard-grab libsdl "SDL_SetWindowKeyboardGrab" :bool [:ptr :bool])
+(ffi/defbind sdl-set-mouse-grab    libsdl "SDL_SetWindowMouseGrab"    :bool [:ptr :bool])
+
+# Clipboard
+(ffi/defbind sdl-set-clipboard     libsdl "SDL_SetClipboardText"      :bool [:string])
+(ffi/defbind sdl-get-clipboard     libsdl "SDL_GetClipboardText"      :ptr  [])
+(ffi/defbind sdl-has-clipboard     libsdl "SDL_HasClipboardText"      :bool [])
+
+# Misc
+(ffi/defbind sdl-open-url          libsdl "SDL_OpenURL"               :bool [:string])
+(ffi/defbind sdl-show-message-box  libsdl "SDL_ShowSimpleMessageBox"  :bool [:u32 :string :string :ptr])
+(ffi/defbind sdl-get-displays      libsdl "SDL_GetDisplays"           :ptr  [:ptr])
+(ffi/defbind sdl-get-display-bounds libsdl "SDL_GetDisplayBounds"     :bool [:u32 :ptr])
+(ffi/defbind sdl-disable-screensaver libsdl "SDL_DisableScreenSaver"  :bool [])
+(ffi/defbind sdl-enable-screensaver  libsdl "SDL_EnableScreenSaver"   :bool [])
+(ffi/defbind sdl-set-window-bordered libsdl "SDL_SetWindowBordered"   :bool [:ptr :bool])
+(ffi/defbind sdl-set-window-opacity  libsdl "SDL_SetWindowOpacity"    :bool [:ptr :float])
+(ffi/defbind sdl-flash-window      libsdl "SDL_FlashWindow"           :bool [:ptr :int])
+(ffi/defbind sdl-set-window-icon   libsdl "SDL_SetWindowIcon"         :bool [:ptr :ptr])
 
 # ── Internal helpers ──────────────────────────────────────────────────
 
@@ -748,6 +810,188 @@
         :dst {:x (float x) :y (float y) :w (sz :width) :h (sz :height)}))
     (sdl/destroy-texture tex)))
 
+# ── Audio ──────────────────────────────────────────────────────────────
+
+(defn sdl/open-audio [&named device format channels freq]
+  "Open an audio playback stream. Returns an audio stream pointer.
+   :device defaults to default playback. :format defaults to audio-f32.
+   :channels defaults to 2 (stereo). :freq defaults to 48000."
+  (ffi/with-stack [[spec audio-spec-type @[(if format format audio-f32)
+                                           (if channels channels 2)
+                                           (if freq freq 48000)]]]
+    (check-ptr (sdl-open-audio-device-stream
+                 (if device device audio-device-default-playback)
+                 spec nil nil)
+               "sdl/open-audio")))
+
+(defn sdl/resume-audio [stream]
+  "Resume audio playback."
+  (check-bool (sdl-resume-audio stream) "sdl/resume-audio"))
+
+(defn sdl/pause-audio [stream]
+  "Pause audio playback."
+  (check-bool (sdl-pause-audio stream) "sdl/pause-audio"))
+
+(defn sdl/put-audio [stream data]
+  "Put audio data into a stream. data is a bytes value."
+  (let ([ptr (ffi/pin data)])
+    (defer (ffi/free ptr)
+      (check-bool (sdl-put-audio-data stream ptr (length data)) "sdl/put-audio"))))
+
+(defn sdl/clear-audio [stream]
+  "Clear buffered audio data."
+  (check-bool (sdl-clear-audio stream) "sdl/clear-audio"))
+
+(defn sdl/destroy-audio [stream]
+  "Destroy an audio stream."
+  (sdl-destroy-audio stream))
+
+(defn sdl/load-wav [path]
+  "Load a WAV file. Returns {:spec {:format f :channels c :freq f} :data bytes :length n}."
+  (ffi/with-stack [[spec-buf audio-spec-type @[0 0 0]]
+                   [audio-ptr :ptr nil]
+                   [audio-len :u32 0]]
+    (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len) "sdl/load-wav")
+    (let* ([sp (ffi/read spec-buf audio-spec-type)]
+           [ptr (ffi/read audio-ptr :ptr)]
+           [len (ffi/read audio-len :u32)]
+           [data (if (> len 0) (ffi/read ptr (ffi/array :u8 len)) (bytes))])
+      {:spec {:format (get sp 0) :channels (get sp 1) :freq (get sp 2)}
+       :data data
+       :length len})))
+
+(defn sdl/audio-playback-devices []
+  "Get list of audio playback device IDs."
+  (ffi/with-stack [[count-ptr :int 0]]
+    (let* ([ptr (sdl-get-audio-playback-devices count-ptr)]
+           [count (ffi/read count-ptr :int)])
+      (when (null? ptr)
+        (if (= count 0) (list) (sdl-error "sdl/audio-playback-devices")))
+      (var result @[])
+      (var i 0)
+      (while (< i count)
+        (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
+        (assign i (+ i 1)))
+      result)))
+
+# ── Input ──────────────────────────────────────────────────────────────
+
+(defn sdl/key-pressed? [scancode]
+  "Check if a key is currently pressed (by scancode)."
+  (ffi/with-stack [[n-ptr :int 0]]
+    (let ([state-ptr (sdl-get-keyboard-state n-ptr)])
+      (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
+
+(defn sdl/mouse-state []
+  "Get mouse position and button state. Returns {:x f :y f :buttons u32}."
+  (ffi/with-stack [[xp :float 0.0] [yp :float 0.0]]
+    (let ([buttons (sdl-get-mouse-state xp yp)])
+      {:x (ffi/read xp :float) :y (ffi/read yp :float) :buttons buttons})))
+
+(defn sdl/warp-mouse [win x y]
+  "Move the mouse to (x,y) within a window."
+  (sdl-warp-mouse win (float x) (float y)))
+
+(defn sdl/show-cursor []
+  "Show the mouse cursor."
+  (check-bool (sdl-show-cursor) "sdl/show-cursor"))
+
+(defn sdl/hide-cursor []
+  "Hide the mouse cursor."
+  (check-bool (sdl-hide-cursor) "sdl/hide-cursor"))
+
+(defn sdl/set-relative-mouse [win enabled]
+  "Enable or disable relative mouse mode for a window."
+  (check-bool (sdl-set-relative-mouse win enabled) "sdl/set-relative-mouse"))
+
+(defn sdl/start-text-input [win]
+  "Start text input for a window (enables text-input events)."
+  (check-bool (sdl-start-text-input win) "sdl/start-text-input"))
+
+(defn sdl/stop-text-input [win]
+  "Stop text input for a window."
+  (check-bool (sdl-stop-text-input win) "sdl/stop-text-input"))
+
+(defn sdl/set-keyboard-grab [win grabbed]
+  "Grab or release keyboard input for a window."
+  (check-bool (sdl-set-keyboard-grab win grabbed) "sdl/set-keyboard-grab"))
+
+(defn sdl/set-mouse-grab [win grabbed]
+  "Grab or release mouse input for a window."
+  (check-bool (sdl-set-mouse-grab win grabbed) "sdl/set-mouse-grab"))
+
+# ── Clipboard ──────────────────────────────────────────────────────────
+
+(defn sdl/set-clipboard [text]
+  "Set clipboard text."
+  (check-bool (sdl-set-clipboard text) "sdl/set-clipboard"))
+
+(defn sdl/get-clipboard []
+  "Get clipboard text. Returns a string."
+  (let ([ptr (sdl-get-clipboard)])
+    (if (null? ptr) "" (ffi/string ptr))))
+
+(defn sdl/has-clipboard? []
+  "Check if clipboard has text."
+  (sdl-has-clipboard))
+
+# ── Misc ───────────────────────────────────────────────────────────────
+
+(defn sdl/open-url [url]
+  "Open a URL in the default browser."
+  (check-bool (sdl-open-url url) "sdl/open-url"))
+
+(defn sdl/message-box [title message &named flags window]
+  "Show a simple message box. :flags msgbox-error/warning/information."
+  (check-bool (sdl-show-message-box (if flags flags msgbox-information)
+                                     title message (if window window nil))
+              "sdl/message-box"))
+
+(defn sdl/displays []
+  "Get list of display IDs."
+  (ffi/with-stack [[count-ptr :int 0]]
+    (let* ([ptr (sdl-get-displays count-ptr)]
+           [count (ffi/read count-ptr :int)])
+      (when (null? ptr)
+        (if (= count 0) (list) (sdl-error "sdl/displays")))
+      (var result @[])
+      (var i 0)
+      (while (< i count)
+        (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
+        (assign i (+ i 1)))
+      result)))
+
+(defn sdl/display-bounds [display-id]
+  "Get display bounds as {:x :y :w :h}."
+  (ffi/with-stack [[rect-ptr irect-type @[0 0 0 0]]]
+    (check-bool (sdl-get-display-bounds display-id rect-ptr) "sdl/display-bounds")
+    (let ([r (ffi/read rect-ptr irect-type)])
+      {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
+
+(defn sdl/disable-screensaver []
+  "Disable the screen saver."
+  (check-bool (sdl-disable-screensaver) "sdl/disable-screensaver"))
+
+(defn sdl/enable-screensaver []
+  "Enable the screen saver."
+  (check-bool (sdl-enable-screensaver) "sdl/enable-screensaver"))
+
+(defn sdl/set-bordered [win bordered]
+  "Set window bordered or borderless."
+  (check-bool (sdl-set-window-bordered win bordered) "sdl/set-bordered"))
+
+(defn sdl/set-opacity [win opacity]
+  "Set window opacity (0.0 transparent, 1.0 opaque)."
+  (check-bool (sdl-set-window-opacity win (float opacity)) "sdl/set-opacity"))
+
+(defn sdl/flash-window [win operation]
+  "Flash a window. Use flash-cancel/briefly/until-focused."
+  (check-bool (sdl-flash-window win operation) "sdl/flash-window"))
+
+(defn sdl/set-icon [win surface]
+  "Set window icon from an SDL_Surface."
+  (check-bool (sdl-set-window-icon win surface) "sdl/set-icon"))
+
 # ── Resource macros ────────────────────────────────────────────────────
 
 # Note: with-window, with-font, with-texture are documented in the export
@@ -872,6 +1116,45 @@
  :with-font*        sdl/with-font*
  :with-texture*     sdl/with-texture*
 
+ # Audio
+ :open-audio        sdl/open-audio
+ :resume-audio      sdl/resume-audio
+ :pause-audio       sdl/pause-audio
+ :put-audio         sdl/put-audio
+ :clear-audio       sdl/clear-audio
+ :destroy-audio     sdl/destroy-audio
+ :load-wav          sdl/load-wav
+ :audio-playback-devices sdl/audio-playback-devices
+
+ # Input
+ :key-pressed?      sdl/key-pressed?
+ :mouse-state       sdl/mouse-state
+ :warp-mouse        sdl/warp-mouse
+ :show-cursor       sdl/show-cursor
+ :hide-cursor       sdl/hide-cursor
+ :set-relative-mouse sdl/set-relative-mouse
+ :start-text-input  sdl/start-text-input
+ :stop-text-input   sdl/stop-text-input
+ :set-keyboard-grab sdl/set-keyboard-grab
+ :set-mouse-grab    sdl/set-mouse-grab
+
+ # Clipboard
+ :set-clipboard     sdl/set-clipboard
+ :get-clipboard     sdl/get-clipboard
+ :has-clipboard?    sdl/has-clipboard?
+
+ # Misc
+ :open-url          sdl/open-url
+ :message-box       sdl/message-box
+ :displays          sdl/displays
+ :display-bounds    sdl/display-bounds
+ :disable-screensaver sdl/disable-screensaver
+ :enable-screensaver  sdl/enable-screensaver
+ :set-bordered      sdl/set-bordered
+ :set-opacity       sdl/set-opacity
+ :flash-window      sdl/flash-window
+ :set-icon          sdl/set-icon
+
  # Constructors
  :rgb               sdl/rgb
  :rgba              sdl/rgba
@@ -930,6 +1213,18 @@
  :font-bold         font-bold
  :font-italic       font-italic
  :font-underline    font-underline
- :font-strikethrough font-strikethrough}
+ :font-strikethrough font-strikethrough
+ :audio-u8          audio-u8
+ :audio-s16         audio-s16
+ :audio-s32         audio-s32
+ :audio-f32         audio-f32
+ :audio-device-default-playback  audio-device-default-playback
+ :audio-device-default-recording audio-device-default-recording
+ :msgbox-error      msgbox-error
+ :msgbox-warning    msgbox-warning
+ :msgbox-information msgbox-information
+ :flash-cancel      flash-cancel
+ :flash-briefly     flash-briefly
+ :flash-until-focused flash-until-focused}
 
 ) # end (fn [])
