@@ -71,6 +71,12 @@
 (assert (= (butlast (list 1 2 3)) (list 1 2)) "butlast: list")
 (assert (= (take 2 (list 1 2 3)) (list 1 2)) "take: list")
 
+## ── ptr/from-int accepts negative values (bugfix) ───────────────
+
+(let [[p (ptr/from-int -1)]]
+  (assert (ptr? p) "ptr/from-int -1 returns a pointer")
+  (assert (= (ptr/to-int p) -1) "ptr/from-int -1 roundtrips"))
+
 ## ── bytes idempotency (bugfix) ─────────────────────────────────────────
 
 (let [[b (bytes "hello")]]

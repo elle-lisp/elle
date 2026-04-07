@@ -735,15 +735,8 @@ pub fn prim_ptr_from_int(args: &[Value]) -> (SignalBits, Value) {
             )
         }
     };
-    if n < 0 {
-        return (
-            SIG_ERROR,
-            error_val(
-                "argument-error",
-                "ptr/from-int: address must be non-negative",
-            ),
-        );
-    }
+    // Reinterpret as unsigned — negative values are valid C pointers
+    // (e.g. SQLITE_TRANSIENT = (void(*)(void*))-1 = 0xFFFFFFFFFFFFFFFF).
     let addr = n as u64;
     // Validate the address fits in a usize (platform pointer width).
     if addr > usize::MAX as u64 {

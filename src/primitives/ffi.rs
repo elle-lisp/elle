@@ -631,9 +631,10 @@ mod tests {
 
     #[test]
     fn test_ptr_from_int_negative() {
+        // Negative values are valid C pointers (e.g. SQLITE_TRANSIENT = -1).
         let result = prim_ptr_from_int(&[Value::int(-1)]);
-        assert_eq!(result.0, SIG_ERROR);
-        assert_eq!(error_kind(&result.1).as_deref(), Some("argument-error"));
+        assert_eq!(result.0, SIG_OK);
+        assert!(result.1.as_pointer().is_some());
     }
 
     #[test]

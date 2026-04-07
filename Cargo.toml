@@ -18,7 +18,6 @@ members = [
     "plugins/regex",
     "plugins/selkie",
 
-    "plugins/sqlite",
     "plugins/syn",
     "plugins/tls",
     "plugins/toml",
