@@ -306,7 +306,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::LoadUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_byte(*index as u8);
+                    self.bytecode.emit_u16(*index);
                 }
                 self.push_reg(*dst);
             }
@@ -315,7 +315,7 @@ impl Emitter {
                 // Load without unwrapping cells - used for forwarding captures
                 self.bytecode.emit(Instruction::LoadUpvalueRaw);
                 self.bytecode.emit_byte(0); // depth (currently unused)
-                self.bytecode.emit_byte(*index as u8);
+                self.bytecode.emit_u16(*index);
                 self.push_reg(*dst);
             }
 
@@ -328,7 +328,7 @@ impl Emitter {
                 } else {
                     self.bytecode.emit(Instruction::StoreUpvalue);
                     self.bytecode.emit_byte(0); // depth (currently unused)
-                    self.bytecode.emit_byte(*index as u8);
+                    self.bytecode.emit_u16(*index);
                 }
                 // Both StoreLocal and StoreUpvalue pop-then-push-back.
                 // Auto-pop: consume the pushed-back value.

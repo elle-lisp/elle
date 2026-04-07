@@ -422,11 +422,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
             }
             Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue => {
-                if i + 1 < instructions.len() {
+                if i + 2 < instructions.len() {
                     let depth = instructions[i];
-                    let index = instructions[i + 1];
+                    let index = u16::from_le_bytes([instructions[i + 1], instructions[i + 2]]);
                     line.push_str(&format!(" (depth={}, index={})", depth, index));
-                    i += 2;
+                    i += 3;
                 }
             }
             Instruction::Call | Instruction::TailCall => {
