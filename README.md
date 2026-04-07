@@ -19,6 +19,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Plugins](#plugins)
 - [Epochs — Versioned Syntax Migration](#epochs--versioned-syntax-migration)
 - [Tooling](#tooling)
+- [Coming from Another Language](#coming-from-another-language)
 - [Getting Started](#getting-started)
 - [License](#license)
 
@@ -813,6 +814,19 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 | `docs/cookbook/` | Recipes for common codebase changes |
 | `docs/analysis/` | Testing, debugging, semantic portraits |
 | `docs/impl/` | Implementation internals (reader, HIR, LIR, VM, JIT) |
+
+## Coming from Another Language
+
+Orientation guides for programmers arriving from other languages — key
+differences, concept mappings, and gotchas:
+[Python](docs/coming-from.md#python) ·
+[JavaScript](docs/coming-from.md#javascript--typescript) ·
+[Rust](docs/coming-from.md#rust) ·
+[Go](docs/coming-from.md#go) ·
+[Clojure](docs/coming-from.md#clojure) ·
+[Common Lisp / Scheme](docs/coming-from.md#common-lisp--scheme) ·
+[Erlang / Elixir](docs/coming-from.md#erlang--elixir) ·
+[C](docs/coming-from.md#c)
 
 ## Getting Started
 
