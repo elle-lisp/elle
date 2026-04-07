@@ -184,11 +184,13 @@
 (defmacro ffi/defbind (name lib cname ret-type arg-types)
   (let* [[arg-types-val (syntax->datum arg-types)]
          [arg-count (length arg-types-val)]
-         [params (letrec [[gen (fn (i acc)
-                                 (if (= i arg-count)
-                                   (reverse acc)
-                                   (gen (+ i 1) (cons (gensym) acc))))]]
-                   (gen 0 '()))]]
+         [params (let [[p @[]]]
+                   (letrec [[gen (fn (i)
+                                   (when (< i arg-count)
+                                     (push p (gensym))
+                                     (gen (+ i 1))))]]
+                     (gen 0))
+                   (apply list p))]]
     `(def ,name
        (let ((ptr__ (ffi/lookup ,lib ,cname))
              (sig__ (ffi/signature ,ret-type ,arg-types)))
