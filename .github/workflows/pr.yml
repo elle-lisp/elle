@@ -76,13 +76,8 @@ jobs:
       matrix:
         plugin:
           - arrow
-          - base64
-          - clap
-          - compress
           - crypto
           - csv
-          - git
-          - glob
           - hash
           - jiff
           - msgpack
@@ -92,13 +87,10 @@ jobs:
           - random
           - regex
           - selkie
-          - semver
-          - sqlite
           - syn
           - tls
           - toml
           - tree-sitter
-          - uuid
           - xml
           - yaml
     steps:

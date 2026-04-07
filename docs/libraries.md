@@ -41,9 +41,22 @@ pattern and are imported via `(import "std/<name>")`.
 | Module | Import | Description |
 |--------|--------|-------------|
 | hash | `(import "std/hash")` | Streaming hash convenience functions |
-| watch | `(import "std/watch")` | Event-driven filesystem watcher (wraps watch plugin) |
+| watch | `(import "std/watch")` | Event-driven filesystem watcher (inotify/kqueue) |
 | egui | `(import "std/egui")` | Immediate-mode GUI (wraps egui plugin) |
 | lua | `(import "std/lua")` | Lua compatibility prelude |
+
+### Utilities (pure Elle / FFI)
+
+| Module | Import | Description |
+|--------|--------|-------------|
+| base64 | `((import "std/base64"))` | Base64 encoding/decoding |
+| cli | `((import "std/cli"))` | CLI argument parsing |
+| compress | `((import "std/compress"))` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
+| git | `((import "std/git"))` | Git repository operations (FFI to libgit2) |
+| glob | `((import "std/glob"))` | Filesystem glob pattern matching |
+| semver | `((import "std/semver"))` | Semantic version parsing and comparison |
+| sqlite | `((import "std/sqlite"))` | SQLite database (FFI to libsqlite3) |
+| uuid | `((import "std/uuid"))` | UUID generation and parsing |
 
 ## Usage
 
