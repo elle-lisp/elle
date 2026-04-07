@@ -11,7 +11,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 // Re-export advanced functions for use in PRIMITIVES array
 pub(crate) use advanced::{
-    prim_append, prim_butlast, prim_concat, prim_last, prim_reverse, prim_take,
+    prim_append, prim_butlast, prim_concat, prim_drop, prim_last, prim_reverse, prim_take,
 };
 
 /// Construct a cons cell
@@ -902,6 +902,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["count", "list"],
         category: "list",
         example: "(take 2 (list 1 2 3 4))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "drop",
+        func: prim_drop,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Drop the first n elements of a list",
+        params: &["count", "list"],
+        category: "list",
+        example: "(drop 2 (list 1 2 3 4))",
         aliases: &[],
     },
     PrimitiveDef {

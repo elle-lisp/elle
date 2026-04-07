@@ -21,7 +21,7 @@
 # (range end)
 (let ((r (range 5)))
   (assert (array? r) "range 5: is array")
-  (assert (mutable? r) "range 5: is mutable")
+  (assert (not (mutable? r)) "range 5: is immutable")
   (assert (= (length r) 5) "range 5: length")
   (assert (= (get r 0) 0) "range 5: first")
   (assert (= (get r 4) 4) "range 5: last"))

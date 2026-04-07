@@ -6,7 +6,7 @@ use `import` with the `std/` prefix and require no compilation.
 
 ## Usage pattern
 
-```lisp
+```
 ## Plugin (Rust cdylib)
 (def crypto (import "plugin/crypto"))
 (seq->hex (crypto:sha256 "hello"))

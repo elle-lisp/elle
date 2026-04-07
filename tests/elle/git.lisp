@@ -1,5 +1,8 @@
 ## Git module tests (FFI to libgit2)
 
+(def [ok? _] (protect ((fn [] (ffi/native "libgit2.so")))))
+(unless ok? (println "SKIP: libgit2.so not available") (exit 0))
+
 (def git ((import "std/git")))
 
 ## Open current repo

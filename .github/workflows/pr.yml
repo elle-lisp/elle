@@ -120,7 +120,7 @@ jobs:
       - name: Install GNU parallel and Redis
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel redis-server
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
       - name: Build release binary
         run: cargo build --release -p elle

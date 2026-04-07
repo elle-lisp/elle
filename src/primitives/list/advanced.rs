@@ -1,4 +1,4 @@
-//! Advanced list operations: append, concat, take, butlast, reverse, last
+//! Advanced list operations: append, concat, take, drop, butlast, reverse, last
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::{error_val, list, Value};
 use unicode_segmentation::UnicodeSegmentation;
@@ -819,4 +819,46 @@ pub(crate) fn prim_last(args: &[Value]) -> (SignalBits, Value) {
             ),
         ),
     )
+}
+
+/// Drop the first n elements of a list
+pub(crate) fn prim_drop(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("drop: expected 2 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let count = match args[0].as_int() {
+        Some(n) if n < 0 => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "argument-error",
+                    format!("drop: count must be non-negative, got {}", n),
+                ),
+            );
+        }
+        Some(n) => n as usize,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("drop: expected integer, got {}", args[0].type_name()),
+                ),
+            )
+        }
+    };
+    let vec = match args[1].list_to_vec() {
+        Ok(v) => v,
+        Err(e) => return (SIG_ERROR, error_val("type-error", format!("drop: {}", e))),
+    };
+
+    let dropped: Vec<Value> = vec.into_iter().skip(count).collect();
+    (SIG_OK, list(dropped))
 }

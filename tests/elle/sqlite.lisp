@@ -1,5 +1,8 @@
 ## SQLite module tests (FFI to libsqlite3)
 
+(def [ok? _] (protect ((fn [] (ffi/native "libsqlite3.so")))))
+(unless ok? (println "SKIP: libsqlite3.so not available") (exit 0))
+
 (def db ((import "std/sqlite")))
 
 (def conn (db:open ":memory:"))

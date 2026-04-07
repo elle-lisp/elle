@@ -1,5 +1,9 @@
 ## Compress module tests (FFI to libz + libzstd)
 
+(def [ok1? _] (protect ((fn [] (ffi/native "libz.so")))))
+(def [ok2? _] (protect ((fn [] (ffi/native "libzstd.so")))))
+(unless (and ok1? ok2?) (println "SKIP: libz.so or libzstd.so not available") (exit 0))
+
 (def z ((import "std/compress")))
 
 ## gzip roundtrip
