@@ -5,7 +5,6 @@ members = [
 
     "plugins/crypto",
     "plugins/csv",
-    "plugins/git",
     "plugins/hash",
     "plugins/jiff",
     "plugins/mqtt",
