@@ -76,13 +76,8 @@ jobs:
       matrix:
         plugin:
           - arrow
-          - base64
-          - clap
-          - compress
           - crypto
           - csv
-          - git
-          - glob
           - hash
           - jiff
           - msgpack
@@ -92,13 +87,10 @@ jobs:
           - random
           - regex
           - selkie
-          - semver
-          - sqlite
           - syn
           - tls
           - toml
           - tree-sitter
-          - uuid
           - xml
           - yaml
     steps:
@@ -128,7 +120,7 @@ jobs:
       - name: Install GNU parallel and Redis
         run: |
           sudo apt-get update
-          sudo apt-get install -y parallel redis-server
+          sudo apt-get install -y parallel redis-server libsqlite3-dev libz-dev libzstd-dev libgit2-dev
           sudo systemctl start redis-server
       - name: Build release binary
         run: cargo build --release -p elle

@@ -2,13 +2,9 @@
 members = [
     ".",
     "plugins/arrow",
-    "plugins/base64",
-    "plugins/clap",
-    "plugins/compress",
+
     "plugins/crypto",
     "plugins/csv",
-    "plugins/git",
-    "plugins/glob",
     "plugins/hash",
     "plugins/jiff",
     "plugins/mqtt",
@@ -19,14 +15,12 @@ members = [
     "plugins/random",
     "plugins/regex",
     "plugins/selkie",
-    "plugins/semver",
-    "plugins/sqlite",
+
     "plugins/syn",
     "plugins/tls",
     "plugins/toml",
     "plugins/tree-sitter",
-    "plugins/uuid",
-    "plugins/watch",
+
     "plugins/xml",
     "plugins/yaml",
     "plugins/egui",

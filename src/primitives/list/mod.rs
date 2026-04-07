@@ -859,6 +859,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(concat [1 2] [3 4]) #=> [1 2 3 4]",
         aliases: &[],
     },
+
     PrimitiveDef {
         name: "reverse",
         func: prim_reverse,
@@ -870,7 +871,6 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(reverse (list 1 2 3))",
         aliases: &[],
     },
-
     PrimitiveDef {
         name: "last",
         func: prim_last,

@@ -15,14 +15,9 @@ TIMEOUT ?= 30s
 
 PLUGINS := \
     arrow \
-    base64 \
-    clap \
-    compress \
     crypto \
     csv \
     egui \
-    git \
-    glob \
     hash \
     jiff \
     mqtt \
@@ -33,14 +28,10 @@ PLUGINS := \
     random \
     regex \
     selkie \
-    semver \
-    sqlite \
     syn \
     tls \
     toml \
     tree-sitter \
-    uuid \
-    watch \
     xml \
     yaml
 

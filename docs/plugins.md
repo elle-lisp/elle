@@ -1,30 +1,31 @@
 # Plugins
 
-Elle ships with 29 plugins — Rust cdylib crates that extend the language
-with new primitives. `import` loads a plugin and returns a struct of its
-functions.
+Elle ships with 20 Rust plugins and 9 pure Elle standard library modules.
+Plugins are cdylib crates loaded at runtime via `import`. Standard modules
+use `import` with the `std/` prefix and require no compilation.
 
 ## Usage pattern
 
-```lisp
-# (def crypto (import "plugin/crypto"))
-# (seq->hex (crypto:sha256 "hello"))
+```
+## Plugin (Rust cdylib)
+(def crypto (import "plugin/crypto"))
+(seq->hex (crypto:sha256 "hello"))
+
+## Standard module (pure Elle or FFI)
+(def b64 ((import "std/base64")))
+(b64:encode "hello")
 ```
 
 Build plugins before use: `cargo build --release -p elle-crypto`.
 
-## Shipped plugins
+## Rust plugins
 
 | Plugin | Import name | Description |
 |--------|-------------|-------------|
 | `elle-arrow` | `"plugin/arrow"` | Apache Arrow columnar data |
-| `elle-base64` | `"plugin/base64"` | Base64 encoding/decoding |
-| `elle-clap` | `"plugin/clap"` | CLI argument parsing |
-| `elle-compress` | `"plugin/compress"` | Compression (gzip, zstd, etc.) |
 | `elle-crypto` | `"plugin/crypto"` | SHA-2 hashing and HMAC |
 | `elle-csv` | `"plugin/csv"` | CSV reading and writing |
-| `elle-git` | `"plugin/git"` | Git repository operations |
-| `elle-glob` | `"plugin/glob"` | Filesystem glob patterns |
+| `elle-egui` | `"plugin/egui"` | Immediate-mode GUI |
 | `elle-hash` | `"plugin/hash"` | Universal hashing (SHA-3, BLAKE3, CRC32, etc.) |
 | `elle-jiff` | `"plugin/jiff"` | Date/time operations |
 | `elle-mqtt` | `"plugin/mqtt"` | MQTT client |
@@ -35,17 +36,26 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 | `elle-random` | `"plugin/random"` | Pseudo-random numbers |
 | `elle-regex` | `"plugin/regex"` | Regular expressions |
 | `elle-selkie` | `"plugin/selkie"` | Mermaid diagram rendering |
-| `elle-semver` | `"plugin/semver"` | Semantic versioning |
-| `elle-sqlite` | `"plugin/sqlite"` | SQLite database |
 | `elle-syn` | `"plugin/syn"` | Rust source parsing |
 | `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
 | `elle-toml` | `"plugin/toml"` | TOML parsing |
 | `elle-tree-sitter` | `"plugin/tree-sitter"` | Multi-language parsing |
-| `elle-uuid` | `"plugin/uuid"` | UUID generation |
-| `elle-watch` | `"plugin/watch"` | Filesystem watching |
 | `elle-xml` | `"plugin/xml"` | XML parsing |
 | `elle-yaml` | `"plugin/yaml"` | YAML parsing |
-| `elle-egui` | `"plugin/egui"` | Immediate-mode GUI |
+
+## Standard library modules (pure Elle / FFI)
+
+| Module | Import | Description |
+|--------|--------|-------------|
+| `base64` | `(def b64 ((import "std/base64")))` | Base64 encoding/decoding |
+| `cli` | `(def cli ((import "std/cli")))` | CLI argument parsing |
+| `compress` | `(def z ((import "std/compress")))` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
+| `git` | `(def git ((import "std/git")))` | Git repository operations (FFI to libgit2) |
+| `glob` | `(def glob ((import "std/glob")))` | Filesystem glob patterns |
+| `semver` | `(def sv ((import "std/semver")))` | Semantic versioning |
+| `sqlite` | `(def db ((import "std/sqlite")))` | SQLite database (FFI to libsqlite3) |
+| `uuid` | `(def uuid ((import "std/uuid")))` | UUID generation and parsing |
+| `watch` | `(def w ((import "std/watch")))` | Filesystem watching |
 
 ## Gotchas
 

@@ -1618,6 +1618,7 @@
   "Product of a sequence of numbers. (product [1 2 3]) => 6"
   (fold * 1 xs))
 
+
 ## ── Module export closure ───────────────────────────────────────────
 ## Last expression: a closure returning a struct of all exports.
 ## Called by init_stdlib to register stdlib functions as primitives.

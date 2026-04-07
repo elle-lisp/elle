@@ -92,7 +92,7 @@ others are aborted.
 scheduler — waiting fibers yield rather than blocking the thread.
 
 ```lisp
-(def sync ((import "lib/sync")))
+(def sync ((import "std/sync")))
 
 (def lock (sync:make-lock))
 (lock:acquire)
@@ -127,7 +127,7 @@ On top of the core process API, the module provides:
 - **EventManager** — pub/sub event dispatching
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   # Ping-pong between two processes
@@ -143,7 +143,7 @@ On top of the core process API, the module provides:
 ### GenServer example
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (process:gen-server-start-link
@@ -161,7 +161,7 @@ On top of the core process API, the module provides:
 ### Supervisor example
 
 ```elle
-(def process ((import "lib/process")))
+(def process ((import "std/process")))
 
 (process:start (fn []
   (let ([me (process:self)])

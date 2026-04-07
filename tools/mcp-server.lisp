@@ -33,13 +33,13 @@
 (def ox (import "oxigraph"))
 (def syn (import "syn"))
 (def glob-plugin (import "glob"))
-(def portrait-lib ((import "lib/portrait")))
-(def rdf ((import "lib/rdf")))
+(def portrait-lib ((import "std/portrait")))
+(def rdf ((import "std/rdf")))
 (def rust-rdf ((import "tools/rust-rdf-lib") syn))
 
 # ── Watch library ───────────────────────────────────────────────────────
 
-(def watch ((import "lib/watch")))
+(def watch ((import "std/watch")))
 
 # ── Store initialization ─────────────────────────────────────────────────
 

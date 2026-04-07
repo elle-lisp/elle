@@ -1,7 +1,7 @@
 ## examples/egui-counter.lisp — minimal egui counter app
 
 (def egui-plugin (import "egui"))
-(def ui ((import "lib/egui") egui-plugin))
+(def ui ((import "std/egui") egui-plugin))
 
 (var count 0)
 

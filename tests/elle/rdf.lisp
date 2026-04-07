@@ -1,6 +1,6 @@
 ## tests/elle/rdf.lisp — verify lib/rdf.lisp triple generation
 
-(def rdf ((import "lib/rdf.lisp")))
+(def rdf ((import "std/rdf")))
 
 # ── Primitive triples ──────────────────────────────────────────────────
 

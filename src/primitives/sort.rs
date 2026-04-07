@@ -197,7 +197,7 @@ pub(crate) fn prim_range(args: &[Value]) -> (SignalBits, Value) {
         }
     }
 
-    (SIG_OK, Value::array_mut(result))
+    (SIG_OK, Value::array(result))
 }
 
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[

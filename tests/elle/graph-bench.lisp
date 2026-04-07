@@ -91,7 +91,7 @@
 
 # ── Full portrait ──────────────────────────────────────────────────────
 
-(def portrait ((import "lib/portrait.lisp")))
+(def portrait ((import "std/portrait")))
 
 (assign t0 (clock/monotonic))
 (def p (portrait:function a :map))
@@ -105,7 +105,7 @@
 
 # ── RDF generation ─────────────────────────────────────────────────────
 
-(def rdf ((import "lib/rdf.lisp")))
+(def rdf ((import "std/rdf")))
 
 (assign t0 (clock/monotonic))
 (def pt (rdf:primitives))

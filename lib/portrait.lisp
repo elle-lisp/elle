@@ -6,7 +6,7 @@
 ## decisions.
 ##
 ## Usage:
-##   (def portrait (import "lib/portrait.lisp"))
+##   (def portrait (import "std/portrait"))
 ##   (def a (compile/analyze (file/read "myfile.lisp") {:file "myfile.lisp"}))
 ##   (println (portrait:function a :my-fn))
 ##   (println (portrait:module a))

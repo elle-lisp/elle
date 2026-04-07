@@ -416,7 +416,10 @@
 (assert (nil? (ptr/from-int 0)) "ptr/from-int zero is nil")
 
 # ptr/from-int error: negative
-(let (([ok? _] (protect ((fn () (ptr/from-int -1)))))) (assert (not ok?) "ptr/from-int negative error"))
+## ptr/from-int accepts negative values (sentinel pointers like SQLITE_TRANSIENT)
+(let [[p (ptr/from-int -1)]]
+  (assert (ptr? p) "ptr/from-int negative returns pointer")
+  (assert (= (ptr/to-int p) -1) "ptr/from-int negative roundtrips"))
 
 # ptr/from-int error: wrong type
 (let (([ok? _] (protect ((fn () (ptr/from-int "hello")))))) (assert (not ok?) "ptr/from-int wrong type error"))

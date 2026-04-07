@@ -1,7 +1,7 @@
 ## demos/egui/smoke.lisp — headless smoke test for egui plugin
 
 (def egui-plugin (import "egui"))
-(def ui ((import "lib/egui") egui-plugin))
+(def ui ((import "std/egui") egui-plugin))
 
 (def win (ui:open :title "Smoke Test"))
 (assert (ui:open? win) "window should be open")
