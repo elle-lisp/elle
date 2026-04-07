@@ -107,7 +107,7 @@
     (var i 0)
     (while (< i WIDTH)
       (push r 0)
-      (assign i (+ i 1)))
+      (assign i (inc i)))
     r))
 
 # ── Color palette (Bernstein polynomials) ─────────────────────────
@@ -127,7 +127,7 @@
         (push p (bit/or (bit/shl 255 24)
                         (bit/or (bit/shl r 16)
                                 (bit/or (bit/shl g 8) b)))))
-      (assign i (+ i 1)))
+      (assign i (inc i)))
     p))
 
 # ── Mandelbrot computation ────────────────────────────────────────
@@ -157,7 +157,7 @@
         (assign zr  (+ (- zr2 zi2) cr))
         (assign zr2 (* zr zr))
         (assign zi2 (* zi zi))
-        (assign iter (+ iter 1)))
+        (assign iter (inc iter)))
 
       (def color
         (if (= iter max-iter)
@@ -168,10 +168,10 @@
             (palette idx))))
 
       (put row-buf px color)
-      (assign px (+ px 1)))
+      (assign px (inc px)))
 
     (ffi/write (ptr/add pixel-buf (* py STRIDE)) row-type row-buf)
-    (assign py (+ py 1)))
+    (assign py (inc py)))
 
   (- (now-ms) t0))
 
