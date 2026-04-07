@@ -15,6 +15,7 @@ Elle is a Lisp. What separates it from other Lisps is the depth of its static an
 - [Execution Backends](#execution-backends)
 - [FFI](#ffi)
 - [Modules](#modules)
+- [Standard Library Modules](#standard-library-modules)
 - [Plugins](#plugins)
 - [Epochs](#epochs)
 - [Tooling](#tooling)
@@ -691,31 +692,59 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
 
 - **Module system is user-replaceable.** `import` is an ordinary primitive. You can wrap it with caching, path resolution, sandboxing, or shadow it entirely.
 
+## Standard Library Modules
+
+- **Pure Elle and FFI modules require no compilation.** Import with the `std/` prefix. Modules that wrap C libraries (sqlite, compress, git) use Elle's FFI — the system library must be installed, but no Rust build step is needed.
+
+  ```lisp
+  (def b64 ((import "std/base64")))
+  (b64:encode "hello")  # => "aGVsbG8="
+
+  (def db ((import "std/sqlite")))
+  (def conn (db:open ":memory:"))
+  (db:exec conn "CREATE TABLE t (id INTEGER, name TEXT)")
+  ```
+
+  | Module | Description |
+  |--------|-------------|
+  | `base64` | Base64 encoding/decoding |
+  | `cli` | Declarative CLI argument parsing |
+  | `compress` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
+  | `git` | Git repository operations (FFI to libgit2) |
+  | `glob` | Filesystem glob pattern matching |
+  | `semver` | Semantic version parsing and comparison |
+  | `sqlite` | SQLite database (FFI to libsqlite3) |
+  | `uuid` | UUID generation and parsing |
+  | `http` | Pure Elle HTTP/1.1 client and server |
+  | `tls` | TLS client and server (wraps tls plugin) |
+  | `dns` | Pure Elle DNS client (RFC 1035) |
+  | `redis` | Pure Elle Redis client (RESP2) |
+  | `aws` | Elle-native AWS client (SigV4, HTTPS) |
+  | `sync` | Locks, semaphores, condvars, barriers, queues |
+  | `process` | Erlang-style GenServer, Supervisor, Actor, Task |
+  | `watch` | Event-driven filesystem watcher |
+  | `zmq` | ZeroMQ bindings via FFI |
+
 ## Plugins
 
-- **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`. No intermediate serialization format, no separate process, no generated bindings.
+- **Native plugins are Rust cdylib crates.** Link against `elle`, export an init function. Plugins register primitives through the same `PrimitiveDef` mechanism as builtins — same signal declarations, same doc strings, same arity checking. Work directly with `Value`.
 
   ```lisp
   (def re (import "plugin/regex"))
-  (def pat (re:compile "\\d+"))
-  (re:find-all pat "a1b2c3")
-  # => ({:match "1" ...} {:match "2" ...} ...)
+  (re:match "\\d+" "abc123")  # => {:match "123" ...}
   ```
 
-- **29 plugins ship with Elle:**
+- **20 plugins ship with Elle:**
 
   | Plugin | Description |
   |--------|-------------|
   | `arrow` | Apache Arrow columnar data and Parquet serialization |
-  | `base64` | Base64 encoding/decoding |
-  | `clap` | Declarative CLI argument parsing |
-  | `compress` | Compression (gzip, zstd, etc.) |
   | `crypto` | SHA-2 hashing and HMAC |
   | `csv` | CSV reading and writing |
-  | `git` | Git repository operations |
-  | `glob` | Filesystem glob patterns |
+  | `egui` | Immediate-mode GUI |
   | `hash` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
   | `jiff` | Date, time, and duration arithmetic |
+  | `mqtt` | MQTT packet codec |
   | `msgpack` | MessagePack serialization |
   | `oxigraph` | RDF graph database (SPARQL) |
   | `polars` | Polars DataFrame operations (eager and lazy APIs) |
@@ -723,13 +752,10 @@ See [`docs/impl/wasm.md`](docs/impl/wasm.md) for details.
   | `random` | Pseudo-random number generation |
   | `regex` | Regular expressions |
   | `selkie` | Mermaid diagram rendering |
-  | `semver` | Semantic version parsing and comparison |
-  | `sqlite` | SQLite database |
   | `syn` | Rust source code parsing |
   | `tls` | TLS client and server via rustls |
   | `toml` | TOML parsing and generation |
   | `tree-sitter` | Multi-language parsing and structural queries |
-  | `uuid` | UUID generation |
   | `xml` | XML parsing and generation |
   | `yaml` | YAML parsing and generation |
 
