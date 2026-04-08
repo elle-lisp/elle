@@ -13,7 +13,7 @@ Demonstration programs that dogfood Elle with non-trivial algorithms and serve a
 | [egui/](egui/) | Immediate-mode GUI via egui plugin |
 | [fib/](fib/) | Recursive Fibonacci benchmark measuring function call overhead |
 | [logo/](logo/) | Elle logo glyph rendered as colored bezier fibers |
-| [mandelbrot/](mandelbrot/) | Interactive Mandelbrot explorer — GTK4 + Cairo |
+| [mandelbrot/](mandelbrot/) | Interactive Mandelbrot explorer — GTK4 + Cairo (uses `std/gtk4/bind`) |
 | [matrix/](matrix/) | Heat diffusion simulation with ASCII visualization |
 | [microgpt/](microgpt/) | Micro GPT — scalar autograd + character-level transformer |
 | [nqueens/](nqueens/) | N-Queens backtracking algorithm (cons-list and array variants) |

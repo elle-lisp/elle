@@ -113,6 +113,8 @@ bytecode. Error messages include file:line:col information.
 | lib/sdl3.lisp | `lib/` | SDL3 bindings via FFI (window, renderer, events, audio, TTF) |
 | lib/http.lisp | `lib/` | Pure Elle HTTP/1.1 client and server |
 | lib/aws.lisp | `lib/` | Elle-native AWS client (SigV4, HTTPS) |
+| lib/gtk4.lisp | `lib/` | GTK4 declarative UI (widgets, events, CSS, WebKit) |
+| lib/sdl.lisp | `lib/` | SDL3 bindings for games/graphics |
 
 ## Directories
 

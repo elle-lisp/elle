@@ -1,44 +1,28 @@
 # mandelbrot
 
-Interactive Mandelbrot set explorer rendered via GTK4 + Cairo FFI.
+Interactive Mandelbrot set explorer using GTK4 + Cairo via FFI.
 
-## Responsibility
+## Architecture
 
-Demonstrate GTK4 widget-based GUI programming in Elle using FFI callbacks. Exercises the full GObject signal system, Cairo pixel-buffer rendering, and GTK4 event controllers.
-
-Does NOT:
-- Use any Elle GUI abstraction (raw FFI only)
-- Require the async scheduler (synchronous computation, GTK main loop)
+Uses `std/gtk4/bind` for shared GTK4/GLib/GObject library handles and
+common widget bindings. Adds Cairo and GtkDrawingArea bindings locally
+since these are rendering-specific and not part of the widget toolkit
+module.
 
 ## Key files
 
 | File | Purpose |
 |------|---------|
-| `mandelbrot.lisp` | Complete demo — GTK4/Cairo bindings, Mandelbrot computation, event handling |
+| `mandelbrot.lisp` | Complete demo — fractal computation, Cairo rendering, event handling |
 
-## FFI surface
+## Dependencies
 
-- `libgtk-4.so.1` — application, window, drawing area, event controllers
-- `libgobject-2.0.so.0` — `g_signal_connect_data` for signal wiring
-- `libgio-2.0.so.0` — `g_application_run` for main loop
-- `libcairo.so.2` — image surface creation, scaling, painting
-- libc (`nil` handle) — `clock_gettime` for render timing
-
-## Architecture
-
-```
-GtkApplication
-  └─ activate signal (ffi/callback)
-       └─ GtkApplicationWindow
-            └─ GtkDrawingArea
-                 ├─ draw_func (ffi/callback) — blit ARGB32 buffer via Cairo
-                 ├─ GtkGestureClick — zoom in/out on click
-                 └─ GtkEventControllerScroll — zoom on scroll
-            └─ GtkEventControllerKey — pan, reset, quit, iteration control
-```
+- `std/gtk4/bind` — GTK4 library handles and common bindings
+- `libgio-2.0.so.0` — GApplication lifecycle
+- `libcairo.so.2` — pixel buffer rendering
 
 ## Running
 
 ```bash
-cargo run --release -- demos/mandelbrot/mandelbrot.lisp
+elle demos/mandelbrot/mandelbrot.lisp
 ```

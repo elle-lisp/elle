@@ -182,21 +182,20 @@
 ##                     (sig__ (ffi/signature :int [:int])))
 ##                 (fn (a0) (ffi/call ptr__ sig__ a0))))
 (defmacro ffi/defbind (name lib cname ret-type arg-types)
-  (let* [[ptr-sym (gensym)]
-         [sig-sym (gensym)]
-         [arg-types-val (syntax->datum arg-types)]
+  (let* [[arg-types-val (syntax->datum arg-types)]
          [arg-count (length arg-types-val)]
-         [params (letrec [[gen-params (fn (i acc)
-                                        (if (= i arg-count)
-                                          (reverse acc)
-                                          (gen-params (+ i 1) (cons (gensym) acc))))]]
-                   (gen-params 0 '()))]
-         [call-args params]]
+         [params (let [[p @[]]]
+                   (letrec [[gen (fn (i)
+                                   (when (< i arg-count)
+                                     (push p (gensym))
+                                     (gen (+ i 1))))]]
+                     (gen 0))
+                   (apply list p))]]
     `(def ,name
-       (let ((,ptr-sym (ffi/lookup ,lib ,cname))
-             (,sig-sym (ffi/signature ,ret-type ,arg-types)))
+       (let ((ptr__ (ffi/lookup ,lib ,cname))
+             (sig__ (ffi/signature ,ret-type ,arg-types)))
           (fn ,params
-             (ffi/call ,ptr-sym ,sig-sym ,;call-args))))))
+             (ffi/call ptr__ sig__ ,;params))))))
 
 ## each - iterate over a sequence
 ## Dispatches on type-of: lists use first/rest, indexed types use get/length.

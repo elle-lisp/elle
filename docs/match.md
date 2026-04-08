@@ -122,6 +122,35 @@ Patterns compose to any depth:
 (db-host {:nodb true})               # => "unknown"
 ```
 
+## Or-patterns
+
+`(or p1 p2 ...)` matches if any alternative matches. All alternatives
+must bind the same set of variables (or none at all).
+
+```lisp
+(defn classify-suit [suit]
+  (match suit
+    ((or :hearts :diamonds) :red)
+    ((or :clubs :spades)    :black)
+    (_                      :unknown)))
+
+(classify-suit :hearts)    # => :red
+(classify-suit :spades)    # => :black
+```
+
+Or-patterns work with binding patterns — each alternative must bind
+the same names:
+
+```lisp
+(defn first-element [coll]
+  (match coll
+    ((or [x & _] (x & _))  x)
+    (_                      nil)))
+
+(first-element [10 20])        # => 10
+(first-element (list 30 40))   # => 30
+```
+
 ## Guards
 
 `when` inside an arm adds a condition. The syntax is
