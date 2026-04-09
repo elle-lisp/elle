@@ -319,7 +319,7 @@ The MCP server exposes what the compiler already computes. Elle's compilation pi
 (compile/callees a :my-function)   # => call graph
 ```
 
-See [Design Philosophy](../philosophy.md) for why Elle is designed this way, and [Agent Reasoning](analysis/agent-reasoning.md) for how agents use the MCP server in practice.
+See [Design Philosophy](philosophy.md) for why Elle is designed this way, and [Agent Reasoning](analysis/agent-reasoning.md) for how agents use the MCP server in practice.
 
 ## IDE integration
 

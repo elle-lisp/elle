@@ -54,7 +54,7 @@ The compiler already computes signal inference, capture analysis, and call graph
 
 The language design (polymorphic-by-default, dynamic modules, per-file compilation) is sound. These tools don't compensate for gaps — they expose what the compiler already computes so that humans and agents can query it.
 
-See [philosophy.md](../../philosophy.md) and [modules.md](../modules.md) for the design rationale.
+See [philosophy.md](../philosophy.md) and [modules.md](../modules.md) for the design rationale.
 
 ## For Humans
 

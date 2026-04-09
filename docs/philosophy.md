@@ -71,13 +71,13 @@ Mark a function `(silence)` when:
 
 Don't mark silence on everything. It's an explicit performance contract, not a default.
 
-The compiler already knows all of this — signal inference is computed at compile time. The [portrait](docs/analysis/portrait.md) system exposes it as queryable data, and the [MCP server](docs/mcp.md) makes the entire codebase's signal structure available as an RDF knowledge graph. These tools don't fix a broken design; they surface what the compiler already computes. See [Agent Reasoning in Elle](docs/analysis/agent-reasoning.md) for how AI agents use this.
+The compiler already knows all of this — signal inference is computed at compile time. The [portrait](analysis/portrait.md) system exposes it as queryable data, and the [MCP server](mcp.md) makes the entire codebase's signal structure available as an RDF knowledge graph. These tools don't fix a broken design; they surface what the compiler already computes. See [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how AI agents use this.
 
 ---
 
 ## See also
 
-- [Module system](docs/modules.md) — Architectural constraints of the module system and their rationale
-- [Signal inference](docs/signals/inference.md) — How signals are inferred, bounded, and enforced
-- [Agent Reasoning](docs/analysis/agent-reasoning.md) — How AI agents analyze and refactor Elle code
-- [MCP Server](docs/mcp.md) — Semantic knowledge graph and querying interface
+- [Module system](modules.md) — Architectural constraints of the module system and their rationale
+- [Signal inference](signals/inference.md) — How signals are inferred, bounded, and enforced
+- [Agent Reasoning](analysis/agent-reasoning.md) — How AI agents analyze and refactor Elle code
+- [MCP Server](mcp.md) — Semantic knowledge graph and querying interface
