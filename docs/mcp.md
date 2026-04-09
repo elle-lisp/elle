@@ -5,6 +5,8 @@ Protocol) server that gives AI coding assistants deep, structured access
 to an Elle codebase. The server is itself written in Elle
 ([`tools/mcp-server.lisp`](../tools/mcp-server.lisp)) and communicates via JSON-RPC 2.0 on stdio.
 
+**See also:** [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how to use MCP + portrait together. [Portrait](analysis/portrait.md) for local file analysis. [Analysis directory](analysis/) for an overview of code understanding tools.
+
 ## What it does
 
 The server maintains a persistent RDF knowledge graph (via the oxigraph
@@ -45,7 +47,7 @@ code through the graph rather than through ad-hoc text searches.
 
 | Tool | Description |
 |------|-------------|
-| `trace` | Trace an Elle function through primitives into the Rust implementation. Shows the full call chain: Elle code → Elle primitives → Rust functions → deeper Rust calls. Configurable depth. |
+| `trace` | Trace an Elle function through primitives into the Rust implementation. For each Elle function call, shows exactly which Rust primitive it maps to (with file/line), and what Rust functions that primitive calls. Complete end-to-end call chain with source locations. Configurable depth. |
 | `verify_invariants` | Check project invariants encoded as SPARQL ASK queries (from `.elle-invariants.lisp`). |
 
 ## Knowledge graph schema
@@ -53,14 +55,64 @@ code through the graph rather than through ad-hoc text searches.
 The graph is populated by `analyze_file` (Elle sources) and the
 supporting [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) and [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) scripts.
 
-### Elle entities (`urn:elle:` namespace)
+### Elle function analysis (`urn:elle:Fn`)
+
+Each function is represented with complete signal and composition metadata:
+
+| Predicate | Type | Description |
+|-----------|------|-------------|
+| `elle:name` | string | Function name |
+| `elle:file` | string | Source file path |
+| `elle:arity` | integer | Number of parameters |
+| `elle:param` | string | Parameter name (repeated) |
+| `elle:doc` | string | Docstring if present |
+| `elle:signal-yields` | boolean | True if function may yield |
+| `elle:signal-io` | boolean | True if function does I/O |
+| `elle:signal-error` | boolean | True if function may error |
+| `elle:jit-eligible` | boolean | True if JIT-compilable (silent, no I/O) |
+| `elle:calls` | IRI | Function this calls (repeated) |
+| `elle:capture` | string | Variable this captures (repeated) |
+| `elle:capture-mutated` | string | Captured variable that is mutated (repeated) |
+
+**Example query: Find all I/O functions**
+```sparql
+SELECT ?name ?file WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:name> ?name ;
+      <urn:elle:file> ?file ;
+      <urn:elle:signal-io> true .
+}
+```
+
+**Example query: Functions that call a specific function**
+```sparql
+SELECT ?caller ?file WHERE {
+  ?caller a <urn:elle:Fn> ;
+          <urn:elle:calls> ?target ;
+          <urn:elle:file> ?file .
+  ?target <urn:elle:name> "map" .
+}
+```
+
+**Example query: Potentially shared mutable state (race condition risk)**
+```sparql
+SELECT ?var (COUNT(?fn) as ?captures)
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:capture-mutated> ?var .
+}
+GROUP BY ?var
+HAVING (?captures > 1)
+```
+
+### Other Elle entities
 
 | Type | Predicates |
 |------|-----------|
-| `elle:Fn` | `elle:name`, `elle:file`, `elle:arity`, `elle:param`, `elle:doc` |
 | `elle:Def` | `elle:name`, `elle:file` |
 | `elle:Macro` | `elle:name`, `elle:file` |
 | `elle:Import` | `elle:name`, `elle:path`, `elle:file` |
+| `elle:Primitive` | `elle:name`, `elle:arity`, `elle:doc`, `elle:signal-*` (same as Fn) |
 
 ### Rust entities (`urn:rust:` namespace)
 
@@ -109,25 +161,37 @@ elle tools/rust-graph.lisp
 
 ## What can an AI agent do with it?
 
-**Understand code across language boundaries.** Ask the `trace` tool to
-follow `map` from Elle into Rust:
+**Understand code across language boundaries.** Trace a function from Elle through Rust implementations:
 
 ```
-trace(path: "stdlib.lisp", function: "map")
+trace(path: "lib/portrait.lisp", function: "classify-phase", depth: 2)
 ```
 
-Returns the full call chain: `map` (Elle) → calls `cons`, `first`,
-`rest` (primitives) → Rust `prim_cons`, `prim_first`, `prim_rest` →
-`Value::cons()`, `Cons::first`, `Cons::rest`.
+Returns the complete call chain with source locations:
 
-**Assess refactoring impact.** Before changing `prim_first`:
+```
+[elle] get (line 31, tail=false)
+  -> [rust] prim_get src/primitives/access.rs:44
+       [rust] resolve_index src/primitives/access.rs:11
+       [rust] error_val src/value/error.rs:10
+
+[elle] empty? (line 32, tail=false)
+  -> [rust] prim_empty src/primitives/list/mod.rs:590
+```
+
+Every Elle operation maps to Rust implementations with exact file/line information. Agents can:
+- Find performance bottlenecks by seeing which primitives are called
+- Understand the cost of operations (e.g., every struct access goes through error handling)
+- Read Rust source code for specific operations
+- Identify optimization opportunities (repeated patterns, unnecessary layers, etc.)
+
+**Assess cascading refactoring impact.** Before changing a primitive:
 
 ```
 impact(path: "src/primitives/list/mod.rs", function: "prim_first")
 ```
 
-Returns every Elle function that calls `first`, what their signals are,
-and whether any are JIT-compiled.
+Returns every Elle function that calls `first`, their signals, whether they're JIT-compiled, and what would change if you modified `prim_first`.
 
 **Find functions by behavior.** Which functions do I/O?
 
@@ -135,47 +199,127 @@ and whether any are JIT-compiled.
 signal_query(path: "lib/http.lisp", query: "io")
 ```
 
-**Refactor safely.** Rename a function and all its references:
+Returns all I/O-performing functions, ready for optimization or scrutiny.
+
+**Refactor safely across the codebase.** Rename a function and all references:
 
 ```
 compile_rename(path: "lib/process.lisp", old_name: "helper", new_name: "dispatch")
 ```
 
-The rename respects lexical scope — shadowed bindings are left alone.
+The tool respects lexical scope — shadowed bindings are left alone.
 
-**Query the graph directly.** Any SPARQL query works:
+**Query the semantic graph directly.** Any SPARQL query works:
 
 ```sparql
-# Which files import the most modules?
-SELECT ?file (COUNT(*) AS ?imports) WHERE {
-  ?s a <urn:elle:Import> ; <urn:elle:file> ?file
-} GROUP BY ?file ORDER BY DESC(?imports)
+# Which functions are JIT-eligible? (performance candidates)
+SELECT ?name ?file (COUNT(?caller) as ?calls)
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:name> ?name ;
+      <urn:elle:file> ?file ;
+      <urn:elle:jit-eligible> true .
+  OPTIONAL {
+    ?caller a <urn:elle:Fn> ;
+            <urn:elle:calls> ?fn .
+  }
+}
+GROUP BY ?name ?file
+ORDER BY DESC(?calls)
 ```
 
-## Example SPARQL queries
+## Example SPARQL queries for agents
 
-Find all functions that can error:
-
+**Find all JIT-eligible functions (performance hotspots to optimize)**
 ```sparql
 SELECT ?name ?file WHERE {
   ?fn a <urn:elle:Fn> ;
       <urn:elle:name> ?name ;
-      <urn:elle:file> ?file .
-  # Filter by signal if the graph includes signal triples
+      <urn:elle:file> ?file ;
+      <urn:elle:jit-eligible> true .
 }
 ```
 
-Find all Rust structs:
-
+**Find entry points (functions with no callers — dead code or API boundaries)**
 ```sparql
-SELECT ?name ?file WHERE {
-  ?s a <urn:rust:Struct> ;
-     <urn:rust:name> ?name ;
-     <urn:rust:file> ?file .
+SELECT ?name ?file
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:name> ?name ;
+      <urn:elle:file> ?file .
+  FILTER NOT EXISTS {
+    ?caller a <urn:elle:Fn> ;
+            <urn:elle:calls> ?fn .
+  }
 }
+ORDER BY ?file
+```
+
+**Find highly connected functions (composition complexity)**
+```sparql
+SELECT ?name (COUNT(?callee) as ?calls_count)
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:name> ?name ;
+      <urn:elle:calls> ?callee .
+}
+GROUP BY ?name
+ORDER BY DESC(?calls_count)
+LIMIT 20
+```
+
+**Find functions that capture mutable state (potential correctness issues)**
+```sparql
+SELECT ?name ?var
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:name> ?name ;
+      <urn:elle:capture-mutated> ?var .
+}
+ORDER BY ?var ?name
+```
+
+**Check cross-language dependencies (Elle calling Rust primitives)**
+```sparql
+SELECT ?elle_fn ?rust_fn
+WHERE {
+  ?elle_fn a <urn:elle:Fn> ;
+           <urn:elle:calls> ?calls_iri .
+  ?prim a <urn:elle:Primitive> .
+  # Match by name conversion (elle-style to rust style)
+}
+```
+
+**Find all functions in a file and their signal profiles**
+```sparql
+SELECT ?name ?yields ?io ?jit_eligible
+WHERE {
+  ?fn a <urn:elle:Fn> ;
+      <urn:elle:file> "lib/http.lisp" ;
+      <urn:elle:name> ?name ;
+      <urn:elle:signal-yields> ?yields ;
+      <urn:elle:signal-io> ?io ;
+      <urn:elle:jit-eligible> ?jit_eligible .
+}
+ORDER BY ?name
 ```
 
 See [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) for more examples.
+
+## Design rationale
+
+The MCP server exposes what the compiler already computes. Elle's compilation pipeline performs signal inference, capture analysis, and binding resolution for every file. This information exists whether or not anyone queries it — the MCP server just makes it accessible over JSON-RPC.
+
+**Everything the MCP server provides is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`tools/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
+
+```text
+(def a (compile/analyze (file/read "my-code.lisp") {:file "my-code.lisp"}))
+(compile/signal a :my-function)    # => signal profile
+(compile/captures a :my-function)  # => captured variables
+(compile/callees a :my-function)   # => call graph
+```
+
+See [Design Philosophy](../philosophy.md) for why Elle is designed this way, and [Agent Reasoning](analysis/agent-reasoning.md) for how agents use the MCP server in practice.
 
 ## IDE integration
 

@@ -117,6 +117,13 @@ is intentional — Expanders are not cached or reused across top-level calls.
 Used by `compile_file`, `eval_all` (via `compile_file`), and `analyze_file` to
 correctly infer signals for mutually recursive top-level definitions.
 
+The signal inference computed here is exposed to tools and agents via:
+- **`compile/signal`** — Get the inferred signal of a function
+- **`portrait`** — Semantic portrait showing signal profile, composition properties, and observations
+- **MCP server** — RDF knowledge graph with signal predicates (`elle:signal-yields`, `elle:signal-io`, etc.)
+
+See [MCP server documentation](../docs/mcp.md) and [Agent Reasoning](../docs/analysis/agent-reasoning.md) for how to query this information.
+
 ### Problem
 
 When compiling `(def f (fn (x) (g x)))` followed by `(def g (fn (x) (f x)))`,
