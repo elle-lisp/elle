@@ -321,6 +321,25 @@ The MCP server exposes what the compiler already computes. Elle's compilation pi
 
 See [Design Philosophy](philosophy.md) for why Elle is designed this way, and [Agent Reasoning](analysis/agent-reasoning.md) for how agents use the MCP server in practice.
 
+## The graph is a cache
+
+The knowledge graph is a snapshot of compiler analysis at the time each file was analyzed. It can become stale.
+
+**Source code is ground truth.** If the graph contradicts the source, the source wins. Re-analyze the file:
+
+```text
+analyze_file(path: "lib/http.lisp")
+```
+
+**When to re-analyze:**
+- After editing a file
+- When `portrait` or `signal_query` results seem wrong
+- Before trusting impact analysis for a refactoring decision
+
+**After refactoring:** Any change made via `compile_rename`, `compile_extract`, or manual editing should be followed by re-analysis of the affected files and a test run. The refactoring tools produce correct transformations, but the graph won't reflect the new state until those files are re-analyzed.
+
+The MCP server's `analyze_file` tool handles this — it clears old triples for the file and replaces them with fresh analysis.
+
 ## IDE integration
 
 The MCP server is designed for AI coding assistants (Claude, Cursor,

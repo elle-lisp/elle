@@ -97,6 +97,16 @@ compile_parallelize(path: "lib/process.lisp", functions: ["worker1", "worker2", 
 ```
 This verifies no shared mutable captures would cause data races.
 
+### Step 4: Verify
+
+After any refactoring, re-analyze the affected files and run tests:
+
+```
+analyze_file(path: "lib/http.lisp")
+```
+
+The knowledge graph is a cache of compiler analysis. Source code is always ground truth. If the graph seems wrong, re-analyze the file. If the mismatch persists after re-analysis, it's a compiler bug — not a code error.
+
 ## Signal reasoning for agents
 
 Agents can reason about signals without reading code—just query the graph.
