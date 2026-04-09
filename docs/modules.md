@@ -299,36 +299,49 @@ through `import` and both return values.
 execute, return. Everything else is Elle code and conventions.
 
 
-## Trade-offs
+## Architectural Constraints
+
+These are design choices that enable the elegance of the module system. They are constraints, not limitations.
 
 ### No .lisp caching
 
-Every `import` of a `.lisp` file recompiles and re-executes it. If two
-modules both `(import "utils.lisp")`, the file runs twice. This is
-intentional: caching would suppress side effects and create shared mutable
-state between independent callers.
+Every `import` of a `.lisp` file recompiles and re-executes it. If two modules both `(import "utils.lisp")`, the file runs twice.
 
-Stateful modules (those using `var` and `assign`) get independent state per
-import. For projects where recompilation cost matters, import once at the top
-level and pass the module value down.
+**Why**: Caching would create shared mutable state between independent callers and suppress side effects. Stateful modules (those using `var` and `assign`) must get independent state per import. This is a feature: two imports of the same module file get independent instances, just as two calls to a factory function create independent objects.
+
+**Consequence**: Recompilation cost. For projects where this matters, import once at the top level and pass the module value down the call stack.
 
 ### Circular import detection is runtime-only
 
-The VM tracks which files are currently being loaded. If file A imports file B
-which imports file A, the second import signals an error:
+The VM tracks which files are currently being loaded. If file A imports file B which imports file A, the second import signals an error:
 
 ```text
 import: circular dependency detected for 'a.lisp'
 ```
 
-This is a direct consequence of `import` being a runtime primitive. Circular
-dependencies are a design error; Elle detects them at the point of failure.
+**Why**: `import` is a runtime primitive (compiles and executes a file). Circular dependency detection happens when the cycle is actually triggered, not preemptively. This is consistent with how the module system treats all imports as dynamic: the return value is computed at runtime, so dependency analysis is runtime-only.
+
+**Consequence**: Circular import bugs surface at runtime, not compile-time. This is acceptable because circular imports are design errors, not programming mistakes—they should never happen in correct code.
+
+### Cross-file signal inference is per-file
+
+The fixpoint loop converges signal inference within a single file. Mutual recursion across imported modules doesn't benefit from cross-form convergence—each import is treated as returning a Polymorphic signal.
+
+**Why**: Fixpoint convergence requires re-analyzing all forms in the file until signals stabilize. Extending this across file boundaries would require either whole-program analysis (defeating modularity) or a module type system (adding significant complexity). Per-file convergence is a clean boundary.
+
+**Consequence for humans**: You cannot rely on cross-file signal inference. Use `(silence)` and `squelch` at module boundaries if you need performance guarantees.
+
+**Solution for agents**: This limitation is solved by the [MCP knowledge graph](../mcp.md). While each file's compilation is independent, the RDF store captures the entire codebase's call graph and signal profiles. Agents can query cross-file dependencies via SPARQL. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for how agents reason about module composition.
 
 ### Static analysis cannot see through imports
 
-The analyzer processes one file at a time. When it encounters `(import ...)`,
-it sees a function call that returns an unknown value. No cross-file signal
-tracking, arity checking, or LSP completion for imported symbols.
+The analyzer processes one file at a time. When it encounters `(import ...)`, it sees a function call that returns an unknown value. No cross-file signal tracking, arity checking, or static IDE features for imported symbols.
+
+**Why**: Imports are fully dynamic. The return value depends on runtime parameters and computation. Static analysis would require a separate module type system or whole-program analysis, both incompatible with the goal of making modules first-class, parameterizable values.
+
+**Consequence for humans**: IDE features like completion and refactoring don't work across module boundaries. Read the documentation or source code for imported modules.
+
+**Solution for agents**: The [MCP knowledge graph](../mcp.md) provides complete cross-file visibility. When a file is analyzed, all its function definitions, calls, and captures are stored in the RDF graph. Agents can query module composition via SPARQL without relying on static type information. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for cross-file reasoning patterns.
 
 
 ## Implementation

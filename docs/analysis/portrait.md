@@ -4,6 +4,8 @@ The portrait system exposes everything the compiler knows about your code:
 signal profiles, capture analysis, composition properties, and the call graph.
 It analyzes source without executing it.
 
+**See also:** [Agent Reasoning in Elle](agent-reasoning.md) for how to use portrait + MCP together for codebase-wide analysis. For global codebase queries, see [MCP server](../mcp.md).
+
 ## Compile-time analysis
 
 ```text

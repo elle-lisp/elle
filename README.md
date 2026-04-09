@@ -2,7 +2,17 @@
 
 [![CI](https://github.com/elle-lisp/elle/actions/workflows/main.yml/badge.svg)](https://github.com/elle-lisp/elle/actions/workflows/main.yml)
 
-Elle is a Lisp. If you know [Janet](https://janet-lang.org), think Janet on steroids — the same practical spirit (embeddable, batteries-included, modern syntax), but with a compilation pipeline that does deep static analysis before any code runs: full binding resolution, capture analysis, and signal inference at compile time. This gives Elle a sound signal system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
+Elle is a Lisp with a compilation pipeline that does deep static analysis before any code runs: full binding resolution, capture analysis, and signal inference at compile time. This gives Elle a sound signal system, fully hygienic macros, colorless concurrency via fibers, and deterministic memory management — all derived from the same analysis pass.
+
+The compiler already knows what every binding refers to, what every closure captures, and what signals every function can emit. This information is available to user code at runtime via `compile/analyze` and related functions, and exposed to AI agents via:
+
+- **[Portrait](docs/analysis/portrait.md)** — Signal profiles, captures, and composition properties of a single file
+- **[MCP Server](docs/mcp.md)** — Semantic knowledge graph of the entire codebase, queryable via SPARQL
+- **[Agent Reasoning](docs/analysis/agent-reasoning.md)** — How AI agents use these tools to understand, refactor, and verify code
+
+Humans write readable code without type annotations or formal constraints. Agents query the semantic model the compiler produces. Neither compromises the other.
+
+If you know [Janet](https://janet-lang.org), think Janet on steroids — the same practical spirit (embeddable, batteries-included, modern syntax), with a compiler that understands your code deeply enough to expose it as structured data.
 
 ## Contents
 
@@ -20,6 +30,7 @@ Elle is a Lisp. If you know [Janet](https://janet-lang.org), think Janet on ster
 - [Epochs — Versioned Syntax Migration](#epochs--versioned-syntax-migration)
 - [Tooling](#tooling)
 - [Documentation](#documentation)
+- [For Agent Developers](#for-agent-developers)
 - [Coming from Another Language](#coming-from-another-language)
 - [Getting Started](#getting-started)
 - [License](#license)
@@ -828,6 +839,14 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 | `docs/cookbook/` | Recipes for common codebase changes |
 | `docs/analysis/` | Testing, debugging, semantic portraits |
 | `docs/impl/` | Implementation internals (reader, HIR, LIR, VM, JIT) |
+
+## For Agent Developers
+
+The compiler computes signal inference, capture analysis, and call graphs for every file. The MCP server makes all of this queryable.
+
+- **[Agent Reasoning Guide](docs/analysis/agent-reasoning.md)** — Workflow: understand locally via `portrait`, reason globally via SPARQL, refactor via compile-aware tools
+- **[MCP Server](docs/mcp.md)** — 15 tools: `portrait`, `signal_query`, `impact`, `trace`, `compile_rename`, `compile_extract`, `compile_parallelize`, `verify_invariants`, and SPARQL
+- **[Analysis overview](docs/analysis/README.md)** — How portrait, MCP, and agent reasoning fit together
 
 ## Coming from Another Language
 

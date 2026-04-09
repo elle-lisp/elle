@@ -165,6 +165,71 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 # => error: argument violates signal bound
 ```
 
+## Cross-File Signal Inference: Design Constraint
+
+Elle's signal inference operates within a single file via the **fixpoint loop** (see [pipeline.md](../pipeline.md)). This enables accurate inference for mutually recursive top-level definitions within a file. Mutual recursion across file boundaries is a different problem.
+
+**Note for agents:** This per-file limitation is mitigated by the global [MCP knowledge graph](../mcp.md). While each file's signal inference is independent, the RDF store captures the entire codebase's structure, allowing agents to reason about cross-file impact via SPARQL queries. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for how to query cross-file dependencies and understand cascading changes.
+
+### The Limitation
+
+When module A imports module B:
+- The return value of `(import "b.lisp")` is unknown to the analyzer (it depends on runtime computation)
+- A call to a function from module B is treated as `Polymorphic` signal — the analyzer cannot see B's signal inference
+- Even if B's functions are actually silent, A will treat them as yielding
+
+**Example:**
+```text
+# b.lisp
+(defn silent-add [x y]
+  (silence)
+  (+ x y))
+
+# Returns a struct of functions
+(fn [] {:add silent-add})
+```
+
+```text
+# a.lisp
+(def b ((import "b.lisp")))
+
+(defn use-b [x y]
+  (silence)                 # error! This contradicts the call below
+  (b:add x y))              # => treated as Polymorphic, not Silent
+# => Compile error: function must be silent but calls polymorphic function
+```
+
+### Why: Preserving Dynamic Module Semantics
+
+The module system intentionally allows:
+1. **Parameterized module creation** — `(import "module") :config :value`
+2. **Dynamic instantiation** — different instantiations have different state
+3. **Stateful modules** — modules with `var` and `assign` (independent per import)
+
+These features require treating imports as fully dynamic: the return value is unknown until runtime. To enable cross-file signal inference, Elle would need either:
+
+- **Whole-program analysis** — defeats the purpose of separate files
+- **Module type system** — adds significant complexity to declare module signatures
+- **Import result caching with signal annotation** — complicates state independence
+
+The tradeoff: Single-file fixpoint convergence is simple and gives accurate signal inference for mutually recursive definitions within a file. Across files, treat imports conservatively (Polymorphic).
+
+### Workaround: Explicit Bounds
+
+If you need a function from an imported module to be used in a silence-bounded context, use `squelch` to enforce the boundary at the call site:
+
+```text
+# a.lisp
+(def b ((import "b.lisp")))
+
+(defn use-b [x y]
+  (silence)
+  # Dynamically enforce that b:add must not yield
+  ((squelch b:add |:yield :io|) x y))
+```
+
+This gives you runtime assurance without changing the module system's design.
+
 
 ## Runtime Verification
 
