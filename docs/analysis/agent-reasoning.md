@@ -19,7 +19,7 @@ An agent doesn't need to understand signals by reading source code. It queries t
 
 When analyzing a single file or function, use `portrait` to get its profile:
 
-```lisp
+```text
 # Analyze the file
 (def a (compile/analyze (file/read "lib/http.lisp") {:file "lib/http.lisp"}))
 
@@ -200,7 +200,7 @@ An agent can then read the Rust source to understand semantics.
 
 Define project-level invariants as SPARQL ASK queries in `.elle-invariants.lisp`:
 
-```lisp
+```text
 # No mutable state shared across functions
 (defn check-shared-mutable []
   '(ASK WHERE {
