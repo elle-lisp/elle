@@ -396,8 +396,8 @@ impl Emitter {
                     num_params: func.num_params,
                     constants: Rc::new(nested_bytecode.constants),
                     signal: func.signal,
-                    lbox_params_mask: func.lbox_params_mask,
-                    lbox_locals_mask: func.lbox_locals_mask,
+                    capture_params_mask: func.capture_params_mask,
+                    capture_locals_mask: func.capture_locals_mask,
                     symbol_names: Rc::new(nested_bytecode.symbol_names),
                     location_map: Rc::new(nested_bytecode.location_map),
                     lir_function: Some(Rc::new(nested_lir)),
@@ -787,30 +787,30 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
-            LirInstr::MakeLBox { dst, value } => {
+            LirInstr::MakeCaptureCell { dst, value } => {
                 self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::MakeLBox);
+                self.bytecode.emit(Instruction::MakeCapture);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::LoadLBox { dst, cell } => {
+            LirInstr::LoadCaptureCell { dst, cell } => {
                 self.ensure_on_top(*cell);
-                self.bytecode.emit(Instruction::UnlBox);
+                self.bytecode.emit(Instruction::UnwrapCapture);
                 self.pop();
                 self.push_reg(*dst);
             }
 
-            LirInstr::StoreLBox { cell, value } => {
+            LirInstr::StoreCaptureCell { cell, value } => {
                 self.ensure_on_top(*cell);
                 self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::UpdateLBox);
-                // UpdateLBox pops value, pops cell, pushes value back.
-                // Unlike other stores, UpdateLBox pushes the value back.
+                self.bytecode.emit(Instruction::UpdateCapture);
+                // UpdateCapture pops value, pops cell, pushes value back.
+                // Unlike other stores, UpdateCapture pushes the value back.
                 // We do NOT auto-pop here because lower_set needs the value.
-                self.pop(); // value (consumed by UpdateLBox, re-pushed)
-                self.pop(); // cell (consumed by UpdateLBox)
-                            // Value is now on the stack (pushed back by UpdateLBox).
+                self.pop(); // value (consumed by UpdateCapture, re-pushed)
+                self.pop(); // cell (consumed by UpdateCapture)
+                            // Value is now on the stack (pushed back by UpdateCapture).
                 self.push_reg(*value);
             }
 
@@ -1055,7 +1055,7 @@ impl Emitter {
             let local_offset = index - locals_start;
             // Beyond bit 63, the mask can't represent the local — be conservative
             // and treat it as a cell local (use env/StoreUpvalue).
-            if local_offset < 64 && (func.lbox_locals_mask & (1 << local_offset)) == 0 {
+            if local_offset < 64 && (func.capture_locals_mask & (1 << local_offset)) == 0 {
                 // Non-cell local: use stack slot
                 Some(index - func.num_captures)
             } else {

@@ -266,8 +266,8 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     match closure.template.arity {
         crate::value::Arity::AtLeast(n) => {
             for (i, arg) in args[..n.min(args.len())].iter().enumerate() {
-                if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
-                    env.push(Value::local_lbox(*arg));
+                if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
+                    env.push(Value::capture_cell(*arg));
                 } else {
                     env.push(*arg);
                 }
@@ -276,16 +276,16 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
             let rest_args = if args.len() > n { &args[n..] } else { &[] };
             let rest = args_to_list(rest_args);
             let rest_idx = n;
-            if rest_idx < 64 && (closure.template.lbox_params_mask & (1 << rest_idx)) != 0 {
-                env.push(Value::local_lbox(rest));
+            if rest_idx < 64 && (closure.template.capture_params_mask & (1 << rest_idx)) != 0 {
+                env.push(Value::capture_cell(rest));
             } else {
                 env.push(rest);
             }
         }
         _ => {
             for (i, arg) in args.iter().enumerate() {
-                if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
-                    env.push(Value::local_lbox(*arg));
+                if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
+                    env.push(Value::capture_cell(*arg));
                 } else {
                     env.push(*arg);
                 }
@@ -303,8 +303,8 @@ fn build_callback_env(closure: &Closure, args: &[Value]) -> Vec<Value> {
     };
     let num_locally_defined = closure.template.num_locals.saturating_sub(num_param_slots);
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
-            env.push(Value::local_lbox(Value::NIL));
+        if i >= 64 || (closure.template.capture_locals_mask & (1 << i)) != 0 {
+            env.push(Value::capture_cell(Value::NIL));
         } else {
             env.push(Value::NIL);
         }
@@ -444,8 +444,8 @@ mod tests {
             num_params: arity,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -549,8 +549,8 @@ mod tests {
             num_params: 1,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,

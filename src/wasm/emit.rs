@@ -106,9 +106,9 @@ pub(super) enum DataOp {
     CarOrNil = 5,
     CdrOrNil = 6,
     MakeArray = 7,
-    MakeLBox = 8,
-    LoadLBox = 9,
-    StoreLBox = 10,
+    MakeCapture = 8,
+    LoadCapture = 9,
+    StoreCapture = 10,
     // 11 = MakeString (unused)
     ArrayRefDestructure = 12,
     ArraySliceFrom = 13,
@@ -130,9 +130,9 @@ pub(super) const OP_CDR_DESTRUCTURE: i32 = DataOp::CdrDestructure as i32;
 pub(super) const OP_CAR_OR_NIL: i32 = DataOp::CarOrNil as i32;
 pub(super) const OP_CDR_OR_NIL: i32 = DataOp::CdrOrNil as i32;
 pub(super) const OP_MAKE_ARRAY: i32 = DataOp::MakeArray as i32;
-pub(super) const OP_MAKE_LBOX: i32 = DataOp::MakeLBox as i32;
-pub(super) const OP_LOAD_LBOX: i32 = DataOp::LoadLBox as i32;
-pub(super) const OP_STORE_LBOX: i32 = DataOp::StoreLBox as i32;
+pub(super) const OP_MAKE_CAPTURE: i32 = DataOp::MakeCapture as i32;
+pub(super) const OP_LOAD_CAPTURE: i32 = DataOp::LoadCapture as i32;
+pub(super) const OP_STORE_CAPTURE: i32 = DataOp::StoreCapture as i32;
 pub(super) const OP_ARRAY_REF_DESTRUCTURE: i32 = DataOp::ArrayRefDestructure as i32;
 pub(super) const OP_ARRAY_SLICE_FROM: i32 = DataOp::ArraySliceFrom as i32;
 pub(super) const OP_STRUCT_GET_OR_NIL: i32 = DataOp::StructGetOrNil as i32;
@@ -587,13 +587,13 @@ impl WasmEmitter {
         let param_bits = if nc >= 64 {
             u64::MAX
         } else {
-            func.lbox_params_mask.wrapping_shl(nc as u32)
+            func.capture_params_mask.wrapping_shl(nc as u32)
         };
         let np = nc + func.num_params as u64;
         let local_bits = if np >= 64 {
             u64::MAX
         } else {
-            func.lbox_locals_mask.wrapping_shl(np as u32)
+            func.capture_locals_mask.wrapping_shl(np as u32)
         };
         self.env_lbox_mask = capture_bits | param_bits | local_bits;
         self.next_resume_state = 1;

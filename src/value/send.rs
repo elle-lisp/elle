@@ -39,8 +39,8 @@ pub struct SendableClosure {
     pub num_params: usize,
     pub constants: Vec<SendValue>,
     pub signal: Signal,
-    pub lbox_params_mask: u64,
-    pub lbox_locals_mask: u64,
+    pub capture_params_mask: u64,
+    pub capture_locals_mask: u64,
     pub symbol_names: HashMap<u32, String>,
     pub location_map: LocationMap,
     pub doc: Option<Box<SendValue>>,
@@ -91,10 +91,11 @@ pub enum SendValue {
     /// Deep copy of @bytes (mutable binary data, with traits)
     Blob(Vec<u8>, Box<SendValue>),
 
-    /// Deep copy of mutable boxes (if contents are sendable)
-    /// The bool indicates if it's a local lbox (auto-unwrapped) or user box
-    /// Third field is the traits
-    LBox(Box<SendValue>, bool, Box<SendValue>),
+    /// Deep copy of user boxes (if contents are sendable)
+    LBox(Box<SendValue>, Box<SendValue>),
+
+    /// Deep copy of compiler capture cells (if contents are sendable)
+    CaptureCell(Box<SendValue>, Box<SendValue>),
 
     /// Float values that couldn't be stored inline
     Float(f64),
@@ -243,10 +244,9 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             Ok(SendValue::Buffer(borrowed.clone(), Box::new(traits_sv)))
         }
 
-        // Boxes - deep copy the contents if sendable, plus traits
+        // User boxes - deep copy the contents if sendable, plus traits
         HeapObject::LBox {
             cell: cell_ref,
-            is_local,
             traits,
             ..
         } => {
@@ -255,9 +255,22 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 .map_err(|_| "Cannot borrow box for sending".to_string())?;
             let contents = from_value_inner(*borrowed, ctx)?;
             let traits_sv = from_value_inner(*traits, ctx)?;
-            Ok(SendValue::LBox(
+            Ok(SendValue::LBox(Box::new(contents), Box::new(traits_sv)))
+        }
+
+        // Compiler capture cells - deep copy the contents if sendable, plus traits
+        HeapObject::CaptureCell {
+            cell: cell_ref,
+            traits,
+            ..
+        } => {
+            let borrowed = cell_ref
+                .try_borrow()
+                .map_err(|_| "Cannot borrow capture cell for sending".to_string())?;
+            let contents = from_value_inner(*borrowed, ctx)?;
+            let traits_sv = from_value_inner(*traits, ctx)?;
+            Ok(SendValue::CaptureCell(
                 Box::new(contents),
-                *is_local,
                 Box::new(traits_sv),
             ))
         }
@@ -292,8 +305,8 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 num_params: 0,
                 constants: Vec::new(),
                 signal: closure_rc.template.signal,
-                lbox_params_mask: 0,
-                lbox_locals_mask: 0,
+                capture_params_mask: 0,
+                capture_locals_mask: 0,
                 symbol_names: HashMap::new(),
                 location_map: LocationMap::new(),
                 doc: None,
@@ -336,8 +349,8 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 num_params: closure_rc.template.num_params,
                 constants,
                 signal: closure_rc.template.signal,
-                lbox_params_mask: closure_rc.template.lbox_params_mask,
-                lbox_locals_mask: closure_rc.template.lbox_locals_mask,
+                capture_params_mask: closure_rc.template.capture_params_mask,
+                capture_locals_mask: closure_rc.template.capture_locals_mask,
                 symbol_names: (*closure_rc.template.symbol_names).clone(),
                 location_map: (*closure_rc.template.location_map).clone(),
                 doc,
@@ -513,13 +526,19 @@ impl SendValue {
                     traits: traits_val,
                 })
             }
-            SendValue::LBox(contents, is_local, traits) => {
+            SendValue::LBox(contents, traits) => {
                 let val = contents.into_value();
                 let traits_val = traits.into_value();
-                // Preserve the lbox type (local vs user) across thread boundary
                 alloc(HeapObject::LBox {
                     cell: std::cell::RefCell::new(val),
-                    is_local,
+                    traits: traits_val,
+                })
+            }
+            SendValue::CaptureCell(contents, traits) => {
+                let val = contents.into_value();
+                let traits_val = traits.into_value();
+                alloc(HeapObject::CaptureCell {
+                    cell: std::cell::RefCell::new(val),
                     traits: traits_val,
                 })
             }
@@ -650,9 +669,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             })
         }
 
-        SendValue::LBox(contents, is_local, traits) => {
-            // Special case: if contents is a Ref to an InProgress closure,
-            // emit NIL placeholder and record a fixup.
+        SendValue::LBox(contents, traits) => {
             let fixup_idx = match *contents {
                 SendValue::Ref(idx) => {
                     if matches!(ctx.states[idx], ReconState::InProgress) {
@@ -667,13 +684,35 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let traits_val = into_value_inner(*traits, ctx);
             let lbox_val = alloc(HeapObject::LBox {
                 cell: RefCell::new(inner_val),
-                is_local,
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
                 ctx.fixups.push((lbox_val, idx));
             }
             lbox_val
+        }
+
+        SendValue::CaptureCell(contents, traits) => {
+            let fixup_idx = match *contents {
+                SendValue::Ref(idx) => {
+                    if matches!(ctx.states[idx], ReconState::InProgress) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            let inner_val = into_value_inner(*contents, ctx);
+            let traits_val = into_value_inner(*traits, ctx);
+            let cell_val = alloc(HeapObject::CaptureCell {
+                cell: RefCell::new(inner_val),
+                traits: traits_val,
+            });
+            if let Some(idx) = fixup_idx {
+                ctx.fixups.push((cell_val, idx));
+            }
+            cell_val
         }
 
         SendValue::Float(f) => alloc(HeapObject::Float(f)),
@@ -746,8 +785,8 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 num_params: sc.num_params,
                 constants: Rc::new(constants),
                 signal: sc.signal,
-                lbox_params_mask: sc.lbox_params_mask,
-                lbox_locals_mask: sc.lbox_locals_mask,
+                capture_params_mask: sc.capture_params_mask,
+                capture_locals_mask: sc.capture_locals_mask,
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
                 rotation_safe: false,
@@ -817,7 +856,7 @@ impl SendBundle {
                     idx
                 ),
             };
-            if let Some(cell) = lbox_val.as_lbox() {
+            if let Some(cell) = lbox_val.as_box_or_capture() {
                 *cell.borrow_mut() = closure_val;
             }
         }

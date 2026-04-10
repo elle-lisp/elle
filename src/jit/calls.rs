@@ -683,11 +683,11 @@ pub extern "C" fn elle_jit_tail_call(
 // =============================================================================
 
 /// Push a parameter value into the environment buffer, wrapping in a
-/// LocalCell if the lbox_params_mask indicates it's needed.
+/// LocalCell if the capture_params_mask indicates it's needed.
 #[inline]
 fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-    if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
-        buf.push(Value::local_lbox(val));
+    if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
+        buf.push(Value::capture_cell(val));
     } else {
         buf.push(val);
     }
@@ -793,14 +793,14 @@ pub(crate) fn build_closure_env_for_jit(
     // num_locals counts non-LBox params + let-bound locals.
     // The env already has param entries; only let-bound locals need env slots.
     let num_lbox_params = (0..num_params.min(64))
-        .filter(|i| closure.template.lbox_params_mask & (1 << i) != 0)
+        .filter(|i| closure.template.capture_params_mask & (1 << i) != 0)
         .count();
     let num_local_params = num_params - num_lbox_params;
     let num_locally_defined = closure.template.num_locals.saturating_sub(num_local_params);
 
     for i in 0..num_locally_defined {
-        if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
-            new_env.push(Value::local_lbox(Value::NIL));
+        if i >= 64 || (closure.template.capture_locals_mask & (1 << i)) != 0 {
+            new_env.push(Value::capture_cell(Value::NIL));
         } else {
             new_env.push(Value::NIL);
         }

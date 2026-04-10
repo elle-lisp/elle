@@ -1,6 +1,6 @@
 pub mod arithmetic;
 pub mod call;
-pub mod cell;
+pub mod capture;
 // Note: jit_entry is not pub — it only adds impl VM methods
 pub mod closure;
 pub mod comparison;
@@ -234,8 +234,8 @@ impl VM {
                 num_params: 0,
                 constants: Rc::new(bytecode.constants.to_vec()),
                 signal: bytecode.signal,
-                lbox_params_mask: 0,
-                lbox_locals_mask: 0,
+                capture_params_mask: 0,
+                capture_locals_mask: 0,
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
                 rotation_safe: false,

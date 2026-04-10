@@ -3,10 +3,10 @@
 use std::any::Any;
 
 use super::{
-    Value, TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CLOSURE, TAG_CONS, TAG_EXTERNAL,
-    TAG_FALSE, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE, TAG_MANAGED_PTR,
-    TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING, TAG_STRING_MUT, TAG_STRUCT,
-    TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD, TAG_TRUE,
+    Value, TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CAPTURE_CELL, TAG_CLOSURE,
+    TAG_CONS, TAG_EXTERNAL, TAG_FALSE, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX,
+    TAG_LIB_HANDLE, TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT,
+    TAG_STRING, TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD, TAG_TRUE,
 };
 
 impl Value {
@@ -147,10 +147,16 @@ impl Value {
         self.tag == TAG_CLOSURE
     }
 
-    /// Check if this is a box (LBox).
+    /// Check if this is a user box (LBox).
     #[inline]
     pub fn is_lbox(&self) -> bool {
         self.tag == TAG_LBOX
+    }
+
+    /// Check if this is a compiler capture cell (CaptureCell).
+    #[inline]
+    pub fn is_capture_cell(&self) -> bool {
+        self.tag == TAG_CAPTURE_CELL
     }
 
     /// Check if this is a fiber.
@@ -379,7 +385,7 @@ impl Value {
         }
     }
 
-    /// Extract as box (LBox) if this is a box.
+    /// Extract as box (LBox) if this is a user box.
     #[inline]
     pub fn as_lbox(&self) -> Option<&std::cell::RefCell<Value>> {
         use crate::value::heap::{deref, HeapObject};
@@ -392,14 +398,23 @@ impl Value {
         }
     }
 
-    /// Check if this is a compiler-created local box (auto-unwrapped by LoadUpvalue).
+    /// Extract as capture cell if this is a compiler capture cell.
     #[inline]
-    pub fn is_local_lbox(&self) -> bool {
+    pub fn as_capture_cell(&self) -> Option<&std::cell::RefCell<Value>> {
         use crate::value::heap::{deref, HeapObject};
-        if !self.is_lbox() {
-            return false;
+        if !self.is_capture_cell() {
+            return None;
         }
-        unsafe { matches!(deref(*self), HeapObject::LBox { is_local: true, .. }) }
+        match unsafe { deref(*self) } {
+            HeapObject::CaptureCell { cell, .. } => Some(cell),
+            _ => None,
+        }
+    }
+
+    /// Extract the RefCell from either a user box or a capture cell.
+    #[inline]
+    pub fn as_box_or_capture(&self) -> Option<&std::cell::RefCell<Value>> {
+        self.as_lbox().or_else(|| self.as_capture_cell())
     }
 
     /// Extract as native function if this is a native function.
@@ -567,6 +582,7 @@ impl Value {
             || self.is_struct_mut()
             || self.is_set_mut()
             || self.is_lbox()
+            || self.is_capture_cell()
             || self.is_parameter()
     }
 

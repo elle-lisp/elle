@@ -115,6 +115,7 @@ pub fn serialize_value(value: &Value) -> Result<String, String> {
                 }
             }
             HeapTag::LBox => Err("LBox should have been handled above".to_string()),
+            HeapTag::CaptureCell => Err("Cannot serialize capture cell to JSON".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())
@@ -298,6 +299,7 @@ pub fn serialize_value_pretty(value: &Value, indent_level: usize) -> Result<Stri
                 }
             }
             HeapTag::LBox => Err("LBox should have been handled above".to_string()),
+            HeapTag::CaptureCell => Err("Cannot serialize capture cell to JSON".to_string()),
             HeapTag::Float => {
                 // This is a heap-allocated float (for NaN values)
                 Err("Cannot serialize non-finite float value to JSON".to_string())

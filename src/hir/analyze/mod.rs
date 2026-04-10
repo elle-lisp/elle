@@ -581,15 +581,15 @@ mod tests {
         let binding = arena.alloc(sym, BindingScope::Local);
         assert!(!arena.get(binding).is_mutated);
         assert!(!arena.get(binding).is_captured);
-        assert!(!arena.get(binding).needs_lbox());
+        assert!(!arena.get(binding).needs_capture());
 
         arena.get_mut(binding).is_mutated = true;
         assert!(arena.get(binding).is_mutated);
-        assert!(!arena.get(binding).needs_lbox());
+        assert!(!arena.get(binding).needs_capture());
 
         arena.get_mut(binding).is_captured = true;
         assert!(arena.get(binding).is_captured);
-        assert!(arena.get(binding).needs_lbox());
+        assert!(arena.get(binding).needs_capture());
     }
 
     #[test]
@@ -604,11 +604,11 @@ mod tests {
         assert!(arena.get(binding).is_immutable);
         assert!(arena.get(binding).is_captured);
         assert!(!arena.get(binding).is_prebound);
-        assert!(!arena.get(binding).needs_lbox());
+        assert!(!arena.get(binding).needs_capture());
     }
 
     #[test]
-    fn test_immutable_prebound_captured_local_needs_lbox() {
+    fn test_immutable_prebound_captured_local_needs_capture() {
         // An immutable local that is prebound (def in begin, letrec) AND
         // captured DOES need a cell — the capture may happen before the
         // binding is initialized (self-recursion, forward references).
@@ -621,11 +621,11 @@ mod tests {
         assert!(arena.get(binding).is_immutable);
         assert!(arena.get(binding).is_captured);
         assert!(arena.get(binding).is_prebound);
-        assert!(arena.get(binding).needs_lbox());
+        assert!(arena.get(binding).needs_capture());
     }
 
     #[test]
-    fn test_mutable_captured_local_needs_lbox() {
+    fn test_mutable_captured_local_needs_capture() {
         // A mutable local (var) that is captured DOES need a cell.
         use crate::hir::arena::{BindingArena, BindingScope};
         let mut arena = BindingArena::new();
@@ -633,7 +633,7 @@ mod tests {
         arena.get_mut(binding).is_captured = true;
         assert!(!arena.get(binding).is_immutable);
         assert!(arena.get(binding).is_captured);
-        assert!(arena.get(binding).needs_lbox());
+        assert!(arena.get(binding).needs_capture());
     }
 
     #[test]
@@ -643,11 +643,11 @@ mod tests {
         let mut arena = BindingArena::new();
         let binding = arena.alloc(SymbolId(4), BindingScope::Local);
         arena.get_mut(binding).is_immutable = true;
-        assert!(!arena.get(binding).needs_lbox());
+        assert!(!arena.get(binding).needs_capture());
     }
 
     #[test]
-    fn test_immutable_mutated_captured_local_needs_lbox() {
+    fn test_immutable_mutated_captured_local_needs_capture() {
         // Edge case: a binding marked immutable but also mutated and captured.
         // Immutable wins — no cell needed. (In practice, the analyzer would
         // reject set on an immutable binding, so this shouldn't happen.)
@@ -657,7 +657,7 @@ mod tests {
         arena.get_mut(binding).is_immutable = true;
         arena.get_mut(binding).is_mutated = true;
         arena.get_mut(binding).is_captured = true;
-        assert!(!arena.get(binding).needs_lbox());
+        assert!(!arena.get(binding).needs_capture());
     }
 
     // === Scope-aware binding resolution tests ===

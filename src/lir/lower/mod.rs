@@ -174,7 +174,7 @@ pub struct Lowerer<'a> {
     /// Number of captured variables (for lambda context)
     num_captures: u16,
     /// Number of parameters allocated as locals (non-LBox, non-captured params).
-    /// Used by allocate_slot to compute lbox_locals_mask offsets.
+    /// Used by allocate_slot to compute capture_locals_mask offsets.
     num_local_params: u16,
     /// Set of bindings that are upvalues (captures/parameters in lambda)
     /// These use LoadCapture/StoreCapture, not LoadLocal/StoreLocal
@@ -357,14 +357,14 @@ impl<'a> Lowerer<'a> {
         // LBox locals get ENV-relative slots (num_captures + num_locals).
         // Non-LBox locals get STACK-relative slots (num_locals).
         // Both increment num_locals to keep env placeholder slots aligned.
-        let needs_lbox = self.arena.get(binding).needs_lbox();
+        let needs_capture = self.arena.get(binding).needs_capture();
         let slot = if self.in_lambda {
             // local_index is relative to locally-defined vars (after param locals)
             let local_index = self.current_func.num_locals - self.num_local_params;
-            if needs_lbox && local_index < 64 {
-                self.current_func.lbox_locals_mask |= 1 << local_index;
+            if needs_capture && local_index < 64 {
+                self.current_func.capture_locals_mask |= 1 << local_index;
             }
-            if needs_lbox {
+            if needs_capture {
                 // Env-relative: for LoadCapture/StoreCapture
                 self.num_captures + self.current_func.num_locals
             } else {

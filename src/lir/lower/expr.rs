@@ -98,14 +98,14 @@ impl<'a> Lowerer<'a> {
 
         if let Some(&slot) = self.binding_to_slot.get(binding) {
             // Check if this binding needs cell unwrapping
-            let needs_lbox = self.arena.get(*binding).needs_lbox();
+            let needs_capture = self.arena.get(*binding).needs_capture();
 
             // Check if this is an upvalue (capture or parameter) or a local
             let is_upvalue = self.upvalue_bindings.contains(binding);
 
             let dst = self.fresh_reg();
             if self.in_lambda && is_upvalue {
-                if needs_lbox {
+                if needs_capture {
                     self.emit(LirInstr::LoadCapture { dst, index: slot });
                 } else {
                     self.emit(LirInstr::LoadCaptureRaw { dst, index: slot });
@@ -115,11 +115,11 @@ impl<'a> Lowerer<'a> {
                 // Outside lambdas, local variables use LoadLocal
                 self.emit(LirInstr::LoadLocal { dst, slot });
 
-                if needs_lbox {
+                if needs_capture {
                     // Unwrap the cell to get the actual value
                     // Only needed for locals, not captures (LoadCapture auto-unwraps)
                     let value_reg = self.fresh_reg();
-                    self.emit(LirInstr::LoadLBox {
+                    self.emit(LirInstr::LoadCaptureCell {
                         dst: value_reg,
                         cell: dst,
                     });
@@ -210,26 +210,26 @@ impl<'a> Lowerer<'a> {
             for binding in bindings_to_preallocate {
                 // Allocate slot now so captures can find it
                 if !self.binding_to_slot.contains_key(&binding) {
-                    let needs_lbox = self.arena.get(binding).needs_lbox();
+                    let needs_capture = self.arena.get(binding).needs_capture();
                     let slot = self.allocate_slot(binding);
 
                     // Inside lambdas, only LBox locals live in the closure
                     // environment (LoadCapture/StoreCapture). Non-LBox locals
                     // use fast local storage (LoadLocal/StoreLocal).
-                    if self.in_lambda && needs_lbox {
+                    if self.in_lambda && needs_capture {
                         self.upvalue_bindings.insert(binding);
                     }
 
                     // Only create cells for top-level locals (outside lambdas)
                     // Inside lambdas, the VM creates cells for locally-defined variables
                     // when building the closure environment
-                    if needs_lbox && !self.in_lambda {
+                    if needs_capture && !self.in_lambda {
                         // Create a cell containing nil
                         // This cell will be captured by nested lambdas
                         // and updated when the Define is lowered
                         let nil_reg = self.emit_const(LirConst::Nil)?;
                         let cell_reg = self.fresh_reg();
-                        self.emit(LirInstr::MakeLBox {
+                        self.emit(LirInstr::MakeCaptureCell {
                             dst: cell_reg,
                             value: nil_reg,
                         });

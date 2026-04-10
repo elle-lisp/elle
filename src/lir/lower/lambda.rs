@@ -30,7 +30,7 @@ impl<'a> Lowerer<'a> {
 
             // Check if this binding needs a cell (captured locals, mutated params)
             // We need to preserve the cell when capturing so mutations are shared
-            let binding_needs_lbox = self.arena.get(cap.binding).needs_lbox();
+            let binding_needs_capture = self.arena.get(cap.binding).needs_capture();
 
             match cap.kind {
                 CaptureKind::Local => {
@@ -42,7 +42,7 @@ impl<'a> Lowerer<'a> {
                         if self.in_lambda && is_upvalue {
                             // In a lambda, captures and params are accessed via LoadCapture
                             // Use LoadCaptureRaw for bindings that need cells to preserve the cell
-                            if binding_needs_lbox {
+                            if binding_needs_capture {
                                 self.emit(LirInstr::LoadCaptureRaw {
                                     dst: reg,
                                     index: slot,
@@ -72,7 +72,7 @@ impl<'a> Lowerer<'a> {
                     if self.in_lambda {
                         // We're in a nested lambda - load from parent's captures
                         // Use LoadCaptureRaw for bindings that need cells to preserve the cell
-                        if binding_needs_lbox {
+                        if binding_needs_capture {
                             self.emit(LirInstr::LoadCaptureRaw { dst: reg, index });
                         } else {
                             self.emit(LirInstr::LoadCapture { dst: reg, index });
@@ -188,16 +188,16 @@ impl<'a> Lowerer<'a> {
             self.upvalue_bindings.insert(cap.binding);
         }
 
-        // Build lbox_params_mask and bind parameters.
+        // Build capture_params_mask and bind parameters.
         // LBox params → upvalues in the env (LoadCapture/StoreCapture).
         // Non-LBox params → locals (LoadLocal/StoreLocal), copied from env at entry.
-        let mut lbox_params_mask: u64 = 0;
+        let mut capture_params_mask: u64 = 0;
         for (i, param) in params.iter().enumerate() {
-            let needs_lbox = self.arena.get(*param).needs_lbox();
+            let needs_capture = self.arena.get(*param).needs_capture();
 
-            if needs_lbox {
+            if needs_capture {
                 if i < 64 {
-                    lbox_params_mask |= 1 << i;
+                    capture_params_mask |= 1 << i;
                 }
                 // LBox param: lives in env as upvalue
                 let upvalue_idx = self.num_captures + i as u16;
@@ -213,14 +213,14 @@ impl<'a> Lowerer<'a> {
                 // NOT added to upvalue_bindings → uses LoadLocal/StoreLocal
             }
         }
-        self.current_func.lbox_params_mask = lbox_params_mask;
+        self.current_func.capture_params_mask = capture_params_mask;
 
         // Copy non-LBox params from env into their local slots.
         // The VM/host populates the env as [captures..., params...].
         // Non-LBox params are at env index (num_captures + i).
         for (i, param) in params.iter().enumerate() {
-            let needs_lbox = self.arena.get(*param).needs_lbox();
-            if !needs_lbox {
+            let needs_capture = self.arena.get(*param).needs_capture();
+            if !needs_capture {
                 let env_idx = self.num_captures + i as u16;
                 let slot = *self.binding_to_slot.get(param).unwrap();
                 let tmp = self.fresh_reg();

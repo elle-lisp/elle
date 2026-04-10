@@ -81,10 +81,10 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) push_param_frame: FuncId,
     #[allow(dead_code)]
     pub(crate) is_truthy: FuncId,
-    pub(crate) make_lbox: FuncId,
-    pub(crate) load_lbox: FuncId,
+    pub(crate) make_capture: FuncId,
+    pub(crate) load_capture_cell: FuncId,
     pub(crate) load_capture: FuncId,
-    pub(crate) store_lbox: FuncId,
+    pub(crate) store_capture_cell: FuncId,
     pub(crate) store_capture: FuncId,
     pub(crate) call: FuncId,
     pub(crate) tail_call: FuncId,
@@ -225,20 +225,20 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
         dispatch::elle_jit_push_param_frame as *const u8,
     );
     builder.symbol(
-        "elle_jit_make_lbox",
-        dispatch::elle_jit_make_lbox as *const u8,
+        "elle_jit_make_capture",
+        dispatch::elle_jit_make_capture as *const u8,
     );
     builder.symbol(
-        "elle_jit_load_lbox",
-        dispatch::elle_jit_load_lbox as *const u8,
+        "elle_jit_load_capture_cell",
+        dispatch::elle_jit_load_capture_cell as *const u8,
     );
     builder.symbol(
         "elle_jit_load_capture",
         dispatch::elle_jit_load_capture as *const u8,
     );
     builder.symbol(
-        "elle_jit_store_lbox",
-        dispatch::elle_jit_store_lbox as *const u8,
+        "elle_jit_store_capture_cell",
+        dispatch::elle_jit_store_capture_cell as *const u8,
     );
     builder.symbol(
         "elle_jit_store_capture",
@@ -355,8 +355,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let resolve_tc_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // store_capture: (env_ptr, index, val_tag, val_payload) -> (tag, payload)
     let store_capture_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
-    // store_lbox: (cell_tag, cell_payload, val_tag, val_payload) -> (tag, payload)
-    let store_lbox_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
+    // store_capture_cell: (cell_tag, cell_payload, val_tag, val_payload) -> (tag, payload)
+    let store_capture_cell_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
     // array_ref_or_nil: (tag, payload, index) -> (tag, payload)
     let array_ref_or_nil_sig = make_sig(module, &[I64, I64, I64], &[I64, I64]);
     // array_ref_destructure: (tag, payload, index, vm) -> (tag, payload)
@@ -442,10 +442,14 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         array_extend: declare(module, "elle_jit_array_extend", &value_binary_vm)?,
         push_param_frame: declare(module, "elle_jit_push_param_frame", &push_param_sig)?,
         is_truthy: declare(module, "elle_jit_is_truthy", &value_unary)?,
-        make_lbox: declare(module, "elle_jit_make_lbox", &value_unary)?,
-        load_lbox: declare(module, "elle_jit_load_lbox", &value_unary)?,
+        make_capture: declare(module, "elle_jit_make_capture", &value_unary)?,
+        load_capture_cell: declare(module, "elle_jit_load_capture_cell", &value_unary)?,
         load_capture: declare(module, "elle_jit_load_capture", &value_unary)?,
-        store_lbox: declare(module, "elle_jit_store_lbox", &store_lbox_sig)?,
+        store_capture_cell: declare(
+            module,
+            "elle_jit_store_capture_cell",
+            &store_capture_cell_sig,
+        )?,
         store_capture: declare(module, "elle_jit_store_capture", &store_capture_sig)?,
         call: declare(module, "elle_jit_call", &call_sig)?,
         tail_call: declare(module, "elle_jit_tail_call", &call_sig)?,

@@ -161,9 +161,9 @@ impl fmt::Display for LirInstr {
             LirInstr::ArrayMutLen { dst, src } => write!(f, "{} ← len({})", dst, src),
 
             // === Box Operations ===
-            LirInstr::MakeLBox { dst, value } => write!(f, "{} ← lbox({})", dst, value),
-            LirInstr::LoadLBox { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
-            LirInstr::StoreLBox { cell, value } => write!(f, "deref({}) ← {}", cell, value),
+            LirInstr::MakeCaptureCell { dst, value } => write!(f, "{} ← lbox({})", dst, value),
+            LirInstr::LoadCaptureCell { dst, cell } => write!(f, "{} ← deref({})", dst, cell),
+            LirInstr::StoreCaptureCell { cell, value } => write!(f, "deref({}) ← {}", cell, value),
 
             // === Destructuring ===
             LirInstr::CarDestructure { dst, src } => write!(f, "{} ← car!({})", dst, src),

@@ -190,8 +190,8 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let num_locals = read_i64(mp + 16) as usize;
             let arity_kind = read_i64(mp + 24);
             let arity_count = read_i64(mp + 32) as usize;
-            let lbox_params_mask = read_i64(mp + 40) as u64;
-            let lbox_locals_mask = read_i64(mp + 48) as u64;
+            let capture_params_mask = read_i64(mp + 40) as u64;
+            let capture_locals_mask = read_i64(mp + 48) as u64;
             let signal_bits = read_i64(mp + 56) as u32;
 
             // Read captures from linear memory
@@ -233,8 +233,8 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     bits: crate::value::fiber::SignalBits::new(signal_bits),
                     propagates: 0,
                 },
-                lbox_params_mask,
-                lbox_locals_mask,
+                capture_params_mask,
+                capture_locals_mask,
                 symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
                 location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
                 rotation_safe: false,
@@ -607,13 +607,13 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
             None => (SIG_OK, Value::EMPTY_LIST),
         },
         x if x == DataOp::MakeArray as i32 => (SIG_OK, Value::array_mut(args.to_vec())),
-        x if x == DataOp::MakeLBox as i32 => (SIG_OK, Value::local_lbox(args[0])),
-        x if x == DataOp::LoadLBox as i32 => match args[0].as_lbox() {
+        x if x == DataOp::MakeCapture as i32 => (SIG_OK, Value::capture_cell(args[0])),
+        x if x == DataOp::LoadCapture as i32 => match args[0].as_capture_cell() {
             Some(cell) => (SIG_OK, *cell.borrow()),
             None => (SIG_OK, args[0]),
         },
-        x if x == DataOp::StoreLBox as i32 => {
-            if let Some(cell) = args[0].as_lbox() {
+        x if x == DataOp::StoreCapture as i32 => {
+            if let Some(cell) = args[0].as_capture_cell() {
                 *cell.borrow_mut() = args[1];
             }
             (SIG_OK, Value::NIL)

@@ -238,8 +238,8 @@ mod tests {
             num_params: 0,
             constants,
             signal: Signal::yields(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             lir_function: None,
@@ -277,8 +277,8 @@ mod tests {
         env: Vec<Value>,
         yield_points: Vec<YieldPointMeta>,
         num_params: usize,
-        lbox_params_mask: u64,
-        lbox_locals_mask: u64,
+        capture_params_mask: u64,
+        capture_locals_mask: u64,
     ) -> (crate::vm::VM, Value) {
         use crate::signals::Signal;
         use crate::value::types::Arity;
@@ -298,8 +298,8 @@ mod tests {
             num_params,
             constants,
             signal: Signal::yields(),
-            lbox_params_mask,
-            lbox_locals_mask,
+            capture_params_mask,
+            capture_locals_mask,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             lir_function: None,
@@ -627,8 +627,8 @@ mod tests {
     #[test]
     fn test_jit_yield_rewraps_lbox_locals() {
         // 2 params (param 1 is lbox-wrapped), 2 locally-defined (local 0 is lbox-wrapped)
-        // lbox_params_mask = 0b10 (param index 1)
-        // lbox_locals_mask = 0b01 (local index 0)
+        // capture_params_mask = 0b10 (param index 1)
+        // capture_locals_mask = 0b01 (local index 0)
         let yield_meta = YieldPointMeta {
             num_params: 2,
             resume_ip: 50,
@@ -642,8 +642,8 @@ mod tests {
             vec![], // no captures
             vec![yield_meta],
             2,    // num_params
-            0b10, // lbox_params_mask: param 1 is mutable-captured
-            0b01, // lbox_locals_mask: local 0 is mutable-captured
+            0b10, // capture_params_mask: param 1 is mutable-captured
+            0b01, // capture_locals_mask: local 0 is mutable-captured
         );
 
         // Spilled: [param0=10, param1=20, local0=30, local1=40, op0=50]

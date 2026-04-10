@@ -462,10 +462,10 @@ impl JitCompiler {
                         .ins()
                         .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
                 let base = arg_var_base + i;
-                if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                     let (cell_t, cell_p) = translator.call_helper_value_unary(
                         &mut builder,
-                        translator.helpers.make_lbox,
+                        translator.helpers.make_capture,
                         arg_tag,
                         arg_payload,
                     )?;
@@ -521,10 +521,10 @@ impl JitCompiler {
                     let merged_tag = builder.block_params(merge_block)[0];
                     let merged_pay = builder.block_params(merge_block)[1];
 
-                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_unary(
                             &mut builder,
-                            translator.helpers.make_lbox,
+                            translator.helpers.make_capture,
                             merged_tag,
                             merged_pay,
                         )?;
@@ -608,12 +608,12 @@ impl JitCompiler {
             let rest_tag = builder.block_params(cons_loop_exit)[0];
             let rest_payload = builder.block_params(cons_loop_exit)[1];
 
-            // Handle lbox_params_mask for the rest param
+            // Handle capture_params_mask for the rest param
             let rest_param_index = non_rest_params;
-            if rest_param_index < 64 && (lir.lbox_params_mask & (1 << rest_param_index)) != 0 {
+            if rest_param_index < 64 && (lir.capture_params_mask & (1 << rest_param_index)) != 0 {
                 let (cell_t, cell_p) = translator.call_helper_value_unary(
                     &mut builder,
-                    translator.helpers.make_lbox,
+                    translator.helpers.make_capture,
                     rest_tag,
                     rest_payload,
                 )?;
@@ -677,10 +677,10 @@ impl JitCompiler {
                     let merged_tag = builder.block_params(merge_block)[0];
                     let merged_pay = builder.block_params(merge_block)[1];
 
-                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_unary(
                             &mut builder,
-                            translator.helpers.make_lbox,
+                            translator.helpers.make_capture,
                             merged_tag,
                             merged_pay,
                         )?;
@@ -700,10 +700,10 @@ impl JitCompiler {
                         builder
                             .ins()
                             .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    if (i as u64) < 64 && (lir.lbox_params_mask & (1 << i)) != 0 {
+                    if (i as u64) < 64 && (lir.capture_params_mask & (1 << i)) != 0 {
                         let (cell_t, cell_p) = translator.call_helper_value_unary(
                             &mut builder,
-                            translator.helpers.make_lbox,
+                            translator.helpers.make_capture,
                             arg_tag,
                             arg_payload,
                         )?;

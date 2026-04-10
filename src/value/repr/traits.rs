@@ -141,7 +141,11 @@ impl PartialEq for Value {
                 ) => std::rc::Rc::ptr_eq(c1, c2),
 
                 // Box comparison (compare contents)
-                (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
+                (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. })
+                | (
+                    HeapObject::CaptureCell { cell: c1, .. },
+                    HeapObject::CaptureCell { cell: c2, .. },
+                ) => {
                     let _guard =
                         match cycle::cmp_enter(self.payload as usize, other.payload as usize) {
                             Some(g) => g,
@@ -273,7 +277,7 @@ impl Hash for Value {
                 }
                 HeapObject::LStringMut { data: rc, .. } => rc.borrow().hash(state),
                 HeapObject::LBytesMut { data: rc, .. } => rc.borrow().hash(state),
-                HeapObject::LBox { cell: rc, .. } => {
+                HeapObject::LBox { cell: rc, .. } | HeapObject::CaptureCell { cell: rc, .. } => {
                     if let Some(_guard) = cycle::hash_enter(self.payload as usize) {
                         rc.borrow().hash(state);
                     }
@@ -361,6 +365,7 @@ fn type_rank(v: &Value) -> u8 {
             HeapTag::LStructMut => 15,
             HeapTag::Closure => 16,
             HeapTag::LBox => 17,
+            HeapTag::CaptureCell => 17, // same rank as LBox
             HeapTag::NativeFn => 18,
             HeapTag::LibHandle => 19,
             HeapTag::ThreadHandle => 20,
@@ -506,8 +511,9 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
             b1.iter().cmp(b2.iter())
         }
 
-        // Box — by contained value (borrow)
-        (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. }) => {
+        // Box / CaptureCell — by contained value (borrow)
+        (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. })
+        | (HeapObject::CaptureCell { cell: c1, .. }, HeapObject::CaptureCell { cell: c2, .. }) => {
             let _guard = match cycle::cmp_enter(a.payload as usize, b.payload as usize) {
                 Some(g) => g,
                 None => return Ordering::Equal,

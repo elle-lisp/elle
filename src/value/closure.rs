@@ -33,10 +33,10 @@ pub struct ClosureTemplate {
     pub signal: Signal,
     /// Bitmask indicating which parameters need box wrapping.
     /// Bit i set means parameter i is mutated and needs a LocalLBox.
-    pub lbox_params_mask: u64,
+    pub capture_params_mask: u64,
     /// Bitmask indicating which locally-defined variables need box wrapping.
     /// Bit i set means locally-defined variable i needs a LocalLBox.
-    pub lbox_locals_mask: u64,
+    pub capture_locals_mask: u64,
     /// Symbol ID → name mapping for cross-thread portability.
     pub symbol_names: Rc<HashMap<u32, String>>,
     /// Bytecode offset → source location mapping for error reporting.
@@ -137,8 +137,8 @@ impl PartialEq for Closure {
             && self.template.num_captures == other.template.num_captures
             && self.template.constants == other.template.constants
             && self.template.signal == other.template.signal
-            && self.template.lbox_params_mask == other.template.lbox_params_mask
-            && self.template.lbox_locals_mask == other.template.lbox_locals_mask
+            && self.template.capture_params_mask == other.template.capture_params_mask
+            && self.template.capture_locals_mask == other.template.capture_locals_mask
             && self.template.symbol_names == other.template.symbol_names
             && self.template.location_map == other.template.location_map
             && self.template.doc == other.template.doc
@@ -162,8 +162,8 @@ mod tests {
             num_params: 0,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -199,8 +199,8 @@ mod tests {
             num_params: 3,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -228,8 +228,8 @@ mod tests {
             num_params: 3,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -257,8 +257,8 @@ mod tests {
             num_params: 3,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,

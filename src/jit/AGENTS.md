@@ -62,7 +62,7 @@ The JIT was built incrementally:
 |-------|-------|
 | Phase 1 | Constants, arithmetic, comparison, variables, terminators. Capture-free functions only. |
 | Phase 2 | Closures with captures: `LoadCapture`, `LoadCaptureRaw`, `StoreCapture`. |
-| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeLBox`, `LoadLBox`, `StoreLBox`), function calls (`Call`, `TailCall`). VM pointer parameter added for call dispatch. |
+| Phase 3 | Data structures (`Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`), lboxes (`MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`), function calls (`Call`, `TailCall`). VM pointer parameter added for call dispatch. |
 | Phase 4 | Self-tail-call optimization, JIT-to-JIT calling, batch compilation, `ValueConst`. |
 
 ## Phase 4 Scope (Current)
@@ -73,7 +73,7 @@ Supported instructions:
 - **Comparison**: `Compare` (inline integer fast path, extern fallback)
 - **Variables**: `Move`, `Dup`, `LoadLocal`, `StoreLocal` (via `local_slot_to_var`), `LoadCapture`, `LoadCaptureRaw`
 - **Data structures**: `Cons`, `Car`, `Cdr`, `MakeVector`, `IsPair`
-- **LBoxes**: `MakeLBox`, `LoadLBox`, `StoreLBox`, `StoreCapture`
+- **LBoxes**: `MakeCaptureCell`, `LoadCaptureCell`, `StoreCaptureCell`, `StoreCapture`
 - **Globals**: Accessed as depth-0 upvalues via `LoadCapture`/`LoadCaptureRaw`; `LoadGlobal`/`StoreGlobal` are dead instructions (unreachable in VM dispatch)
 - **Function calls**: `Call`, `TailCall` (self-calls become native loops; non-self calls use `elle_jit_tail_call` trampoline)
 - **Terminators**: `Return`, `Jump`, `Branch`
@@ -140,7 +140,7 @@ These handle type checking and tagged-union encoding.
 ### data.rs (heap/VM interaction)
 
 - **Data structures**: `elle_jit_cons`, `elle_jit_car`, `elle_jit_cdr`, `elle_jit_make_array`, `elle_jit_is_pair`, and array/slice ops
-- **LBoxes**: `elle_jit_make_lbox`, `elle_jit_load_lbox`, `elle_jit_store_lbox`, `elle_jit_load_capture`, `elle_jit_store_capture`
+- **LBoxes**: `elle_jit_make_capture`, `elle_jit_load_capture_cell`, `elle_jit_store_capture_cell`, `elle_jit_load_capture`, `elle_jit_store_capture`
 - **Type checks**: `elle_jit_is_array`, `elle_jit_is_struct`, `elle_jit_is_set`, etc.
 
 ## Self-Tail-Call Optimization
@@ -348,7 +348,7 @@ No errors are silently swallowed.
 13. **Variadic functions with `VarargKind::List` are JIT-supported.** The JIT
      entry block emits a Cranelift cons-building loop that iterates over
      `args[fixed..nargs]` in reverse, calling `elle_jit_cons` to build the
-     rest-arg list. `lbox_params_mask` is checked for the rest param slot.
+     rest-arg list. `capture_params_mask` is checked for the rest param slot.
      Functions with `VarargKind::Struct` or `VarargKind::StrictStruct` are
      still rejected (they require fiber access for keyword error reporting)
      and fall back to the interpreter.
@@ -374,20 +374,20 @@ LoadCapture/StoreCapture never use stack-relative slots.
 
 ## LBox Optimization for Locally-Defined Variables
 
-The JIT uses `LirFunction.lbox_locals_mask` to avoid unnecessary `LocalLBox`
+The JIT uses `LirFunction.capture_locals_mask` to avoid unnecessary `CaptureCell`
 heap allocations. In the VM interpreter, every locally-defined variable inside
-a lambda gets a `LocalLBox(NIL)` at function entry (because `StoreUpvalue`
+a lambda gets a `CaptureCell(NIL)` at function entry (because `StoreUpvalue`
 requires lbox indirection to write through `Rc<Vec<Value>>`). In JIT code,
 locally-defined variables are Cranelift variables (CPU registers/stack), so
-lbox wrapping is only needed when `binding.needs_lbox()` is true (captured by
+lbox wrapping is only needed when `binding.needs_capture()` is true (captured by
 nested closure or mutated via `set!`).
 
 The optimization applies to three code paths in `translate.rs`:
 
-1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_lbox` when the
-   bit is set in `lbox_locals_mask`; others get NIL directly.
-2. **`LoadCapture` for locals**: Skips `load_lbox` unwrapping when bit not set.
-3. **`StoreCapture` for locals**: Skips `store_lbox` when bit not set, uses
+1. **`init_locally_defined_vars`**: Only calls `elle_jit_make_capture` when the
+   bit is set in `capture_locals_mask`; others get NIL directly.
+2. **`LoadCapture` for locals**: Skips `load_capture_cell` unwrapping when bit not set.
+3. **`StoreCapture` for locals**: Skips `store_capture_cell` when bit not set, uses
    `def_var` directly.
 
 Impact: 3.2x speedup on N-Queens N=12 (4.4s → 1.38s), 30x reduction in

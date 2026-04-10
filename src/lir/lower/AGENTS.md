@@ -38,7 +38,7 @@ HIR + spans
     ▼
 Lowerer (&BindingArena)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
-    ├─► emit MakeLBox for captured locals (arena.get(b).needs_lbox())
+    ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     ├─► perform escape analysis for scope allocation
@@ -48,7 +48,7 @@ Lowerer (&BindingArena)
 LirFunction (basic blocks with SpannedInstr)
 ```
 
-The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`): `arena.get(b).needs_lbox()`, `arena.get(b).name`, etc. The arena reference is immutable during lowering, ensuring analysis-phase metadata cannot be modified.
+The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`): `arena.get(b).needs_capture()`, `arena.get(b).name`, etc. The arena reference is immutable during lowering, ensuring analysis-phase metadata cannot be modified.
 
 ## Source location tracking
 
@@ -150,10 +150,10 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 |-------------|--------------|-------|
 | `LoadLocal` | → value | Load from stack slot |
 | `StoreLocal` | value → value | Store to slot, keep on stack |
-| `LoadCapture` | → value | From closure env, auto-unwraps LocalLBox |
+| `LoadCapture` | → value | From closure env, auto-unwraps CaptureCell |
 | `LoadCaptureRaw` | → lbox | From closure env, preserves lbox (for forwarding) |
 | `StoreCapture` | value → | Into closure env, handles lboxes |
-| `MakeLBox` | value → lbox | Wrap in LocalLBox |
+| `MakeCaptureCell` | value → lbox | Wrap in CaptureCell |
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 | `LoadResumeValue` | → value | First instruction in yield resume block |
@@ -183,9 +183,9 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 5. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for LBox locals (`num_captures + num_locals`) and stack-relative indices for non-LBox locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 
-6. **`lbox_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time.
+6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time.
 
-7. **`lbox_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `set!`. The JIT uses this to skip `LocalLBox` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+7. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `set!`. The JIT uses this to skip `CaptureCell` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
 
 8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering. The emitter preserves it into `Closure.doc` without encoding it in bytecode.
 
@@ -202,7 +202,7 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 - **Forgetting to allocate slots**: Every binding used in the function must have a slot allocated via `allocate_slot()`
 - **Mixing LoadLocal and LoadCapture**: Inside lambdas, upvalues use LoadCapture; locals use LoadLocal
-- **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeLBox` before storing
+- **Not emitting lbox operations**: If a binding needs an lbox, emit `MakeCaptureCell` before storing
 - **Not propagating spans**: Every emitted instruction should carry the source span from the HIR node
 - **Forgetting region cleanup**: If `RegionEnter` is emitted, ensure `RegionExit` is emitted at scope exit
 - **Not handling break compensation**: When emitting `break`, emit compensating `RegionExit` instructions for each region entered between break site and target

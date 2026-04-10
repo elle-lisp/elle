@@ -314,22 +314,22 @@ pub extern "C" fn elle_jit_array_ref_or_nil(tag: u64, payload: u64, index: u64) 
 
 /// Create a LocalCell wrapping a value
 #[no_mangle]
-pub extern "C" fn elle_jit_make_lbox(tag: u64, payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_make_capture(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    JitValue::from_value(Value::local_lbox(val))
+    JitValue::from_value(Value::capture_cell(val))
 }
 
-/// Load value from a LocalCell
+/// Load value from a CaptureCell
 #[no_mangle]
-pub extern "C" fn elle_jit_load_lbox(cell_tag: u64, cell_payload: u64) -> JitValue {
+pub extern "C" fn elle_jit_load_capture_cell(cell_tag: u64, cell_payload: u64) -> JitValue {
     let cell = Value {
         tag: cell_tag,
         payload: cell_payload,
     };
-    if let Some(cell_ref) = cell.as_lbox() {
+    if let Some(cell_ref) = cell.as_capture_cell() {
         JitValue::from_value(*cell_ref.borrow())
     } else {
-        eprintln!("JIT type error: expected cell");
+        eprintln!("JIT type error: expected capture cell");
         JitValue::nil()
     }
 }
@@ -341,8 +341,8 @@ pub extern "C" fn elle_jit_load_lbox(cell_tag: u64, cell_payload: u64) -> JitVal
 #[no_mangle]
 pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
     let val = Value { tag, payload };
-    if val.is_local_lbox() {
-        if let Some(cell_ref) = val.as_lbox() {
+    if val.is_capture_cell() {
+        if let Some(cell_ref) = val.as_capture_cell() {
             JitValue::from_value(*cell_ref.borrow())
         } else {
             JitValue { tag, payload } // shouldn't happen, but safe fallback
@@ -352,9 +352,9 @@ pub extern "C" fn elle_jit_load_capture(tag: u64, payload: u64) -> JitValue {
     }
 }
 
-/// Store value into a LocalCell
+/// Store value into a CaptureCell
 #[no_mangle]
-pub extern "C" fn elle_jit_store_lbox(
+pub extern "C" fn elle_jit_store_capture_cell(
     cell_tag: u64,
     cell_payload: u64,
     val_tag: u64,
@@ -368,10 +368,10 @@ pub extern "C" fn elle_jit_store_lbox(
         tag: val_tag,
         payload: val_payload,
     };
-    if let Some(cell_ref) = cell.as_lbox() {
+    if let Some(cell_ref) = cell.as_capture_cell() {
         *cell_ref.borrow_mut() = val;
     } else {
-        eprintln!("JIT type error: expected cell");
+        eprintln!("JIT type error: expected capture cell");
     }
     JitValue::nil()
 }
@@ -394,8 +394,8 @@ pub extern "C" fn elle_jit_store_capture(
         payload: val_payload,
     };
 
-    if slot.is_local_lbox() {
-        if let Some(cell_ref) = slot.as_lbox() {
+    if slot.is_capture_cell() {
+        if let Some(cell_ref) = slot.as_capture_cell() {
             *cell_ref.borrow_mut() = new_val;
         }
     } else {
@@ -456,16 +456,16 @@ mod tests {
     #[test]
     fn test_cell_operations() {
         let v = Value::int(42);
-        let cell = elle_jit_make_lbox(v.tag, v.payload).to_value();
-        assert!(cell.is_local_lbox());
+        let cell = elle_jit_make_capture(v.tag, v.payload).to_value();
+        assert!(cell.is_capture_cell());
 
-        let loaded = elle_jit_load_lbox(cell.tag, cell.payload).to_value();
+        let loaded = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
         assert_eq!(loaded.as_int(), Some(42));
 
         let new_val = Value::int(100);
-        elle_jit_store_lbox(cell.tag, cell.payload, new_val.tag, new_val.payload);
+        elle_jit_store_capture_cell(cell.tag, cell.payload, new_val.tag, new_val.payload);
 
-        let loaded2 = elle_jit_load_lbox(cell.tag, cell.payload).to_value();
+        let loaded2 = elle_jit_load_capture_cell(cell.tag, cell.payload).to_value();
         assert_eq!(loaded2.as_int(), Some(100));
     }
 }

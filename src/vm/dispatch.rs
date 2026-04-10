@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use super::core::VM;
 use super::{
-    arithmetic, cell, closure, comparison, control, data, literals, stack, types, variables,
+    arithmetic, capture, closure, comparison, control, data, literals, stack, types, variables,
 };
 
 /// Decrement fuel and return from the dispatch loop if the budget is exhausted.
@@ -380,14 +380,14 @@ impl VM {
                 }
 
                 // Box operations
-                Instruction::MakeLBox => {
-                    cell::handle_make_lbox(self);
+                Instruction::MakeCapture => {
+                    capture::handle_make_capture(self);
                 }
-                Instruction::UnlBox => {
-                    cell::handle_unlbox(self);
+                Instruction::UnwrapCapture => {
+                    capture::handle_unwrap_capture(self);
                 }
-                Instruction::UpdateLBox => {
-                    cell::handle_update_lbox(self);
+                Instruction::UpdateCapture => {
+                    capture::handle_update_capture(self);
                 }
 
                 // Yield — capture suspended frame and suspend

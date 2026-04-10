@@ -49,7 +49,6 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
     heap.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
     heap.alloc(HeapObject::LBox {
         cell: std::cell::RefCell::new(Value::NIL),
-        is_local: false,
         traits: Value::NIL,
     });
     assert_eq!(heap.len(), 3); // 3 total objects
