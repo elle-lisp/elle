@@ -189,3 +189,74 @@
 (assert (= (letrec ((even? (fn (n) (if (= n 0) true (odd? (- n 1)))))
            (odd?  (fn (n) (if (= n 0) false (even? (- n 1))))))
     (join (spawn (fn () (odd? 99))))) true) "spawn mutual recursion deep")
+
+# ============================================================================
+# JIT on spawned threads: closures capturing other closures in hot loops.
+# The spawned closure calls the captured helper enough times to exceed the
+# JIT threshold on the worker thread. Before the ClosureRef LIR-transfer fix
+# (src/lir/types.rs::convert_value_consts_for_send), LIR containing
+# closure-valued ValueConst instructions would be dropped on send, silently
+# forcing the worker into the interpreter.
+# ============================================================================
+
+(assert (= (let ((double (fn (x) (* x 2))))
+             (letrec ((loop (fn (n acc)
+                              (if (= n 0)
+                                  acc
+                                  (loop (- n 1) (+ acc (double n)))))))
+               (join (spawn (fn () (loop 100 0))))))
+           10100)
+  "spawn hot loop with captured closure (JIT on worker thread)")
+
+(assert (= (let ((inc (fn (x) (+ x 1)))
+                 (sq  (fn (x) (* x x))))
+             (letrec ((loop (fn (n acc)
+                              (if (= n 0)
+                                  acc
+                                  (loop (- n 1) (+ acc (sq (inc n))))))))
+               (join (spawn (fn () (loop 50 0))))))
+           45525)
+  "spawn hot loop with two captured closures")
+
+(assert (= (let ((compose (fn (f g) (fn (x) (f (g x))))))
+             (let ((inc (fn (x) (+ x 1)))
+                   (dbl (fn (x) (* x 2))))
+               (let ((f (compose dbl inc)))
+                 (letrec ((loop (fn (n acc)
+                                  (if (= n 0)
+                                      acc
+                                      (loop (- n 1) (+ acc (f n)))))))
+                   (join (spawn (fn () (loop 100 0))))))))
+           10300)
+  "spawn hot loop with composed closures")
+
+# ============================================================================
+# Regression test for the ClosureRef LIR-transfer fix.
+#
+# When a closure is sent across a `sys/spawn` boundary, its LIR function is
+# cloned for cross-thread transfer. If the LIR contains `ValueConst`
+# instructions holding closure Values (which happens whenever user code
+# inside the spawned closure references a stdlib function like `inc`,
+# because stdlib functions are registered as primitives and lower to
+# `ValueConst`), those Values have to be re-routed to the reconstructed
+# closure on the receiving side. The fix in
+# `src/lir/types.rs::convert_value_consts_for_send` + the
+# `LirConst::ClosureRef` placeholder + `patch_lir_closure_refs` in
+# `src/value/send.rs` does exactly that.
+#
+# Before the fix, `convert_value_consts_for_send` dropped the LIR function
+# on any closure-valued ValueConst, silently forcing the worker thread into
+# the interpreter and destroying the threaded speedup for e.g. mandelbrot.
+#
+# This test asserts the fix actually fires: it spawns a closure that calls
+# a stdlib function, joins it, and checks that the counter incremented.
+# If a future lowering change causes stdlib references to stop appearing as
+# ValueConst (or the fix regresses), the assertion will fire and point
+# directly at the broken contract.
+# ============================================================================
+
+(let [[before (lir/closure-value-const-count)]]
+  (join (sys/spawn (fn [] (inc 41))))
+  (let [[after (lir/closure-value-const-count)]]
+    (assert (> after before)
+      "ClosureRef LIR-transfer path fires when a spawned closure calls a stdlib function")))

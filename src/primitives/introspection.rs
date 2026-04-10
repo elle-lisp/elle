@@ -272,6 +272,32 @@ pub(crate) fn prim_keyword(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (lir/closure-value-const-count) — number of closure-valued `ValueConst`
+/// instructions converted to `ClosureRef` by the LIR cross-thread
+/// serializer during this process's lifetime.
+///
+/// Used by regression tests to assert the ClosureRef LIR-transfer fix
+/// is actually firing on real spawn patterns. See
+/// `src/lir/types.rs::convert_value_consts_for_send`.
+pub(crate) fn prim_closure_value_const_count(args: &[Value]) -> (SignalBits, Value) {
+    if !args.is_empty() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "lir/closure-value-const-count: expected 0 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    (
+        SIG_OK,
+        Value::int(crate::lir::closure_value_const_count() as i64),
+    )
+}
+
 /// (jit/rejections) — list closures rejected from JIT compilation with reasons
 ///
 /// Returns a list of structs, each with :name, :reason, and :calls keys.
@@ -439,6 +465,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &[],
         category: "meta",
         example: "(jit/rejections)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "lir/closure-value-const-count",
+        func: prim_closure_value_const_count,
+        signal: Signal::silent(),
+        arity: Arity::Exact(0),
+        doc: "Number of closure-valued ValueConst instructions converted to ClosureRef by the LIR cross-thread serializer. Used by regression tests to assert the ClosureRef LIR-transfer fix fires.",
+        params: &[],
+        category: "meta",
+        example: "(lir/closure-value-const-count)",
         aliases: &[],
     },
     PrimitiveDef {

@@ -3,6 +3,25 @@
 use crate::signals::Signal;
 use crate::syntax::Span;
 use crate::value::{Arity, SymbolId, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// Number of closure-valued `ValueConst` instructions converted to
+/// `ClosureRef` by `convert_value_consts_for_send` during the lifetime
+/// of this process.
+///
+/// This path is exercised whenever user code references a stdlib
+/// function (registered as a primitive via `update_cache_with_stdlib`)
+/// from inside a closure that is sent across a `sys/spawn` boundary.
+/// Exposed to Elle via the `lir/closure-value-const-count` primitive
+/// and printed by `--stats`.
+static CLOSURE_VALUE_CONST_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Returns the lifetime count of closure-valued `ValueConst` instructions
+/// serialized across `sys/spawn` boundaries. Reported by `--stats` and
+/// exposed as an Elle primitive for regression tests.
+pub fn closure_value_const_count() -> usize {
+    CLOSURE_VALUE_CONST_COUNT.load(Ordering::Relaxed)
+}
 
 /// Virtual register
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -186,6 +205,64 @@ impl LirFunction {
                 .iter()
                 .any(|si| matches!(si.instr, LirInstr::SuspendingCall { .. }))
         })
+    }
+
+    /// Convert ValueConst instructions to Const (LirConst) for safe cross-thread transfer.
+    /// NativeFn ValueConsts are safe to keep as-is (function pointers are Send+Sync).
+    /// Closure ValueConsts are converted to `ClosureRef(idx)` using the intern table.
+    /// Returns false if any ValueConst contains a non-sendable, non-closure heap value.
+    pub fn convert_value_consts_for_send(
+        &mut self,
+        visited: &std::collections::HashMap<u64, usize>,
+    ) -> bool {
+        for block in &mut self.blocks {
+            for si in &mut block.instructions {
+                if let LirInstr::ValueConst { dst, value } = &si.instr {
+                    if value.is_native_fn() {
+                        continue; // function pointers are thread-safe
+                    }
+                    let dst = *dst;
+                    if let Some(lir_const) = value_to_lir_const(*value) {
+                        si.instr = LirInstr::Const {
+                            dst,
+                            value: lir_const,
+                        };
+                    } else if value.is_closure() {
+                        // Closure ValueConst: look up in intern table.
+                        //
+                        // This branch fires whenever a closure being sent
+                        // across a `sys/spawn` boundary contains, in its
+                        // LIR, a `ValueConst` holding a closure Value. That
+                        // happens because stdlib functions are registered
+                        // as primitives (see
+                        // `src/primitives/module_init.rs::register_stdlib_exports`
+                        // which calls `update_cache_with_stdlib`), so user
+                        // code referencing a stdlib function inside a
+                        // lambda lowers the reference to `ValueConst` via
+                        // `immutable_values` in the lowerer. A spawned
+                        // closure that transitively calls e.g. `inc` or
+                        // `map` from stdlib will trip this branch.
+                        //
+                        // `CLOSURE_VALUE_CONST_COUNT` tracks the live count;
+                        // see the `lir/closure-value-const-count` primitive
+                        // and `--stats` output.
+                        CLOSURE_VALUE_CONST_COUNT.fetch_add(1, Ordering::Relaxed);
+                        if let Some(&idx) = visited.get(&value.payload) {
+                            si.instr = LirInstr::Const {
+                                dst,
+                                value: LirConst::ClosureRef(idx),
+                            };
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        // unsendable ValueConst (compound heap value)
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 }
 
@@ -490,4 +567,31 @@ pub enum LirConst {
     String(String),
     Symbol(SymbolId),
     Keyword(String),
+    /// Placeholder for a closure during cross-thread LIR transfer.
+    /// The usize is the index into `SendBundle::closures`.
+    /// Patched back to `ValueConst` during reconstruction.
+    ClosureRef(usize),
+}
+
+/// Convert a runtime Value to a LirConst for safe cross-thread transfer.
+/// Returns None for compound heap values (cons, arrays, closures, etc.)
+/// that can't be represented as LirConst.
+pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
+    if v.is_nil() {
+        Some(LirConst::Nil)
+    } else if v.is_empty_list() {
+        Some(LirConst::EmptyList)
+    } else if let Some(b) = v.as_bool() {
+        Some(LirConst::Bool(b))
+    } else if let Some(n) = v.as_int() {
+        Some(LirConst::Int(n))
+    } else if let Some(f) = v.as_float() {
+        Some(LirConst::Float(f))
+    } else if let Some(id) = v.as_symbol() {
+        Some(LirConst::Symbol(SymbolId(id)))
+    } else if let Some(name) = v.as_keyword_name() {
+        Some(LirConst::Keyword(name))
+    } else {
+        v.with_string(|s| s.to_string()).map(LirConst::String)
+    }
 }

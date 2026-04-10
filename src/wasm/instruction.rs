@@ -653,7 +653,10 @@ impl WasmEmitter {
                     LirConst::Bool(false) => (TAG_FALSE as i64, 0),
                     LirConst::Int(n) => (TAG_INT as i64, *n),
                     LirConst::Float(x) => (TAG_FLOAT as i64, x.to_bits() as i64),
-                    LirConst::Symbol(_) | LirConst::Keyword(_) | LirConst::String(_) => {
+                    LirConst::Symbol(_)
+                    | LirConst::Keyword(_)
+                    | LirConst::String(_)
+                    | LirConst::ClosureRef(_) => {
                         unreachable!()
                     }
                 };

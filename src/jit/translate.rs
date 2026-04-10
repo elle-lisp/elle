@@ -954,9 +954,11 @@ impl<'a> FunctionTranslator<'a> {
                     self.def_var_pair(builder, dst.0, rt, rp);
                 }
                 self.emit_exception_check_after_call(builder)?;
-                let idx = self.call_site_index;
-                self.call_site_index += 1;
-                self.emit_yield_check_after_call(builder, idx)?;
+                if self.lir.signal.may_suspend() {
+                    let idx = self.call_site_index;
+                    self.call_site_index += 1;
+                    self.emit_yield_check_after_call(builder, idx)?;
+                }
             }
 
             LirInstr::ArrayMutExtend { dst, array, source } => {

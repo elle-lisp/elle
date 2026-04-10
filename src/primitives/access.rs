@@ -732,7 +732,7 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
         error_val(
             "type-error",
             format!(
-                "put: expected collection (array, @array, string, @string, or struct), got {}",
+                "put: expected array, struct, set, bytes, or string, got {}",
                 args[0].type_name()
             ),
         ),
