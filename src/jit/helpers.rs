@@ -80,6 +80,9 @@ impl<'a> FunctionTranslator<'a> {
                 let p = builder.ins().iconst(I64, v.payload as i64);
                 (t, p)
             }
+            LirConst::ClosureRef(_) => {
+                panic!("bug: ClosureRef in JIT — should have been patched during reconstruction")
+            }
         }
     }
 

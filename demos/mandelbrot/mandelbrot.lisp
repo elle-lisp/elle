@@ -61,6 +61,7 @@
 (def WIN_H  600)
 (def BPP    4)
 (def STRIDE (* WIDTH BPP))
+(def NCPU  (integer (or (sys/env "NCPU") "16")))
 
 (def KEY_ESC    0xff1b)
 (def KEY_q      0x71)
@@ -72,6 +73,8 @@
 (def KEY_PLUS   0x2b)
 (def KEY_MINUS  0x2d)
 (def KEY_EQUAL  0x3d)
+(def KP_ADD     0xffab)
+(def KP_SUB     0xffad)
 
 (def CAIRO_FORMAT_ARGB32 0)
 (def SCROLL_VERTICAL     2)
@@ -130,6 +133,77 @@
       (assign i (inc i)))
     p))
 
+# ── Per-row computation (JIT compiles to native x86) ─────────────
+
+(def BLACK (bit/shl 255 24))
+
+(defn compute-row [row-buf ci x-min dx max-iter]
+  (var px 0)
+  (while (< px WIDTH)
+    (def cr (+ x-min (* (float px) dx)))
+    # cardioid and period-2 bulb check — skip full iteration
+    (def q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci)))
+    (def color
+      (if (or (<= (* q (+ q (- cr 0.25))) (* 0.25 (* ci ci)))
+              (<= (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625))
+        BLACK
+        (begin
+          (var zr  0.0)
+          (var zi  0.0)
+          (var zr2 0.0)
+          (var zi2 0.0)
+          (var iter 0)
+          (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
+            (assign zi  (+ (* 2.0 zr zi) ci))
+            (assign zr  (+ (- zr2 zi2) cr))
+            (assign zr2 (* zr zr))
+            (assign zi2 (* zi zi))
+            (assign iter (inc iter)))
+          (if (= iter max-iter)
+            BLACK
+            (let* [[log-zn (/ (math/log (+ zr2 zi2)) 2.0)]
+                   [smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))]
+                   [idx    (mod (integer (* smooth 3.0)) PALETTE_SIZE)]]
+              (palette idx))))))
+    (put row-buf px color)
+    (assign px (inc px))))
+
+# ── Thread pool ──────────────────────────────────────────────────
+
+(defn recv-blocking [rx]
+  (def result (chan/select @[rx]))
+  (result 1))
+
+(var work-txs @[])
+(var done-rx  nil)
+
+(defn init-workers []
+  (def [dtx drx] (chan))
+  (assign done-rx drx)
+  (var i 0)
+  (while (< i NCPU)
+    (def [wtx wrx] (chan))
+    (push work-txs wtx)
+    (sys/spawn (fn []
+      (def local-buf
+        (let [[r @[]]]
+          (var j 0)
+          (while (< j WIDTH) (push r 0) (assign j (inc j)))
+          r))
+      (forever
+        (def msg (recv-blocking wrx))
+        (match msg
+          ([pixel-addr y-min dy x-min dx max-iter y-start y-end]
+            (def pbuf (ptr/from-int pixel-addr))
+            (var py y-start)
+            (while (< py y-end)
+              (compute-row local-buf (+ y-min (* (float py) dy)) x-min dx max-iter)
+              (ffi/write (ptr/add pbuf (* py STRIDE)) row-type local-buf)
+              (assign py (inc py)))
+            (chan/send dtx :done))
+          (_ (chan/send dtx :skip))))))
+    (assign i (inc i))))
+
 # ── Mandelbrot computation ────────────────────────────────────────
 
 (defn compute-mandelbrot []
@@ -140,38 +214,19 @@
   (def dx     (/ view-scale (float WIDTH)))
   (def dy     (/ (* view-scale aspect) (float HEIGHT)))
 
-  (var py 0)
-  (while (< py HEIGHT)
-    (def ci (+ y-min (* (float py) dy)))
-    (var px 0)
-    (while (< px WIDTH)
-      (def cr (+ x-min (* (float px) dx)))
+  (def paddr (ptr/to-int pixel-buf))
+  (def rows-per (/ HEIGHT NCPU))
+  (var t 0)
+  (while (< t NCPU)
+    (def y-start (* t rows-per))
+    (def y-end (if (= t (- NCPU 1)) HEIGHT (* (+ t 1) rows-per)))
+    (chan/send (work-txs t) [paddr y-min dy x-min dx max-iter y-start y-end])
+    (assign t (inc t)))
 
-      (var zr  0.0)
-      (var zi  0.0)
-      (var zr2 0.0)
-      (var zi2 0.0)
-      (var iter 0)
-      (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
-        (assign zi  (+ (* 2.0 zr zi) ci))
-        (assign zr  (+ (- zr2 zi2) cr))
-        (assign zr2 (* zr zr))
-        (assign zi2 (* zi zi))
-        (assign iter (inc iter)))
-
-      (def color
-        (if (= iter max-iter)
-          (bit/shl 255 24)
-          (let* [[log-zn (/ (math/log (+ zr2 zi2)) 2.0)]
-                 [smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))]
-                 [idx    (mod (integer (* smooth 3.0)) PALETTE_SIZE)]]
-            (palette idx))))
-
-      (put row-buf px color)
-      (assign px (inc px)))
-
-    (ffi/write (ptr/add pixel-buf (* py STRIDE)) row-type row-buf)
-    (assign py (inc py)))
+  (var i 0)
+  (while (< i NCPU)
+    (recv-blocking done-rx)
+    (assign i (inc i)))
 
   (- (now-ms) t0))
 
@@ -239,10 +294,10 @@
       ((= keyval KEY_RIGHT)  (assign view-cx (+ view-cx step)) (refresh) 1)
       ((= keyval KEY_UP)     (assign view-cy (- view-cy step)) (refresh) 1)
       ((= keyval KEY_DOWN)   (assign view-cy (+ view-cy step)) (refresh) 1)
-      ((or (= keyval KEY_PLUS) (= keyval KEY_EQUAL))
+      ((or (= keyval KEY_PLUS) (= keyval KEY_EQUAL) (= keyval KP_ADD))
         (assign max-iter (* max-iter 2))
         (refresh) 1)
-      ((= keyval KEY_MINUS)
+      ((or (= keyval KEY_MINUS) (= keyval KP_SUB))
         (when (> max-iter 16)
           (assign max-iter (/ max-iter 2)))
         (refresh) 1)
@@ -290,6 +345,7 @@
   (b:gtk-window-set-child win da)
   (b:gtk-window-present win)
 
+  (init-workers)
   (compute-mandelbrot)
   (update-title)
   (gtk-queue-draw da))

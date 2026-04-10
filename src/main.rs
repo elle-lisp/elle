@@ -288,6 +288,10 @@ fn main() {
             eprint!("{}", scope_stats);
         }
         print_jit_stats(&vm);
+        let cvc = elle::lir::closure_value_const_count();
+        if cvc > 0 {
+            eprintln!("[stats] closure-valued ValueConsts serialized: {}", cvc);
+        }
     }
 
     if !read_stdin && files.is_empty() {

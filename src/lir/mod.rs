@@ -18,6 +18,7 @@ pub use display::terminator_kind;
 pub use emit::Emitter;
 pub use lower::{Lowerer, ScopeStats};
 pub use types::{
-    BasicBlock, BinOp, CallSiteInfo, ClosureId, CmpOp, Label, LirConst, LirFunction, LirInstr,
-    LirModule, Reg, SpannedInstr, SpannedTerminator, Terminator, UnaryOp, YieldPointInfo,
+    closure_value_const_count, BasicBlock, BinOp, CallSiteInfo, ClosureId, CmpOp, Label, LirConst,
+    LirFunction, LirInstr, LirModule, Reg, SpannedInstr, SpannedTerminator, Terminator, UnaryOp,
+    YieldPointInfo,
 };

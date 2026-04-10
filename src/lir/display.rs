@@ -78,6 +78,7 @@ impl fmt::Display for LirConst {
             LirConst::String(s) => write!(f, "\"{}\"", s),
             LirConst::Symbol(sid) => write!(f, "sym({})", sid.0),
             LirConst::Keyword(k) => write!(f, ":{}", k),
+            LirConst::ClosureRef(idx) => write!(f, "closure-ref({})", idx),
         }
     }
 }

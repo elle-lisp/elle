@@ -16,7 +16,7 @@ use crate::value::{error_val, Value};
 /// `Value` contains `Rc` (not `Send`). For single-threaded schedulers
 /// (the common case) this is trivially safe. For cross-thread use the
 /// scheduler is responsible for only sending immutable data.
-struct SendableValue(Value);
+pub(crate) struct SendableValue(Value);
 
 // SAFETY: The scheduler contract guarantees that values sent through
 // channels are either immutable or will not be accessed from the
@@ -24,10 +24,36 @@ struct SendableValue(Value);
 unsafe impl Send for SendableValue {}
 
 /// Sender half of a channel, wrapped for `Value::external`.
-struct ChanSender(RefCell<Option<crossbeam_channel::Sender<SendableValue>>>);
+pub(crate) struct ChanSender(pub(crate) RefCell<Option<crossbeam_channel::Sender<SendableValue>>>);
 
 /// Receiver half of a channel, wrapped for `Value::external`.
-struct ChanReceiver(RefCell<Option<crossbeam_channel::Receiver<SendableValue>>>);
+pub(crate) struct ChanReceiver(
+    pub(crate) RefCell<Option<crossbeam_channel::Receiver<SendableValue>>>,
+);
+
+/// Clone the crossbeam sender from a channel sender Value.
+/// Returns None if the value is not a chan/sender or is already closed.
+pub(crate) fn clone_sender(v: &Value) -> Option<crossbeam_channel::Sender<SendableValue>> {
+    v.as_external::<ChanSender>()
+        .and_then(|cs| cs.0.borrow().as_ref().map(|s| s.clone()))
+}
+
+/// Clone the crossbeam receiver from a channel receiver Value.
+/// Returns None if the value is not a chan/receiver or is already closed.
+pub(crate) fn clone_receiver(v: &Value) -> Option<crossbeam_channel::Receiver<SendableValue>> {
+    v.as_external::<ChanReceiver>()
+        .and_then(|cr| cr.0.borrow().as_ref().map(|r| r.clone()))
+}
+
+/// Create a chan/sender Value from a raw crossbeam sender.
+pub(crate) fn sender_value(tx: crossbeam_channel::Sender<SendableValue>) -> Value {
+    Value::external("chan/sender", ChanSender(RefCell::new(Some(tx))))
+}
+
+/// Create a chan/receiver Value from a raw crossbeam receiver.
+pub(crate) fn receiver_value(rx: crossbeam_channel::Receiver<SendableValue>) -> Value {
+    Value::external("chan/receiver", ChanReceiver(RefCell::new(Some(rx))))
+}
 
 /// Helper: extract `&ChanSender` from a Value or return a type error.
 fn extract_sender<'a>(

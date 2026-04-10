@@ -1106,6 +1106,11 @@ impl Emitter {
                 self.bytecode.emit(Instruction::LoadConst);
                 self.bytecode.emit_u16(idx);
             }
+            LirConst::ClosureRef(_) => {
+                panic!(
+                    "bug: ClosureRef in emitter — should have been patched during reconstruction"
+                )
+            }
         }
     }
 }
