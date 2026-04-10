@@ -65,7 +65,10 @@ pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(closure) = args[0].as_closure() {
-        (SIG_OK, Value::bool(closure.template.lbox_params_mask != 0))
+        (
+            SIG_OK,
+            Value::bool(closure.template.capture_params_mask != 0),
+        )
     } else {
         (SIG_OK, Value::FALSE)
     }

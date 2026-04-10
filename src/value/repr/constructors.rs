@@ -185,20 +185,18 @@ impl Value {
         use std::cell::RefCell;
         alloc(HeapObject::LBox {
             cell: RefCell::new(value),
-            is_local: false,
             traits: Value::NIL,
         })
     }
 
-    /// Create a compiler local box — auto-unwrapped by LoadUpvalue.
+    /// Create a compiler capture cell — auto-unwrapped by LoadUpvalue.
     /// Used for mutable captured variables.
     #[inline]
-    pub fn local_lbox(value: Value) -> Self {
+    pub fn capture_cell(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
-        alloc(HeapObject::LBox {
+        alloc(HeapObject::CaptureCell {
             cell: RefCell::new(value),
-            is_local: true,
             traits: Value::NIL,
         })
     }

@@ -147,8 +147,8 @@ impl VM {
             .num_locals
             .saturating_sub(closure.template.num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
-                buf.push(Value::local_lbox(Value::NIL));
+            if i >= 64 || (closure.template.capture_locals_mask & (1 << i)) != 0 {
+                buf.push(Value::capture_cell(Value::NIL));
             } else {
                 buf.push(Value::NIL);
             }
@@ -158,11 +158,11 @@ impl VM {
     }
 
     /// Push a parameter value into the environment buffer, wrapping in a
-    /// LocalCell if the lbox_params_mask indicates it's needed.
+    /// LocalCell if the capture_params_mask indicates it's needed.
     #[inline]
     fn push_param(buf: &mut Vec<Value>, closure: &crate::value::Closure, i: usize, val: Value) {
-        if i < 64 && (closure.template.lbox_params_mask & (1 << i)) != 0 {
-            buf.push(Value::local_lbox(val));
+        if i < 64 && (closure.template.capture_params_mask & (1 << i)) != 0 {
+            buf.push(Value::capture_cell(val));
         } else {
             buf.push(val);
         }

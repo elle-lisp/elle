@@ -219,8 +219,8 @@ fn build_env_in_memory(
     let num_captures = template.num_captures;
     let num_params = template.num_params;
     let num_locals = template.num_locals;
-    let lbox_params_mask = template.lbox_params_mask;
-    let lbox_locals_mask = template.lbox_locals_mask;
+    let capture_params_mask = template.capture_params_mask;
+    let capture_locals_mask = template.capture_locals_mask;
     let extra_locals = num_locals.saturating_sub(num_params);
     let total_slots = num_captures + num_params + extra_locals;
 
@@ -243,8 +243,8 @@ fn build_env_in_memory(
 
     // Write params with optional LBox wrapping
     for (i, arg) in args.iter().enumerate().take(num_params) {
-        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
-            Value::local_lbox(*arg)
+        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+            Value::capture_cell(*arg)
         } else {
             *arg
         };
@@ -257,8 +257,8 @@ fn build_env_in_memory(
 
     // Write nil for remaining params
     for i in args.len()..num_params {
-        let val = if i < 64 && lbox_params_mask & (1u64 << i) != 0 {
-            Value::local_lbox(Value::NIL)
+        let val = if i < 64 && capture_params_mask & (1u64 << i) != 0 {
+            Value::capture_cell(Value::NIL)
         } else {
             Value::NIL
         };
@@ -271,8 +271,8 @@ fn build_env_in_memory(
 
     // Write nil/LBox(nil) for extra local slots
     for i in 0..extra_locals {
-        let val = if i < 64 && lbox_locals_mask & (1u64 << i) != 0 {
-            Value::local_lbox(Value::NIL)
+        let val = if i < 64 && capture_locals_mask & (1u64 << i) != 0 {
+            Value::capture_cell(Value::NIL)
         } else {
             Value::NIL
         };

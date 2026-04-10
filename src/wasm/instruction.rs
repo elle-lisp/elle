@@ -97,12 +97,12 @@ impl WasmEmitter {
                     memory_index: 0,
                 }));
                 f.instruction(&Instruction::LocalSet(self.pay_local(*dst)));
-                // Auto-unwrap LBox
+                // Auto-unwrap CaptureCell
                 f.instruction(&Instruction::LocalGet(self.tag_local(*dst)));
-                f.instruction(&Instruction::I64Const(TAG_LBOX as i64));
+                f.instruction(&Instruction::I64Const(TAG_CAPTURE_CELL as i64));
                 f.instruction(&Instruction::I64Eq);
                 f.instruction(&Instruction::If(BlockType::Empty));
-                self.emit_data_op1(f, *dst, OP_LOAD_LBOX, *dst);
+                self.emit_data_op1(f, *dst, OP_LOAD_CAPTURE, *dst);
                 f.instruction(&Instruction::End);
             }
             LirInstr::LoadCaptureRaw { dst, index } => {
@@ -151,8 +151,8 @@ impl WasmEmitter {
                 }));
                 // Write new value to args[1]
                 self.write_val_to_mem(f, *src, 1);
-                // Call OP_STORE_LBOX
-                f.instruction(&Instruction::I32Const(OP_STORE_LBOX));
+                // Call OP_STORE_CAPTURE
+                f.instruction(&Instruction::I32Const(OP_STORE_CAPTURE));
                 f.instruction(&Instruction::I32Const(ARGS_BASE));
                 f.instruction(&Instruction::I32Const(2));
                 f.instruction(&Instruction::Call(FN_RT_DATA_OP));
@@ -236,14 +236,14 @@ impl WasmEmitter {
             LirInstr::ArrayMutPush { dst, array, value } => {
                 self.emit_data_op2(f, *dst, OP_ARRAY_PUSH, *array, *value);
             }
-            LirInstr::MakeLBox { dst, value } => {
-                self.emit_data_op1(f, *dst, OP_MAKE_LBOX, *value);
+            LirInstr::MakeCaptureCell { dst, value } => {
+                self.emit_data_op1(f, *dst, OP_MAKE_CAPTURE, *value);
             }
-            LirInstr::LoadLBox { dst, cell } => {
-                self.emit_data_op1(f, *dst, OP_LOAD_LBOX, *cell);
+            LirInstr::LoadCaptureCell { dst, cell } => {
+                self.emit_data_op1(f, *dst, OP_LOAD_CAPTURE, *cell);
             }
-            LirInstr::StoreLBox { cell, value } => {
-                self.emit_data_op2(f, *cell, OP_STORE_LBOX, *cell, *value);
+            LirInstr::StoreCaptureCell { cell, value } => {
+                self.emit_data_op2(f, *cell, OP_STORE_CAPTURE, *cell, *value);
             }
             LirInstr::CallArrayMut { dst, func, args } => {
                 self.emit_call_array(f, *dst, *func, *args);
@@ -371,8 +371,8 @@ impl WasmEmitter {
                 crate::value::types::Arity::AtLeast(n) => n as i64,
                 crate::value::types::Arity::Range(min, _) => min as i64,
             },
-            nested.lbox_params_mask as i64,
-            nested.lbox_locals_mask as i64,
+            nested.capture_params_mask as i64,
+            nested.capture_locals_mask as i64,
             nested.signal.bits.raw() as i64,
         ];
         for (i, val) in meta_vals.iter().enumerate() {

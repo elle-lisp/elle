@@ -81,7 +81,7 @@ These are set during the swap protocol in `vm/fiber.rs::with_child_fiber`.
      is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
 4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref)
-       and `LocalLBox` (compiler-created for mutable captures and mutated parameters,
+       and `CaptureCell` (compiler-created for mutable captures and mutated parameters,
        auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
        Immutable captured locals do not need lboxes — they are captured by value.
 

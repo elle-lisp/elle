@@ -94,7 +94,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 2. **`Binding` identity is integer equality.** Two references to the same binding site have the same `u32` index. `Binding` implements `Hash`/`Eq` via the derived `u32` comparison.
 
-3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
+3. **`needs_capture()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
 
 4. **Signals combine upward.** A `begin` has the combined signal of its children. A `fn` body's signal is stored but the fn itself is Silent.
 
@@ -106,7 +106,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 8. **`Define` and `LocalDefine` are unified.** There is a single `HirKind::Define { binding, value }`. The lowerer checks `binding.is_global()` to decide between global and local define semantics.
 
-9. **Binding metadata is mutable during analysis, read-only after.** The analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc. The lowerer only reads via `arena.get(b).needs_lbox()`, `arena.get(b).name`, etc. The type system enforces this: the analyzer holds `&mut BindingArena`, the lowerer holds `&BindingArena`.
+9. **Binding metadata is mutable during analysis, read-only after.** The analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc. The lowerer only reads via `arena.get(b).needs_capture()`, `arena.get(b).name`, etc. The type system enforces this: the analyzer holds `&mut BindingArena`, the lowerer holds `&BindingArena`.
 
 10. **`Destructure` decomposes values into pattern bindings.** `HirKind::Destructure { pattern: HirPattern, value: Box<Hir> }` is produced by the analyzer for `def`, `var`, `let`, and `fn` parameter destructuring. The pattern's leaf `Var` bindings are created in the current scope. `let*` is desugared to nested `let` in the expander, so the analyzer never sees `let*`.
 

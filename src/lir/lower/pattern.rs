@@ -53,8 +53,8 @@ impl<'a> Lowerer<'a> {
                     } else {
                         self.allocate_slot(*binding)
                     };
-                    let needs_lbox = self.arena.get(*binding).needs_lbox();
-                    if self.in_lambda && needs_lbox {
+                    let needs_capture = self.arena.get(*binding).needs_capture();
+                    if self.in_lambda && needs_capture {
                         self.upvalue_bindings.insert(*binding);
                         self.emit(LirInstr::StoreCapture {
                             index: slot,
@@ -68,7 +68,7 @@ impl<'a> Lowerer<'a> {
                 // If this arm's body was already lowered (e.g., multiple cases
                 // in an or-pattern reaching the same arm), jump to the existing
                 // body instead of re-lowering it.  Re-lowering would share
-                // binding slots but only initialize cells (MakeLBox) in the
+                // binding slots but only initialize cells (MakeCapture) in the
                 // first copy, causing "Expected cell, got ..." panics when a
                 // later copy runs at runtime.
                 if let Some(&body_label) = lowered_arms.get(arm_index) {
@@ -108,8 +108,8 @@ impl<'a> Lowerer<'a> {
                     } else {
                         self.allocate_slot(*binding)
                     };
-                    let needs_lbox = self.arena.get(*binding).needs_lbox();
-                    if self.in_lambda && needs_lbox {
+                    let needs_capture = self.arena.get(*binding).needs_capture();
+                    if self.in_lambda && needs_capture {
                         self.upvalue_bindings.insert(*binding);
                         self.emit(LirInstr::StoreCapture {
                             index: slot,
@@ -532,8 +532,8 @@ impl<'a> Lowerer<'a> {
                 } else {
                     self.allocate_slot(*binding)
                 };
-                let needs_lbox = self.arena.get(*binding).needs_lbox();
-                if self.in_lambda && needs_lbox {
+                let needs_capture = self.arena.get(*binding).needs_capture();
+                if self.in_lambda && needs_capture {
                     self.upvalue_bindings.insert(*binding);
                     self.emit(LirInstr::StoreCapture {
                         index: slot,

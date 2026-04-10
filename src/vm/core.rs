@@ -117,8 +117,8 @@ fn root_closure() -> Rc<Closure> {
             num_params: 0,
             constants: Rc::new(vec![]),
             signal: Signal::silent(),
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -522,8 +522,8 @@ impl VM {
                         // Only dump env for small envs (inner closures, not stdlib)
                         if frame.env.len() <= 5 {
                             for (ei, ev) in frame.env.iter().enumerate() {
-                                let detail = if ev.is_local_lbox() {
-                                    if let Some(cell_ref) = ev.as_lbox() {
+                                let detail = if ev.is_capture_cell() {
+                                    if let Some(cell_ref) = ev.as_capture_cell() {
                                         let inner = *cell_ref.borrow();
                                         let lbox_ptr = cell_ref as *const _ as usize;
                                         format!(

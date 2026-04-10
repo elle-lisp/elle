@@ -1250,7 +1250,7 @@ fn test_jit_make_lbox() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::MakeLBox {
+        LirInstr::MakeCaptureCell {
             dst: Reg(1),
             value: Reg(0),
         },
@@ -1261,8 +1261,8 @@ fn test_jit_make_lbox() {
     func.entry = Label(0);
 
     let result = compile_and_call(&func, &[Value::int(42)]).unwrap();
-    assert!(result.is_local_lbox());
-    let cell = result.as_lbox().unwrap();
+    assert!(result.is_capture_cell());
+    let cell = result.as_capture_cell().unwrap();
     assert_eq!(cell.borrow().as_int(), Some(42));
 }
 
@@ -1277,7 +1277,7 @@ fn test_jit_load_lbox() {
     let mut entry = BasicBlock::new(Label(0));
     entry.instructions.push(load_arg(Reg(0), 0));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLBox {
+        LirInstr::LoadCaptureCell {
             dst: Reg(1),
             cell: Reg(0),
         },
@@ -1287,7 +1287,7 @@ fn test_jit_load_lbox() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let cell = Value::local_lbox(Value::int(42));
+    let cell = Value::capture_cell(Value::int(42));
     let result = compile_and_call(&func, &[cell]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }
@@ -1304,14 +1304,14 @@ fn test_jit_store_lbox() {
     entry.instructions.push(load_arg(Reg(0), 0)); // cell
     entry.instructions.push(load_arg(Reg(1), 1)); // value
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::StoreLBox {
+        LirInstr::StoreCaptureCell {
             cell: Reg(0),
             value: Reg(1),
         },
         span(),
     ));
     entry.instructions.push(SpannedInstr::new(
-        LirInstr::LoadLBox {
+        LirInstr::LoadCaptureCell {
             dst: Reg(2),
             cell: Reg(0),
         },
@@ -1321,7 +1321,7 @@ fn test_jit_store_lbox() {
     func.blocks.push(entry);
     func.entry = Label(0);
 
-    let cell = Value::local_lbox(Value::int(0));
+    let cell = Value::capture_cell(Value::int(0));
     let result = compile_and_call(&func, &[cell, Value::int(42)]).unwrap();
     assert_eq!(result.as_int(), Some(42));
 }

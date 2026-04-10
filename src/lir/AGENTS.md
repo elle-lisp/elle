@@ -41,7 +41,7 @@ HIR + spans
     ▼
 Lowerer (&BindingArena)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
-    ├─► emit MakeLBox for captured locals (arena.get(b).needs_lbox())
+    ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
     ├─► lower control flow to jumps
     ├─► emit LoadCapture/StoreCapture for upvalues
     └─► propagate HIR spans to SpannedInstr
@@ -68,7 +68,7 @@ Emitter
 ```
 
 The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`):
-`arena.get(b).needs_lbox()`, `arena.get(b).name`, etc.
+`arena.get(b).needs_capture()`, `arena.get(b).name`, etc.
 
 ## Source location tracking
 
@@ -105,13 +105,13 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 4. **`upvalue_bindings` tracks what uses LoadCapture.** Inside fn bodies,
     captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
 
-5. **`lbox_params_mask` is set for mutable parameters.** Bit i set means
+5. **`capture_params_mask` is set for mutable parameters.** Bit i set means
      parameter i needs lbox wrapping at call time.
 
-6. **`lbox_locals_mask` is set for locals that need lboxes.** Bit i set means
+6. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means
      locally-defined variable i (0-indexed from the first local after params)
      needs lbox wrapping because it's captured by a nested closure or mutated
-     via `set!`. The JIT uses this to skip `LocalLBox` heap allocation for
+     via `set!`. The JIT uses this to skip `CaptureCell` heap allocation for
      non-captured, non-mutated `let` bindings. The VM interpreter does not
      use this mask (it lbox-wraps all locals unconditionally). Both masks
      are limited to 64 entries (`u64`).
@@ -143,10 +143,10 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 |-------------|--------------|-------|
 | `LoadLocal` | → value | Load from stack slot |
 | `StoreLocal` | value → value | Store to slot, keep on stack |
-| `LoadCapture` | → value | From closure env, auto-unwraps LocalLBox |
+| `LoadCapture` | → value | From closure env, auto-unwraps CaptureCell |
 | `LoadCaptureRaw` | → lbox | From closure env, preserves lbox (for forwarding) |
 | `StoreCapture` | value → | Into closure env, handles lboxes |
-| `MakeLBox` | value → lbox | Wrap in LocalLBox |
+| `MakeCaptureCell` | value → lbox | Wrap in CaptureCell |
 | `MakeClosure` | caps... → closure | Pops N captures, creates closure |
 | `EmptyList` | → empty_list | Push Value::EMPTY_LIST (truthy, unlike Nil) |
 | `LoadResumeValue` | → value | First instruction in yield resume block |

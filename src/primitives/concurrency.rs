@@ -48,8 +48,8 @@ fn spawn_closure_impl(closure: &crate::value::Closure) -> LResult<Value> {
             .num_locals
             .saturating_sub(closure.template.num_params);
         for i in 0..num_locally_defined {
-            if i >= 64 || (closure.template.lbox_locals_mask & (1 << i)) != 0 {
-                env_values.push(Value::local_lbox(Value::NIL));
+            if i >= 64 || (closure.template.capture_locals_mask & (1 << i)) != 0 {
+                env_values.push(Value::capture_cell(Value::NIL));
             } else {
                 env_values.push(Value::NIL);
             }

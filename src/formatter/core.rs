@@ -134,6 +134,7 @@ fn format_value(
             }
             HeapObject::ThreadHandle { .. } => return "#<thread-handle>".to_string(),
             HeapObject::LBox { .. } => return "#<box>".to_string(),
+            HeapObject::CaptureCell { .. } => return "#<capture-cell>".to_string(),
             HeapObject::Float(_) => return "#<float>".to_string(),
             HeapObject::Fiber { .. } => return "#<fiber>".to_string(),
             HeapObject::Syntax { syntax: s, .. } => return format!("#<syntax:{}>", s),

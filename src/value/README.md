@@ -121,7 +121,7 @@ All non-immediate values are heap-allocated via `Rc`. Mutable heap objects use `
 
 2. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped).
+3. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `CaptureCell` (compiler-created for mutable captures, auto-unwrapped).
 
 4. **Mutable values freeze on set insertion.** When a mutable value is inserted into a set, it is converted to its immutable equivalent.
 

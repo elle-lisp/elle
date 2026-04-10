@@ -121,21 +121,25 @@ impl<'a> FunctionTranslator<'a> {
     ) -> Result<(), JitError> {
         let nil_tag = builder.ins().iconst(I64, TAG_NIL as i64);
         let zero = builder.ins().iconst(I64, 0);
-        let lbox_locals_mask = self.lir.lbox_locals_mask;
+        let capture_locals_mask = self.lir.capture_locals_mask;
 
         // The first num_local_params slots are non-LBox param copies
-        // (initialized at function entry). lbox_locals_mask indexes from
+        // (initialized at function entry). capture_locals_mask indexes from
         // the first let-bound local (after param copies).
         let nlp = self.lir.num_local_params as u32;
 
         for i in 0..num_locally_defined {
             let base = self.local_var_base + i;
             let mask_bit = i.saturating_sub(nlp);
-            let needs_lbox =
-                i >= nlp && (mask_bit >= 64 || (lbox_locals_mask & (1 << mask_bit)) != 0);
-            if needs_lbox {
-                let (cell_tag, cell_payload) =
-                    self.call_helper_value_unary(builder, self.helpers.make_lbox, nil_tag, zero)?;
+            let needs_capture =
+                i >= nlp && (mask_bit >= 64 || (capture_locals_mask & (1 << mask_bit)) != 0);
+            if needs_capture {
+                let (cell_tag, cell_payload) = self.call_helper_value_unary(
+                    builder,
+                    self.helpers.make_capture,
+                    nil_tag,
+                    zero,
+                )?;
                 builder.def_var(var(self.var_tag(base)), cell_tag);
                 builder.def_var(var(self.var_payload(base)), cell_payload);
             } else {
@@ -210,11 +214,11 @@ impl<'a> FunctionTranslator<'a> {
                     let base = self.arg_var_base + param_index as u32;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     if (param_index as u32) < 64
-                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
+                        && (self.lir.capture_params_mask & (1 << param_index)) != 0
                     {
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
-                            self.helpers.load_lbox,
+                            self.helpers.load_capture_cell,
                             tag,
                             payload,
                         )?;
@@ -228,11 +232,11 @@ impl<'a> FunctionTranslator<'a> {
                     let base = self.local_var_base + jit_slot;
                     let (tag, payload) = self.use_var_pair(builder, base);
                     if (local_index as u32) < 64
-                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
+                        && (self.lir.capture_locals_mask & (1 << local_index)) != 0
                     {
                         let (rt, rp) = self.call_helper_value_unary(
                             builder,
-                            self.helpers.load_lbox,
+                            self.helpers.load_capture_cell,
                             tag,
                             payload,
                         )?;
@@ -366,26 +370,26 @@ impl<'a> FunctionTranslator<'a> {
                 }
             }
 
-            LirInstr::MakeLBox { dst, value } => {
+            LirInstr::MakeCaptureCell { dst, value } => {
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let (rt, rp) =
-                    self.call_helper_value_unary(builder, self.helpers.make_lbox, vt, vp)?;
+                    self.call_helper_value_unary(builder, self.helpers.make_capture, vt, vp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::LoadLBox { dst, cell } => {
+            LirInstr::LoadCaptureCell { dst, cell } => {
                 let (ct, cp) = self.use_var_pair(builder, cell.0);
                 let (rt, rp) =
-                    self.call_helper_value_unary(builder, self.helpers.load_lbox, ct, cp)?;
+                    self.call_helper_value_unary(builder, self.helpers.load_capture_cell, ct, cp)?;
                 self.def_var_pair(builder, dst.0, rt, rp);
             }
 
-            LirInstr::StoreLBox { cell, value } => {
+            LirInstr::StoreCaptureCell { cell, value } => {
                 let (ct, cp) = self.use_var_pair(builder, cell.0);
                 let (vt, vp) = self.use_var_pair(builder, value.0);
                 let func_ref = self
                     .module
-                    .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                    .declare_func_in_func(self.helpers.store_capture_cell, builder.func);
                 let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
                 let _ = builder.inst_results(call);
             }
@@ -410,12 +414,12 @@ impl<'a> FunctionTranslator<'a> {
                     let param_index = *index - num_captures;
                     let base = self.arg_var_base + param_index as u32;
                     if (param_index as u32) < 64
-                        && (self.lir.lbox_params_mask & (1 << param_index)) != 0
+                        && (self.lir.capture_params_mask & (1 << param_index)) != 0
                     {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
                             .module
-                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                            .declare_func_in_func(self.helpers.store_capture_cell, builder.func);
                         let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
                         let _ = builder.inst_results(call);
                     } else {
@@ -426,12 +430,12 @@ impl<'a> FunctionTranslator<'a> {
                     let jit_slot = self.lir.num_local_params as u32 + local_index as u32;
                     let base = self.local_var_base + jit_slot;
                     if (local_index as u32) < 64
-                        && (self.lir.lbox_locals_mask & (1 << local_index)) != 0
+                        && (self.lir.capture_locals_mask & (1 << local_index)) != 0
                     {
                         let (ct, cp) = self.use_var_pair(builder, base);
                         let func_ref = self
                             .module
-                            .declare_func_in_func(self.helpers.store_lbox, builder.func);
+                            .declare_func_in_func(self.helpers.store_capture_cell, builder.func);
                         let call = builder.ins().call(func_ref, &[ct, cp, vt, vp]);
                         let _ = builder.inst_results(call);
                     } else {
@@ -657,8 +661,8 @@ impl<'a> FunctionTranslator<'a> {
                     num_params: func.num_params,
                     constants: std::rc::Rc::new(nested_bytecode.constants),
                     signal: func.signal,
-                    lbox_params_mask: func.lbox_params_mask,
-                    lbox_locals_mask: func.lbox_locals_mask,
+                    capture_params_mask: func.capture_params_mask,
+                    capture_locals_mask: func.capture_locals_mask,
                     symbol_names: std::rc::Rc::new(nested_bytecode.symbol_names),
                     location_map: std::rc::Rc::new(nested_bytecode.location_map),
                     rotation_safe: func.rotation_safe,

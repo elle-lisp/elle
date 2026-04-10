@@ -1182,7 +1182,7 @@ pub(crate) fn prim_compile_bindings(args: &[Value]) -> (SignalBits, Value) {
         fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
         fields.insert(kw("captured"), Value::bool(inner.is_captured));
         fields.insert(kw("immutable"), Value::bool(inner.is_immutable));
-        fields.insert(kw("needs-lbox"), Value::bool(inner.needs_lbox()));
+        fields.insert(kw("needs-lbox"), Value::bool(inner.needs_capture()));
 
         // Add location from symbol index if available.
         if let Some(loc) = handle.symbol_index.symbol_locations.get(&inner.name) {
@@ -1366,7 +1366,7 @@ fn captures_to_values(
             }
             let kind = match cap.kind {
                 crate::hir::CaptureKind::Local => {
-                    if inner.needs_lbox() {
+                    if inner.needs_capture() {
                         "lbox"
                     } else {
                         "value"
@@ -1692,7 +1692,7 @@ pub(crate) fn prim_compile_binding(args: &[Value]) -> (SignalBits, Value) {
                 fields.insert(kw("mutated"), Value::bool(inner.is_mutated));
                 fields.insert(kw("captured"), Value::bool(inner.is_captured));
                 fields.insert(kw("immutable"), Value::bool(inner.is_immutable));
-                fields.insert(kw("needs-lbox"), Value::bool(inner.needs_lbox()));
+                fields.insert(kw("needs-lbox"), Value::bool(inner.needs_capture()));
 
                 if let Some(loc) = handle.symbol_index.symbol_locations.get(&inner.name) {
                     fields.insert(kw("line"), Value::int(loc.line as i64));
@@ -2123,7 +2123,7 @@ fn prim_compile_parallelize(args: &[Value]) -> (SignalBits, Value) {
                         if let Some(cap_name) = symbols.name(handle.arena.get(*b1).name) {
                             let mut f = BTreeMap::new();
                             f.insert(kw("name"), Value::string(cap_name));
-                            let kind = if handle.arena.get(*b1).needs_lbox() {
+                            let kind = if handle.arena.get(*b1).needs_capture() {
                                 "lbox"
                             } else {
                                 "value"

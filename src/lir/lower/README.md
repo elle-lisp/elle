@@ -28,8 +28,8 @@ When a variable is both captured by a closure AND mutated, it needs lbox boxing:
 
 The lowerer:
 1. Detects that `counter` is captured and mutated
-2. Emits `MakeLBox` to wrap the initial value
-3. Emits `LoadLBox`/`StoreLBox` for access in the outer scope
+2. Emits `MakeCaptureCell` to wrap the initial value
+3. Emits `LoadCaptureCell`/`StoreCaptureCell` for access in the outer scope
 4. Emits `LoadCapture`/`StoreCapture` for access in the closure
 
 ## Key Files

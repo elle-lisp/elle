@@ -120,9 +120,12 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             data: data.clone(),
             traits: table,
         })),
-        HeapObject::LBox { cell, is_local, .. } => Ok(alloc(HeapObject::LBox {
+        HeapObject::LBox { cell, .. } => Ok(alloc(HeapObject::LBox {
             cell: cell.clone(),
-            is_local: *is_local,
+            traits: table,
+        })),
+        HeapObject::CaptureCell { cell, .. } => Ok(alloc(HeapObject::CaptureCell {
+            cell: cell.clone(),
             traits: table,
         })),
         HeapObject::Fiber { handle, .. } => Ok(alloc(HeapObject::Fiber {
@@ -202,6 +205,7 @@ pub(crate) fn prim_traits(args: &[Value]) -> (SignalBits, Value) {
             | HeapObject::LSetMut { traits, .. }
             | HeapObject::Closure { traits, .. }
             | HeapObject::LBox { traits, .. }
+            | HeapObject::CaptureCell { traits, .. }
             | HeapObject::Fiber { traits, .. }
             | HeapObject::Syntax { traits, .. }
             | HeapObject::ManagedPointer { traits, .. }

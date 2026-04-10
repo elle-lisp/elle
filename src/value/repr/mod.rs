@@ -47,6 +47,7 @@ pub const TAG_BYTES_MUT: u64 = 19;
 pub const TAG_SET: u64 = 20;
 pub const TAG_SET_MUT: u64 = 21;
 pub const TAG_LBOX: u64 = 22;
+pub const TAG_CAPTURE_CELL: u64 = 34;
 pub const TAG_FIBER: u64 = 23;
 pub const TAG_SYNTAX: u64 = 24;
 pub const TAG_NATIVE_FN: u64 = 26;

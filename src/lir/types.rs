@@ -65,14 +65,14 @@ pub struct LirFunction {
     /// Number of captured variables
     /// Used by JIT to distinguish captures (from env) from parameters (from args)
     pub num_captures: u16,
-    /// Bitmask indicating which parameters need to be wrapped in cells
-    /// Bit i is set if parameter i needs a cell (for mutable parameters)
-    pub lbox_params_mask: u64,
-    /// Bitmask indicating which locally-defined variables need cells.
-    /// Bit i is set if locally-defined variable i needs a cell (captured or mutated).
+    /// Bitmask indicating which parameters need to be wrapped in capture cells
+    /// Bit i is set if parameter i needs a capture cell (for mutable parameters)
+    pub capture_params_mask: u64,
+    /// Bitmask indicating which locally-defined variables need capture cells.
+    /// Bit i is set if locally-defined variable i needs a capture cell (captured or mutated).
     /// Variables without the bit set are stored directly without cell wrapping,
     /// avoiding heap allocation on every function call.
-    pub lbox_locals_mask: u64,
+    pub capture_locals_mask: u64,
     /// Signal of this function (Pure, Yields, or Polymorphic)
     pub signal: Signal,
     /// Optional docstring from the source lambda
@@ -87,7 +87,7 @@ pub struct LirFunction {
     pub num_params: usize,
     /// Number of non-LBox parameters copied to local slots.
     /// These occupy the first `num_local_params` positions in `num_locals`.
-    /// The `lbox_locals_mask` indexes from position `num_local_params`.
+    /// The `capture_locals_mask` indexes from position `num_local_params`.
     pub num_local_params: usize,
     /// Yield point metadata, populated during bytecode emission.
     /// Indexed by yield point order (0, 1, 2, ...).
@@ -163,8 +163,8 @@ impl LirFunction {
             num_regs: 0,
             num_locals: 0,
             num_captures: 0,
-            lbox_params_mask: 0,
-            lbox_locals_mask: 0,
+            capture_params_mask: 0,
+            capture_locals_mask: 0,
             signal: Signal::silent(),
             doc: None,
             syntax: None,
@@ -324,13 +324,13 @@ pub enum LirInstr {
     /// Get array length (for pattern matching)
     ArrayMutLen { dst: Reg, src: Reg },
 
-    // === Cell Operations (for mutable captures) ===
-    /// Create a cell containing a value
-    MakeLBox { dst: Reg, value: Reg },
-    /// Load value from cell
-    LoadLBox { dst: Reg, cell: Reg },
-    /// Store value into cell
-    StoreLBox { cell: Reg, value: Reg },
+    // === Capture Cell Operations (for mutable captures) ===
+    /// Create a capture cell containing a value
+    MakeCaptureCell { dst: Reg, value: Reg },
+    /// Load value from capture cell
+    LoadCaptureCell { dst: Reg, cell: Reg },
+    /// Store value into capture cell
+    StoreCaptureCell { cell: Reg, value: Reg },
 
     // === Destructuring ===
     /// Car for destructuring: signals error if not a cons cell

@@ -63,7 +63,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 ## Dependents
 
-- `lir/lower/` - consumes HIR, reads `arena.get(b).needs_lbox()` via `&BindingArena`
+- `lir/lower/` - consumes HIR, reads `arena.get(b).needs_capture()` via `&BindingArena`
 - `pipeline.rs` - orchestrates Syntax → HIR → LIR → Bytecode
 - `lint/cli.rs` - uses `HirLinter` for static analysis
 - `lsp/state.rs` - uses `extract_symbols_from_hir` and `HirLinter` for IDE features
@@ -77,7 +77,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
    binding site have the same `u32` index. `Binding` implements `Hash`/`Eq`
    via the derived `u32` comparison.
 
-3. **`needs_lbox()` determines lbox boxing.** A local binding needs an lbox if
+3. **`needs_capture()` determines lbox boxing.** A local binding needs an lbox if
    captured AND mutable. A parameter needs an lbox if mutated. Globals never need
    lboxes. Immutable captured locals are captured by value directly.
 
@@ -104,7 +104,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 9. **Binding metadata is mutable during analysis, read-only after.** The
    analyzer mutates bindings via `arena.get_mut(b).is_mutated = true` etc.
-   The lowerer only reads via `arena.get(b).needs_lbox()`, `arena.get(b).name`,
+   The lowerer only reads via `arena.get(b).needs_capture()`, `arena.get(b).name`,
    etc. The type system enforces this: the analyzer holds `&mut BindingArena`,
    the lowerer holds `&BindingArena`.
 

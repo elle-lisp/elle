@@ -111,6 +111,7 @@ pub enum HeapTag {
     Parameter = 25,
     LSet = 26,
     LSetMut = 27,
+    CaptureCell = 28,
 }
 
 /// All heap-allocated value types.
@@ -168,14 +169,13 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable box for captured variables.
-    /// The boolean distinguishes compiler-created boxes (true, auto-unwrapped
-    /// by LoadUpvalue) from user-created boxes via `box` (false, not auto-unwrapped).
-    LBox {
-        cell: RefCell<Value>,
-        is_local: bool,
-        traits: Value,
-    },
+    /// User-facing mutable box, created via `(box v)`.
+    /// Not auto-unwrapped by LoadUpvalue.
+    LBox { cell: RefCell<Value>, traits: Value },
+
+    /// Compiler-created capture cell for mutable captured variables.
+    /// Auto-unwrapped by LoadUpvalue; never visible to user code.
+    CaptureCell { cell: RefCell<Value>, traits: Value },
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
@@ -313,6 +313,7 @@ impl HeapObject {
             HeapObject::LBytes { .. } => HeapTag::LBytes,
             HeapObject::LBytesMut { .. } => HeapTag::LBytesMut,
             HeapObject::LBox { .. } => HeapTag::LBox,
+            HeapObject::CaptureCell { .. } => HeapTag::CaptureCell,
             HeapObject::Float(_) => HeapTag::Float,
             HeapObject::NativeFn(_) => HeapTag::NativeFn,
             HeapObject::LibHandle(_) => HeapTag::LibHandle,
@@ -334,8 +335,8 @@ impl HeapObject {
     #[inline]
     pub fn value_tag(&self) -> u64 {
         use crate::value::repr::{
-            TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CLOSURE, TAG_CONS,
-            TAG_EXTERNAL, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
+            TAG_ARRAY, TAG_ARRAY_MUT, TAG_BYTES, TAG_BYTES_MUT, TAG_CAPTURE_CELL, TAG_CLOSURE,
+            TAG_CONS, TAG_EXTERNAL, TAG_FFI_SIG, TAG_FFI_TYPE, TAG_FIBER, TAG_LBOX, TAG_LIB_HANDLE,
             TAG_MANAGED_PTR, TAG_NATIVE_FN, TAG_PARAMETER, TAG_SET, TAG_SET_MUT, TAG_STRING,
             TAG_STRING_MUT, TAG_STRUCT, TAG_STRUCT_MUT, TAG_SYNTAX, TAG_THREAD,
         };
@@ -353,6 +354,7 @@ impl HeapObject {
             HeapObject::LSet { .. } => TAG_SET,
             HeapObject::LSetMut { .. } => TAG_SET_MUT,
             HeapObject::LBox { .. } => TAG_LBOX,
+            HeapObject::CaptureCell { .. } => TAG_CAPTURE_CELL,
             HeapObject::Fiber { .. } => TAG_FIBER,
             HeapObject::Syntax { .. } => TAG_SYNTAX,
             HeapObject::NativeFn(_) => TAG_NATIVE_FN,
@@ -385,6 +387,7 @@ impl HeapObject {
             HeapObject::LBytes { .. } => "bytes",
             HeapObject::LBytesMut { .. } => "@bytes",
             HeapObject::LBox { .. } => "box",
+            HeapObject::CaptureCell { .. } => "capture-cell",
             HeapObject::Float(_) => "float",
             HeapObject::NativeFn(_) => "native-fn",
             HeapObject::LibHandle(_) => "library-handle",
@@ -459,6 +462,7 @@ impl std::fmt::Debug for HeapObject {
                 }
             }
             HeapObject::LBox { .. } => write!(f, "<box>"),
+            HeapObject::CaptureCell { .. } => write!(f, "<capture-cell>"),
             HeapObject::Float(n) => write!(f, "{}", n),
             HeapObject::NativeFn(_) => write!(f, "<native-fn>"),
             HeapObject::LibHandle(id) => write!(f, "<lib-handle:{}>", id),

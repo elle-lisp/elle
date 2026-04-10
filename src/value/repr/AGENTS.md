@@ -121,7 +121,7 @@ Does NOT:
 
 3. **`nil` ≠ empty list.** `Value::NIL` is falsy (absence). `Value::EMPTY_LIST` is truthy (empty list). Lists terminate with `EMPTY_LIST`, not `NIL`.
 
-4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `LocalLBox` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
+4. **Two lbox types exist.** `LBox` (user-created via `box`, explicit deref) and `CaptureCell` (compiler-created for mutable captures, auto-unwrapped). Distinguished by a bool flag on `HeapObject::LBox`.
 
 5. **`Closure` has `location_map` and `doc`.** The `location_map: Rc<LocationMap>` field maps bytecode offsets to source locations for error reporting. The `doc: Option<Value>` field carries the docstring extracted from the function body, threaded from HIR through LIR.
 

@@ -45,7 +45,7 @@ When calling a closure:
 
 1. Validate arity
 2. Build environment: `[captures..., params..., locals...]`
-3. Wrap parameters in lboxes if `lbox_params_mask` indicates
+3. Wrap parameters in lboxes if `capture_params_mask` indicates
 4. Push call frame for stack traces
 5. Recursively execute closure's bytecode
 6. Pop frame, push result
