@@ -83,10 +83,42 @@ expected failures. Do not rationalize failures away. Fix them.
 | Command | Runtime | What it does |
 |---------|---------|-------------|
 | `make smoke` | ~30s | Elle scripts (VM, JIT, WASM) + doctests + docgen |
-| `make test` | ~3min | smoke + fmt + clippy + rustdoc + unit tests |
+| `make test` | ~3min | smoke + MCP integration + fmt + clippy + rustdoc + unit tests |
 
 See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
 test organization, helpers, and how to add tests.
+
+## Plugins and the single-cargo-invocation rule
+
+Every plugin in `plugins/` is a `cdylib` that depends on the `elle`
+library crate. This creates a subtle trap: if you build the elle binary
+and a plugin in *separate* `cargo build` invocations, cargo's feature
+resolver may pick different feature sets for transitive dependencies
+(notably `wasmtime`). That produces two different compilations of the
+elle crate — two different `libelle-*.rlib` files with two different
+`HeapObject` enum layouts.
+
+The symptom is spectacular: the plugin's `Value::native_fn(f)` values
+survive the cross-dylib handoff by pointer, and the tag word on the
+`Value` side reads correctly (`(native-fn? f)` returns `true`), but when
+the main binary dereferences the heap pointer it reads a different
+`HeapObject` variant — typically `LibHandle`. Calling the value fails
+with `type-error: Cannot call <heap:...>`, and `(type f)` returns
+`"library-handle"` even though `(native-fn? f)` just said `true`.
+
+**The rule:** always build elle and its plugins in a single `cargo
+build` invocation. For example:
+
+```sh
+cargo build -p elle -p elle-oxigraph -p elle-syn
+```
+
+The `test-mcp` target in the Makefile already follows this rule. If
+you add a new target that depends on a plugin, do the same. Never
+chain `cargo build -p elle` followed by `cargo build -p elle-X` as
+separate steps — the chain looks harmless but produces a broken
+binary that only fails when the plugin's functions are actually
+called.
 
 ## Conventions
 

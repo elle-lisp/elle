@@ -30,9 +30,9 @@
 (def saved-stdout (*stdout*))
 (def saved-stderr (*stderr*))
 
-(def ox (import "oxigraph"))
-(def syn (import "syn"))
-(def glob-plugin (import "glob"))
+(def ox (import "plugin/oxigraph"))
+(def syn (import "plugin/syn"))
+(def glob ((import "std/glob")))
 (def portrait-lib ((import "std/portrait")))
 (def rdf ((import "std/rdf")))
 (def rust-rdf ((import "tools/rust-rdf-lib") syn))
@@ -53,7 +53,7 @@
 
 (defn nuke-store [path]
   "Delete a corrupt store directory so it can be recreated fresh."
-  (each entry in (glob-plugin:glob (string path "/*"))
+  (each entry in (glob:glob (string path "/*"))
     (file/delete entry))
   nil)
 
@@ -81,7 +81,7 @@
 
 (defn populate-rust []
   "Parse all .rs files, load Rust triples and primitive cross-links."
-  (var files (glob-plugin:glob "**/*.rs"))
+  (var files (glob:glob "**/*.rs"))
   (var count 0)
   (each file in files
     (let [[[ok? _err] (protect

@@ -1,14 +1,16 @@
-.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git check-plugin-list clean help \
+.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git test-mcp check-plugin-list clean help \
        smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit doctest
 
 .DEFAULT_GOAL := all
 
 ifdef GITHUB_ACTIONS
-  JOBS    ?= 4
-  ELLE    ?= ./target/release/elle
+  JOBS          ?= 4
+  ELLE          ?= ./target/release/elle
+  CARGO_PROFILE := --release
 else
-  JOBS    ?= 16
-  ELLE    ?= ./target/debug/elle
+  JOBS          ?= 16
+  ELLE          ?= ./target/debug/elle
+  CARGO_PROFILE :=
   plugin-tests: plugins
 endif
 TIMEOUT ?= 30s
@@ -46,10 +48,16 @@ dev:  ## Build the Elle binary (debug, fast compile)
 	cargo build -p elle
 
 plugins:  ## Build all native plugins (.so)
-	cargo build --release $(addprefix -p elle-,$(PLUGINS))
+	@# Build elle alongside every plugin so cargo's feature resolver
+	@# produces a SINGLE shared compilation of the elle crate. See
+	@# CONTRIBUTING.md — building plugins alone yields a second elle
+	@# rlib with a different HeapObject layout, and plugin functions
+	@# crash with "Cannot call <heap:...>" when invoked.
+	cargo build --release -p elle $(addprefix -p elle-,$(PLUGINS))
 
 plugin-%:  ## Build a single plugin by bare name (e.g., make plugin-crypto)
-	cargo build --release -p elle-$*
+	@# Always co-build elle; see the comment on the `plugins` target.
+	cargo build --release -p elle -p elle-$*
 
 # ── Docs ────────────────────────────────────────────────────────────
 
@@ -135,8 +143,23 @@ plugin-tests-jit:  ## Run plugin tests (JIT enabled)
 plugin-tests: plugin-tests-vm plugin-tests-jit  ## Run plugin tests (VM then JIT)
 
 test-git:  ## Run git plugin integration tests (requires git, no network)
-	cargo build -p elle-git
+	@# Co-build elle + elle-git in one cargo invocation; see
+	@# CONTRIBUTING.md on the single-cargo-invocation rule.
+	cargo build $(CARGO_PROFILE) -p elle -p elle-git
 	$(ELLE) tests/git.lisp
+
+test-mcp:  ## Run the MCP server integration test
+	@echo "=== MCP server integration test ==="
+	@# elle and its plugins MUST be built in a SINGLE cargo invocation so
+	@# that cargo's feature resolver produces one shared compilation of
+	@# the elle crate. Building them in separate `cargo build -p X` calls
+	@# yields two `libelle-*.rlib` artifacts with different HeapObject
+	@# layouts; the plugin's `Value::native_fn` values then deref as
+	@# garbage `LibHandle` in the main binary and calls fail with
+	@# `type-error: Cannot call <heap:...>`. See CONTRIBUTING.md.
+	cargo build $(CARGO_PROFILE) -p elle -p elle-oxigraph -p elle-syn
+	@$(ELLE) tools/test-mcp.lisp $(ELLE) \
+		|| { echo "FAILED: MCP server integration test"; exit 1; }
 
 check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
 	@ws=$$(sed -n 's/.*"plugins\/\([^"]*\)".*/\1/p' Cargo.toml | sort); \
@@ -150,7 +173,7 @@ check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
 		exit 1; \
 	fi
 
-test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
+test: smoke test-mcp  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
