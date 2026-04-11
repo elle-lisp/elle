@@ -3,6 +3,39 @@
 This directory contains language references, design documents, and contributor
 guides. See [QUICKSTART.md](../QUICKSTART.md) for the full table of contents.
 
+## These files are programs
+
+Every `.md` file in this directory is simultaneously a piece of documentation
+**and** a runnable Elle program. The reader recognizes `.md` as a first-class
+source format: when you run
+
+```sh
+elle docs/control.md
+```
+
+the reader extracts every fenced code block tagged ` ```lisp ` or ` ```elle `,
+replaces all other lines (prose, tables, other code fences) with blank lines
+so source positions line up with the original markdown, and feeds the result
+to the standard s-expression reader. Error messages point back to the exact
+`.md` line and column.
+
+This means these files serve three roles at once:
+
+- **Documentation** — readable on GitHub, in your editor, or rendered on the
+  generated site.
+- **Demos and examples** — every code sample is real code that was executed
+  the last time the tests ran; there are no stale snippets that "used to work".
+- **Tests** — `make doctest` runs every `.md` file under `docs/` and fails
+  loudly if anything stops working. When you change an interface, the doc
+  for that interface either updates or breaks the build.
+
+Write docs the same way you'd write a test: pick something to demonstrate,
+show the code, assert the result. Anything you put in a ` ```lisp ` block
+is code the build will execute. Anything outside a fenced block is prose
+that the reader will skip. See [`impl/reader.md`](impl/reader.md) for the
+full pipeline and [`../src/reader/mod.rs`](../src/reader/mod.rs)'s
+`strip_markdown` for the exact extraction rules.
+
 ## Language Topics
 
 Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
