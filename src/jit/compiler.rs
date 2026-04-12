@@ -720,8 +720,10 @@ impl JitCompiler {
             translator.init_locally_defined_vars(&mut builder, num_locally_defined)?;
         }
 
-        // Allocate shared spill slot for yield/call sites (if any)
-        if lir.signal.may_suspend() {
+        // Allocate shared spill slot for emit/call sites (if any).
+        // Check yield_points (emit terminators) and call_sites directly,
+        // not may_suspend() — emit can emit any signal, not just :yield.
+        if !lir.yield_points.is_empty() || !lir.call_sites.is_empty() {
             translator.allocate_shared_spill_slot(&mut builder);
         }
 
