@@ -378,7 +378,7 @@ fn for_each_terminator_use(term: &Terminator, mut f: impl FnMut(Reg)) {
     match term {
         Terminator::Return(reg) => f(*reg),
         Terminator::Branch { cond, .. } => f(*cond),
-        Terminator::Yield { value, .. } => f(*value),
+        Terminator::Emit { value, .. } => f(*value),
         Terminator::Jump(_) | Terminator::Unreachable => {}
     }
 }

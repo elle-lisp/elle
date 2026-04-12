@@ -24,7 +24,7 @@ Does NOT:
 | `LirInstr` | Individual operation |
 | `SpannedInstr` | `LirInstr` + `Span` for source tracking |
 | `SpannedTerminator` | `Terminator` + `Span` for source tracking |
-| `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Yield` |
+| `Terminator` | How block exits: `Return`, `Jump`, `Branch`, `Emit` |
 | `Reg` | Virtual register |
 | `Label` | Basic block identifier |
 | `YieldPointInfo` | Metadata for a yield point: resume IP and live registers |
@@ -95,7 +95,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 1. **Each register assigned exactly once.** SSA form. If you see a register
     used before definition, lowering is broken.
 
-2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Yield`,
+2. **Every block ends with a terminator.** `Return`, `Jump`, `Branch`, `Emit`,
     or `Unreachable`. No fall-through.
 
 3. **`binding_to_slot` maps all accessed bindings.** If lowering fails with
@@ -116,8 +116,8 @@ stored in `Closure.location_map` and used by the VM for error reporting.
      use this mask (it lbox-wraps all locals unconditionally). Both masks
      are limited to 64 entries (`u64`).
 
-7. **Yield is a block terminator, not an instruction.** `Terminator::Yield`
-    splits the block: the current block ends with yield, and a new resume block
+7. **Emit is a block terminator, not an instruction.** `Terminator::Emit { signal: SignalBits, value: Reg, resume_label: Label }`
+    splits the block: the current block ends with emit, and a new resume block
     begins. The resume block starts with `LoadResumeValue` to capture the value
     passed to `coro/resume`.
 
@@ -126,7 +126,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
       `HirKind::Lambda.syntax` during lowering. The emitter preserves both
       into `Closure.doc` and `Closure.syntax` without encoding them in bytecode.
 
-9. **Yield point metadata is collected during emission.** `Emitter::emit()`
+9. **Emit point metadata is collected during emission.** `Emitter::emit()`
      returns `(Bytecode, Vec<YieldPointInfo>, Vec<CallSiteInfo>)`. The caller
      must attach these to `LirFunction.yield_points` and `LirFunction.call_sites`
      before storing the function on a `Closure`. The JIT reads this metadata
@@ -164,17 +164,17 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 | `RegionEnter` | (none) | Push scope mark on FiberHeap (effective for all fibers including root) |
 | `RegionExit` | (none) | Pop scope mark and release scoped objects (effective for all fibers including root) |
 
-## Yield and Call Site Metadata
+## Emit and Call Site Metadata
 
 The emitter collects two types of metadata during bytecode emission:
 
 ### YieldPointInfo
 
-Recorded when a `Terminator::Yield` is emitted:
-- `resume_ip: usize` — Bytecode offset to resume at (the instruction after the Yield opcode)
-- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack at yield time, bottom-to-top
+Recorded when a `Terminator::Emit` is emitted:
+- `resume_ip: usize` — Bytecode offset to resume at (the instruction after the Emit opcode)
+- `stack_regs: Vec<Reg>` — Virtual registers on the operand stack at emit time, bottom-to-top
 
-The JIT uses this to spill live registers to a stack slot and call the yield runtime helper.
+The JIT uses this to spill live registers to a stack slot and call the emit runtime helper.
 
 ### CallSiteInfo
 
@@ -247,23 +247,23 @@ unsafe-result, outward-set, break). Access via `lowerer.scope_stats()`
 after `lower()` completes. Set `ELLE_SCOPE_STATS=1` to print stats to
 stderr during compilation.
 
-## Yield as terminator
+## Emit as terminator
 
-`Terminator::Yield { value, resume_label }` correctly models that yield
+`Terminator::Emit { signal, value, resume_label }` correctly models that emit
 suspends execution and resumes in a new block. The lowerer:
 
-1. Emits `Terminator::Yield` to end the current block
+1. Emits `Terminator::Emit` to end the current block
 2. Creates a new block at `resume_label`
 3. Emits `LoadResumeValue` as the first instruction of the resume block
 
-The emitter preserves stack state across the yield boundary via
-`yield_stack_state`. This ensures intermediate values computed before yield
-(e.g., the `1` in `(+ 1 (yield 2) 3)`) survive into the resume block.
+The emitter preserves stack state across the emit boundary via
+`yield_stack_state`. This ensures intermediate values computed before emit
+(e.g., the `1` in `(+ 1 (emit :yield 2) 3)`) survive into the resume block.
 
-**Yield point metadata:** When the emitter encounters a `Terminator::Yield`,
+**Emit point metadata:** When the emitter encounters a `Terminator::Emit`,
 it records a `YieldPointInfo` containing:
-- `resume_ip`: Bytecode offset to resume at (the instruction after Yield)
-- `stack_regs`: Virtual registers on the operand stack at yield time
+- `resume_ip`: Bytecode offset to resume at (the instruction after Emit)
+- `stack_regs`: Virtual registers on the operand stack at emit time
 
 This metadata is collected in `Emitter.yield_points` and returned alongside
 the bytecode. The JIT uses this to generate side-exit code that spills live

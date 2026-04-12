@@ -13,7 +13,7 @@ basic blocks, and explicit control flow.
 - **`Label`** — block label for control flow
 - **`LirInstr`** — individual operations (load const, add, call, etc.)
 - **`Terminator`** — block-ending instruction (return, jump,
-  branch, tail call)
+  branch, emit, tail call)
 - **`LirConst`** — compile-time constants (int, float, string,
   keyword, nil, true, false)
 
@@ -29,11 +29,11 @@ The lowerer (`src/lir/lower/`) transforms HIR trees into LIR:
 4. **Escape analysis** — determines which scopes can use region-based
    allocation (RegionEnter/RegionExit)
 
-## Yield metadata
+## Emit metadata
 
-LIR collects yield-site and call-site information during emission.
+LIR collects emit-site and call-site information during emission.
 The JIT uses this for yield-through-call support — knowing which
-calls might yield so it can emit proper save/restore sequences.
+calls might emit so it can generate proper save/restore sequences.
 
 ## Files
 

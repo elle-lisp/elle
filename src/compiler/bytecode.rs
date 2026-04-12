@@ -153,8 +153,9 @@ pub enum Instruction {
     /// Update a capture cell's value
     UpdateCapture,
 
-    /// Yield (suspends execution)
-    Yield,
+    /// Emit a signal (suspends execution). Operand: u16 signal bits.
+    /// `(emit :yield val)` emits SIG_YIELD; `(emit :io val)` emits SIG_IO.
+    Emit,
 
     /// Empty list constant
     EmptyList,

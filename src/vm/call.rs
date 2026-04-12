@@ -152,8 +152,25 @@ impl VM {
         instr_ip: usize,
         location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
-        if let Some(f) = func.as_native_fn() {
-            let (bits, value) = f(args.as_slice());
+        if let Some(def) = func.as_native_def() {
+            let blocked = def
+                .signal
+                .bits
+                .intersection(self.fiber.withheld)
+                .intersection(crate::signals::CAP_MASK);
+            if !blocked.is_empty() {
+                return self.handle_capability_denial(
+                    def,
+                    blocked,
+                    &args,
+                    bytecode,
+                    constants,
+                    closure_env,
+                    ip,
+                    location_map,
+                );
+            }
+            let (bits, value) = (def.func)(args.as_slice());
             return self.handle_primitive_signal(
                 bits,
                 value,
@@ -494,8 +511,16 @@ impl VM {
     /// Dispatches native functions via tail signal handler, sets up pending
     /// tail call for closures with environment building.
     fn tail_call_inner(&mut self, func: Value, args: Vec<Value>) -> Option<SignalBits> {
-        if let Some(f) = func.as_native_fn() {
-            let (bits, value) = f(&args);
+        if let Some(def) = func.as_native_def() {
+            let blocked = def
+                .signal
+                .bits
+                .intersection(self.fiber.withheld)
+                .intersection(crate::signals::CAP_MASK);
+            if !blocked.is_empty() {
+                return Some(self.handle_capability_denial_tail(def, blocked, &args));
+            }
+            let (bits, value) = (def.func)(&args);
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 

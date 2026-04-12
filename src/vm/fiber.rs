@@ -62,6 +62,10 @@ impl VM {
         child_fiber.parent = self.current_fiber_handle.as_ref().map(|h| h.downgrade());
         child_fiber.parent_value = self.current_fiber_value;
 
+        // 2a. Propagate withheld capabilities: child inherits parent's withheld.
+        // This is idempotent (OR is monotonic) so safe on repeated resume.
+        child_fiber.withheld |= self.fiber.withheld;
+
         // 3. Swap parent out, child in; track the child's handle and value
         let parent_handle = self.current_fiber_handle.take();
         let parent_value = self.current_fiber_value.take();

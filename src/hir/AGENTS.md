@@ -83,6 +83,9 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 
 4. **Signals combine upward.** A `begin` has the combined signal of its
    children. A `fn` body's signal is stored but the fn itself is Silent.
+   Signal emission uses `HirKind::Emit { signal: SignalBits, value: Box<Hir> }`
+   (replaces the old `HirKind::Yield`). `yield` is now a macro that expands
+   to `(emit :yield val)`.
 
 5. **Captures are computed per-fn.** Each `HirKind::Lambda` carries its
    own `Vec<CaptureInfo>` listing what it captures and how.
@@ -216,7 +219,7 @@ Lowerer (&BindingArena) — read-only access to binding metadata
 | `analyze/binding.rs` | ~425 | Binding forms: `let`, `letrec`, `def`/`var`, `set` |
 | `analyze/destructure.rs` | ~215 | Destructuring pattern analysis, define-form detection, rest-pattern splitting |
 | `analyze/lambda.rs` | ~160 | Lambda/fn analysis with captures, params, signals |
-| `analyze/special.rs` | ~210 | Special forms: `match`, `yield` |
+| `analyze/special.rs` | ~210 | Special forms: `match`, `emit` |
 | `analyze/call.rs` | ~200 | Call analysis and signal tracking |
 | `expr.rs` | ~180 | `Hir`, `HirKind` |
 | `binding.rs` | ~40 | `Binding(u32)` index type, `CaptureInfo`, `CaptureKind` |

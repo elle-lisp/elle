@@ -196,8 +196,15 @@ pub enum HirKind {
     And(Vec<Hir>),
     Or(Vec<Hir>),
 
-    // === Coroutines ===
-    Yield(Box<Hir>),
+    // === Signal emission ===
+    /// `(emit <signal> <value>)` — general signal emission.
+    /// `signal` is compile-time signal bits (from a literal keyword or set).
+    /// `value` is the payload expression. Replaces the old `Yield` variant;
+    /// `(yield val)` is now a macro expanding to `(emit :yield val)`.
+    Emit {
+        signal: crate::value::fiber::SignalBits,
+        value: Box<Hir>,
+    },
 
     // === Quote ===
     /// Quote stores a pre-computed Value (converted at analysis time)

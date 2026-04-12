@@ -94,7 +94,7 @@ This prevents accidental capture in macros while allowing intentional capture vi
 
 2. **`Binding` identity is integer equality.** Two references to the same binding site have the same `u32` index. `Binding` implements `Hash`/`Eq` via the derived `u32` comparison.
 
-3. **`needs_capture()` determines lbox boxing.** A local binding needs an lbox if captured. A parameter needs an lbox if mutated. Globals never need lboxes.
+3. **`needs_capture()` determines lbox boxing.** A local binding needs an lbox if captured AND mutated. A parameter needs an lbox if mutated. Globals never need lboxes.
 
 4. **Signals combine upward.** A `begin` has the combined signal of its children. A `fn` body's signal is stored but the fn itself is Silent.
 

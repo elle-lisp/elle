@@ -457,8 +457,7 @@ mod tests {
         });
         assert!(serialize_value(&closure).is_err());
 
-        let native_fn: crate::value::NativeFn = |_| (crate::value::fiber::SIG_OK, Value::NIL);
-        let fn_val = Value::native_fn(native_fn);
+        let fn_val = Value::native_fn(&crate::primitives::def::NOOP_PRIM);
         assert!(serialize_value(&fn_val).is_err());
     }
 

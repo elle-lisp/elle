@@ -357,7 +357,7 @@ to see parent-established parameter bindings.
 | `data.rs` | ~100 | Cons, Car, Cdr, MakeVector, `handle_struct_rest` |
 | `literals.rs` | ~18 | Nil, EmptyList, True, False literal handlers |
 | `eval.rs` | ~180 | Runtime eval: compile+execute datum, env wrapping |
-| `capture.rs` | Capture cell operations: MakeCaptureCell, UnlBox, UpdateLBox |
+| `capture.rs` | Capture cell operations: MakeCapture, UnwrapCapture, UpdateCapture |
 
 ## Truthiness
 

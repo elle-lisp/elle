@@ -372,23 +372,23 @@ impl<'a> Lowerer<'a> {
         Ok(dst)
     }
 
-    pub(super) fn lower_yield(&mut self, value: &Hir) -> Result<Reg, String> {
+    pub(super) fn lower_emit(
+        &mut self,
+        signal: crate::value::fiber::SignalBits,
+        value: &Hir,
+    ) -> Result<Reg, String> {
         let value_reg = self.lower_expr(value)?;
 
-        // Allocate the resume block label
         let resume_label = self.fresh_label();
 
-        // Terminate current block with Yield
-        self.terminate(Terminator::Yield {
+        self.terminate(Terminator::Emit {
+            signal,
             value: value_reg,
             resume_label,
         });
 
-        // Start the resume block
         self.start_new_block(resume_label);
 
-        // The resume value is on the stack when execution resumes.
-        // Load it into a register.
         let dst = self.fresh_reg();
         self.emit(LirInstr::LoadResumeValue { dst });
 

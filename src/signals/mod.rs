@@ -64,6 +64,23 @@ pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget
 pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
 pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
 
+/// Capability mask: which signal bits represent deniable operations.
+///
+/// These are the bits checked during capability enforcement. A primitive's
+/// signal bits AND the fiber's `withheld` AND this mask determines whether
+/// the primitive is blocked.
+///
+/// Includes: error (0), yield (1), debug (2), ffi (4), halt (8), io (9), exec (11).
+/// Excludes VM-internal infrastructure: resume (3), propagate (5), abort (6),
+/// query (7), terminal (10), fuel (12), switch (13), wait (14).
+pub const CAP_MASK: SignalBits = SIG_ERROR
+    .union(SIG_YIELD)
+    .union(SIG_DEBUG)
+    .union(SIG_FFI)
+    .union(SIG_HALT)
+    .union(SIG_IO)
+    .union(SIG_EXEC);
+
 /// Signal classification for expressions and functions.
 ///
 /// Two fields:

@@ -301,7 +301,7 @@ impl WasmEmitter {
         for block in &func.blocks {
             let block_idx = self.label_to_idx[&block.label];
 
-            if let Terminator::Yield { resume_label, .. } = &block.terminator.terminator {
+            if let Terminator::Emit { resume_label, .. } = &block.terminator.terminator {
                 let state_id = self.next_resume_state;
                 self.next_resume_state += 1;
                 let target_block_idx = self.label_to_idx[resume_label] as i32;

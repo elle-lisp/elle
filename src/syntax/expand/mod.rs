@@ -22,6 +22,8 @@ const MAX_MACRO_EXPANSION_DEPTH: usize = 200;
 pub struct MacroDef {
     pub name: String,
     pub params: Vec<String>,
+    /// Optional parameters (after `&opt`, before any `&` rest).
+    pub optional_params: Vec<String>,
     pub rest_param: Option<String>,
     pub template: Syntax,
     #[allow(dead_code)] // set during construction; read access planned for hygiene
@@ -239,14 +241,21 @@ impl Expander {
             }
         })?;
 
-        // Parse params, recognizing & as rest separator
+        // Parse params: required* (&opt optional*)? (& rest)?
         let mut fixed_params = Vec::new();
+        let mut optional_params = Vec::new();
         let mut rest_param = None;
+        let mut in_optional = false;
         let mut i = 0;
         while i < params_syntax.len() {
             let p = params_syntax[i]
                 .as_symbol()
                 .ok_or_else(|| format!("{}: macro parameter must be a symbol", span))?;
+            if p == "&opt" {
+                in_optional = true;
+                i += 1;
+                continue;
+            }
             if p == "&" {
                 // Next symbol is the rest param
                 if i + 1 >= params_syntax.len() {
@@ -261,7 +270,11 @@ impl Expander {
                 rest_param = Some(rest_name.to_string());
                 break;
             }
-            fixed_params.push(p.to_string());
+            if in_optional {
+                optional_params.push(p.to_string());
+            } else {
+                fixed_params.push(p.to_string());
+            }
             i += 1;
         }
 
@@ -272,6 +285,7 @@ impl Expander {
         let macro_def = MacroDef {
             name: name.clone(),
             params: fixed_params,
+            optional_params,
             rest_param,
             template,
             definition_scope: ScopeId(0), // Top-level scope

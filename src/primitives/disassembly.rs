@@ -281,7 +281,7 @@ fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (Sig
                         Value::int(else_label.0 as i64),
                     ]
                 }
-                Terminator::Yield { resume_label, .. } => {
+                Terminator::Emit { resume_label, .. } => {
                     vec![Value::int(resume_label.0 as i64)]
                 }
             };

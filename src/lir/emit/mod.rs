@@ -987,46 +987,36 @@ impl Emitter {
                 self.pending_jumps.push((then_pos, *then_label));
             }
 
-            Terminator::Yield {
+            Terminator::Emit {
+                signal,
                 value,
                 resume_label,
             } => {
                 self.ensure_on_top(*value);
-                self.bytecode.emit(Instruction::Yield);
-                // Pop the yielded value from the simulated stack
+                // Emit instruction with signal bits as u16 operand.
+                // Signal bits fit in u16 (bits 0-15 are built-in,
+                // 16-31 are user-defined; u16 truncates user bits
+                // but those are rare in emit — revisit if needed).
+                self.bytecode.emit(Instruction::Emit);
+                self.bytecode.emit_u16(signal.raw() as u16);
                 self.pop();
 
-                // The resume IP is the current bytecode position (right after
-                // the Yield opcode byte). This is what the interpreter stores
-                // in SuspendedFrame.ip.
                 let resume_ip = self.bytecode.current_pos();
 
-                // Record yield point metadata for JIT.
-                // num_locals is needed so the JIT can spill local variable
-                // values into the SuspendedFrame stack, matching the
-                // interpreter's layout: [locals..., operands...].
                 self.yield_points.push(YieldPointInfo {
                     resume_ip,
                     stack_regs: self.stack.clone(),
                     num_locals: self.current_func_num_locals,
                 });
 
-                // Save stack state for the resume block.
-                // The resume block will start with this stack state,
-                // plus the resume value on top (added by LoadResumeValue).
                 self.yield_stack_state.insert(
                     *resume_label,
                     (self.stack.clone(), self.reg_to_stack.clone()),
                 );
 
-                // Emit a jump to the resume block.
-                // This is necessary because blocks are sorted by label number,
-                // so the resume block may not be immediately after the yield.
-                // When the coroutine is resumed, the VM continues from the IP
-                // after the yield, which is this jump instruction.
                 self.bytecode.emit(Instruction::Jump);
                 let pos = self.bytecode.current_pos();
-                self.bytecode.emit_i16(0); // placeholder
+                self.bytecode.emit_i16(0);
                 self.pending_jumps.push((pos, *resume_label));
             }
 

@@ -1191,16 +1191,19 @@ impl<'a> FunctionTranslator<'a> {
                     .brif(is_falsy, *else_block, &[], *then_block, &[]);
             }
 
-            Terminator::Yield {
+            Terminator::Emit {
+                signal: _,
                 value,
                 resume_label: _,
             } => {
+                // TODO: pass signal bits to jit_yield so JIT-compiled emit
+                // can emit arbitrary signals, not just SIG_YIELD
                 let (yt, yp) = self.use_var_pair(builder, value.0);
                 let vm = self
                     .vm_ptr
-                    .ok_or_else(|| JitError::InvalidLir("Yield without vm pointer".to_string()))?;
+                    .ok_or_else(|| JitError::InvalidLir("Emit without vm pointer".to_string()))?;
                 let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
-                    JitError::InvalidLir("Yield without self_tag_payload".to_string())
+                    JitError::InvalidLir("Emit without self_tag_payload".to_string())
                 })?;
 
                 let yield_index = self.yield_point_index;

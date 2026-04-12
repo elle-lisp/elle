@@ -241,7 +241,7 @@ impl<'a> HirSymbolExtractor<'a> {
                 }
             }
 
-            HirKind::Yield(e) => {
+            HirKind::Emit { value: e, .. } => {
                 self.walk(e, index, symbols);
             }
 

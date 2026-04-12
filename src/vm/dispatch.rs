@@ -7,7 +7,6 @@ use crate::compiler::bytecode::Instruction;
 use crate::error::LocationMap;
 use crate::value::{
     BytecodeFrame, SignalBits, SuspendedFrame, Value, SIG_ERROR, SIG_FUEL, SIG_HALT, SIG_OK,
-    SIG_YIELD,
 };
 use std::rc::Rc;
 
@@ -390,9 +389,20 @@ impl VM {
                     capture::handle_update_capture(self);
                 }
 
-                // Yield — capture suspended frame and suspend
-                Instruction::Yield => {
-                    return self.handle_yield(bytecode, constants, closure_env, ip, location_map);
+                // Emit — exit dispatch loop for all signals.
+                // SIG_ERROR: store error, no SuspendedFrame (error propagation).
+                // Other signals: create SuspendedFrame (cooperative suspension).
+                Instruction::Emit => {
+                    let bits_raw = self.read_u16(bc, &mut ip) as u32;
+                    let signal_bits = crate::value::fiber::SignalBits::new(bits_raw);
+                    return self.handle_emit(
+                        signal_bits,
+                        bytecode,
+                        constants,
+                        closure_env,
+                        ip,
+                        location_map,
+                    );
                 }
 
                 // Runtime eval — compile and execute a datum
@@ -533,41 +543,47 @@ impl VM {
         }
     }
 
-    /// Handle the Yield instruction.
+    /// Handle the Emit instruction.
     ///
-    /// Captures a SuspendedFrame (bytecode, constants, env, IP, stack)
-    /// so that resume can continue from this exact point. Each call level
-    /// appends its frame to the suspended chain.
-    fn handle_yield(
+    /// For error signals (SIG_ERROR): stores the error in fiber.signal and
+    /// exits the dispatch loop. No SuspendedFrame — errors propagate through
+    /// the normal return/unwind path.
+    ///
+    /// For suspension signals (SIG_YIELD, user-defined): captures a
+    /// SuspendedFrame so that resume can continue from this exact point.
+    fn handle_emit(
         &mut self,
+        signal_bits: SignalBits,
         bytecode: &Rc<Vec<u8>>,
         constants: &Rc<Vec<Value>>,
         closure_env: &Rc<Vec<Value>>,
         ip: usize,
         location_map: &Rc<LocationMap>,
     ) -> (SignalBits, usize) {
-        let yielded_value = self
+        let value = self
             .fiber
             .stack
             .pop()
-            .expect("VM bug: Stack underflow on yield");
+            .expect("VM bug: Stack underflow on emit");
 
-        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+        self.fiber.signal = Some((signal_bits, value));
 
-        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
-            bytecode: bytecode.clone(),
-            constants: constants.clone(),
-            env: closure_env.clone(),
-            ip,
-            stack: saved_stack,
-            location_map: location_map.clone(),
-            // Yield: on resume, the resume argument becomes the result of
-            // the (yield ...) expression — push it onto the restored stack.
-            push_resume_value: true,
-        });
+        if !signal_bits.contains(SIG_ERROR) {
+            // Suspension: save stack and create a frame for later resumption.
+            let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
 
-        self.fiber.signal = Some((SIG_YIELD, yielded_value));
-        self.fiber.suspended = Some(vec![frame]);
-        (SIG_YIELD, ip)
+            let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+                bytecode: bytecode.clone(),
+                constants: constants.clone(),
+                env: closure_env.clone(),
+                ip,
+                stack: saved_stack,
+                location_map: location_map.clone(),
+                push_resume_value: true,
+            });
+            self.fiber.suspended = Some(vec![frame]);
+        }
+
+        (signal_bits, ip)
     }
 }

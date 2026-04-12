@@ -79,10 +79,7 @@ pub fn register_and_build(
     for def in primitives {
         ctx.register(def);
         let short_name = def.name.strip_prefix(prefix).unwrap_or(def.name);
-        fields.insert(
-            TableKey::Keyword(short_name.into()),
-            Value::native_fn(def.func),
-        );
+        fields.insert(TableKey::Keyword(short_name.into()), Value::native_fn(def));
     }
     Value::struct_from(fields)
 }
@@ -104,10 +101,7 @@ pub fn register_and_build_refs(
     for def in primitives {
         ctx.register(def);
         let short_name = def.name.strip_prefix(prefix).unwrap_or(def.name);
-        fields.insert(
-            TableKey::Keyword(short_name.into()),
-            Value::native_fn(def.func),
-        );
+        fields.insert(TableKey::Keyword(short_name.into()), Value::native_fn(def));
     }
     Value::struct_from(fields)
 }

@@ -1134,7 +1134,8 @@ mod tests {
             Span::synthetic(),
         ));
         b0.terminator = SpannedTerminator::new(
-            Terminator::Yield {
+            Terminator::Emit {
+                signal: crate::value::fiber::SIG_YIELD,
                 value: Reg(0),
                 resume_label: Label(1),
             },

@@ -198,12 +198,8 @@ This is capability-based security applied to control flow:
 - **A signal means a boundary was hit.** The callee couldn't proceed without
   something it wasn't granted. The handler decides what happens next.
 
-**Note on implementation phases**: Phases 1–5 of the migration (below) implement
-signal routing and signal tracking. Capability enforcement — checking what a
-fiber is allowed to do and signaling when it exceeds its grant — is future work
-requiring a different mechanism (likely a capability field on fibers and checks
-at signal emission points). The vision is complete, but the early phases focus
-on the signal infrastructure that makes capability enforcement possible.
+Capability enforcement is implemented. See
+[`capabilities.md`](capabilities.md) for the full surface.
 
 ### Examples
 

@@ -549,9 +549,15 @@ pub enum Terminator {
         then_label: Label,
         else_label: Label,
     },
-    /// Yield control with a value. Execution resumes at resume_label
-    /// with the resume value on the stack.
-    Yield { value: Reg, resume_label: Label },
+    /// Emit a signal with compile-time signal bits and a runtime value.
+    /// Execution resumes at resume_label with the resume value on the stack.
+    /// Replaces the old `Yield` terminator; `(yield val)` becomes
+    /// `Emit { signal: SIG_YIELD, ... }`.
+    Emit {
+        signal: crate::value::fiber::SignalBits,
+        value: Reg,
+        resume_label: Label,
+    },
     /// Unreachable (for incomplete blocks)
     Unreachable,
 }

@@ -56,7 +56,7 @@
   (let ((f (fiber/new (fn []
               (let ((i 0))
                 (while (< i 20)
-                  (emit 2 i)
+                  (yield i)
                   (assign i (+ i 1)))
                 :done))
             2)))
@@ -94,7 +94,7 @@
   (let ((inner (fiber/new (fn []
                   (let ((i 0))
                     (while (< i 15)
-                      (emit 2 i)
+                      (yield i)
                       (assign i (+ i 1)))
                     :inner-done))
                 2)))

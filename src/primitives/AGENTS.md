@@ -14,7 +14,9 @@ Implement Elle's standard library of built-in functions:
 - Introspection and debugging
 
 Does NOT:
-- Define special forms (those are in `hir/analyze.rs`)
+- Define special forms (those are in `hir/analyze.rs`). Note: `emit` is a special
+  form when the first argument is a literal keyword or keyword set; dynamic
+  `(emit var val)` falls through to the primitive.
 - Execute bytecode (that's `vm`)
 - Compile code (that's `compiler`, `hir`, `lir`)
 
@@ -27,7 +29,7 @@ Does NOT:
 
 ## Function type
 
-**NativeFn**: `fn(&[Value]) -> (SignalBits, Value)`
+**NativeFn**: `&'static PrimitiveDef` (the bare function pointer type is `PrimFn`: `fn(&[Value]) -> (SignalBits, Value)`)
 
 All primitives use a single unified type. No primitive has VM access.
 Return values:

@@ -64,3 +64,13 @@ fn fiber_stress() {
 fn fiber_io_stress() {
     run_elle_script("fiber_io_stress");
 }
+
+#[test]
+fn caps() {
+    run_elle_script("caps");
+}
+
+#[test]
+fn emit() {
+    run_elle_script("emit");
+}

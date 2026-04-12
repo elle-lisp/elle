@@ -55,13 +55,13 @@
 # ============================================================================
 
 # Yield a string, return int
-(let [[f (fiber/new (fn [] (emit 2 "yielded") 99) |:yield|)]]
+(let [[f (fiber/new (fn [] (yield "yielded") 99) |:yield|)]]
   (let [[y (fiber/resume f)]]
     (assert (= y "yielded") "fiber yield string")
     (assert (= (fiber/resume f) 99) "fiber return after yield")))
 
 # Yield an array
-(let [[f (fiber/new (fn [] (emit 2 [1 2 3]) :done) |:yield|)]]
+(let [[f (fiber/new (fn [] (yield [1 2 3]) :done) |:yield|)]]
   (let [[y (fiber/resume f)]]
     (assert (= (length y) 3) "fiber yield array length")
     (assert (= (get y 0) 1) "fiber yield array element")))
@@ -124,8 +124,8 @@
 # ============================================================================
 
 (let [[f (fiber/new (fn []
-                      (emit 2 "first")
-                      (emit 2 "second")
+                      (yield "first")
+                      (yield "second")
                       "third")
                     |:yield|)]]
   (assert (= (fiber/resume f) "first") "multi-yield first")

@@ -178,8 +178,8 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
             mark(value, false, tail_blocks);
         }
 
-        // Yield: value is not in tail position
-        HirKind::Yield(expr) => {
+        // Emit: value is not in tail position
+        HirKind::Emit { value: expr, .. } => {
             mark(expr, false, tail_blocks);
         }
 
@@ -316,7 +316,7 @@ mod tests {
             HirKind::Assign { value, .. }
             | HirKind::Define { value, .. }
             | HirKind::Destructure { value, .. }
-            | HirKind::Yield(value) => {
+            | HirKind::Emit { value, .. } => {
                 collect_calls(value, calls);
             }
             HirKind::Eval { expr, env } => {

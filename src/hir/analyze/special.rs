@@ -91,26 +91,101 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
-    pub(crate) fn analyze_yield(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
-        if items.len() > 2 {
-            return Err(format!("{}: yield expects 0 or 1 arguments", span));
+    /// `(emit <signal> <value>)` — general signal emission.
+    ///
+    /// The first argument must be a compile-time constant: a literal keyword
+    /// (`:yield`, `:error`, `:io`, etc.) or a literal set of keywords
+    /// (`|:yield :io|`). The analyzer extracts the signal bits at compile
+    /// time and records them in the HIR node.
+    pub(crate) fn analyze_emit(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if items.len() < 2 || items.len() > 3 {
+            return Err(format!(
+                "{}: emit requires 1 or 2 arguments (signal [value])",
+                span
+            ));
         }
 
-        let value = if items.len() == 2 {
-            self.analyze_expr(&items[1])?
+        // Extract signal bits from the first argument (must be literal keyword or set)
+        let signal_bits = self.resolve_static_signal(&items[1])?;
+
+        let value = if items.len() == 3 {
+            self.analyze_expr(&items[2])?
         } else {
-            // (yield) with no args yields nil
             Hir::silent(HirKind::Nil, span.clone())
         };
 
-        // Track that this lambda has a direct yield (not from calling a parameter)
+        // Track direct signal emission (generalizes has_direct_yield)
         self.current_signal_sources.has_direct_yield = true;
 
+        let signal = Signal {
+            bits: signal_bits,
+            propagates: 0,
+        };
+
         Ok(Hir::new(
-            HirKind::Yield(Box::new(value)),
+            HirKind::Emit {
+                signal: signal_bits,
+                value: Box::new(value),
+            },
             span,
-            Signal::yields(), // Yield always has Yields signal
+            signal,
         ))
+    }
+
+    /// Resolve a static signal specifier (keyword or set literal) to SignalBits.
+    ///
+    /// Accepts:
+    /// - A literal keyword: `:yield` → SIG_YIELD
+    /// - A literal set of keywords: `|:yield :io|` → SIG_YIELD | SIG_IO
+    ///
+    /// Rejects non-literal arguments at compile time.
+    fn resolve_static_signal(
+        &self,
+        syntax: &Syntax,
+    ) -> Result<crate::value::fiber::SignalBits, String> {
+        use crate::syntax::SyntaxKind;
+        use crate::value::fiber::SignalBits;
+
+        match &syntax.kind {
+            SyntaxKind::Keyword(name) => {
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
+                match registry.to_signal_bits(name) {
+                    Some(bits) => Ok(bits),
+                    None => Err(format!(
+                        "{}: emit: unknown signal keyword :{}",
+                        syntax.span, name
+                    )),
+                }
+            }
+            SyntaxKind::Set(elements) => {
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
+                let mut bits = SignalBits::EMPTY;
+                for elem in elements {
+                    match &elem.kind {
+                        SyntaxKind::Keyword(name) => match registry.to_signal_bits(name) {
+                            Some(b) => bits |= b,
+                            None => {
+                                return Err(format!(
+                                    "{}: emit: unknown signal keyword :{}",
+                                    elem.span, name
+                                ))
+                            }
+                        },
+                        _ => {
+                            return Err(format!(
+                                "{}: emit: set elements must be keywords",
+                                elem.span
+                            ))
+                        }
+                    }
+                }
+                Ok(bits)
+            }
+            _ => Err(format!(
+                "{}: emit: first argument must be a signal keyword or keyword set, got {:?}",
+                syntax.span, syntax.kind
+            )),
+        }
     }
 
     pub(crate) fn analyze_match(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {

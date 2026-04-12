@@ -75,7 +75,7 @@ impl<'a> Lowerer<'a> {
             HirKind::And(exprs) => self.lower_and(exprs),
             HirKind::Or(exprs) => self.lower_or(exprs),
 
-            HirKind::Yield(value) => self.lower_yield(value),
+            HirKind::Emit { signal, value } => self.lower_emit(*signal, value),
             HirKind::Quote(value) => self.emit_value_const(*value),
             HirKind::Cond {
                 clauses,
