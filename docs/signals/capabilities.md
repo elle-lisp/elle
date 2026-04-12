@@ -8,7 +8,7 @@ parent can catch.
 
 `fiber/new` accepts `:deny` after the mask argument:
 
-```lisp
+```text
 # Deny IO — child can't call IO primitives
 (fiber/new body |:io :error| :deny |:io|)
 
@@ -54,7 +54,7 @@ Instead, the fiber emits a signal with:
 - **Bits**: the blocked capability bits (e.g., `:io`)
 - **Payload**: a struct describing the denial
 
-```lisp
+```text
 {:error :capability-denied
  :denied |:io|
  :primitive "port/read-line"
@@ -66,7 +66,7 @@ The parent catches this signal through the normal mask routing.
 
 ## Introspection
 
-```lisp
+```text
 (fiber/caps)      # current fiber's capabilities
 (fiber/caps f)    # specific fiber's capabilities
 ```
@@ -74,7 +74,7 @@ The parent catches this signal through the normal mask routing.
 Returns a keyword set of active capabilities — everything in the
 capability space that is NOT withheld:
 
-```lisp
+```text
 (fiber/caps)
 # => |:error :yield :debug :ffi :halt :io :exec|
 
@@ -88,7 +88,7 @@ capability space that is NOT withheld:
 Withheld capabilities propagate from parent to child at resume time.
 A child inherits its parent's restrictions plus any `:deny` of its own:
 
-```lisp
+```text
 (let ([outer (fiber/new
                (fn []
                  # inner denies :ffi, inherits :io denial from outer
@@ -111,7 +111,7 @@ absorbed).
 The parent can catch a denial, perform the operation on the child's
 behalf, and resume the child with the result:
 
-```lisp
+```text
 (let ([f (fiber/new
            (fn [] (length "hello"))
            |:error|
@@ -132,7 +132,7 @@ blocks `length` but not `+`.
 
 ## Examples
 
-```lisp
+```text
 # Pure computation sandbox — no IO, no FFI, no subprocess
 (let ([f (fiber/new compute |:io :ffi :exec :error|
                     :deny |:io :ffi :exec|)])

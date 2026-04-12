@@ -1192,12 +1192,10 @@ impl<'a> FunctionTranslator<'a> {
             }
 
             Terminator::Emit {
-                signal: _,
+                signal,
                 value,
                 resume_label: _,
             } => {
-                // TODO: pass signal bits to jit_yield so JIT-compiled emit
-                // can emit arbitrary signals, not just SIG_YIELD
                 let (yt, yp) = self.use_var_pair(builder, value.0);
                 let vm = self
                     .vm_ptr
@@ -1219,7 +1217,8 @@ impl<'a> FunctionTranslator<'a> {
                 let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
                 let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
 
-                // Call elle_jit_yield(ytag, ypay, spilled_ptr, yield_index, vm, ctag, cpay)
+                let sig_val = builder.ins().iconst(I64, signal.raw() as i64);
+
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.jit_yield, builder.func);
@@ -1233,6 +1232,7 @@ impl<'a> FunctionTranslator<'a> {
                         vm,
                         self_tag,
                         self_payload,
+                        sig_val,
                     ],
                 );
                 let rt = builder.inst_results(call)[0];

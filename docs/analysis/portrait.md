@@ -8,7 +8,7 @@ It analyzes source without executing it.
 
 ## Compile-time analysis
 
-```lisp
+```text
 (def src "(defn validate [data]
   (when (nil? (get data :name))
     (error {:error :validation-error :message \"missing name\"}))
@@ -19,7 +19,7 @@ It analyzes source without executing it.
 
 ## Signal queries
 
-```lisp
+```text
 # Query a function's inferred signal profile
 (compile/signal a :validate)
 # => {:silent false :jit-eligible true :propagates ... }
@@ -41,7 +41,7 @@ It analyzes source without executing it.
 The `lib/portrait.lisp` library wraps the raw analysis APIs into
 structured reports.
 
-```lisp
+```text
 (def portrait ((import "std/portrait.lisp")))
 
 # Function portrait — signal profile, captures, callees

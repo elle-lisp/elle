@@ -25,14 +25,14 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 - Duplicate restrictions for the same parameter: the last one wins
 
 **Outside lambda bodies**, `silence` is a call to the stdlib `silence` function, which signals `:error` at runtime. `silence` is implemented as:
-```lisp
+```text
 (defn silence [& _]
   (error {:error :invalid-silence
           :message "silence must appear in a function body preamble"}))
 ```
 
 **Examples:**
-```lisp
+```text
 # Silent function
 (defn add (x y)
   (silence)
@@ -74,7 +74,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 `squelch` is a **runtime blacklist** (open-world): `(squelch f :yield)` returns a new closure that forbids `:yield` at the call boundary. Everything else is allowed, including user-defined signals not listed. It is a primitive function that can appear anywhere an expression is valid.
 
 **Examples:**
-```lisp
+```text
 (defn f [] (yield 42))
 
 # Squelch a single signal
@@ -112,7 +112,7 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 **Silence bounds (total suppression):** The programmer-supplied ceiling constraint from `(silence)` declares that the function must emit no signals. When a `silence` bound is present, the compiler checks that `inferred_signals.bits == 0`. If the check fails, compile-time error.
 
 **Example:**
-```lisp
+```text
 # Function with parameter bound
 (defn apply-silent (f x)
   (silence f)  # f must be silent
@@ -134,7 +134,7 @@ The `inferred_signals: Signal` field is always present and contains the minimum 
 A function with `(silence f)` is no longer polymorphic with respect to `f`. The compiler knows `f` must be silent, so the function's signal is determined by its own body only, not by what `f` might do.
 
 **Example:**
-```lisp
+```text
 # Without bound: polymorphic
 (defn map-any (f xs)
   (map f xs))
@@ -152,7 +152,7 @@ A function with `(silence f)` is no longer polymorphic with respect to `f`. The 
 When a concrete function is passed to a parameter with a bound, the analyzer checks the argument's signal against the bound at compile time.
 
 **Example:**
-```lisp
+```text
 (defn apply-silent (f x)
   (silence f)
   (f x))
@@ -179,7 +179,7 @@ When module A imports module B:
 - Even if B's functions are actually silent, A will treat them as yielding
 
 **Example:**
-```lisp
+```text
 # b.lisp
 (defn silent-add [x y]
   (silence)
@@ -189,7 +189,7 @@ When module A imports module B:
 (fn [] {:add silent-add})
 ```
 
-```lisp
+```text
 # a.lisp
 (def b ((import "b.lisp")))
 
@@ -218,7 +218,7 @@ The tradeoff: Single-file fixpoint convergence is simple and gives accurate sign
 
 If you need a function from an imported module to be used in a silence-bounded context, use `squelch` to enforce the boundary at the call site:
 
-```lisp
+```text
 # a.lisp
 (def b ((import "b.lisp")))
 
@@ -243,7 +243,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 - If the check fails, the VM signals `:error` with a descriptive message
 
 **Example:**
-```lisp
+```text
 (defn apply-silent (f x)
   (silence f)
   (f x))
@@ -264,7 +264,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 - Non-squelched signals pass through normally; errors are never affected by squelch
 
 **Example:**
-```lisp
+```text
 # Squelch a yielding closure — signal-violation at boundary
 (def squelched (squelch (fn [] (yield 1)) :yield))
 (try (squelched) (catch e (get e :error)))  # => :signal-violation
@@ -284,7 +284,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 ### Fiber Primitives
 
-```lisp
+```text
 # === Creation and control ===
 # (fiber/new fn mask) => fiber
 # (fiber/resume fiber value) => signal-bits
@@ -303,7 +303,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 ### Sugar and Aliases
 
-```lisp
+```text
 # try/catch
 # (try body (catch e handler))
 
@@ -318,7 +318,7 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 ### Signal Restrictions
 
-```lisp
+```text
 # Compile-time silence bounds
 (defn silent-add (x y)
   (silence)           # no signals — silent

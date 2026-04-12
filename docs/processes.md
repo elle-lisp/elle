@@ -8,7 +8,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 
 ## Loading
 
-```lisp
+```text
 (def process ((import "std/process")))
 ```
 
@@ -17,7 +17,7 @@ wrapper), Supervisor (automatic restart), and Task (one-shot async work).
 `process:start` creates a scheduler and runs a closure as the first
 process. It blocks until all processes complete and returns the scheduler.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -26,7 +26,7 @@ process. It blocks until all processes complete and returns the scheduler.
 
 Use `process:run` when you need a pre-configured or shared scheduler:
 
-```lisp
+```text
 (def sched (process:make-scheduler :fuel 500))
 (process:run sched (fn [] (println "on existing scheduler")))
 ```
@@ -36,7 +36,7 @@ Use `process:run` when you need a pre-configured or shared scheduler:
 Every process has a mailbox. `send` delivers a message; `recv` blocks
 until one arrives.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -51,7 +51,7 @@ until one arrives.
 parent (crash propagation). `spawn-monitor` monitors without linking
 (death notification without crashing the parent).
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -69,7 +69,7 @@ parent (crash propagation). `spawn-monitor` monitors without linking
 `recv-match` takes a predicate and returns the first message that
 matches, leaving non-matching messages in the mailbox in order.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -87,7 +87,7 @@ matches, leaving non-matching messages in the mailbox in order.
 `recv-timeout` returns `:timeout` if no message arrives within the
 given number of scheduler ticks.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -99,7 +99,7 @@ given number of scheduler ticks.
 Linked processes crash together. When a linked child crashes, the parent
 crashes too — unless the parent is trapping exits.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -120,7 +120,7 @@ crashes too — unless the parent is trapping exits.
 Monitors deliver a `[:DOWN ref pid reason]` message when the monitored
 process dies, without affecting the monitoring process.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -139,7 +139,7 @@ process dies, without affecting the monitoring process.
 Processes can register under a keyword name. `whereis` looks up PIDs
 by name; `send-named` sends to a registered name.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -162,7 +162,7 @@ by name; `send-named` sends to a registered name.
 Each process has a private key-value store. Useful for per-process
 configuration that doesn't belong in the main state.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -179,7 +179,7 @@ Processes are cooperatively scheduled with fuel budgets. A CPU-bound
 process gets preempted after exhausting its fuel, allowing other
 processes to run.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -216,7 +216,7 @@ down after replying.
 
 ## Key-value store example
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -239,7 +239,7 @@ down after replying.
 `gen-server-stop` requests graceful shutdown. The server's `:terminate`
 callback runs before it exits.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -277,7 +277,7 @@ from `handle-call` and use `gen-server-reply` later:
 Actor wraps GenServer with a simpler API: just an init function and
 get/update operations on state.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -295,7 +295,7 @@ get/update operations on state.
 Task runs a one-shot function as a supervised process and returns the
 result. Like `ev/spawn` but the work has a PID and can be monitored.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -337,7 +337,7 @@ Each child is a struct with:
 
 ## Basic supervisor
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -377,7 +377,7 @@ infinite restart loop. The `:max-restarts` and `:max-ticks` options
 set a sliding window: if a child restarts more than N times within M
 scheduler ticks, the supervisor stops restarting it.
 
-```lisp
+```text
 (process:supervisor-start-link children
   :max-restarts 3    # at most 3 restarts...
   :max-ticks 5)      # ...within 5 scheduler ticks
@@ -387,7 +387,7 @@ scheduler ticks, the supervisor stops restarting it.
 
 Pass a `:logger` callback to receive structured lifecycle events:
 
-```lisp
+```text
 (process:supervisor-start-link children
   :logger (fn [event]
     (println "supervisor:" (get event :event) (get event :id))))
@@ -410,7 +410,7 @@ By default, children start concurrently. When a child spec includes
 startup ordering — for example, a ZMQ bridge must bind its endpoints
 before clients connect.
 
-```lisp
+```text
 (process:supervisor-start-link
   [{:id :bridge :restart :permanent :ready true
     :start (fn []
@@ -431,7 +431,7 @@ the death and proceeds without deadlocking.
 
 Add and remove children at runtime:
 
-```lisp
+```text
 (process:supervisor-start-child :sup
   {:id :dynamic-1 :restart :temporary
    :start (fn [] (forever (process:recv))})
@@ -448,7 +448,7 @@ subprocess under a supervisor. The child process spawns the subprocess,
 blocks on `subprocess/wait`, then crashes on non-zero exit to trigger
 supervisor restart.
 
-```lisp
+```text
 (process:supervisor-start-link
   [(process:make-subprocess-child :nginx "/usr/sbin/nginx" ["-g" "daemon off;"])
    (process:make-subprocess-child :redis "/usr/bin/redis-server" ["--port" "6380"]
@@ -461,7 +461,7 @@ supervisor restart.
 
 This replaces the manual bridge pattern:
 
-```lisp
+```text
 # Before: every user writes this glue
 {:id :my-daemon :restart :permanent
  :start (fn []
@@ -476,7 +476,7 @@ This replaces the manual bridge pattern:
 Options passed to `subprocess/exec` (environment, working directory)
 go in the `:opts` named argument:
 
-```lisp
+```text
 (process:make-subprocess-child :worker "/usr/bin/worker" []
   :opts {:cwd "/var/lib/worker" :env {:PORT "8080"}})
 ```
@@ -487,7 +487,7 @@ go in the `:opts` named argument:
 EventManager provides pub/sub event dispatching. Handlers are modules
 with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 
-```lisp
+```text
 (def handler-mod
   {:init         (fn [_] @[])
    :handle-event (fn [event state]
@@ -507,7 +507,7 @@ with `:init`, `:handle-event`, and optional `:terminate` callbacks.
 `ev/spawn` and `ev/join` work inside processes. Sub-fibers are
 tracked by the scheduler and participate in I/O completion.
 
-```lisp
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []

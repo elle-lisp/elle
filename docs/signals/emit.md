@@ -6,7 +6,7 @@ through `emit`.
 
 ## Syntax
 
-```lisp
+```text
 (emit :keyword value)       # emit a single signal
 (emit |:kw1 :kw2| value)    # emit compound signal bits
 (emit :keyword)             # emit with nil payload
@@ -18,7 +18,7 @@ is the payload (defaults to nil).
 
 ## Common signals
 
-```lisp
+```text
 (emit :yield 42)            # cooperative suspension, payload 42
 (emit :error {:error :type-error :message "boom"})  # error signal
 (emit :io request)          # I/O request to scheduler
@@ -29,7 +29,7 @@ is the payload (defaults to nil).
 
 `yield` and `error` are prelude macros that expand to `emit`:
 
-```lisp
+```text
 (yield 42)     # => (emit :yield 42)
 (yield)        # => (emit :yield nil)
 (error "boom") # => (emit :error "boom")
@@ -45,7 +45,7 @@ keywords uniformly.
 When a fiber emits a signal, the parent catches it if the signal bits
 overlap the fiber's mask:
 
-```lisp
+```text
 (let ([f (fiber/new (fn [] (emit :yield 42)) |:yield|)])
   (fiber/resume f))   # => 42
 
@@ -66,7 +66,7 @@ overlap the fiber's mask:
   fiber, and the resume value becomes the result of the `(emit ...)`
   expression.
 
-```lisp
+```text
 # Suspension: emit :yield, get resume value back
 (let ([x (emit :yield :waiting)])
   # x is whatever the parent passes to fiber/resume
@@ -82,14 +82,14 @@ overlap the fiber's mask:
 Any keyword can be a signal. Register it with `signal/register` and
 use it with `emit`:
 
-```lisp
+```text
 (signal/register :heartbeat)
 (emit :heartbeat {:timestamp (clock/monotonic)})
 ```
 
 The parent catches it through the mask like any other signal:
 
-```lisp
+```text
 (fiber/new body |:heartbeat|)
 ```
 
@@ -98,7 +98,7 @@ The parent catches it through the mask like any other signal:
 When the first argument is not a literal keyword or set, `emit` falls
 through to the runtime primitive. This supports dynamic signal selection:
 
-```lisp
+```text
 (emit some-variable value)   # runtime dispatch, not compile-time
 ```
 
