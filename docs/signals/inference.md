@@ -25,7 +25,7 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 - Duplicate restrictions for the same parameter: the last one wins
 
 **Outside lambda bodies**, `silence` is a call to the stdlib `silence` function, which signals `:error` at runtime. `silence` is implemented as:
-```
+```lisp
 (defn silence [& _]
   (error {:error :invalid-silence
           :message "silence must appear in a function body preamble"}))
@@ -179,7 +179,7 @@ When module A imports module B:
 - Even if B's functions are actually silent, A will treat them as yielding
 
 **Example:**
-```text
+```lisp
 # b.lisp
 (defn silent-add [x y]
   (silence)
@@ -189,7 +189,7 @@ When module A imports module B:
 (fn [] {:add silent-add})
 ```
 
-```text
+```lisp
 # a.lisp
 (def b ((import "b.lisp")))
 
@@ -218,7 +218,7 @@ The tradeoff: Single-file fixpoint convergence is simple and gives accurate sign
 
 If you need a function from an imported module to be used in a silence-bounded context, use `squelch` to enforce the boundary at the call site:
 
-```text
+```lisp
 # a.lisp
 (def b ((import "b.lisp")))
 

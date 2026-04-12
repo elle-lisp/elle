@@ -107,7 +107,7 @@ frame execution, no defer/protect unwinding. The fiber is dead.
   it propagates through all masks including `protect` and `defer`
 - Other-cancel returns `SIG_OK` with the error value
 
-```text
+```lisp
 (def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) |:error :yield|))
 (fiber/resume f)          # f is now :paused
 (fiber/cancel f :reason)  # f is now :error, :cleanup never printed
@@ -125,7 +125,7 @@ child's actual outcome determines what the parent sees.
 - No post-hoc status stomp: if the fiber's protect catches and recovers,
   the fiber may end up `:dead` instead of `:error`
 
-```elle
+```lisp
 (def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) |:error :yield|))
 (fiber/resume f)          # f is now :paused
 (fiber/abort f :reason)   # :cleanup printed, f is now :error

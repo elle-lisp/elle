@@ -312,7 +312,7 @@ The MCP server exposes what the compiler already computes. Elle's compilation pi
 
 **Everything the MCP server provides is available to normal Elle code at runtime.** `compile/analyze`, `compile/signal`, `compile/captures`, `compile/callees` — these are regular Elle functions. The MCP server is just an Elle program (`tools/mcp-server.lisp`) that wraps these primitives in the Model Context Protocol. You can write your own analysis tools using the same functions:
 
-```text
+```lisp
 (def a (compile/analyze (file/read "my-code.lisp") {:file "my-code.lisp"}))
 (compile/signal a :my-function)    # => signal profile
 (compile/captures a :my-function)  # => captured variables

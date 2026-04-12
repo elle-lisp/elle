@@ -39,7 +39,7 @@ Signal bounds enable further JIT optimizations:
 2. **Inlining**: silent callbacks can be inlined more aggressively
 3. **Elimination of polymorphism**: silence bounds simplify compilation
 
-```text
+```lisp
 # Without bounds: JIT cannot specialize
 (defn map-any [f xs]
   (map f xs))

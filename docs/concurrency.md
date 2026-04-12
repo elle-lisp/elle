@@ -126,7 +126,7 @@ On top of the core process API, the module provides:
 - **Task** — one-shot async work as a monitored process
 - **EventManager** — pub/sub event dispatching
 
-```elle
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -142,7 +142,7 @@ On top of the core process API, the module provides:
 
 ### GenServer example
 
-```elle
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -160,7 +160,7 @@ On top of the core process API, the module provides:
 
 ### Supervisor example
 
-```elle
+```lisp
 (def process ((import "std/process")))
 
 (process:start (fn []

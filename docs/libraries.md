@@ -62,14 +62,14 @@ pattern and are imported via `(import "std/<name>")`.
 
 Libraries are parametric modules. Import and call the closure:
 
-```text
+```lisp
 (def http ((import "std/http")))
 (http:get "https://example.com")
 ```
 
 Libraries that depend on native plugins take the plugin as a parameter:
 
-```text
+```lisp
 (def tls-plugin (import "plugin/tls"))
 (def tls ((import "std/tls") tls-plugin))
 (tls:connect "example.com" 443)
