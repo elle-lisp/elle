@@ -8,9 +8,7 @@
 ## Error model: manager fiber owns the port, reconnects on transient errors.
 ## Protocol: RESP2 over TCP.
 
-# ============================================================================
-# RESP2 encoder
-# ============================================================================
+## ── RESP2 encoder ─────────────────────────────────────────────────────
 
 (defn resp-encode [& args]
   "Encode a Redis command as a RESP2 array of bulk strings.
@@ -22,16 +20,14 @@
       (push buf (string "$" (string/size-of s) "\r\n" s "\r\n"))))
   (freeze buf))
 
-# ============================================================================
-# RESP2 decoder
-# ============================================================================
+## ── RESP2 decoder ─────────────────────────────────────────────────────
 
 (defn resp-read [port]
   "Read a single RESP2 reply from port. Signals on error replies.
    Returns Elle values: string, integer, array, or nil."
   (let [[line (port/read-line port)]]
     (when (nil? line)
-      (error {:error :redis-error :message "unexpected EOF from Redis"}))
+      (error {:error :redis-error :reason :unexpected-eof :message "unexpected EOF"}))
     (let [[prefix (get line 0)]
           [body   (slice line 1)]]
       (case prefix
@@ -39,7 +35,7 @@
         "+" body
 
         # Error
-        "-" (error {:error :redis-error :message body})
+        "-" (error {:error :redis-error :reason :server-error :body body :message body})
 
         # Integer
         ":" (integer body)
@@ -51,7 +47,7 @@
                 (let [[data (port/read port (+ len 2))]]
                   # data includes trailing \r\n; slice bytes first (byte-indexed), then convert
                   (when (nil? data)
-                    (error {:error :redis-error :message "unexpected EOF reading bulk string"}))
+                    (error {:error :redis-error :reason :unexpected-eof :phase :bulk-string :message "unexpected EOF reading bulk string"}))
                   (string (slice data 0 len)))))
 
         # Array
@@ -67,6 +63,7 @@
                   (freeze result))))
 
         (error {:error :redis-error
+                :reason :unexpected-prefix :prefix prefix
                 :message (string "unexpected RESP prefix: " prefix)})))))
 
 (defn resp-read-raw [port]
@@ -75,9 +72,7 @@
   (let [[[ok? val] (protect (resp-read port))]]
     (if ok? val val)))
 
-# ============================================================================
-# Command helpers
-# ============================================================================
+## ── Command helpers ───────────────────────────────────────────────────
 
 (defn resp-ok? [val]
   "Convert 'OK' string replies to true."
@@ -87,9 +82,7 @@
   "Convert integer 0/1 replies to boolean."
   (= val 1))
 
-# ============================================================================
-# Parameter for ambient port access
-# ============================================================================
+## ── Parameter for ambient port access ─────────────────────────────────
 
 (def *redis-port* (parameter nil))
 
@@ -97,14 +90,12 @@
   "Send a command on the current Redis port and read the reply."
   (let [[port (*redis-port*)]]
     (when (nil? port)
-      (error {:error :redis-error :message "no active Redis connection"}))
+      (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
     (port/write port (apply resp-encode args))
     (port/flush port)
     (resp-read port)))
 
-# ============================================================================
-# Connection
-# ============================================================================
+## ── Connection ────────────────────────────────────────────────────────
 
 (defn redis-connect [host port]
   "Connect to Redis via TCP. Returns the raw TCP port."
@@ -119,9 +110,7 @@
    (redis:auth \"password\") or (redis:auth \"user\" \"password\")."
   (resp-ok? (apply redis-cmd (cons "AUTH" args))))
 
-# ============================================================================
-# Manager fiber
-# ============================================================================
+## ── Manager fiber ─────────────────────────────────────────────────────
 
 (defn default-terminal? [err]
   "Default predicate for terminal errors. Auth failures and protocol
@@ -167,9 +156,7 @@
     {:run        run-with-manager
      :port-param param}))
 
-# ============================================================================
-# Client — simplified connection for direct use
-# ============================================================================
+## ── Client — simplified connection for direct use ─────────────────────
 
 (defn redis-with [host port thunk]
   "Open a Redis connection, run thunk with *redis-port* bound, close on exit."
@@ -178,9 +165,7 @@
       (parameterize ((*redis-port* conn))
         (thunk)))))
 
-# ============================================================================
-# Commands — String
-# ============================================================================
+## ── Commands — String ─────────────────────────────────────────────────
 
 (defn redis-get [key]
   "GET key — returns string or nil."
@@ -235,9 +220,7 @@
   "SETNX key value — returns true if set."
   (resp-bool (redis-cmd "SETNX" key value)))
 
-# ============================================================================
-# Commands — Keys
-# ============================================================================
+## ── Commands — Keys ───────────────────────────────────────────────────
 
 (defn redis-del [& keys]
   "DEL key [key ...] — returns count of deleted keys."
@@ -287,9 +270,7 @@
   "PEXPIREAT key unix-time-ms — set expiration as absolute unix timestamp in ms."
   (resp-bool (redis-cmd "PEXPIREAT" key (string timestamp-ms))))
 
-# ============================================================================
-# Commands — Scan
-# ============================================================================
+## ── Commands — Scan ───────────────────────────────────────────────────
 
 (defn redis-scan [cursor &named match count]
   "SCAN cursor [MATCH pattern] [COUNT count] — incrementally iterate keys.
@@ -343,9 +324,7 @@
         (push acc item))))
   (freeze acc))
 
-# ============================================================================
-# Commands — Hash
-# ============================================================================
+## ── Commands — Hash ───────────────────────────────────────────────────
 
 (defn redis-hset [key field value]
   "HSET key field value — returns 1 if new field, 0 if updated."
@@ -397,9 +376,7 @@
   "HINCRBY key field increment — returns new integer value."
   (redis-cmd "HINCRBY" key field (string n)))
 
-# ============================================================================
-# Commands — List
-# ============================================================================
+## ── Commands — List ───────────────────────────────────────────────────
 
 (defn redis-lpush [key & values]
   "LPUSH key value [value ...] — returns new length."
@@ -433,9 +410,7 @@
   "LSET key index value — returns true on OK."
   (resp-ok? (redis-cmd "LSET" key (string index) value)))
 
-# ============================================================================
-# Commands — Set
-# ============================================================================
+## ── Commands — Set ────────────────────────────────────────────────────
 
 (defn redis-sadd [key & members]
   "SADD key member [member ...] — returns count of new members."
@@ -469,9 +444,7 @@
   "SDIFF key [key ...] — returns array of difference members."
   (apply redis-cmd (cons "SDIFF" keys)))
 
-# ============================================================================
-# Commands — Sorted Set
-# ============================================================================
+## ── Commands — Sorted Set ─────────────────────────────────────────────
 
 (defn redis-zadd [key score member]
   "ZADD key score member — returns count of new members."
@@ -529,9 +502,7 @@
   "ZREVRANGE key start stop WITHSCORES — returns flat array [member score ...]."
   (redis-cmd "ZREVRANGE" key (string start) (string stop) "WITHSCORES"))
 
-# ============================================================================
-# Commands — Server
-# ============================================================================
+## ── Commands — Server ─────────────────────────────────────────────────
 
 (defn redis-ping []
   "PING — returns 'PONG'."
@@ -559,9 +530,7 @@
     (redis-cmd "INFO" section)
     (redis-cmd "INFO")))
 
-# ============================================================================
-# Transactions
-# ============================================================================
+## ── Transactions ──────────────────────────────────────────────────────
 
 (defn redis-multi []
   "MULTI — start a transaction. Returns true on OK."
@@ -616,7 +585,7 @@
               (assign attempts (+ attempts 1))
               (when (>= attempts 16)
                 (error {:error :redis-error
-                        :message "redis:atomic: too many retries (WATCH conflict)"})))
+                        :reason :watch-conflict :message "too many retries (WATCH conflict)"})))
             (begin
               (assign result exec-result)
               (assign done true))))
@@ -626,9 +595,7 @@
           (error val)))))
   result)
 
-# ============================================================================
-# Lua scripting
-# ============================================================================
+## ── Lua scripting ─────────────────────────────────────────────────────
 
 (defn redis-eval [script numkeys & args]
   "EVAL script numkeys [key ...] [arg ...] — execute a Lua script.
@@ -652,9 +619,7 @@
   "SCRIPT FLUSH — clear the script cache."
   (resp-ok? (redis-cmd "SCRIPT" "FLUSH")))
 
-# ============================================================================
-# Pub/Sub
-# ============================================================================
+## ── Pub/Sub ───────────────────────────────────────────────────────────
 
 (defn redis-subscribe [port & channels]
   "Send SUBSCRIBE command on port. Returns the port (now in sub mode)."
@@ -702,9 +667,7 @@
   (each p in patterns
     (resp-read port)))
 
-# ============================================================================
-# Pipelining
-# ============================================================================
+## ── Pipelining ────────────────────────────────────────────────────────
 
 (defn redis-pipeline [& commands]
   "Send multiple commands in a batch, read all replies.
@@ -713,7 +676,7 @@
    Returns array of results."
   (let [[port (*redis-port*)]]
     (when (nil? port)
-      (error {:error :redis-error :message "no active Redis connection"}))
+      (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
     # Send all commands
     (each cmd in commands
       (port/write port (apply resp-encode cmd)))
@@ -724,9 +687,7 @@
       (push results (resp-read-raw port)))
     (freeze results)))
 
-# ============================================================================
-# Internal self-tests (RESP encoding/decoding, no Redis needed)
-# ============================================================================
+## ── Internal self-tests (RESP encoding/decoding, no Redis needed) ─────
 
 (defn run-internal-tests []
   "Self-tests for RESP encoding and decoding."
@@ -825,9 +786,7 @@
 
   true)
 
-# ============================================================================
-# Exports
-# ============================================================================
+## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
   {# Connection

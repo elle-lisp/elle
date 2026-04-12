@@ -5,11 +5,64 @@ are structs `{:error :keyword :message "string"}`, but `(error val)` accepts
 any value — integers, strings, lists. Catch handlers that assume struct
 shape should guard with `struct?` first.
 
+## Error struct convention
+
+Error values are structs with three standard fields:
+
+```lisp
+{:error   :http-error              # module/category — which subsystem failed
+ :reason  :malformed-header        # specific condition — what went wrong
+ :message "malformed header"}      # human-readable summary (for logs/REPL)
+```
+
+**`:error`** is the genus. Match on this for broad catch-all handling:
+"is this an HTTP problem, a DNS problem, or something else?"
+
+**`:reason`** is the species. Match on this for targeted recovery:
+"was it a malformed header, an unsupported scheme, or an EOF?"
+
+**`:message`** is prose for humans. It must never contain information
+that isn't already in a struct field. Programs should never need to
+parse the message string — every datum is in its own field.
+
+Additional fields carry context values relevant to the specific error:
+
+```text
+# Good: every datum is a field; message is a formatted summary
+{:error :dns-format-error
+ :reason :bad-rdata-length
+ :rtype :a
+ :expected 4
+ :actual 7
+ :message "A record rdata length is not 4"}
+
+# Bad: information only in the message string
+{:error :dns-error
+ :message "dns: A record rdata length is not 4"}
+```
+
+### Matching on errors
+
+```text
+# Broad: catch all HTTP errors
+(try (http:get url)
+  (catch e
+    (when (= e:error :http-error)
+      (println "HTTP failed:" e:message))))
+
+# Targeted: handle a specific condition
+(try (irc:connect host port :nick nick)
+  (catch e
+    (when (= e:reason :nick-collision)
+      (println "nick" e:nick "taken, trying another"))))
+```
+
 ## Raising errors
 
 ```lisp
 # (error val) signals an error
-# (error {:error :bad-input :message "expected a number"})
+# (error {:error :bad-input :reason :negative-age :value age
+#         :message "expected a non-negative age"})
 ```
 
 ## try / catch
@@ -89,7 +142,7 @@ On error, cleanup runs, then the error re-propagates:
 (try
   (defer (push err-log :cleanup)
     (push err-log :body)
-    (error {:error :fail :message "oops"}))
+    (error {:error :fail :reason :oops :message "oops"}))
   (catch e :caught))
 # err-log is @[:body :cleanup]
 # try returns :caught
@@ -123,7 +176,8 @@ Errors bubble up through the call stack until caught.
 ```lisp
 (defn validate [age]
   (when (< age 0)
-    (error {:error :invalid :message "negative age"}))
+    (error {:error :invalid :reason :negative-age :value age
+            :message "negative age"}))
   age)
 
 (defn make-person [name age]
@@ -132,6 +186,8 @@ Errors bubble up through the call stack until caught.
 # error propagates from validate through make-person
 (def err (try (make-person "Bob" -5) (catch e e)))
 err:error                  # => :invalid
+err:reason                 # => :negative-age
+err:value                  # => -5
 ```
 
 ## protect vs try/catch vs defer

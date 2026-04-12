@@ -17,6 +17,7 @@ depend on other modules or plugins take them as arguments.
 | `contract.lisp` | Compositional validation for function boundaries |
 | `lua.lisp` | Lua standard library compatibility prelude |
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
+| `irc.lisp` | IRCv3 client: CAP negotiation, SASL PLAIN, message tags, coroutine read stream |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
 
 ---
@@ -430,4 +431,95 @@ Handler module: `{:init (fn [arg] state) :handle-event (fn [event state] [:ok st
 ```bash
 ./target/debug/elle tests/elle/process.lisp
 ./target/debug/elle tests/elle/genserver.lisp
+```
+
+---
+
+# lib/irc
+
+Agent guide for `lib/irc.lisp` -- IRCv3 client.
+
+## Purpose
+
+IRC client with IRCv3 capability negotiation, SASL PLAIN authentication,
+and message tags. Coroutine-based: the connection struct exposes a read
+stream and a send function. No background fibers -- the caller controls
+when messages are consumed.
+
+## Loading
+
+```lisp
+# Plain TCP
+(def irc ((import "std/irc")))
+
+# TLS (standard for modern IRC)
+(def tls ((import "std/tls") (import "plugin/tls")))
+(def irc ((import "std/irc") :tls tls))
+```
+
+## Data flow
+
+```
+irc:connect host port :nick :sasl [user pass]
+  -> TCP or TLS connect
+  -> CAP LS 302 + NICK + USER
+  -> CAP negotiation (LS/REQ/ACK)
+  -> SASL PLAIN if negotiated
+  -> CAP END
+  -> wait for 001 RPL_WELCOME
+  -> return conn struct
+```
+
+## Connection struct
+
+```lisp
+{:messages <coroutine>   # yields parsed messages, auto-PONGs
+ :send     <function>    # (conn:send "COMMAND" "param1" ...)
+ :close    <function>    # sends QUIT, closes transport
+ :nick     "nick"        # resolved nick after registration
+ :caps     |"multi-prefix" "server-time"|  # negotiated capabilities
+ :server   "irc.libera.chat"
+ :isupport {:chantypes "#&" :prefix "(ov)@+"}}
+```
+
+## Message struct
+
+```lisp
+{:tags    {:time "2024-01-01T00:00:00Z" :msgid "abc123"}
+ :source  {:nick "user" :user "ident" :host "host.com"}
+ :command "PRIVMSG"
+ :params  ["#channel" "Hello world"]}
+```
+
+## Exported functions
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `connect` | `(fn [host port &named nick username realname sasl])` | conn struct |
+| `parse-message` | `(fn [line])` | message struct |
+| `format-message` | `(fn [msg])` | string |
+| `parse-tags` | `(fn [raw])` | struct |
+| `parse-source` | `(fn [raw])` | struct |
+| `parse-ctcp` | `(fn [text])` | `{:command :text}` or nil |
+| `test` | `(fn [])` | true |
+
+## Invariants
+
+- `conn:messages` only yields non-PING messages; PINGs are auto-answered
+- `conn:send` formats the trailing parameter automatically (`:` prefix when needed)
+- Registration handles nick collision by appending `_` (up to 3 retries)
+- All I/O yields to the scheduler (async)
+
+## Concurrency patterns
+
+```lisp
+# Simple bot (single fiber)
+(each msg in conn:messages
+  (when (= msg:command "PRIVMSG")
+    (conn:send "PRIVMSG" (get msg:params 0) "reply")))
+
+# Background reader (multi-fiber)
+(def sync ((import "std/sync")))
+(def q (sync:make-queue 256))
+(ev/spawn (fn [] (each msg in conn:messages (q:put msg))))
 ```

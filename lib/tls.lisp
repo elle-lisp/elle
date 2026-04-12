@@ -102,7 +102,8 @@
       (let [[data (port/read port 16384)]]  # async — yields SIG_IO
         (when (nil? data)
           (error {:error :tls-error
-                  :message "tls: connection closed during handshake"}))
+                  :reason :connection-closed :phase :handshake
+                  :message "connection closed during handshake"}))
 
         # Feed into state machine. Outgoing data from this call
         # will be sent at the top of the next loop iteration.
@@ -258,7 +259,7 @@
            [plaintext (if (string? data) (bytes data) data)]
            [result (write-plaintext-fn tls plaintext)]]
       (when (= result:status :error)
-        (error {:error :tls-error :message result:message}))
+        (error {:error :tls-error :reason :write-failed :message result:message}))
       (let [[out result:outgoing]]
         (when (> (length out) 0)
           (port/write port out)))             # async

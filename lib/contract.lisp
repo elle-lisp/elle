@@ -102,7 +102,9 @@
            desc)))
       (true
        (error {:error :type-error
-               :message "compile-validator: unsupported expression type"})))))
+               :reason :unsupported-type
+               :got (type-of expr)
+               :message "unsupported expression type"})))))
 
 # ============================================================================
 # check — multiple predicate functions (all must pass, short-circuits)
@@ -115,7 +117,7 @@
    Short-circuits on the first falsy result.
    Usage: (check integer? odd?)"
     (when (= (length preds) 0)
-      (error {:error :arity-error :message "check: requires at least one predicate"}))
+      (error {:error :arity-error :reason :too-few-args :minimum 1 :message "requires at least one predicate"}))
     (let* [[descs (map string preds)]
            [desc (string/join descs " & ")]]
       (make-validator
@@ -142,7 +144,7 @@
    Does not short-circuit. Returns nil if all pass, aggregate failure if any fail.
    Usage: (v/and integer? (fn [x] (> x 0)))"
     (when (= (length exprs) 0)
-      (error {:error :arity-error :message "v/and: requires at least one expression"}))
+      (error {:error :arity-error :reason :too-few-args :minimum 1 :message "requires at least one expression"}))
     (let* [[validators (map compile-validator exprs)]
            [desc (string/join (map (fn [v] (get v :describe)) validators) " & ")]]
       (make-validator
@@ -167,7 +169,7 @@
    Short-circuits on the first pass. If all fail, returns aggregate failure.
    Usage: (v/or integer? string?)"
     (when (= (length exprs) 0)
-      (error {:error :arity-error :message "v/or: requires at least one expression"}))
+      (error {:error :arity-error :reason :too-few-args :minimum 1 :message "requires at least one expression"}))
     (let* [[validators (map compile-validator exprs)]
            [desc (string/join (map (fn [v] (get v :describe)) validators) " | ")]]
       (make-validator
@@ -197,7 +199,7 @@
    Uses = for comparison.
    Usage: (v/oneof :a :b :c)"
     (when (= (length values) 0)
-      (error {:error :arity-error :message "v/oneof: requires at least one value"}))
+      (error {:error :arity-error :reason :too-few-args :minimum 1 :message "requires at least one value"}))
     (let* [[parts (map string values)]
            [desc (append "one of: " (string/join parts ", "))]]
       (make-validator

@@ -65,7 +65,10 @@
   (defn decode-with [data table]
     (unless (string? data)
       (error {:error :type-error
-              :message (string "base64: expected string, got " (type-of data))}))
+              :reason :wrong-type
+              :expected :string
+              :got (type-of data)
+              :message (string "expected string, got " (type-of data))}))
     (let* [[s     (strip-padding (string/trim data))]
            [slen  (length s)]
            [input (bytes s)]
@@ -74,7 +77,9 @@
                      (let [[v (table (input pos))]]
                        (when (= v -1)
                          (error {:error :base64-error
-                                 :message (string "base64/decode: invalid char at " pos)}))
+                                 :reason :invalid-char
+                                 :position pos
+                                 :message (string "invalid char at " pos)}))
                        v))]]
       (var i 0)
       (while (<= (+ i 3) (dec slen))
@@ -90,7 +95,7 @@
         [3 (let [[a (lookup i)] [b (lookup (inc i))] [c (lookup (+ i 2))]]
              (push acc (bit/or (bit/shl a 2) (bit/shr b 4)))
              (push acc (bit/and (bit/or (bit/shl b 4) (bit/shr c 2)) 255)))]
-        [_ (error {:error :base64-error :message "base64/decode: invalid length"})])
+        [_ (error {:error :base64-error :reason :invalid-length :message "invalid length"})])
       (freeze (bytes ;acc))))
 
   (defn decode [data]     "Base64-decode (standard)."   (decode-with data std-decode))

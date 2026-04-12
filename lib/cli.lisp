@@ -17,7 +17,11 @@
     "Error if v is non-nil and not a string."
     (when (and v (not (string? v)))
       (error {:error :type-error
-              :message (string ctx ": :" key " must be a string, got " (type-of v))}))
+              :reason :wrong-type
+              :expected :string
+              :got (type-of v)
+              :param (keyword key)
+              :message (string ":" key " must be a string, got " (type-of v))}))
     v)
 
   ## ── Arg spec parsing ─────────────────────────────────────────────
@@ -25,26 +29,34 @@
   (defn parse-arg-spec [spec]
     "Normalize an arg spec struct into internal form."
     (unless (struct? spec)
-      (error {:error :cli-error :message "cli/parse: each arg must be a struct"}))
+      (error {:error :cli-error :reason :invalid-spec :expected :struct :got (type-of spec) :message "each arg must be a struct"}))
     (let [[name (require-string spec:name "name" "cli/parse")]]
       (unless name
-        (error {:error :cli-error :message "cli/parse: each arg must have a :name key"}))
+        (error {:error :cli-error :reason :missing-name :message "each arg must have a :name key"}))
       (let* [[long-name  (require-string spec:long "long" "cli/parse")]
              [short-name (require-string spec:short "short" "cli/parse")]
              [action-kw  (let [[v spec:action]]
                            (if (nil? v) :set
                              (if (keyword? v) v
                                (error {:error :cli-error
-                                       :message (string "cli/parse: :action must be a keyword, got "
+                                       :reason :wrong-type
+                                       :expected :keyword
+                                       :got (type-of v)
+                                       :param :action
+                                       :message (string ":action must be a keyword, got "
                                                         (type-of v))}))))]
              [default-val (require-string spec:default "default" "cli/parse")]
              [required?   spec:required]]
         (when (and short-name (not (= (length short-name) 1)))
           (error {:error :cli-error
-                  :message (string "cli/parse: :short must be a single character, got \"" short-name "\"")}))
+                  :reason :invalid-short
+                  :option short-name
+                  :message (string ":short must be a single character, got \"" short-name "\"")}))
         (unless (contains? |:set :flag :count :append| action-kw)
           (error {:error :cli-error
-                  :message (string "cli/parse: unknown action " action-kw
+                  :reason :unknown-action
+                  :action action-kw
+                  :message (string "unknown action " action-kw
                                    ", expected :set, :flag, :count, or :append")}))
         {:name name :long long-name :short short-name
          :action action-kw :default default-val :required required?})))
@@ -98,21 +110,23 @@
                     [value (slice arg (inc eq) (length arg))]
                     [spec  (find-by-long specs name)]]
                (unless spec
-                 (error {:error :cli-error :message (string "cli/parse: unknown option --" name)}))
+                 (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
                (apply-action result spec:name spec:action value)))
             ## --long
             ((string/starts-with? arg "--")
              (let* [[name (slice arg 2 (length arg))]
                     [spec (find-by-long specs name)]]
                (unless spec
-                 (error {:error :cli-error :message (string "cli/parse: unknown option --" name)}))
+                 (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
                (match spec:action
                  [:flag  (apply-action result spec:name :flag nil)]
                  [:count (apply-action result spec:name :count nil)]
                  [_      (assign i (inc i))
                          (when (>= i argc)
                            (error {:error :cli-error
-                                   :message (string "cli/parse: --" name " requires a value")}))
+                                   :reason :missing-value
+                                   :option (string "--" name)
+                                   :message (string "--" name " requires a value")}))
                          (apply-action result spec:name spec:action (args i))])))
             ## -x (short) — handles stacked flags like -vvv
             ((and (string/starts-with? arg "-") (> (length arg) 1))
@@ -122,7 +136,7 @@
                  (let* [[ch   (chars ci)]
                         [spec (find-by-short specs ch)]]
                    (unless spec
-                     (error {:error :cli-error :message (string "cli/parse: unknown option -" ch)}))
+                     (error {:error :cli-error :reason :unknown-option :option (string "-" ch) :message (string "unknown option -" ch)}))
                    (match spec:action
                      [:flag  (apply-action result spec:name :flag nil)]
                      [:count (apply-action result spec:name :count nil)]
@@ -135,7 +149,9 @@
                             (assign i (inc i))
                             (when (>= i argc)
                               (error {:error :cli-error
-                                      :message (string "cli/parse: -" ch " requires a value")}))
+                                      :reason :missing-value
+                                      :option (string "-" ch)
+                                      :message (string "-" ch " requires a value")}))
                             (apply-action result spec:name spec:action (args i))))]))
                  (assign ci (inc ci)))))
             ## Positional
@@ -145,14 +161,18 @@
                  (put result (keyword ((pos-specs pi) :name)) arg)
                  (assign pi (inc pi)))
                (error {:error :cli-error
-                       :message (string "cli/parse: unexpected argument \"" arg "\"")})))))
+                       :reason :unexpected-argument
+                       :argument arg
+                       :message (string "unexpected argument \"" arg "\"")})))))
         (assign i (inc i)))
       ## Check required args
       (each s in specs
         (when s:required
           (when (nil? (result (keyword s:name)))
             (error {:error :cli-error
-                    :message (string "cli/parse: missing required argument: " s:name)}))))
+                    :reason :missing-required
+                    :name s:name
+                    :message (string "missing required argument: " s:name)}))))
       result))
 
   ## ── Subcommand support ───────────────────────────────────────────
@@ -167,7 +187,9 @@
         (each s in norm-args
           (when (contains? |"command" "command-args"| s:name)
             (error {:error :cli-error
-                    :message (string "cli/parse: arg name " s:name
+                    :reason :reserved-name
+                    :name s:name
+                    :message (string "arg name " s:name
                                      " conflicts with reserved subcommand key")}))))
       (if (not has-cmds)
         (freeze (parse-argv norm-args argv))
@@ -205,12 +227,18 @@
     "Parse CLI arguments against a command spec. Returns struct of parsed values."
     (unless (struct? spec)
       (error {:error :type-error
-              :message (string "cli/parse: spec must be a struct, got " (type-of spec))}))
+              :reason :wrong-type
+              :expected :struct
+              :got (type-of spec)
+              :message (string "spec must be a struct, got " (type-of spec))}))
     (unless (or (array? argv) (pair? argv) (empty? argv))
       (error {:error :type-error
-              :message (string "cli/parse: argv must be a list or array, got " (type-of argv))}))
+              :reason :wrong-type
+              :expected :list
+              :got (type-of argv)
+              :message (string "argv must be a list or array, got " (type-of argv))}))
     (unless spec:name
-      (error {:error :cli-error :message "cli/parse: spec must have a :name key"}))
+      (error {:error :cli-error :reason :missing-name :message "spec must have a :name key"}))
     ## Skip argv[0] (program name)
     (let [[user-argv (if (> (length argv) 0) (rest argv) ())]]
       (parse-with-commands spec (->list user-argv))))
