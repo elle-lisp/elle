@@ -5,6 +5,8 @@ control flow: errors, yields, I/O, fuel exhaustion.
 
 | File | Content |
 |------|---------|
+| [emit](emit.md) | `emit` special form, yield/error macros, signal emission |
+| [capabilities](capabilities.md) | Capability enforcement, `:deny`, `fiber/caps` |
 | [design](design.md) | Motivation, prior art, terminology, core insight |
 | [protocol](protocol.md) | Signal protocol, registry, user signals |
 | [inference](inference.md) | Compile-time verification, restrictions |
