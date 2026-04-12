@@ -38,7 +38,7 @@
     ((or (pair? coll) (empty? coll))
      (if (empty? coll) ()
        (cons (f (first coll)) (map f (rest coll)))))
-    (true (error {:error :type-error :message "map: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn filter [p coll]
   "Return elements of coll for which (p element) is truthy. Type-preserving."
@@ -63,7 +63,7 @@
        (if (p (first coll))
          (cons (first coll) (filter p (rest coll)))
          (filter p (rest coll)))))
-    (true (error {:error :type-error :message "filter: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn fold [f init lst]
   "Reduce lst by applying (f accumulator element) left to right, starting from init. Alias: reduce."
@@ -117,7 +117,7 @@
                           (loop (+ i 1))
                           false)))))
        (loop 0)))
-    (true (error {:error :type-error :message "all?: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn any? [pred coll]
   (cond
@@ -135,7 +135,7 @@
                           true
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error {:error :type-error :message "any?: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn find [pred coll]
   (cond
@@ -153,7 +153,7 @@
                           (get coll i)
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error {:error :type-error :message "find: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn find-index [pred coll]
   (cond
@@ -173,7 +173,7 @@
                           i
                           (loop (+ i 1)))))))
        (loop 0)))
-    (true (error {:error :type-error :message "find-index: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn count [pred coll]
   (cond
@@ -185,7 +185,7 @@
                         n
                         (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))))
        (loop 0 0)))
-    (true (error {:error :type-error :message "count: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn nth [n coll]
   (get coll n))
@@ -204,7 +204,7 @@
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :message "zip: not a sequence"})))))
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
      (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
@@ -251,7 +251,7 @@
          result))
       ((array? coll)
        (apply array (flat (to-list coll))))
-      (true (error {:error :type-error :message "flatten: not a sequence"})))))
+      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn take-while [pred coll]
   (letrec
@@ -280,7 +280,7 @@
                                               (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))]]
          (apply array lst)))
-      (true (error {:error :type-error :message "take-while: not a sequence"})))))
+      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn drop-while [pred coll]
   (letrec
@@ -314,7 +314,7 @@
                                               (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))]]
          (apply array lst)))
-      (true (error {:error :type-error :message "drop-while: not a sequence"})))))
+      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn distinct [coll]
   (let [[seen @{}]]
@@ -342,7 +342,7 @@
                                                  (loop (+ i 1) (cons (get coll i) acc))))))
                                 (loop 0 ())))]]
            (apply array lst)))
-        (true (error {:error :type-error :message "distinct: not a sequence"}))))))
+        (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
 
 (defn frequencies [coll]
   (let [[counts @{}]]
@@ -366,7 +366,7 @@
                                            (reverse acc)
                                            (loop (+ i 1) (cons (get coll i) acc))))))
                           (loop 0 ())))))
-    (true (error {:error :type-error :message "mapcat: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn group-by [f coll]
   (let [[groups @{}]]
@@ -400,7 +400,7 @@
                         ()
                         (cons (f i (get coll i)) (go (+ i 1)))))))
          (go 0))))
-    (true (error {:error :type-error :message "map-indexed: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn partition [n coll]
   (cond
@@ -436,7 +436,7 @@
                         (cons (apply array (take n lst))
                               (part (drop n lst)))))))
        (apply array (part (to-list coll)))))
-    (true (error {:error :type-error :message "partition: not a sequence"}))))
+    (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn interpose [sep coll]
   (letrec
@@ -465,7 +465,7 @@
                                              (loop (+ i 1) (cons (get coll i) acc))))))
                              (loop 0 ())))]]
          (apply array lst)))
-      (true (error {:error :type-error :message "interpose: not a sequence"})))))
+      (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn min-key [f & args]
   (fold (fn (best x) (if (< (f x) (f best)) x best))
@@ -498,7 +498,7 @@
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :message "sort-by: not a sequence"})))))
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
      (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
@@ -541,7 +541,7 @@
                              (reverse acc)
                              (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :message "sort-with: not a sequence"})))))
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
      (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
@@ -610,17 +610,15 @@
   (let* [[fmt (if (empty? opts)
                 :mermaid
                 (if (> (length opts) 1)
-                  (error {:error :arity-error :message "fn/cfg: expected at most 1 format keyword"})
+                  (error {:error :arity-error :reason :too-many-args :maximum 1 :message "expected at most 1 format keyword"})
                   (first opts)))]
          [cfg (fn/flow target)]]
     (when (nil? cfg)
-      (error {:error :type-error :message "fn/cfg: target has no LIR"}))
+      (error {:error :type-error :reason :no-lir :message "target has no LIR"}))
     (cond
       ((= fmt :mermaid) (fn/cfg-mermaid cfg))
       ((= fmt :dot)     (fn/cfg-dot cfg))
-      (true (error {:error :type-error :message (-> "fn/cfg: unknown format "
-                                   (append (string fmt))
-                                   (append ", expected :mermaid or :dot"))})))))
+      (true (error {:error :type-error :reason :unknown-format :format fmt :expected |:mermaid :dot| :message (string "unknown format: " fmt)})))))
 
 (defn fn/cfg-label (cfg)
   "Build the label string from a CFG struct's metadata."
@@ -774,11 +772,11 @@
    Keys in b override keys in a. Returns the same mutability as the inputs.
    Signals :type-error if either argument is not a struct or mutabilities differ."
   (if (not (struct? a))
-    (error {:error :type-error :message "merge: first argument must be a struct"})
+    (error {:error :type-error :reason :not-a-struct :position :first :message "first argument must be a struct"})
     (if (not (struct? b))
-      (error {:error :type-error :message "merge: second argument must be a struct"})
+      (error {:error :type-error :reason :not-a-struct :position :second :message "second argument must be a struct"})
       (if (not (= (mutable? a) (mutable? b)))
-        (error {:error :type-error :message "merge: mutability mismatch — both arguments must be the same mutability"})
+        (error {:error :type-error :reason :mutability-mismatch :message "both arguments must be the same mutability"})
         (let [[result (@struct)]]
           (each k in (keys a) (put result k (get a k)))
           (each k in (keys b) (put result k (get b k)))
@@ -1148,7 +1146,7 @@
         :park   (handle-park caller request)
         :notify (handle-notify caller request)
         (error {:error :protocol-error
-                :message (string "unknown :wait op: " (request :op))})))
+                :reason :unknown-op :op (request :op) :message (string "unknown op: " (request :op))})))
 
     (defn handle-fiber-after-resume [fiber]
       "Route a fiber to the right place after resume."
@@ -1282,7 +1280,7 @@
   (let [[timeout-ms (or (get args 0) 0)]
         [shutdown-fn (*shutdown*)]]
     (when (nil? shutdown-fn)
-      (error {:error :state-error :message "ev/shutdown: not inside an event loop"}))
+      (error {:error :state-error :reason :no-event-loop :message "not inside an event loop"}))
     (shutdown-fn timeout-ms)))
 
 (defn ev/with-scheduler [sched & thunks]
@@ -1335,7 +1333,7 @@
   "Emit a :wait signal. Guards against use outside async scheduler."
   (when (nil? (*spawn*))
     (error {:error :state-error
-            :message (string "ev/" (get request :op) " requires an async scheduler")}))
+            :reason :no-scheduler :op (get request :op) :message (string (get request :op) " requires an async scheduler")}))
   (emit :wait request))
 
 (defn ev/futex-wait [key cell expected]
@@ -1414,7 +1412,7 @@
       (each f in remaining (ev/abort f))
       (if (= done work)
         (ev/join work)
-        (error {:error :timeout :message "operation timed out"})))))
+        (error {:error :timeout :reason :deadline-exceeded :message "operation timed out"})))))
 
 (defn ev/scope [body-fn]
   "Structured concurrency nursery. body-fn receives a spawn function.
@@ -1604,10 +1602,10 @@
   (if (or (array? coll) (bytes? coll) (string? coll))
     (when (or (< key 0) (>= key (length coll)))
       (error {:error :key-error
-              :message (string "update: index out of bounds: " key)}))
+              :reason :index-out-of-bounds :key key :message (string "index out of bounds: " key)}))
     (unless (has? coll key)
       (error {:error :key-error
-              :message (string "update: key not found: " key)})))
+              :reason :key-not-found :key key :message (string "key not found: " key)})))
   (put coll key (f (get coll key))))
 
 (defn sum [xs]

@@ -6,9 +6,7 @@
 ## Async/uring-first: all I/O goes through udp/send-to and udp/recv-from,
 ## which dispatch through whatever I/O backend the scheduler uses.
 
-# ============================================================================
-# Constants
-# ============================================================================
+## ── Constants ─────────────────────────────────────────────────────────
 
 (def TYPE-A     1)
 (def TYPE-AAAA  28)
@@ -35,9 +33,7 @@
 (def DEFAULT-TIMEOUT 3000)
 (def DEFAULT-RETRIES 2)
 
-# ============================================================================
-# Byte packing helpers
-# ============================================================================
+## ── Byte packing helpers ──────────────────────────────────────────────
 
 (defn u16->bytes [n]
   "Encode a 16-bit integer as 2 big-endian bytes."
@@ -57,9 +53,7 @@
     (bit/or (bit/shl (get buf (+ offset 2)) 8)
             (get buf (+ offset 3)))))
 
-# ============================================================================
-# Domain name encoding / decoding
-# ============================================================================
+## ── Domain name encoding / decoding ───────────────────────────────────
 
 (defn encode-name [name]
   "Encode a domain name as DNS wire format (length-prefixed labels + null).
@@ -69,7 +63,11 @@
             (let [[label-bytes (bytes label)]]
               (when (> (length label-bytes) 63)
                 (error {:error :dns-error
-                        :message (concat "dns: label too long: " label)}))
+                        :reason :label-too-long
+                        :label label
+                        :length (length label-bytes)
+                        :limit 63
+                        :message (concat "label too long: " label)}))
               (concat acc (bytes (length label-bytes)) label-bytes)))
           (bytes)
           (concat labels [""]))))
@@ -86,7 +84,10 @@
   (forever
     (when (>= safety 128)
       (error {:error :dns-format-error
-              :message "dns: name decode loop exceeded 128 iterations"}))
+              :reason :decode-loop
+              :iterations safety
+              :limit 128
+              :message "name decode loop exceeded 128 iterations"}))
     (assign safety (+ safety 1))
     (let [[b (get buf pos)]]
       (cond
@@ -111,9 +112,7 @@
   {:name (string/join (freeze parts) ".")
    :offset (or return-offset (+ pos 1))})
 
-# ============================================================================
-# Query building
-# ============================================================================
+## ── Query building ────────────────────────────────────────────────────
 
 (defn build-query [id name qtype]
   "Build a DNS query packet.
@@ -131,9 +130,7 @@
                           (u16->bytes CLASS-IN))]]
     (concat header question)))
 
-# ============================================================================
-# Response parsing
-# ============================================================================
+## ── Response parsing ──────────────────────────────────────────────────
 
 (defn parse-header [buf]
   "Parse a DNS response header (first 12 bytes).
@@ -141,7 +138,10 @@
             :qdcount :ancount :nscount :arcount}."
   (when (< (length buf) 12)
     (error {:error :dns-format-error
-            :message "dns: response too short for header"}))
+            :reason :short-header
+            :length (length buf)
+            :minimum 12
+            :message "response too short for header"}))
   (let [[flags (read-u16 buf 2)]]
     {:id      (read-u16 buf 0)
      :qr      (not (= 0 (bit/and flags FLAG-QR)))
@@ -202,25 +202,34 @@
            [rdata-start (+ pos2 10)]
            [rdata-end   (+ rdata-start rdlen)]]
       (let [[record
-              (cond
-                ((= rtype TYPE-A)
-                 (when (not (= rdlen 4))
-                   (error {:error :dns-format-error
-                           :message "dns: A record rdata length is not 4"}))
-                 {:type :a :name name :addr (format-ipv4 buf rdata-start) :ttl ttl})
+              (case rtype
+                TYPE-A
+                (begin
+                  (when (not (= rdlen 4))
+                    (error {:error :dns-format-error
+                            :reason :bad-rdata-length
+                            :rtype :a
+                            :expected 4
+                            :actual rdlen
+                            :message "A record rdata length is not 4"}))
+                  {:type :a :name name :addr (format-ipv4 buf rdata-start) :ttl ttl})
 
-                ((= rtype TYPE-AAAA)
-                 (when (not (= rdlen 16))
-                   (error {:error :dns-format-error
-                           :message "dns: AAAA record rdata length is not 16"}))
-                 {:type :aaaa :name name :addr (format-ipv6 buf rdata-start) :ttl ttl})
+                TYPE-AAAA
+                (begin
+                  (when (not (= rdlen 16))
+                    (error {:error :dns-format-error
+                            :reason :bad-rdata-length
+                            :rtype :aaaa
+                            :expected 16
+                            :actual rdlen
+                            :message "AAAA record rdata length is not 16"}))
+                  {:type :aaaa :name name :addr (format-ipv6 buf rdata-start) :ttl ttl})
 
-                ((= rtype TYPE-CNAME)
-                 (let [[cname-result (decode-name buf rdata-start)]]
-                   {:type :cname :name name :target cname-result:name :ttl ttl}))
+                TYPE-CNAME
+                (let [[cname-result (decode-name buf rdata-start)]]
+                  {:type :cname :name name :target cname-result:name :ttl ttl})
 
-                # Unknown record type — skip
-                (true nil))]]
+                nil)]]
         (when record (push records record)))
       (assign pos rdata-end))
     (assign i (+ i 1)))
@@ -239,9 +248,7 @@
      :authority authority:records
      :additional additional:records}))
 
-# ============================================================================
-# resolv.conf parsing
-# ============================================================================
+## ── resolv.conf parsing ───────────────────────────────────────────────
 
 (defn parse-resolv-conf [text]
   "Parse /etc/resolv.conf and return a list of nameserver IP strings."
@@ -267,9 +274,7 @@
           servers))
       ["127.0.0.1"])))
 
-# ============================================================================
-# Transaction ID generation
-# ============================================================================
+## ── Transaction ID generation ─────────────────────────────────────────
 
 (var next-txid 1)
 
@@ -279,9 +284,7 @@
     (assign next-txid (bit/and (+ id 1) 0xffff))
     id))
 
-# ============================================================================
-# DNS query execution
-# ============================================================================
+## ── DNS query execution ───────────────────────────────────────────────
 
 (defn do-query [server name qtype timeout]
   "Send a single DNS query and return the parsed response.
@@ -294,24 +297,35 @@
       (let* [[[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]]
         (unless ok?
           (error {:error :dns-timeout
-                  :message (concat "dns: timeout querying " server " for " name)}))
+                  :reason :query-timeout
+                  :server server
+                  :name name
+                  :message (concat "timeout querying " server " for " name)}))
         (let* [[resp-buf result:data]
                [resp (parse-response resp-buf)]]
           # Verify transaction ID
           (unless (= resp:header:id txid)
             (error {:error :dns-error
-                    :message "dns: transaction ID mismatch"}))
+                    :reason :txid-mismatch
+                    :expected txid
+                    :actual resp:header:id
+                    :message "transaction ID mismatch"}))
           # Check truncation
           (when resp:header:tc
             (error {:error :dns-error
-                    :message "dns: response truncated (TC bit set)"}))
+                    :reason :truncated
+                    :message "response truncated (TC bit set)"}))
           # Check RCODE
           (unless (= resp:header:rcode RCODE-OK)
             (let [[rcode-name (or (get rcode-names resp:header:rcode)
                                   (string resp:header:rcode))]]
               (error {:error :dns-error
+                      :reason :server-error
                       :rcode resp:header:rcode
-                      :message (concat "dns: server returned " rcode-name
+                      :rcode-name rcode-name
+                      :name name
+                      :server server
+                      :message (concat "server returned " rcode-name
                                        " for " name)})))
           resp)))))
 
@@ -329,11 +343,12 @@
   # All retries exhausted
   (when last-err (error last-err))
   (error {:error :dns-timeout
-          :message (concat "dns: all retries exhausted for " name)}))
+          :reason :retries-exhausted
+          :name name
+          :retries retries
+          :message (concat "retries exhausted for " name)}))
 
-# ============================================================================
-# High-level resolver
-# ============================================================================
+## ── High-level resolver ───────────────────────────────────────────────
 
 (defn resolve-type [name qtype server timeout retries]
   "Resolve a name to records of a specific type, following CNAMEs."
@@ -343,13 +358,18 @@
   (forever
     (when (>= depth MAX-CNAME-DEPTH)
       (error {:error :dns-error
-              :message (concat "dns: CNAME chain too deep for " name)}))
+              :reason :cname-too-deep
+              :name name
+              :depth depth
+              :limit MAX-CNAME-DEPTH
+              :message (concat "CNAME chain too deep for " name)}))
     (let* [[resp (query-with-retries server current-name qtype timeout retries)]
            [answers resp:answers]
            # Collect direct answers of the requested type
-           [direct (filter (fn [r] (= r:type (cond ((= qtype TYPE-A) :a)
-                                                    ((= qtype TYPE-AAAA) :aaaa)
-                                                    (true nil))))
+           [direct (filter (fn [r] (= r:type (case qtype
+                                                    TYPE-A :a
+                                                    TYPE-AAAA :aaaa
+                                                    nil)))
                            answers)]
            # Check for CNAME redirects
            [cnames (filter (fn [r] (= r:type :cname)) answers)]]
@@ -396,9 +416,7 @@
          [ret (or retries DEFAULT-RETRIES)]]
     (query-with-retries srv name qtype tmo ret)))
 
-# ============================================================================
-# Internal tests (pure, no network)
-# ============================================================================
+## ── Internal tests (pure, no network) ─────────────────────────────────
 
 (defn run-internal-tests []
   "Sanity checks on wire-format helpers. Called via (dns:test)."
@@ -600,9 +618,7 @@
 
   true)
 
-# ============================================================================
-# Exports
-# ============================================================================
+## ── Exports ───────────────────────────────────────────────────────────
 
 (fn []
   {:resolve        resolve

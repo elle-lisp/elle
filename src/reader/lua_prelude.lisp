@@ -145,7 +145,7 @@
 # lua_error: raise an error (can't use `error` — already a builtin)
 (def lua_error (fn (msg)
   (if (string? msg)
-    (error {:error :lua-error :message msg})
+    (error {:error :lua-error :reason :user-error :message msg})
     (error msg))))
 
 # ============================================================================
@@ -172,4 +172,4 @@
 (def lua_assert (fn (v msg)
   (if v v
     (error {:error :assertion-failed
-            :message (if (nil? msg) "assertion failed" msg)}))))
+            :reason :falsy-value :message (if (nil? msg) "assertion failed" msg)}))))

@@ -3,16 +3,14 @@
 ## Loaded via: (def http ((import-file "./lib/http.lisp")))
 ## Usage:      (http:get "http://example.com/")
 
-# ============================================================================
-# URL parsing
-# ============================================================================
+## ── URL parsing ──────────────────────────────────────────────────────
 
 (defn parse-url [url]
   "Parse an HTTP URL string into {:scheme :host :port :path :query}.
    Only 'http' scheme is supported. Default port is 80. Default path is '/'.
    Query is nil if absent, otherwise the string after '?' without the '?'."
-  (unless (string-starts-with? url "http://")
-    (error {:error :http-error :message "unsupported scheme" :url url}))
+  (unless (string/starts-with? url "http://")
+    (error {:error :http-error :reason :unsupported-scheme :url url :message "unsupported scheme"}))
   (let* [[tail (slice url (length "http://"))]
          [slash (string/find tail "/")]
          [auth (if (nil? slash) tail (slice tail 0 slash))]
@@ -21,17 +19,15 @@
          [host (if (nil? colon) auth (slice auth 0 colon))]
          [port (if (nil? colon) 80 (integer (slice auth (inc colon))))]]
     (when (empty? tail)
-      (error {:error :http-error :message "missing host" :url url}))
+      (error {:error :http-error :reason :missing-host :url url :message "missing host"}))
     (when (empty? host)
-      (error {:error :http-error :message "empty host" :url url}))
+      (error {:error :http-error :reason :empty-host :url url :message "empty host"}))
     (let* [[q-pos (string/find path+query "?")]
            [path (if (nil? q-pos) path+query (slice path+query 0 q-pos))]
            [query (if (nil? q-pos) nil (slice path+query (inc q-pos)))]]
       {:scheme "http" :host host :port port :path path :query query})))
 
-# ============================================================================
-# Header parsing and serialization
-# ============================================================================
+## ── Header parsing and serialization ─────────────────────────────────
 
 (defn header->kw [name]
   "Convert HTTP header name string to lowercase keyword.
@@ -63,8 +59,8 @@
         (break (freeze headers)))
       (let [[colon-pos (string/find line ":")]]
         (when (nil? colon-pos)
-          (error {:error :http-error :message "malformed header"
-                  :line line}))
+          (error {:error :http-error :reason :malformed-header :line line
+                  :message "malformed header"}))
         (let* [[name (slice line 0 colon-pos)]
                [value (string/trim (slice line (inc colon-pos)))]]
           (put headers (header->kw name) value))))))
@@ -75,9 +71,7 @@
   (each [key value] in (pairs headers)
     (port/write port (string/format "{}: {}\r\n" (kw->header key) value))))
 
-# ============================================================================
-# Request and response wire format
-# ============================================================================
+## ── Request and response wire format ─────────────────────────────────
 
 (defn read-request-line [port]
   "Read and parse HTTP request line: 'GET /path HTTP/1.1'.
@@ -87,12 +81,12 @@
       nil
       (let [[parts (string/split line " ")]]
         (when (< (length parts) 3)
-          (error {:error :http-error :message "malformed request line"
-                  :line line}))
+          (error {:error :http-error :reason :malformed-request-line :line line
+                  :message "malformed request line"}))
         (let [[[method path version] parts]]
           (unless (string/starts-with? version "HTTP/")
-            (error {:error :http-error :message "invalid HTTP version"
-                    :version version}))
+            (error {:error :http-error :reason :invalid-http-version :version version
+                    :message "invalid HTTP version"}))
           {:method method :path path :version version})))))
 
 (defn write-request-line [port method path]
@@ -106,8 +100,8 @@
   (let* [[line (port/read-line port)]
          [parts (string/split line " ")]]
     (when (< (length parts) 2)
-      (error {:error :http-error :message "malformed status line"
-              :line line}))
+      (error {:error :http-error :reason :malformed-status-line :line line
+              :message "malformed status line"}))
     (let* [[[version status-str & reason-parts] parts]
            [status (integer status-str)]
            [reason (if (empty? reason-parts) "" (string/join reason-parts " "))]]
@@ -130,15 +124,13 @@
         (while (pos? n)
           (let [[chunk (port/read port n)]]
             (when (nil? chunk)
-              (error {:error :http-error :message "unexpected EOF reading HTTP body"}))
+              (error {:error :http-error :reason :unexpected-eof :phase :body :message "unexpected EOF reading body"}))
             (let [[b (if (bytes? chunk) chunk (bytes chunk))]]
               (append buf b)
               (assign n (- n (length b))))))
         (string (freeze buf))))))
 
-# ============================================================================
-# Reason phrases
-# ============================================================================
+## ── Reason phrases ───────────────────────────────────────────────────
 
 (def reason-phrases
   {200 "OK"
@@ -158,9 +150,7 @@
    502 "Bad Gateway"
    503 "Service Unavailable"})
 
-# ============================================================================
-# Response construction
-# ============================================================================
+## ── Response construction ────────────────────────────────────────────
 
 (defn http-respond [status body &named headers]
   "Build a response struct with Content-Type and Content-Length set.
@@ -172,9 +162,7 @@
                    (merge base-headers (freeze headers)))]]
     {:status status :headers merged :body body}))
 
-# ============================================================================
-# Client API
-# ============================================================================
+## ── Client API ───────────────────────────────────────────────────────
 
 (defn wants-close? [headers]
   "True if headers indicate the connection should close."
@@ -242,9 +230,7 @@
   "Close a keep-alive session."
   (port/close session:conn))
 
-# ============================================================================
-# Server API
-# ============================================================================
+## ── Server API ───────────────────────────────────────────────────────
 
 (defn read-request [conn]
   "Read a complete HTTP request from a connection port.
@@ -308,9 +294,7 @@
       (unless ok? (break))
       (ev/spawn (fn [] (connection-loop conn handler on-error))))))
 
-# ============================================================================
-# Exports
-# ============================================================================
+## ── Exports ─────────────────────────────────────────────────────────
 
 (defn run-internal-tests []
   "Sanity checks on internal wire-format helpers. Called via (http:test)."
@@ -365,9 +349,9 @@
     (port/flush p)
     (port/close p))
   (let [[content (slurp "/tmp/elle-http-test-write-headers")]]
-    (assert (string-contains? content "Content-Type: text/plain")
+    (assert (string/contains? content "Content-Type: text/plain")
       "write-headers content-type")
-    (assert (string-contains? content "Content-Length: 11")
+    (assert (string/contains? content "Content-Length: 11")
       "write-headers content-length"))
 
   # read-request-line

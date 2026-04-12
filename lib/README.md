@@ -13,6 +13,7 @@
 | `gtk4.lisp` | GTK4 declarative UI (widgets, events, CSS, WebKit) | |
 | `gtk4/` | GTK4 sub-modules: bind, widgets, webview | |
 | `sdl.lisp` | SDL3 bindings for games/graphics | |
+| `irc.lisp` | IRCv3 client (CAP, SASL, message tags) | |
 | `zmq.lisp` | ZeroMQ bindings | | |
 
 Each module is a closure. `import` loads it; calling the result

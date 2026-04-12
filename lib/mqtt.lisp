@@ -34,7 +34,7 @@
         (when (pred pkt) (break pkt))
         (let [[data (port/read conn:tcp 16384)]]
           (when (nil? data)
-            (error {:error :mqtt-error :message "mqtt: connection closed unexpectedly"}))
+            (error {:error :mqtt-error :reason :connection-closed :message "connection closed unexpectedly"}))
           (plugin:feed conn:mqtt data)))))
 
   (defn packet-type? [type-kw]
@@ -61,7 +61,8 @@
                          (let [[ack (drive-until conn (packet-type? :connack))]]
                            (unless (zero? ack:code)
                              (error {:error :mqtt-error
-                                     :message (concat "mqtt: CONNACK rejected, code="
+                                     :reason :connack-rejected :code ack:code
+                                     :message (concat "CONNACK rejected, code="
                                                       (string ack:code))}))))]]
         (unless ok?
           (port/close tcp-port)

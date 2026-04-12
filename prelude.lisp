@@ -102,7 +102,7 @@
 ## (error value) => (emit :error value)
 (defmacro error (& args)
   (if (> (length args) 1)
-    (emit :error {:error :arity-error :message "error: expected 0 or 1 arguments"})
+    (emit :error {:error :arity-error :reason :too-many-args :maximum 1 :message "expected 0 or 1 arguments"})
     `(emit :error ,(if (empty? args) nil (first args)))))
 
 ## try/catch - error handling via fibers
@@ -227,7 +227,7 @@
             (while (< idx len)
               (let ((,var (get items idx))) ,;body)
               (assign idx (+ idx 1)))))
-         (_ (error {:error :type-error :message "each: not a sequence"}))))))
+         (_ (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
 
 ## case - equality dispatch (flat pairs)
 ## (case expr val1 body1 val2 body2 ... [default])
