@@ -179,6 +179,14 @@ These must remain true. Violating them breaks the system:
    forbidden. If you catch an error, you must either handle it meaningfully or
    propagate it.
 
+## Writing Elle code
+
+**Read [`QUICKSTART.md`](QUICKSTART.md) before writing any Elle code.**
+It is the complete language reference: syntax, special forms, data types,
+control flow, macros, fibers, signals, and the standard library. Elle
+looks like a Lisp but has significant differences from Scheme/Clojure/CL
+that will trip you up if you guess. Do not guess; read the reference.
+
 ## Intentional oddities
 
 The 4 most critical (agents get these wrong):
