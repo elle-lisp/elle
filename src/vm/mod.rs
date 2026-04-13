@@ -239,6 +239,7 @@ impl VM {
                 signal: bytecode.signal,
                 capture_params_mask: 0,
                 capture_locals_mask: 0,
+
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
                 rotation_safe: false,

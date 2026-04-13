@@ -240,6 +240,7 @@ mod tests {
             signal: lir.signal,
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             lir_function: Some(Rc::new(lir)),
@@ -448,6 +449,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             lir_function: None,

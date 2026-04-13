@@ -74,6 +74,28 @@ pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (fn/gpu-eligible? value) — true if closure is eligible for GPU compilation
+pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fn/gpu-eligible?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(closure) = args[0].as_closure() {
+        let eligible = match &closure.template.lir_function {
+            Some(lir) => lir.is_gpu_eligible(),
+            None => closure.template.is_gpu_candidate(),
+        };
+        (SIG_OK, Value::bool(eligible))
+    } else {
+        (SIG_OK, Value::FALSE)
+    }
+}
+
 /// (fn/errors? value) — true if closure may error
 pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -374,6 +396,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/mutates-params? (fn (x) (assign x 1)))",
         aliases: &["mutates-params?"],
+    },
+    PrimitiveDef {
+        name: "fn/gpu-eligible?",
+        func: prim_gpu_eligible,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure passes signal and structural checks for GPU compilation",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/gpu-eligible? (fn [a b] (+ a b)))",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "fn/errors?",

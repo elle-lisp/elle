@@ -207,6 +207,42 @@ impl LirFunction {
         })
     }
 
+    /// True if this function is eligible for GPU compilation.
+    ///
+    /// GPU-eligible functions use only numeric operations (arithmetic,
+    /// comparison, local variable access, control flow) with no heap
+    /// allocation, closures, function calls, or signal emission.
+    ///
+    /// Checked in order of increasing cost:
+    /// 1. Signal check (cheapest — just field reads)
+    /// 2. Structural check (arity, captures, cells)
+    /// 3. Instruction whitelist (walks all basic blocks)
+    pub fn is_gpu_eligible(&self) -> bool {
+        // Signal: allow error-only (arithmetic type errors can't happen on
+        // unboxed GPU scalars), reject yield/IO/FFI/polymorphic
+        let non_error = self.signal.bits.subtract(crate::signals::SIG_ERROR);
+        if !non_error.is_empty() || self.signal.propagates != 0 {
+            return false;
+        }
+        // Structural: no closures, no variadics, no mutable cells
+        if self.num_captures > 0 {
+            return false;
+        }
+        if !matches!(self.arity, Arity::Exact(_)) {
+            return false;
+        }
+        if self.capture_params_mask != 0 || self.capture_locals_mask != 0 {
+            return false;
+        }
+        // Instruction whitelist: every instruction and terminator must be GPU-safe
+        self.blocks.iter().all(|b| {
+            b.instructions
+                .iter()
+                .all(|si| is_gpu_instruction(&si.instr))
+                && is_gpu_terminator(&b.terminator.terminator)
+        })
+    }
+
     /// Convert ValueConst instructions to Const (LirConst) for safe cross-thread transfer.
     /// NativeFn ValueConsts are safe to keep as-is (function pointers are Send+Sync).
     /// Closure ValueConsts are converted to `ClosureRef(idx)` using the intern table.
@@ -600,4 +636,39 @@ pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
     } else {
         v.with_string(|s| s.to_string()).map(LirConst::String)
     }
+}
+
+/// True if this LIR instruction is safe for GPU compilation.
+///
+/// GPU-safe: numeric constants, arithmetic, comparison, local/parameter
+/// access. Everything else requires heap, closures, calls, or signals.
+///
+/// LoadCapture/LoadCaptureRaw are parameter loads when num_captures == 0
+/// (checked by is_gpu_eligible before reaching the instruction walk).
+fn is_gpu_instruction(i: &LirInstr) -> bool {
+    matches!(
+        i,
+        LirInstr::Const {
+            value: LirConst::Int(_) | LirConst::Float(_) | LirConst::Bool(_) | LirConst::Nil,
+            ..
+        } | LirInstr::BinOp { .. }
+            | LirInstr::UnaryOp { .. }
+            | LirInstr::Compare { .. }
+            | LirInstr::LoadLocal { .. }
+            | LirInstr::StoreLocal { .. }
+            | LirInstr::LoadCapture { .. }
+            | LirInstr::LoadCaptureRaw { .. }
+    )
+}
+
+/// True if this block terminator is safe for GPU compilation.
+///
+/// GPU-safe: return, jump, branch. Emit (any signal) and Unreachable are not.
+/// An Emit terminator means the function deliberately signals — even :error
+/// via `(error ...)` is not GPU-safe.
+fn is_gpu_terminator(t: &Terminator) -> bool {
+    matches!(
+        t,
+        Terminator::Return(_) | Terminator::Jump(_) | Terminator::Branch { .. }
+    )
 }

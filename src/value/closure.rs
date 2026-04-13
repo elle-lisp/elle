@@ -68,6 +68,28 @@ pub struct ClosureTemplate {
     pub wasm_func_idx: Option<u32>,
 }
 
+impl ClosureTemplate {
+    /// True if signal and structural checks pass for GPU eligibility.
+    ///
+    /// This is a necessary but not sufficient condition — the full
+    /// `LirFunction::is_gpu_eligible()` also walks instructions.
+    /// Use this for cheap runtime queries on compiled closures.
+    /// True if signal and structural checks pass for GPU eligibility.
+    ///
+    /// Allows SIG_ERROR (arithmetic type errors can't happen on unboxed GPU
+    /// scalars) but rejects yield, I/O, FFI, and polymorphism.
+    pub fn is_gpu_candidate(&self) -> bool {
+        // Allow error-only signals (arithmetic ops on unboxed types can't type-error)
+        let non_error_bits = self.signal.bits.subtract(crate::signals::SIG_ERROR);
+        non_error_bits.is_empty()
+            && self.signal.propagates == 0
+            && self.num_captures == 0
+            && matches!(self.arity, Arity::Exact(_))
+            && self.capture_params_mask == 0
+            && self.capture_locals_mask == 0
+    }
+}
+
 /// Closure with captured environment
 #[derive(Debug, Clone)]
 pub struct Closure {
@@ -164,6 +186,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -201,6 +224,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -230,6 +254,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -259,6 +284,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,

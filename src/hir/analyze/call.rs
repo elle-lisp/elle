@@ -279,16 +279,37 @@ impl<'a> Analyzer<'a> {
     /// This enables polymorphic signal inference: if the only sources of
     /// suspension are calling parameters, we infer Polymorphic over them.
     pub(crate) fn compute_inferred_signal(&self, body: &Hir, params: &[Binding]) -> Signal {
-        // If body doesn't suspend, lambda doesn't suspend
-        if !body.signal.may_suspend() {
+        // If body is completely silent, lambda is silent
+        if body.signal.bits.is_empty() && body.signal.propagates == 0 {
             return Signal::silent();
         }
 
+        // If body has signal bits but doesn't suspend (e.g. error-only),
+        // preserve the bits without polymorphic inference
+        if !body.signal.may_suspend() {
+            return Signal {
+                bits: body.signal.bits,
+                propagates: 0,
+            };
+        }
+
+        // Non-suspension bits from the body (error, ffi, etc.) are always
+        // preserved — they don't depend on parameter polymorphism.
+        let non_suspension_bits = body
+            .signal
+            .bits
+            .subtract(crate::signals::SIG_YIELD)
+            .subtract(crate::signals::SIG_DEBUG);
+
         // If there's a direct yield or non-parameter yield, it's Yields
+        // plus whatever non-suspension bits the body has.
         if self.current_signal_sources.has_direct_yield
             || self.current_signal_sources.has_non_param_yield
         {
-            return Signal::yields();
+            return Signal {
+                bits: crate::signals::SIG_YIELD.union(non_suspension_bits),
+                propagates: 0,
+            };
         }
 
         // If param_calls is empty but body suspends, fall back to body's signal
@@ -311,7 +332,7 @@ impl<'a> Analyzer<'a> {
         }
 
         Signal {
-            bits: bound_bits,
+            bits: bound_bits.union(non_suspension_bits),
             propagates,
         }
     }

@@ -235,6 +235,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 },
                 capture_params_mask,
                 capture_locals_mask,
+
                 symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
                 location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
                 rotation_safe: false,

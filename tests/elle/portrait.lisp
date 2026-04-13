@@ -12,9 +12,11 @@
 
 (def p1 (portrait:function a1 :add))
 (assert (= (get p1 :name) "add") "portrait has name")
-(assert (get (get p1 :signal) :silent) "add is silent")
+# add has SIG_ERROR (from +) so not strictly silent, but jit-eligible
+(assert (not (get (get p1 :signal) :silent)) "add has SIG_ERROR from +")
 (assert (empty? (get p1 :captures)) "add has no captures")
-(assert (get (get p1 :composition) :memoizable) "add is memoizable")
+# add has SIG_ERROR so portrait considers it non-memoizable (conservative)
+(assert (not (get (get p1 :composition) :memoizable)) "add not memoizable (has SIG_ERROR)")
 (assert (get (get p1 :composition) :parallelizable) "add is parallelizable")
 (assert (get (get p1 :composition) :jit-eligible) "add is jit-eligible")
 (assert (get (get p1 :composition) :stateless) "add is stateless")
@@ -29,13 +31,15 @@
 (assert (string? text) "render returns string")
 (assert (> (length text) 0) "render is non-empty")
 (assert (contains? text "add") "render contains function name")
-(assert (contains? text "silent") "render shows signal")
+# add has SIG_ERROR, so render shows "error" in signal info
+(assert (contains? text "error") "render shows signal")
 
 # ── Module portrait ─────────────────────────────────────────────────────
 
 (def mp (portrait:module a1))
 (assert (array? (get mp :pure)) "module has pure list")
-(assert (not (empty? (get mp :pure))) "module has pure functions")
+# add/double have SIG_ERROR, so portrait doesn't classify them as pure
+(assert (empty? (get mp :pure)) "no pure functions (SIG_ERROR from arithmetic)")
 
 (def mod-text (portrait:render-module mp))
 (assert (string? mod-text) "module render returns string")

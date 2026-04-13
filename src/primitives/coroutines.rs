@@ -369,6 +369,7 @@ mod tests {
                 signal: Signal::silent(),
                 capture_params_mask: 0,
                 capture_locals_mask: 0,
+
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(crate::error::LocationMap::new()),
                 rotation_safe: false,

@@ -243,6 +243,7 @@ mod tests {
             signal: Signal::yields(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             lir_function: None,
@@ -303,6 +304,7 @@ mod tests {
             signal: Signal::yields(),
             capture_params_mask,
             capture_locals_mask,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(crate::error::LocationMap::new()),
             lir_function: None,

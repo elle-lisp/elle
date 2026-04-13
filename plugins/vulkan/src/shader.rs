@@ -33,7 +33,7 @@ pub(crate) fn create_shader(
     spirv: &[u8],
     num_buffers: u32,
 ) -> Result<GpuShader, String> {
-    if spirv.len() < 4 || spirv.len() % 4 != 0 {
+    if spirv.len() < 4 || !spirv.len().is_multiple_of(4) {
         return Err("SPIR-V data must be non-empty and 4-byte aligned".into());
     }
 
