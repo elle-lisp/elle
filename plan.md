@@ -628,20 +628,21 @@ Ordered steps:
 - Also added: `OpBitwiseOr`(197), `OpBitwiseAnd`(199), `OpShiftLeftLogical`(196),
   `OpShiftRightLogical`(194), `OpBitcast`(124), `umin` (via `OpSelect`)
 
-**1c. Buffer pool + command pool recycling** (`plugins/vulkan/src/dispatch.rs`)
-- Add `BufferPool` to `VulkanState`
-- Per-thread command pool with `vkResetCommandPool`
-- Descriptor pool recycling
+**1c. Buffer pool + command pool recycling** (`plugins/vulkan/src/`) **DONE**
+- `BufferPool` on `VulkanState`: keyed by `(size_bucket, MemoryLocation)`
+- Power-of-2 size bucketing (min 256 bytes), returned to pool on GpuHandle::drop
+- Single command pool on `VulkanState`, reset via `vkResetCommandPool`
 
-**1d. Integer data type support**
-- `dispatch.rs`: accept i32/u32 buffer specs alongside f32
-- `decode.rs`: type-parameterized decode
-- `lib/spirv.lisp`: integer storage buffer types
+**1d. Integer data type support** **DONE**
+- `BufferSpec.data` is `Vec<u8>` (raw bytes, not f32-specific)
+- Buffer specs accept `:dtype` keyword (`:f32` default, `:u32`, `:i32`)
+- `vulkan/decode` supports `:f32`, `:u32`, `:i32`, `:raw`
 
-**1e. Persistent device buffers**
-- New `gpu-buffer` Elle value type
-- Generation-based invalidation protocol
-- `gpu:persist` / `gpu:update` primitives
+**1e. Persistent device buffers** **DONE**
+- `GpuBuffer` type: wraps buffer + allocation, survives across dispatches
+- `vulkan/persist ctx spec` creates, `vulkan/update buf spec` re-uploads
+- `DispatchBuffer` enum: dispatch accepts both specs and persistent refs
+- Returned to buffer pool on GC
 
 **1f. End-to-end Mandelbrot demo** **DONE**
 - `demos/mandelbrot/mandelbrot.lisp`: GTK4 explorer with GPU acceleration + CPU fallback
@@ -652,12 +653,48 @@ Ordered steps:
 
 ### Phase 2: MLIR Integration (months)
 
-- Add melior (Rust MLIR bindings) or llvm-sys dependency
-- Define Elle MLIR dialect ops (see dialect section above)
-- LIR → Elle dialect lowering (instruction mapping table above)
-- Signal lowering pass
-- Numeric specialization pass
-- LLVM backend (replace Wasmtime for tier-2 CPU)
+**Dependency research** (completed):
+
+The melior crate (0.27.0) provides safe Rust bindings to the MLIR C API.
+Requires LLVM/MLIR system installation. Current state:
+
+| Crate | Version | LLVM Required | Status |
+|-------|---------|---------------|--------|
+| `melior` | 0.27.0 | LLVM 22 | Alpha, API unstable |
+| `mlir-sys` | 220.0.1 | LLVM 22 | Low-level C bindings |
+| `inkwell` | (latest) | LLVM 11-21 | Mature, LLVM IR only (no MLIR) |
+
+**Local environment**: Gentoo has LLVM 19/20/21 but no MLIR libraries.
+Gentoo's `llvm-core/llvm` ebuilds don't expose an MLIR USE flag. MLIR
+must be built from source (~30 min, ~500MB disk).
+
+**Practical path**:
+- **Option A**: Build LLVM 22 + MLIR from source, use `melior 0.27.0`.
+  Pro: full MLIR ecosystem (arith, scf, memref, gpu, spirv dialects).
+  Con: heavyweight build dependency, API churn.
+- **Option B**: Use `inkwell` for direct LLVM IR emission (skip MLIR).
+  Pro: mature crate, works with system LLVM 19-21. Con: no MLIR
+  dialects, no gpu→spirv lowering, manual optimization passes.
+- **Option C**: Use `pliron` (pure Rust MLIR-like framework, no C deps).
+  Pro: no system dependency. Con: immature, no LLVM codegen backend.
+
+**SPIR-V path**: MLIR has native gpu→spirv conversion passes. With
+melior, the path is: Elle dialect → standard dialects → gpu dialect →
+spirv dialect → SPIR-V bytes. This replaces our hand-written
+`lib/spirv.lisp` for compiler-generated shaders.
+
+**Recommended**: Option A (melior) once LLVM 22 is packaged. Meanwhile,
+the existing SPIR-V builder + Vulkan plugin handles user-authored GPU
+compute. The compiler-generated GPU path (Phase 3) can wait.
+
+**Steps when ready**:
+1. Build LLVM 22 + MLIR from source (or emerge when available)
+2. Add melior dependency with `MLIR_SYS_*_PREFIX` pointing to install
+3. Define Elle MLIR dialect ops (see dialect section above)
+4. LIR → Elle dialect lowering (instruction mapping table above)
+5. Signal lowering pass
+6. Numeric specialization pass
+7. LLVM backend (replace Wasmtime for tier-2 CPU)
 
 ### Phase 3: GPU Codegen via MLIR (months)
 
@@ -685,20 +722,24 @@ Ordered steps:
 
 ## Open Questions
 
-1. **melior vs llvm-sys**: melior wraps MLIR C API but is less mature.
-   llvm-sys is battle-tested but doesn't expose MLIR. May need both,
-   or direct C API bindings.
+1. **melior vs inkwell** (RESEARCHED): melior 0.27.0 wraps MLIR C API,
+   requires LLVM 22 (not yet in Gentoo). inkwell targets LLVM 11-21
+   (available now) but has no MLIR dialects. Recommendation: wait for
+   LLVM 22 packaging, use melior for full dialect ecosystem. Meanwhile,
+   the SPIR-V builder handles GPU compute and Cranelift handles CPU JIT.
 
 2. **Cranelift coexistence**: Keep Cranelift for tier-1 (fast compile)
-   even with LLVM for tier-2? Or replace entirely? Cranelift's 1MB
-   footprint and fast compilation are hard to beat for JIT.
+   even with LLVM for tier-2. Cranelift's 1MB footprint and <1ms
+   compile time are unbeatable for JIT. LLVM tier-2 is for hot numeric
+   code that benefits from vectorization/LICM/GVN.
 
 3. **WASM story**: LLVM has a wasm32 target. Does this replace Wasmtime
    entirely, or do we keep Wasmtime for its sandbox guarantees?
 
-4. **Build complexity**: LLVM/MLIR are C++ libraries. Building from
-   source adds significant compile time. System packages (Gentoo
-   `llvm`, `mlir`) reduce this but create version coupling.
+4. **Build complexity** (RESEARCHED): Gentoo's llvm-core/llvm ebuilds
+   have no MLIR USE flag. MLIR must be built from source (~30 min,
+   ~500MB). `MLIR_SYS_*_PREFIX` env var points melior to the install.
+   This is the primary practical blocker for Phase 2.
 
 5. **Fiber ↔ GPU workgroup mapping**: Can we lower `fiber/new` on a
    silent+numeric function to a GPU workgroup dispatch? This would
@@ -706,5 +747,5 @@ Ordered steps:
 
 6. **SIG_GPU definition**: Bit 15 is reserved in comments but
    `SIG_GPU` is not yet defined as a constant in `src/signals/mod.rs`
-   and `:gpu` is not registered in the signal registry. Define in
-   Phase 1 or defer until Phase 3?
+   and `:gpu` is not registered in the signal registry. Deferred to
+   Phase 3 — not needed while GPU is plugin-based.
