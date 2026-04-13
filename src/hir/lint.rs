@@ -233,6 +233,8 @@ impl HirLinter {
             }
 
             HirKind::Quote(_) => {}
+
+            HirKind::Error => {}
         }
     }
 }

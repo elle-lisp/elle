@@ -41,6 +41,7 @@ pub enum ErrorKind {
     },
     UndefinedVariable {
         name: String,
+        suggestions: Vec<String>,
     },
 
     // Arity errors
@@ -108,6 +109,15 @@ pub enum ErrorKind {
     PatternError {
         message: String,
     },
+    SignalMismatch {
+        function: String,
+        required_mask: String,
+        actual_mask: String,
+    },
+    UnterminatedForm {
+        delimiter: char,
+        depth: usize,
+    },
 
     // Runtime
     RuntimeError {
@@ -168,8 +178,16 @@ impl LError {
             ErrorKind::TypeMismatch { expected, got } => {
                 format!("Type error: expected {}, got {}", expected, got)
             }
-            ErrorKind::UndefinedVariable { name } => {
-                format!("Reference error: undefined variable '{}'", name)
+            ErrorKind::UndefinedVariable { name, suggestions } => {
+                if suggestions.is_empty() {
+                    format!("undefined variable: {}", name)
+                } else {
+                    format!(
+                        "undefined variable: {} (did you mean: {}?)",
+                        name,
+                        suggestions.join(", ")
+                    )
+                }
             }
             ErrorKind::ArityMismatch { expected, got } => {
                 format!(
@@ -225,6 +243,33 @@ impl LError {
             ErrorKind::CompileError { message } => format!("Compile error: {}", message),
             ErrorKind::MacroError { message } => format!("Macro error: {}", message),
             ErrorKind::PatternError { message } => format!("Pattern error: {}", message),
+            ErrorKind::SignalMismatch {
+                function,
+                required_mask,
+                actual_mask,
+            } => {
+                format!(
+                    "function {} restricted to {} but body may emit {}",
+                    function, required_mask, actual_mask
+                )
+            }
+            ErrorKind::UnterminatedForm { delimiter, depth } => {
+                let closer = match delimiter {
+                    '(' => "paren",
+                    '[' => "bracket",
+                    '{' => "brace",
+                    '|' => "pipe",
+                    _ => "delimiter",
+                };
+                if *depth > 1 {
+                    format!(
+                        "unterminated {} (missing {} closing {}s)",
+                        delimiter, depth, closer
+                    )
+                } else {
+                    format!("unterminated {} (missing closing {})", delimiter, closer)
+                }
+            }
             ErrorKind::RuntimeError { message } => format!("Runtime error: {}", message),
             ErrorKind::ExecutionError { message } => format!("Execution error: {}", message),
             ErrorKind::UncaughtException { message } => {
@@ -240,13 +285,50 @@ impl LError {
     }
 }
 
+impl LError {
+    /// Format this error with source context (carets).
+    ///
+    /// When the location points to a readable file, shows the source
+    /// line with a `^` caret. This is the rich display used by the CLI;
+    /// the `Display` impl is a simpler fallback that doesn't do I/O.
+    pub fn format_with_source(&self) -> String {
+        let mut out = String::new();
+        if let Some(ref loc) = self.location {
+            out.push_str(&format!("  at {}\n", loc));
+            if let Some(source) = crate::error::formatting::load_source_for_loc(loc) {
+                let ctx = crate::error::formatting::format_source_context(&source, loc);
+                if !ctx.is_empty() {
+                    out.push_str(&ctx);
+                }
+            }
+        }
+        out.push_str(&format!("✗ {}", self.description()));
+        match &self.trace {
+            TraceSource::None => {}
+            TraceSource::Vm(frames) | TraceSource::Cps(frames) => {
+                for frame in frames {
+                    out.push_str("\n    in ");
+                    if let Some(ref name) = frame.function_name {
+                        out.push_str(name);
+                    } else {
+                        out.push_str("<anonymous>");
+                    }
+                    if let Some(ref loc) = frame.location {
+                        out.push_str(&format!(" at {}", loc));
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
 impl fmt::Display for LError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Show description, then location if present, then trace if present
-        write!(f, "{}", self.description())?;
         if let Some(ref loc) = self.location {
-            write!(f, "\n  at {}", loc)?;
+            writeln!(f, "  at {}", loc)?;
         }
+        write!(f, "✗ {}", self.description())?;
         match &self.trace {
             TraceSource::None => {}
             TraceSource::Vm(frames) | TraceSource::Cps(frames) => {
@@ -302,7 +384,20 @@ impl LError {
     }
 
     pub fn undefined_variable(name: impl Into<String>) -> Self {
-        LError::new(ErrorKind::UndefinedVariable { name: name.into() })
+        LError::new(ErrorKind::UndefinedVariable {
+            name: name.into(),
+            suggestions: Vec::new(),
+        })
+    }
+
+    pub fn undefined_variable_with_suggestions(
+        name: impl Into<String>,
+        suggestions: Vec<String>,
+    ) -> Self {
+        LError::new(ErrorKind::UndefinedVariable {
+            name: name.into(),
+            suggestions,
+        })
     }
 
     // Arity errors
@@ -400,6 +495,22 @@ impl LError {
         LError::new(ErrorKind::PatternError {
             message: message.into(),
         })
+    }
+
+    pub fn signal_mismatch(
+        function: impl Into<String>,
+        required_mask: impl Into<String>,
+        actual_mask: impl Into<String>,
+    ) -> Self {
+        LError::new(ErrorKind::SignalMismatch {
+            function: function.into(),
+            required_mask: required_mask.into(),
+            actual_mask: actual_mask.into(),
+        })
+    }
+
+    pub fn unterminated_form(delimiter: char, depth: usize) -> Self {
+        LError::new(ErrorKind::UnterminatedForm { delimiter, depth })
     }
 
     // Runtime

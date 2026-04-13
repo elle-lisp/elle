@@ -315,14 +315,25 @@ impl SyntaxReader {
 
     fn read_list(&mut self, start_loc: &SourceLoc, start_boff: usize) -> Result<Syntax, String> {
         self.advance(); // skip (
-        let mut elements = Vec::new();
+        let mut elements: Vec<Syntax> = Vec::new();
+        // Track the innermost unclosed opening delimiter for better error messages
+        let mut innermost_unclosed: Option<SourceLoc> = None;
 
         loop {
             match self.current() {
                 None => {
+                    // Point at innermost unclosed paren if we have one, else the outermost
+                    let point_at = innermost_unclosed.as_ref().unwrap_or(start_loc);
+                    let depth = 1 + elements
+                        .iter()
+                        .filter(|e| matches!(&e.kind, SyntaxKind::List(_)))
+                        .count()
+                        .min(1); // approximate depth
                     return Err(format!(
-                        "{}: unterminated list (missing closing paren)",
-                        start_loc.position()
+                        "{}: unterminated list ({} closing paren{} needed)",
+                        point_at.position(),
+                        depth,
+                        if depth > 1 { "s" } else { "" }
                     ));
                 }
                 Some(OwnedToken::RightParen) => {
@@ -336,6 +347,11 @@ impl SyntaxReader {
                     let set_boff = self.current_byte_offset();
                     elements.push(self.read_set(&set_loc, set_boff)?);
                     continue;
+                }
+                Some(OwnedToken::LeftParen) => {
+                    // Track this as potentially the innermost unclosed paren
+                    innermost_unclosed = Some(self.current_location());
+                    elements.push(self.read()?);
                 }
                 _ => elements.push(self.read()?),
             }

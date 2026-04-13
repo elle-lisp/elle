@@ -201,6 +201,8 @@ fn collect_fn_signals(
         | HirKind::Keyword(_)
         | HirKind::Var(_)
         | HirKind::Quote(_) => {}
+
+        HirKind::Error => {}
     }
 }
 
@@ -395,6 +397,8 @@ fn collect_call_edges(
         | HirKind::Keyword(_)
         | HirKind::Var(_)
         | HirKind::Quote(_) => {}
+
+        HirKind::Error => {}
     }
 }
 
@@ -1017,7 +1021,30 @@ pub(crate) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
     let symbol_index = extract_symbols_from_hir(&result.hir, symbols, &result.arena);
     let mut linter = HirLinter::new();
     linter.lint(&result.hir, symbols, &result.arena);
-    let diagnostics = linter.diagnostics().to_vec();
+    let mut diagnostics = linter.diagnostics().to_vec();
+
+    // Convert accumulated analysis errors to diagnostics
+    for err in &result.errors {
+        use crate::error::ErrorKind;
+        let (code, rule) = match &err.kind {
+            ErrorKind::UndefinedVariable { .. } => ("E001", "undefined-variable"),
+            ErrorKind::SignalMismatch { .. } => ("E002", "signal-mismatch"),
+            ErrorKind::UnterminatedForm { .. } => ("E003", "unterminated-form"),
+            ErrorKind::CompileError { .. } => ("E004", "compile-error"),
+            _ => ("E000", "analysis-error"),
+        };
+        let loc = err
+            .location
+            .clone()
+            .unwrap_or_else(|| crate::reader::SourceLoc::new(&file_name, 0, 0));
+        diagnostics.push(crate::lint::diagnostics::Diagnostic::new(
+            crate::lint::diagnostics::Severity::Error,
+            code,
+            rule,
+            err.description(),
+            Some(loc),
+        ));
+    }
 
     // Build signal map, call graph, and binding spans.
     let signal_map = build_signal_map(&result.hir, &result.arena, symbols);

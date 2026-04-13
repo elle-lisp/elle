@@ -233,12 +233,11 @@ impl<'a> Analyzer<'a> {
             let excess = inferred_signals.bits.subtract(ceiling.bits);
             if !excess.is_empty() {
                 let reg = registry::global_registry().lock().unwrap();
-                return Err(format!(
-                    "{}: function restricted to {} but body may emit {}",
-                    span,
-                    reg.format_signal_bits(ceiling.bits),
-                    reg.format_signal_bits(excess),
-                ));
+                let required = reg.format_signal_bits(ceiling.bits);
+                let actual = reg.format_signal_bits(excess);
+                // Accumulate as recoverable error
+                let error = span.signal_mismatch("", &required, &actual);
+                self.errors.push(error);
             }
         }
 

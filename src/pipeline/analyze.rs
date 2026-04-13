@@ -32,10 +32,12 @@ pub fn analyze(
     );
     analyzer.bind_primitives(&meta);
     let analysis = analyzer.analyze(&expanded)?;
+    let errors = analysis.errors;
     drop(analyzer);
     Ok(AnalyzeResult {
         hir: analysis.hir,
         arena,
+        errors,
     })
 }
 
@@ -84,7 +86,8 @@ pub fn analyze_file(
     );
     analyzer.bind_primitives(&meta);
     let hir = analyzer.analyze_file_letrec(forms, span)?;
+    let errors = analyzer.take_errors();
     drop(analyzer);
 
-    Ok(AnalyzeResult { hir, arena })
+    Ok(AnalyzeResult { hir, arena, errors })
 }

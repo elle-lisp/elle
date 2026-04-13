@@ -45,21 +45,77 @@ fn format_runtime_error(error: &str, symbols: &SymbolTable) -> String {
     error.to_string()
 }
 
-/// Parse a compilation error string and format with location on separate line.
-/// Format: "file:line:col: message" -> "  at file:line:col\n✗ Compilation error: message"
-fn format_compilation_error(error: &str) -> String {
-    // Try to extract location and message
-    // Pattern: "file:line:col: message"
+/// Parse a compilation error string into an LError for structured display.
+/// When the error has "file:line:col: message" format, extracts location.
+/// Uses Generic kind so `description()` returns just the message without
+/// an extra "Compile error:" prefix (the caller provides context).
+fn parse_compilation_error(error: &str) -> elle::error::LError {
+    // Try to extract location from "file:line:col: message" pattern
     if let Some(colon_idx) = error.find(": ") {
-        let location_part = &error[..colon_idx];
-        // Check if this looks like a location (contains at least one colon for line:col)
-        if location_part.contains(':') {
-            let message = &error[colon_idx + 2..];
-            return format!("  at {}\n✗ Compilation error: {}", location_part, message);
+        let loc_part = &error[..colon_idx];
+        let parts: Vec<&str> = loc_part.rsplitn(3, ':').collect();
+        if parts.len() >= 2 {
+            if let (Ok(col), Ok(line)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
+                let file = if parts.len() == 3 {
+                    parts[2]
+                } else {
+                    "<unknown>"
+                };
+                let message = &error[colon_idx + 2..];
+                return elle::error::LError::new(elle::error::ErrorKind::CompileError {
+                    message: message.to_string(),
+                })
+                .with_location(elle::error::SourceLoc::new(file, line, col));
+            }
         }
     }
-    // Fallback: just show error as-is
-    format!("✗ Compilation error: {}", error)
+    elle::error::LError::compile_error(error)
+}
+
+/// Format a compilation error as JSON for --json mode
+fn format_error_json(error: &elle::error::LError) -> String {
+    let (file, line, col) = match &error.location {
+        Some(loc) => (loc.file.as_str(), loc.line, loc.col),
+        None => ("<unknown>", 0, 0),
+    };
+    let (kind, message) = match &error.kind {
+        elle::error::ErrorKind::UndefinedVariable {
+            name, suggestions, ..
+        } => {
+            let msg = if suggestions.is_empty() {
+                format!("undefined variable: {}", name)
+            } else {
+                format!(
+                    "undefined variable: {} (did you mean: {}?)",
+                    name,
+                    suggestions.join(", ")
+                )
+            };
+            ("undefined-variable", msg)
+        }
+        elle::error::ErrorKind::SignalMismatch {
+            function,
+            required_mask,
+            actual_mask,
+        } => (
+            "signal-mismatch",
+            format!(
+                "function {} restricted to {} but body may emit {}",
+                function, required_mask, actual_mask
+            ),
+        ),
+        elle::error::ErrorKind::CompileError { message } => ("compile-error", message.clone()),
+        elle::error::ErrorKind::SyntaxError { message, .. } => ("syntax-error", message.clone()),
+        _ => ("error", error.description()),
+    };
+    format!(
+        r#"{{"error":"compile-error","kind":"{}","file":"{}","line":{},"col":{},"message":"{}"}}"#,
+        kind,
+        file.replace('\\', "\\\\").replace('"', "\\\""),
+        line,
+        col,
+        message.replace('\\', "\\\\").replace('"', "\\\""),
+    )
 }
 
 fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
@@ -112,7 +168,12 @@ fn run_source(
     let result = match compile_file(contents, symbols, source_name) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("{}", format_compilation_error(&e));
+            let lerr = parse_compilation_error(&e);
+            if elle::config::get().json {
+                eprintln!("{}", format_error_json(&lerr));
+            } else {
+                eprintln!("{}", lerr.format_with_source());
+            }
             return Err(e);
         }
     };

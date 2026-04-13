@@ -503,6 +503,8 @@ impl<'a> Lowerer<'a> {
                         || self.walk_for_outward_set(value, scope_bindings)
                 }) || self.walk_for_outward_set(body, scope_bindings)
             }
+
+            HirKind::Error => false,
         }
     }
 
@@ -654,6 +656,8 @@ impl<'a> Lowerer<'a> {
                         && self.hir_break_values_safe(value, target_id, scope_bindings)
                 }) && self.hir_break_values_safe(body, target_id, scope_bindings)
             }
+
+            HirKind::Error => true,
         }
     }
 
@@ -781,6 +785,8 @@ impl<'a> Lowerer<'a> {
                         || Self::walk_for_escaping_break(value, inner_blocks)
                 }) || Self::walk_for_escaping_break(body, inner_blocks)
             }
+
+            HirKind::Error => false,
         }
     }
 
@@ -883,6 +889,8 @@ impl<'a> Lowerer<'a> {
                         && self.all_breaks_have_safe_values(value)
                 }) && self.all_breaks_have_safe_values(body)
             }
+
+            HirKind::Error => true,
         }
     }
 

@@ -47,8 +47,10 @@ impl<'a> Analyzer<'a> {
                         match self.lookup(name, &[]) {
                             Some(binding) => Ok(Hir::silent(HirKind::Var(binding), span)),
                             None => {
-                                let binding = self.resolve_primitive(name);
-                                Ok(Hir::silent(HirKind::Var(binding), span))
+                                // Undefined variable — accumulate error with suggestions
+                                let suggestions = self.suggest_similar(name);
+                                let error = span.undefined_var_suggest(name, suggestions);
+                                Ok(self.accumulate_error(error, &span))
                             }
                         }
                     }
@@ -864,10 +866,14 @@ impl<'a> Analyzer<'a> {
         let first = segments[0];
         let mut result = match self.lookup(first, scopes) {
             Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
-            None => {
-                let binding = self.resolve_primitive(first);
-                Hir::silent(HirKind::Var(binding), span.clone())
-            }
+            None => match self.lookup(first, &[]) {
+                Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
+                None => {
+                    let suggestions = self.suggest_similar(first);
+                    let error = span.undefined_var_suggest(first, suggestions);
+                    return Ok(self.accumulate_error(error, span));
+                }
+            },
         };
 
         // Each subsequent segment: wrap in (get result :segment)
