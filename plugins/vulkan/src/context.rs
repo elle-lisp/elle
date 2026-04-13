@@ -1,6 +1,80 @@
 use ash::vk;
-use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
+use gpu_allocator::vulkan::{
+    Allocation, AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
+};
+use gpu_allocator::MemoryLocation;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+/// Round up to next power of 2, minimum 256 bytes.
+fn size_bucket(bytes: usize) -> usize {
+    let min = 256;
+    let n = bytes.max(min);
+    n.next_power_of_two()
+}
+
+/// Cached Vulkan buffer + allocation, keyed by (size_bucket, MemoryLocation).
+struct PooledBuffer {
+    buffer: vk::Buffer,
+    allocation: Allocation,
+    byte_size: usize,
+}
+
+/// Reusable buffer pool. Caches allocations by (size_bucket, location).
+pub(crate) struct BufferPool {
+    free: HashMap<(usize, MemoryLocation), Vec<PooledBuffer>>,
+}
+
+impl BufferPool {
+    pub(crate) fn new() -> Self {
+        Self {
+            free: HashMap::new(),
+        }
+    }
+
+    /// Acquire a buffer of at least `byte_size` bytes with the given memory location.
+    /// Returns None if no cached buffer is available (caller must allocate fresh).
+    pub(crate) fn acquire(
+        &mut self,
+        byte_size: usize,
+        location: MemoryLocation,
+    ) -> Option<(vk::Buffer, Allocation, usize)> {
+        let bucket = size_bucket(byte_size);
+        self.free
+            .get_mut(&(bucket, location))
+            .and_then(|v| v.pop())
+            .map(|pb| (pb.buffer, pb.allocation, pb.byte_size))
+    }
+
+    /// Return a buffer to the pool for reuse.
+    pub(crate) fn release(
+        &mut self,
+        buffer: vk::Buffer,
+        allocation: Allocation,
+        byte_size: usize,
+        location: MemoryLocation,
+    ) {
+        let bucket = size_bucket(byte_size);
+        self.free
+            .entry((bucket, location))
+            .or_default()
+            .push(PooledBuffer {
+                buffer,
+                allocation,
+                byte_size,
+            });
+    }
+
+    /// Free all pooled buffers.
+    pub(crate) fn drain(&mut self, device: &ash::Device, allocator: &mut Allocator) {
+        for (_, buffers) in self.free.drain() {
+            for pb in buffers {
+                allocator.free(pb.allocation).ok();
+                unsafe { device.destroy_buffer(pb.buffer, None) };
+            }
+        }
+    }
+}
 
 #[allow(dead_code)]
 pub(crate) struct VulkanState {
@@ -12,16 +86,92 @@ pub(crate) struct VulkanState {
     pub(crate) queue_family_index: u32,
     pub(crate) allocator: Allocator,
     pub(crate) fence_fd_fn: ash::khr::external_fence_fd::Device,
+    pub(crate) buffer_pool: BufferPool,
+    /// Reusable command pool (reset between dispatches).
+    pub(crate) command_pool: Option<vk::CommandPool>,
 }
 
 impl Drop for VulkanState {
     fn drop(&mut self) {
         unsafe {
             self.device.device_wait_idle().ok();
+            self.buffer_pool.drain(&self.device, &mut self.allocator);
+            if let Some(cp) = self.command_pool.take() {
+                self.device.destroy_command_pool(cp, None);
+            }
             // allocator is dropped automatically (it's a field)
             self.device.destroy_device(None);
             self.instance.destroy_instance(None);
         }
+    }
+}
+
+impl VulkanState {
+    /// Get or create the reusable command pool.
+    pub(crate) fn get_command_pool(&mut self) -> Result<vk::CommandPool, String> {
+        if let Some(cp) = self.command_pool {
+            unsafe {
+                self.device
+                    .reset_command_pool(cp, vk::CommandPoolResetFlags::empty())
+            }
+            .map_err(|e| format!("reset_command_pool: {e}"))?;
+            Ok(cp)
+        } else {
+            let info = vk::CommandPoolCreateInfo::default()
+                .queue_family_index(self.queue_family_index)
+                .flags(vk::CommandPoolCreateFlags::TRANSIENT);
+            let cp = unsafe { self.device.create_command_pool(&info, None) }
+                .map_err(|e| format!("create_command_pool: {e}"))?;
+            self.command_pool = Some(cp);
+            Ok(cp)
+        }
+    }
+
+    /// Allocate or reuse a buffer from the pool.
+    pub(crate) fn acquire_buffer(
+        &mut self,
+        byte_size: usize,
+        location: MemoryLocation,
+        index: usize,
+    ) -> Result<(vk::Buffer, Allocation), String> {
+        if let Some((buf, alloc, _)) = self.buffer_pool.acquire(byte_size, location) {
+            return Ok((buf, alloc));
+        }
+        // Allocate fresh
+        let bucket_size = size_bucket(byte_size);
+        let buf_info = vk::BufferCreateInfo::default()
+            .size(bucket_size as u64)
+            .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE);
+        let buffer = unsafe { self.device.create_buffer(&buf_info, None) }
+            .map_err(|e| format!("create_buffer[{index}]: {e}"))?;
+
+        let requirements = unsafe { self.device.get_buffer_memory_requirements(buffer) };
+        let allocation = self
+            .allocator
+            .allocate(&AllocationCreateDesc {
+                name: &format!("buf-{index}"),
+                requirements,
+                location,
+                linear: true,
+                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
+            })
+            .map_err(|e| {
+                unsafe { self.device.destroy_buffer(buffer, None) };
+                format!("allocate[{index}]: {e}")
+            })?;
+
+        let bind_result = unsafe {
+            self.device
+                .bind_buffer_memory(buffer, allocation.memory(), allocation.offset())
+        };
+        if let Err(e) = bind_result {
+            self.allocator.free(allocation).ok();
+            unsafe { self.device.destroy_buffer(buffer, None) };
+            return Err(format!("bind_buffer_memory[{index}]: {e}"));
+        }
+
+        Ok((buffer, allocation))
     }
 }
 
@@ -115,6 +265,8 @@ pub(crate) fn init_vulkan() -> Result<GpuCtx, String> {
         queue_family_index,
         allocator,
         fence_fd_fn,
+        buffer_pool: BufferPool::new(),
+        command_pool: None,
     };
 
     Ok(GpuCtx {

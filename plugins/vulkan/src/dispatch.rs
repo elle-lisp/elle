@@ -1,6 +1,6 @@
 use crate::context::VulkanState;
 use ash::vk;
-use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme};
+use gpu_allocator::vulkan::Allocation;
 use gpu_allocator::MemoryLocation;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
@@ -13,9 +13,9 @@ pub(crate) enum BufferUsage {
     InOut,
 }
 
-/// Extracted buffer specification ready for the Send closure.
+/// Extracted buffer specification. Data is raw bytes (not f32-specific).
 pub(crate) struct BufferSpec {
-    pub(crate) data: Vec<f32>,
+    pub(crate) data: Vec<u8>,
     pub(crate) byte_size: usize,
     pub(crate) usage: BufferUsage,
 }
@@ -27,6 +27,7 @@ pub(crate) struct LiveBuffer {
     pub(crate) byte_size: usize,
     pub(crate) usage: BufferUsage,
     pub(crate) element_count: u32,
+    pub(crate) location: MemoryLocation,
 }
 
 /// Handle to an in-flight GPU dispatch. Holds all state needed for
@@ -35,27 +36,26 @@ pub(crate) struct GpuHandle {
     pub(crate) ctx: Arc<Mutex<VulkanState>>,
     pub(crate) fence: vk::Fence,
     pub(crate) fence_fd: RawFd,
-    pub(crate) command_pool: vk::CommandPool,
     pub(crate) descriptor_pool: vk::DescriptorPool,
     pub(crate) buffers: Vec<LiveBuffer>,
 }
 
 impl Drop for GpuHandle {
     fn drop(&mut self) {
-        // Safety cleanup if collect was never called
         if let Ok(mut state) = self.ctx.lock() {
             let device = state.device.clone();
             unsafe { device.destroy_descriptor_pool(self.descriptor_pool, None) };
             for lb in self.buffers.drain(..) {
                 if let Some(allocation) = lb.allocation {
-                    state.allocator.free(allocation).ok();
+                    // Return to pool instead of freeing
+                    state
+                        .buffer_pool
+                        .release(lb.buffer, allocation, lb.byte_size, lb.location);
+                } else {
+                    unsafe { device.destroy_buffer(lb.buffer, None) };
                 }
-                unsafe { device.destroy_buffer(lb.buffer, None) };
             }
-            unsafe {
-                device.destroy_fence(self.fence, None);
-                device.destroy_command_pool(self.command_pool, None);
-            }
+            unsafe { device.destroy_fence(self.fence, None) };
         }
         if self.fence_fd >= 0 {
             unsafe { libc::close(self.fence_fd) };
@@ -76,16 +76,9 @@ pub(crate) fn dispatch(
     let mut state = ctx_arc.lock().map_err(|e| format!("lock: {e}"))?;
     let device = state.device.clone();
     let queue = state.queue;
-    let queue_family_index = state.queue_family_index;
 
-    // ── Command pool ────────────────────────────────────────────
-    let pool_info = vk::CommandPoolCreateInfo::default()
-        .queue_family_index(queue_family_index)
-        .flags(vk::CommandPoolCreateFlags::TRANSIENT);
-    let command_pool = unsafe { device.create_command_pool(&pool_info, None) }
-        .map_err(|e| format!("create_command_pool: {e}"))?;
-
-    // ── Command buffer ──────────────────────────────────────────
+    // ── Reusable command pool + fresh command buffer ──────────
+    let command_pool = state.get_command_pool()?;
     let alloc_info = vk::CommandBufferAllocateInfo::default()
         .command_pool(command_pool)
         .level(vk::CommandBufferLevel::PRIMARY)
@@ -93,15 +86,13 @@ pub(crate) fn dispatch(
     let cmd = unsafe { device.allocate_command_buffers(&alloc_info) }
         .map_err(|e| format!("allocate_command_buffers: {e}"))?[0];
 
-    // ── Create + upload buffers ─────────────────────────────────
+    // ── Acquire + upload buffers ─────────────────────────────
     let mut live_buffers: Vec<LiveBuffer> = Vec::with_capacity(specs.len());
-    if let Err(e) = create_buffers(&mut state, &device, &specs, &mut live_buffers) {
-        cleanup_buffers(&mut state, &device, &mut live_buffers);
-        unsafe { device.destroy_command_pool(command_pool, None) };
+    if let Err(e) = create_buffers(&mut state, &specs, &mut live_buffers) {
+        release_buffers(&mut state, &mut live_buffers);
         return Err(e);
     }
 
-    // Upload input data
     for (i, (lb, spec)) in live_buffers.iter().zip(specs.iter()).enumerate() {
         if lb.usage == BufferUsage::Output {
             continue;
@@ -111,12 +102,10 @@ pub(crate) fn dispatch(
             .mapped_ptr()
             .ok_or_else(|| format!("buffer[{i}] not host-mapped"))?
             .as_ptr() as *mut u8;
-        let src =
-            unsafe { std::slice::from_raw_parts(spec.data.as_ptr() as *const u8, spec.byte_size) };
-        unsafe { std::ptr::copy_nonoverlapping(src.as_ptr(), mapped, src.len()) };
+        unsafe { std::ptr::copy_nonoverlapping(spec.data.as_ptr(), mapped, spec.data.len()) };
     }
 
-    // ── Descriptor pool + set ───────────────────────────────────
+    // ── Descriptor pool + set ────────────────────────────────
     let pool_size = vk::DescriptorPoolSize::default()
         .ty(vk::DescriptorType::STORAGE_BUFFER)
         .descriptor_count(specs.len() as u32);
@@ -156,7 +145,7 @@ pub(crate) fn dispatch(
 
     unsafe { device.update_descriptor_sets(&writes, &[]) };
 
-    // ── Record command buffer ───────────────────────────────────
+    // ── Record command buffer ────────────────────────────────
     let begin_info =
         vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     unsafe {
@@ -195,21 +184,21 @@ pub(crate) fn dispatch(
             .map_err(|e| format!("end_command_buffer: {e}"))?;
     }
 
-    // ── Fence with exportable fd ────────────────────────────────
+    // ── Fence with exportable fd ─────────────────────────────
     let mut export_info = vk::ExportFenceCreateInfo::default()
         .handle_types(vk::ExternalFenceHandleTypeFlags::SYNC_FD);
     let fence_info = vk::FenceCreateInfo::default().push_next(&mut export_info);
     let fence = unsafe { device.create_fence(&fence_info, None) }
         .map_err(|e| format!("create_fence: {e}"))?;
 
-    // ── Submit ──────────────────────────────────────────────────
+    // ── Submit ───────────────────────────────────────────────
     let submit_info = vk::SubmitInfo::default().command_buffers(std::slice::from_ref(&cmd));
     unsafe { device.queue_submit(queue, &[submit_info], fence) }.map_err(|e| {
         unsafe { device.destroy_fence(fence, None) };
         format!("queue_submit: {e}")
     })?;
 
-    // ── Export fence fd ─────────────────────────────────────────
+    // ── Export fence fd ──────────────────────────────────────
     let fd_info = vk::FenceGetFdInfoKHR::default()
         .fence(fence)
         .handle_type(vk::ExternalFenceHandleTypeFlags::SYNC_FD);
@@ -223,7 +212,6 @@ pub(crate) fn dispatch(
         ctx: ctx_arc,
         fence,
         fence_fd,
-        command_pool,
         descriptor_pool,
         buffers: live_buffers,
     })
@@ -258,48 +246,17 @@ pub(crate) fn collect_ref(handle: &GpuHandle) -> Result<Vec<u8>, String> {
 
 fn create_buffers(
     state: &mut VulkanState,
-    device: &ash::Device,
     specs: &[BufferSpec],
     live_buffers: &mut Vec<LiveBuffer>,
 ) -> Result<(), String> {
     for (i, spec) in specs.iter().enumerate() {
-        let buf_info = vk::BufferCreateInfo::default()
-            .size(spec.byte_size as u64)
-            .usage(vk::BufferUsageFlags::STORAGE_BUFFER)
-            .sharing_mode(vk::SharingMode::EXCLUSIVE);
-        let buffer = unsafe { device.create_buffer(&buf_info, None) }
-            .map_err(|e| format!("create_buffer[{i}]: {e}"))?;
-
-        let requirements = unsafe { device.get_buffer_memory_requirements(buffer) };
-
         let location = match spec.usage {
             BufferUsage::Input => MemoryLocation::CpuToGpu,
             BufferUsage::Output => MemoryLocation::GpuToCpu,
             BufferUsage::InOut => MemoryLocation::CpuToGpu,
         };
 
-        let allocation = state
-            .allocator
-            .allocate(&AllocationCreateDesc {
-                name: &format!("buf-{i}"),
-                requirements,
-                location,
-                linear: true,
-                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
-            })
-            .map_err(|e| {
-                unsafe { device.destroy_buffer(buffer, None) };
-                format!("allocate[{i}]: {e}")
-            })?;
-
-        let bind_result =
-            unsafe { device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset()) };
-        if let Err(e) = bind_result {
-            state.allocator.free(allocation).ok();
-            unsafe { device.destroy_buffer(buffer, None) };
-            return Err(format!("bind_buffer_memory[{i}]: {e}"));
-        }
-
+        let (buffer, allocation) = state.acquire_buffer(spec.byte_size, location, i)?;
         let element_count = (spec.byte_size / 4) as u32;
         live_buffers.push(LiveBuffer {
             buffer,
@@ -307,16 +264,21 @@ fn create_buffers(
             byte_size: spec.byte_size,
             usage: spec.usage,
             element_count,
+            location,
         });
     }
     Ok(())
 }
 
-fn cleanup_buffers(state: &mut VulkanState, device: &ash::Device, buffers: &mut Vec<LiveBuffer>) {
+fn release_buffers(state: &mut VulkanState, buffers: &mut Vec<LiveBuffer>) {
+    let device = state.device.clone();
     for lb in buffers.drain(..) {
         if let Some(allocation) = lb.allocation {
-            state.allocator.free(allocation).ok();
+            state
+                .buffer_pool
+                .release(lb.buffer, allocation, lb.byte_size, lb.location);
+        } else {
+            unsafe { device.destroy_buffer(lb.buffer, None) };
         }
-        unsafe { device.destroy_buffer(lb.buffer, None) };
     }
 }

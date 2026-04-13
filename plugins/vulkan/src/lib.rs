@@ -151,7 +151,7 @@ fn prim_dispatch(args: &[Value]) -> (SignalBits, Value) {
 
     let mut specs = Vec::with_capacity(buf_specs_arr.len());
     for (i, spec_val) in buf_specs_arr.iter().enumerate() {
-        match parse_buffer_spec(spec_val, i) {
+        match parse_buffer_spec(spec_val, i, "vulkan/dispatch") {
             Ok(s) => specs.push(s),
             Err(e) => return e,
         }
@@ -289,7 +289,7 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
 
     let mut specs = Vec::with_capacity(buf_specs_arr.len());
     for (i, spec_val) in buf_specs_arr.iter().enumerate() {
-        match parse_buffer_spec(spec_val, i) {
+        match parse_buffer_spec(spec_val, i, "vulkan/submit") {
             Ok(s) => specs.push(s),
             Err(e) => return e,
         }
@@ -345,14 +345,18 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
     (SIG_YIELD | SIG_IO, IoRequest::task(task))
 }
 
-fn parse_buffer_spec(val: &Value, index: usize) -> Result<BufferSpec, (SignalBits, Value)> {
+fn parse_buffer_spec(
+    val: &Value,
+    index: usize,
+    caller: &str,
+) -> Result<BufferSpec, (SignalBits, Value)> {
+    let err =
+        |kind: &str, msg: String| -> (SignalBits, Value) { (SIG_ERROR, error_val(kind, msg)) };
+
     let usage_val = struct_get(val, "usage").ok_or_else(|| {
-        (
-            SIG_ERROR,
-            error_val(
-                "value-error",
-                format!("vulkan/submit: buffer[{index}] missing :usage"),
-            ),
+        err(
+            "value-error",
+            format!("{caller}: buffer[{index}] missing :usage"),
         )
     })?;
 
@@ -361,101 +365,92 @@ fn parse_buffer_spec(val: &Value, index: usize) -> Result<BufferSpec, (SignalBit
         Some(ref k) if k == "output" => BufferUsage::Output,
         Some(ref k) if k == "inout" => BufferUsage::InOut,
         _ => {
-            return Err((
-                SIG_ERROR,
-                error_val(
-                    "value-error",
-                    format!(
-                        "vulkan/submit: buffer[{index}] :usage must be :input, :output, or :inout"
-                    ),
-                ),
+            return Err(err(
+                "value-error",
+                format!("{caller}: buffer[{index}] :usage must be :input, :output, or :inout"),
             ))
         }
     };
 
-    match usage {
-        BufferUsage::Output => {
-            // Output-only: needs :size (in bytes)
-            let size_val = struct_get(val, "size").ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val(
-                        "value-error",
-                        format!("vulkan/submit: output buffer[{index}] missing :size"),
-                    ),
-                )
-            })?;
-            let byte_size = size_val.as_int().ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("vulkan/submit: buffer[{index}] :size must be integer"),
-                    ),
-                )
-            })? as usize;
+    if usage == BufferUsage::Output {
+        let size_val = struct_get(val, "size").ok_or_else(|| {
+            err(
+                "value-error",
+                format!("{caller}: output buffer[{index}] missing :size"),
+            )
+        })?;
+        let byte_size = size_val.as_int().ok_or_else(|| {
+            err(
+                "type-error",
+                format!("{caller}: buffer[{index}] :size must be integer"),
+            )
+        })? as usize;
+        return Ok(BufferSpec {
+            data: Vec::new(),
+            byte_size,
+            usage,
+        });
+    }
 
-            Ok(BufferSpec {
-                data: Vec::new(),
-                byte_size,
-                usage,
-            })
-        }
-        _ => {
-            // Input or InOut: needs :data (array of floats)
-            let data_val = struct_get(val, "data").ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val(
-                        "value-error",
-                        format!("vulkan/submit: buffer[{index}] missing :data"),
-                    ),
-                )
-            })?;
+    // Input or InOut: needs :data (array of numeric values)
+    let data_val = struct_get(val, "data").ok_or_else(|| {
+        err(
+            "value-error",
+            format!("{caller}: buffer[{index}] missing :data"),
+        )
+    })?;
 
-            let arr = if let Some(a) = data_val.as_array() {
-                a.to_vec()
-            } else if let Some(r) = data_val.as_array_mut() {
-                r.borrow().clone()
-            } else {
-                return Err((
-                    SIG_ERROR,
-                    error_val(
-                        "type-error",
-                        format!("vulkan/submit: buffer[{index}] :data must be an array"),
-                    ),
-                ));
-            };
+    let arr = if let Some(a) = data_val.as_array() {
+        a.to_vec()
+    } else if let Some(r) = data_val.as_array_mut() {
+        r.borrow().clone()
+    } else {
+        return Err(err(
+            "type-error",
+            format!("{caller}: buffer[{index}] :data must be an array"),
+        ));
+    };
 
-            let mut floats = Vec::with_capacity(arr.len());
-            for (j, v) in arr.iter().enumerate() {
-                let f = if let Some(f) = v.as_float() {
-                    f as f32
-                } else if let Some(i) = v.as_int() {
-                    i as f32
-                } else {
-                    return Err((
-                        SIG_ERROR,
-                        error_val(
-                            "type-error",
-                            format!(
-                                "vulkan/submit: buffer[{index}][{j}] must be numeric, got {}",
-                                v.type_name()
-                            ),
-                        ),
-                    ));
-                };
-                floats.push(f);
+    // Encode to raw bytes. Default dtype is :f32; also supports :u32, :i32.
+    let dtype = struct_get(val, "dtype")
+        .and_then(|v| extract_keyword(&v))
+        .unwrap_or_else(|| "f32".to_string());
+
+    let mut bytes = Vec::with_capacity(arr.len() * 4);
+    for (j, v) in arr.iter().enumerate() {
+        match dtype.as_str() {
+            "f32" => {
+                let f = if let Some(f) = v.as_float() { f as f32 }
+                    else if let Some(i) = v.as_int() { i as f32 }
+                    else {
+                        return Err(err("type-error",
+                            format!("{caller}: buffer[{index}][{j}] must be numeric, got {}", v.type_name())));
+                    };
+                bytes.extend_from_slice(&f.to_le_bytes());
             }
-
-            let byte_size = floats.len() * 4;
-            Ok(BufferSpec {
-                data: floats,
-                byte_size,
-                usage,
-            })
+            "u32" => {
+                let n = v.as_int()
+                    .ok_or_else(|| err("type-error",
+                        format!("{caller}: buffer[{index}][{j}] must be integer for :u32")))?;
+                bytes.extend_from_slice(&(n as u32).to_le_bytes());
+            }
+            "i32" => {
+                let n = v.as_int()
+                    .ok_or_else(|| err("type-error",
+                        format!("{caller}: buffer[{index}][{j}] must be integer for :i32")))?;
+                bytes.extend_from_slice(&(n as i32).to_le_bytes());
+            }
+            _ => return Err(err("value-error",
+                format!("{caller}: buffer[{index}] unsupported :dtype {dtype:?}, expected :f32, :u32, or :i32"))),
         }
     }
+
+    let byte_size = bytes.len();
+    Ok(BufferSpec {
+        data: bytes,
+        byte_size,
+        usage,
+    })
 }
 
 fn struct_get(val: &Value, key: &str) -> Option<Value> {
@@ -490,17 +485,20 @@ fn prim_decode(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let _dtype = match extract_keyword(&args[1]) {
-        Some(k) if k == "f32" => k,
+    let dtype = match extract_keyword(&args[1]) {
+        Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "raw") => k,
         _ => {
             return (
                 SIG_ERROR,
-                error_val("value-error", "vulkan/decode: dtype must be :f32 (for now)"),
+                error_val(
+                    "value-error",
+                    "vulkan/decode: dtype must be :f32, :u32, :i32, or :raw",
+                ),
             )
         }
     };
 
-    match decode::decode_f32(&bytes) {
+    match decode::decode(&bytes, &dtype) {
         Ok(val) => (SIG_OK, val),
         Err(msg) => (SIG_ERROR, error_val("gpu-error", msg)),
     }

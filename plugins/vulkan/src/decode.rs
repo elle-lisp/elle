@@ -4,10 +4,10 @@ use elle::value::Value;
 ///
 /// Format:
 ///   4 bytes: output buffer count (u32 LE)
-///   Per buffer: 4 bytes element count (u32 LE) + N*4 bytes f32 data
+///   Per buffer: 4 bytes element count (u32 LE) + N*4 bytes data
 ///
 /// Returns a single array if one output buffer, or array-of-arrays if multiple.
-pub(crate) fn decode_f32(bytes: &[u8]) -> Result<Value, String> {
+pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<Value, String> {
     if bytes.len() < 4 {
         return Err("result bytes too short for header".into());
     }
@@ -35,13 +35,37 @@ pub(crate) fn decode_f32(bytes: &[u8]) -> Result<Value, String> {
             ));
         }
 
-        let elements: Vec<Value> = bytes[offset..offset + data_bytes]
-            .chunks_exact(4)
-            .map(|c| {
-                let f = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-                Value::float(f as f64)
-            })
-            .collect();
+        let chunk = &bytes[offset..offset + data_bytes];
+        let elements: Vec<Value> = match dtype {
+            "f32" => chunk
+                .chunks_exact(4)
+                .map(|c| {
+                    let f = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    Value::float(f as f64)
+                })
+                .collect(),
+            "u32" => chunk
+                .chunks_exact(4)
+                .map(|c| {
+                    let n = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    Value::int(n as i64)
+                })
+                .collect(),
+            "i32" => chunk
+                .chunks_exact(4)
+                .map(|c| {
+                    let n = i32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    Value::int(n as i64)
+                })
+                .collect(),
+            "raw" => {
+                // Return raw bytes as a single bytes value per buffer
+                arrays.push(Value::bytes(chunk.to_vec()));
+                offset += data_bytes;
+                continue;
+            }
+            _ => return Err(format!("unsupported dtype: {dtype:?}")),
+        };
 
         arrays.push(Value::array(elements));
         offset += data_bytes;
