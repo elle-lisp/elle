@@ -79,16 +79,25 @@
   (ox:load store (rdf:primitives) :ntriples)
   (flush-store))
 
+(def rust-source-globs
+  ["src/**/*.rs" "plugins/**/*.rs" "tests/**/*.rs"
+   "benches/**/*.rs" "patches/**/*.rs"])
+
 (defn populate-rust []
-  "Parse all .rs files, load Rust triples and primitive cross-links."
-  (var files (glob:glob "**/*.rs"))
+  "Parse source .rs files, load Rust triples and primitive cross-links.
+   Yields between files so the main loop can process requests.
+   Scans only source directories to avoid the deep target/ tree."
+  (var files @[])
+  (each pattern in rust-source-globs
+    (each f in (glob:glob pattern)
+      (push files f)))
   (var count 0)
   (each file in files
-    (let [[[ok? _err] (protect
-            (begin
-              (ox:load store (rust-rdf:file file) :ntriples)
-              (ox:load store (rust-rdf:primitive-links file) :ntriples)))]]
-      (when ok? (assign count (inc count)))))
+    (when-ok [_ (begin
+                  (ox:load store (rust-rdf:file file) :ntriples)
+                  (ox:load store (rust-rdf:primitive-links file) :ntriples))]
+      (assign count (inc count)))
+    (yield nil))
   (flush-store)
   count)
 
@@ -103,9 +112,6 @@
   (clear-file-triples path)
   (ox:load store (rdf:file analysis path) :ntriples)
   (flush-store))
-
-(populate-primitives)
-(def rust-file-count (populate-rust))
 
 # ── Analysis cache ───────────────────────────────────────────────────────
 
@@ -134,8 +140,8 @@
   (each sym in (compile/symbols analysis)
     (when (= (get sym :kind) :function)
       (var name (get sym :name))
-      (let [[[ok? sig] (protect (compile/signal analysis (keyword name)))]]
-        (when ok? (put result name sig)))))
+      (when-ok [sig (compile/signal analysis (keyword name))]
+        (put result name sig))))
   result)
 
 (defn diff-signals [old-sigs new-sigs]
@@ -386,10 +392,7 @@
 
   (each sym in fn-syms
     (var name (get sym :name))
-    (var sig nil)
-    (let [[[ok? val] (protect (compile/signal analysis (keyword name)))]]
-      (when ok? (assign sig val)))
-    (when sig
+    (when-ok [sig (compile/signal analysis (keyword name))]
       (cond
         ((get sig :silent)                         (push silent-names name))
         ((not (empty? (get sig :propagates)))      (push delegating-names name))
@@ -397,14 +400,8 @@
         ((get sig :yields)                         (push yielding-names name))
         (true                                      (push io-names name)))
 
-      (var caps nil)
-      (let [[[ok? val] (protect (compile/captures analysis (keyword name)))]]
-        (when ok? (assign caps val)))
-      (when caps
-        (var callees nil)
-        (let [[[ok? val] (protect (compile/callees analysis (keyword name)))]]
-          (when ok? (assign callees val)))
-        (when callees
+      (when-ok [caps (compile/captures analysis (keyword name))]
+        (when-ok [callees (compile/callees analysis (keyword name))]
           (each o in (portrait-lib:observations analysis name sig caps callees)
             (push observations
               (string/format "{}: [{}] {}" name (get o :kind) (get o :message))))))))
@@ -488,12 +485,9 @@
   (push out (string/format "Called by ({} callers):\n" (length callers)))
   (each c in callers
     (var caller-name (get c :name))
-    (var caller-sig nil)
-    (let [[[ok? val] (protect (compile/signal analysis (keyword caller-name)))]]
-      (when ok? (assign caller-sig val)))
     (push out (string/format "  {} (line {}, tail={})"
       caller-name (or (get c :line) "?") (or (get c :tail) false)))
-    (when caller-sig
+    (when-ok [caller-sig (compile/signal analysis (keyword caller-name))]
       (when (get caller-sig :silent)
         (push out " ! caller is silent — adding effects here will propagate"))
       (when (get caller-sig :jit-eligible)
@@ -653,11 +647,10 @@
 
     (if (empty? impl-rows)
       # Not a primitive — it's an Elle-defined function, show its signal
-      (let [[[ok? sig] (protect (compile/signal analysis (keyword callee-name)))]]
-        (when ok?
-          (push out (string/format "         signal: {}\n"
-            (if (get sig :silent) "silent"
-              (string/join (map string (->list (get sig :bits))) ", "))))))
+      (when-ok [sig (compile/signal analysis (keyword callee-name))]
+        (push out (string/format "         signal: {}\n"
+          (if (get sig :silent) "silent"
+            (string/join (map string (->list (get sig :bits))) ", ")))))
 
       # Primitive — trace into Rust
       (each impl-row in impl-rows
@@ -747,7 +740,27 @@
 
 (eprintln "elle-mcp server starting (v0.5.0)")
 (eprintln "  store: " store-path)
-(eprintln "  rust: " rust-file-count " files loaded")
+
+# Population fiber — yields between work units so the main loop
+# can process requests between FFI calls.
+(def populator (fiber/new (fn []
+  (populate-primitives)
+  (yield nil)
+  (eprintln "  primitives: loaded")
+  (var count (populate-rust))
+  (eprintln "  rust: " count " files loaded")
+  (send-response {:jsonrpc "2.0"
+                  :method "notifications/model/populated"
+                  :params {:primitives true :rust count}}))
+  |:yield|))
+
+# Kick off population — runs populate-primitives, then yields
+(fiber/resume populator nil)
+
+(defn tick-populator []
+  "Resume the population fiber one step if it's still alive."
+  (when (= (fiber/status populator) :paused)
+    (fiber/resume populator nil)))
 
 # Watcher fiber
 (eprintln "  watch: enabled")
@@ -780,6 +793,7 @@
     (when (nil? line)
       (eprintln "stdin closed, shutting down")
       (break))
+    (tick-populator)
     (unless (empty? line)
       (let [[[ok? msg] (protect (json/parse line))]]
         (if (not ok?)
