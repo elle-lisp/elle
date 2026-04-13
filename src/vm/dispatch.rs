@@ -503,10 +503,12 @@ impl VM {
                     types::handle_is_set_mut(self);
                 }
                 Instruction::CheckSignalBound => {
-                    // Read SignalBits as two u16s (low half first, then high half)
-                    let lo = self.read_u16(bc, &mut ip) as u32;
-                    let hi = self.read_u16(bc, &mut ip) as u32;
-                    let allowed_bits = SignalBits::new(lo | (hi << 16));
+                    // Read SignalBits as four u16s (least-significant first)
+                    let w0 = self.read_u16(bc, &mut ip) as u64;
+                    let w1 = self.read_u16(bc, &mut ip) as u64;
+                    let w2 = self.read_u16(bc, &mut ip) as u64;
+                    let w3 = self.read_u16(bc, &mut ip) as u64;
+                    let allowed_bits = SignalBits::new(w0 | (w1 << 16) | (w2 << 32) | (w3 << 48));
                     let val = self.fiber.stack.pop().unwrap_or(Value::NIL);
                     if let Some(closure) = val.as_closure() {
                         let signal_bits = closure.signal().bits;

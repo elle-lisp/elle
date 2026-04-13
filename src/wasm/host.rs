@@ -54,7 +54,7 @@ pub struct WasmSuspensionFrame {
     pub env_base: usize,
     /// Full signal bits at the yield point. Preserves SIG_IO and other
     /// bits so the scheduler can detect I/O requests on the fiber.
-    pub signal_bits: u32,
+    pub signal_bits: u64,
 }
 
 /// Host state stored in the Wasmtime `Store<ElleHost>`.

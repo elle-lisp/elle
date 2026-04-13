@@ -20,6 +20,7 @@ members = [
     "plugins/tls",
     "plugins/toml",
     "plugins/tree-sitter",
+    "plugins/vulkan",
 
     "plugins/xml",
     "plugins/yaml",

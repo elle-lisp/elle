@@ -36,6 +36,7 @@ PLUGINS := \
     tls \
     toml \
     tree-sitter \
+    vulkan \
     xml \
     yaml
 

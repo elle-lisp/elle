@@ -6,9 +6,9 @@ use crate::value::{error_val, error_val_extra, Value};
 use std::path::{Path, PathBuf};
 
 /// Resolve the Elle project root.
-/// Checks `ELLE_HOME` env var first, then walks up from the binary to find `Cargo.toml`.
+/// Checks `--home` config first, then walks up from the binary to find `Cargo.toml`.
 fn elle_root() -> Option<PathBuf> {
-    if let Ok(home) = std::env::var("ELLE_HOME") {
+    if let Some(home) = &crate::config::get().home {
         let p = PathBuf::from(home);
         if p.is_dir() {
             return Some(p);
@@ -73,8 +73,8 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         search_dirs.push(cwd);
     }
 
-    // ELLE_PATH (colon-separated)
-    if let Ok(elle_path) = std::env::var("ELLE_PATH") {
+    // --path (colon-separated)
+    if let Some(elle_path) = &crate::config::get().path {
         for entry in elle_path.split(':') {
             let p = PathBuf::from(entry);
             if p.is_dir() {
@@ -83,10 +83,12 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         }
     }
 
-    // ELLE_HOME (default: directory of the elle binary)
-    let elle_home = std::env::var("ELLE_HOME")
+    // --home (default: directory of the elle binary)
+    let elle_home = crate::config::get()
+        .home
+        .as_ref()
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|| {
             std::env::current_exe()
                 .ok()
                 .and_then(|p| p.parent().map(|d| d.to_path_buf()))
@@ -329,7 +331,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[PrimitiveDef {
     func: prim_import_file,
     signal: Signal::errors(),
     arity: Arity::Exact(1),
-    doc: "Import a module by specifier. Resolves via search paths (CWD, ELLE_PATH, ELLE_HOME) with extension probing (.lisp, libelle_<name>.so).",
+    doc: "Import a module by specifier. Resolves via search paths (CWD, --path, --home) with extension probing (.lisp, libelle_<name>.so).",
     params: &["spec"],
     category: "",
     example: "(import \"lib/http\")",

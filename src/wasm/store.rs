@@ -234,8 +234,8 @@ pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
 /// Handle the result of a WASM closure call (shared by call and resume paths).
 ///
 /// If the function suspended (status > 0): snapshot env to the front frame,
-/// clear memory[0..4], restore env_stack_ptr, return SIG_YIELD.
-/// If normal return: read signal from memory[0..4], clear if non-zero, return.
+/// clear memory[0..8], restore env_stack_ptr, return SIG_YIELD.
+/// If normal return: read signal from memory[0..8], clear if non-zero, return.
 /// If error: restore env_stack_ptr, return error.
 pub(super) fn handle_wasm_result(
     caller: &mut Caller<'_, ElleHost>,
@@ -243,7 +243,7 @@ pub(super) fn handle_wasm_result(
     results: &[Val; 3],
     env_base: usize,
     label: &str,
-) -> (i64, i64, i32) {
+) -> (i64, i64, i64) {
     let memory = caller
         .get_export("__elle_memory")
         .and_then(|e| e.into_memory())
@@ -253,7 +253,7 @@ pub(super) fn handle_wasm_result(
         Ok(()) => {
             let tag = results[0].unwrap_i64();
             let payload = results[1].unwrap_i64();
-            let status = results[2].unwrap_i32();
+            let status = results[2].unwrap_i64();
 
             if status > 0 {
                 // Suspended: snapshot env and update the back frame.
@@ -270,10 +270,10 @@ pub(super) fn handle_wasm_result(
                 }
 
                 if caller.data().debug {
-                    let old = i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
-                    eprintln!("[{}] clearing memory[0..4] from {} to 0", label, old);
+                    let old = i64::from_le_bytes(memory.data(&*caller)[0..8].try_into().unwrap());
+                    eprintln!("[{}] clearing memory[0..8] from {} to 0", label, old);
                 }
-                memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                memory.data_mut(&mut *caller)[0..8].copy_from_slice(&0i64.to_le_bytes());
                 caller.data_mut().env_stack_ptr = env_base;
 
                 if caller.data().debug {
@@ -283,23 +283,23 @@ pub(super) fn handle_wasm_result(
                     );
                 }
 
-                (tag, payload, crate::value::fiber::SIG_YIELD.raw() as i32)
+                (tag, payload, crate::value::fiber::SIG_YIELD.raw() as i64)
             } else {
                 caller.data_mut().env_stack_ptr = env_base;
 
                 let mut signal =
-                    i32::from_le_bytes(memory.data(&*caller)[0..4].try_into().unwrap());
+                    i64::from_le_bytes(memory.data(&*caller)[0..8].try_into().unwrap());
                 if signal != 0 {
-                    memory.data_mut(&mut *caller)[0..4].copy_from_slice(&0i32.to_le_bytes());
+                    memory.data_mut(&mut *caller)[0..8].copy_from_slice(&0i64.to_le_bytes());
                 }
                 // If a NativeFn tail call returned SIG_IO (written to
-                // memory[0..4] by rt_prepare_tail_call), convert it to
+                // memory[0..8] by rt_prepare_tail_call), convert it to
                 // SIG_YIELD so the WASM caller does yield-through instead
                 // of treating it as an error-like early return. The I/O
                 // request is in the return value; the fiber scheduler
                 // will check fiber/bits for SIG_IO and drive the I/O.
-                if signal as u32 & crate::signals::SIG_IO.raw() != 0 {
-                    signal = crate::value::fiber::SIG_YIELD.raw() as i32;
+                if signal as u64 & crate::signals::SIG_IO.raw() != 0 {
+                    signal = crate::value::fiber::SIG_YIELD.raw() as i64;
                 }
 
                 if caller.data().debug {
@@ -331,7 +331,7 @@ pub(super) fn call_wasm_closure(
     closure: &std::rc::Rc<crate::value::closure::Closure>,
     wasm_idx: u32,
     args: &[Value],
-) -> (i64, i64, i32) {
+) -> (i64, i64, i64) {
     let env_base = caller.data().env_stack_ptr;
     prepare_wasm_env(caller, closure, args, env_base);
 
@@ -346,7 +346,7 @@ pub(super) fn call_wasm_closure(
         .unwrap_func()
         .expect("call_wasm_closure: table entry is not a function");
 
-    let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
+    let mut results = [Val::I64(0), Val::I64(0), Val::I64(0)];
     let call_result = func.call(
         &mut *caller,
         &[
@@ -374,7 +374,7 @@ pub(super) fn call_wasm_closure(
 pub fn resume_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
     resume_val: Value,
-) -> Option<(i64, i64, i32)> {
+) -> Option<(i64, i64, i64)> {
     // Peek the front frame (innermost). During the WASM call, rt_load_saved_reg
     // reads from it. New frames pushed by rt_yield go to the back, so they
     // don't interfere. We pop_front AFTER the call completes.
@@ -443,7 +443,7 @@ pub fn resume_wasm_closure(
         .unwrap_func()
         .expect("resume_wasm_closure: table entry is not a function");
 
-    let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
+    let mut results = [Val::I64(0), Val::I64(0), Val::I64(0)];
     let call_result = func.call(
         &mut *caller,
         &[
@@ -487,7 +487,7 @@ pub fn run_module(
     use crate::signals::SIG_IO;
 
     let instance = linker.instantiate(&mut *store, module)?;
-    let entry = instance.get_typed_func::<(i32,), (i64, i64, i32)>(&mut *store, "__elle_entry")?;
+    let entry = instance.get_typed_func::<(i32,), (i64, i64, i64)>(&mut *store, "__elle_entry")?;
     let (mut tag, mut payload, mut status) = entry.call(&mut *store, (0,))?;
 
     // The entry function may suspend when ev/run's scheduler does I/O
@@ -625,7 +625,7 @@ pub(super) fn call_precached_closure(
     closure: &std::rc::Rc<crate::value::closure::Closure>,
     pc: &super::host::PrecachedClosure,
     args: &[crate::value::Value],
-) -> (i64, i64, i32) {
+) -> (i64, i64, i64) {
     use crate::value::repr::TAG_HEAP_START;
 
     let engine = caller.engine().clone();
@@ -675,7 +675,7 @@ pub(super) fn call_precached_closure(
 
     // Call the closure function (exported as __elle_closure)
     let func = match instance
-        .get_typed_func::<(i32, i32, i32, i32), (i64, i64, i32)>(&mut store, "__elle_closure")
+        .get_typed_func::<(i32, i32, i32, i32), (i64, i64, i64)>(&mut store, "__elle_closure")
     {
         Ok(f) => f,
         Err(e) => {

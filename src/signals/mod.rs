@@ -31,7 +31,9 @@ use std::fmt;
 //
 // Signal bit partitioning:
 //
-//   Bits 0-2:   User-facing signals (error, yield, debug)
+//   Bit  0:     Error - exception, abort
+//   Bit  1:     Yield - cooperative suspension
+//   Bit  2:     Debug - breakpoint or trace
 //   Bit  3:     Resume - run a suspended fiber (VM-internal)
 //   Bit  4:     FFI — calls foreign code
 //   Bit  5:     Propagate — propagate caught signal (VM-internal)
@@ -42,9 +44,9 @@ use std::fmt;
 //   Bit  10:    Terminal — non-resumable signal
 //   Bit  11:    Exec — subprocess capability (access control; NOT a dispatch bit)
 //   Bit  12:    Fuel — instruction budget exhaustion
-//   Bit 13: SIG_SWITCH (fiber switch trampoline)
-//   Bit 14: SIG_WAIT (structured concurrency wait request)
-//   Bit 15: Reserved for future use
+//   Bit  13:    Switch - fiber switch trampoline
+//   Bit  14:    Wait - structured concurrency wait request
+//   Bit  15:    GPU
 //   Bits 16-31: User-defined signal types
 
 pub const SIG_OK: SignalBits = SignalBits::new(0); // no bits set = normal return

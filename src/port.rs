@@ -25,7 +25,7 @@ pub(crate) enum PortKind {
 
 /// Which operations are permitted on this port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Direction {
+pub enum Direction {
     Read,
     Write,
     ReadWrite,
@@ -33,7 +33,7 @@ pub(crate) enum Direction {
 
 /// How bytes are interpreted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Encoding {
+pub enum Encoding {
     Text,   // UTF-8
     Binary, // raw bytes
 }

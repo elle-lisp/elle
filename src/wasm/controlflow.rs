@@ -17,7 +17,7 @@ impl WasmEmitter {
         if num_blocks == 0 {
             f.instruction(&Instruction::I64Const(TAG_NIL as i64));
             f.instruction(&Instruction::I64Const(0));
-            f.instruction(&Instruction::I32Const(0));
+            f.instruction(&Instruction::I64Const(0));
             return;
         }
 
@@ -36,8 +36,8 @@ impl WasmEmitter {
         if self.may_suspend && !self.resume_states.is_empty() {
             self.emit_resume_prologue(f, state_local);
         } else {
-            let entry_idx = self.label_to_idx[&func.entry] as i32;
-            f.instruction(&Instruction::I32Const(entry_idx));
+            let entry_idx = self.label_to_idx[&func.entry] as i64;
+            f.instruction(&Instruction::I64Const(entry_idx));
             f.instruction(&Instruction::LocalSet(state_local));
         }
 
@@ -50,8 +50,9 @@ impl WasmEmitter {
             f.instruction(&Instruction::Block(BlockType::Empty));
         }
 
-        // br_table dispatch
+        // br_table dispatch (BrTable needs i32, state_local is i64)
         f.instruction(&Instruction::LocalGet(state_local));
+        f.instruction(&Instruction::I32WrapI64);
         let targets: Vec<u32> = (0..total_blocks as u32)
             .map(|i| total_blocks as u32 - 1 - i)
             .collect();
@@ -202,12 +203,12 @@ impl WasmEmitter {
             Terminator::Return(reg) => {
                 f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
                 f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
-                f.instruction(&Instruction::I32Const(0));
+                f.instruction(&Instruction::I64Const(0));
                 f.instruction(&Instruction::Return);
             }
             Terminator::Jump(target) => {
-                let target_idx = self.label_to_idx[target] as i32;
-                f.instruction(&Instruction::I32Const(target_idx));
+                let target_idx = self.label_to_idx[target] as i64;
+                f.instruction(&Instruction::I64Const(target_idx));
                 f.instruction(&Instruction::LocalSet(state_local));
                 f.instruction(&Instruction::Br(loop_depth));
             }
@@ -220,10 +221,10 @@ impl WasmEmitter {
                 let else_idx = self.label_to_idx[else_label] as i32;
                 self.emit_truthiness_check(f, *cond);
                 f.instruction(&Instruction::If(BlockType::Empty));
-                f.instruction(&Instruction::I32Const(then_idx));
+                f.instruction(&Instruction::I64Const(then_idx as i64));
                 f.instruction(&Instruction::LocalSet(state_local));
                 f.instruction(&Instruction::Else);
-                f.instruction(&Instruction::I32Const(else_idx));
+                f.instruction(&Instruction::I64Const(else_idx as i64));
                 f.instruction(&Instruction::LocalSet(state_local));
                 f.instruction(&Instruction::End);
                 f.instruction(&Instruction::Br(loop_depth));
@@ -248,11 +249,11 @@ impl WasmEmitter {
                     f.instruction(&Instruction::I32Const(ARGS_BASE));
                     f.instruction(&Instruction::I32Const(total_saved as i32));
                     f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
-                    f.instruction(&Instruction::I32Const(signal.raw() as i32));
+                    f.instruction(&Instruction::I64Const(signal.raw() as i64));
                     f.instruction(&Instruction::Call(FN_RT_YIELD));
                     f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(*value)));
-                    f.instruction(&Instruction::I32Const(resume_state as i32));
+                    f.instruction(&Instruction::I64Const(resume_state as i64));
                     f.instruction(&Instruction::Return);
                 } else {
                     f.instruction(&Instruction::Unreachable);
@@ -267,7 +268,7 @@ impl WasmEmitter {
             Terminator::Return(reg) => {
                 f.instruction(&Instruction::LocalGet(self.tag_local(*reg)));
                 f.instruction(&Instruction::LocalGet(self.pay_local(*reg)));
-                f.instruction(&Instruction::I32Const(0));
+                f.instruction(&Instruction::I64Const(0));
             }
             Terminator::Unreachable => {
                 f.instruction(&Instruction::Unreachable);
