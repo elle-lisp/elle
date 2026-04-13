@@ -488,6 +488,12 @@ pub struct Fiber {
     /// reaches zero the VM emits `SIG_FUEL`, pausing the fiber. Refuel via
     /// `fiber/set-fuel` then call `fiber/resume` to continue.
     pub fuel: Option<u32>,
+    /// Withheld capabilities. Bits set here prevent the fiber from silently
+    /// performing the corresponding operations. When a primitive's signal bits
+    /// overlap with `withheld & CAP_MASK`, the primitive is blocked and a
+    /// denial signal is emitted instead. Default: empty (full access).
+    /// Transitive: `child.withheld = parent.withheld | deny_bits`.
+    pub withheld: SignalBits,
 }
 
 impl Fiber {
@@ -510,6 +516,7 @@ impl Fiber {
             call_depth: 0,
             call_stack: Vec::new(),
             fuel: None,
+            withheld: SignalBits::EMPTY,
         }
     }
 }

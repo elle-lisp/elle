@@ -100,12 +100,15 @@ impl<'a> Lowerer<'a> {
                 //
                 // We use a sentinel Hir whose result_is_safe is false,
                 // representing "heap-allocated inside the scope".
-                // Yield is always unsafe in result_is_safe.
+                // Emit is always unsafe in result_is_safe.
                 let sentinel = Hir::silent(
-                    HirKind::Yield(Box::new(Hir::silent(
-                        HirKind::Nil,
-                        crate::syntax::Span::synthetic(),
-                    ))),
+                    HirKind::Emit {
+                        signal: crate::value::fiber::SIG_YIELD,
+                        value: Box::new(Hir::silent(
+                            HirKind::Nil,
+                            crate::syntax::Span::synthetic(),
+                        )),
+                    },
                     crate::syntax::Span::synthetic(),
                 );
                 let mut extended: Vec<(Binding, &Hir)> = scope_bindings.to_vec();
@@ -483,7 +486,7 @@ impl<'a> Lowerer<'a> {
                     })
             }
 
-            HirKind::Yield(expr) => self.walk_for_outward_set(expr, scope_bindings),
+            HirKind::Emit { value: expr, .. } => self.walk_for_outward_set(expr, scope_bindings),
 
             HirKind::Quote(_) => false,
 
@@ -632,7 +635,9 @@ impl<'a> Lowerer<'a> {
                     })
             }
 
-            HirKind::Yield(expr) => self.hir_break_values_safe(expr, target_id, scope_bindings),
+            HirKind::Emit { value: expr, .. } => {
+                self.hir_break_values_safe(expr, target_id, scope_bindings)
+            }
 
             HirKind::Destructure { value, .. } => {
                 self.hir_break_values_safe(value, target_id, scope_bindings)
@@ -759,7 +764,7 @@ impl<'a> Lowerer<'a> {
                     })
             }
 
-            HirKind::Yield(expr) => Self::walk_for_escaping_break(expr, inner_blocks),
+            HirKind::Emit { value: expr, .. } => Self::walk_for_escaping_break(expr, inner_blocks),
 
             HirKind::Destructure { value, .. } => {
                 Self::walk_for_escaping_break(value, inner_blocks)
@@ -864,7 +869,7 @@ impl<'a> Lowerer<'a> {
                     })
             }
 
-            HirKind::Yield(expr) => self.all_breaks_have_safe_values(expr),
+            HirKind::Emit { value: expr, .. } => self.all_breaks_have_safe_values(expr),
 
             HirKind::Destructure { value, .. } => self.all_breaks_have_safe_values(value),
 
@@ -1000,7 +1005,7 @@ impl<'a> Lowerer<'a> {
                     || args.iter().any(|a| self.body_escapes_heap_values(&a.expr))
             }
             HirKind::Lambda { .. } => false,
-            HirKind::Yield(value) => {
+            HirKind::Emit { value, .. } => {
                 !self.result_is_safe(value, &[]) || self.body_escapes_heap_values(value)
             }
             HirKind::Int(_)

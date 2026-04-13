@@ -257,11 +257,12 @@ impl fmt::Display for Terminator {
                 then_label,
                 else_label,
             } => write!(f, "branch {} → {} / {}", cond, then_label, else_label),
-            Terminator::Yield {
+            Terminator::Emit {
+                signal,
                 value,
                 resume_label,
             } => {
-                write!(f, "yield {} → {}", value, resume_label)
+                write!(f, "emit {} {} → {}", signal, value, resume_label)
             }
             Terminator::Unreachable => f.write_str("unreachable"),
         }
@@ -275,7 +276,7 @@ pub fn terminator_kind(t: &Terminator) -> &'static str {
         Terminator::Return(_) => "return",
         Terminator::Jump(_) => "jump",
         Terminator::Branch { .. } => "branch",
-        Terminator::Yield { .. } => "yield",
+        Terminator::Emit { .. } => "emit",
         Terminator::Unreachable => "unreachable",
     }
 }
@@ -438,12 +439,13 @@ mod tests {
     }
 
     #[test]
-    fn test_terminator_yield() {
-        let term = Terminator::Yield {
+    fn test_terminator_emit() {
+        let term = Terminator::Emit {
+            signal: crate::value::fiber::SIG_YIELD,
             value: Reg(0),
             resume_label: Label(5),
         };
-        assert_eq!(format!("{}", term), "yield r0 → block5");
+        assert_eq!(format!("{}", term), "emit 0x2 r0 → block5");
     }
 
     #[test]

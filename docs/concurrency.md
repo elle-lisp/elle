@@ -7,7 +7,7 @@ For CPU parallelism across cores, see [threads.md](threads.md).
 
 ## Spawn and join
 
-```lisp
+```text
 # Spawn a fiber, wait for its result
 (def f (ev/spawn (fn [] (+ 1 2))))
 (ev/join f)                # => 3
@@ -21,7 +21,7 @@ For CPU parallelism across cores, see [threads.md](threads.md).
 
 The most common pattern:
 
-```lisp
+```text
 (ev/map (fn [x] (* x x)) [1 2 3 4])   # => [1 4 9 16]
 
 # Bounded parallelism (at most n in flight)
@@ -32,14 +32,14 @@ The most common pattern:
 
 `ev/join-protected` returns `[ok? value]` instead of raising errors:
 
-```lisp
+```text
 (let [[[ok? val] (ev/join-protected (ev/spawn (fn [] (+ 1 2))))]]
   (if ok? val :failed))   # => 3
 ```
 
 ## Select, race, timeout
 
-```lisp
+```text
 # First to complete wins; abort the rest
 (ev/race [(ev/spawn (fn [] :fast))
           (ev/spawn (fn [] (ev/sleep 1) :slow))])  # => :fast
@@ -53,7 +53,7 @@ The most common pattern:
 All children must finish before scope exits. If one child fails, the
 others are aborted.
 
-```lisp
+```text
 (ev/scope (fn [spawn]
   (let [[a (spawn (fn [] :users))]
         [b (spawn (fn [] :settings))]]
@@ -62,7 +62,7 @@ others are aborted.
 
 ## Primitives reference
 
-```lisp
+```text
 # (ev/spawn thunk)            — create fiber, returns handle
 # (ev/join fiber-or-seq)      — wait for result(s), propagate errors
 # (ev/join-protected target)  — wait without raising: [ok? value]
@@ -79,7 +79,7 @@ others are aborted.
 
 ## TCP
 
-```lisp
+```text
 # (tcp/listen addr port)      — bind and listen, returns listener
 # (tcp/accept listener)       — yield until connection, returns port
 # (tcp/connect host port)     — yield until connected, returns port
@@ -91,7 +91,7 @@ others are aborted.
 `ev/futex-wait` and `ev/futex-wake`. These cooperate with the async
 scheduler — waiting fibers yield rather than blocking the thread.
 
-```lisp
+```text
 (def sync ((import "std/sync")))
 
 (def lock (sync:make-lock))
@@ -126,7 +126,7 @@ On top of the core process API, the module provides:
 - **Task** — one-shot async work as a monitored process
 - **EventManager** — pub/sub event dispatching
 
-```elle
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -142,7 +142,7 @@ On top of the core process API, the module provides:
 
 ### GenServer example
 
-```elle
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []
@@ -160,7 +160,7 @@ On top of the core process API, the module provides:
 
 ### Supervisor example
 
-```elle
+```text
 (def process ((import "std/process")))
 
 (process:start (fn []

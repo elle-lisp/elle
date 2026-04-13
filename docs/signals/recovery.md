@@ -159,32 +159,6 @@ At the root fiber, signals translate to program outcomes:
 - Normal return → value printed or returned
 - `:error` signal → error message displayed, non-zero exit
 
-
-
-## Migration Status
-
-Steps 1–3 are complete. Steps 4–7 are future work.
-
-1. ✅ **Fibers as execution context.** Fiber struct, FiberHandle,
-   parent/child chain, signal mask, all fiber primitives implemented.
-   Coroutines are fibers that yield.
-
-2. ✅ **Unified signals.** Error and yield are signal types. Errors are
-   `[:keyword "message"]` tuples.
-
-3. ✅ **Signal-bits-based Signal type.** `Signal { bits: SignalBits,
-   propagates: u32 }`. Inference tracks signal bits per function.
-
-4. ❌ **Relax JIT restrictions.** JIT still restricted to silent functions.
-   Signal-aware calling convention not yet implemented.
-
-5. ❌ **User-defined signals.** Bit positions 16–31 reserved but no
-   allocation API.
-
-6. ✅ **Signal restrictions.** `silence` forms for signal contracts implemented.
-
-7. ❌ **Erlang-style processes.** Fibers on an event loop with a scheduler.
-
 ---
 
 ## See also

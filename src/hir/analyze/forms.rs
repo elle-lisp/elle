@@ -332,7 +332,16 @@ impl<'a> Analyzer<'a> {
                             let value = items[1].to_value(self.symbols);
                             return Ok(Hir::silent(HirKind::Quote(value), span));
                         }
-                        "yield" => return self.analyze_yield(items, span),
+                        "emit"
+                            if (items.len() == 2 || items.len() == 3)
+                                && matches!(
+                                    items[1].kind,
+                                    crate::syntax::SyntaxKind::Keyword(_)
+                                        | crate::syntax::SyntaxKind::Set(_)
+                                ) =>
+                        {
+                            return self.analyze_emit(items, span);
+                        }
                         "match" => return self.analyze_match(items, span),
                         "cond" => return self.analyze_cond(items, span),
                         "eval" => return self.analyze_eval(items, span),

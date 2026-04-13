@@ -127,6 +127,21 @@ impl SignalRegistry {
             .map(crate::value::fiber::SignalBits::from_bit)
     }
 
+    /// Convert signal bits to a Vec of keyword Values.
+    ///
+    /// Used by `fiber/caps` and capability denial payloads to produce
+    /// keyword sets from signal bitmasks.
+    pub fn bits_to_keywords(
+        &self,
+        bits: crate::value::fiber::SignalBits,
+    ) -> Vec<crate::value::Value> {
+        self.entries
+            .iter()
+            .filter(|e| bits.has_bit(e.bit_position))
+            .map(|e| crate::value::Value::keyword(&e.name))
+            .collect()
+    }
+
     /// Format signal bits as a human-readable string.
     ///
     /// Returns a string like `"{:error, :yield}"` for multiple bits, or `"{}"` for empty.

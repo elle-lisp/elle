@@ -9,18 +9,20 @@ Fibers are Elle's unified control-flow mechanism.
 pub struct Fiber {
     pub stack: SmallVec<[Value# 256]>,       // operand stack
     pub frames: Vec<Frame>,                   // call frames (closure + ip + base)
-    pub status: FiberStatus,                  // New, Alive, Suspended, Dead, Error
+    pub status: FiberStatus,                  // New, Alive, Paused, Dead, Error
     pub mask: SignalBits,                     // which signals parent catches from this fiber
     pub parent: Option<WeakFiberHandle>,      // weak back-pointer (avoids Rc cycles)
     pub parent_value: Option<Value>,          // cached Value for parent
     pub child: Option<FiberHandle>,           // most recently resumed child
     pub child_value: Option<Value>,           // cached Value for child
     pub closure: Rc<Closure>,                 // the closure this fiber wraps
-    pub env: Option<HashMap<u32, Value>>,     // dynamic bindings (future)
+    pub param_frames: Vec<Vec<(u32, Value)>>, // dynamic parameter bindings
     pub signal: Option<(SignalBits, Value)>,  // signal payload or return value
     pub suspended: Option<Vec<SuspendedFrame>>, // frames for resumption
     pub call_depth: usize,                    // stack overflow detection
     pub call_stack: Vec<CallFrame>,           // for stack traces
+    pub fuel: Option<u32>,                    // instruction budget (None = unlimited)
+    pub withheld: SignalBits,                 // denied capabilities (see capabilities.md)
 }
 ```
 
@@ -46,7 +48,7 @@ back-pointers, avoiding Rc cycles.
 |--------|---------|
 | `New` | Created but never resumed |
 | `Alive` | Currently executing on the VM |
-| `Suspended` | Waiting for resume (signaled or yielded) |
+| `Paused` | Waiting for resume (signaled or yielded) |
 | `Dead` | Completed normally |
 | `Error` | Terminated by unhandled error |
 
@@ -112,19 +114,26 @@ handle, not the callee.
 ### SuspendedFrame
 
 ```rust
-pub struct SuspendedFrame {
-    pub bytecode: Rc<Vec<u8>>,      // Rc clone, not data copy
-    pub constants: Rc<Vec<Value>>,  // Rc clone, not data copy
-    pub env: Rc<Vec<Value>>,        // closure environment
-    pub ip: usize,                  // instruction pointer to resume at
-    pub stack: Vec<Value>,          // operand stack (empty for signal suspension)
+pub enum SuspendedFrame {
+    Bytecode(BytecodeFrame),
+    FiberResume { handle: FiberHandle, fiber_value: Value },
+}
+
+pub struct BytecodeFrame {
+    pub bytecode: Rc<Vec<u8>>,
+    pub constants: Rc<Vec<Value>>,
+    pub env: Rc<Vec<Value>>,
+    pub ip: usize,
+    pub stack: Vec<Value>,
+    pub location_map: Rc<LocationMap>,
+    pub push_resume_value: bool,
 }
 ```
 
-`SuspendedFrame` captures everything needed to resume bytecode execution.
-It replaces the former `SavedContext` and `ContinuationFrame` types with a
-single representation. Bytecode and constants are `Rc` clones — no data
-copying on suspension.
+`SuspendedFrame` is an enum: `Bytecode` captures everything needed to resume
+bytecode execution; `FiberResume` resumes a sub-fiber (used by `defer`/`protect`
+when a sub-fiber's I/O signal propagates through its parent). `push_resume_value`
+controls whether the resume value is pushed onto the stack before continuing.
 
 ### Two suspension modes
 
@@ -173,10 +182,10 @@ Bytecode and constants flow through the dispatch loop as `&Rc<Vec<u8>>`
 and `&Rc<Vec<Value>>`. This eliminates data copying:
 
 - `execute_bytecode` wraps raw slices in `Rc` once at the public boundary
-- `execute_bytecode_from_ip` / `execute_bytecode_coroutine` take `&Rc`
+- `execute_bytecode_from_ip` / `execute_bytecode_saving_stack` take `&Rc`
 - `TailCallInfo` is `(Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>)` —
   tail calls clone the Rc (cheap), not the Vec
-- `handle_yield` / `handle_call` clone the Rc into `SuspendedFrame`
+- `handle_emit` / `handle_call` clone the Rc into `SuspendedFrame`
 - Individual instruction handlers dereference to `&[u8]` / `&[Value]` —
   they don't need the Rc
 

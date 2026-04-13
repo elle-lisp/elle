@@ -1191,16 +1191,17 @@ impl<'a> FunctionTranslator<'a> {
                     .brif(is_falsy, *else_block, &[], *then_block, &[]);
             }
 
-            Terminator::Yield {
+            Terminator::Emit {
+                signal,
                 value,
                 resume_label: _,
             } => {
                 let (yt, yp) = self.use_var_pair(builder, value.0);
                 let vm = self
                     .vm_ptr
-                    .ok_or_else(|| JitError::InvalidLir("Yield without vm pointer".to_string()))?;
+                    .ok_or_else(|| JitError::InvalidLir("Emit without vm pointer".to_string()))?;
                 let (self_tag, self_payload) = self.self_tag_payload.ok_or_else(|| {
-                    JitError::InvalidLir("Yield without self_tag_payload".to_string())
+                    JitError::InvalidLir("Emit without self_tag_payload".to_string())
                 })?;
 
                 let yield_index = self.yield_point_index;
@@ -1216,7 +1217,8 @@ impl<'a> FunctionTranslator<'a> {
                 let spilled_ptr = self.spill_locals_and_operands(builder, stack_regs)?;
                 let yield_idx_val = builder.ins().iconst(I64, yield_index as i64);
 
-                // Call elle_jit_yield(ytag, ypay, spilled_ptr, yield_index, vm, ctag, cpay)
+                let sig_val = builder.ins().iconst(I64, signal.raw() as i64);
+
                 let func_ref = self
                     .module
                     .declare_func_in_func(self.helpers.jit_yield, builder.func);
@@ -1230,6 +1232,7 @@ impl<'a> FunctionTranslator<'a> {
                         vm,
                         self_tag,
                         self_payload,
+                        sig_val,
                     ],
                 );
                 let rt = builder.inst_results(call)[0];

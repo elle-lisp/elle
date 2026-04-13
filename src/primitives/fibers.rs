@@ -175,17 +175,24 @@ pub(crate) fn resolve_signal_bits(
     ))
 }
 
-/// (fiber/new fn mask) → fiber
+/// (fiber/new fn mask [:deny bits]) → fiber
 ///
 /// Create a fiber from a closure and a signal mask. The mask determines
 /// which signals the parent catches when resuming this fiber.
+///
+/// Optional `:deny` keyword arg withholds capabilities from the fiber.
+/// The child's `withheld` is the union of the explicit deny bits and the
+/// parent's withheld (propagated at resume time by the VM).
 pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
-    if args.len() != 2 {
+    if args.len() < 2 {
         return (
             SIG_ERROR,
             error_val(
                 "arity-error",
-                format!("fiber/new: expected 2 arguments, got {}", args.len()),
+                format!(
+                    "fiber/new: expected at least 2 arguments, got {}",
+                    args.len()
+                ),
             ),
         );
     }
@@ -208,7 +215,40 @@ pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
         Err(err) => return err,
     };
 
-    let fiber = Fiber::new(closure, mask);
+    // Parse optional keyword arguments after the required (closure, mask) pair.
+    let mut deny_bits = SignalBits::EMPTY;
+    let mut i = 2;
+    while i < args.len() {
+        if args[i].as_keyword_name().as_deref() == Some("deny") {
+            if i + 1 >= args.len() {
+                return (
+                    SIG_ERROR,
+                    error_val("arity-error", "fiber/new: :deny requires a value"),
+                );
+            }
+            deny_bits = match resolve_signal_bits(&args[i + 1], "fiber/new :deny") {
+                Ok(bits) => bits,
+                Err(err) => return err,
+            };
+            i += 2;
+        } else {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "argument-error",
+                    format!(
+                        "fiber/new: unexpected keyword argument :{}",
+                        args[i]
+                            .as_keyword_name()
+                            .unwrap_or_else(|| args[i].type_name().to_string())
+                    ),
+                ),
+            );
+        }
+    }
+
+    let mut fiber = Fiber::new(closure, mask);
+    fiber.withheld = deny_bits;
     (SIG_OK, Value::fiber(fiber))
 }
 
@@ -504,11 +544,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         name: "fiber/new",
         func: prim_fiber_new,
         signal: Signal::errors(),
-        arity: Arity::Exact(2),
-        doc: "Create a fiber from a closure with a signal mask",
+        arity: Arity::AtLeast(2),
+        doc: "Create a fiber with a signal mask. Optional :deny withholds capabilities.",
         params: &["closure", "mask"],
         category: "fiber",
-        example: "(fiber/new (fn [] 42) 0)",
+        example: "(fiber/new (fn [] 42) |:error| :deny |:io|)",
         aliases: &["fiber"],
     },
     PrimitiveDef {

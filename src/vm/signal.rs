@@ -193,6 +193,92 @@ impl VM {
         self.fiber.signal = Some((bits, value));
         bits
     }
+
+    // ── Capability denial ─────────────────────────────────────────────
+
+    /// Handle capability denial in Call position.
+    ///
+    /// The fiber tried to call a primitive whose signal bits overlap with
+    /// the fiber's `withheld` capabilities. Instead of running the primitive,
+    /// emit a signal with the blocked bits and a denial payload struct.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn handle_capability_denial(
+        &mut self,
+        def: &'static crate::primitives::def::PrimitiveDef,
+        blocked: SignalBits,
+        args: &[Value],
+        bytecode: &Rc<Vec<u8>>,
+        constants: &Rc<Vec<Value>>,
+        closure_env: &Rc<Vec<Value>>,
+        ip: &mut usize,
+        location_map: &Rc<crate::error::LocationMap>,
+    ) -> Option<SignalBits> {
+        let payload = Self::build_denial_payload(def, blocked, args);
+
+        // Save the stack and build a suspended frame (same as suspending signals)
+        let saved_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: bytecode.clone(),
+            constants: constants.clone(),
+            env: closure_env.clone(),
+            ip: *ip,
+            stack: saved_stack,
+            location_map: location_map.clone(),
+            push_resume_value: true,
+        });
+        self.fiber.signal = Some((blocked, payload));
+        self.fiber.suspended = Some(vec![frame]);
+        Some(blocked)
+    }
+
+    /// Handle capability denial in TailCall position.
+    pub(super) fn handle_capability_denial_tail(
+        &mut self,
+        def: &'static crate::primitives::def::PrimitiveDef,
+        blocked: SignalBits,
+        args: &[Value],
+    ) -> SignalBits {
+        let payload = Self::build_denial_payload(def, blocked, args);
+        self.fiber.signal = Some((blocked, payload));
+        blocked
+    }
+
+    /// Build the denial payload struct.
+    ///
+    /// Returns `{:error :capability-denied :denied <keyword-set>
+    ///           :primitive <name> :func <native-fn> :args <array>}`.
+    fn build_denial_payload(
+        def: &'static crate::primitives::def::PrimitiveDef,
+        blocked: SignalBits,
+        args: &[Value],
+    ) -> Value {
+        use crate::value::heap::TableKey;
+        use std::collections::BTreeMap;
+
+        let registry = crate::signals::registry::global_registry().lock().unwrap();
+        let denied_keywords = registry.bits_to_keywords(blocked);
+
+        let mut fields = BTreeMap::new();
+        fields.insert(
+            TableKey::Keyword("error".into()),
+            Value::keyword("capability-denied"),
+        );
+        fields.insert(
+            TableKey::Keyword("denied".into()),
+            Value::set(denied_keywords.into_iter().collect()),
+        );
+        fields.insert(
+            TableKey::Keyword("primitive".into()),
+            Value::string(def.name),
+        );
+        fields.insert(TableKey::Keyword("func".into()), Value::native_fn(def));
+        fields.insert(
+            TableKey::Keyword("args".into()),
+            Value::array(args.to_vec()),
+        );
+
+        Value::struct_from(fields)
+    }
 }
 
 impl VM {
@@ -281,6 +367,12 @@ impl VM {
                 }
             }
             "fiber/self" => (SIG_OK, self.current_fiber_value.unwrap_or(Value::NIL)),
+            "fiber/caps" => {
+                let caps = crate::signals::CAP_MASK.subtract(self.fiber.withheld);
+                let registry = crate::signals::registry::global_registry().lock().unwrap();
+                let keywords = registry.bits_to_keywords(caps);
+                (SIG_OK, Value::set(keywords.into_iter().collect()))
+            }
             "list-primitives" => {
                 // arg is nil (no filter) or a keyword/string category name
                 let category_filter: Option<String> = if arg.is_nil() {

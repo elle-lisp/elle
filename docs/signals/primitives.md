@@ -32,7 +32,7 @@ to perform the context switch.
 A coroutine is a usage pattern, not a type. It's a fiber whose closure
 yields:
 
-```lisp
+```text
 (def gen (fiber/new (fn () (yield 1) (yield 2) (yield 3)) |:yield|))
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 1
 (fiber/resume gen nil)  # → SIG_YIELD, (fiber/value gen) → 2
@@ -125,7 +125,7 @@ child's actual outcome determines what the parent sees.
 - No post-hoc status stomp: if the fiber's protect catches and recovers,
   the fiber may end up `:dead` instead of `:error`
 
-```elle
+```text
 (def f (fiber/new (fn [] (defer (print :cleanup) (yield) :done)) |:error :yield|))
 (fiber/resume f)          # f is now :paused
 (fiber/abort f :reason)   # :cleanup printed, f is now :error

@@ -209,7 +209,7 @@ impl HirLinter {
                 }
             }
 
-            HirKind::Yield(expr) => {
+            HirKind::Emit { value: expr, .. } => {
                 self.check(expr, symbols, arena);
             }
 

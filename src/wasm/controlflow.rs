@@ -231,7 +231,7 @@ impl WasmEmitter {
             Terminator::Unreachable => {
                 f.instruction(&Instruction::Unreachable);
             }
-            Terminator::Yield { value, .. } => {
+            Terminator::Emit { signal, value, .. } => {
                 if self.may_suspend {
                     let resume_state = lir_block_idx
                         .and_then(|idx| self.yield_state_map.get(&idx).copied())
@@ -248,7 +248,7 @@ impl WasmEmitter {
                     f.instruction(&Instruction::I32Const(ARGS_BASE));
                     f.instruction(&Instruction::I32Const(total_saved as i32));
                     f.instruction(&Instruction::I32Const(self.current_table_idx as i32));
-                    f.instruction(&Instruction::I32Const(2)); // SIG_YIELD
+                    f.instruction(&Instruction::I32Const(signal.raw() as i32));
                     f.instruction(&Instruction::Call(FN_RT_YIELD));
                     f.instruction(&Instruction::LocalGet(self.tag_local(*value)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(*value)));

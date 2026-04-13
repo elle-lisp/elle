@@ -42,8 +42,9 @@ Specialized fast paths exist for common sequences (e.g., `LoadLocal` +
 
 ## Fiber integration
 
-- **Yield** — saves the current frame as a `SuspendedFrame`, returns
-  control to the parent fiber or scheduler
+- **Emit** (`Instruction::Emit` with a u16 signal bits operand) — saves
+  the current frame as a `SuspendedFrame`, returns control to the parent
+  fiber or scheduler
 - **Signal emission** — checks the fiber's signal mask to decide
   whether to propagate or catch
 - **Fuel** — decrements a counter per instruction; when zero, emits

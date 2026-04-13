@@ -5,7 +5,7 @@
 //! primitives with the VM and build the metadata maps.
 
 use crate::signals::Signal;
-use crate::value::types::{Arity, NativeFn};
+use crate::value::types::{Arity, PrimFn};
 use crate::value::{SymbolId, Value};
 use std::collections::HashMap;
 
@@ -19,7 +19,7 @@ pub struct PrimitiveDef {
     /// The Elle-facing name (e.g., "math/sin", "cons").
     pub name: &'static str,
     /// The Rust implementation.
-    pub func: NativeFn,
+    pub func: PrimFn,
     /// Signal (errors, yields, etc.).
     pub signal: Signal,
     /// Argument count constraint.
@@ -62,6 +62,31 @@ const fn _default_prim(
 ) -> (crate::value::fiber::SignalBits, crate::value::Value) {
     panic!("PrimitiveDef::DEFAULT func called — this is a bug")
 }
+
+/// No-op primitive: returns (SIG_OK, nil). Used by ad-hoc Value::native_fn
+/// creation in tests and FFI wrappers.
+fn _noop_prim(
+    _args: &[crate::value::Value],
+) -> (crate::value::fiber::SignalBits, crate::value::Value) {
+    (
+        crate::value::fiber::SignalBits::EMPTY,
+        crate::value::Value::NIL,
+    )
+}
+
+/// A silent, no-op PrimitiveDef for ad-hoc `Value::native_fn` creation.
+/// Used by tests and FFI wrappers that need a `&'static PrimitiveDef`.
+pub static NOOP_PRIM: PrimitiveDef = PrimitiveDef {
+    name: "<noop>",
+    func: _noop_prim,
+    signal: Signal::silent(),
+    arity: Arity::AtLeast(0),
+    doc: "",
+    params: &[],
+    category: "",
+    example: "",
+    aliases: &[],
+};
 
 /// Documentation info for a named form (primitive, special form, or macro).
 /// Stored at runtime for `doc` lookup.

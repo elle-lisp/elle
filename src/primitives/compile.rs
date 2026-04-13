@@ -162,7 +162,7 @@ fn collect_fn_signals(
                 collect_fn_signals(body, arena, symbols, map);
             }
         }
-        HirKind::Yield(expr) | HirKind::Break { value: expr, .. } => {
+        HirKind::Emit { value: expr, .. } | HirKind::Break { value: expr, .. } => {
             collect_fn_signals(expr, arena, symbols, map);
         }
         HirKind::Cond {
@@ -357,7 +357,7 @@ fn collect_call_edges(
                 collect_call_edges(body, arena, symbols, edges, current_fn);
             }
         }
-        HirKind::Yield(expr) | HirKind::Break { value: expr, .. } => {
+        HirKind::Emit { value: expr, .. } | HirKind::Break { value: expr, .. } => {
             collect_call_edges(expr, arena, symbols, edges, current_fn);
         }
         HirKind::Cond {
@@ -579,7 +579,7 @@ fn find_named_lambda<'a>(
                 None
             })
         }
-        HirKind::Yield(e) | HirKind::Break { value: e, .. } => {
+        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
             find_named_lambda(e, arena, symbols, target)
         }
         HirKind::Cond {
@@ -700,7 +700,7 @@ fn collect_vars_in_range(
                 collect_vars_in_range(b, start, end, referenced, defined, signal);
             }
         }
-        HirKind::Yield(e) | HirKind::Break { value: e, .. } => {
+        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
             collect_vars_in_range(e, start, end, referenced, defined, signal);
         }
         HirKind::Cond {
@@ -1314,7 +1314,7 @@ fn find_lambda_captures(
             }
             None
         }
-        HirKind::Yield(e) | HirKind::Break { value: e, .. } => {
+        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
             find_lambda_captures(e, arena, symbols, target)
         }
         HirKind::Cond {
@@ -1497,7 +1497,7 @@ fn find_capturers(
                 find_capturers(body, arena, symbols, target, results);
             }
         }
-        HirKind::Yield(e) | HirKind::Break { value: e, .. } => {
+        HirKind::Emit { value: e, .. } | HirKind::Break { value: e, .. } => {
             find_capturers(e, arena, symbols, target, results);
         }
         HirKind::Cond {

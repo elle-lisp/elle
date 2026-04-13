@@ -377,8 +377,12 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
     let call_array_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
     // cons: (car_tag, car_pay, cdr_tag, cdr_pay) -> (tag, payload)
     let cons_sig = make_sig(module, &[I64, I64, I64, I64], &[I64, I64]);
-    // jit_yield: (ytag, ypay, spilled_ptr, yield_idx, vm, ctag, cpay) -> (tag, payload)
-    let yield_sig = make_sig(module, &[I64, I64, I64, I64, I64, I64, I64], &[I64, I64]);
+    // jit_yield: (ytag, ypay, spilled_ptr, yield_idx, vm, ctag, cpay, signal_bits) -> (tag, payload)
+    let yield_sig = make_sig(
+        module,
+        &[I64, I64, I64, I64, I64, I64, I64, I64],
+        &[I64, I64],
+    );
     // jit_yield_through_call: (spilled_ptr, call_site_idx, vm, ctag, cpay) -> (tag, payload)
     let ytc_sig = make_sig(module, &[I64, I64, I64, I64, I64], &[I64, I64]);
     // void -> (tag, payload)  (no arguments, returns NIL)

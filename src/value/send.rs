@@ -389,7 +389,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
         }
 
         // Native function pointers are inherently Send + Sync
-        HeapObject::NativeFn(f) => Ok(SendValue::NativeFn(*f)),
+        HeapObject::NativeFn(f) => Ok(SendValue::NativeFn(f)),
 
         // Unsafe: FFI handles
         HeapObject::LibHandle(_) => Err("Cannot send library handle".to_string()),

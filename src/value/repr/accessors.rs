@@ -417,17 +417,23 @@ impl Value {
         self.as_lbox().or_else(|| self.as_capture_cell())
     }
 
-    /// Extract as native function if this is a native function.
+    /// Extract the primitive definition if this is a native function.
     #[inline]
-    pub fn as_native_fn(&self) -> Option<&crate::value::heap::NativeFn> {
+    pub fn as_native_def(&self) -> Option<&'static crate::primitives::def::PrimitiveDef> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_native_fn() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::NativeFn(f) => Some(f),
+            HeapObject::NativeFn(def) => Some(*def),
             _ => None,
         }
+    }
+
+    /// Extract the bare function pointer if this is a native function.
+    #[inline]
+    pub fn as_native_fn(&self) -> Option<crate::value::heap::PrimFn> {
+        self.as_native_def().map(|def| def.func)
     }
 
     /// Extract as array (immutable) if this is one.

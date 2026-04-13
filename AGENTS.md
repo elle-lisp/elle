@@ -60,8 +60,10 @@ bytecode. Error messages include file:line:col information.
 - **`stdlib`** — Standard library functions (`stdlib.lisp`, loaded at startup).
   See [`docs/stdlib.md`](docs/stdlib.md).
 - **`arithmetic`** — Unified arithmetic operations (shared by VM and primitives)
-- **`signals`** — Signal type (`Silent`, `Yields`, `Polymorphic`), signal
-  registry for keyword-to-bit mapping;
+- **`signals`** — Signal type (`{ bits: SignalBits, propagates: u32 }`),
+  signal registry for keyword-to-bit mapping, `CAP_MASK` for capability
+  enforcement; `emit` is a special form for literal keywords/sets,
+  `yield` is a macro expanding to `(emit :yield val)`;
   includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL`
   (bit 12) for instruction budget exhaustion
 - **`io`** — I/O request types, backends, timeout handling;
@@ -159,8 +161,8 @@ These must remain true. Violating them breaks the system:
 
 2. **Closures capture by value into their environment.** Immutable captured
    locals are captured directly. Mutable captured locals and mutated parameters
-   use `LocalLBox` for indirection. The `lbox_params_mask` on `Closure` tracks
-   which parameters need lbox wrapping.
+   use `CaptureCell` for indirection. The `capture_params_mask` on
+   `ClosureTemplate` tracks which parameters need wrapping.
 
 3. **Signals are inferred, not declared — except when `silence` provides
    explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`)
@@ -176,6 +178,14 @@ These must remain true. Violating them breaks the system:
 5. **Errors propagate.** Functions return `LResult<T>`. Silent failure is
    forbidden. If you catch an error, you must either handle it meaningfully or
    propagate it.
+
+## Writing Elle code
+
+**Read [`QUICKSTART.md`](QUICKSTART.md) before writing any Elle code.**
+It is the complete language reference: syntax, special forms, data types,
+control flow, macros, fibers, signals, and the standard library. Elle
+looks like a Lisp but has significant differences from Scheme/Clojure/CL
+that will trip you up if you guess. Do not guess; read the reference.
 
 ## Intentional oddities
 

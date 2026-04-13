@@ -538,6 +538,7 @@ mod tests {
         let macro_def = MacroDef {
             name: "double".to_string(),
             params: vec!["x".to_string()],
+            optional_params: vec![],
             rest_param: None,
             template,
             definition_scope: ScopeId(0),
@@ -574,6 +575,7 @@ mod tests {
         let macro_def = MacroDef {
             name: "single".to_string(),
             params: vec!["x".to_string()],
+            optional_params: vec![],
             rest_param: None,
             template,
             definition_scope: ScopeId(0),

@@ -66,23 +66,35 @@ impl Expander {
         symbols: &mut SymbolTable,
         vm: &mut VM,
     ) -> Result<Syntax, String> {
-        // Check arity
+        // Check arity: required params must be present, optional and rest are flexible
+        let min_args = macro_def.params.len();
+        let max_args = min_args + macro_def.optional_params.len();
         if macro_def.rest_param.is_some() {
-            if args.len() < macro_def.params.len() {
+            if args.len() < min_args {
                 return Err(format!(
                     "Macro '{}' expects at least {} arguments, got {}",
                     macro_def.name,
-                    macro_def.params.len(),
+                    min_args,
                     args.len()
                 ));
             }
-        } else if args.len() != macro_def.params.len() {
-            return Err(format!(
-                "Macro '{}' expects {} arguments, got {}",
-                macro_def.name,
-                macro_def.params.len(),
-                args.len()
-            ));
+        } else if args.len() < min_args || args.len() > max_args {
+            if min_args == max_args {
+                return Err(format!(
+                    "Macro '{}' expects {} arguments, got {}",
+                    macro_def.name,
+                    min_args,
+                    args.len()
+                ));
+            } else {
+                return Err(format!(
+                    "Macro '{}' expects {}-{} arguments, got {}",
+                    macro_def.name,
+                    min_args,
+                    max_args,
+                    args.len()
+                ));
+            }
         }
 
         // Recursion guard
@@ -125,12 +137,21 @@ impl Expander {
             if let Some(v) = cached {
                 v
             } else {
-                // Build the fn parameter list, including rest param if present.
+                // Build the fn parameter list: required, &opt optional, & rest.
                 let mut param_items: Vec<Syntax> = macro_def
                     .params
                     .iter()
                     .map(|p| Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()))
                     .collect();
+                if !macro_def.optional_params.is_empty() {
+                    param_items.push(Syntax::new(
+                        SyntaxKind::Symbol("&opt".to_string()),
+                        span.clone(),
+                    ));
+                    for p in &macro_def.optional_params {
+                        param_items.push(Syntax::new(SyntaxKind::Symbol(p.clone()), span.clone()));
+                    }
+                }
                 if let Some(ref rest_name) = macro_def.rest_param {
                     param_items.push(Syntax::new(
                         SyntaxKind::Symbol("&".to_string()),
@@ -191,11 +212,20 @@ impl Expander {
                 .map(wrap_macro_arg_value)
                 .collect();
 
+            // Collect optional param arg values (those provided).
+            // Missing optional args are handled by the fn's &opt default (nil).
+            let opt_start = macro_def.params.len();
+            let opt_end = opt_start + macro_def.optional_params.len();
+            let opt_provided = args.len().min(opt_end);
+            for arg in &args[opt_start..opt_provided] {
+                arg_values.push(wrap_macro_arg_value(arg));
+            }
+
             // Collect rest args — the closure's arity is AtLeast(n) with a rest param,
             // and VM's populate_env with VarargKind::List collects remaining args into
             // an Elle list automatically. Pass them as individual Values.
             if macro_def.rest_param.is_some() {
-                for arg in &args[macro_def.params.len()..] {
+                for arg in &args[opt_end..] {
                     arg_values.push(wrap_macro_arg_value(arg));
                 }
             }

@@ -97,6 +97,12 @@
 (defmacro default (name value)
   `(when (nil? ,name) (assign ,name ,value)))
 
+## yield - cooperative suspension
+## (yield) => (emit :yield nil)
+## (yield value) => (emit :yield value)
+(defmacro yield (&opt v)
+  `(emit :yield ,v))
+
 ## error - signal a fiber error
 ## (error) => (emit :error nil)
 ## (error value) => (emit :error value)

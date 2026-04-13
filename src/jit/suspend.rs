@@ -33,6 +33,7 @@ pub extern "C" fn elle_jit_yield(
     vm: u64, // *mut () as u64
     closure_tag: u64,
     closure_payload: u64,
+    signal_bits: u64,
 ) -> JitValue {
     let vm = unsafe { &mut *(vm as *mut crate::vm::VM) };
     let yielded = Value {
@@ -80,20 +81,22 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { *spilled_values.add(i) });
     }
 
-    let frame = SuspendedFrame::Bytecode(BytecodeFrame {
-        bytecode: closure.template.bytecode.clone(),
-        constants: closure.template.constants.clone(),
-        env,
-        ip: yield_meta.resume_ip,
-        stack,
-        location_map: closure.template.location_map.clone(),
-        // JIT yield: on resume, the resume argument becomes the result of
-        // the (yield ...) expression — push it onto the restored stack.
-        push_resume_value: true,
-    });
+    let sig = crate::value::fiber::SignalBits::new(signal_bits as u32);
+    vm.fiber.signal = Some((sig, yielded));
 
-    vm.fiber.signal = Some((crate::value::fiber::SIG_YIELD, yielded));
-    vm.fiber.suspended = Some(vec![frame]);
+    if !sig.contains(crate::value::fiber::SIG_ERROR) {
+        // Suspension: build a frame for later resumption.
+        let frame = SuspendedFrame::Bytecode(BytecodeFrame {
+            bytecode: closure.template.bytecode.clone(),
+            constants: closure.template.constants.clone(),
+            env,
+            ip: yield_meta.resume_ip,
+            stack,
+            location_map: closure.template.location_map.clone(),
+            push_resume_value: true,
+        });
+        vm.fiber.suspended = Some(vec![frame]);
+    }
 
     YIELD_SENTINEL
 }
@@ -379,6 +382,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         assert_eq!(result, YIELD_SENTINEL);
@@ -430,6 +434,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         assert_eq!(result, YIELD_SENTINEL);
@@ -461,6 +466,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -490,6 +496,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -523,6 +530,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -576,6 +584,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -612,6 +621,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -664,6 +674,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
+            crate::value::fiber::SIG_YIELD.raw() as u64,
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);

@@ -11,7 +11,7 @@ compiled and executed in the real VM via `pipeline::eval_syntax()`.
 The full language is available in macro bodies: `if`, `let`, closures,
 list operations, recursion — everything.
 
-```lisp
+```text
 (defmacro my-when (test body)
   `(if ,test ,body nil))
 

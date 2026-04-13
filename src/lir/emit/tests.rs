@@ -107,7 +107,8 @@ fn test_yield_point_info_collected() {
         synthetic_span(),
     ));
     b0.terminator = SpannedTerminator::new(
-        Terminator::Yield {
+        Terminator::Emit {
+            signal: crate::value::fiber::SIG_YIELD,
             value: Reg(0),
             resume_label: Label(1),
         },

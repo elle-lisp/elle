@@ -1733,8 +1733,7 @@ fn test_json_serialize_errors() {
     let result = call_primitive(&json_serialize, &[closure]);
     assert!(result.is_err());
 
-    let native_fn: elle::value::NativeFn = |_| (elle::value::fiber::SIG_OK, Value::NIL);
-    let fn_val = Value::native_fn(native_fn);
+    let fn_val = Value::native_fn(&elle::primitives::def::NOOP_PRIM);
     let result = call_primitive(&json_serialize, &[fn_val]);
     assert!(result.is_err());
 }

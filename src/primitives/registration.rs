@@ -72,7 +72,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
     for table in ALL_TABLES {
         for def in *table {
             let sym_id = symbols.intern(def.name);
-            let native_val = Value::native_fn(def.func);
+            let native_val = Value::native_fn(def);
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
             meta.functions.insert(sym_id, native_val);
@@ -91,7 +91,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
-                let alias_val = Value::native_fn(def.func);
+                let alias_val = Value::native_fn(def);
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
                 meta.functions.insert(alias_id, alias_val);
@@ -118,13 +118,13 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
             let sym_id = symbols.intern(def.name);
             meta.signals.insert(sym_id, def.signal);
             meta.arities.insert(sym_id, def.arity);
-            meta.functions.insert(sym_id, Value::native_fn(def.func));
+            meta.functions.insert(sym_id, Value::native_fn(def));
 
             for alias in def.aliases {
                 let alias_id = symbols.intern(alias);
                 meta.signals.insert(alias_id, def.signal);
                 meta.arities.insert(alias_id, def.arity);
-                meta.functions.insert(alias_id, Value::native_fn(def.func));
+                meta.functions.insert(alias_id, Value::native_fn(def));
             }
         }
     }

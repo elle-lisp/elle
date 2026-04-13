@@ -13,7 +13,7 @@
 use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{
-    FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_TERMINAL,
+    FiberStatus, SignalBits, SIG_ABORT, SIG_ERROR, SIG_OK, SIG_PROPAGATE, SIG_QUERY, SIG_TERMINAL,
 };
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -356,6 +356,51 @@ pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (fiber/caps) → set
+/// (fiber/caps fiber) → set
+///
+/// Returns the active capabilities of the current or specified fiber as a
+/// keyword set. Capabilities are `~withheld & CAP_MASK`.
+///
+/// 0 args: queries the current fiber via SIG_QUERY.
+/// 1 arg: reads the specified fiber's withheld field directly.
+pub(crate) fn prim_fiber_caps(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() {
+        // 0-arg form: query current fiber via SIG_QUERY
+        return (
+            SIG_QUERY,
+            Value::cons(Value::keyword("fiber/caps"), Value::NIL),
+        );
+    }
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fiber/caps: expected 0-1 arguments, got {}", args.len()),
+            ),
+        );
+    }
+
+    let handle = match args[0].as_fiber() {
+        Some(h) => h,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("fiber/caps: expected fiber, got {}", args[0].type_name()),
+                ),
+            );
+        }
+    };
+
+    let caps = handle.with(|fiber| crate::signals::CAP_MASK.subtract(fiber.withheld));
+    let registry = crate::signals::registry::global_registry().lock().unwrap();
+    let keywords = registry.bits_to_keywords(caps);
+    (SIG_OK, Value::set(keywords.into_iter().collect()))
+}
+
 /// Declarative primitive definitions for fiber introspection and management
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -439,6 +484,20 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["fiber"],
         category: "fiber",
         example: "(fiber/propagate f)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fiber/caps",
+        func: prim_fiber_caps,
+        signal: Signal {
+            bits: SIG_ERROR.union(SIG_QUERY),
+            propagates: 0,
+        },
+        arity: Arity::Range(0, 1),
+        doc: "Get the fiber's active capabilities as a keyword set",
+        params: &["fiber?"],
+        category: "fiber",
+        example: "(fiber/caps)\n(fiber/caps f)",
         aliases: &[],
     },
     PrimitiveDef {

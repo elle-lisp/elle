@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn test_from_value_rejects_closure() {
         let result = Syntax::from_value(
-            &Value::native_fn(|_| (crate::value::SIG_OK, Value::NIL)),
+            &Value::native_fn(&crate::primitives::def::NOOP_PRIM),
             &SymbolTable::new(),
             test_span(),
         );

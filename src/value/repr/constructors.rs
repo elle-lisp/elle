@@ -201,12 +201,12 @@ impl Value {
         })
     }
 
-    /// Create a native function value.
+    /// Create a native function value from a static primitive definition.
     /// Uses permanent allocation — native functions outlive any arena scope.
     #[inline]
-    pub fn native_fn(f: crate::value::heap::NativeFn) -> Self {
+    pub fn native_fn(def: &'static crate::primitives::def::PrimitiveDef) -> Self {
         use crate::value::heap::{alloc_permanent, HeapObject};
-        alloc_permanent(HeapObject::NativeFn(f))
+        alloc_permanent(HeapObject::NativeFn(def))
     }
 
     /// Create an immutable array value.

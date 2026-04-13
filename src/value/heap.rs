@@ -15,7 +15,7 @@ use crate::value::Value;
 
 // Re-export types for convenience
 pub use crate::value::closure::Closure;
-pub use crate::value::types::{Arity, NativeFn, TableKey};
+pub use crate::value::types::{Arity, NativeFn, PrimFn, TableKey};
 
 /// Cons cell for list construction.
 pub struct Cons {

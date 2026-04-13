@@ -4,7 +4,10 @@ Signal system for tracking which signals a function may emit. Includes the globa
 
 ## Responsibility
 
-1. Define the `Signal` type and provide signal inference for the emit/fiber system
+1. Define the `Signal` type and provide signal inference for the emit/fiber system.
+   `emit` is a special form when the first argument is a literal keyword or keyword set;
+   it replaces the old `yield` special form. `yield` is now a macro (defined in prelude.lisp)
+   that expands to `(emit :yield val)`.
 2. Maintain the global signal registry mapping signal keywords to bit positions
 3. Track which signals a function might emit (error, yield, debug, ffi, io, halt, user-defined)
 4. Track which parameter indices propagate their callee's signals
@@ -17,8 +20,8 @@ Signal system for tracking which signals a function may emit. Includes the globa
 | `Signal` | `{ bits: SignalBits, propagates: u32 }` — Copy, const fn constructors |
 | `Signal::silent()` | No signals |
 | `Signal::errors()` | May error (SIG_ERROR) |
-| `Signal::yields()` | May yield (SIG_YIELD) |
-| `Signal::yields_errors()` | May yield and error |
+| `Signal::yields()` | May yield (SIG_YIELD) — being phased out in favor of literal `Signal { bits: SIG_YIELD, propagates: 0 }` |
+| `Signal::yields_errors()` | May yield and error — being phased out in favor of literal construction |
 | `Signal::ffi()` | Calls foreign code (SIG_FFI) |
 | `Signal::ffi_errors()` | FFI + may error |
 | `Signal::halts()` | May halt (SIG_HALT) |

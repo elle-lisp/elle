@@ -274,7 +274,7 @@ impl fmt::Debug for TableKey {
     }
 }
 
-/// Unified primitive function type.
+/// Primitive function signature.
 ///
 /// All primitives return (signal_bits, value):
 /// - (SIG_OK, value) → push value onto stack
@@ -284,7 +284,11 @@ impl fmt::Debug for TableKey {
 ///
 /// No primitive has VM access. Operations that formerly needed the VM
 /// now emit signals that the VM dispatch loop handles.
-pub type NativeFn = fn(&[Value]) -> (crate::value::fiber::SignalBits, Value);
+pub type PrimFn = fn(&[Value]) -> (crate::value::fiber::SignalBits, Value);
+
+/// A reference to a static primitive definition. Stored in HeapObject::NativeFn
+/// so the VM can access signal metadata at call time for capability enforcement.
+pub type NativeFn = &'static crate::primitives::def::PrimitiveDef;
 
 #[cfg(test)]
 mod tests {
