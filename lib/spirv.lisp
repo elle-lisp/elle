@@ -4,13 +4,15 @@
 ## compilation — Elle code builds the bytecode directly.
 ##
 ## Usage:
-##   (def spv (import "std/spirv"))
+##   (def spv ((import "std/spirv")))
 ##   (def bytecode (spv:compute 256 3 (fn [s]
 ##     (let* [[id (s:global-id)]
 ##            [a  (s:load 0 id)]
 ##            [b  (s:load 1 id)]]
 ##       (s:store 2 id (s:fadd a b))))
 ##     f32-bits-fn))
+
+(fn []
 
 ## ── SPIR-V constants ────────────────────────────────────────────
 
@@ -61,9 +63,23 @@
 (def op-ford-less-equal   188)
 (def op-ford-equal        180)
 (def op-sless-than        177)
+(def op-sgreater-than     173)
+(def op-logical-and       167)
+(def op-logical-not       168)
+(def op-bitwise-or        197)
+(def op-bitwise-and       199)
+(def op-shift-left        196)
+(def op-shift-right       194)
+(def op-umin              205)
+(def op-bitcast           124)
+(def op-branch            249)
+(def op-branch-conditional 250)
+(def op-loop-merge        246)
+(def op-selection-merge   247)
 
 ## Storage classes
 (def sc-input              1)
+(def sc-function           7)
 (def sc-storage-buffer    12)
 
 ## Decorations
@@ -175,6 +191,8 @@
          [fn-void-t      (id)]
          [ptr-uvec3-in-t (id)]
          [ptr-f32-sb-t   (id)]
+         [ptr-f32-fn-t  (id)]
+         [ptr-u32-fn-t  (id)]
          ## ── Per-buffer types ────────────────────────────
          [buf-struct-ids (map (fn [_] (id)) (range num-buffers))]
          [buf-ptr-ids    (map (fn [_] (id)) (range num-buffers))]
@@ -222,6 +240,8 @@
     (emit-inst (m :types) op-type-function fn-void-t void-t)
     (emit-inst (m :types) op-type-pointer ptr-uvec3-in-t sc-input uvec3-t)
     (emit-inst (m :types) op-type-pointer ptr-f32-sb-t sc-storage-buffer f32-t)
+    (emit-inst (m :types) op-type-pointer ptr-f32-fn-t sc-function f32-t)
+    (emit-inst (m :types) op-type-pointer ptr-u32-fn-t sc-function u32-t)
 
     (each i (range num-buffers)
       (let [[struct-id (buf-struct-ids i)]]
@@ -237,13 +257,14 @@
       (emit-inst (m :types) op-variable (buf-ptr-ids i) (buf-var-ids i) sc-storage-buffer))
 
     ## ── Function body ───────────────────────────────
-    (emit-inst (m :functions) op-function void-t main-fn fn-control-none fn-void-t)
-    (emit-inst (m :functions) op-label entry-lbl)
+    ## fn-vars: OpVariable with Function storage class (must be first in entry block)
+    ## body: all other function instructions (emitted by body-fn)
+    (let* [[fn-vars @[]]
+           [body    @[]]
 
-    ## ── Builder context for user's body ─────────────
-    (let* [[binop (fn [opcode result-type a b]
+           [binop (fn [opcode result-type a b]
               (let [[r (id)]]
-                (emit-inst (m :functions) opcode result-type r a b)
+                (emit-inst body opcode result-type r a b)
                 r))]
 
            [bool-t-cell @[nil]]
@@ -258,25 +279,25 @@
            [cmp-f (fn [opcode a b]
               (let* [[bt (ensure-bool)]
                      [r  (id)]]
-                (emit-inst (m :functions) opcode bt r a b)
+                (emit-inst body opcode bt r a b)
                 r))]
 
            [s {:global-id (fn []
                 (let* [[gv (id)] [ix (id)]]
-                  (emit-inst (m :functions) op-load uvec3-t gv gid-var)
-                  (emit-inst (m :functions) op-composite-extract u32-t ix gv 0)
+                  (emit-inst body op-load uvec3-t gv gid-var)
+                  (emit-inst body op-composite-extract u32-t ix gv 0)
                   ix))
                :load (fn [buf-idx elem-idx]
                 (let* [[ptr (id)] [val (id)]]
-                  (emit-inst (m :functions) op-access-chain ptr-f32-sb-t ptr
+                  (emit-inst body op-access-chain ptr-f32-sb-t ptr
                     (buf-var-ids buf-idx) const-zero elem-idx)
-                  (emit-inst (m :functions) op-load f32-t val ptr)
+                  (emit-inst body op-load f32-t val ptr)
                   val))
                :store (fn [buf-idx elem-idx val]
                 (let [[ptr (id)]]
-                  (emit-inst (m :functions) op-access-chain ptr-f32-sb-t ptr
+                  (emit-inst body op-access-chain ptr-f32-sb-t ptr
                     (buf-var-ids buf-idx) const-zero elem-idx)
-                  (emit-inst (m :functions) op-store ptr val)))
+                  (emit-inst body op-store ptr val)))
                :fadd   (fn [a b] (binop op-fadd f32-t a b))
                :fsub   (fn [a b] (binop op-fsub f32-t a b))
                :fmul   (fn [a b] (binop op-fmul f32-t a b))
@@ -292,12 +313,13 @@
                :fle    (fn [a b] (cmp-f op-ford-less-equal a b))
                :feq    (fn [a b] (cmp-f op-ford-equal a b))
                :slt    (fn [a b] (cmp-f op-sless-than a b))
+               :sgt    (fn [a b] (cmp-f op-sgreater-than a b))
                :select (fn [cond tv fv]
                  (let [[r (id)]]
-                   (emit-inst (m :functions) op-select f32-t r cond tv fv) r))
+                   (emit-inst body op-select f32-t r cond tv fv) r))
                :select-u (fn [cond tv fv]
                  (let [[r (id)]]
-                   (emit-inst (m :functions) op-select u32-t r cond tv fv) r))
+                   (emit-inst body op-select u32-t r cond tv fv) r))
                :const-f (fn [val]
                  (let* [[r (id)] [bits (f32-bits val)]]
                    (emit-inst (m :types) op-constant f32-t r bits) r))
@@ -306,19 +328,80 @@
                    (emit-inst (m :types) op-constant u32-t r val) r))
                :u2f (fn [val]
                  (let [[r (id)]]
-                   (emit-inst (m :functions) op-convert-u-to-f f32-t r val) r))
+                   (emit-inst body op-convert-u-to-f f32-t r val) r))
                :f2u (fn [val]
                  (let [[r (id)]]
-                   (emit-inst (m :functions) op-convert-f-to-u u32-t r val) r))}]]
+                   (emit-inst body op-convert-f-to-u u32-t r val) r))
+               ## ── Local variables ────────────────────────
+               :var-f (fn []
+                 (let [[v (id)]]
+                   (emit-inst fn-vars op-variable ptr-f32-fn-t v sc-function)
+                   {:id v :type f32-t}))
+               :var-u (fn []
+                 (let [[v (id)]]
+                   (emit-inst fn-vars op-variable ptr-u32-fn-t v sc-function)
+                   {:id v :type u32-t}))
+               :load-var (fn [v]
+                 (let [[r (id)]]
+                   (emit-inst body op-load (v :type) r (v :id))
+                   r))
+               :store-var (fn [v val]
+                 (emit-inst body op-store (v :id) val))
+               ## ── Control flow ───────────────────────────
+               :block (fn [] (id))
+               :begin-block (fn [lbl]
+                 (emit-inst body op-label lbl))
+               :branch (fn [lbl]
+                 (emit-inst body op-branch lbl))
+               :branch-cond (fn [cond then else]
+                 (emit-inst body op-branch-conditional cond then else))
+               :loop-merge (fn [merge cont]
+                 (emit-inst body op-loop-merge merge cont 0))
+               :selection-merge (fn [merge]
+                 (emit-inst body op-selection-merge merge 0))
+               ## ── Logical ops ────────────────────────────
+               :logical-and (fn [a b]
+                 (let* [[bt (ensure-bool)]
+                        [r  (id)]]
+                   (emit-inst body op-logical-and bt r a b)
+                   r))
+               :logical-not (fn [a]
+                 (let* [[bt (ensure-bool)]
+                        [r  (id)]]
+                   (emit-inst body op-logical-not bt r a)
+                   r))
+               ## ── Integer bitwise ops ────────────────────
+               :ior  (fn [a b] (binop op-bitwise-or u32-t a b))
+               :iand (fn [a b] (binop op-bitwise-and u32-t a b))
+               :ishl (fn [a b] (binop op-shift-left u32-t a b))
+               :ishr (fn [a b] (binop op-shift-right u32-t a b))
+               :umin (fn [a b]
+                 (let* [[cmp (cmp-f op-sless-than a b)]]
+                   (let [[r (id)]]
+                     (emit-inst body op-select u32-t r cmp a b)
+                     r)))
+               :bitcast-u2f (fn [val]
+                 (let [[r (id)]]
+                   (emit-inst body op-bitcast f32-t r val)
+                   r))
+               :bitcast-f2u (fn [val]
+                 (let [[r (id)]]
+                   (emit-inst body op-bitcast u32-t r val)
+                   r))}]]
 
-      (body-fn s))
+      (body-fn s)
 
-    ## ── End function ────────────────────────────────
-    (emit-inst (m :functions) op-return)
-    (emit-inst (m :functions) op-function-end)
+      ## ── Assemble function ─────────────────────────────
+      ## OpFunction + OpLabel entry + fn-vars + body + OpReturn + OpFunctionEnd
+      (emit-inst (m :functions) op-function void-t main-fn fn-control-none fn-void-t)
+      (emit-inst (m :functions) op-label entry-lbl)
+      (each w fn-vars (push (m :functions) w))
+      (each w body    (push (m :functions) w))
+      (emit-inst (m :functions) op-return)
+      (emit-inst (m :functions) op-function-end))
 
     ## ── Serialize ───────────────────────────────────
     (bytes (serialize m next-id))))
 
 ## ── Export ───────────────────────────────────────────────────────
-{:compute compute}
+{:compute compute})

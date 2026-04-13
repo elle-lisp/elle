@@ -24,6 +24,7 @@
 (ffi/defbind gtk-window-destroy   libgtk "gtk_window_destroy"            :void  [:ptr])
 (ffi/defbind gtk-window-set-title libgtk "gtk_window_set_title"          :void  [:ptr :string])
 (ffi/defbind gtk-window-set-default-size libgtk "gtk_window_set_default_size" :void [:ptr :int :int])
+(ffi/defbind gtk-window-fullscreen     libgtk "gtk_window_fullscreen"          :void [:ptr])
 (ffi/defbind gtk-window-set-child libgtk "gtk_window_set_child"          :void  [:ptr :ptr])
 
 # ── GtkWidget ─────────────────────────────────────────────────────
@@ -228,6 +229,29 @@
 (ffi/defbind g-main-context-iteration libglib "g_main_context_iteration" :int   [:ptr :int])
 (ffi/defbind g-main-context-pending   libglib "g_main_context_pending"   :int   [:ptr])
 
+# ── GApplication ─────────────────────────────────────────────────
+
+(def libgio (ffi/native "libgio-2.0.so.0"))
+(ffi/defbind g-application-register libgio "g_application_register" :int  [:ptr :ptr :ptr])
+(ffi/defbind g-application-activate libgio "g_application_activate" :void [:ptr])
+(ffi/defbind g-application-run      libgio "g_application_run"      :int  [:ptr :int :ptr])
+
+(ffi/defbind g-application-quit libgio "g_application_quit" :void [:ptr])
+
+(defn run-app [app &named quit]
+  "Cooperative GTK event loop. Registers and activates the app, then
+   pumps g_main_context_iteration non-blocking, yielding to Elle's
+   scheduler between iterations.
+   quit: a nullary function returning true when the loop should exit.
+         If omitted, runs forever."
+  (default quit (fn [] false))
+  (g-application-register app nil nil)
+  (g-application-activate app)
+  (def ctx (g-main-context-default))
+  (while (not (quit))
+    (g-main-context-iteration ctx 0)
+    (ev/sleep 0.001)))
+
 # ── GObject signals ──────────────────────────────────────────────
 
 (ffi/defbind g-signal-connect-data libgobj "g_signal_connect_data"
@@ -278,6 +302,7 @@
  :gtk-window-destroy gtk-window-destroy
  :gtk-window-set-title gtk-window-set-title
  :gtk-window-set-default-size gtk-window-set-default-size
+ :gtk-window-fullscreen gtk-window-fullscreen
  :gtk-window-set-child gtk-window-set-child
  # widget
  :gtk-widget-show gtk-widget-show
@@ -421,6 +446,12 @@
  :g-main-context-default g-main-context-default
  :g-main-context-iteration g-main-context-iteration
  :g-main-context-pending g-main-context-pending
+ # gio / application
+ :g-application-register g-application-register
+ :g-application-activate g-application-activate
+ :g-application-run g-application-run
+ :g-application-quit g-application-quit
+ :run-app run-app
  # gobject
  :g-signal-connect-data g-signal-connect-data
  # webkit

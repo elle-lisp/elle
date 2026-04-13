@@ -3,7 +3,7 @@
 ## Wraps the vulkan plugin and SPIR-V emitter.
 ##
 ## Usage:
-##   (def gpu (import "std/gpu"))
+##   (def gpu ((import "std/gpu")))
 ##   (def ctx (gpu:init))
 ##
 ##   ## compile shader at runtime — no offline tools needed
@@ -16,8 +16,10 @@
 ##   (def result (gpu:run shader [4 1 1]
 ##                  [(gpu:input a) (gpu:input b) (gpu:output 1024)]))
 
+(fn []
+
 (def plugin (import "plugin/vulkan"))
-(def spv    (import "std/spirv"))
+(def spv    ((import "std/spirv")))
 
 ## ── Context ────────────────────────────────────────────────────
 
@@ -73,4 +75,4 @@
  :input       gpu-input
  :output      gpu-output
  :inout       gpu-inout
- :run         gpu-run}
+ :run         gpu-run})

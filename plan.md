@@ -20,25 +20,239 @@ story while we're at it?
 - SignalBits widened to u64 (room for GPU signals)
 - IoRequest/IoOp made pub for plugin async I/O
 
+### Vulkan Plugin Architecture
+
+```
+plugins/vulkan/src/
+  lib.rs       — 8 primitives: init, shader, dispatch, wait, collect, submit, decode, f32-bits
+  context.rs   — VulkanState: Entry, Instance, Device, PhysicalDevice, Queue, Allocator, fence_fd_fn
+  shader.rs    — GpuShader: pipeline, pipeline_layout, descriptor_set_layout, shader_module
+  dispatch.rs  — GpuHandle: ctx, fence, fence_fd, command_pool, descriptor_pool, buffers
+  decode.rs    — Result bytes → Elle array conversion (f32 only)
+```
+
+**Async dispatch flow** (from `gpu:run` in `lib/gpu.lisp`):
+```
+plugin:dispatch(shader, wg_x, wg_y, wg_z, buffers)
+  ├─ Lock VulkanState
+  ├─ Create command pool (TRANSIENT) + command buffer
+  ├─ Allocate buffers via gpu-allocator (host-mapped)
+  ├─ Upload input data via mapped pointer memcpy
+  ├─ Create descriptor set, bind buffers as STORAGE_BUFFER
+  ├─ Record vkCmdDispatch(wg_x, wg_y, wg_z)
+  ├─ Memory barrier: SHADER_WRITE → HOST_READ
+  ├─ Create fence with VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD
+  ├─ vkQueueSubmit + vkGetFenceFdKHR → export fence fd
+  └─ Drop lock (GPU works independently)
+
+plugin:wait(handle)
+  └─ (SIG_YIELD | SIG_IO, IoRequest::poll_fd(fence_fd, POLLIN))
+      └─ Fiber suspends → io_uring POLL_ADD or thread-pool poll(2)
+         └─ GPU fence signals → fiber resumes
+
+plugin:collect(handle)
+  ├─ Read output buffers via mapped pointers
+  └─ Encode: [u32 count, per-buffer: u32 elem_count + N×4 bytes f32 data]
+
+plugin:decode(bytes, :f32)
+  └─ → array of f32 arrays
+```
+
+### SPIR-V Builder (`lib/spirv.lisp`, 325 lines)
+
+8 functions total. MCP signal analysis:
+- **Silent (4)**: `string-word-count`, `encode-word`, `emit-inst`, `make-module`
+- **Yielding (4)**: `compute`, `serialize`, `emit-entry-point`, `string-to-words`
+
+The yield comes from polymorphic `body-fn` callback and `serialize`'s `map`
+calls, not from I/O.
+
+**Supported builder ops** (on shader context `s`):
+| Category | Ops |
+|----------|-----|
+| Memory | `global-id`, `load buf idx`, `store buf idx val` |
+| Float arith | `fadd`, `fsub`, `fmul`, `fdiv`, `fmod` |
+| Int arith | `iadd`, `isub`, `imul`, `idiv`, `umod` |
+| Float cmp | `flt`, `fgt`, `fle`, `feq` |
+| Int cmp | `slt` |
+| Conversion | `u2f`, `f2u` |
+| Constants | `const-f`, `const-u` |
+| Selection | `select` (f32), `select-u` (u32) |
+
+### GPU Library (`lib/gpu.lisp`, 77 lines)
+
+7 functions. MCP signal analysis:
+- **Silent (3)**: `gpu-input`, `gpu-output`, `gpu-inout`
+- **Yielding (4)**: `gpu-load-shader`, `gpu-compile`, `gpu-init`, `gpu-run`
+
 ## The Problem
 
 Four separate codegen paths with no shared optimization:
 
 ```
-LIR ─┬→ Bytecode (VM interpreter)
-     ├→ Cranelift IR → x86 (JIT, ~1MB)
-     ├→ WASM bytecode → Wasmtime (~15MB)
-     └→ SPIR-V (GPU, proposed)
+LIR ─┬→ Bytecode (VM interpreter)             src/lir/emit/
+     ├→ Cranelift IR → x86 (JIT, ~1MB)        src/jit/
+     ├→ WASM bytecode → Wasmtime (~15MB)       src/wasm/
+     └→ SPIR-V (GPU, proposed)                 lib/spirv.lisp (runtime)
 ```
 
 Each has its own instruction selector, its own bugs, its own maintenance.
 Optimizations done for one don't help the others. Adding GPU as a fourth
 standalone backend makes this worse.
 
+### Backend Comparison
+
+| Aspect | Bytecode | Cranelift JIT | WASM/Wasmtime |
+|--------|----------|---------------|---------------|
+| Form | Stack-based, ~80 opcodes | Register-based Cranelift IR | State machine + CPS |
+| Yield | `Emit` opcode | Side-exit sentinel (0xDEAD_CAFE...) | CPS resume via br_table |
+| Fast path | None | Diamond CFG for int arith | None |
+| Self-tail-call | Interpreter loop | Native loop (3.2× speedup) | State variable loop |
+| Signal gate | All code | Rejects polymorphic, MakeClosure | Rejects MakeClosure, TailCall, Yield |
+
+## Vulkan Plugin Gap Analysis
+
+Current `dispatch.rs` allocates every Vulkan resource per-dispatch. No reuse.
+
+| Resource | Current Code | Phase 1 Target |
+|----------|-------------|----------------|
+| Command pool | `create_command_pool` per dispatch (line 85, TRANSIENT flag) | Per-thread pool, `vkResetCommandPool` between dispatches |
+| Descriptor pool | `create_descriptor_pool` per dispatch (line 123) | Recycling pool or `vkResetDescriptorPool` |
+| Buffers | `create_buffers()` allocates fresh via gpu-allocator (line 259) | Pool keyed by `(size_bucket, MemoryLocation)` |
+| Fences | `create_fence` with `ExportFenceCreateInfo` per dispatch (line 199) | Verify reuse after reset with SYNC_FD handle type |
+| Data types | f32 only (decode.rs hardcodes f32) | f32, i32, u32 |
+| Persistent bufs | None; `GpuHandle::drop` frees everything | `gpu-buffer` value type with generation counter |
+
+### Buffer Pool Design
+
+```rust
+struct BufferPool {
+    free: HashMap<(SizeBucket, MemoryLocation), Vec<(vk::Buffer, Allocation)>>,
+}
+
+impl BufferPool {
+    fn acquire(&mut self, size: usize, loc: MemoryLocation) -> Option<(vk::Buffer, Allocation)>;
+    fn release(&mut self, buf: vk::Buffer, alloc: Allocation, size: usize, loc: MemoryLocation);
+    fn trim(&mut self, max_per_bucket: usize);  // memory pressure
+}
+```
+
+Size bucketing: round up to next power of 2 (256, 512, 1K, ..., 256M).
+Memory locations from `dispatch.rs` lines 275-279:
+- `BufferUsage::Input` → `MemoryLocation::CpuToGpu`
+- `BufferUsage::Output` → `MemoryLocation::GpuToCpu`
+- `BufferUsage::InOut` → `MemoryLocation::CpuToGpu`
+
+## SPIR-V Builder Gap Analysis
+
+### Missing for Mandelbrot
+
+The inner loop `while |z|² < 4 && iter < max_iter` requires structured
+control flow that the builder doesn't support.
+
+**Required SPIR-V opcodes** (not yet emitted):
+| Opcode | Number | Purpose |
+|--------|--------|---------|
+| `OpBranch` | 249 | Unconditional branch |
+| `OpBranchConditional` | 250 | Conditional branch |
+| `OpLoopMerge` | 246 | Structured loop header annotation |
+| `OpSelectionMerge` | 247 | Structured if header annotation |
+| `OpVariable` | 59 | Function-scoped local variable |
+| `OpPhi` | 245 | Loop-carried dependency (alt: use local vars) |
+| `OpLogicalAnd` | 167 | Combine loop conditions |
+| `OpLogicalNot` | 168 | Negate condition |
+| `OpSGreaterThan` | 187 | Signed integer comparison |
+
+### New Builder API
+
+```lisp
+;; ── Control flow ──────────────────────────────────────────
+(s:block)                          ;; allocate a label ID (no emission)
+(s:begin-block lbl)                ;; emit OpLabel, start new basic block
+(s:branch lbl)                     ;; unconditional branch (terminates block)
+(s:branch-cond cond then else)     ;; conditional branch (terminates block)
+(s:loop-merge merge continue)      ;; must immediately precede branch/branch-cond
+(s:selection-merge merge)          ;; must immediately precede branch-cond
+
+;; ── Local variables ───────────────────────────────────────
+(s:var-f)                          ;; OpVariable Function storage, f32 ptr
+(s:var-u)                          ;; OpVariable Function storage, u32 ptr
+;;   both return {:id <spir-v-id> :type <type-id>}
+(s:load-var var)                   ;; OpLoad from function-scoped variable
+(s:store-var var val)              ;; OpStore to function-scoped variable
+
+;; ── Additional ops ────────────────────────────────────────
+(s:sgt a b)                        ;; signed greater-than (u32 operands)
+(s:logical-and a b)                ;; boolean AND
+(s:logical-not a)                  ;; boolean NOT
+```
+
+### Mandelbrot Kernel Sketch
+
+```lisp
+(spv:compute 256 3 (fn [s]
+  (let* [[id    (s:global-id)]
+         [cx    (s:load 0 id)]       ;; real part of c
+         [cy    (s:load 1 id)]       ;; imag part of c
+         [zr    (s:var-f)]           ;; mutable z_real → {:id N :type f32-t}
+         [zi    (s:var-f)]           ;; mutable z_imag
+         [iter  (s:var-u)]           ;; iteration counter
+         [max   (s:const-u 256)]
+         [four  (s:const-f 4.0)]
+         [zero-f (s:const-f 0.0)]
+         [zero-u (s:const-u 0)]
+         [one-u  (s:const-u 1)]
+         ;; allocate block labels (no emission yet)
+         [loop-hdr  (s:block)]
+         [loop-body (s:block)]
+         [loop-cont (s:block)]
+         [loop-end  (s:block)]]
+    ;; init (still in entry block)
+    (s:store-var zr zero-f)
+    (s:store-var zi zero-f)
+    (s:store-var iter zero-u)
+    (s:branch loop-hdr)
+    ;; ── loop header ──────────────────────────────────
+    (s:begin-block loop-hdr)
+    (let* [[r   (s:load-var zr)]
+           [i   (s:load-var zi)]
+           [r2  (s:fmul r r)]
+           [i2  (s:fmul i i)]
+           [mag (s:fadd r2 i2)]
+           [ok  (s:flt mag four)]
+           [n   (s:load-var iter)]
+           [lim (s:slt n max)]
+           [go  (s:logical-and ok lim)]]
+      ;; loop-merge must immediately precede the branch (SPIR-V validation)
+      (s:loop-merge loop-end loop-cont)
+      (s:branch-cond go loop-body loop-end))
+    ;; ── loop body ────────────────────────────────────
+    (s:begin-block loop-body)
+    (let* [[r (s:load-var zr)]
+           [i (s:load-var zi)]
+           [ri (s:fmul r i)]
+           [r2 (s:fmul r r)]
+           [i2 (s:fmul i i)]
+           [nr (s:fadd (s:fsub r2 i2) cx)]
+           [ni (s:fadd (s:fadd ri ri) cy)]]
+      (s:store-var zr nr)
+      (s:store-var zi ni)
+      (s:store-var iter (s:iadd (s:load-var iter) one-u))
+      (s:branch loop-cont))
+    ;; ── continue target ──────────────────────────────
+    (s:begin-block loop-cont)
+    (s:branch loop-hdr)
+    ;; ── exit block ───────────────────────────────────
+    (s:begin-block loop-end)
+    (s:store 2 id (s:u2f (s:load-var iter)))))
+  vulkan/f32-bits)
+```
+
 ## Proposed Architecture: MLIR
 
 Replace Wasmtime (~15MB) with an MLIR pipeline that handles both CPU
 tier-2 and GPU codegen through a single optimization + lowering stack.
+Net binary cost change: ~40MB MLIR replaces ~15MB Wasmtime = +25MB.
 
 ### Compilation Tiers
 
@@ -55,19 +269,60 @@ tier-2 and GPU codegen through a single optimization + lowering stack.
 LIR → Elle MLIR Dialect → Standard Dialects → Backend
 ```
 
-**Elle MLIR Dialect** (custom):
-- `elle.call` — function call with signal propagation
-- `elle.signal` — signal emission (error, yield, io, gpu)
-- `elle.fiber_yield` — cooperative suspension point
-- `elle.closure_env` — closure environment access
-- `elle.scope_region` — scope-based memory lifetime
+### Elle MLIR Dialect (custom)
 
-**Signal Lowering Pass**: Converts Elle dialect to standard MLIR:
-- `elle.signal` → conditional branch
-- `elle.fiber_yield` → coroutine intrinsics
-- `elle.scope_region` → alloca + lifetime markers
+**Types**:
+- `!elle.value` — 16-byte tagged union (`tag: i64, payload: i64`),
+  matching the JIT calling convention in `src/jit/compiler.rs` lines 87-97
 
-**Standard MLIR Dialects** (after signal lowering):
+**Operations**:
+
+```mlir
+// Function with signal metadata (from LirFunction.signal)
+elle.func @add(%arg0: !elle.value, %arg1: !elle.value) -> !elle.value
+    attributes { signal_bits = 0 : i64, propagates = 0 : i32 } {
+  // ...
+}
+
+// Call with signal routing (Call vs SuspendingCall from LIR)
+%result = elle.call @f(%x, %y) : (!elle.value, !elle.value) -> !elle.value
+    { callee_signal_bits = 0 : i64 }
+
+// Signal emission (from Emit terminator, src/lir/types.rs:556-560)
+elle.signal %value { bits = 2 : i64 }, ^resume_block
+
+// Fiber yield (special case of signal: bits = SIG_YIELD)
+elle.fiber_yield %value, ^resume_block
+
+// Closure environment access (from LoadCapture/StoreCapture)
+%val = elle.load_capture %env[3] : !elle.value
+elle.store_capture %env[3], %val : !elle.value
+
+// Scope allocation region (from RegionEnter/RegionExit)
+elle.scope_region {
+  // allocations freed on exit
+}
+```
+
+### Signal Lowering Pass
+
+Converts Elle dialect to standard MLIR (runs before backend selection):
+- `elle.signal` → conditional branch to signal handler + resume continuation
+- `elle.fiber_yield` → coroutine intrinsics (`llvm.coro.suspend` on CPU path)
+- `elle.scope_region` → `memref.alloca` + lifetime markers
+- `elle.call` with `callee_signal_bits != 0` → call + signal check branch
+- `elle.load_capture`/`elle.store_capture` → `memref.load`/`memref.store` on env pointer
+
+### Numeric Specialization Pass
+
+For GPU-eligible functions (see detection criteria below), replaces tagged
+values with unboxed scalars:
+- `!elle.value` → `i64` or `f64` (inferred from usage)
+- `elle.call` → `func.call` with unboxed signature
+- `BinOp` on `!elle.value` → `arith.addi`/`arith.addf` directly
+
+### Standard MLIR Dialects (after signal lowering)
+
 - `arith` — arithmetic (add, mul, cmp) for int + float
 - `scf` — structured control flow (for, while, if)
 - `memref` — buffer alloc/dealloc, load/store, subview
@@ -88,9 +343,180 @@ Standard dialects → linalg dialect → gpu dialect → spirv / rocdl
 - `gpu.launch_func` — kernel dispatch
 - `gpu.alloc` / `gpu.memcpy` — device memory management
 - `spirv.module` — portable Vulkan SPIR-V output
-- `rocdl` — AMD-native GPU ISA (bypasses SPIR-V for perf)
+- `rocdl` — AMD-native GPU ISA (long-term, requires ROCm dependency)
 
-### Dispatch Model
+## LIR → MLIR Instruction Mapping
+
+Every `LirInstr` variant from `src/lir/types.rs:315-503` classified by
+target eligibility. The LIR has ~60 instruction variants in SSA form.
+
+### GPU-Eligible Instructions
+
+These lower to standard MLIR dialects and can target both CPU and GPU:
+
+| LIR Instruction | MLIR Op | Notes |
+|----------------|---------|-------|
+| `Const { Int(i64) }` | `arith.constant : i64` | |
+| `Const { Float(f64) }` | `arith.constant : f64` | |
+| `Const { Bool(b) }` | `arith.constant : i1` | |
+| `Const { Nil }` | `arith.constant 0 : i64` | nil as zero for numeric contexts |
+| `BinOp { Add }` | `arith.addi` / `arith.addf` | type-dispatched |
+| `BinOp { Sub }` | `arith.subi` / `arith.subf` | |
+| `BinOp { Mul }` | `arith.muli` / `arith.mulf` | |
+| `BinOp { Div }` | `arith.divsi` / `arith.divf` | |
+| `BinOp { Rem }` | `arith.remsi` / `arith.remf` | |
+| `BinOp { BitAnd }` | `arith.andi` | integer only |
+| `BinOp { BitOr }` | `arith.ori` | |
+| `BinOp { BitXor }` | `arith.xori` | |
+| `BinOp { Shl }` | `arith.shli` | |
+| `BinOp { Shr }` | `arith.shrsi` | arithmetic shift |
+| `UnaryOp { Neg }` | `arith.negf` / `arith.subi(0, x)` | |
+| `UnaryOp { Not }` | `arith.xori(x, true)` | boolean not |
+| `UnaryOp { BitNot }` | `arith.xori(x, -1)` | bitwise complement |
+| `Compare { Eq..Ge }` | `arith.cmpi` / `arith.cmpf` | predicate variants |
+| `LoadLocal { slot }` | `memref.load %locals[slot]` | stack locals as memref |
+| `StoreLocal { slot, src }` | `memref.store %src, %locals[slot]` | |
+| `Return(reg)` | `func.return` / `spirv.Return` | |
+| `Jump(label)` | `cf.br ^label` | |
+| `Branch { cond, then, else }` | `cf.cond_br %cond, ^then, ^else` | |
+
+### CPU-Only Instructions
+
+| LIR Instruction | Reason | MLIR (CPU only) |
+|----------------|--------|-----------------|
+| `Call` / `SuspendingCall` / `TailCall` | GPU kernels cannot call functions | `func.call` / `elle.call` |
+| `MakeClosure` | Closures are heap objects | `elle.make_closure` → runtime call |
+| `LoadCapture` / `StoreCapture` / `LoadCaptureRaw` | Closure environment | `elle.load_capture` / `elle.store_capture` |
+| `MakeCaptureCell` / `LoadCaptureCell` / `StoreCaptureCell` | Mutable capture indirection | runtime calls |
+| `Cons` / `Car` / `Cdr` | Linked-list heap allocation | runtime calls |
+| `MakeArrayMut` | Heap array allocation | runtime calls |
+| `ArrayMutLen` / `ArrayMutExtend` / `ArrayMutPush` | Heap array mutation | runtime calls |
+| `CallArrayMut` / `TailCallArrayMut` | Splice-based calls | runtime calls |
+| `IsNil` / `IsPair` / `IsArray` / `IsArrayMut` | Tagged-union type dispatch | `arith.cmpi` on tag field |
+| `IsStruct` / `IsStructMut` / `IsSet` / `IsSetMut` | Tagged-union type dispatch | `arith.cmpi` on tag field |
+| `CarDestructure` / `CdrDestructure` | Error-signaling destructuring | runtime calls |
+| `ArrayMutRefDestructure` / `ArrayMutSliceFrom` | Bounds-checked access | runtime calls |
+| `StructGetOrNil` / `StructGetDestructure` / `StructRest` | Struct field access | runtime calls |
+| `CarOrNil` / `CdrOrNil` / `ArrayMutRefOrNil` | Silent destructuring | runtime calls |
+| `Eval` | Runtime compilation | not lowerable |
+| `PushParamFrame` / `PopParamFrame` | Dynamic parameters | runtime calls |
+| `CheckSignalBound` | Runtime signal checking | runtime calls |
+| `RegionEnter` / `RegionExit` / `RegionExitCall` | Scope allocation | `elle.scope_region` |
+| `LoadResumeValue` | Coroutine resume | `elle.fiber_yield` resume |
+| `ValueConst` | Runtime heap values | `elle.load_const` |
+| `Emit` terminator | Signal emission | `elle.signal` (CPU only) |
+
+## Signal-Driven Eligibility
+
+### Signal System Reference
+
+`Signal` from `src/signals/mod.rs`:
+```rust
+pub struct Signal {
+    pub bits: SignalBits,      // u64 bitmask: which signals this function may emit
+    pub propagates: u32,       // bitmask: which parameter indices propagate signals
+}
+```
+
+Built-in signal bits (`src/signals/mod.rs`):
+| Bit | Constant | Meaning |
+|-----|----------|---------|
+| 0 | `SIG_ERROR` | Exception/panic |
+| 1 | `SIG_YIELD` | Cooperative suspension |
+| 2 | `SIG_DEBUG` | Breakpoint/trace |
+| 3 | `SIG_RESUME` | Fiber resumption (VM-internal) |
+| 4 | `SIG_FFI` | Foreign function call |
+| 8 | `SIG_HALT` | VM termination |
+| 9 | `SIG_IO` | I/O request to scheduler |
+| 11 | `SIG_EXEC` | Subprocess capability |
+| 12 | `SIG_FUEL` | Instruction budget exhaustion |
+| 13 | `SIG_SWITCH` | Fiber switch (VM-internal) |
+| 14 | `SIG_WAIT` | Structured concurrency wait |
+| 15 | (reserved) | GPU signal (not yet defined) |
+| 16-31 | user | Up to 16 user-defined signals per compilation unit |
+
+Key predicates (`src/signals/mod.rs`):
+- `may_suspend()`: `bits & (SIG_YIELD | SIG_DEBUG) != 0 || propagates != 0`
+- `may_yield()`: `bits & SIG_YIELD != 0`
+- `is_polymorphic()`: `propagates != 0`
+
+### Compilation Gate Table
+
+Signal analysis (computed in HIR, stored on `LirFunction.signal`) determines
+what can compile where:
+
+| Signal Profile | VM | Cranelift JIT | MLIR CPU | MLIR GPU |
+|---------------|-----|---------------|----------|----------|
+| Polymorphic (`propagates != 0`) | yes | no | no | no |
+| Silent (`bits == 0, propagates == 0`) | yes | yes | yes | candidate |
+| Silent + numeric (see below) | yes | yes | yes | **yes** |
+| Yields (`SIG_YIELD`) | yes | yes (side-exit) | yes (coroutine) | no |
+| I/O (`SIG_YIELD \| SIG_IO`) | yes | yes (side-exit) | yes (coroutine) | no |
+| Errors only (`SIG_ERROR`) | yes | yes | yes | no |
+
+Strict subset relationship: **GPU-eligible ⊂ JIT-eligible ⊂ VM-eligible**.
+
+### Existing JIT Compilation Gate (`src/jit/compiler.rs`)
+
+Single-function JIT rejects:
+1. `signal.propagates != 0` — polymorphic (line ~108)
+2. `MakeClosure` in body (lines ~130-136)
+3. Struct/named varargs with ≥1 params (lines ~117-123)
+
+Batch JIT (`src/jit/group.rs`) additionally rejects:
+4. `signal.may_suspend()` (line ~71)
+5. `num_captures > 0` (line ~76)
+6. `Eval` instruction (line ~144)
+
+### Numeric Function Detection (new analysis)
+
+A function is **numeric** (GPU-eligible) when it satisfies all of:
+
+```rust
+fn is_gpu_eligible(f: &LirFunction) -> bool {
+    // ── Signal checks (cheapest, first) ─────────────────
+    f.signal.bits == SignalBits::EMPTY       // completely silent
+    && f.signal.propagates == 0              // not polymorphic
+    // ── Structural checks ───────────────────────────────
+    && f.num_captures == 0                   // no closure environment
+    && matches!(f.arity, Arity::Exact(_))    // fixed arity
+    && f.capture_params_mask == 0            // no mutable param cells
+    && f.capture_locals_mask == 0            // no mutable local cells
+    // ── Instruction whitelist (most expensive, last) ────
+    && f.blocks.iter().all(|b| {
+        b.instructions.iter().all(|si| is_gpu_instruction(&si.instr))
+        && is_gpu_terminator(&b.terminator.terminator)
+    })
+}
+
+fn is_gpu_instruction(i: &LirInstr) -> bool {
+    matches!(i,
+        LirInstr::Const { value: LirConst::Int(_) | LirConst::Float(_)
+                                | LirConst::Bool(_) | LirConst::Nil, .. }
+        | LirInstr::BinOp { .. }
+        | LirInstr::UnaryOp { .. }
+        | LirInstr::Compare { .. }
+        | LirInstr::LoadLocal { .. }
+        | LirInstr::StoreLocal { .. }
+    )
+}
+
+fn is_gpu_terminator(t: &Terminator) -> bool {
+    matches!(t,
+        Terminator::Return(_) | Terminator::Jump(_) | Terminator::Branch { .. }
+    )
+}
+```
+
+**Composition**: GPU-eligible functions are a strict subset of
+escape-analysis-safe functions (`src/lir/lower/escape.rs`): silent implies
+not suspending (condition 2), no captures implies condition 1 satisfied.
+
+"Numeric" means: no heap allocation, no closures, no strings, no function
+calls, no signal emission — only int/float arithmetic, comparisons, local
+variable access, and control flow.
+
+## Dispatch Model
 
 **Opt-in to start.** GPU dispatch is expensive (buffer transfer, kernel
 launch overhead). Users control when it happens:
@@ -101,49 +527,58 @@ launch overhead). Users control when it happens:
 ```
 
 The compiler emits SPIR-V for `f` via the MLIR GPU path. `f` must be
-silent + numeric (enforced by signal analysis). The runtime handles
+silent + numeric (enforced by `is_gpu_eligible`). The runtime handles
 buffer allocation, H2D/D2H transfer, and async dispatch.
 
 **Automatic promotion** is a future goal: the compiler detects data-parallel
 patterns in hot loops and offers to dispatch to GPU. This requires cost
 modeling (is the data large enough to amortize transfer overhead?).
 
-### Signal-Driven Eligibility
+## Memory Management
 
-Signal analysis (already computed in HIR) determines what can compile where:
+### Host-Device Transfer Protocol
 
-| Signal Profile | VM | Cranelift | MLIR CPU | MLIR GPU |
-|---------------|-----|-----------|----------|----------|
-| Polymorphic | yes | no | no | no |
-| Silent | yes | yes | yes | candidate |
-| Silent + numeric | yes | yes | yes | yes |
-| Yields | yes | yes (side-exit) | yes | no |
-| I/O | yes | no | no | no |
+Current implementation in `dispatch.rs`:
 
-"Numeric" means: no heap allocation, no closures, no strings — only
-int/float arithmetic, comparisons, and array element access.
+1. **Allocate**: `gpu-allocator` with `AllocationScheme::GpuAllocatorManaged`
+   selects optimal memory type per `MemoryLocation`:
+   - `CpuToGpu` (input/inout): prefers `HOST_VISIBLE | DEVICE_LOCAL` on
+     AMD RADV with ReBAR (zero-copy); falls back to `HOST_VISIBLE` staging
+   - `GpuToCpu` (output): `HOST_VISIBLE | HOST_CACHED` for readback
 
-### Memory Management
+2. **Upload**: `memcpy` via `allocation.mapped_ptr()` (lines 104-117).
+   Host-mapped, no staging buffer needed.
 
-**Buffer Pool** (per GPU context):
-- Cache allocations by (size, memory_type)
-- Reuse on dispatch, free to pool on collect
-- Actually free on context destroy or under memory pressure
+3. **Barrier**: `SHADER_WRITE → HOST_READ` pipeline barrier in command
+   buffer (lines 179-191). Ensures GPU writes visible to host.
 
-**Persistent Device Buffers**:
-- `gpu-buffer` type that lives on device across dispatches
-- Avoids redundant H2D transfers for read-only data
-- Invalidation protocol when host data changes
+4. **Readback**: `collect_ref()` reads via mapped pointer (lines 234-257).
+   Synchronous — GPU already done by this point (fence signaled).
 
-**Pinned Host Memory**:
-- AMD RADV with ReBAR: HOST_VISIBLE | DEVICE_LOCAL (zero-copy)
-- gpu-allocator already selects optimal memory type
+### Buffer Pool (Phase 1)
 
-**Command Pool Recycling**:
-- One command pool per thread (not per dispatch)
-- Reset between dispatches instead of create/destroy
+Cache allocations by `(SizeBucket, MemoryLocation)`:
+- Size bucketing: next power of 2 (256, 512, 1K, ..., 256M)
+- Pool lives on `VulkanState` (protected by existing `Arc<Mutex<>>`)
+- `acquire()` on dispatch, `release()` on collect
+- `trim(max_per_bucket)` under memory pressure or context destroy
 
-### User-Supplied Kernels
+### Persistent Device Buffers (Phase 1)
+
+`gpu-buffer` value type:
+- Wraps `(Arc<Mutex<VulkanState>>, vk::Buffer, Allocation, usize, generation)`
+- Created by `gpu:persist` from buffer spec
+- Host mutation increments generation; dispatch checks generation to skip
+  H2D transfer if unchanged
+- Invalidation: caller must explicitly `gpu:update` when host data changes
+
+### Command Pool Recycling (Phase 1)
+
+Current: `create_command_pool` per dispatch with `TRANSIENT` flag (line 85).
+Target: per-thread pool stored on `VulkanState`, `vkResetCommandPool`
+between dispatches. Avoids ~100μs create/destroy overhead per dispatch.
+
+## User-Supplied Kernels
 
 Three levels of escape hatch:
 
@@ -154,7 +589,7 @@ Three levels of escape hatch:
 All three produce the same thing: a Vulkan compute pipeline. The runtime
 doesn't care how the SPIR-V was generated.
 
-### Integration with Async Scheduler
+## Integration with Async Scheduler
 
 GPU operations integrate with the existing io_uring scheduler:
 
@@ -170,30 +605,74 @@ any thread. Per-thread command pools avoid contention.
 ## Implementation Phases
 
 ### Phase 1: Stabilize Current Plugin (weeks)
-- Buffer pool in plugins/vulkan/
-- Command pool recycling
-- Persistent device buffers (gpu-buffer type)
-- Extend lib/spirv.lisp: loops, local variables (for mandelbrot)
-- Mandelbrot GPU demo
+
+Ordered steps:
+
+**1a. SPIR-V builder: loops + local variables** (`lib/spirv.lisp`) **DONE**
+- Added `OpVariable`, `OpLoad`, `OpStore` for function-scoped locals
+- Added `OpBranch`, `OpBranchConditional`, `OpLoopMerge`, `OpSelectionMerge`
+- Added `OpLogicalAnd`, `OpLogicalNot`, `OpSGreaterThan`
+- Validated with `spirv-val` for add, localvar, loop, mandelbrot shaders
+- 10 tests in `tests/elle/spirv.lisp`
+- Libraries wrapped in closure convention (`lib/spirv.lisp`, `lib/gpu.lisp`)
+
+**1b. Mandelbrot kernel** (`demos/gpu/mandelbrot.lisp`) **DONE**
+- GPU Mandelbrot: 512×512 = 262,144 pixels in ~71ms (RX 7900 XTX)
+- 1024 workgroups × 256 threads, max 256 iterations
+- Spot-check validation: origin → max_iter, far point → escapes quickly
+- Test case in `tests/elle/plugins/vulkan.lisp` with 4 known points
+
+**1c. Buffer pool + command pool recycling** (`plugins/vulkan/src/dispatch.rs`)
+- Add `BufferPool` to `VulkanState`
+- Per-thread command pool with `vkResetCommandPool`
+- Descriptor pool recycling
+
+**1d. Integer data type support**
+- `dispatch.rs`: accept i32/u32 buffer specs alongside f32
+- `decode.rs`: type-parameterized decode
+- `lib/spirv.lisp`: integer storage buffer types
+
+**1e. Persistent device buffers**
+- New `gpu-buffer` Elle value type
+- Generation-based invalidation protocol
+- `gpu:persist` / `gpu:update` primitives
+
+**1f. End-to-end Mandelbrot demo**
+- Benchmark: CPU mandelbrot vs GPU mandelbrot
+- Integration test in CI
 
 ### Phase 2: MLIR Integration (months)
+
 - Add melior (Rust MLIR bindings) or llvm-sys dependency
-- Define Elle MLIR dialect ops
-- LIR → Elle dialect lowering
+- Define Elle MLIR dialect ops (see dialect section above)
+- LIR → Elle dialect lowering (instruction mapping table above)
 - Signal lowering pass
+- Numeric specialization pass
 - LLVM backend (replace Wasmtime for tier-2 CPU)
 
 ### Phase 3: GPU Codegen via MLIR (months)
-- gpu/map primitive with compiler support
-- Numeric function detection in HIR
+
+- `gpu/map` primitive with compiler support
+- `is_gpu_eligible()` analysis (see detection criteria above)
 - MLIR GPU path: linalg → gpu → spirv
 - Connect to existing Vulkan runtime
 
 ### Phase 4: Optimization (ongoing)
-- Kernel fusion (multiple gpu/map calls → single dispatch)
+
+- Kernel fusion (multiple `gpu/map` calls → single dispatch)
 - Cost modeling for automatic GPU promotion
 - Shared memory / workgroup optimizations
-- AMD-native path via rocdl dialect
+- AMD-native path via rocdl dialect (requires ROCm; long-term/optional)
+
+## Validation Strategy
+
+| Target | Method | When |
+|--------|--------|------|
+| SPIR-V output | `spirv-val` on generated bytecode | Phase 1a, every builder change |
+| Numeric detection | Property tests: random LIR → verify classifier | Phase 3 |
+| Buffer pool | Stress test: concurrent dispatches, verify no leaks | Phase 1c |
+| Mandelbrot | Visual regression: CPU output == GPU output (pixel-exact) | Phase 1f |
+| MLIR lowering | Round-trip: LIR → MLIR → LLVM → execute, compare with bytecode VM | Phase 2 |
 
 ## Open Questions
 
@@ -215,3 +694,8 @@ any thread. Per-thread command pools avoid contention.
 5. **Fiber ↔ GPU workgroup mapping**: Can we lower `fiber/new` on a
    silent+numeric function to a GPU workgroup dispatch? This would
    make fibers the uniform parallelism primitive across CPU and GPU.
+
+6. **SIG_GPU definition**: Bit 15 is reserved in comments but
+   `SIG_GPU` is not yet defined as a constant in `src/signals/mod.rs`
+   and `:gpu` is not registered in the signal registry. Define in
+   Phase 1 or defer until Phase 3?

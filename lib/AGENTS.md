@@ -19,6 +19,8 @@ depend on other modules or plugins take them as arguments.
 | `process.lisp` | Erlang-style processes + GenServer, Actor, Supervisor |
 | `irc.lisp` | IRCv3 client: CAP negotiation, SASL PLAIN, message tags, coroutine read stream |
 | `sync.lisp` | Concurrency primitives: lock, semaphore, condvar, rwlock, barrier, latch, once, queue, monitor (built on futex) |
+| `spirv.lisp` | SPIR-V compute shader emitter: buffer I/O, arithmetic, loops, local variables, structured control flow |
+| `gpu.lisp` | GPU compute convenience layer wrapping vulkan plugin + spirv emitter |
 
 ---
 

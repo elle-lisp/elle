@@ -1,9 +1,7 @@
 #!/usr/bin/env elle
 (elle/epoch 6)
 
-# Mandelbrot Explorer — GTK4 + Cairo via lib/gtk4
-#
-# Interactive fractal viewer rendered via GTK4 drawing area and Cairo.
+# Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
 #
 # Controls:
 #   Left click    zoom in (2x) at cursor
@@ -14,18 +12,22 @@
 #   +/=           double max iterations
 #   -             halve max iterations
 #   Escape / Q    quit
-#
-# Dependencies: libgtk-4, libcairo, libgobject-2.0, libgio-2.0
 
 # ── Libraries ─────────────────────────────────────────────────────
 
 (def b ((import "std/gtk4/bind")))
 
-(def cairo (ffi/native "libcairo.so.2"))
-(def gio   (ffi/native "libgio-2.0.so.0"))
-(def libc  (ffi/native nil))
+(def [gpu-ok? gpu] (protect ((import "std/gpu"))))
+(def gpu-ctx
+  (when gpu-ok?
+    (let [[[ok? ctx] (protect (gpu:init))]]
+      (when ok? (println "GPU: enabled") ctx))))
 
-# ── Additional bindings not in gtk4/bind ──────────────────────────
+(when (not gpu-ctx) (println "GPU: not available, using CPU"))
+
+(def cairo (ffi/native "libcairo.so.2"))
+
+# ── GTK bindings not yet in lib/gtk4/bind ─────────────────────────
 
 (ffi/defbind gtk-app-new     b:libgtk "gtk_application_new"                :ptr  [:string :u32])
 (ffi/defbind gtk-app-win-new b:libgtk "gtk_application_window_new"         :ptr  [:ptr])
@@ -41,11 +43,6 @@
 (ffi/defbind gtk-scroll-new  b:libgtk "gtk_event_controller_scroll_new"    :ptr  [:u32])
 (ffi/defbind gtk-key-new     b:libgtk "gtk_event_controller_key_new"       :ptr  [])
 
-# GIO
-(ffi/defbind g-app-run       gio "g_application_run"                       :int  [:ptr :int :ptr])
-(ffi/defbind g-unref         b:libgobj "g_object_unref"                    :void [:ptr])
-
-# Cairo
 (ffi/defbind cairo-img-surface cairo "cairo_image_surface_create_for_data"  :ptr  [:ptr :int :int :int :int])
 (ffi/defbind cairo-set-source  cairo "cairo_set_source_surface"            :void [:ptr :ptr :double :double])
 (ffi/defbind cairo-paint       cairo "cairo_paint"                         :void [:ptr])
@@ -54,105 +51,166 @@
 
 # ── Constants ─────────────────────────────────────────────────────
 
-(def WIDTH  800)
-(def HEIGHT 600)
-(def SCALE  1)
-(def WIN_W  800)
-(def WIN_H  600)
-(def BPP    4)
-(def STRIDE (* WIDTH BPP))
-(def NCPU  (integer (or (sys/env "NCPU") "16")))
+(def GPU-SCALE (if gpu-ctx 2 1))
+(def WIDTH     (* 800 GPU-SCALE))
+(def HEIGHT    (* 600 GPU-SCALE))
+(def BPP       4)
+(def STRIDE    (* WIDTH BPP))
+(def NPIXELS   (* WIDTH HEIGHT))
+(def NCPU      (integer (or (sys/env "NCPU") "16")))
+(def BLACK     (bit/shl 0xFF 24))
+(def LN2       (math/log 2.0))
 
-(def KEY_ESC    0xff1b)
-(def KEY_q      0x71)
-(def KEY_r      0x72)
-(def KEY_LEFT   0xff51)
-(def KEY_UP     0xff52)
-(def KEY_RIGHT  0xff53)
-(def KEY_DOWN   0xff54)
-(def KEY_PLUS   0x2b)
-(def KEY_MINUS  0x2d)
-(def KEY_EQUAL  0x3d)
-(def KP_ADD     0xffab)
-(def KP_SUB     0xffad)
+# ── Mutable state ────────────────────────────────────────────────
 
-(def CAIRO_FORMAT_ARGB32 0)
-(def SCROLL_VERTICAL     2)
-(def CLOCK_MONOTONIC     1)
+(var view @{:cx -0.5  :cy 0.0  :scale 3.5  :iter (if gpu-ctx 256 32)})
+(var da-widget  nil)
+(var app-window nil)
+(var quit?      false)
+(var actual-w   WIDTH)
+(var actual-h   HEIGHT)
 
-# ── Timing ────────────────────────────────────────────────────────
+# ── Viewport ─────────────────────────────────────────────────────
 
-(def timespec-type (ffi/struct [:long :long]))
-(def ts-buf (ffi/malloc (ffi/size timespec-type)))
-(ffi/defbind clock-gettime libc "clock_gettime" :int [:int :ptr])
+(defn viewport []
+  "Compute viewport parameters from current view state."
+  (let* [[aspect (/ (float HEIGHT) (float WIDTH))]
+         [scale  (view :scale)]
+         [x-min  (- (view :cx) (/ scale 2.0))]
+         [y-min  (- (view :cy) (/ (* scale aspect) 2.0))]
+         [dx     (/ scale (float WIDTH))]
+         [dy     (/ (* scale aspect) (float HEIGHT))]]
+    {:x-min x-min :y-min y-min :dx dx :dy dy :aspect aspect}))
 
-(defn now-ms []
-  (clock-gettime CLOCK_MONOTONIC ts-buf)
-  (let [[ts (ffi/read ts-buf timespec-type)]]
-    (+ (* (ts 0) 1000) (/ (ts 1) 1000000))))
+# ── Pixel buffer ─────────────────────────────────────────────────
 
-# ── View state ────────────────────────────────────────────────────
-
-(var view-cx    -0.5)
-(var view-cy     0.0)
-(var view-scale  3.5)
-(var max-iter    32)
-(var da-widget   nil)
-(var app-window  nil)
-
-# ── Pixel buffer ──────────────────────────────────────────────────
-
-(def pixel-buf (ffi/malloc (* WIDTH HEIGHT BPP)))
+(def pixel-buf (ffi/malloc (* NPIXELS BPP)))
 (def row-type  (ffi/array :u32 WIDTH))
-
-(def row-buf
-  (let [[r @[]]]
-    (var i 0)
-    (while (< i WIDTH)
-      (push r 0)
-      (assign i (inc i)))
-    r))
+(def row-buf   (map (fn [_] 0) (range WIDTH)))
 
 # ── Color palette (Bernstein polynomials) ─────────────────────────
 
-(def PALETTE_SIZE 256)
-(def LN2 (math/log 2.0))
-
 (def palette
-  (let [[p @[]]]
-    (var i 0)
-    (while (< i PALETTE_SIZE)
-      (let* [[t   (/ (float i) (float PALETTE_SIZE))]
-             [omt (- 1.0 t)]
-             [r   (min 255 (integer (* 255.0 9.0 omt t t t)))]
-             [g   (min 255 (integer (* 255.0 15.0 omt omt t t)))]
-             [b   (min 255 (integer (* 255.0 8.5 omt omt omt t)))]]
-        (push p (bit/or (bit/shl 255 24)
-                        (bit/or (bit/shl r 16)
-                                (bit/or (bit/shl g 8) b)))))
-      (assign i (inc i)))
-    p))
+  (map (fn [i]
+    (let* [[t   (/ (float i) 256.0)]
+           [omt (- 1.0 t)]
+           [r   (min 255 (integer (* 255.0 9.0 omt t t t)))]
+           [g   (min 255 (integer (* 255.0 15.0 omt omt t t)))]
+           [b   (min 255 (integer (* 255.0 8.5 omt omt omt t)))]]
+      (bit/or (bit/shl 0xFF 24) (bit/shl r 16) (bit/shl g 8) b)))
+    (range 256)))
 
-# ── Per-row computation (JIT compiles to native x86) ─────────────
+# ── GPU backend ──────────────────────────────────────────────────
 
-(def BLACK (bit/shl 255 24))
+(def gpu-plugin (when gpu-ctx (import "plugin/vulkan")))
 
-(defn compute-row [row-buf ci x-min dx max-iter]
+# Shader compiled once — max-iter passed via params buffer, not baked in
+(def gpu-shader
+  (when gpu-ctx
+    (gpu:compile gpu-ctx 256 2 (fn [s]
+      (let* [[id       (s:global-id)]
+             # ── viewport params from buffer 0 ──────────
+             [x-min    (s:load 0 (s:const-u 0))]
+             [y-min    (s:load 0 (s:const-u 1))]
+             [dx       (s:load 0 (s:const-u 2))]
+             [dy       (s:load 0 (s:const-u 3))]
+             [width-f  (s:load 0 (s:const-u 4))]
+             [limit    (s:f2u (s:load 0 (s:const-u 5)))]
+             # ── pixel coords from global-id ────────────
+             [id-f     (s:u2f id)]
+             [py-u     (s:f2u (s:fdiv id-f width-f))]
+             [px-u     (s:isub id (s:imul py-u (s:f2u width-f)))]
+             [cx       (s:fadd x-min (s:fmul (s:u2f px-u) dx))]
+             [cy       (s:fadd y-min (s:fmul (s:u2f py-u) dy))]
+             # ── mandelbrot iteration ───────────────────
+             [zr       (s:var-f)]
+             [zi       (s:var-f)]
+             [iter     (s:var-u)]
+             [four     (s:const-f 4.0)]
+             [zero-f   (s:const-f 0.0)]
+             [zero-u   (s:const-u 0)]
+             [one-u    (s:const-u 1)]
+             [hdr      (s:block)]
+             [body     (s:block)]
+             [cont     (s:block)]
+             [merge    (s:block)]]
+        (s:store-var zr zero-f)
+        (s:store-var zi zero-f)
+        (s:store-var iter zero-u)
+        (s:branch hdr)
+        # loop header
+        (s:begin-block hdr)
+        (let* [[r   (s:load-var zr)]
+               [i   (s:load-var zi)]
+               [r2  (s:fmul r r)]
+               [i2  (s:fmul i i)]
+               [mag (s:fadd r2 i2)]
+               [ok  (s:flt mag four)]
+               [n   (s:load-var iter)]
+               [lim (s:slt n limit)]
+               [go  (s:logical-and ok lim)]]
+          (s:loop-merge merge cont)
+          (s:branch-cond go body merge))
+        # loop body: z = z² + c
+        (s:begin-block body)
+        (let* [[r  (s:load-var zr)]
+               [i  (s:load-var zi)]
+               [ri (s:fmul r i)]
+               [r2 (s:fmul r r)]
+               [i2 (s:fmul i i)]
+               [nr (s:fadd (s:fsub r2 i2) cx)]
+               [ni (s:fadd (s:fadd ri ri) cy)]]
+          (s:store-var zr nr)
+          (s:store-var zi ni)
+          (s:store-var iter (s:iadd (s:load-var iter) one-u))
+          (s:branch cont))
+        (s:begin-block cont)
+        (s:branch hdr)
+        # color mapping (Bernstein polynomials → ARGB32)
+        (s:begin-block merge)
+        (let* [[n-iters  (s:load-var iter)]
+               [inside?  (s:logical-not (s:slt n-iters limit))]
+               [idx      (s:umod (s:imul n-iters (s:const-u 3)) (s:const-u 256))]
+               [t-val    (s:fdiv (s:u2f idx) (s:const-f 256.0))]
+               [omt      (s:fsub (s:const-f 1.0) t-val)]
+               [c255     (s:const-f 255.0)]
+               [t3       (s:fmul t-val (s:fmul t-val t-val))]
+               [ru       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 9.0)  (s:fmul omt t3)))) (s:const-u 255))]
+               [t2       (s:fmul t-val t-val)]
+               [omt2     (s:fmul omt omt)]
+               [gu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 15.0) (s:fmul omt2 t2)))) (s:const-u 255))]
+               [omt3     (s:fmul omt omt2)]
+               [bu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 8.5)  (s:fmul omt3 t-val)))) (s:const-u 255))]
+               [alpha    (s:const-u 0xFF000000)]
+               [color    (s:ior alpha (s:ior (s:ishl ru (s:const-u 16)) (s:ior (s:ishl gu (s:const-u 8)) bu)))]
+               [pixel    (s:select-u inside? alpha color)]]
+          (s:store 1 id (s:bitcast-u2f pixel))))))))
+
+(defn compute-mandelbrot-gpu []
+  (def vp (viewport))
+  (def params [(vp :x-min) (vp :y-min) (vp :dx) (vp :dy)
+               (float WIDTH) (float (view :iter))])
+  (def wg-count (int (ceil (/ (float NPIXELS) 256.0))))
+  (def handle (gpu-plugin:dispatch gpu-shader wg-count 1 1
+                [(gpu:input params) (gpu:output NPIXELS)]))
+  (gpu-plugin:wait handle)
+  (def raw (gpu-plugin:collect handle))
+  # blit raw ARGB32 bytes to pixel-buf (skip 8-byte collect header)
+  (ffi/write pixel-buf (ffi/array :u8 (* NPIXELS 4)) (slice raw 8 (+ 8 (* NPIXELS 4)))))
+
+# ── CPU backend (thread pool) ────────────────────────────────────
+
+(defn compute-row [buf ci x-min dx max-iter]
   (var px 0)
   (while (< px WIDTH)
     (def cr (+ x-min (* (float px) dx)))
-    # cardioid and period-2 bulb check — skip full iteration
     (def q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci)))
     (def color
       (if (or (<= (* q (+ q (- cr 0.25))) (* 0.25 (* ci ci)))
               (<= (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625))
         BLACK
         (begin
-          (var zr  0.0)
-          (var zi  0.0)
-          (var zr2 0.0)
-          (var zi2 0.0)
-          (var iter 0)
+          (var zr 0.0) (var zi 0.0) (var zr2 0.0) (var zi2 0.0) (var iter 0)
           (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
             (assign zi  (+ (* 2.0 zr zi) ci))
             (assign zr  (+ (- zr2 zi2) cr))
@@ -163,16 +221,13 @@
             BLACK
             (let* [[log-zn (/ (math/log (+ zr2 zi2)) 2.0)]
                    [smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))]
-                   [idx    (mod (integer (* smooth 3.0)) PALETTE_SIZE)]]
+                   [idx    (mod (integer (* smooth 3.0)) 256)]]
               (palette idx))))))
-    (put row-buf px color)
+    (put buf px color)
     (assign px (inc px))))
 
-# ── Thread pool ──────────────────────────────────────────────────
-
 (defn recv-blocking [rx]
-  (def result (chan/select @[rx]))
-  (result 1))
+  (let [[sel (chan/select @[rx])]] (sel 1)))
 
 (var work-txs @[])
 (var done-rx  nil)
@@ -180,147 +235,127 @@
 (defn init-workers []
   (def [dtx drx] (chan))
   (assign done-rx drx)
-  (var i 0)
-  (while (< i NCPU)
+  (repeat NCPU
     (def [wtx wrx] (chan))
     (push work-txs wtx)
     (sys/spawn (fn []
-      (def local-buf
-        (let [[r @[]]]
-          (var j 0)
-          (while (< j WIDTH) (push r 0) (assign j (inc j)))
-          r))
+      (def buf (map (fn [_] 0) (range WIDTH)))
       (forever
-        (def msg (recv-blocking wrx))
-        (match msg
-          ([pixel-addr y-min dy x-min dx max-iter y-start y-end]
-            (def pbuf (ptr/from-int pixel-addr))
+        (match (recv-blocking wrx)
+          ([paddr y-min dy x-min dx max-iter y-start y-end]
+            (def pbuf (ptr/from-int paddr))
             (var py y-start)
             (while (< py y-end)
-              (compute-row local-buf (+ y-min (* (float py) dy)) x-min dx max-iter)
-              (ffi/write (ptr/add pbuf (* py STRIDE)) row-type local-buf)
+              (compute-row buf (+ y-min (* (float py) dy)) x-min dx max-iter)
+              (ffi/write (ptr/add pbuf (* py STRIDE)) row-type buf)
               (assign py (inc py)))
             (chan/send dtx :done))
-          (_ (chan/send dtx :skip))))))
-    (assign i (inc i))))
+          (_ (chan/send dtx :skip))))))))
 
-# ── Mandelbrot computation ────────────────────────────────────────
-
-(defn compute-mandelbrot []
-  (def t0 (now-ms))
-  (def aspect (/ (float HEIGHT) (float WIDTH)))
-  (def x-min  (- view-cx (/ view-scale 2.0)))
-  (def y-min  (- view-cy (/ (* view-scale aspect) 2.0)))
-  (def dx     (/ view-scale (float WIDTH)))
-  (def dy     (/ (* view-scale aspect) (float HEIGHT)))
-
+(defn compute-mandelbrot-cpu []
+  (def vp (viewport))
   (def paddr (ptr/to-int pixel-buf))
   (def rows-per (/ HEIGHT NCPU))
   (var t 0)
   (while (< t NCPU)
     (def y-start (* t rows-per))
     (def y-end (if (= t (- NCPU 1)) HEIGHT (* (+ t 1) rows-per)))
-    (chan/send (work-txs t) [paddr y-min dy x-min dx max-iter y-start y-end])
+    (chan/send (work-txs t) [paddr (vp :y-min) (vp :dy) (vp :x-min) (vp :dx)
+                             (view :iter) y-start y-end])
     (assign t (inc t)))
+  (repeat NCPU (recv-blocking done-rx)))
 
-  (var i 0)
-  (while (< i NCPU)
-    (recv-blocking done-rx)
-    (assign i (inc i)))
+# ── Render ───────────────────────────────────────────────────────
 
-  (- (now-ms) t0))
-
-# ── Helpers ───────────────────────────────────────────────────────
-
-(defn update-title []
-  (when app-window
-    (b:gtk-window-set-title app-window
-      (string "Mandelbrot — " view-cx " + " view-cy
-              "i  scale=" view-scale "  iter=" max-iter))))
+(defn compute-mandelbrot []
+  (def t0 (clock/monotonic))
+  (if gpu-ctx (compute-mandelbrot-gpu) (compute-mandelbrot-cpu))
+  (* 1000.0 (- (clock/monotonic) t0)))
 
 (defn refresh []
-  (compute-mandelbrot)
-  (update-title)
-  (when da-widget (gtk-queue-draw da-widget)))
+  (ev/spawn (fn []
+    (compute-mandelbrot)
+    (when app-window
+      (b:gtk-window-set-title app-window
+        (string "Mandelbrot — " (view :cx) " + " (view :cy)
+                "i  scale=" (view :scale) "  iter=" (view :iter))))
+    (when da-widget (gtk-queue-draw da-widget)))))
 
-# ── GTK callbacks ─────────────────────────────────────────────────
+# ── GTK callbacks ────────────────────────────────────────────────
 
-(defn on-draw [_da cr _w _h _data]
+(def CAIRO_FORMAT_ARGB32 0)
+(def SCROLL_VERTICAL     2)
+
+(defn on-draw [_da cr w h _data]
+  (assign actual-w w)
+  (assign actual-h h)
+  (def s (min (/ (float w) (float WIDTH)) (/ (float h) (float HEIGHT))))
+  (def ox (/ (- (float w) (* s (float WIDTH))) 2.0))
+  (def oy (/ (- (float h) (* s (float HEIGHT))) 2.0))
   (def surf (cairo-img-surface pixel-buf CAIRO_FORMAT_ARGB32 WIDTH HEIGHT STRIDE))
-  (cairo-scale cr (float SCALE) (float SCALE))
-  (cairo-set-source cr surf 0.0 0.0)
+  (cairo-scale cr s s)
+  (cairo-set-source cr surf (/ ox s) (/ oy s))
   (cairo-paint cr)
   (cairo-surf-free surf))
 
 (defn on-click [gesture _n x y _data]
   (let* [[btn    (gtk-get-btn gesture)]
          [aspect (/ (float HEIGHT) (float WIDTH))]
-         [cx     (+ (- view-cx (/ view-scale 2.0))
-                    (* (/ x (float WIN_W)) view-scale))]
-         [cy     (+ (- view-cy (/ (* view-scale aspect) 2.0))
-                    (* (/ y (float WIN_H)) (* view-scale aspect)))]]
-    (cond
-      ((= btn 1)
-        (assign view-cx cx)
-        (assign view-cy cy)
-        (assign view-scale (/ view-scale 2.0))
-        (refresh))
-      ((= btn 3)
-        (assign view-cx cx)
-        (assign view-cy cy)
-        (assign view-scale (* view-scale 2.0))
-        (refresh)))))
+         [scale  (view :scale)]
+         [nx     (/ x (float actual-w))]
+         [ny     (/ y (float actual-h))]
+         [cx     (+ (- (view :cx) (/ scale 2.0)) (* nx scale))]
+         [cy     (+ (- (view :cy) (/ (* scale aspect) 2.0)) (* ny (* scale aspect)))]
+         [factor (cond ((= btn 1) 0.5) ((= btn 3) 2.0) (true nil))]]
+    (when factor
+      (put view :cx cx)
+      (put view :cy cy)
+      (put view :scale (* scale factor))
+      (refresh))))
 
 (defn on-scroll [_ctrl _dx dy _data]
-  (if (< dy 0.0)
-    (assign view-scale (/ view-scale 1.5))
-    (assign view-scale (* view-scale 1.5)))
+  (put view :scale (* (view :scale) (if (< dy 0.0) (/ 1.0 1.5) 1.5)))
   (refresh)
   1)
 
 (defn on-key [_ctrl keyval _keycode _state _data]
-  (let [[step (/ view-scale 4.0)]]
+  (let [[step (/ (view :scale) 4.0)]]
     (cond
-      ((or (= keyval KEY_ESC) (= keyval KEY_q))
-        (when app-window (b:gtk-window-close app-window))
-        1)
-      ((= keyval KEY_r)
-        (assign view-cx -0.5)
-        (assign view-cy 0.0)
-        (assign view-scale 3.5)
-        (assign max-iter 32)
+      ((or (= keyval 0xff1b) (= keyval 0x71))           # ESC / Q
+        (when app-window (b:gtk-window-destroy app-window))
+        (assign quit? true) 1)
+      ((= keyval 0x72)                                    # R
+        (put view :cx -0.5) (put view :cy 0.0)
+        (put view :scale 3.5) (put view :iter 32)
         (refresh) 1)
-      ((= keyval KEY_LEFT)   (assign view-cx (- view-cx step)) (refresh) 1)
-      ((= keyval KEY_RIGHT)  (assign view-cx (+ view-cx step)) (refresh) 1)
-      ((= keyval KEY_UP)     (assign view-cy (- view-cy step)) (refresh) 1)
-      ((= keyval KEY_DOWN)   (assign view-cy (+ view-cy step)) (refresh) 1)
-      ((or (= keyval KEY_PLUS) (= keyval KEY_EQUAL) (= keyval KP_ADD))
-        (assign max-iter (* max-iter 2))
-        (refresh) 1)
-      ((or (= keyval KEY_MINUS) (= keyval KP_SUB))
-        (when (> max-iter 16)
-          (assign max-iter (/ max-iter 2)))
+      ((= keyval 0xff51) (put view :cx (- (view :cx) step)) (refresh) 1)
+      ((= keyval 0xff53) (put view :cx (+ (view :cx) step)) (refresh) 1)
+      ((= keyval 0xff52) (put view :cy (- (view :cy) step)) (refresh) 1)
+      ((= keyval 0xff54) (put view :cy (+ (view :cy) step)) (refresh) 1)
+      ((or (= keyval 0x2b) (= keyval 0x3d) (= keyval 0xffab))
+        (put view :iter (* (view :iter) 2)) (refresh) 1)
+      ((or (= keyval 0x2d) (= keyval 0xffad))
+        (when (> (view :iter) 16)
+          (put view :iter (/ (view :iter) 2)))
         (refresh) 1)
       (true 0))))
 
-# ── Activate ──────────────────────────────────────────────────────
+# ── Activate ─────────────────────────────────────────────────────
 
 (defn on-activate [app _data]
   (def win (gtk-app-win-new app))
   (assign app-window win)
-  (b:gtk-window-set-default-size win WIN_W WIN_H)
+  (b:gtk-window-set-default-size win WIDTH HEIGHT)
 
   (def da (gtk-da-new))
   (assign da-widget da)
-  (gtk-da-set-cw da WIN_W)
-  (gtk-da-set-ch da WIN_H)
+  (gtk-da-set-cw da WIDTH)
+  (gtk-da-set-ch da HEIGHT)
 
-  # draw function
   (gtk-da-draw-fn da
     (ffi/callback (ffi/signature :void [:ptr :ptr :int :int :ptr]) on-draw)
     nil nil)
 
-  # click gesture (all buttons)
   (let [[click (gtk-click-new)]]
     (gtk-gesture-btn click 0)
     (b:g-signal-connect-data click "pressed"
@@ -328,14 +363,12 @@
       nil nil 0)
     (gtk-add-ctrl da click))
 
-  # scroll zoom
   (let [[scroll (gtk-scroll-new SCROLL_VERTICAL)]]
     (b:g-signal-connect-data scroll "scroll"
       (ffi/callback (ffi/signature :int [:ptr :double :double :ptr]) on-scroll)
       nil nil 0)
     (gtk-add-ctrl da scroll))
 
-  # keyboard (on window for global capture)
   (let [[keys (gtk-key-new)]]
     (b:g-signal-connect-data keys "key-pressed"
       (ffi/callback (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]) on-key)
@@ -343,38 +376,22 @@
     (gtk-add-ctrl win keys))
 
   (b:gtk-window-set-child win da)
+  (when gpu-ctx (b:gtk-window-fullscreen win))
   (b:gtk-window-present win)
 
-  (init-workers)
-  (compute-mandelbrot)
-  (update-title)
-  (gtk-queue-draw da))
+  (when (not gpu-ctx) (init-workers)))
 
-# ── Main ──────────────────────────────────────────────────────────
+# ── Main ─────────────────────────────────────────────────────────
 
-(defn main []
-  (println "Mandelbrot Explorer")
-  (println "  left-click: zoom in    right-click: zoom out    scroll: zoom")
-  (println "  arrows: pan    +/-: iterations    r: reset    q: quit")
+(println "Mandelbrot Explorer")
+(println "  left-click: zoom in    right-click: zoom out    scroll: zoom")
+(println "  arrows: pan    +/-: iterations    r: reset    q: quit")
 
-  (b:gtk-init)
-  (def app (gtk-app-new "org.elle.mandelbrot" 32))
-  (b:g-signal-connect-data app "activate"
-    (ffi/callback (ffi/signature :void [:ptr :ptr]) on-activate)
-    nil nil 0)
+(b:gtk-init)
+(def app (gtk-app-new "org.elle.mandelbrot" 32))
+(b:g-signal-connect-data app "activate"
+  (ffi/callback (ffi/signature :void [:ptr :ptr]) on-activate)
+  nil nil 0)
 
-  # g_application_run needs argc >= 1
-  (def arg0 (ffi/malloc 16))
-  (ffi/write arg0 (ffi/array :u8 12) [109 97 110 100 101 108 98 114 111 116 0 0])
-  (def argv (ffi/malloc 16))
-  (ffi/write argv :ptr arg0)
-  (ffi/write (ptr/add argv 8) :ptr nil)
-
-  (g-app-run app 1 argv)
-  (ffi/free argv)
-  (ffi/free arg0)
-  (g-unref app)
-  (ffi/free pixel-buf)
-  (ffi/free ts-buf))
-
-(main)
+(ev/spawn (fn [] (refresh)))
+(b:run-app app :quit (fn [] quit?))
