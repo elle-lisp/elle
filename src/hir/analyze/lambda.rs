@@ -229,15 +229,19 @@ impl<'a> Analyzer<'a> {
 
         // Check function-level constraint if present.
         // silence (whitelist): excess = inferred & !ceiling — any excess is an error.
+        // Signal mismatches are fatal — the programmer explicitly declared a
+        // constraint and violated it. Unlike undefined vars (which we accumulate),
+        // this is not something we continue past.
         if let Some(ceiling) = declared_ceiling {
             let excess = inferred_signals.bits.subtract(ceiling.bits);
             if !excess.is_empty() {
                 let reg = registry::global_registry().lock().unwrap();
-                let required = reg.format_signal_bits(ceiling.bits);
-                let actual = reg.format_signal_bits(excess);
-                // Accumulate as recoverable error
-                let error = span.signal_mismatch("", &required, &actual);
-                self.errors.push(error);
+                return Err(format!(
+                    "{}: function restricted to {} but body may emit {}",
+                    span,
+                    reg.format_signal_bits(ceiling.bits),
+                    reg.format_signal_bits(excess),
+                ));
             }
         }
 

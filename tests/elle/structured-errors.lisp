@@ -35,16 +35,20 @@
 
 (println "3: diagnostics have messages ok")
 
-# ── Bug 2: signal mismatch appears in diagnostics ─────────────────────
+# ── Bug 2: signal mismatch raises structured error ────────────────────
+# compile/analyze raises on signal mismatch; verify via fiber catch
 
 (def signal-src "(defn yields [] (fiber/emit :yield 42))\n(defn q [] (silence) (yields))")
-(def signal-result (compile/analyze signal-src {:file "signal.lisp"}))
-(def signal-diags (compile/diagnostics signal-result))
+(def signal-fiber
+  (fiber/new
+    (fn [] (compile/analyze signal-src {:file "signal.lisp"}) :no-error)
+    |:error|))
+(def signal-result (fiber/resume signal-fiber))
 
-# Signal mismatch should appear in diagnostics, not just as a raised error
-(assert (not (empty? signal-diags)) "signal mismatch in diagnostics")
+# Should have caught an error (fiber yields the error struct)
+(assert (not (= signal-result :no-error)) "signal mismatch raises error")
 
-(println "4: signal mismatch in diagnostics ok")
+(println "4: signal mismatch raises structured error ok")
 
 # ── Clean code produces no diagnostics ────────────────────────────────
 
