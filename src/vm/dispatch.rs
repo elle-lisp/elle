@@ -393,7 +393,7 @@ impl VM {
                 // SIG_ERROR: store error, no SuspendedFrame (error propagation).
                 // Other signals: create SuspendedFrame (cooperative suspension).
                 Instruction::Emit => {
-                    let bits_raw = self.read_u16(bc, &mut ip) as u32;
+                    let bits_raw = self.read_u16(bc, &mut ip) as u64;
                     let signal_bits = crate::value::fiber::SignalBits::new(bits_raw);
                     return self.handle_emit(
                         signal_bits,

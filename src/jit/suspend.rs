@@ -81,7 +81,7 @@ pub extern "C" fn elle_jit_yield(
         stack.push(unsafe { *spilled_values.add(i) });
     }
 
-    let sig = crate::value::fiber::SignalBits::new(signal_bits as u32);
+    let sig = crate::value::fiber::SignalBits::new(signal_bits);
     vm.fiber.signal = Some((sig, yielded));
 
     if !sig.contains(crate::value::fiber::SIG_ERROR) {
@@ -382,7 +382,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         assert_eq!(result, YIELD_SENTINEL);
@@ -434,7 +434,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         assert_eq!(result, YIELD_SENTINEL);
@@ -466,7 +466,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -496,7 +496,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -530,7 +530,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -584,7 +584,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -621,7 +621,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
@@ -674,7 +674,7 @@ mod tests {
             &mut vm as *mut crate::vm::VM as *mut () as u64,
             closure_val.tag,
             closure_val.payload,
-            crate::value::fiber::SIG_YIELD.raw() as u64,
+            crate::value::fiber::SIG_YIELD.raw(),
         );
 
         let frame = as_bytecode_frame(&vm.fiber.suspended.as_ref().unwrap()[0]);
