@@ -4,7 +4,7 @@ mod dispatch;
 mod shader;
 
 use context::GpuCtx;
-use dispatch::{BufferSpec, BufferUsage, GpuHandle};
+use dispatch::{BufferSpec, BufferUsage, DispatchBuffer, GpuBuffer, GpuHandle};
 use shader::GpuShader;
 
 use elle::io::request::IoRequest;
@@ -149,15 +149,15 @@ fn prim_dispatch(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let mut specs = Vec::with_capacity(buf_specs_arr.len());
+    let mut dbufs = Vec::with_capacity(buf_specs_arr.len());
     for (i, spec_val) in buf_specs_arr.iter().enumerate() {
-        match parse_buffer_spec(spec_val, i, "vulkan/dispatch") {
-            Ok(s) => specs.push(s),
+        match parse_dispatch_buffer(spec_val, i, "vulkan/dispatch") {
+            Ok(db) => dbufs.push(db),
             Err(e) => return e,
         }
     }
 
-    if specs.len() != shader.num_buffers as usize {
+    if dbufs.len() != shader.num_buffers as usize {
         return (
             SIG_ERROR,
             error_val(
@@ -165,7 +165,7 @@ fn prim_dispatch(args: &[Value]) -> (SignalBits, Value) {
                 format!(
                     "vulkan/dispatch: shader expects {} buffers, got {}",
                     shader.num_buffers,
-                    specs.len()
+                    dbufs.len()
                 ),
             ),
         );
@@ -177,7 +177,7 @@ fn prim_dispatch(args: &[Value]) -> (SignalBits, Value) {
         shader.pipeline_layout,
         shader.descriptor_set_layout,
         [wg_x, wg_y, wg_z],
-        specs,
+        dbufs,
     ) {
         Ok(handle) => (SIG_OK, Value::external("vulkan-handle", handle)),
         Err(msg) => (SIG_ERROR, error_val("gpu-error", msg)),
@@ -287,15 +287,15 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
         );
     };
 
-    let mut specs = Vec::with_capacity(buf_specs_arr.len());
+    let mut dbufs = Vec::with_capacity(buf_specs_arr.len());
     for (i, spec_val) in buf_specs_arr.iter().enumerate() {
-        match parse_buffer_spec(spec_val, i, "vulkan/submit") {
-            Ok(s) => specs.push(s),
+        match parse_dispatch_buffer(spec_val, i, "vulkan/submit") {
+            Ok(db) => dbufs.push(db),
             Err(e) => return e,
         }
     }
 
-    if specs.len() != shader.num_buffers as usize {
+    if dbufs.len() != shader.num_buffers as usize {
         return (
             SIG_ERROR,
             error_val(
@@ -303,7 +303,7 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
                 format!(
                     "vulkan/submit: shader expects {} buffers, got {}",
                     shader.num_buffers,
-                    specs.len()
+                    dbufs.len()
                 ),
             ),
         );
@@ -321,7 +321,7 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
             pipeline_layout,
             descriptor_set_layout,
             [wg_x, wg_y, wg_z],
-            specs,
+            dbufs,
         ) {
             Ok(handle) => {
                 // Block on fence (we're on thread pool, this is fine)
@@ -343,6 +343,24 @@ fn prim_submit(args: &[Value]) -> (SignalBits, Value) {
     };
 
     (SIG_YIELD | SIG_IO, IoRequest::task(task))
+}
+
+/// Parse a dispatch buffer: either a persistent GpuBuffer or a fresh BufferSpec.
+fn parse_dispatch_buffer(
+    val: &Value,
+    index: usize,
+    caller: &str,
+) -> Result<DispatchBuffer, (SignalBits, Value)> {
+    // Check if it's a persistent GpuBuffer
+    if let Some(gpu_buf) = val.as_external::<GpuBuffer>() {
+        return Ok(DispatchBuffer::Persistent {
+            buffer: gpu_buf.buffer,
+            byte_size: gpu_buf.byte_size,
+            usage: BufferUsage::Input, // persistent buffers are input-only for now
+        });
+    }
+    // Fall back to parsing as a buffer spec
+    parse_buffer_spec(val, index, caller).map(DispatchBuffer::Spec)
 }
 
 fn parse_buffer_spec(
@@ -527,6 +545,85 @@ fn prim_f32_bits(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::int(bits as i64))
 }
 
+// ── vulkan/persist ──────────────────────────────────────────────
+// Create a persistent GPU buffer. Uploaded once, reused across dispatches.
+
+fn prim_persist(args: &[Value]) -> (SignalBits, Value) {
+    let ctx = match get_ctx(&args[0], "vulkan/persist") {
+        Ok(c) => c,
+        Err(e) => return e,
+    };
+
+    let spec = match parse_buffer_spec(&args[1], 0, "vulkan/persist") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    let location = match spec.usage {
+        BufferUsage::Input => gpu_allocator::MemoryLocation::CpuToGpu,
+        BufferUsage::Output => gpu_allocator::MemoryLocation::GpuToCpu,
+        BufferUsage::InOut => gpu_allocator::MemoryLocation::CpuToGpu,
+    };
+
+    let mut state = match ctx.inner.lock() {
+        Ok(s) => s,
+        Err(e) => return (SIG_ERROR, error_val("gpu-error", format!("lock: {e}"))),
+    };
+
+    let (buffer, allocation) = match state.acquire_buffer(spec.byte_size, location, 0) {
+        Ok(ba) => ba,
+        Err(msg) => return (SIG_ERROR, error_val("gpu-error", msg)),
+    };
+
+    let gpu_buf = GpuBuffer {
+        ctx: ctx.inner.clone(),
+        buffer,
+        allocation,
+        byte_size: spec.byte_size,
+        location,
+    };
+
+    // Upload initial data
+    if !spec.data.is_empty() {
+        if let Err(msg) = gpu_buf.upload(&spec.data) {
+            return (SIG_ERROR, error_val("gpu-error", msg));
+        }
+    }
+
+    (SIG_OK, Value::external("vulkan-buffer", gpu_buf))
+}
+
+// ── vulkan/update ──────────────────────────────────────────────
+// Re-upload data to a persistent GPU buffer.
+
+fn prim_update(args: &[Value]) -> (SignalBits, Value) {
+    let gpu_buf = match args[0].as_external::<GpuBuffer>() {
+        Some(b) => b,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "vulkan/update: expected vulkan-buffer, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+
+    let spec = match parse_buffer_spec(&args[1], 0, "vulkan/update") {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    match gpu_buf.upload(&spec.data) {
+        Ok(()) => (SIG_OK, Value::NIL),
+        Err(msg) => (SIG_ERROR, error_val("gpu-error", msg)),
+    }
+}
+
 // ── Primitive table ─────────────────────────────────────────────
 
 static PRIMITIVES: &[PrimitiveDef] = &[
@@ -622,6 +719,28 @@ static PRIMITIVES: &[PrimitiveDef] = &[
         params: &["result-bytes", "element-type"],
         category: "gpu",
         example: "(vulkan/decode result :f32)",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "vulkan/persist",
+        func: prim_persist,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Create a persistent GPU buffer from a buffer spec",
+        params: &["ctx", "buffer-spec"],
+        category: "gpu",
+        example: "(vulkan/persist ctx (gpu:input data))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "vulkan/update",
+        func: prim_update,
+        signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Re-upload data to a persistent GPU buffer",
+        params: &["gpu-buffer", "buffer-spec"],
+        category: "gpu",
+        example: "(vulkan/update buf (gpu:input new-data))",
         aliases: &[],
     },
 ];

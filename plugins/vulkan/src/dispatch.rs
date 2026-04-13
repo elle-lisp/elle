@@ -13,6 +13,18 @@ pub(crate) enum BufferUsage {
     InOut,
 }
 
+/// Buffer source for a dispatch: either a fresh spec or a persistent buffer reference.
+pub(crate) enum DispatchBuffer {
+    /// Fresh buffer — allocated (or pooled), uploaded, freed after dispatch.
+    Spec(BufferSpec),
+    /// Persistent buffer — already allocated and uploaded. Not freed after dispatch.
+    Persistent {
+        buffer: vk::Buffer,
+        byte_size: usize,
+        usage: BufferUsage,
+    },
+}
+
 /// Extracted buffer specification. Data is raw bytes (not f32-specific).
 pub(crate) struct BufferSpec {
     pub(crate) data: Vec<u8>,
@@ -28,6 +40,52 @@ pub(crate) struct LiveBuffer {
     pub(crate) usage: BufferUsage,
     pub(crate) element_count: u32,
     pub(crate) location: MemoryLocation,
+}
+
+/// Persistent GPU buffer. Lives across dispatches, freed on GC.
+/// Data is uploaded once on creation; can be re-uploaded via update.
+pub(crate) struct GpuBuffer {
+    pub(crate) ctx: Arc<Mutex<VulkanState>>,
+    pub(crate) buffer: vk::Buffer,
+    pub(crate) allocation: Allocation,
+    pub(crate) byte_size: usize,
+    pub(crate) location: MemoryLocation,
+}
+
+impl Drop for GpuBuffer {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.ctx.lock() {
+            // Return to pool (not freed immediately)
+            let alloc = std::mem::replace(
+                &mut self.allocation,
+                // Dummy — won't be used after this
+                unsafe { std::mem::zeroed() },
+            );
+            state
+                .buffer_pool
+                .release(self.buffer, alloc, self.byte_size, self.location);
+        }
+    }
+}
+
+impl GpuBuffer {
+    /// Upload data to the buffer.
+    pub(crate) fn upload(&self, data: &[u8]) -> Result<(), String> {
+        if data.len() > self.byte_size {
+            return Err(format!(
+                "data ({} bytes) exceeds buffer size ({} bytes)",
+                data.len(),
+                self.byte_size
+            ));
+        }
+        let mapped = self
+            .allocation
+            .mapped_ptr()
+            .ok_or("buffer not host-mapped")?
+            .as_ptr() as *mut u8;
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), mapped, data.len()) };
+        Ok(())
+    }
 }
 
 /// Handle to an in-flight GPU dispatch. Holds all state needed for
@@ -71,7 +129,7 @@ pub(crate) fn dispatch(
     pipeline_layout: vk::PipelineLayout,
     descriptor_set_layout: vk::DescriptorSetLayout,
     workgroups: [u32; 3],
-    specs: Vec<BufferSpec>,
+    dispatch_bufs: Vec<DispatchBuffer>,
 ) -> Result<GpuHandle, String> {
     let mut state = ctx_arc.lock().map_err(|e| format!("lock: {e}"))?;
     let device = state.device.clone();
@@ -86,29 +144,57 @@ pub(crate) fn dispatch(
     let cmd = unsafe { device.allocate_command_buffers(&alloc_info) }
         .map_err(|e| format!("allocate_command_buffers: {e}"))?[0];
 
-    // ── Acquire + upload buffers ─────────────────────────────
-    let mut live_buffers: Vec<LiveBuffer> = Vec::with_capacity(specs.len());
-    if let Err(e) = create_buffers(&mut state, &specs, &mut live_buffers) {
-        release_buffers(&mut state, &mut live_buffers);
-        return Err(e);
-    }
-
-    for (i, (lb, spec)) in live_buffers.iter().zip(specs.iter()).enumerate() {
-        if lb.usage == BufferUsage::Output {
-            continue;
+    // ── Resolve buffers: allocate fresh for Specs, reference for Persistent ──
+    let mut live_buffers: Vec<LiveBuffer> = Vec::with_capacity(dispatch_bufs.len());
+    for (i, db) in dispatch_bufs.iter().enumerate() {
+        match db {
+            DispatchBuffer::Spec(spec) => {
+                let location = match spec.usage {
+                    BufferUsage::Input => MemoryLocation::CpuToGpu,
+                    BufferUsage::Output => MemoryLocation::GpuToCpu,
+                    BufferUsage::InOut => MemoryLocation::CpuToGpu,
+                };
+                let (buffer, allocation) = state.acquire_buffer(spec.byte_size, location, i)?;
+                // Upload data
+                if spec.usage != BufferUsage::Output && !spec.data.is_empty() {
+                    let mapped = allocation
+                        .mapped_ptr()
+                        .ok_or_else(|| format!("buffer[{i}] not host-mapped"))?
+                        .as_ptr() as *mut u8;
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(spec.data.as_ptr(), mapped, spec.data.len())
+                    };
+                }
+                live_buffers.push(LiveBuffer {
+                    buffer,
+                    allocation: Some(allocation),
+                    byte_size: spec.byte_size,
+                    usage: spec.usage,
+                    element_count: (spec.byte_size / 4) as u32,
+                    location,
+                });
+            }
+            DispatchBuffer::Persistent {
+                buffer,
+                byte_size,
+                usage,
+            } => {
+                live_buffers.push(LiveBuffer {
+                    buffer: *buffer,
+                    allocation: None, // Not owned — persistent buffer manages its own lifetime
+                    byte_size: *byte_size,
+                    usage: *usage,
+                    element_count: (*byte_size / 4) as u32,
+                    location: MemoryLocation::CpuToGpu, // doesn't matter, not pooled
+                });
+            }
         }
-        let alloc = lb.allocation.as_ref().unwrap();
-        let mapped = alloc
-            .mapped_ptr()
-            .ok_or_else(|| format!("buffer[{i}] not host-mapped"))?
-            .as_ptr() as *mut u8;
-        unsafe { std::ptr::copy_nonoverlapping(spec.data.as_ptr(), mapped, spec.data.len()) };
     }
 
     // ── Descriptor pool + set ────────────────────────────────
     let pool_size = vk::DescriptorPoolSize::default()
         .ty(vk::DescriptorType::STORAGE_BUFFER)
-        .descriptor_count(specs.len() as u32);
+        .descriptor_count(dispatch_bufs.len() as u32);
     let dp_info = vk::DescriptorPoolCreateInfo::default()
         .max_sets(1)
         .pool_sizes(std::slice::from_ref(&pool_size));
@@ -242,43 +328,4 @@ pub(crate) fn collect_ref(handle: &GpuHandle) -> Result<Vec<u8>, String> {
 
     output[0..4].copy_from_slice(&output_count.to_le_bytes());
     Ok(output)
-}
-
-fn create_buffers(
-    state: &mut VulkanState,
-    specs: &[BufferSpec],
-    live_buffers: &mut Vec<LiveBuffer>,
-) -> Result<(), String> {
-    for (i, spec) in specs.iter().enumerate() {
-        let location = match spec.usage {
-            BufferUsage::Input => MemoryLocation::CpuToGpu,
-            BufferUsage::Output => MemoryLocation::GpuToCpu,
-            BufferUsage::InOut => MemoryLocation::CpuToGpu,
-        };
-
-        let (buffer, allocation) = state.acquire_buffer(spec.byte_size, location, i)?;
-        let element_count = (spec.byte_size / 4) as u32;
-        live_buffers.push(LiveBuffer {
-            buffer,
-            allocation: Some(allocation),
-            byte_size: spec.byte_size,
-            usage: spec.usage,
-            element_count,
-            location,
-        });
-    }
-    Ok(())
-}
-
-fn release_buffers(state: &mut VulkanState, buffers: &mut Vec<LiveBuffer>) {
-    let device = state.device.clone();
-    for lb in buffers.drain(..) {
-        if let Some(allocation) = lb.allocation {
-            state
-                .buffer_pool
-                .release(lb.buffer, allocation, lb.byte_size, lb.location);
-        } else {
-            unsafe { device.destroy_buffer(lb.buffer, None) };
-        }
-    }
 }
