@@ -257,6 +257,8 @@ impl<'a> HirSymbolExtractor<'a> {
                 }
                 self.walk(body, index, symbols);
             }
+
+            HirKind::Error => {}
         }
     }
 

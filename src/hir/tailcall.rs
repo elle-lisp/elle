@@ -209,6 +209,8 @@ fn mark(hir: &mut Hir, in_tail: bool, tail_blocks: &HashSet<BlockId>) {
         | HirKind::Keyword(_)
         | HirKind::Var(_)
         | HirKind::Quote(_) => {}
+
+        HirKind::Error => {}
     }
 }
 

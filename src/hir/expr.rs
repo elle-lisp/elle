@@ -236,4 +236,16 @@ pub enum HirKind {
         bindings: Vec<(Hir, Hir)>,
         body: Box<Hir>,
     },
+
+    /// Poison node — inserted when a recoverable error is accumulated
+    /// during analysis. The lowerer should never see this; the pipeline
+    /// checks for accumulated errors before lowering.
+    Error,
+}
+
+impl Hir {
+    /// Create an error poison node (for error accumulation)
+    pub fn error(span: Span) -> Self {
+        Hir::silent(HirKind::Error, span)
+    }
 }

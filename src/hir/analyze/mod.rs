@@ -24,6 +24,7 @@ mod special;
 
 use super::binding::{Binding, CaptureInfo, CaptureKind};
 use super::expr::{BlockId, Hir, HirKind};
+use crate::error::LError;
 use crate::hir::arena::{BindingArena, BindingScope};
 use crate::primitives::def::PrimitiveMeta;
 use crate::signals::Signal;
@@ -61,6 +62,8 @@ struct BlockContext {
 pub struct AnalysisResult {
     /// The analyzed HIR expression
     pub hir: Hir,
+    /// Accumulated non-fatal errors (undefined vars, signal mismatches)
+    pub errors: Vec<LError>,
 }
 
 /// Tracks the sources of Yields signals within a lambda body.
@@ -158,6 +161,10 @@ pub struct Analyzer<'a> {
     /// Accumulated function-level constraint from silence forms in current lambda.
     /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
+    /// Accumulated non-fatal errors. Recoverable error sites (undefined var,
+    /// signal mismatch) push here and return `Ok(Hir::error(span))` to
+    /// continue analysis. The pipeline checks this after analysis.
+    errors: Vec<LError>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -202,6 +209,7 @@ impl<'a> Analyzer<'a> {
             primitive_values: HashMap::new(),
             current_param_bounds: HashMap::new(),
             current_declared_ceiling: None,
+            errors: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -211,7 +219,60 @@ impl<'a> Analyzer<'a> {
     /// Analyze a syntax tree into HIR
     pub fn analyze(&mut self, syntax: &crate::syntax::Syntax) -> Result<AnalysisResult, String> {
         let hir = self.analyze_expr(syntax)?;
-        Ok(AnalysisResult { hir })
+        let errors = std::mem::take(&mut self.errors);
+        Ok(AnalysisResult { hir, errors })
+    }
+
+    /// Accumulate a non-fatal error and return a poison node.
+    /// Used at recoverable error sites to continue analysis.
+    fn accumulate_error(&mut self, error: LError, span: &Span) -> Hir {
+        self.errors.push(error);
+        Hir::error(span.clone())
+    }
+
+    /// Return accumulated errors (for the pipeline to check).
+    pub fn take_errors(&mut self) -> Vec<LError> {
+        std::mem::take(&mut self.errors)
+    }
+
+    /// Levenshtein edit distance between two strings.
+    fn levenshtein(a: &str, b: &str) -> usize {
+        let m = a.len();
+        let n = b.len();
+        if m == 0 {
+            return n;
+        }
+        if n == 0 {
+            return m;
+        }
+
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0; n + 1];
+
+        for (i, ca) in a.chars().enumerate() {
+            curr[0] = i + 1;
+            for (j, cb) in b.chars().enumerate() {
+                let cost = if ca == cb { 0 } else { 1 };
+                curr[j + 1] = (prev[j] + cost).min(prev[j + 1] + 1).min(curr[j] + 1);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        prev[n]
+    }
+
+    /// Find bindings in scope with names similar to `name` (edit distance <= 2).
+    fn suggest_similar(&self, name: &str) -> Vec<String> {
+        let mut candidates: Vec<(usize, String)> = Vec::new();
+        for scope in self.scopes.iter().rev() {
+            for scope_name in scope.bindings.keys() {
+                let dist = Self::levenshtein(name, scope_name);
+                if dist > 0 && dist <= 2 && !candidates.iter().any(|(_, n)| n == scope_name) {
+                    candidates.push((dist, scope_name.clone()));
+                }
+            }
+        }
+        candidates.sort_by_key(|(d, _)| *d);
+        candidates.into_iter().map(|(_, n)| n).take(3).collect()
     }
 
     /// Bind all registered primitives as immutable Local bindings in the

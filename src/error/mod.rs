@@ -25,10 +25,7 @@ mod tests {
     #[test]
     fn test_undefined_variable_error() {
         let err = LError::undefined_variable("foo");
-        assert_eq!(
-            err.description(),
-            "Reference error: undefined variable 'foo'"
-        );
+        assert_eq!(err.description(), "undefined variable: foo");
     }
 
     #[test]
@@ -143,7 +140,7 @@ mod tests {
     fn test_error_display_trait() {
         let err = LError::undefined_variable("x");
         let display = format!("{}", err);
-        assert_eq!(display, "Reference error: undefined variable 'x'");
+        assert_eq!(display, "✗ undefined variable: x");
     }
 
     #[test]
@@ -170,7 +167,7 @@ mod tests {
         let loc = SourceLoc::from_line_col(42, 13);
         let err = LError::undefined_variable("x").with_location(loc);
         let display = format!("{}", err);
-        assert!(display.contains("Reference error"));
+        assert!(display.contains("undefined variable: x"));
         assert!(display.contains("42:13"));
     }
 
@@ -236,7 +233,7 @@ mod tests {
     fn test_error_as_std_error() {
         use std::error::Error as StdError;
         let err: Box<dyn StdError> = Box::new(LError::division_by_zero());
-        assert_eq!(err.to_string(), "Arithmetic error: division by zero");
+        assert_eq!(err.to_string(), "✗ Arithmetic error: division by zero");
     }
 
     #[test]

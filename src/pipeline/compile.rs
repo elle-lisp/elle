@@ -338,7 +338,26 @@ fn compile_file_inner(
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
+    let errors = analyzer.take_errors();
     drop(analyzer);
+
+    // If there are accumulated errors, return the first one in the
+    // standard "file:line:col: message" format that main.rs knows how
+    // to parse back into an LError for structured display.
+    if !errors.is_empty() {
+        let err = &errors[0];
+        let msg = match &err.location {
+            Some(loc) => format!(
+                "{}:{}:{}: {}",
+                loc.file,
+                loc.line,
+                loc.col,
+                err.description()
+            ),
+            None => err.description(),
+        };
+        return Err(msg);
+    }
 
     // Mark tail calls
     mark_tail_calls(&mut hir);

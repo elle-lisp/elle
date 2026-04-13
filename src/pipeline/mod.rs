@@ -29,4 +29,6 @@ pub struct CompileResult {
 pub struct AnalyzeResult {
     pub hir: crate::hir::Hir,
     pub arena: crate::hir::BindingArena,
+    /// Accumulated non-fatal analysis errors
+    pub errors: Vec<crate::error::LError>,
 }

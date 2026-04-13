@@ -57,6 +57,48 @@ impl Span {
     }
 }
 
+impl Span {
+    /// Convert to a SourceLoc for error reporting
+    pub fn to_source_loc(&self) -> crate::reader::SourceLoc {
+        crate::reader::SourceLoc::new(
+            self.file.clone().unwrap_or_else(|| "<unknown>".to_string()),
+            self.line as usize,
+            self.col as usize,
+        )
+    }
+
+    /// Create an LError with CompileError kind and this span's location
+    pub fn compile_err(&self, msg: impl Into<String>) -> crate::error::LError {
+        crate::error::LError::compile_error(msg).with_location(self.to_source_loc())
+    }
+
+    /// Create an LError with UndefinedVariable kind and this span's location
+    pub fn undefined_var(&self, name: impl Into<String>) -> crate::error::LError {
+        crate::error::LError::undefined_variable(name).with_location(self.to_source_loc())
+    }
+
+    /// Create an LError with UndefinedVariable kind, suggestions, and this span's location
+    pub fn undefined_var_suggest(
+        &self,
+        name: impl Into<String>,
+        suggestions: Vec<String>,
+    ) -> crate::error::LError {
+        crate::error::LError::undefined_variable_with_suggestions(name, suggestions)
+            .with_location(self.to_source_loc())
+    }
+
+    /// Create a SignalMismatch LError with this span's location
+    pub fn signal_mismatch(
+        &self,
+        function: impl Into<String>,
+        required_mask: impl Into<String>,
+        actual_mask: impl Into<String>,
+    ) -> crate::error::LError {
+        crate::error::LError::signal_mismatch(function, required_mask, actual_mask)
+            .with_location(self.to_source_loc())
+    }
+}
+
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.file {

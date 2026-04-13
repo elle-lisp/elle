@@ -4,7 +4,9 @@ Elle is a Lisp. Source text becomes bytecode; bytecode runs on a VM.
 
 This is not a toy. The implementation targets correctness, performance, and
 clarity — in that order. We compile through multiple IRs, we have proper
-lexical scoping with closure capture analysis, and we have a signal system.
+lexical scoping with closure capture analysis, and a unified signal/capability
+system: **signals flow up** (from callee to caller), **capabilities flow down**
+(from parent fiber to child). See [signals](docs/signals/) for the full design.
 
 You are an LLM. You will make mistakes. The test suite will catch them. Run the
 tests. Read the error messages. They are designed to be helpful.
@@ -19,6 +21,7 @@ excuses. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full policy.
 ## Contents
 
 - [Architecture](#architecture)
+- [Signals and capabilities](#signals-and-capabilities)
 - [Products](#products)
 - [Directories](#directories)
 - [Testing](#testing)
@@ -65,7 +68,10 @@ bytecode. Error messages include file:line:col information.
   enforcement; `emit` is a special form for literal keywords/sets,
   `yield` is a macro expanding to `(emit :yield val)`;
   includes `SIG_EXEC` (bit 11) for subprocess operations and `SIG_FUEL`
-  (bit 12) for instruction budget exhaustion
+  (bit 12) for instruction budget exhaustion.
+  See [`docs/signals/`](docs/signals/) for the full design and
+  [`docs/signals/capabilities.md`](docs/signals/capabilities.md)
+  for capability enforcement
 - **`io`** — I/O request types, backends, timeout handling;
   includes `PortKind::Pipe` for subprocess stdio and `ProcessHandle`
   for subprocess lifecycle
@@ -104,6 +110,32 @@ bytecode. Error messages include file:line:col information.
 - 19 user-facing heap variants carry a `traits: Value` field
 - 5 infrastructure types (`Float`, `NativeFn`, `LibHandle`, `FFISignature`,
   `FFIType`) do not carry traits
+
+## Signals and capabilities
+
+Elle's foundational runtime feature. Two directions:
+
+**Signals flow up** — from callee to caller. Every function has a
+compile-time signal (`Silent`, `Yields`, `Polymorphic`) inferred by the
+analyzer. When a function calls `(emit :yield val)`, the signal propagates
+up through the call chain. The compiler uses this to decide calling
+convention (direct call vs suspending call). `silence` declares a ceiling;
+`squelch` wraps at runtime.
+
+**Capabilities flow down** — from parent fiber to child. When creating a
+fiber with `(fiber/new body mask :deny |:io :ffi|)`, the parent withholds
+capabilities. The child inherits the parent's restrictions plus its own.
+When a denied primitive is called, it doesn't run — instead, a
+`:capability-denied` signal is emitted that the parent can catch and
+mediate.
+
+| Concept | Direction | Time | Mechanism |
+|---------|-----------|------|-----------|
+| Signals | up | compile + run | `emit`, `silence`, `squelch` |
+| Capabilities | down | run | `:deny` on `fiber/new`, `CAP_MASK` |
+
+Full documentation: [`docs/signals/`](docs/signals/).
+Capability enforcement: [`docs/signals/capabilities.md`](docs/signals/capabilities.md).
 
 ## Products
 
@@ -164,12 +196,14 @@ These must remain true. Violating them breaks the system:
    use `CaptureCell` for indirection. The `capture_params_mask` on
    `ClosureTemplate` tracks which parameters need wrapping.
 
-3. **Signals are inferred, not declared — except when `silence` provides
-   explicit bounds.** The `Signal` type (`Silent`, `Yields`, `Polymorphic`)
-   propagates from leaves to root during analysis. `silence` constrains
-   inference; it doesn't replace it. The inferred signal must be a subset of
-   the declared bound. When a parameter has a `silence` bound, it is no longer
-   polymorphic — its signal is known to be zero bits.
+3. **Signals up, capabilities down.** Signals (`Silent`, `Yields`,
+   `Polymorphic`) are inferred at compile time, propagating from callees to
+   callers. `silence` constrains inference; it doesn't replace it.
+   Capabilities are enforced at runtime: a parent fiber uses `:deny` to
+   withhold capabilities from a child; denied operations become signals the
+   parent can catch. See [`docs/signals/`](docs/signals/) for signal
+   inference and [`docs/signals/capabilities.md`](docs/signals/capabilities.md)
+   for capability enforcement.
 
 4. **The VM is stack-based for operands, register-addressed for locals.**
    Instructions reference registers (locals) by index. Results push to the

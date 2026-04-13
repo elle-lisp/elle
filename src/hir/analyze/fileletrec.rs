@@ -255,6 +255,9 @@ impl<'a> Analyzer<'a> {
                 pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
             }
 
+            // Clear errors before fixpoint — re-analysis may re-accumulate
+            // the same errors. We keep only the final set.
+            self.errors.clear();
             const MAX_FIXPOINT_ITERS: usize = 10;
             for _ in 0..MAX_FIXPOINT_ITERS {
                 let mut changed = false;

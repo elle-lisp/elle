@@ -56,8 +56,21 @@ impl Linter {
         } else {
             filename
         };
-        let analysis = analyze_file(code, &mut symbols, &mut vm, source_name)
-            .map_err(|e| format!("Analysis error: {}", e))?;
+        let analysis = match analyze_file(code, &mut symbols, &mut vm, source_name) {
+            Ok(a) => a,
+            Err(e) => {
+                // Convert fatal analysis error to a diagnostic instead of propagating
+                self.diagnostics
+                    .push(Self::error_to_diagnostic(&e, source_name));
+                return Ok(());
+            }
+        };
+
+        // Convert accumulated analysis errors to diagnostics
+        for error in &analysis.errors {
+            self.diagnostics
+                .push(Self::lerror_to_diagnostic(error, source_name));
+        }
 
         // Lint the analyzed file
         let mut hir_linter = HirLinter::new();
@@ -66,6 +79,54 @@ impl Linter {
             .extend(hir_linter.diagnostics().iter().cloned());
 
         Ok(())
+    }
+
+    /// Convert an LError to a Diagnostic
+    fn lerror_to_diagnostic(error: &crate::error::LError, file: &str) -> Diagnostic {
+        use crate::error::ErrorKind;
+        let (code, rule) = match &error.kind {
+            ErrorKind::UndefinedVariable { .. } => ("E001", "undefined-variable"),
+            ErrorKind::SignalMismatch { .. } => ("E002", "signal-mismatch"),
+            ErrorKind::UnterminatedForm { .. } => ("E003", "unterminated-form"),
+            ErrorKind::CompileError { .. } => ("E004", "compile-error"),
+            ErrorKind::SyntaxError { .. } => ("E005", "syntax-error"),
+            _ => ("E000", "analysis-error"),
+        };
+        let loc = error
+            .location
+            .clone()
+            .unwrap_or_else(|| crate::reader::SourceLoc::new(file, 0, 0));
+        Diagnostic::new(Severity::Error, code, rule, error.description(), Some(loc))
+    }
+
+    /// Convert a String error (from fatal analysis failure) to a Diagnostic
+    fn error_to_diagnostic(error: &str, file: &str) -> Diagnostic {
+        // Try to parse location from "file:line:col: message" format
+        if let Some(colon_idx) = error.find(": ") {
+            let loc_part = &error[..colon_idx];
+            let parts: Vec<&str> = loc_part.rsplitn(3, ':').collect();
+            if parts.len() >= 2 {
+                if let (Ok(col), Ok(line)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>())
+                {
+                    let file_part = if parts.len() == 3 { parts[2] } else { file };
+                    let message = &error[colon_idx + 2..];
+                    return Diagnostic::new(
+                        Severity::Error,
+                        "E000",
+                        "analysis-error",
+                        message,
+                        Some(crate::reader::SourceLoc::new(file_part, line, col)),
+                    );
+                }
+            }
+        }
+        Diagnostic::new(
+            Severity::Error,
+            "E000",
+            "analysis-error",
+            error,
+            Some(crate::reader::SourceLoc::new(file, 0, 0)),
+        )
     }
 
     /// Lint a file
