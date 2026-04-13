@@ -181,71 +181,48 @@ control flow that the builder doesn't support.
 (s:load-var var)                   ;; OpLoad from function-scoped variable
 (s:store-var var val)              ;; OpStore to function-scoped variable
 
-;; ── Additional ops ────────────────────────────────────────
+;; ── Comparison / logic ────────────────────────────────────
 (s:sgt a b)                        ;; signed greater-than (u32 operands)
 (s:logical-and a b)                ;; boolean AND
 (s:logical-not a)                  ;; boolean NOT
+
+;; ── Integer bitwise ──────────────────────────────────────
+(s:ior a b)                        ;; OpBitwiseOr (197)
+(s:iand a b)                       ;; OpBitwiseAnd (199)
+(s:ishl a b)                       ;; OpShiftLeftLogical (196)
+(s:ishr a b)                       ;; OpShiftRightLogical (194)
+(s:umin a b)                       ;; min(a,b) via OpSelect + OpSLessThan
+
+;; ── Type reinterpretation ────────────────────────────────
+(s:bitcast-u2f val)                ;; OpBitcast u32→f32 (preserves bits)
+(s:bitcast-f2u val)                ;; OpBitcast f32→u32 (preserves bits)
 ```
 
-### Mandelbrot Kernel Sketch
+### Mandelbrot Kernel (actual, from `demos/mandelbrot/mandelbrot.lisp`)
 
-```lisp
-(spv:compute 256 3 (fn [s]
-  (let* [[id    (s:global-id)]
-         [cx    (s:load 0 id)]       ;; real part of c
-         [cy    (s:load 1 id)]       ;; imag part of c
-         [zr    (s:var-f)]           ;; mutable z_real → {:id N :type f32-t}
-         [zi    (s:var-f)]           ;; mutable z_imag
-         [iter  (s:var-u)]           ;; iteration counter
-         [max   (s:const-u 256)]
-         [four  (s:const-f 4.0)]
-         [zero-f (s:const-f 0.0)]
-         [zero-u (s:const-u 0)]
-         [one-u  (s:const-u 1)]
-         ;; allocate block labels (no emission yet)
-         [loop-hdr  (s:block)]
-         [loop-body (s:block)]
-         [loop-cont (s:block)]
-         [loop-end  (s:block)]]
-    ;; init (still in entry block)
-    (s:store-var zr zero-f)
-    (s:store-var zi zero-f)
-    (s:store-var iter zero-u)
-    (s:branch loop-hdr)
-    ;; ── loop header ──────────────────────────────────
-    (s:begin-block loop-hdr)
-    (let* [[r   (s:load-var zr)]
-           [i   (s:load-var zi)]
-           [r2  (s:fmul r r)]
-           [i2  (s:fmul i i)]
-           [mag (s:fadd r2 i2)]
-           [ok  (s:flt mag four)]
-           [n   (s:load-var iter)]
-           [lim (s:slt n max)]
-           [go  (s:logical-and ok lim)]]
-      ;; loop-merge must immediately precede the branch (SPIR-V validation)
-      (s:loop-merge loop-end loop-cont)
-      (s:branch-cond go loop-body loop-end))
-    ;; ── loop body ────────────────────────────────────
-    (s:begin-block loop-body)
-    (let* [[r (s:load-var zr)]
-           [i (s:load-var zi)]
-           [ri (s:fmul r i)]
-           [r2 (s:fmul r r)]
-           [i2 (s:fmul i i)]
-           [nr (s:fadd (s:fsub r2 i2) cx)]
-           [ni (s:fadd (s:fadd ri ri) cy)]]
-      (s:store-var zr nr)
-      (s:store-var zi ni)
-      (s:store-var iter (s:iadd (s:load-var iter) one-u))
-      (s:branch loop-cont))
-    ;; ── continue target ──────────────────────────────
-    (s:begin-block loop-cont)
-    (s:branch loop-hdr)
-    ;; ── exit block ───────────────────────────────────
-    (s:begin-block loop-end)
-    (s:store 2 id (s:u2f (s:load-var iter)))))
-  vulkan/f32-bits)
+The production shader computes coordinates from `global-id` + viewport
+params and outputs ARGB32 pixels directly via `bitcast`. No CPU-side
+coordinate generation or color mapping.
+
+```
+Buffer 0: params [x-min y-min dx dy width max-iter] (input, 6 f32)
+Buffer 1: pixels (output, W×H f32 holding u32 ARGB32 bit patterns)
+```
+
+Key techniques:
+- **Coord from global-id**: `px = id % width`, `py = id / width` (integer
+  division via f32 truncation), `cx = x-min + px * dx`, `cy = y-min + py * dy`
+- **Max-iter via params buffer**: shader compiled once, max-iter passed
+  per-dispatch. No recompilation when user changes iteration count.
+- **ARGB32 color in shader**: Bernstein polynomial palette computed per-pixel.
+  `ior`/`ishl` pack RGB channels, `bitcast-u2f` stores raw u32 bits.
+- **Raw bytes blit**: `plugin:collect` returns raw bytes, written directly
+  to Cairo pixel buffer via `ffi/write` (skip 8-byte collect header).
+  No decode, no per-pixel iteration on CPU.
+
+Performance (RX 7900 XTX, 1600×1200 @ 256 iterations):
+- First frame: ~23ms (includes SPIR-V compilation + pipeline creation)
+- Subsequent frames: ~10ms dispatch + ~4ms blit = **~14ms total**
 ```
 
 ## Proposed Architecture: MLIR
@@ -602,6 +579,31 @@ GPU operations integrate with the existing io_uring scheduler:
 Cross-thread dispatch: `Arc<Mutex<VulkanState>>` supports submission from
 any thread. Per-thread command pools avoid contention.
 
+### Cooperative GTK Event Loop
+
+GTK4 apps traditionally use `g_application_run` which blocks the thread
+in GTK's event loop. This prevents Elle's fiber scheduler from processing
+yields (GPU fence waits, I/O, etc.).
+
+Solution (`lib/gtk4/bind.lisp:run-app`): replace `g_application_run` with
+a cooperative loop:
+
+```lisp
+(defn run-app [app &named quit]
+  (default quit (fn [] false))
+  (g-application-register app nil nil)
+  (g-application-activate app)
+  (def ctx (g-main-context-default))
+  (while (not (quit))
+    (g-main-context-iteration ctx 0)   # non-blocking GTK event pump
+    (ev/sleep 0.001)))                  # yield to Elle's fiber scheduler
+```
+
+FFI callbacks (draw, click, key) cannot yield. Operations that yield
+(GPU dispatch, I/O) must run in `ev/spawn`'d fibers, not directly from
+callbacks. The spawned fibers execute during `ev/sleep` in the cooperative
+loop.
+
 ## Implementation Phases
 
 ### Phase 1: Stabilize Current Plugin (weeks)
@@ -617,10 +619,14 @@ Ordered steps:
 - Libraries wrapped in closure convention (`lib/spirv.lisp`, `lib/gpu.lisp`)
 
 **1b. Mandelbrot kernel** (`demos/gpu/mandelbrot.lisp`) **DONE**
-- GPU Mandelbrot: 512×512 = 262,144 pixels in ~71ms (RX 7900 XTX)
-- 1024 workgroups × 256 threads, max 256 iterations
-- Spot-check validation: origin → max_iter, far point → escapes quickly
-- Test case in `tests/elle/plugins/vulkan.lisp` with 4 known points
+- Standalone compute-only demo + interactive GTK4 explorer with GPU/CPU fallback
+- Shader computes coords from global-id + viewport params, outputs ARGB32 via bitcast
+- No CPU-side coordinate generation or color mapping — raw bytes blit to Cairo pixel buffer
+- 1600×1200 @ 256 iterations in ~10ms dispatch + ~4ms blit (RX 7900 XTX)
+- First frame ~23ms (includes shader compile), subsequent frames ~10ms
+- Test case in `tests/elle/plugins/vulkan.lisp`: 4 known-point validation
+- Also added: `OpBitwiseOr`(197), `OpBitwiseAnd`(199), `OpShiftLeftLogical`(196),
+  `OpShiftRightLogical`(194), `OpBitcast`(124), `umin` (via `OpSelect`)
 
 **1c. Buffer pool + command pool recycling** (`plugins/vulkan/src/dispatch.rs`)
 - Add `BufferPool` to `VulkanState`
@@ -637,9 +643,12 @@ Ordered steps:
 - Generation-based invalidation protocol
 - `gpu:persist` / `gpu:update` primitives
 
-**1f. End-to-end Mandelbrot demo**
-- Benchmark: CPU mandelbrot vs GPU mandelbrot
-- Integration test in CI
+**1f. End-to-end Mandelbrot demo** **DONE**
+- `demos/mandelbrot/mandelbrot.lisp`: GTK4 explorer with GPU acceleration + CPU fallback
+- `demos/gpu/mandelbrot.lisp`: standalone compute-only benchmark
+- Cooperative GTK event loop via `b:run-app` (`g_main_context_iteration` + `ev/sleep`)
+- `ev/spawn` for render to avoid yielding through FFI callbacks
+- Fullscreen with GPU (2× resolution), windowed with CPU
 
 ### Phase 2: MLIR Integration (months)
 
