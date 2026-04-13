@@ -143,6 +143,27 @@ ELLE_MCP_STORE=/path/to/store elle tools/mcp-server.lisp
 The store is persistent — graph data survives across server restarts.
 The `.elle-mcp/` directory is gitignored by default.
 
+## Startup behavior
+
+The server responds to `initialize` immediately. Graph population (Elle
+primitives, Rust function triples) runs in a background fiber so the
+server can handle requests while the graph loads. This keeps MCP client
+connection timeouts from firing on large codebases.
+
+When population completes, the server emits a JSON-RPC notification:
+
+```json
+{"jsonrpc":"2.0","method":"notifications/model/populated","params":{"primitives":true,"rust":406}}
+```
+
+Tools that query the graph (`sparql_query`, `trace`, etc.) return
+whatever data is available — results may be incomplete until the
+notification arrives. Tools that don't depend on the graph
+(`initialize`, `ping`, `tools/list`, `analyze_file`, `portrait`, etc.)
+work immediately.
+
+The Rust file scan excludes `target/` to avoid parsing build artifacts.
+
 ## Populating the graph
 
 The server populates the graph incrementally via `analyze_file`. For
