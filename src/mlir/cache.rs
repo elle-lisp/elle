@@ -19,6 +19,8 @@ pub struct MlirCache {
     context: melior::Context,
     /// Compiled functions: bytecode pointer → engine + function name.
     engines: HashMap<*const u8, (ExecutionEngine, String)>,
+    /// Cached SPIR-V bytes: bytecode pointer → compiled SPIR-V binary.
+    spirv_cache: HashMap<*const u8, Vec<u8>>,
     /// Functions that failed MLIR compilation — don't retry.
     rejections: std::collections::HashSet<*const u8>,
 }
@@ -33,6 +35,7 @@ impl MlirCache {
         MlirCache {
             context: create_context(),
             engines: HashMap::new(),
+            spirv_cache: HashMap::new(),
             rejections: std::collections::HashSet::new(),
         }
     }
@@ -86,8 +89,29 @@ impl MlirCache {
         })
     }
 
-    /// Check if a function is already compiled.
+    /// Check if a function is already compiled (CPU JIT).
     pub fn contains(&self, key: *const u8) -> bool {
         self.engines.contains_key(&key)
+    }
+
+    /// Compile a GPU-eligible LirFunction to SPIR-V bytes, using the
+    /// shared context and caching the result by bytecode pointer.
+    pub fn compile_spirv(
+        &mut self,
+        key: *const u8,
+        lir: &LirFunction,
+        workgroup_size: u32,
+    ) -> Result<&[u8], String> {
+        if !self.spirv_cache.contains_key(&key) {
+            let bytes =
+                super::spirv::lower_to_spirv_with_context(&self.context, lir, workgroup_size)?;
+            self.spirv_cache.insert(key, bytes);
+        }
+        Ok(&self.spirv_cache[&key])
+    }
+
+    /// Get cached SPIR-V bytes, if available.
+    pub fn get_spirv(&self, key: *const u8) -> Option<&[u8]> {
+        self.spirv_cache.get(&key).map(|v| v.as_slice())
     }
 }

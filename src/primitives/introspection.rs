@@ -396,13 +396,15 @@ pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
     } else {
         256
     };
-    match crate::mlir::lower_to_spirv(lir, workgroup_size) {
-        Ok(bytes) => (SIG_OK, Value::bytes(bytes)),
-        Err(e) => (
-            SIG_ERROR,
-            error_val("mlir-error", format!("mlir/compile-spirv: {}", e)),
+    // Use SIG_QUERY to access the VM's MlirCache for shared context
+    // and SPIR-V caching. The VM handles the query in dispatch_query.
+    (
+        SIG_QUERY,
+        Value::cons(
+            Value::keyword("mlir/compile-spirv"),
+            Value::cons(args[0], Value::int(workgroup_size as i64)),
         ),
-    }
+    )
 }
 
 /// Declarative primitive definitions for introspection operations.
@@ -591,7 +593,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "mlir/compile-spirv",
         func: prim_compile_spirv,
-        signal: Signal::errors(),
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
         arity: Arity::Range(1, 2),
         doc: "Compile a GPU-eligible closure to SPIR-V bytes. Optional second arg is workgroup size (default 256).",
         params: &["closure", "workgroup-size"],

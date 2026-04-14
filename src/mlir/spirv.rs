@@ -14,11 +14,20 @@ use std::process::{Command, Stdio};
 
 use super::lower::create_context;
 
-/// Lower a GPU-eligible LirFunction to SPIR-V bytes.
+/// Lower a GPU-eligible LirFunction to SPIR-V bytes (creates fresh context).
 pub fn lower_to_spirv(lir: &LirFunction, workgroup_size: u32) -> Result<Vec<u8>, String> {
-    let mlir_text = generate_gpu_module(lir, workgroup_size)?;
     let context = create_context();
-    let mut module = Module::parse(&context, &mlir_text).ok_or("failed to parse generated MLIR")?;
+    lower_to_spirv_with_context(&context, lir, workgroup_size)
+}
+
+/// Lower a GPU-eligible LirFunction to SPIR-V bytes using a shared context.
+pub fn lower_to_spirv_with_context(
+    context: &melior::Context,
+    lir: &LirFunction,
+    workgroup_size: u32,
+) -> Result<Vec<u8>, String> {
+    let mlir_text = generate_gpu_module(lir, workgroup_size)?;
+    let mut module = Module::parse(context, &mlir_text).ok_or("failed to parse generated MLIR")?;
 
     // Pass pipeline: convert standard dialects to SPIR-V inside gpu.module,
     // then convert gpu.module to spirv.module, then lower ABI/VCE.
