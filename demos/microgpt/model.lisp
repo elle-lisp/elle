@@ -55,15 +55,11 @@
   # ── Forward pass building blocks ───────────────────────────────
 
   (defn mat-vec-mul [mat vec-in]
-    "Matrix-vector multiply: mat[rows x cols] * vec-in[cols] → result[rows]."
-    (let ([result @[]])
+    "Matrix-vector multiply: mat[rows x cols] * vec-in[cols] → result[rows].
+     Uses fused dot product — one Value node per output element."
+    (let ([n (length vec-in)] [result @[]])
       (each row in mat
-        (let ([acc (ag:make-value 0.0)])
-          (var c 0)
-          (while (< c (length row))
-            (assign acc (ag:v+ acc (ag:v* (row c) (vec-in c))))
-            (assign c (inc c)))
-          (push result acc)))
+        (push result (ag:vdot row vec-in n)))
       result))
 
   (defn vec-add [a b]
@@ -77,10 +73,9 @@
 
   (defn rms-norm [vec-in]
     "RMS normalization: x / sqrt(mean(x^2) + eps)."
-    (var sum-sq (ag:make-value 0.0))
-    (each v in vec-in
-      (assign sum-sq (ag:v+ sum-sq (ag:v* v v))))
-    (let ([rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*) 0.5)])
+    (let* ([squares (map (fn [v] (ag:v* v v)) vec-in)]
+           [sum-sq (ag:vsum squares)]
+           [rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*) 0.5)])
       (thaw (->array (map (fn [v] (ag:v/ v rms)) vec-in)))))
 
   (defn softmax-values [scores]
@@ -109,19 +104,15 @@
   (defn attn-head [h q layer-keys layer-vals n-t x-attn]
     "Compute one attention head and write results into x-attn."
     (let* ([hs (* h *head-dim*)]
-           [q-head (slice q hs (+ hs *head-dim*))]
            [sf (/ 1.0 (sqrt (float *head-dim*)))]
            [attn-logits @[]])
+      # Q·K dot products (fused — one node per past position)
       (var ti 0)
       (while (< ti n-t)
-        (let ([k-t (layer-keys ti)])
-          (var dot (ag:make-value 0.0))
-          (var d 0)
-          (while (< d *head-dim*)
-            (assign dot (ag:v+ dot (ag:v* (q-head d) (k-t (+ hs d)))))
-            (assign d (inc d)))
-          (push attn-logits (ag:v*s dot sf)))
+        (push attn-logits (ag:v*s (ag:vdot q (layer-keys ti) *head-dim*
+                                           :offset-a hs :offset-b hs) sf))
         (assign ti (inc ti)))
+      # Weighted sum of cached values
       (let ([aw (softmax-values attn-logits)])
         (each j in (range *head-dim*)
           (var acc (ag:make-value 0.0))

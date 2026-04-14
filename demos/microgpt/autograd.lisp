@@ -67,6 +67,37 @@
     "Add scalar s to Value v."
     (v+ v (make-value s)))
 
+  # ── Fused operations (reduce node count) ───────────────────────
+
+  (defn vdot [avec bvec n &named offset-a offset-b]
+    "Fused dot product: sum(avec[i]*bvec[i]) for i in 0..n-1.
+     Single Value node instead of 2n nodes.
+     Optional offset-a/offset-b for sliced access."
+    (default offset-a 0)
+    (default offset-b 0)
+    (var sum 0.0)
+    (let* ([children @[]] [grads @[]])
+      (var i 0)
+      (while (< i n)
+        (let* ([a (avec (+ offset-a i))]
+               [b (bvec (+ offset-b i))])
+          (assign sum (+ sum (* a:data b:data)))
+          (push children a)
+          (push children b)
+          (push grads b:data)
+          (push grads a:data))
+        (assign i (inc i)))
+      (make-op sum children grads)))
+
+  (defn vsum [vec]
+    "Fused sum: single Value node with all inputs as children."
+    (var sum 0.0)
+    (let ([grads @[]])
+      (each v in vec
+        (assign sum (+ sum v:data))
+        (push grads 1.0))
+      (make-op sum (if (array? vec) vec (thaw (->array vec))) grads)))
+
   # ── Backward pass ──────────────────────────────────────────────
 
   (defn topo-sort [root]
@@ -103,4 +134,5 @@
    :v-data v-data :v-grad v-grad
    :v+ v+ :v* v* :vneg vneg :vpow vpow :vexp vexp :vlog vlog :vrelu vrelu
    :v- v- :v/ v/ :v*s v*s :v+s v+s
+   :vdot vdot :vsum vsum
    :backward backward})
