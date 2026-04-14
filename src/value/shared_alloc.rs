@@ -61,6 +61,11 @@ impl SharedAllocator {
         self.marks.clear();
     }
 
+    /// Bytes committed by the shared slab.
+    pub fn allocated_bytes(&self) -> usize {
+        self.pool.allocated_bytes()
+    }
+
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn len(&self) -> usize {
         self.pool.len()

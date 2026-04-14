@@ -43,6 +43,16 @@ impl SymbolTable {
         self.names.get(id.0 as usize).map(|s| s.as_ref())
     }
 
+    /// Return the number of interned symbols.
+    pub fn len(&self) -> usize {
+        self.names.len()
+    }
+
+    /// Return true if no symbols have been interned.
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+
     /// Check if a symbol exists
     pub fn get(&self, name: &str) -> Option<SymbolId> {
         self.map.get(name).copied()

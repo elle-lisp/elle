@@ -178,6 +178,10 @@ impl FiberHeap {
         // mark/release scoping remains unaffected.
         if !self.shared_alloc.is_null() {
             self.shared_alloc_count += 1;
+            let visible = self.pool.alloc_count + self.shared_alloc_count;
+            if visible > self.peak_alloc_count {
+                self.peak_alloc_count = visible;
+            }
             return unsafe { &mut *self.shared_alloc }.alloc(obj);
         }
 
@@ -392,9 +396,15 @@ impl FiberHeap {
         self.alloc_error.take()
     }
 
-    /// Bytes committed by root slab.
+    /// Bytes committed by local slab plus shared allocator (if active).
     pub fn allocated_bytes(&self) -> usize {
-        self.pool.allocated_bytes()
+        let local = self.pool.allocated_bytes();
+        let shared = if self.shared_alloc.is_null() {
+            0
+        } else {
+            unsafe { (*self.shared_alloc).allocated_bytes() }
+        };
+        local + shared
     }
 
     /// Number of `RegionEnter` instructions executed (scope regions entered).
@@ -437,10 +447,10 @@ impl FiberHeap {
         self.owned_shared.len()
     }
 
-    /// Reset peak to current count. Returns previous peak.
+    /// Reset peak to current visible count (local + shared). Returns previous peak.
     pub fn reset_peak(&mut self) -> usize {
         let prev = self.peak_alloc_count;
-        self.peak_alloc_count = self.pool.alloc_count;
+        self.peak_alloc_count = self.pool.alloc_count + self.shared_alloc_count;
         prev
     }
 

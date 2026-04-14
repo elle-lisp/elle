@@ -57,6 +57,11 @@ pub fn intern_string(s: &str) -> *const HeapObject {
     STRING_INTERNER.with(|interner| interner.borrow_mut().intern(s))
 }
 
+/// Return the number of interned strings in the thread-local table.
+pub fn intern_string_count() -> usize {
+    STRING_INTERNER.with(|interner| interner.borrow().strings.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
