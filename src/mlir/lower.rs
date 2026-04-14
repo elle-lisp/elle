@@ -13,36 +13,39 @@ use melior::ir::{Block, BlockLike, Location, Module, Region, RegionLike, Type, V
 use melior::Context;
 use std::collections::HashMap;
 
-/// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
-pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
+/// Create an MLIR context with all dialects registered.
+pub fn create_context() -> Context {
     let context = Context::new();
     let registry = DialectRegistry::new();
     melior::utility::register_all_dialects(&registry);
     context.append_dialect_registry(&registry);
     context.load_all_available_dialects();
+    context
+}
 
-    let location = Location::unknown(&context);
+/// Lower a GPU-eligible LirFunction into an MLIR module.
+///
+/// The module contains a single `func.func` with `llvm.emit_c_interface`
+/// so the execution engine can call it via C calling convention.
+pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Module<'c>, String> {
+    let location = Location::unknown(context);
     let module = Module::new(location);
 
-    let i64_type: Type = IntegerType::new(&context, 64).into();
+    let i64_type: Type = IntegerType::new(context, 64).into();
     let num_params = lir.arity.fixed_params();
 
-    // Build function signature: (i64, i64, ...) -> i64
     let param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
-    let func_type = FunctionType::new(&context, &param_types, &[i64_type]);
-
+    let func_type = FunctionType::new(context, &param_types, &[i64_type]);
     let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
 
-    // Create function body region
     let region = Region::new();
 
-    // Map LIR labels to MLIR block indices
+    // Map LIR labels to block indices
     let mut label_to_idx: HashMap<u32, usize> = HashMap::new();
     let mut blocks: Vec<Block> = Vec::new();
 
     for (i, lir_block) in lir.blocks.iter().enumerate() {
         let block = if i == 0 {
-            // Entry block gets function parameters
             Block::new(
                 &param_types
                     .iter()
@@ -56,14 +59,11 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
         blocks.push(block);
     }
 
-    // Lower instructions in each block
+    // Lower instructions
     for (block_idx, lir_block) in lir.blocks.iter().enumerate() {
         let block = &blocks[block_idx];
-
-        // Register map: LIR Reg → MLIR Value
         let mut regs: HashMap<u32, Value> = HashMap::new();
 
-        // Entry block: map param indices to block arguments
         if block_idx == 0 {
             for i in 0..num_params {
                 regs.insert(i as u32, block.argument(i).unwrap().into());
@@ -73,7 +73,6 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
         for si in &lir_block.instructions {
             match &si.instr {
                 LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
-                    // In GPU context (num_captures == 0), these are parameter loads.
                     if block_idx == 0 && (*index as usize) < num_params {
                         regs.insert(dst.0, block.argument(*index as usize).unwrap().into());
                     }
@@ -81,19 +80,13 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
                 LirInstr::Const { dst, value } => {
                     let n = match value {
                         LirConst::Int(n) => *n,
-                        LirConst::Bool(b) => {
-                            if *b {
-                                1i64
-                            } else {
-                                0i64
-                            }
-                        }
+                        LirConst::Bool(b) => i64::from(*b),
                         LirConst::Nil => 0i64,
                         LirConst::Float(f) => f.to_bits() as i64,
                         _ => return Err(format!("unsupported constant: {:?}", value)),
                     };
                     let op = arith::constant(
-                        &context,
+                        context,
                         IntegerAttribute::new(i64_type, n).into(),
                         location,
                     );
@@ -136,7 +129,7 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
             }
         }
 
-        // Lower terminator
+        // Terminator
         match &lir_block.terminator.terminator {
             Terminator::Return(reg) => {
                 let val = *regs
@@ -165,7 +158,7 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
                     .get(&else_label.0)
                     .ok_or_else(|| format!("unknown else label {}", else_label.0))?;
                 block.append_operation(cf::cond_br(
-                    &context,
+                    context,
                     cond_val,
                     &blocks[then_idx],
                     &blocks[else_idx],
@@ -183,26 +176,34 @@ pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
         }
     }
 
-    // Move blocks into region
     for block in blocks {
         region.append_block(block);
     }
 
-    // Create the function operation
+    // Create func with llvm.emit_c_interface for ExecutionEngine compatibility
     let func_op = func::func(
-        &context,
-        StringAttribute::new(&context, func_name),
+        context,
+        StringAttribute::new(context, func_name),
         TypeAttribute::new(func_type.into()),
         region,
-        &[],
+        &[(
+            melior::ir::Identifier::new(context, "llvm.emit_c_interface"),
+            melior::ir::attribute::Attribute::unit(context),
+        )],
         location,
     );
     module.body().append_operation(func_op);
 
-    // Verify and return text
     if !module.as_operation().verify() {
         return Err("MLIR verification failed".to_string());
     }
 
+    Ok(module)
+}
+
+/// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
+pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
+    let context = create_context();
+    let module = lower_to_module(&context, lir)?;
     Ok(module.as_operation().to_string())
 }
