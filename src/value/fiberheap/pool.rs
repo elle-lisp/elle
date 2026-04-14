@@ -11,6 +11,7 @@ use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 /// Position snapshot for mark/release within a `SlabPool`.
+#[derive(Clone)]
 pub(crate) struct SlabMark {
     pub(crate) allocs_len: usize,
     pub(crate) dtor_len: usize,

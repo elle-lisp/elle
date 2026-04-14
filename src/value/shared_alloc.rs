@@ -12,19 +12,34 @@
 //! - Torn down when the owner's `FiberHeap::clear()` runs;
 //!   `teardown()` runs destructors and returns all slab slots to the free list
 
-use crate::value::fiberheap::pool::SlabPool;
+use crate::value::fiberheap::pool::{SlabMark, SlabPool};
 use crate::value::heap::HeapObject;
 use crate::value::Value;
 
 /// Saved position for scope-based release within a SharedAllocator.
 struct SharedMark {
-    slab: crate::value::fiberheap::pool::SlabMark,
+    slab: SlabMark,
+}
+
+/// Previous tail-call iteration's shared allocations, preserved for one
+/// rotation cycle so argument values from iteration N remain valid until
+/// iteration N+1 copies them.
+///
+/// Not yet activated — shared rotation requires reachability analysis
+/// to avoid freeing objects referenced by live chains (e.g., cons lists
+/// accumulated via tail-call arguments).
+#[allow(dead_code)]
+struct SharedSwapPool {
+    allocs: Vec<*mut HeapObject>,
+    dtors: Vec<*mut HeapObject>,
 }
 
 pub(crate) struct SharedAllocator {
     pool: SlabPool,
     /// Stack of scope marks for RegionEnter/RegionExit on child fibers.
     marks: Vec<SharedMark>,
+    /// Swap pool for tail-call rotation.
+    swap: Option<SharedSwapPool>,
 }
 
 impl SharedAllocator {
@@ -32,6 +47,7 @@ impl SharedAllocator {
         SharedAllocator {
             pool: SlabPool::new(),
             marks: Vec::new(),
+            swap: None,
         }
     }
 
@@ -55,8 +71,56 @@ impl SharedAllocator {
         self.pool.release(&mark.slab);
     }
 
+    /// Capture the current pool position for rotation.
+    #[allow(dead_code)]
+    pub(crate) fn rotation_mark(&self) -> SlabMark {
+        self.pool.mark()
+    }
+
+    /// Rotate the shared pool at a tail-call boundary.
+    ///
+    /// Same protocol as FiberHeap::rotate_pools:
+    /// 1. Teardown swap (iteration N-2 is dead)
+    /// 2. Move current iteration's objects to swap
+    /// 3. Reset alloc_count to base level
+    #[allow(dead_code)]
+    pub(crate) fn rotate(&mut self, base: &SlabMark) {
+        // 1. Teardown previous swap pool.
+        if let Some(old) = self.swap.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+            for &ptr in old.allocs.iter().rev() {
+                unsafe { self.pool.dealloc_slot(ptr) };
+            }
+        }
+
+        // 2. Move current iteration's objects to swap.
+        let iter_allocs = self.pool.allocs.split_off(base.allocs_len);
+        let iter_dtors = self.pool.dtors.split_off(base.dtor_len);
+
+        self.swap = if iter_allocs.is_empty() {
+            None
+        } else {
+            Some(SharedSwapPool {
+                allocs: iter_allocs,
+                dtors: iter_dtors,
+            })
+        };
+
+        // 3. Reset alloc_count to base level.
+        self.pool.alloc_count = base.alloc_count;
+    }
+
     /// Run destructors, return all slots to the slab free list, and reset.
     pub fn teardown(&mut self) {
+        // Drain swap pool first.
+        if let Some(old) = self.swap.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+            // Slab slots freed by pool.teardown() below.
+        }
         self.pool.teardown();
         self.marks.clear();
     }

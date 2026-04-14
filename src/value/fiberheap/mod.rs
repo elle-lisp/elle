@@ -55,6 +55,11 @@ pub struct RotationBase {
     /// Scope depth at mark time. Rotation is skipped when scope depth
     /// differs (unbalanced due to error exit).
     scope_depth: usize,
+    /// When shared_alloc is active at mark time, captures the shared
+    /// allocator's pool state for rotation. Reserved for future use
+    /// when reachability analysis enables safe shared rotation.
+    #[allow(dead_code)]
+    shared_mark: Option<pool::SlabMark>,
 }
 
 mod slab;
@@ -459,6 +464,7 @@ impl FiberHeap {
         RotationBase {
             heap_mark: self.mark(),
             scope_depth: self.scope_marks.len(),
+            shared_mark: None,
         }
     }
 
@@ -472,17 +478,24 @@ impl FiberHeap {
     /// rotation is performed on the shared allocator instead of the
     /// private pool, since that's where allocations actually go.
     pub fn rotate_pools(&mut self, base: &RotationBase) {
-        if !self.shared_alloc.is_null() {
-            // Skip rotation when shared allocator is active — rotation state
-            // is per-fiber, not per-shared-allocator. Cooperative scheduling
-            // means no interleaving within a single trampoline iteration.
-            return;
-        }
-
-        // Defect 2: scope depth must match the depth at base-mark time.
+        // Scope depth must match the depth at base-mark time.
         // If not (unbalanced due to error exit), skip rotation to avoid
         // invalidating scope marks.
         if self.scope_marks.len() != base.scope_depth {
+            return;
+        }
+
+        if !self.shared_alloc.is_null() {
+            // Shared allocator rotation is not yet safe: objects in the
+            // shared pool may be referenced by the fiber's stack, by other
+            // live objects, or form reference chains (e.g., cons lists
+            // accumulated via tail-call arguments). The swap pool's
+            // one-iteration lag is insufficient — chains can extend
+            // arbitrarily far back.
+            //
+            // The infrastructure exists (SharedAllocator::rotate) for when
+            // we have reachability info to determine which objects are safe
+            // to rotate.
             return;
         }
 
@@ -630,6 +643,11 @@ impl FiberHeap {
     #[allow(dead_code)]
     pub(crate) fn shared_alloc(&self) -> *mut crate::value::shared_alloc::SharedAllocator {
         self.shared_alloc
+    }
+
+    /// Check whether a shared allocator is active for this fiber.
+    pub fn has_shared_alloc(&self) -> bool {
+        !self.shared_alloc.is_null()
     }
 
     /// Set the shared allocator pointer for this fiber.

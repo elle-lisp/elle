@@ -107,6 +107,18 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
 }
 
+/// Check whether the current fiber heap has a shared allocator active.
+pub fn current_heap_has_shared_alloc() -> bool {
+    CURRENT_FIBER_HEAP.with(|cell| {
+        let ptr = cell.get();
+        if ptr.is_null() {
+            false
+        } else {
+            unsafe { (*ptr).has_shared_alloc() }
+        }
+    })
+}
+
 pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R> {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();

@@ -141,15 +141,15 @@
     "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
 
 # TCO with per-iteration allocation: values escape via tail-call args
-# and route through SharedAllocator to parent heap — not reclaimed.
-# This is a known limitation: swap pool rotation only applies to the
-# fiber's local pool, but under ev/run all allocs go to the shared path.
-# TODO: reclaim shared allocs on tail-call rotation
+# and form reference chains (each cons cell points to the previous).
+# Swap pool one-iteration lag can't safely free them — the chain extends
+# arbitrarily far back. This is correctly detected by escape analysis
+# (rotation_safe=false).
 (let [[m (find-result "tco-alloc-10000")]]
   (assert (= (m :allocs) (m :peak))
-    "tco-alloc-10000: peak equals allocs (no reclamation happening)")
+    "tco-alloc-10000: peak equals allocs (no rotation for escaping chains)")
   (assert (> (m :allocs) 10000)
-    "tco-alloc-10000: allocs proportional to iterations (not reclaimed)"))
+    "tco-alloc-10000: allocs proportional to iterations (reference chains)"))
 
 # fib: pure arithmetic, no heap objects expected
 (let [[m (find-result "fib-15")]]
