@@ -340,6 +340,71 @@ pub(crate) fn prim_jit_rejections(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// (mlir/compile-spirv closure [workgroup-size]) — compile closure to SPIR-V bytes
+#[cfg(feature = "mlir")]
+pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "mlir/compile-spirv: expected 1-2 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    let closure = match args[0].as_closure() {
+        Some(c) => c,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "mlir/compile-spirv: expected closure, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let lir = match &closure.template.lir_function {
+        Some(lir) => lir,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "mlir-error",
+                    "mlir/compile-spirv: closure has no LIR".to_string(),
+                ),
+            )
+        }
+    };
+    if !lir.is_gpu_eligible() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "mlir-error",
+                "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
+            ),
+        );
+    }
+    let workgroup_size = if args.len() == 2 {
+        args[1].as_int().unwrap_or(256) as u32
+    } else {
+        256
+    };
+    match crate::mlir::lower_to_spirv(lir, workgroup_size) {
+        Ok(bytes) => (SIG_OK, Value::bytes(bytes)),
+        Err(e) => (
+            SIG_ERROR,
+            error_val("mlir-error", format!("mlir/compile-spirv: {}", e)),
+        ),
+    }
+}
+
 /// Declarative primitive definitions for introspection operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -521,5 +586,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(keyword \"foo\")",
         aliases: &["string->keyword"],
+    },
+    #[cfg(feature = "mlir")]
+    PrimitiveDef {
+        name: "mlir/compile-spirv",
+        func: prim_compile_spirv,
+        signal: Signal::errors(),
+        arity: Arity::Range(1, 2),
+        doc: "Compile a GPU-eligible closure to SPIR-V bytes. Optional second arg is workgroup size (default 256).",
+        params: &["closure", "workgroup-size"],
+        category: "mlir",
+        example: "(mlir/compile-spirv (fn [a b] (+ a b)))",
+        aliases: &[],
     },
 ];

@@ -68,6 +68,36 @@
          [_ (plugin:wait handle)]]
     (plugin:decode (plugin:collect handle) :f32)))
 
+## ── Compiler-generated GPU map ────────────────────────────────
+
+(defn gpu-map [f data &named ctx dtype wg-size]
+  "Map a GPU-eligible function over an array using compiler-generated SPIR-V.
+   f: a GPU-eligible closure (pure arithmetic, no I/O or captures).
+   data: input array of integers.
+   Returns: array of results.
+
+   Optional named args:
+     :ctx       — Vulkan context (created if not given)
+     :dtype     — :i32 (default), :u32, or :f32
+     :wg-size   — workgroup size (default 256)
+
+   Example: (gpu:map (fn [x] (* x x)) [1 2 3 4])"
+  (default ctx (plugin:init))
+  (default dtype :i32)
+  (default wg-size 256)
+  (let* [[n          (length data)]
+         [num-bufs   (+ (fn/arity f) 1)]
+         [spirv      (mlir/compile-spirv f wg-size)]
+         [shader     (plugin:shader ctx spirv num-bufs)]
+         [wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))]
+         [in-buf     {:data data :usage :input :dtype dtype}]
+         [out-buf    {:size (* n 4) :usage :output}]
+         [handle     (plugin:dispatch shader wg-count 1 1
+                       [in-buf out-buf])]
+         [_          (plugin:wait handle)]
+         [result     (plugin:decode (plugin:collect handle) dtype)]]
+    result))
+
 ## ── Export ─────────────────────────────────────────────────────
 {:init        gpu-init
  :compile     gpu-compile
@@ -75,4 +105,5 @@
  :input       gpu-input
  :output      gpu-output
  :inout       gpu-inout
- :run         gpu-run})
+ :run         gpu-run
+ :map         gpu-map})

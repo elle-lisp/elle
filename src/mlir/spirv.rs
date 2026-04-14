@@ -57,7 +57,8 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     out.push_str("  gpu.module @kernels {\n");
 
     // GPU function signature: one memref<Nxi32> per input + one for output
-    out.push_str(&format!("    gpu.func @{}(", func_name));
+    // Entry point must be "main" — the Vulkan plugin hardcodes this name.
+    out.push_str("    gpu.func @main(");
     for i in 0..num_params {
         out.push_str(&format!("%buf{}: memref<{}xi32>, ", i, buf_size));
     }
