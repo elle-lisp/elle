@@ -172,4 +172,90 @@ mod tests {
         let result = mlir_call(&make_mul_add(), &[3, 7]).expect("execution should succeed");
         assert_eq!(result, 24);
     }
+
+    #[test]
+    fn bench_mlir() {
+        use super::lower::{create_context, lower_to_module};
+        use std::time::Instant;
+
+        let func = make_mul_add();
+        let n = 1_000_000;
+
+        // ── MLIR: break down each phase ─────────────────────────
+        let start = Instant::now();
+        let context = create_context();
+        let ctx_time = start.elapsed();
+
+        let start = Instant::now();
+        let mut module = lower_to_module(&context, &func).unwrap();
+        let lower_time = start.elapsed();
+
+        let start = Instant::now();
+        let pm = melior::pass::PassManager::new(&context);
+        pm.add_pass(melior::pass::conversion::create_to_llvm());
+        pm.run(&mut module).unwrap();
+        let convert_time = start.elapsed();
+
+        let start = Instant::now();
+        let engine = melior::ExecutionEngine::new(&module, 2, &[], false, false);
+        let jit_time = start.elapsed();
+
+        let start = Instant::now();
+        for i in 0..n {
+            let mut a: i64 = i;
+            let mut b: i64 = 7;
+            let mut result: i64 = 0;
+            unsafe {
+                engine
+                    .invoke_packed(
+                        "mul_add",
+                        &mut [
+                            &mut a as *mut i64 as *mut (),
+                            &mut b as *mut i64 as *mut (),
+                            &mut result as *mut i64 as *mut (),
+                        ],
+                    )
+                    .unwrap();
+            }
+            assert_eq!(result, i * 7 + i);
+        }
+        let mlir_exec_time = start.elapsed();
+
+        // ── Cranelift: compile only (execution needs VM context) ─
+        let start = Instant::now();
+        let compiler = crate::jit::JitCompiler::new().unwrap();
+        let cranelift_init = start.elapsed();
+
+        let start = Instant::now();
+        let _jit_code = compiler
+            .compile(&func, None, std::collections::HashMap::new(), vec![])
+            .unwrap();
+        let cranelift_compile = start.elapsed();
+
+        eprintln!();
+        eprintln!("── mul_add(a,b) = a*b+a, {} exec iterations ──", n);
+        eprintln!();
+        eprintln!("  MLIR:");
+        eprintln!("    context creation:  {:?}", ctx_time);
+        eprintln!("    lower LIR→MLIR:    {:?}", lower_time);
+        eprintln!("    convert →LLVM:     {:?}", convert_time);
+        eprintln!("    LLVM JIT compile:  {:?}", jit_time);
+        eprintln!(
+            "    compile total:     {:?}",
+            ctx_time + lower_time + convert_time + jit_time
+        );
+        eprintln!(
+            "    exec:              {:?} ({:?}/call)",
+            mlir_exec_time,
+            mlir_exec_time / n as u32
+        );
+        eprintln!();
+        eprintln!("  Cranelift:");
+        eprintln!("    init:              {:?}", cranelift_init);
+        eprintln!("    compile:           {:?}", cranelift_compile);
+        eprintln!(
+            "    compile total:     {:?}",
+            cranelift_init + cranelift_compile
+        );
+    }
 }
