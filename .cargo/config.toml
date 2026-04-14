@@ -1,2 +1,7 @@
 [env]
 RUST_TEST_THREADS = { value = "16", force = false }
+MLIR_SYS_220_PREFIX = { value = "/home/adavidoff/git/tmp/mlir-install", force = false }
+LIBCLANG_PATH = { value = "/usr/lib/llvm/20/lib64", force = false }
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,/home/adavidoff/git/tmp/mlir-install/lib"]

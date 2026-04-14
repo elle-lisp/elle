@@ -51,6 +51,8 @@ pub mod jit;
 pub mod lint;
 pub mod lir;
 pub mod lsp;
+#[cfg(feature = "mlir")]
+pub mod mlir;
 pub mod path;
 pub mod pipeline;
 pub mod plugin;
@@ -65,6 +67,7 @@ pub mod symbols;
 pub mod syntax;
 pub mod value;
 pub mod vm;
+#[cfg(feature = "wasm")]
 pub mod wasm;
 
 pub use compiler::Bytecode;

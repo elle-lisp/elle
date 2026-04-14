@@ -238,6 +238,7 @@ impl VM {
 
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
+            #[cfg(feature = "wasm")]
             if closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_wasm_call(closure, &args) {
                     self.fiber.call_depth -= 1;

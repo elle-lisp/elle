@@ -19,6 +19,7 @@ pub mod signal;
 pub mod stack;
 pub mod types;
 pub mod variables;
+#[cfg(feature = "wasm")]
 mod wasm_entry;
 
 pub use crate::value::fiber::CallFrame;

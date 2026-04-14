@@ -175,6 +175,7 @@ fn run_source(
     }
 
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
+    #[cfg(feature = "wasm")]
     if elle::config::get().wasm_full {
         let no_stdlib = elle::config::get().wasm_no_stdlib;
         let eval_fn = if no_stdlib {

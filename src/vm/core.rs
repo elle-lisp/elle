@@ -98,8 +98,10 @@ pub struct VM {
     pub jit_hotness_threshold: usize,
     /// Lazy WASM compilation tier. When `--wasm=N`, hot closures are
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
+    #[cfg(feature = "wasm")]
     pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
     /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
+    #[cfg(feature = "wasm")]
     pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
 }
 
@@ -186,11 +188,13 @@ impl VM {
             source_arg: String::new(),
             jit_enabled,
             jit_hotness_threshold: jit_threshold,
+            #[cfg(feature = "wasm")]
             wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None
             },
+            #[cfg(feature = "wasm")]
             wasm_rejections: FxHashMap::default(),
         }
     }

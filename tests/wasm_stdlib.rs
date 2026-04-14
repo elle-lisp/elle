@@ -1,4 +1,5 @@
 //! Test: can we compile and run stdlib.lisp through WASM?
+#![cfg(feature = "wasm")]
 
 const STDLIB: &str = include_str!("../stdlib.lisp");
 
