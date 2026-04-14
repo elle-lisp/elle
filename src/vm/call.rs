@@ -247,6 +247,18 @@ impl VM {
                 }
             }
 
+            // MLIR tier-2: GPU-eligible functions compiled through LLVM.
+            // Checked before Cranelift — MLIR produces better optimized code
+            // for numeric functions (LLVM vectorization, LICM, GVN).
+            #[cfg(feature = "mlir")]
+            if closure.template.lir_function.is_some() {
+                if let Some(bits) = self.try_mlir_call(closure, &args) {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
+                    return bits;
+                }
+            }
+
             // JIT compilation and dispatch.
             // Polymorphic closures are rejected by the JIT compiler itself.
             // Skip profiling for primitives (no LIR means not JIT-compilable).

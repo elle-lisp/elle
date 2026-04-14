@@ -4,9 +4,11 @@
 //! then compiles through the arith/func/cf dialects to LLVM IR and
 //! JIT-executes via the MLIR ExecutionEngine.
 
+mod cache;
 mod execute;
 mod lower;
 
+pub use cache::MlirCache;
 pub use execute::mlir_call;
 pub use lower::lower_to_mlir;
 

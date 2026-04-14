@@ -103,6 +103,10 @@ pub struct VM {
     /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
     #[cfg(feature = "wasm")]
     pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
+    /// MLIR compilation cache for GPU-eligible functions.
+    /// Lazily initialized on first GPU-eligible call.
+    #[cfg(feature = "mlir")]
+    pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -196,6 +200,8 @@ impl VM {
             },
             #[cfg(feature = "wasm")]
             wasm_rejections: FxHashMap::default(),
+            #[cfg(feature = "mlir")]
+            mlir_cache: None,
         }
     }
 

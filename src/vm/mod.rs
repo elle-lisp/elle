@@ -14,6 +14,8 @@ pub mod execute;
 pub mod fiber;
 mod jit_entry;
 pub mod literals;
+#[cfg(feature = "mlir")]
+mod mlir_entry;
 pub mod parameters;
 pub mod signal;
 pub mod stack;
