@@ -21,6 +21,7 @@ PLUGINS := \
     csv \
     egui \
     hash \
+    image \
     jiff \
     mqtt \
     msgpack \
@@ -30,6 +31,7 @@ PLUGINS := \
     random \
     regex \
     selkie \
+    svg \
     syn \
     tls \
     toml \
