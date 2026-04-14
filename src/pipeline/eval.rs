@@ -75,7 +75,12 @@ pub fn eval(
     // Get cached expander and meta (uses throwaway cache VM only for init)
     let (mut expander, meta) = cache::get_cached_expander_and_meta();
 
-    let expanded = expander.expand(syntax, symbols, vm)?;
+    let scoped = if source_name.starts_with('<') {
+        syntax
+    } else {
+        expander.stamp_file_scope(syntax)
+    };
+    let expanded = expander.expand(scoped, symbols, vm)?;
 
     let mut arena = BindingArena::new();
     let mut analyzer = Analyzer::new_with_primitives(

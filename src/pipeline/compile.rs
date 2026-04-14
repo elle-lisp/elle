@@ -282,7 +282,18 @@ fn compile_file_inner(
     // Phase 2: Macro expansion (cached VM held only for this phase)
     let (expanded_forms, expander, meta) =
         cache::with_compilation_cache(|macro_vm, mut expander, meta| {
-            let mut pending: std::collections::VecDeque<Syntax> = syntaxes.into();
+            // Stamp a file scope on user code so user bindings are
+            // distinguishable from primitives (Flatt 2016 §3). Skip for
+            // internal sources (<stdlib>, <internal>).
+            let mut pending: std::collections::VecDeque<Syntax> = if source_name.starts_with('<') {
+                syntaxes.into()
+            } else {
+                let file_scope = expander.fresh_scope();
+                syntaxes
+                    .into_iter()
+                    .map(|s| expander.stamp_scope(s, file_scope))
+                    .collect()
+            };
             let mut expanded_forms = Vec::new();
             let mut included: HashSet<String> = HashSet::from([source_name.to_string()]);
             while let Some(syntax) = pending.pop_front() {

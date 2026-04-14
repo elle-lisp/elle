@@ -4,6 +4,7 @@ use super::Expander;
 use crate::symbol::SymbolTable;
 use crate::syntax::{Span, Syntax, SyntaxKind};
 use crate::vm::VM;
+use crate::Value;
 
 impl Expander {
     /// Convert quasiquote to code that constructs the value at runtime
@@ -78,7 +79,18 @@ impl Expander {
                 span.clone(),
             )),
 
-            // Everything else gets quoted
+            // Symbols: wrap as SyntaxLiteral to preserve definition-site
+            // scopes through the Value round-trip (Flatt 2016 §3). Without
+            // this, template symbols become bare Values and lose their scopes.
+            // The intro scope is added later by add_scope_recursive, which
+            // together with the definition-site scopes ensures correct
+            // resolution even when the call site shadows the same name.
+            SyntaxKind::Symbol(_) => Ok(Syntax::new(
+                SyntaxKind::SyntaxLiteral(Value::syntax(syntax.clone())),
+                span.clone(),
+            )),
+
+            // Everything else gets quoted (atoms don't participate in binding)
             _ => Ok(self.make_list(
                 vec![self.make_symbol("quote", span.clone()), syntax.clone()],
                 span.clone(),

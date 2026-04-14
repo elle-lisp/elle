@@ -161,6 +161,24 @@ fn prim_pow(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+fn prim_fmod(args: &[Value]) -> (SignalBits, Value) {
+    let a = match require_number("fmod", &args[0]) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let b = match require_number("fmod", &args[1]) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    if b == 0.0 {
+        return (
+            SIG_ERROR,
+            error_val("division-by-zero", "fmod: division by zero"),
+        );
+    }
+    (SIG_OK, Value::float(a % b))
+}
+
 fn prim_atan2(args: &[Value]) -> (SignalBits, Value) {
     let y = match require_number("atan2", &args[0]) {
         Ok(v) => v,
@@ -290,6 +308,13 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         arity: Arity::Exact(1), doc: "Returns the arctangent of a number (in radians).",
         params: &["x"], category: "math", example: "(math/atan 1)",
         aliases: &["atan"],
+    },
+    PrimitiveDef {
+        name: "math/fmod", func: prim_fmod, signal: Signal::errors(),
+        arity: Arity::Exact(2),
+        doc: "Floating-point remainder. Returns a - floor(a/b) * b.",
+        params: &["a", "b"], category: "math", example: "(math/fmod 5.5 2.0) #=> 1.5",
+        aliases: &["fmod"],
     },
     PrimitiveDef {
         name: "math/atan2", func: prim_atan2, signal: Signal::errors(),
