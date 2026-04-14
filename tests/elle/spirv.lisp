@@ -5,6 +5,10 @@
 
 (def spv ((import "std/spirv")))
 
+# spirv-val may not be installed (e.g. CI without vulkan-tools)
+(def has-spirv-val
+  (= (get (subprocess/system "which" ["spirv-val"]) :exit) 0))
+
 ## ── Helper: IEEE 754 f32 bit pattern ──────────────────────
 ## Standalone f32-bits for testing (no vulkan plugin needed).
 ## Only needs to be a valid u32 — SPIR-V builder doesn't
@@ -233,11 +237,12 @@
         f32-bits)]
        [p (port/open "/tmp/elle-spirv-bitwise.spv" :write)]
        [_ (port/write p bytecode)]
-       [_ (port/close p)]
-       [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitwise.spv"])]]
-  (when (not (= (result :exit) 0))
-    (eprintln "spirv-val stderr:" (result :stderr)))
-  (assert (= (result :exit) 0) "spirv: bitwise ior validates"))
+       [_ (port/close p)]]
+  (when has-spirv-val
+    (let [[result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitwise.spv"])]]
+      (when (not (= (result :exit) 0))
+        (eprintln "spirv-val stderr:" (result :stderr)))
+      (assert (= (result :exit) 0) "spirv: bitwise ior validates"))))
 
 ## ── 13. Bitcast u32→f32 on GPU ────────────────────────────
 (let* [[bytecode (spv:compute 256 1 (fn [s]
@@ -248,9 +253,10 @@
         f32-bits)]
        [p (port/open "/tmp/elle-spirv-bitcast.spv" :write)]
        [_ (port/write p bytecode)]
-       [_ (port/close p)]
-       [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitcast.spv"])]]
-  (assert (= (result :exit) 0) "spirv: bitcast validates"))
+       [_ (port/close p)]]
+  (when has-spirv-val
+    (let [[result (subprocess/system "spirv-val" ["/tmp/elle-spirv-bitcast.spv"])]]
+      (assert (= (result :exit) 0) "spirv: bitcast validates"))))
 
 ## ── 14. umin on GPU ──────────────────────────────────────
 (let* [[bytecode (spv:compute 256 1 (fn [s]
@@ -262,8 +268,9 @@
         f32-bits)]
        [p (port/open "/tmp/elle-spirv-umin.spv" :write)]
        [_ (port/write p bytecode)]
-       [_ (port/close p)]
-       [result (subprocess/system "spirv-val" ["/tmp/elle-spirv-umin.spv"])]]
-  (assert (= (result :exit) 0) "spirv: umin validates"))
+       [_ (port/close p)]]
+  (when has-spirv-val
+    (let [[result (subprocess/system "spirv-val" ["/tmp/elle-spirv-umin.spv"])]]
+      (assert (= (result :exit) 0) "spirv: umin validates"))))
 
 (println "All SPIR-V tests passed")
