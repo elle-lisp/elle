@@ -450,7 +450,8 @@ impl<'a> Analyzer<'a> {
             // the binding is captured by a lambda in the same begin block.
             // Without this, an immutable captured local would be captured
             // by value (nil) before its initializer runs.
-            let binding = self.bind(name, &[], BindingScope::Local);
+            let name_scopes = items[1].scopes.as_slice();
+            let binding = self.bind(name, name_scopes, BindingScope::Local);
             self.arena.get_mut(binding).is_prebound = true;
 
             if immutable {

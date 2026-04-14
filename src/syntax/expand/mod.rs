@@ -101,8 +101,16 @@ impl Expander {
     pub fn load_prelude(&mut self, symbols: &mut SymbolTable, vm: &mut VM) -> Result<(), String> {
         const PRELUDE: &str = include_str!("../../../prelude.lisp");
         let syntaxes = crate::reader::read_syntax_all(PRELUDE, "<internal>")?;
+        // Use ScopeId(0) — the reserved primitive scope — so that
+        // prelude symbols match primitive bindings (which are also
+        // bound with ScopeId(0)). This is critical for macro hygiene:
+        // template symbols in quasiquotes carry ScopeId(0), allowing
+        // them to resolve to primitives even when the call site has
+        // shadowing bindings with the same name.
+        let prelude_scope = ScopeId(0);
         for syntax in syntaxes {
-            self.expand(syntax, symbols, vm)?;
+            let scoped = self.add_scope_recursive(syntax, prelude_scope);
+            self.expand(scoped, symbols, vm)?;
         }
         Ok(())
     }
@@ -122,6 +130,21 @@ impl Expander {
     /// Create a list syntax node
     fn make_list(&self, items: Vec<Syntax>, span: Span) -> Syntax {
         Syntax::new(SyntaxKind::List(items), span)
+    }
+
+    /// Stamp a fresh file scope onto a syntax tree. This distinguishes
+    /// user bindings from primitives (which have empty scopes), enabling
+    /// macro hygiene: template symbols from the prelude carry
+    /// `ScopeId(0)` and won't match user bindings that carry the file
+    /// scope instead.
+    pub fn stamp_file_scope(&mut self, syntax: Syntax) -> Syntax {
+        let scope = self.fresh_scope();
+        self.add_scope_recursive(syntax, scope)
+    }
+
+    /// Public wrapper for adding a scope to a syntax tree.
+    pub(crate) fn stamp_scope(&self, syntax: Syntax, scope: ScopeId) -> Syntax {
+        self.add_scope_recursive(syntax, scope)
     }
 
     /// Expand all macros in a syntax tree

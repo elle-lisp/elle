@@ -154,10 +154,18 @@ impl Syntax {
     /// this case; the syntax object carries its own (more accurate) span.
     pub fn from_value(value: &Value, symbols: &SymbolTable, span: Span) -> Result<Syntax, String> {
         // Syntax objects pass through directly, preserving scopes.
-        // Mark as scope_exempt so the intro scope isn't stamped on
-        // call-site identifiers that survived the Value round-trip.
+        // The intro scope WILL be added by add_scope_recursive, which
+        // is correct: it distinguishes this expansion's symbols from
+        // other scopes. Both template symbols (from quasiquote) and
+        // argument symbols (from unquote) get the intro scope on top
+        // of their existing scopes, enabling proper hygiene resolution.
         if let Some(syntax_rc) = value.as_syntax() {
             let mut s = syntax_rc.as_ref().clone();
+            // Mark scope_exempt so the intro scope isn't added to
+            // call-site identifiers that survived the Value round-trip.
+            // Template symbols from quasiquote also come through here
+            // (via SyntaxLiteral) and are exempt — their definition-site
+            // scopes are sufficient for correct resolution.
             s.scope_exempt = true;
             // Safety check: the cloned Syntax must not contain SyntaxLiteral
             // children. SyntaxLiteral holds a heap-pointer Value that may be
