@@ -4,7 +4,7 @@
 //! are compiled through MLIR → LLVM for optimized native execution.
 //! The MLIR cache is lazily initialized on first use.
 
-use crate::value::{SignalBits, Value, SIG_ERROR, SIG_OK};
+use crate::value::{SignalBits, Value, SIG_ERROR};
 
 use super::core::VM;
 

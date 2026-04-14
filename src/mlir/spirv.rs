@@ -6,7 +6,6 @@
 //! Pipeline: LIR → MLIR text → parse → pass pipeline → extract binary
 
 use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator};
-use melior::ir::operation::OperationLike;
 use melior::ir::Module;
 use melior::pass;
 use std::collections::HashMap;
@@ -437,10 +436,41 @@ fn extract_spirv_module(mlir_text: &str) -> Result<String, String> {
     Ok(mlir_text[start..end].to_string())
 }
 
+/// Find the mlir-translate binary.
+///
+/// Search order:
+/// 1. MLIR_TRANSLATE env var (explicit path)
+/// 2. $MLIR_SYS_220_PREFIX/bin/mlir-translate (same install as melior)
+/// 3. mlir-translate on $PATH
+fn find_mlir_translate() -> Result<String, String> {
+    if let Ok(path) = std::env::var("MLIR_TRANSLATE") {
+        return Ok(path);
+    }
+    if let Ok(prefix) = std::env::var("MLIR_SYS_220_PREFIX") {
+        let path = format!("{}/bin/mlir-translate", prefix);
+        if std::path::Path::new(&path).exists() {
+            return Ok(path);
+        }
+    }
+    // Check PATH via `which`
+    if let Ok(output) = Command::new("which").arg("mlir-translate").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Ok(path);
+            }
+        }
+    }
+    Err(
+        "mlir-translate not found. Set MLIR_TRANSLATE or MLIR_SYS_220_PREFIX, or add to PATH."
+            .to_string(),
+    )
+}
+
 /// Serialize SPIR-V dialect text to binary bytes via mlir-translate.
 fn serialize_spirv(spirv_text: &str) -> Result<Vec<u8>, String> {
-    let mlir_translate = concat!(env!("HOME"), "/git/tmp/mlir-install/bin/mlir-translate");
-    let mut child = Command::new(mlir_translate)
+    let mlir_translate = find_mlir_translate()?;
+    let mut child = Command::new(&mlir_translate)
         .args(["--no-implicit-module", "--serialize-spirv"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
