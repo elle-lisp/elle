@@ -19,6 +19,8 @@ pub struct MlirCache {
     context: melior::Context,
     /// Compiled functions: bytecode pointer → engine + function name.
     engines: HashMap<*const u8, (ExecutionEngine, String)>,
+    /// Functions that failed MLIR compilation — don't retry.
+    rejections: std::collections::HashSet<*const u8>,
 }
 
 // Safety: MlirCache is only used from the single-threaded VM.
@@ -31,7 +33,18 @@ impl MlirCache {
         MlirCache {
             context: create_context(),
             engines: HashMap::new(),
+            rejections: std::collections::HashSet::new(),
         }
+    }
+
+    /// Record a compilation failure so we don't retry.
+    pub fn reject(&mut self, key: *const u8) {
+        self.rejections.insert(key);
+    }
+
+    /// Check if a function was previously rejected.
+    pub fn is_rejected(&self, key: *const u8) -> bool {
+        self.rejections.contains(&key)
     }
 
     /// Compile a GPU-eligible LirFunction and cache the result.

@@ -26,10 +26,14 @@ impl VM {
         let bytecode_ptr = closure.template.bytecode.as_ptr();
 
         // Check cache first (fast path)
-        if let Some(cache) = &self.mlir_cache {
-            if cache.contains(bytecode_ptr) {
-                return Some(self.run_mlir_cached(bytecode_ptr, args));
-            }
+        let cache = self
+            .mlir_cache
+            .get_or_insert_with(crate::mlir::MlirCache::new);
+        if cache.contains(bytecode_ptr) {
+            return Some(self.run_mlir_cached(bytecode_ptr, args));
+        }
+        if cache.is_rejected(bytecode_ptr) {
+            return None;
         }
 
         // Check hotness without incrementing — the counter is owned
@@ -58,6 +62,8 @@ impl VM {
                 Some(self.run_mlir_cached(bytecode_ptr, args))
             }
             Err(e) => {
+                // Cache rejection so we don't retry on every call
+                self.mlir_cache.as_mut().unwrap().reject(bytecode_ptr);
                 if crate::config::get().debug_jit {
                     eprintln!(
                         "[mlir] failed {}: {}",

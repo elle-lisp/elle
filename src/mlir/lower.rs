@@ -1,15 +1,18 @@
 //! Lower GPU-eligible LirFunction to MLIR.
 //!
-//! Produces an MLIR module using the arith, func, and cf dialects.
+//! Produces an MLIR module using the arith, func, cf, and memref dialects.
 //! Only handles the GPU-safe instruction subset — no heap allocation,
 //! closures, function calls, or signal emission.
+//!
+//! Local slots use `memref.alloca` for correct cross-block semantics
+//! (StoreLocal in one block, LoadLocal in another).
 
 use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
 use melior::dialect::arith::CmpiPredicate;
-use melior::dialect::{arith, cf, func, DialectRegistry};
+use melior::dialect::{arith, cf, func, memref, DialectRegistry};
 use melior::ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute};
 use melior::ir::operation::OperationLike;
-use melior::ir::r#type::{FunctionType, IntegerType};
+use melior::ir::r#type::{FunctionType, IntegerType, MemRefType};
 use melior::ir::{Block, BlockLike, Location, Module, Region, RegionLike, Type, Value};
 use melior::Context;
 use std::collections::HashMap;
@@ -28,6 +31,9 @@ pub fn create_context() -> Context {
 ///
 /// The module contains a single `func.func` with `llvm.emit_c_interface`
 /// so the execution engine can call it via C calling convention.
+///
+/// Local slots are allocated with `memref.alloca` in the entry block
+/// for correct cross-block semantics (phi-like patterns via memory).
 pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Module<'c>, String> {
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -60,15 +66,34 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
         blocks.push(block);
     }
 
-    // Shared register map across all blocks — SSA values from
-    // dominating blocks are accessible in dominated blocks.
+    // SSA register map: LIR Reg → MLIR Value (for within-block SSA values)
     let mut regs: HashMap<u32, Value> = HashMap::new();
 
-    // Pre-populate with entry block parameters
+    // Allocate memref slots for locals in the entry block.
+    // Local slots handle cross-block value passing (phi patterns).
+    let scalar_memref = MemRefType::new(i64_type, &[], None, None);
+    let num_locals = lir.num_locals as u32;
+    let mut local_slots: HashMap<u32, Value> = HashMap::new();
+
     if !blocks.is_empty() {
         let entry = &blocks[0];
+
+        // Pre-populate regs with entry block parameters
         for i in 0..num_params {
             regs.insert(i as u32, entry.argument(i).unwrap().into());
+        }
+
+        // Allocate a memref<i64> for each local slot
+        for slot in 0..num_locals {
+            let alloca_op = entry.append_operation(memref::alloca(
+                context,
+                scalar_memref,
+                &[],
+                &[],
+                None,
+                location,
+            ));
+            local_slots.insert(slot, alloca_op.result(0).unwrap().into());
         }
     }
 
@@ -79,8 +104,9 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
         for si in &lir_block.instructions {
             match &si.instr {
                 LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
-                    if block_idx == 0 && (*index as usize) < num_params {
-                        regs.insert(dst.0, block.argument(*index as usize).unwrap().into());
+                    if (*index as usize) < num_params {
+                        // Parameters are entry block arguments
+                        regs.insert(dst.0, blocks[0].argument(*index as usize).unwrap().into());
                     }
                 }
                 LirInstr::Const { dst, value } => {
@@ -149,7 +175,6 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                         .ok_or_else(|| format!("undefined reg r{}", src.0))?;
                     let result = match op {
                         UnaryOp::Neg => {
-                            // -x = 0 - x
                             let zero = block.append_operation(arith::constant(
                                 context,
                                 IntegerAttribute::new(i64_type, 0).into(),
@@ -160,7 +185,6 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                             sub.result(0).unwrap().into()
                         }
                         UnaryOp::Not => {
-                            // logical not: x == 0
                             let zero = block.append_operation(arith::constant(
                                 context,
                                 IntegerAttribute::new(i64_type, 0).into(),
@@ -180,7 +204,6 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                             ext.result(0).unwrap().into()
                         }
                         UnaryOp::BitNot => {
-                            // ~x = x ^ -1
                             let neg1 = block.append_operation(arith::constant(
                                 context,
                                 IntegerAttribute::new(i64_type, -1).into(),
@@ -193,15 +216,21 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                     };
                     regs.insert(dst.0, result);
                 }
-                LirInstr::LoadLocal { dst, slot } => {
-                    if let Some(&val) = regs.get(&(*slot as u32)) {
-                        regs.insert(dst.0, val);
-                    }
-                }
                 LirInstr::StoreLocal { slot, src } => {
-                    if let Some(&val) = regs.get(&src.0) {
-                        regs.insert(*slot as u32, val);
-                    }
+                    let val = *regs
+                        .get(&src.0)
+                        .ok_or_else(|| format!("undefined reg r{} in StoreLocal", src.0))?;
+                    let slot_ptr = *local_slots
+                        .get(&(*slot as u32))
+                        .ok_or_else(|| format!("unallocated local slot {}", slot))?;
+                    block.append_operation(memref::store(val, slot_ptr, &[], location));
+                }
+                LirInstr::LoadLocal { dst, slot } => {
+                    let slot_ptr = *local_slots
+                        .get(&(*slot as u32))
+                        .ok_or_else(|| format!("unallocated local slot {}", slot))?;
+                    let load_op = block.append_operation(memref::load(slot_ptr, &[], location));
+                    regs.insert(dst.0, load_op.result(0).unwrap().into());
                 }
                 _ => return Err(format!("unsupported instruction: {:?}", si.instr)),
             }
@@ -262,7 +291,6 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
         region.append_block(block);
     }
 
-    // Create func with llvm.emit_c_interface for ExecutionEngine compatibility
     let func_op = func::func(
         context,
         StringAttribute::new(context, func_name),
