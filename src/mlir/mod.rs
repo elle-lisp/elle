@@ -7,10 +7,12 @@
 mod cache;
 mod execute;
 mod lower;
+mod spirv;
 
 pub use cache::MlirCache;
 pub use execute::mlir_call;
 pub use lower::lower_to_mlir;
+pub use spirv::lower_to_spirv;
 
 #[cfg(test)]
 mod tests {
@@ -250,6 +252,33 @@ mod tests {
     #[test]
     fn test_execute_abs_zero() {
         assert_eq!(mlir_call(&make_abs(), &[0]).unwrap(), 0);
+    }
+
+    // ── SPIR-V tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_spirv_add() {
+        let func = make_add();
+        let spirv_bytes = lower_to_spirv(&func, 256).expect("SPIR-V lowering should succeed");
+        assert!(
+            spirv_bytes.len() >= 20,
+            "SPIR-V should be non-trivial: {} bytes",
+            spirv_bytes.len()
+        );
+        // SPIR-V magic number: 0x07230203
+        assert_eq!(
+            &spirv_bytes[0..4],
+            &[0x03, 0x02, 0x23, 0x07],
+            "SPIR-V magic number"
+        );
+    }
+
+    #[test]
+    fn test_spirv_mul_add() {
+        let func = make_mul_add();
+        let spirv_bytes = lower_to_spirv(&func, 64).expect("SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
     }
 
     #[test]
