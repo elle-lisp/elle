@@ -1,104 +1,106 @@
-# ── Scalar autograd engine ────────────────────────────────────────
-#
-# Each Value node is a mutable @struct with:
-#   :id          unique integer (for visited-set keying)
-#   :data        float (forward value)
-#   :grad        float (accumulated gradient, mutated during backward)
-#   :children    array of Value nodes this was computed from
-#   :local-grads array of floats, d(this)/d(child_i)
+## autograd.lisp — Scalar autograd engine
+##
+## Each Value node is a mutable @struct with:
+##   :id          unique integer (for visited-set keying)
+##   :data        float (forward value)
+##   :grad        float (accumulated gradient, mutated during backward)
+##   :children    array of Value nodes this was computed from
+##   :local-grads array of floats, d(this)/d(child_i)
 
-# ── Value construction ───────────────────────────────────────────
+(fn []
 
-(var *next-id* 0)
+  # ── Value construction ─────────────────────────────────────────
 
-(defn make-value [data]
-  "Create a leaf Value node (no children)."
-  (let* ([id *next-id*])
-    (assign *next-id* (+ *next-id* 1))
-    @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
+  (var *next-id* 0)
 
-(defn make-op [data children local-grads]
-  "Create a Value node that is the result of an operation."
-  (let* ([id *next-id*])
-    (assign *next-id* (+ *next-id* 1))
-    @{:id id :data data :grad 0.0
-      :children children :local-grads local-grads}))
+  (defn make-value [data]
+    "Create a leaf Value node (no children)."
+    (let* ([id *next-id*])
+      (assign *next-id* (inc *next-id*))
+      @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
 
-# ── Accessors ────────────────────────────────────────────────────
+  (defn make-op [data children local-grads]
+    "Create a Value node that is the result of an operation."
+    (let* ([id *next-id*])
+      (assign *next-id* (inc *next-id*))
+      @{:id id :data data :grad 0.0
+        :children children :local-grads local-grads}))
 
-(defn v-data [v] v:data)
-(defn v-grad [v] v:grad)
-(defn v-id   [v] v:id)
+  # ── Accessors ──────────────────────────────────────────────────
 
-# ── Arithmetic operations ────────────────────────────────────────
+  (defn v-data [v] v:data)
+  (defn v-grad [v] v:grad)
 
-(defn v+ [a b]
-  (make-op (+ (v-data a) (v-data b)) @[a b] @[1.0 1.0]))
+  # ── Arithmetic operations ──────────────────────────────────────
 
-(defn v* [a b]
-  (make-op (* (v-data a) (v-data b)) @[a b] @[(v-data b) (v-data a)]))
+  (defn v+ [a b]
+    (make-op (+ (v-data a) (v-data b)) @[a b] @[1.0 1.0]))
 
-(defn vneg [a]
-  (make-op (- (v-data a)) @[a] @[-1.0]))
+  (defn v* [a b]
+    (make-op (* (v-data a) (v-data b)) @[a b] @[(v-data b) (v-data a)]))
 
-(defn vpow [a n]
-  (make-op (pow (v-data a) n) @[a] @[(* n (pow (v-data a) (- n 1.0)))]))
+  (defn vneg [a]
+    (make-op (- (v-data a)) @[a] @[-1.0]))
 
-(defn vexp [a]
-  (let* ([ea (exp (v-data a))])
-    (make-op ea @[a] @[ea])))
+  (defn vpow [a n]
+    (make-op (pow (v-data a) n) @[a] @[(* n (pow (v-data a) (- n 1.0)))]))
 
-(defn vlog [a]
-  (make-op (log (v-data a)) @[a] @[(/ 1.0 (v-data a))]))
+  (defn vexp [a]
+    (let* ([ea (exp (v-data a))])
+      (make-op ea @[a] @[ea])))
 
-(defn vrelu [a]
-  (let* ([d (v-data a)])
-    (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
+  (defn vlog [a]
+    (make-op (log (v-data a)) @[a] @[(/ 1.0 (v-data a))]))
 
-(defn v- [a b] (v+ a (vneg b)))
-(defn v/ [a b] (v* a (vpow b -1.0)))
+  (defn vrelu [a]
+    (let* ([d (v-data a)])
+      (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
 
-# ── Scalar-Value mixed ops ───────────────────────────────────────
+  (defn v- [a b] (v+ a (vneg b)))
+  (defn v/ [a b] (v* a (vpow b -1.0)))
 
-(defn v*s [v s]
-  "Multiply Value v by scalar s."
-  (v* v (make-value s)))
+  (defn v*s [v s]
+    "Multiply Value v by scalar s."
+    (v* v (make-value s)))
 
-(defn v+s [v s]
-  "Add scalar s to Value v."
-  (v+ v (make-value s)))
+  (defn v+s [v s]
+    "Add scalar s to Value v."
+    (v+ v (make-value s)))
 
-# ── Backward pass ────────────────────────────────────────────────
+  # ── Backward pass ──────────────────────────────────────────────
 
-(defn topo-sort [root]
-  "Topological sort (DFS, post-order) from root."
-  (let* ([topo @[]]
-         [visited @{}])
-    (letrec ([walk (fn [node]
-      (when (not (has? visited (v-id node)))
-        (put visited (v-id node) true)
-        (each child in node:children
-          (walk child))
-        (push topo node)))])
-      (walk root))
-    topo))
+  (defn topo-sort [root]
+    "Topological sort (DFS, post-order) from root."
+    (let* ([topo @[]]
+           [visited @||])
+      (letrec ([walk (fn [node]
+        (when (not (contains? visited node:id))
+          (add visited node:id)
+          (each child in node:children
+            (walk child))
+          (push topo node)))])
+        (walk root))
+      topo))
 
-(defn backward! [root]
-  "Run backpropagation from root. Assumes all grads already zeroed."
-  (let* ([topo (topo-sort root)])
-    # Zero all grads
-    (each node in topo
-      (put node :grad 0.0))
-    # Seed root gradient
-    (put root :grad 1.0)
-    # Reverse accumulation
-    (each node in (reverse topo)
-      (let* ([children   node:children]
-             [local-grads node:local-grads]
-             [node-grad  (v-grad node)])
-        (var j 0)
-        (while (< j (length children))
-          (let* ([child (children j)]
-                 [lg    (local-grads j)])
-            (put child :grad (+ (v-grad child) (* node-grad lg))))
-          (assign j (+ j 1)))))))
+  (defn backward [root]
+    "Run backpropagation from root."
+    (let* ([topo (topo-sort root)])
+      (each node in topo
+        (put node :grad 0.0))
+      (put root :grad 1.0)
+      (each node in (reverse topo)
+        (let* ([children   node:children]
+               [local-grads node:local-grads]
+               [node-grad  node:grad])
+          (var j 0)
+          (while (< j (length children))
+            (let* ([child (children j)]
+                   [lg    (local-grads j)])
+              (put child :grad (+ child:grad (* node-grad lg))))
+            (assign j (inc j)))))))
+
+  {:make-value make-value :make-op make-op
+   :v-data v-data :v-grad v-grad
+   :v+ v+ :v* v* :vneg vneg :vpow vpow :vexp vexp :vlog vlog :vrelu vrelu
+   :v- v- :v/ v/ :v*s v*s :v+s v+s
+   :backward backward})
