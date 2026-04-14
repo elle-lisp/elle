@@ -282,6 +282,15 @@ mod tests {
     }
 
     #[test]
+    fn test_spirv_abs() {
+        let func = make_abs();
+        let spirv_bytes =
+            lower_to_spirv(&func, 256).expect("multi-block SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
+    #[test]
     fn bench_mlir() {
         use super::lower::{create_context, lower_to_module};
         use std::time::Instant;

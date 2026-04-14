@@ -51,11 +51,19 @@
 (assert (= (result3 0) -1) "negate 1")
 (assert (= (result3 1) 2) "negate -2")
 
+# ── Test: branching (abs) ────────────────────────────────────────────
+
+(def result4 (gpu:map (fn [x] (if (> x 0) x (- 0 x))) [5 -3 0 -7 10] :ctx ctx))
+(assert (= (result4 0) 5) "abs(5)=5")
+(assert (= (result4 1) 3) "abs(-3)=3")
+(assert (= (result4 2) 0) "abs(0)=0")
+(assert (= (result4 3) 7) "abs(-7)=7")
+
 # ── Test: i64 (values that overflow i32) ─────────────────────────────
 
 (def big (+ 1 (bit/shl 1 40)))
-(def result4 (gpu:map (fn [x] (* x 2)) [1 big] :ctx ctx))
-(assert (= (result4 0) 2) "i64: 1*2=2")
-(assert (= (result4 1) (* big 2)) "i64: big*2 no truncation")
+(def result5 (gpu:map (fn [x] (* x 2)) [1 big] :ctx ctx))
+(assert (= (result5 0) 2) "i64: 1*2=2")
+(assert (= (result5 1) (* big 2)) "i64: big*2 no truncation")
 
 (println "all gpu/map tests passed")
