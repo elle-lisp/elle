@@ -25,18 +25,21 @@ impl VM {
 
         let bytecode_ptr = closure.template.bytecode.as_ptr();
 
-        // Check cache first
-        let cache = self
-            .mlir_cache
-            .get_or_insert_with(crate::mlir::MlirCache::new);
-        if cache.contains(bytecode_ptr) {
-            return Some(self.run_mlir_cached(bytecode_ptr, args));
+        // Check cache first (fast path)
+        if let Some(cache) = &self.mlir_cache {
+            if cache.contains(bytecode_ptr) {
+                return Some(self.run_mlir_cached(bytecode_ptr, args));
+            }
         }
 
-        // Only compile if already hot (past JIT threshold)
-        // The hotness counter is shared with Cranelift — we don't
-        // double-count. If Cranelift already compiled it, we won't
-        // reach here (jit_cache hit happens first in call.rs).
+        // Check hotness without incrementing — the counter is owned
+        // by try_jit_call which runs after us. We just read it.
+        let count = self.get_closure_call_count(bytecode_ptr);
+        if count < self.jit_hotness_threshold {
+            return None;
+        }
+
+        // Full LIR instruction walk (only for hot functions)
         let lir = closure.template.lir_function.as_ref()?;
         if !lir.is_gpu_eligible() {
             return None;

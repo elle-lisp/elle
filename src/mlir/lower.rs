@@ -4,7 +4,8 @@
 //! Only handles the GPU-safe instruction subset — no heap allocation,
 //! closures, function calls, or signal emission.
 
-use crate::lir::{BinOp, LirConst, LirFunction, LirInstr, Terminator};
+use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
+use melior::dialect::arith::CmpiPredicate;
 use melior::dialect::{arith, cf, func, DialectRegistry};
 use melior::ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute};
 use melior::ir::operation::OperationLike;
@@ -59,16 +60,21 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
         blocks.push(block);
     }
 
+    // Shared register map across all blocks — SSA values from
+    // dominating blocks are accessible in dominated blocks.
+    let mut regs: HashMap<u32, Value> = HashMap::new();
+
+    // Pre-populate with entry block parameters
+    if !blocks.is_empty() {
+        let entry = &blocks[0];
+        for i in 0..num_params {
+            regs.insert(i as u32, entry.argument(i).unwrap().into());
+        }
+    }
+
     // Lower instructions
     for (block_idx, lir_block) in lir.blocks.iter().enumerate() {
         let block = &blocks[block_idx];
-        let mut regs: HashMap<u32, Value> = HashMap::new();
-
-        if block_idx == 0 {
-            for i in 0..num_params {
-                regs.insert(i as u32, block.argument(i).unwrap().into());
-            }
-        }
 
         for si in &lir_block.instructions {
             match &si.instr {
@@ -115,6 +121,78 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                     let op_ref = block.append_operation(mlir_op);
                     regs.insert(dst.0, op_ref.result(0).unwrap().into());
                 }
+                LirInstr::Compare { dst, op, lhs, rhs } => {
+                    let lv = *regs
+                        .get(&lhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", lhs.0))?;
+                    let rv = *regs
+                        .get(&rhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
+                    let pred = match op {
+                        CmpOp::Eq => CmpiPredicate::Eq,
+                        CmpOp::Ne => CmpiPredicate::Ne,
+                        CmpOp::Lt => CmpiPredicate::Slt,
+                        CmpOp::Le => CmpiPredicate::Sle,
+                        CmpOp::Gt => CmpiPredicate::Sgt,
+                        CmpOp::Ge => CmpiPredicate::Sge,
+                    };
+                    let op_ref =
+                        block.append_operation(arith::cmpi(context, pred, lv, rv, location));
+                    // cmpi returns i1; extend to i64 for consistency
+                    let i1_val: Value = op_ref.result(0).unwrap().into();
+                    let ext_ref = block.append_operation(arith::extui(i1_val, i64_type, location));
+                    regs.insert(dst.0, ext_ref.result(0).unwrap().into());
+                }
+                LirInstr::UnaryOp { dst, op, src } => {
+                    let sv = *regs
+                        .get(&src.0)
+                        .ok_or_else(|| format!("undefined reg r{}", src.0))?;
+                    let result = match op {
+                        UnaryOp::Neg => {
+                            // -x = 0 - x
+                            let zero = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, 0).into(),
+                                location,
+                            ));
+                            let zero_val: Value = zero.result(0).unwrap().into();
+                            let sub = block.append_operation(arith::subi(zero_val, sv, location));
+                            sub.result(0).unwrap().into()
+                        }
+                        UnaryOp::Not => {
+                            // logical not: x == 0
+                            let zero = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, 0).into(),
+                                location,
+                            ));
+                            let zero_val: Value = zero.result(0).unwrap().into();
+                            let cmp = block.append_operation(arith::cmpi(
+                                context,
+                                CmpiPredicate::Eq,
+                                sv,
+                                zero_val,
+                                location,
+                            ));
+                            let i1_val: Value = cmp.result(0).unwrap().into();
+                            let ext =
+                                block.append_operation(arith::extui(i1_val, i64_type, location));
+                            ext.result(0).unwrap().into()
+                        }
+                        UnaryOp::BitNot => {
+                            // ~x = x ^ -1
+                            let neg1 = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, -1).into(),
+                                location,
+                            ));
+                            let neg1_val: Value = neg1.result(0).unwrap().into();
+                            let xor = block.append_operation(arith::xori(sv, neg1_val, location));
+                            xor.result(0).unwrap().into()
+                        }
+                    };
+                    regs.insert(dst.0, result);
+                }
                 LirInstr::LoadLocal { dst, slot } => {
                     if let Some(&val) = regs.get(&(*slot as u32)) {
                         regs.insert(dst.0, val);
@@ -148,9 +226,13 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                 then_label,
                 else_label,
             } => {
-                let cond_val = *regs
+                let cond_i64 = *regs
                     .get(&cond.0)
                     .ok_or_else(|| format!("undefined reg r{} in branch", cond.0))?;
+                // Truncate i64 → i1 for cond_br
+                let i1_type: Type = IntegerType::new(context, 1).into();
+                let trunc = block.append_operation(arith::trunci(cond_i64, i1_type, location));
+                let cond_val: Value = trunc.result(0).unwrap().into();
                 let then_idx = *label_to_idx
                     .get(&then_label.0)
                     .ok_or_else(|| format!("unknown then label {}", then_label.0))?;
