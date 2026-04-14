@@ -1,30 +1,57 @@
 //! Lower GPU-eligible LirFunction to SPIR-V bytes.
 //!
 //! Generates a compute kernel from a scalar LIR function by wrapping
-//! it in a gpu.module with buffer I/O. Uses scf.if for control flow
-//! (SPIR-V has no stack allocation for memref.alloca).
+//! it in a gpu.module with buffer I/O. Uses scf.if for control flow.
 //!
-//! Pipeline: LIR → MLIR gpu.module text → mlir-opt → SPIR-V bytes
+//! Pipeline: LIR → MLIR text → parse → pass pipeline → extract binary
 
 use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator};
+use melior::ir::operation::OperationLike;
+use melior::ir::Module;
+use melior::pass;
 use std::collections::HashMap;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-const MLIR_TRANSLATE: &str = concat!(env!("HOME"), "/git/tmp/mlir-install/bin/mlir-translate");
+use super::lower::create_context;
 
 /// Lower a GPU-eligible LirFunction to SPIR-V bytes.
 pub fn lower_to_spirv(lir: &LirFunction, workgroup_size: u32) -> Result<Vec<u8>, String> {
     let mlir_text = generate_gpu_module(lir, workgroup_size)?;
-    let spirv_mlir = run_mlir_opt(&mlir_text)?;
-    let spirv_module = extract_spirv_module(&spirv_mlir)?;
-    serialize_spirv(&spirv_module)
+    let context = create_context();
+    let mut module = Module::parse(&context, &mlir_text).ok_or("failed to parse generated MLIR")?;
+
+    // Pass pipeline: convert standard dialects to SPIR-V inside gpu.module,
+    // then convert gpu.module to spirv.module, then lower ABI/VCE.
+    let pm = pass::PassManager::new(&context);
+
+    // Nest passes inside gpu.module
+    let gpu_pm = pm.nested_under("gpu.module");
+    gpu_pm.add_pass(pass::conversion::create_arith_to_spirv());
+    gpu_pm.add_pass(pass::conversion::create_control_flow_to_spirv());
+    gpu_pm.add_pass(pass::conversion::create_scf_to_spirv());
+    gpu_pm.add_pass(pass::conversion::create_mem_ref_to_spirv());
+
+    // Convert gpu.module → spirv.module
+    pm.add_pass(pass::conversion::create_gpu_to_spirv());
+
+    // Nest passes inside spirv.module
+    let spirv_pm = pm.nested_under("spirv.module");
+    spirv_pm.add_pass(pass::spirv::create_spirv_lower_abi_attributes_pass());
+    spirv_pm.add_pass(pass::spirv::create_spirv_update_vce_pass());
+
+    pm.run(&mut module)
+        .map_err(|_| "SPIR-V conversion pass pipeline failed".to_string())?;
+
+    // Extract spirv.module text and serialize to bytes.
+    // The MLIR C API doesn't expose SPIR-V serialization directly,
+    // so we use mlir-translate for the final step.
+    let module_text = module.as_operation().to_string();
+    let spirv_text = extract_spirv_module(&module_text)?;
+    serialize_spirv(&spirv_text)
 }
 
 /// Generate MLIR text for a gpu.module wrapping the LIR function.
-///
-/// Single-block functions emit straight-line code.
-/// Multi-block functions with diamond if-then-else patterns use scf.if.
 fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String, String> {
     let num_params = lir.arity.fixed_params();
     let buf_size = "?";
@@ -62,11 +89,9 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
         ));
     }
 
-    // SSA register map
     let mut regs: HashMap<u32, String> = HashMap::new();
 
     if lir.blocks.len() == 1 {
-        // Single block: straight-line code
         emit_block_instructions(
             &lir.blocks[0].instructions,
             &mut regs,
@@ -75,7 +100,6 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
             indent,
             &mut out,
         )?;
-
         let result_reg = match &lir.blocks[0].terminator.terminator {
             Terminator::Return(reg) => reg.0,
             _ => return Err("SPIR-V kernel must end with Return".to_string()),
@@ -86,18 +110,16 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
         ));
         out.push_str(&format!("{indent}gpu.return\n"));
     } else {
-        // Multi-block: reconstruct as scf.if chains
         emit_multiblock(lir, &mut regs, num_params, buf_size, indent, &mut out)?;
     }
 
-    out.push_str("    }\n"); // gpu.func
-    out.push_str("  }\n"); // gpu.module
-    out.push_str("}\n"); // module
+    out.push_str("    }\n");
+    out.push_str("  }\n");
+    out.push_str("}\n");
 
     Ok(out)
 }
 
-/// Emit instructions for a single block, updating the register map.
 fn emit_block_instructions(
     instructions: &[crate::lir::SpannedInstr],
     regs: &mut HashMap<u32, String>,
@@ -169,7 +191,6 @@ fn emit_block_instructions(
                 regs.insert(dst.0, name);
             }
             LirInstr::StoreLocal { slot, src } => {
-                // In single-block or within scf.if, just alias the register
                 if let Some(name) = regs.get(&src.0) {
                     regs.insert(*slot as u32, name.clone());
                 }
@@ -185,10 +206,6 @@ fn emit_block_instructions(
     Ok(())
 }
 
-/// Emit multi-block function as scf.if chains.
-///
-/// Detects diamond pattern: entry → branch(then, else) → merge → return.
-/// Emits as scf.if with yield values.
 fn emit_multiblock(
     lir: &LirFunction,
     regs: &mut HashMap<u32, String>,
@@ -197,13 +214,9 @@ fn emit_multiblock(
     indent: &str,
     out: &mut String,
 ) -> Result<(), String> {
-    // Process blocks linearly. When we hit a Branch terminator,
-    // find the merge point and emit scf.if.
     let mut block_idx = 0;
     while block_idx < lir.blocks.len() {
         let block = &lir.blocks[block_idx];
-
-        // Emit this block's instructions
         emit_block_instructions(
             &block.instructions,
             regs,
@@ -223,7 +236,6 @@ fn emit_multiblock(
                 break;
             }
             Terminator::Jump(label) => {
-                // Find the target block and continue
                 block_idx = lir
                     .blocks
                     .iter()
@@ -236,8 +248,6 @@ fn emit_multiblock(
                 else_label,
             } => {
                 let cond_val = regs.get(&cond.0).ok_or("undef cond")?.clone();
-
-                // Find then, else, and merge blocks
                 let then_idx = lir
                     .blocks
                     .iter()
@@ -249,14 +259,12 @@ fn emit_multiblock(
                     .position(|b| b.label == *else_label)
                     .ok_or("unknown else block")?;
 
-                // Both then and else should jump to the same merge block
                 let then_block = &lir.blocks[then_idx];
                 let else_block = &lir.blocks[else_idx];
 
                 let merge_label = match &then_block.terminator.terminator {
                     Terminator::Jump(l) => *l,
                     Terminator::Return(_) => {
-                        // Then returns directly — emit scf.if without merge
                         return emit_if_return(
                             lir, regs, num_params, block_idx, then_idx, else_idx, &cond_val,
                             buf_size, indent, out,
@@ -265,23 +273,19 @@ fn emit_multiblock(
                     _ => return Err("then block must end with Jump or Return".to_string()),
                 };
 
-                // Verify else also jumps to merge
                 match &else_block.terminator.terminator {
                     Terminator::Jump(l) if *l == merge_label => {}
                     _ => return Err("else block must jump to same merge as then".to_string()),
                 }
 
-                // Find the store slot in then/else blocks (what they yield)
-                let then_result = find_block_result(then_block, regs, num_params, then_idx)?;
-                let else_result = find_block_result(else_block, regs, num_params, else_idx)?;
+                let then_result = find_block_result(then_block)?;
+                let else_result = find_block_result(else_block)?;
 
-                // Emit scf.if
                 let if_result = format!("%if_result_{}", block_idx);
                 out.push_str(&format!(
                     "{indent}{if_result} = scf.if {cond_val} -> (i64) {{\n"
                 ));
 
-                // Then body
                 let inner = format!("{indent}  ");
                 let mut then_regs = regs.clone();
                 emit_block_instructions(
@@ -296,7 +300,6 @@ fn emit_multiblock(
                 out.push_str(&format!("{inner}scf.yield {then_val} : i64\n"));
                 out.push_str(&format!("{indent}}} else {{\n"));
 
-                // Else body
                 let mut else_regs = regs.clone();
                 emit_block_instructions(
                     &else_block.instructions,
@@ -310,20 +313,15 @@ fn emit_multiblock(
                 out.push_str(&format!("{inner}scf.yield {else_val} : i64\n"));
                 out.push_str(&format!("{indent}}}\n"));
 
-                // The merge block reads from a local slot — map it to the scf.if result
+                if let Some(store_slot) = find_store_slot(then_block) {
+                    regs.insert(store_slot as u32, if_result.clone());
+                }
+
                 let merge_idx = lir
                     .blocks
                     .iter()
                     .position(|b| b.label == merge_label)
                     .ok_or("unknown merge block")?;
-                let merge_block = &lir.blocks[merge_idx];
-
-                // Find which slot the then/else stored to
-                if let Some(store_slot) = find_store_slot(then_block) {
-                    regs.insert(store_slot as u32, if_result.clone());
-                }
-
-                // Continue with merge block
                 block_idx = merge_idx;
             }
             _ => {
@@ -337,23 +335,15 @@ fn emit_multiblock(
     Ok(())
 }
 
-/// Find the register that a block "yields" (the last StoreLocal's source).
-fn find_block_result(
-    block: &crate::lir::BasicBlock,
-    regs: &HashMap<u32, String>,
-    num_params: usize,
-    block_idx: usize,
-) -> Result<u32, String> {
-    // Walk instructions to find the last StoreLocal
+fn find_block_result(block: &crate::lir::BasicBlock) -> Result<u32, String> {
     for si in block.instructions.iter().rev() {
         if let LirInstr::StoreLocal { src, .. } = &si.instr {
             return Ok(src.0);
         }
     }
-    Err("branch block has no StoreLocal (no value to yield)".to_string())
+    Err("branch block has no StoreLocal".to_string())
 }
 
-/// Find which local slot a block stores to.
 fn find_store_slot(block: &crate::lir::BasicBlock) -> Option<u16> {
     for si in block.instructions.iter().rev() {
         if let LirInstr::StoreLocal { slot, .. } = &si.instr {
@@ -363,12 +353,11 @@ fn find_store_slot(block: &crate::lir::BasicBlock) -> Option<u16> {
     None
 }
 
-/// Handle the case where both branches return directly (no merge block).
 fn emit_if_return(
     lir: &LirFunction,
     regs: &mut HashMap<u32, String>,
     num_params: usize,
-    entry_idx: usize,
+    _entry_idx: usize,
     then_idx: usize,
     else_idx: usize,
     cond_val: &str,
@@ -388,7 +377,7 @@ fn emit_if_return(
         _ => return Err("expected return in else".to_string()),
     };
 
-    let if_result = format!("%if_ret_{}", entry_idx);
+    let if_result = format!("%if_ret_{}", _entry_idx);
     out.push_str(&format!(
         "{indent}{if_result} = scf.if {cond_val} -> (i64) {{\n"
     ));
@@ -428,50 +417,7 @@ fn emit_if_return(
     Ok(())
 }
 
-fn run_mlir_opt(mlir_text: &str) -> Result<String, String> {
-    let mlir_opt = MLIR_TRANSLATE.replace("mlir-translate", "mlir-opt");
-    let pipeline = "builtin.module(\
-        gpu.module(\
-            convert-cf-to-spirv,\
-            convert-scf-to-spirv,\
-            convert-memref-to-spirv,\
-            convert-arith-to-spirv\
-        ),\
-        convert-gpu-to-spirv,\
-        spirv.module(\
-            spirv-lower-abi-attrs,\
-            spirv-update-vce\
-        )\
-    )";
-    let mut child = Command::new(&mlir_opt)
-        .args(["--pass-pipeline", pipeline])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to run mlir-opt: {}", e))?;
-
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(mlir_text.as_bytes())
-        .map_err(|e| format!("failed to write to mlir-opt: {}", e))?;
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("mlir-opt failed: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "mlir-opt failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    String::from_utf8(output.stdout).map_err(|e| format!("mlir-opt output not utf8: {}", e))
-}
-
+/// Extract the spirv.module text from the converted MLIR.
 fn extract_spirv_module(mlir_text: &str) -> Result<String, String> {
     let start = mlir_text.find("spirv.module").ok_or("no spirv.module")?;
     let bytes = mlir_text.as_bytes();
@@ -491,8 +437,10 @@ fn extract_spirv_module(mlir_text: &str) -> Result<String, String> {
     Ok(mlir_text[start..end].to_string())
 }
 
+/// Serialize SPIR-V dialect text to binary bytes via mlir-translate.
 fn serialize_spirv(spirv_text: &str) -> Result<Vec<u8>, String> {
-    let mut child = Command::new(MLIR_TRANSLATE)
+    let mlir_translate = concat!(env!("HOME"), "/git/tmp/mlir-install/bin/mlir-translate");
+    let mut child = Command::new(mlir_translate)
         .args(["--no-implicit-module", "--serialize-spirv"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
