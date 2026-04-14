@@ -49,7 +49,9 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     out.push_str("module attributes {\n");
     out.push_str("  gpu.container_module,\n");
     out.push_str("  spirv.target_env = #spirv.target_env<\n");
-    out.push_str("    #spirv.vce<v1.0, [Shader], [SPV_KHR_storage_buffer_storage_class]>,\n");
+    out.push_str(
+        "    #spirv.vce<v1.0, [Shader, Int64], [SPV_KHR_storage_buffer_storage_class]>,\n",
+    );
     out.push_str("    #spirv.resource_limits<>>\n");
     out.push_str("} {\n");
 
@@ -60,9 +62,9 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     // Entry point must be "main" — the Vulkan plugin hardcodes this name.
     out.push_str("    gpu.func @main(");
     for i in 0..num_params {
-        out.push_str(&format!("%buf{}: memref<{}xi32>, ", i, buf_size));
+        out.push_str(&format!("%buf{}: memref<{}xi64>, ", i, buf_size));
     }
-    out.push_str(&format!("%out: memref<{}xi32>)\n", buf_size));
+    out.push_str(&format!("%out: memref<{}xi64>)\n", buf_size));
     out.push_str(&format!(
         "      kernel attributes {{ spirv.entry_point_abi = #spirv.entry_point_abi<workgroup_size = [{}, 1, 1]>}} {{\n",
         workgroup_size
@@ -74,7 +76,7 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     // Load from input buffers
     for i in 0..num_params {
         out.push_str(&format!(
-            "      %arg{} = memref.load %buf{}[%gid] : memref<{}xi32>\n",
+            "      %arg{} = memref.load %buf{}[%gid] : memref<{}xi64>\n",
             i, i, buf_size
         ));
     }
@@ -98,14 +100,14 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
                 let name = format!("%c{}", dst.0);
                 let val = match value {
                     LirConst::Int(n) => {
-                        format!("      {} = arith.constant {} : i32\n", name, *n as i32)
+                        format!("      {} = arith.constant {} : i64\n", name, *n)
                     }
                     LirConst::Bool(b) => format!(
-                        "      {} = arith.constant {} : i32\n",
+                        "      {} = arith.constant {} : i64\n",
                         name,
                         if *b { 1 } else { 0 }
                     ),
-                    LirConst::Nil => format!("      {} = arith.constant 0 : i32\n", name),
+                    LirConst::Nil => format!("      {} = arith.constant 0 : i64\n", name),
                     _ => return Err(format!("unsupported constant for SPIR-V: {:?}", value)),
                 };
                 out.push_str(&val);
@@ -132,7 +134,7 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
                     BinOp::Shr => "arith.shrsi",
                 };
                 out.push_str(&format!(
-                    "      {} = {} {}, {} : i32\n",
+                    "      {} = {} {}, {} : i64\n",
                     name, op_name, lv, rv
                 ));
                 reg_names.insert(dst.0, name);
@@ -163,7 +165,7 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
         .get(&result_reg)
         .ok_or_else(|| format!("undefined result reg r{}", result_reg))?;
     out.push_str(&format!(
-        "      memref.store {}, %out[%gid] : memref<{}xi32>\n",
+        "      memref.store {}, %out[%gid] : memref<{}xi64>\n",
         result_name, buf_size
     ));
     out.push_str("      gpu.return\n");

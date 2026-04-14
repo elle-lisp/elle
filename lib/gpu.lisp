@@ -76,14 +76,16 @@
    data: input array of integers.
    Returns: array of results.
 
+   Requires elle built with --features mlir.
+
    Optional named args:
      :ctx       — Vulkan context (created if not given)
-     :dtype     — :i32 (default), :u32, or :f32
+     :dtype     — :i64 (default), :i32, :u32, or :f32
      :wg-size   — workgroup size (default 256)
 
    Example: (gpu:map (fn [x] (* x x)) [1 2 3 4])"
   (default ctx (plugin:init))
-  (default dtype :i32)
+  (default dtype :i64)
   (default wg-size 256)
   (let* [[n          (length data)]
          [num-bufs   (+ (fn/arity f) 1)]
@@ -91,7 +93,8 @@
          [shader     (plugin:shader ctx spirv num-bufs)]
          [wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))]
          [in-buf     {:data data :usage :input :dtype dtype}]
-         [out-buf    {:size (* n 4) :usage :output}]
+         [elem-size  (if (= dtype :i64) 8 4)]
+         [out-buf    {:size (* n elem-size) :usage :output}]
          [handle     (plugin:dispatch shader wg-count 1 1
                        [in-buf out-buf])]
          [_          (plugin:wait handle)]

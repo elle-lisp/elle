@@ -6,6 +6,9 @@ use elle::value::Value;
 ///   4 bytes: output buffer count (u32 LE)
 ///   Per buffer: 4 bytes element count (u32 LE) + N*4 bytes data
 ///
+/// The element count field is always byte_size/4 (legacy from f32-only days).
+/// For i64 dtype, we reinterpret: actual_elements = raw_count / 2.
+///
 /// Returns a single array if one output buffer, or array-of-arrays if multiple.
 pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<Value, String> {
     if bytes.len() < 4 {
@@ -19,7 +22,8 @@ pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<Value, String> {
         if offset + 4 > bytes.len() {
             return Err(format!("truncated header for output buffer {i}"));
         }
-        let n = u32::from_le_bytes([
+        // Element count field: byte_size / 4 (always 4-byte granularity)
+        let raw_count = u32::from_le_bytes([
             bytes[offset],
             bytes[offset + 1],
             bytes[offset + 2],
@@ -27,7 +31,7 @@ pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<Value, String> {
         ]) as usize;
         offset += 4;
 
-        let data_bytes = n * 4;
+        let data_bytes = raw_count * 4;
         if offset + data_bytes > bytes.len() {
             return Err(format!(
                 "truncated data for output buffer {i}: need {data_bytes} bytes, have {}",
@@ -58,8 +62,14 @@ pub(crate) fn decode(bytes: &[u8], dtype: &str) -> Result<Value, String> {
                     Value::int(n as i64)
                 })
                 .collect(),
+            "i64" => chunk
+                .chunks_exact(8)
+                .map(|c| {
+                    let n = i64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]);
+                    Value::int(n)
+                })
+                .collect(),
             "raw" => {
-                // Return raw bytes as a single bytes value per buffer
                 arrays.push(Value::bytes(chunk.to_vec()));
                 offset += data_bytes;
                 continue;

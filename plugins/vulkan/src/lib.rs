@@ -429,12 +429,13 @@ fn parse_buffer_spec(
         ));
     };
 
-    // Encode to raw bytes. Default dtype is :f32; also supports :u32, :i32.
+    // Encode to raw bytes. Default dtype is :f32; also supports :u32, :i32, :i64.
     let dtype = struct_get(val, "dtype")
         .and_then(|v| extract_keyword(&v))
         .unwrap_or_else(|| "f32".to_string());
 
-    let mut bytes = Vec::with_capacity(arr.len() * 4);
+    let elem_size = if dtype == "i64" { 8 } else { 4 };
+    let mut bytes = Vec::with_capacity(arr.len() * elem_size);
     for (j, v) in arr.iter().enumerate() {
         match dtype.as_str() {
             "f32" => {
@@ -458,8 +459,14 @@ fn parse_buffer_spec(
                         format!("{caller}: buffer[{index}][{j}] must be integer for :i32")))?;
                 bytes.extend_from_slice(&(n as i32).to_le_bytes());
             }
+            "i64" => {
+                let n = v.as_int()
+                    .ok_or_else(|| err("type-error",
+                        format!("{caller}: buffer[{index}][{j}] must be integer for :i64")))?;
+                bytes.extend_from_slice(&n.to_le_bytes());
+            }
             _ => return Err(err("value-error",
-                format!("{caller}: buffer[{index}] unsupported :dtype {dtype:?}, expected :f32, :u32, or :i32"))),
+                format!("{caller}: buffer[{index}] unsupported :dtype {dtype:?}, expected :f32, :u32, :i32, or :i64"))),
         }
     }
 
@@ -504,13 +511,13 @@ fn prim_decode(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let dtype = match extract_keyword(&args[1]) {
-        Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "raw") => k,
+        Some(k) if matches!(k.as_str(), "f32" | "u32" | "i32" | "i64" | "raw") => k,
         _ => {
             return (
                 SIG_ERROR,
                 error_val(
                     "value-error",
-                    "vulkan/decode: dtype must be :f32, :u32, :i32, or :raw",
+                    "vulkan/decode: dtype must be :f32, :u32, :i32, :i64, or :raw",
                 ),
             )
         }
