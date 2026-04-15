@@ -153,6 +153,14 @@ impl VM {
         location_map: &Rc<LocationMap>,
     ) -> Option<SignalBits> {
         if let Some(def) = func.as_native_def() {
+            etrace!(
+                self,
+                crate::config::trace_bits::CALL,
+                "call",
+                "native {} nargs={}",
+                def.name,
+                args.len()
+            );
             let blocked = def
                 .signal
                 .bits
@@ -198,6 +206,14 @@ impl VM {
         }
 
         if let Some(closure) = func.as_closure() {
+            etrace!(
+                self,
+                crate::config::trace_bits::CALL,
+                "call",
+                "closure {} nargs={}",
+                closure.template.name.as_deref().unwrap_or("<anon>"),
+                args.len()
+            );
             self.fiber.call_depth += 1;
 
             // Push call frame for stack traces
@@ -363,7 +379,11 @@ impl VM {
                     let (_, value) = self.fiber.signal.take().unwrap();
 
                     let caller_stack: Vec<Value> = self.fiber.stack.drain(..).collect();
-                    if crate::config::get().debug_stack && caller_stack.len() <= 5 {
+                    if self
+                        .runtime_config
+                        .has_trace_bit(crate::config::trace_bits::CALL)
+                        && caller_stack.len() <= 5
+                    {
                         eprintln!(
                             "[call_inner suspend] ip={} bc_len={} stack_depth={}",
                             *ip,
@@ -385,7 +405,10 @@ impl VM {
                     });
 
                     let mut frames = self.fiber.suspended.take().unwrap_or_default();
-                    if crate::config::get().debug_resume {
+                    if self
+                        .runtime_config
+                        .has_trace_bit(crate::config::trace_bits::FIBER)
+                    {
                         eprintln!(
                             "[call_inner] suspend: bits={} ip={} bc_len={} inner_frames={} env_len={}",
                             bits, *ip, bytecode.len(), frames.len(), closure_env.len(),

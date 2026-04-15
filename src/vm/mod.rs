@@ -150,7 +150,10 @@ impl VM {
             .expect("VM bug: SIG_SWITCH without pending_fiber_resume");
         let caller_frames = self.fiber.suspended.take().unwrap_or_default();
         self.fiber.signal.take();
-        if crate::config::get().debug_resume {
+        if self
+            .runtime_config
+            .has_trace_bit(crate::config::trace_bits::FIBER)
+        {
             eprintln!(
                 "[handle_sig_switch] caller_frames={} fiber_status={:?}",
                 caller_frames.len(),

@@ -62,7 +62,10 @@ impl VM {
                         Vec::new(),
                     ) {
                         Ok(jit_code) => {
-                            if crate::config::get().debug_jit {
+                            if self
+                                .runtime_config
+                                .has_trace_bit(crate::config::trace_bits::JIT)
+                            {
                                 // Dump first few LIR blocks to identify the function
                                 let block_info: Vec<String> = lir_func
                                     .blocks

@@ -3,6 +3,7 @@
 //! Set once at startup via `init`, read anywhere via `get`.
 //! Runtime configuration parsed from CLI flags. See `Config::parse` and `elle --help`.
 
+use std::collections::HashSet;
 use std::sync::OnceLock;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -34,6 +35,277 @@ pub fn get() -> &'static Config {
 pub fn init(config: Config) {
     let _ = CONFIG.set(config);
 }
+
+// ── JIT policy ────────────────────────────────────────────────────
+
+/// JIT compilation policy.
+#[derive(Debug, Clone, PartialEq)]
+pub enum JitPolicy {
+    /// JIT disabled.
+    Off,
+    /// Compile on first call.
+    Eager,
+    /// Compile after N calls (default: threshold=10).
+    Adaptive { threshold: usize },
+    /// Only compile silent, capture-free functions.
+    Conservative,
+    /// Defer to an Elle closure stored on the VM (see `vm/config`).
+    Custom,
+}
+
+impl JitPolicy {
+    /// Whether JIT is enabled at all.
+    pub fn enabled(&self) -> bool {
+        !matches!(self, JitPolicy::Off)
+    }
+
+    /// Hotness threshold (calls before compilation).
+    /// Returns 0 for Eager, the threshold for Adaptive, usize::MAX for Off.
+    pub fn threshold(&self) -> usize {
+        match self {
+            JitPolicy::Off => usize::MAX,
+            JitPolicy::Eager => 0,
+            JitPolicy::Adaptive { threshold } => *threshold,
+            JitPolicy::Conservative => 10,
+            JitPolicy::Custom => 0,
+        }
+    }
+
+    /// Keyword representation for Elle.
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            JitPolicy::Off => "off",
+            JitPolicy::Eager => "eager",
+            JitPolicy::Adaptive { .. } => "adaptive",
+            JitPolicy::Conservative => "conservative",
+            JitPolicy::Custom => "custom",
+        }
+    }
+
+    /// Parse from a keyword string.
+    pub fn from_keyword(s: &str) -> Option<JitPolicy> {
+        match s {
+            "off" => Some(JitPolicy::Off),
+            "eager" => Some(JitPolicy::Eager),
+            "adaptive" => Some(JitPolicy::Adaptive { threshold: 10 }),
+            "conservative" => Some(JitPolicy::Conservative),
+            "custom" => Some(JitPolicy::Custom),
+            _ => None,
+        }
+    }
+}
+
+// ── WASM policy ───────────────────────────────────────────────────
+
+/// WASM compilation policy.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WasmPolicy {
+    /// WASM disabled.
+    Off,
+    /// Compile entire module upfront.
+    Full,
+    /// Per-function lazy compilation after N calls.
+    Lazy { threshold: usize },
+    /// Per-module WASM compilation (future).
+    Modular,
+}
+
+impl WasmPolicy {
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            WasmPolicy::Off => "off",
+            WasmPolicy::Full => "full",
+            WasmPolicy::Lazy { .. } => "lazy",
+            WasmPolicy::Modular => "modular",
+        }
+    }
+
+    pub fn from_keyword(s: &str) -> Option<WasmPolicy> {
+        match s {
+            "off" => Some(WasmPolicy::Off),
+            "full" => Some(WasmPolicy::Full),
+            "lazy" => Some(WasmPolicy::Lazy { threshold: 10 }),
+            "modular" => Some(WasmPolicy::Modular),
+            _ => None,
+        }
+    }
+}
+
+// ── Trace keywords ────────────────────────────────────────────────
+
+/// All known trace keywords. Unknown keywords in `--trace=` are rejected;
+/// unknown keywords in Elle `(put (vm/config) :trace ...)` are accepted
+/// silently (forward compat for :spirv, :mlir, :gpu).
+pub const TRACE_KEYWORDS: &[&str] = &[
+    "call", "signal", "compile", "fiber", "hir", "lir", "emit", "jit", "io", "gc", "import",
+    "macro", "wasm", "capture", "arena", "escape", "bytecode",
+    // Future: accepted without error
+    "spirv", "mlir", "gpu",
+];
+
+/// Bit positions for trace keywords — avoids HashSet lookups on hot paths.
+/// Each keyword maps to a bit in a u32.
+pub mod trace_bits {
+    pub const CALL: u32 = 1 << 0;
+    pub const SIGNAL: u32 = 1 << 1;
+    pub const COMPILE: u32 = 1 << 2;
+    pub const FIBER: u32 = 1 << 3;
+    pub const HIR: u32 = 1 << 4;
+    pub const LIR: u32 = 1 << 5;
+    pub const EMIT: u32 = 1 << 6;
+    pub const JIT: u32 = 1 << 7;
+    pub const IO: u32 = 1 << 8;
+    pub const GC: u32 = 1 << 9;
+    pub const IMPORT: u32 = 1 << 10;
+    pub const MACRO: u32 = 1 << 11;
+    pub const WASM: u32 = 1 << 12;
+    pub const CAPTURE: u32 = 1 << 13;
+    pub const ARENA: u32 = 1 << 14;
+    pub const ESCAPE: u32 = 1 << 15;
+    pub const BYTECODE: u32 = 1 << 16;
+    pub const ALL: u32 = (1 << 17) - 1;
+
+    /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
+    pub fn from_name(name: &str) -> u32 {
+        match name {
+            "call" => CALL,
+            "signal" => SIGNAL,
+            "compile" => COMPILE,
+            "fiber" => FIBER,
+            "hir" => HIR,
+            "lir" => LIR,
+            "emit" => EMIT,
+            "jit" => JIT,
+            "io" => IO,
+            "gc" => GC,
+            "import" => IMPORT,
+            "macro" => MACRO,
+            "wasm" => WASM,
+            "capture" => CAPTURE,
+            "arena" => ARENA,
+            "escape" => ESCAPE,
+            "bytecode" => BYTECODE,
+            // Future keywords — accepted but no bit (traced via HashSet)
+            _ => 0,
+        }
+    }
+}
+
+// ── RuntimeConfig ─────────────────────────────────────────────────
+
+/// Mutable runtime configuration stored on the VM.
+///
+/// Accessible from Elle via `(vm/config)`. Changes take effect immediately.
+/// Separate from `Config` (which is static/global) so that per-fiber or
+/// per-test configuration is possible.
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+    /// Active trace keywords.
+    pub trace: HashSet<String>,
+    /// Bitfield cache mirroring `trace` for fast hot-path checks.
+    pub trace_bits: u32,
+    /// JIT compilation policy.
+    pub jit: JitPolicy,
+    /// WASM compilation policy.
+    pub wasm: WasmPolicy,
+    /// Print bytecode before execution.
+    pub debug_bytecode: bool,
+    /// Dump parsed AST and exit.
+    pub dump_ast: bool,
+    /// Print compilation stats on exit.
+    pub stats: bool,
+}
+
+impl RuntimeConfig {
+    /// Build a RuntimeConfig from the static global Config.
+    pub fn from_static_config(config: &Config) -> Self {
+        let jit = if config.jit == 0 {
+            JitPolicy::Off
+        } else if config.jit == 1 {
+            JitPolicy::Eager
+        } else {
+            JitPolicy::Adaptive {
+                threshold: (config.jit - 1) as usize,
+            }
+        };
+
+        let wasm = if config.wasm_full {
+            WasmPolicy::Full
+        } else if config.wasm > 0 {
+            WasmPolicy::Lazy {
+                threshold: (config.wasm - 1) as usize,
+            }
+        } else {
+            WasmPolicy::Off
+        };
+
+        // Map old debug_* flags to trace keywords
+        let mut trace = HashSet::new();
+        let mut bits = 0u32;
+        if config.debug {
+            trace.insert("bytecode".to_string());
+            bits |= trace_bits::BYTECODE;
+        }
+        if config.debug_jit {
+            trace.insert("jit".to_string());
+            bits |= trace_bits::JIT;
+        }
+        if config.debug_resume {
+            trace.insert("fiber".to_string());
+            bits |= trace_bits::FIBER;
+        }
+        if config.debug_stack {
+            trace.insert("call".to_string());
+            bits |= trace_bits::CALL;
+        }
+        if config.debug_wasm {
+            trace.insert("wasm".to_string());
+            bits |= trace_bits::WASM;
+        }
+
+        RuntimeConfig {
+            trace,
+            trace_bits: bits,
+            jit,
+            wasm,
+            debug_bytecode: config.debug,
+            dump_ast: config.dump_ast,
+            stats: config.stats,
+        }
+    }
+
+    /// Set the trace keyword set and update the bitfield cache.
+    pub fn set_trace(&mut self, keywords: HashSet<String>) {
+        let mut bits = 0u32;
+        for kw in &keywords {
+            bits |= trace_bits::from_name(kw);
+        }
+        self.trace = keywords;
+        self.trace_bits = bits;
+    }
+
+    /// Check if a trace bit is set (fast path — no HashSet lookup).
+    #[inline(always)]
+    pub fn has_trace_bit(&self, bit: u32) -> bool {
+        self.trace_bits & bit != 0
+    }
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        RuntimeConfig {
+            trace: HashSet::new(),
+            trace_bits: 0,
+            jit: JitPolicy::Adaptive { threshold: 10 },
+            wasm: WasmPolicy::Off,
+            debug_bytecode: false,
+            dump_ast: false,
+            stats: false,
+        }
+    }
+}
+
+// ── Config (static) ───────────────────────────────────────────────
 
 /// All runtime configuration for Elle.
 ///
@@ -93,7 +365,7 @@ pub struct Config {
     /// JSON output on stderr (errors, stats, timing).
     pub json: bool,
 
-    // -- Debug --
+    // -- Debug (old flags, mapped to RuntimeConfig on VM init) --
     /// Print bytecode before execution.
     pub debug: bool,
 
@@ -120,6 +392,10 @@ pub struct Config {
 
     /// Dump parsed AST (s-expression form) and exit without compiling.
     pub dump_ast: bool,
+
+    /// Trace keywords from `--trace=kw1,kw2,...`.
+    /// Stored here from CLI parsing, then merged into RuntimeConfig on VM init.
+    pub trace_keywords: Vec<String>,
 }
 
 impl Default for Config {
@@ -144,6 +420,7 @@ impl Default for Config {
             wasm_lir: false,
             wasm_chunk: false,
             dump_ast: false,
+            trace_keywords: Vec::new(),
         }
     }
 }
@@ -191,19 +468,67 @@ impl Config {
 
             // --key=value style
             if let Some(rest) = arg.strip_prefix("--jit=") {
-                config.jit = rest
-                    .parse::<u32>()
-                    .map_err(|_| format!("--jit: expected integer, got '{}'", rest))?;
+                // Named policies: off, eager, adaptive
+                match rest {
+                    "off" => config.jit = 0,
+                    "eager" => config.jit = 1,
+                    "adaptive" => config.jit = 11,
+                    _ => {
+                        config.jit = rest.parse::<u32>().map_err(|_| {
+                            format!(
+                                "--jit: expected integer or policy name (off/eager/adaptive), got '{}'",
+                                rest
+                            )
+                        })?;
+                    }
+                }
                 i += 1;
                 continue;
             }
             if let Some(rest) = arg.strip_prefix("--wasm=") {
-                if rest == "full" {
-                    config.wasm_full = true;
+                match rest {
+                    "off" => {
+                        config.wasm = 0;
+                        config.wasm_full = false;
+                    }
+                    "full" => config.wasm_full = true,
+                    "lazy" => config.wasm = 11,
+                    _ => {
+                        config.wasm = rest.parse::<u32>().map_err(|_| {
+                            format!(
+                                "--wasm: expected integer or policy name (off/full/lazy), got '{}'",
+                                rest
+                            )
+                        })?;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--trace=") {
+                if rest == "all" {
+                    for kw in TRACE_KEYWORDS {
+                        config.trace_keywords.push(kw.to_string());
+                    }
                 } else {
-                    config.wasm = rest.parse::<u32>().map_err(|_| {
-                        format!("--wasm: expected integer or 'full', got '{}'", rest)
-                    })?;
+                    for kw in rest.split(',') {
+                        let kw = kw.trim();
+                        if !kw.is_empty() {
+                            config.trace_keywords.push(kw.to_string());
+                        }
+                    }
+                }
+                // Also set old debug_* flags for backward compat with code
+                // that still checks them directly (wasm paths, etc.)
+                for kw in &config.trace_keywords {
+                    match kw.as_str() {
+                        "jit" => config.debug_jit = true,
+                        "fiber" => config.debug_resume = true,
+                        "call" => config.debug_stack = true,
+                        "wasm" => config.debug_wasm = true,
+                        "bytecode" => config.debug = true,
+                        _ => {}
+                    }
                 }
                 i += 1;
                 continue;
@@ -234,11 +559,27 @@ impl Config {
                 "--stats" => config.stats = true,
                 "--wasm-no-stdlib" => config.wasm_no_stdlib = true,
                 "--no-uring" => config.no_uring = true,
-                "--debug" => config.debug = true,
-                "--debug-jit" => config.debug_jit = true,
-                "--debug-resume" => config.debug_resume = true,
-                "--debug-stack" => config.debug_stack = true,
-                "--debug-wasm" => config.debug_wasm = true,
+                // Old debug flags — kept as aliases
+                "--debug" => {
+                    config.debug = true;
+                    config.trace_keywords.push("bytecode".into());
+                }
+                "--debug-jit" => {
+                    config.debug_jit = true;
+                    config.trace_keywords.push("jit".into());
+                }
+                "--debug-resume" => {
+                    config.debug_resume = true;
+                    config.trace_keywords.push("fiber".into());
+                }
+                "--debug-stack" => {
+                    config.debug_stack = true;
+                    config.trace_keywords.push("call".into());
+                }
+                "--debug-wasm" => {
+                    config.debug_wasm = true;
+                    config.trace_keywords.push("wasm".into());
+                }
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,

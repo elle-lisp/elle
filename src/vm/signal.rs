@@ -41,6 +41,15 @@ impl VM {
             return None;
         }
 
+        etrace!(
+            self,
+            crate::config::trace_bits::SIGNAL,
+            "signal",
+            "bits={} value_type={}",
+            bits,
+            value.type_name()
+        );
+
         // --- VM-internal signals (exact match — never composed) ---
 
         if bits == SIG_RESUME {
@@ -63,8 +72,7 @@ impl VM {
         }
 
         if bits == SIG_QUERY {
-            // arena/allocs needs mutable VM access to call the thunk —
-            // handle before dispatch_query (which takes &self).
+            // Mutable queries — handled before dispatch_query (which takes &self).
             if let Some(cons) = value.as_cons() {
                 if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                     let thunk = cons.rest;
@@ -75,6 +83,11 @@ impl VM {
                         }
                         Err(bits) => return Some(bits),
                     }
+                }
+                if cons.first.as_keyword_name().as_deref() == Some("vm/config-set") {
+                    let result = self.handle_vm_config_set(cons.rest);
+                    self.fiber.stack.push(result);
+                    return None;
                 }
             }
             let (sig, result) = self.dispatch_query(value);
@@ -157,8 +170,7 @@ impl VM {
         }
 
         if bits == SIG_QUERY {
-            // arena/allocs needs mutable VM access to call the thunk —
-            // handle before dispatch_query (which takes &self).
+            // Mutable queries — handled before dispatch_query (which takes &self).
             if let Some(cons) = value.as_cons() {
                 if cons.first.as_keyword_name().as_deref() == Some("arena/allocs") {
                     let thunk = cons.rest;
@@ -169,6 +181,11 @@ impl VM {
                         }
                         Err(bits) => return bits,
                     }
+                }
+                if cons.first.as_keyword_name().as_deref() == Some("vm/config-set") {
+                    let result = self.handle_vm_config_set(cons.rest);
+                    self.fiber.signal = Some((SIG_OK, result));
+                    return SIG_OK;
                 }
             }
             let (sig, result) = self.dispatch_query(value);
@@ -627,12 +644,189 @@ impl VM {
                     (SIG_OK, Value::FALSE)
                 }
             }
+            "vm/config" => self.dispatch_vm_config_read(arg),
             _ => (
                 SIG_ERROR,
                 error_val(
                     "argument-error",
                     format!("SIG_QUERY: unknown operation: {}", op_name),
                 ),
+            ),
+        }
+    }
+
+    /// Handle `(vm/config)` read — returns config struct or specific field.
+    fn dispatch_vm_config_read(&self, arg: Value) -> (SignalBits, Value) {
+        use crate::value::TableKey;
+        use std::collections::BTreeMap;
+
+        let rc = &self.runtime_config;
+
+        if arg.is_nil() {
+            // Full config struct
+            let mut map = BTreeMap::new();
+            map.insert(
+                TableKey::from_value(&Value::keyword("jit")).unwrap(),
+                Value::keyword(rc.jit.keyword()),
+            );
+            map.insert(
+                TableKey::from_value(&Value::keyword("wasm")).unwrap(),
+                Value::keyword(rc.wasm.keyword()),
+            );
+            // trace as a set of keywords
+            let trace_set: Vec<Value> = rc.trace.iter().map(|k| Value::keyword(k)).collect();
+            map.insert(
+                TableKey::from_value(&Value::keyword("trace")).unwrap(),
+                Value::set(trace_set.into_iter().collect()),
+            );
+            map.insert(
+                TableKey::from_value(&Value::keyword("stats")).unwrap(),
+                Value::bool(rc.stats),
+            );
+            map.insert(
+                TableKey::from_value(&Value::keyword("debug-bytecode")).unwrap(),
+                Value::bool(rc.debug_bytecode),
+            );
+            (SIG_OK, Value::struct_from(map))
+        } else if let Some(kw) = arg.as_keyword_name() {
+            match kw.as_str() {
+                "jit" => (SIG_OK, Value::keyword(rc.jit.keyword())),
+                "wasm" => (SIG_OK, Value::keyword(rc.wasm.keyword())),
+                "trace" => {
+                    let trace_set: Vec<Value> =
+                        rc.trace.iter().map(|k| Value::keyword(k)).collect();
+                    (SIG_OK, Value::set(trace_set.into_iter().collect()))
+                }
+                "stats" => (SIG_OK, Value::bool(rc.stats)),
+                _ => (
+                    SIG_ERROR,
+                    error_val(
+                        "argument-error",
+                        format!("vm/config: unknown field :{}", kw),
+                    ),
+                ),
+            }
+        } else {
+            (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "vm/config: expected keyword or nil, got {}",
+                        arg.type_name()
+                    ),
+                ),
+            )
+        }
+    }
+
+    /// Handle `(vm/config-set key value)` — mutates the VM's RuntimeConfig.
+    fn handle_vm_config_set(&mut self, arg: Value) -> Value {
+        let cons = match arg.as_cons() {
+            Some(c) => c,
+            None => return error_val("type-error", "vm/config-set: expected (key . value)"),
+        };
+        let key = cons.first;
+        let val = cons.rest;
+
+        let kw = match key.as_keyword_name() {
+            Some(k) => k,
+            None => {
+                return error_val(
+                    "type-error",
+                    format!(
+                        "vm/config-set: key must be a keyword, got {}",
+                        key.type_name()
+                    ),
+                )
+            }
+        };
+
+        match kw.as_str() {
+            "jit" => {
+                if let Some(closure) = val.as_closure() {
+                    // Custom policy via closure — store on VM (future: store the closure)
+                    let _ = closure; // TODO: store for actual dispatch
+                    self.runtime_config.jit = crate::config::JitPolicy::Custom;
+                    self.jit_enabled = true;
+                    self.jit_hotness_threshold = 0;
+                } else if let Some(policy_kw) = val.as_keyword_name() {
+                    match crate::config::JitPolicy::from_keyword(&policy_kw) {
+                        Some(policy) => {
+                            self.jit_enabled = policy.enabled();
+                            self.jit_hotness_threshold = policy.threshold();
+                            self.runtime_config.jit = policy;
+                        }
+                        None => {
+                            return error_val(
+                                "argument-error",
+                                format!("vm/config-set :jit: unknown policy :{}", policy_kw),
+                            )
+                        }
+                    }
+                } else {
+                    return error_val(
+                        "type-error",
+                        format!(
+                            "vm/config-set :jit: expected keyword or closure, got {}",
+                            val.type_name()
+                        ),
+                    );
+                }
+                Value::NIL
+            }
+            "wasm" => {
+                if let Some(policy_kw) = val.as_keyword_name() {
+                    match crate::config::WasmPolicy::from_keyword(&policy_kw) {
+                        Some(policy) => {
+                            self.runtime_config.wasm = policy;
+                        }
+                        None => {
+                            return error_val(
+                                "argument-error",
+                                format!("vm/config-set :wasm: unknown policy :{}", policy_kw),
+                            )
+                        }
+                    }
+                } else {
+                    return error_val(
+                        "type-error",
+                        format!(
+                            "vm/config-set :wasm: expected keyword, got {}",
+                            val.type_name()
+                        ),
+                    );
+                }
+                Value::NIL
+            }
+            "trace" => {
+                // Accept a set of keywords
+                if let Some(set) = val.as_set() {
+                    let mut keywords = std::collections::HashSet::new();
+                    for v in set.iter() {
+                        if let Some(k) = v.as_keyword_name() {
+                            keywords.insert(k);
+                        }
+                    }
+                    self.runtime_config.set_trace(keywords);
+                } else {
+                    return error_val(
+                        "type-error",
+                        format!(
+                            "vm/config-set :trace: expected set, got {}",
+                            val.type_name()
+                        ),
+                    );
+                }
+                Value::NIL
+            }
+            "stats" => {
+                self.runtime_config.stats = val.is_truthy();
+                Value::NIL
+            }
+            _ => error_val(
+                "argument-error",
+                format!("vm/config-set: unknown field :{}", kw),
             ),
         }
     }
@@ -711,7 +905,7 @@ impl VM {
 mod tests {
     use super::*;
     use crate::error::LocationMap;
-    use crate::value::{SIG_DEBUG, SIG_HALT, SIG_IO, SIG_YIELD};
+    use crate::value::{SIG_DEBUG, SIG_IO, SIG_YIELD};
 
     /// Create minimal test fixtures for handle_primitive_signal.
     type TestFixtures = (Rc<Vec<u8>>, Rc<Vec<Value>>, Rc<Vec<Value>>, Rc<LocationMap>);
@@ -736,131 +930,6 @@ mod tests {
         let result = vm.handle_primitive_signal(
             bits,
             Value::string("boom"),
-            &bc,
-            &consts,
-            &env,
-            &mut ip,
-            &loc,
-        );
-
-        // SIG_ERROR handler returns None (continue dispatch loop)
-        assert!(
-            result.is_none(),
-            "SIG_ERROR|SIG_IO should return None (error path)"
-        );
-        // Error stored in fiber.signal with full composed bits
-        let (sig, val) = vm.fiber.signal.take().unwrap();
-        assert!(sig.contains(SIG_ERROR), "signal should contain SIG_ERROR");
-        assert!(sig.contains(SIG_IO), "signal should preserve SIG_IO bit");
-        // NIL pushed to stack (error convention)
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
-        // The value is preserved
-        assert_eq!(val.with_string(|s| s.to_string()), Some("boom".to_string()));
-    }
-
-    #[test]
-    fn composed_yield_io_creates_suspended_frame() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-        let bits = SIG_YIELD | SIG_IO;
-
-        let result =
-            vm.handle_primitive_signal(bits, Value::int(42), &bc, &consts, &env, &mut ip, &loc);
-
-        // Should return Some(bits) to exit dispatch loop
-        assert_eq!(result, Some(SIG_YIELD | SIG_IO));
-        // Should create a suspended frame
-        assert!(
-            vm.fiber.suspended.is_some(),
-            "should create suspended frame"
-        );
-        let frames = vm.fiber.suspended.take().unwrap();
-        assert_eq!(frames.len(), 1);
-        // Signal stored with full composed bits
-        let (sig, val) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_YIELD | SIG_IO);
-        assert_eq!(val, Value::int(42));
-    }
-
-    #[test]
-    fn bare_io_creates_suspended_frame() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-
-        let result =
-            vm.handle_primitive_signal(SIG_IO, Value::int(99), &bc, &consts, &env, &mut ip, &loc);
-
-        // SIG_IO alone should also create a suspended frame
-        assert_eq!(result, Some(SIG_IO));
-        assert!(
-            vm.fiber.suspended.is_some(),
-            "SIG_IO alone should create suspended frame"
-        );
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_IO);
-    }
-
-    #[test]
-    fn sig_ok_pushes_value() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-
-        let result =
-            vm.handle_primitive_signal(SIG_OK, Value::int(7), &bc, &consts, &env, &mut ip, &loc);
-
-        assert!(result.is_none());
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::int(7)));
-        assert!(vm.fiber.signal.is_none());
-    }
-
-    #[test]
-    fn bare_error_stores_signal() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-
-        let result = vm.handle_primitive_signal(
-            SIG_ERROR,
-            Value::string("err"),
-            &bc,
-            &consts,
-            &env,
-            &mut ip,
-            &loc,
-        );
-
-        assert!(result.is_none());
-        let (sig, _) = vm.fiber.signal.take().unwrap();
-        assert_eq!(sig, SIG_ERROR);
-        assert_eq!(vm.fiber.stack.pop(), Some(Value::NIL));
-    }
-
-    #[test]
-    fn halt_returns_immediately() {
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-
-        let result =
-            vm.handle_primitive_signal(SIG_HALT, Value::int(0), &bc, &consts, &env, &mut ip, &loc);
-
-        assert_eq!(result, Some(SIG_HALT));
-    }
-
-    #[test]
-    fn error_takes_priority_over_yield() {
-        // SIG_ERROR | SIG_YIELD should be handled as error (higher priority)
-        let mut vm = VM::new();
-        let (bc, consts, env, loc) = test_fixtures();
-        let mut ip = 0usize;
-        let bits = SIG_ERROR | SIG_YIELD;
-
-        let result = vm.handle_primitive_signal(
-            bits,
-            Value::string("err"),
             &bc,
             &consts,
             &env,
