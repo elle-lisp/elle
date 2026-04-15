@@ -11,8 +11,8 @@ to an Elle codebase. The server is itself written in Elle
 
 The server maintains a persistent RDF knowledge graph (via the oxigraph
 plugin) that represents the structure of both Elle and Rust source code.
-It exposes 15 tools that let an AI agent query, analyze, and refactor
-code through the graph rather than through ad-hoc text searches.
+It exposes 20 tools that let an AI agent query, analyze, refactor
+code through the graph, and orchestrate test runs with result tracking.
 
 ## Tools
 

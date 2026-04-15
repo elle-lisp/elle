@@ -328,7 +328,9 @@
   [tool-ping tool-sparql-query tool-sparql-update tool-load-rdf tool-dump-rdf
    tool-analyze-file tool-portrait tool-signal-query tool-impact
    tool-verify-invariants tool-compile-rename tool-compile-extract
-   tool-compile-parallelize tool-trace])
+   tool-compile-parallelize tool-trace
+   tool-test-run tool-test-status tool-test-history tool-test-gate
+   tool-push-ready tool-push-wip])
 
 # ── SPARQL tool handlers ─────────────────────────────────────────────────
 
@@ -676,6 +678,251 @@
 
   (text-content (freeze out)))
 
+# ── Test orchestration ───────────────────────────────────────────────────
+
+(def tool-test-run
+  {:name "test_run"
+   :description "Run tests and record results. Captures exit code, duration, stdout/stderr. Records result keyed by (sha, mode) in the RDF store."
+   :inputSchema {:type "object"
+                 :properties {:path {:type "string" :description "Specific test file (optional)"}
+                              :mode {:type "string" :enum ["smoke" "test" "single"]
+                                     :description "Test scope: smoke (~30s), test (~3min), or single file"}
+                              :jit {:type "string" :enum ["off" "eager" "adaptive"]
+                                    :description "Override JIT policy (optional)"}}
+                 :required ["mode"]}})
+
+(def tool-test-status
+  {:name "test_status"
+   :description "Query test results for a commit. Returns structured summary: passed/failed count, failure details with location and context. Agents never need to re-run tests with | tail to read output."
+   :inputSchema {:type "object"
+                 :properties {:sha {:type "string" :description "Git SHA (default: HEAD)"}
+                              :mode {:type "string" :description "Filter by mode: smoke or test"}}
+                 :required []}})
+
+(def tool-test-history
+  {:name "test_history"
+   :description "Test results across recent commits."
+   :inputSchema {:type "object"
+                 :properties {:path {:type "string" :description "Specific test file (optional)"}
+                              :limit {:type "integer" :description "How many commits back (default: 10)"}}
+                 :required []}})
+
+(def tool-test-gate
+  {:name "test_gate"
+   :description "Check if SHA is clear to push. Verifies a full make test pass exists for the SHA on a clean worktree."
+   :inputSchema {:type "object"
+                 :properties {:sha {:type "string" :description "Git SHA (default: HEAD)"}}
+                 :required []}})
+
+(def tool-push-ready
+  {:name "push_ready"
+   :description "Push with test gate. Checks test_gate for HEAD, pushes if passing."
+   :inputSchema {:type "object"
+                 :properties {:remote {:type "string" :description "Remote name (default: origin)"}
+                              :branch {:type "string" :description "Branch name"}}
+                 :required ["branch"]}})
+
+(def tool-push-wip
+  {:name "push_wip"
+   :description "Push without test gate. For saving work or requesting review."
+   :inputSchema {:type "object"
+                 :properties {:remote {:type "string" :description "Remote name (default: origin)"}
+                              :branch {:type "string" :description "Branch name"}}
+                 :required ["branch"]}})
+
+# ── Test orchestration handlers ──────────────────────────────────────────
+
+(defn git-sha []
+  "Get current HEAD SHA."
+  (let [[proc (subprocess/exec "git" @["rev-parse" "HEAD"])]]
+    (string/trim (port/read-all (get proc :stdout)))))
+
+(defn git-clean? []
+  "Check if worktree is clean."
+  (let [[proc (subprocess/exec "git" @["status" "--porcelain"])]]
+    (empty? (string/trim (port/read-all (get proc :stdout))))))
+
+(defn run-make-target [target jit-override]
+  "Run a make target, return {:exit-code :stdout :stderr :duration}."
+  (let* [[start (time/monotonic)]
+         [env-args (if jit-override
+                     {:env {:ELLE_JIT jit-override}}
+                     {})]
+         [proc (subprocess/exec "make" @[target] env-args)]
+         [stdout (port/read-all (get proc :stdout))]
+         [stderr (port/read-all (get proc :stderr))]
+         [status (subprocess/wait proc)]
+         [duration (- (time/monotonic) start)]]
+    {:exit-code (get status :exit-code)
+     :stdout stdout
+     :stderr stderr
+     :duration (/ duration 1000000000)}))
+
+(defn parse-test-failures [stderr]
+  "Extract structured failure info from test stderr."
+  (var failures @[])
+  (each line in (string/split stderr "\n")
+    (when (string/find line "✗")
+      (push failures {:message (string/trim line)})))
+  (freeze failures))
+
+(defn store-test-result [sha mode clean passed duration failures stderr]
+  "Store test result as RDF triples."
+  (let [[iri (string/format "urn:test:{}:{}" sha mode)]
+        [timestamp (time/now)]
+        [ttl (string/format
+               "<{}> a <urn:elle:TestRun> ;
+                   <urn:elle:sha> \"{}\" ;
+                   <urn:elle:mode> \"{}\" ;
+                   <urn:elle:clean> {} ;
+                   <urn:elle:passed> {} ;
+                   <urn:elle:duration> {} ;
+                   <urn:elle:timestamp> \"{}\" ;
+                   <urn:elle:failed-count> {} ."
+               iri sha mode
+               (if clean "true" "false")
+               (if passed "true" "false")
+               duration timestamp
+               (length failures))]]
+    # Delete old result for this sha+mode
+    (protect (ox:update store
+      (string/format "DELETE WHERE {{ <{}> ?p ?o . }}" iri)))
+    (protect (ox:load store ttl :turtle))
+    (flush-store)))
+
+(defn call-test-run [arguments]
+  (let* [[mode (get arguments "mode")]
+         [jit-override (get arguments "jit")]
+         [sha (git-sha)]
+         [clean (git-clean?)]
+         [target (case mode
+                   "smoke" "smoke"
+                   "test"  "test"
+                   "single" (let [[path (get arguments "path")]]
+                              (when (nil? path)
+                                (error {:error :invalid-params
+                                        :message "single mode requires path parameter"}))
+                              nil)
+                   (error {:error :invalid-params
+                           :message (string/format "unknown mode: {}" mode)}))]
+         [result (if target
+                   (run-make-target target jit-override)
+                   (let [[path (get arguments "path")]
+                         [elle-bin (or (sys/env "ELLE") "./target/debug/elle")]
+                         [jit-flag (case jit-override
+                                     "off" "--jit=0"
+                                     "eager" "--jit=1"
+                                     nil "")]]
+                     (let* [[args (if (empty? jit-flag) @[path] @[jit-flag path])]
+                            [proc (subprocess/exec elle-bin args)]
+                            [stdout (port/read-all (get proc :stdout))]
+                            [stderr (port/read-all (get proc :stderr))]
+                            [status (subprocess/wait proc)]]
+                       {:exit-code (get status :exit-code)
+                        :stdout stdout :stderr stderr :duration 0})))]
+         [passed (= (get result :exit-code) 0)]
+         [failures (if passed () (parse-test-failures (get result :stderr)))]]
+    (store-test-result sha mode clean passed (get result :duration) failures
+                       (get result :stderr))
+    (text-content (json/pretty
+      {:passed passed
+       :failed-count (length failures)
+       :failures failures
+       :duration (get result :duration)
+       :clean clean
+       :sha sha}))))
+
+(defn query-test-result [sha mode]
+  "Query stored test result for sha+mode."
+  (let [[query (string/format
+                 "SELECT ?passed ?clean ?duration ?failed_count ?timestamp
+                  WHERE {{
+                    <urn:test:{}:{}> <urn:elle:passed> ?passed ;
+                                     <urn:elle:clean> ?clean ;
+                                     <urn:elle:duration> ?duration ;
+                                     <urn:elle:failed-count> ?failed_count ;
+                                     <urn:elle:timestamp> ?timestamp .
+                  }}" sha mode)]]
+    (let [[[ok? rows] (protect (ox:query store query))]]
+      (if (and ok? (not (empty? rows)))
+        (first rows)
+        nil))))
+
+(defn call-test-status [arguments]
+  (let* [[sha (or (get arguments "sha") (git-sha))]
+         [mode (get arguments "mode")]
+         [modes (if mode (list mode) (list "smoke" "test"))]]
+    (var results @[])
+    (each m in modes
+      (let [[r (query-test-result sha m)]]
+        (when r (push results (put r "mode" m)))))
+    (if (empty? results)
+      (text-content (json/pretty {:sha sha :results "no test records found"}))
+      (text-content (json/pretty {:sha sha :results (freeze results)})))))
+
+(defn call-test-history [arguments]
+  (let* [[limit (or (get arguments "limit") 10)]
+         [query (string/format
+                  "SELECT ?sha ?mode ?passed ?clean ?duration ?timestamp
+                   WHERE {{
+                     ?run a <urn:elle:TestRun> ;
+                          <urn:elle:sha> ?sha ;
+                          <urn:elle:mode> ?mode ;
+                          <urn:elle:passed> ?passed ;
+                          <urn:elle:clean> ?clean ;
+                          <urn:elle:duration> ?duration ;
+                          <urn:elle:timestamp> ?timestamp .
+                   }}
+                   ORDER BY DESC(?timestamp)
+                   LIMIT {}" limit)]]
+    (let [[[ok? rows] (protect (ox:query store query))]]
+      (if ok?
+        (text-content (json/pretty rows))
+        (error-content "Failed to query test history")))))
+
+(defn call-test-gate [arguments]
+  (let* [[sha (or (get arguments "sha") (git-sha))]
+         [result (query-test-result sha "test")]]
+    (if (nil? result)
+      (text-content (json/pretty {:ready false :reason "no test record for this SHA"}))
+      (let [[passed (get result "passed")]
+            [clean  (get result "clean")]]
+        (cond
+          ((not passed)
+           (text-content (json/pretty {:ready false :reason "tests failed"})))
+          ((not clean)
+           (text-content (json/pretty {:ready false :reason "worktree was dirty when tests ran"})))
+          (true
+           (text-content (json/pretty {:ready true :sha sha}))))))))
+
+(defn call-push [arguments gated]
+  (let* [[remote (or (get arguments "remote") "origin")]
+         [branch (get arguments "branch")]]
+    (when (nil? branch)
+      (error {:error :invalid-params :message "missing required parameter: branch"}))
+    (when gated
+      (let* [[sha (git-sha)]
+             [result (query-test-result sha "test")]]
+        (when (or (nil? result) (not (get result "passed")) (not (get result "clean")))
+          (let [[reason (cond
+                          ((nil? result) "no test record for HEAD")
+                          ((not (get result "passed")) "tests failed")
+                          (true "worktree was dirty"))]]
+            (error {:error :test-gate-failed
+                    :message (string/format "push blocked: {}" reason)})))))
+    (let* [[proc (subprocess/exec "git" @["push" remote branch])]
+           [stderr (port/read-all (get proc :stderr))]
+           [status (subprocess/wait proc)]]
+      (if (= (get status :exit-code) 0)
+        (text-content (string/format "pushed {} to {}/{}" (git-sha) remote branch))
+        (error-content (string/format "push failed: {}" stderr))))))
+
+(defn call-push-ready [arguments]
+  (call-push arguments true))
+
+(defn call-push-wip [arguments]
+  (call-push arguments false))
+
 # ── Tool dispatch ────────────────────────────────────────────────────────
 
 (defn dispatch-tool [name arguments]
@@ -694,6 +941,12 @@
     "compile_extract"     (call-compile-extract arguments)
     "compile_parallelize" (call-compile-parallelize arguments)
     "trace"               (call-trace arguments)
+    "test_run"            (call-test-run arguments)
+    "test_status"         (call-test-status arguments)
+    "test_history"        (call-test-history arguments)
+    "test_gate"           (call-test-gate arguments)
+    "push_ready"          (call-push-ready arguments)
+    "push_wip"            (call-push-wip arguments)
     (error {:error :method-not-found
             :message (string/format "unknown tool: {}" name)})))
 
@@ -703,7 +956,7 @@
   (jsonrpc-result id
     {:protocolVersion "2025-03-26"
      :capabilities {:tools {:listChanged false}}
-     :serverInfo {:name "elle-mcp" :version "0.5.0"}
+     :serverInfo {:name "elle-mcp" :version "0.6.0"}
      :instructions "Elle semantic analysis server with RDF knowledge graph and program transformation. Use tools/list to discover available tools."}))
 
 (defn handle-tools-list [id _params]
@@ -738,7 +991,7 @@
 
 # ── Main loop ────────────────────────────────────────────────────────────
 
-(eprintln "elle-mcp server starting (v0.5.0)")
+(eprintln "elle-mcp server starting (v0.6.0)")
 (eprintln "  store: " store-path)
 
 # Population fiber — yields between work units so the main loop
