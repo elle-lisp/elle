@@ -124,7 +124,7 @@ pub struct PyLexer {
     line: usize,
     col: usize,
     file: String,
-    /// Stack of indentation levels (in spaces).  Starts with [0].
+    /// Stack of indentation levels (in spaces).  Starts with \[0\].
     indent_stack: Vec<usize>,
     /// Nesting depth of brackets/parens/braces (suppresses newlines).
     bracket_depth: u32,

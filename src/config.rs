@@ -117,6 +117,9 @@ pub struct Config {
 
     /// Chunk user expressions into sub-thunks (experimental).
     pub wasm_chunk: bool,
+
+    /// Dump parsed AST (s-expression form) and exit without compiling.
+    pub dump_ast: bool,
 }
 
 impl Default for Config {
@@ -140,6 +143,7 @@ impl Default for Config {
             wasm_dump: false,
             wasm_lir: false,
             wasm_chunk: false,
+            dump_ast: false,
         }
     }
 }
@@ -238,6 +242,7 @@ impl Config {
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
+                "--dump-ast" => config.dump_ast = true,
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {
