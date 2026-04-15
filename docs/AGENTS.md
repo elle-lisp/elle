@@ -122,6 +122,7 @@ Root AGENTS.md references these docs:
 | `cookbook.md` | 647 | Recipes for common changes |
 | `testing.md` | 472 | Testing strategy |
 | `pipeline.md` | 256 | Compilation pipeline |
+| `config.md` | ~150 | Runtime configuration: vm/config API, trace keywords, JIT/WASM policies, CLI sugar |
 | `debugging.md` | 220 | Debugging toolkit |
 | `oddities.md` | 280 | Intentional design oddities |
 | `fibers.md` | 312 | Fiber architecture |

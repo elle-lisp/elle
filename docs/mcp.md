@@ -327,6 +327,96 @@ ORDER BY ?name
 
 See [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) for more examples.
 
+## Test orchestration
+
+The MCP server provides tools for running tests, tracking results, and
+gating pushes on test status. These eliminate the pattern where agents
+push branches that fail CI.
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `test_run` | Run tests and record results. Captures exit code, duration, stdout/stderr. Records result keyed by `(sha, test-path, mode)` in the RDF store. |
+| `test_status` | Query test results for a commit. Returns a structured, agent-ready summary — NOT raw output. Agents never need to re-run tests with `\| tail` to read failures. |
+| `test_history` | Test results across recent commits for a specific test or all tests. |
+| `test_gate` | Check if a SHA is clear to push. Verifies a full `make test` pass exists for the SHA on a clean worktree. |
+| `push_ready` | Push with test gate. Checks `test_gate` for HEAD, pushes if passing, returns what's needed if not. |
+| `push_wip` | Push without gate. Pushes unconditionally for saving work or requesting review. |
+
+### `test_run`
+
+```json
+{"path": "tests/elle/core.lisp", "mode": "smoke", "jit": "off"}
+```
+
+Parameters:
+- `path` (optional) — specific test file
+- `mode` — `"smoke"`, `"test"`, or `"single"`
+- `jit` (optional) — override JIT policy: `"off"`, `"eager"`, `"adaptive"`
+
+### `test_status`
+
+```json
+{"sha": "abc123", "mode": "smoke"}
+```
+
+Returns structured result:
+```lisp
+{:passed true
+ :failed-count 0
+ :failures ()
+ :duration 32
+ :clean true
+ :sha "abc123"}
+```
+
+When tests fail, each failure includes:
+```lisp
+{:test "tests/elle/fibers.lisp"
+ :message "assertion failed: fiber cancel propagates"
+ :location "fibers.lisp:42"
+ :context "  (assert (= status :cancelled) \"fiber cancel propagates\")\n           ^"}
+```
+
+### `test_gate`
+
+```json
+{"sha": "abc123"}
+```
+
+Checks:
+1. HEAD SHA has a passing `make test` record
+2. Worktree was clean when the test ran
+3. No new commits since the test (SHA matches HEAD)
+
+Returns `{:ready true}` or `{:ready false :reason "..."}`.
+
+### `push_ready` / `push_wip`
+
+```json
+{"remote": "origin", "branch": "feature-x"}
+```
+
+`push_ready` verifies test gate before pushing. `push_wip` pushes
+unconditionally.
+
+### Test result storage
+
+Results are stored as RDF triples:
+
+```turtle
+<urn:test:abc123:smoke> a elle:TestRun ;
+    elle:sha "abc123" ;
+    elle:mode "smoke" ;
+    elle:clean true ;
+    elle:passed true ;
+    elle:duration 32 ;
+    elle:timestamp "2026-04-15T..." ;
+    elle:failing-tests () ;
+    elle:stderr "" .
+```
+
 ## Design rationale
 
 The MCP server exposes what the compiler already computes. Elle's compilation pipeline performs signal inference, capture analysis, and binding resolution for every file. This information exists whether or not anyone queries it — the MCP server just makes it accessible over JSON-RPC.

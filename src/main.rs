@@ -328,26 +328,47 @@ fn main() {
 
     let mut had_errors = false;
     let mut files: Vec<String> = Vec::new();
+    let mut eval_exprs: Vec<String> = Vec::new();
     let mut read_stdin = false;
 
-    // remaining_args from Config::parse: file args, eval expressions, and user args after --.
-    if let Some(first) = remaining_args.first() {
-        if first == "-" {
+    // remaining_args from Config::parse: file args, eval expressions (--eval:...), and user args after --.
+    // Separate eval expressions from file args.
+    for (i, arg) in remaining_args.iter().enumerate() {
+        if let Some(expr) = arg.strip_prefix("--eval:") {
+            eval_exprs.push(expr.to_string());
+        } else if arg == "-" && files.is_empty() && eval_exprs.is_empty() {
             read_stdin = true;
             vm.source_arg = "-".to_string();
-            vm.user_args = remaining_args[1..].to_vec();
-        } else {
-            vm.source_arg = first.clone();
-            vm.user_args = remaining_args[1..].to_vec();
-            files.push(first.clone());
+            vm.user_args = remaining_args[i + 1..].to_vec();
+            break;
+        } else if arg == "--" {
+            vm.user_args = remaining_args[i + 1..].to_vec();
+            break;
+        } else if files.is_empty() && eval_exprs.is_empty() {
+            vm.source_arg = arg.clone();
+            files.push(arg.clone());
+            // Everything after the first file arg goes to user_args
+            vm.user_args = remaining_args[i + 1..].to_vec();
+            break;
         }
     }
-    // If no source arg found: REPL mode, vm.source_arg stays "" and vm.user_args stays empty.
+    if eval_exprs.is_empty() && files.is_empty() && !read_stdin {
+        // REPL mode: vm.source_arg stays "" and vm.user_args stays empty.
+    } else if !eval_exprs.is_empty() && files.is_empty() && !read_stdin {
+        vm.source_arg = "<eval>".to_string();
+    }
 
     if read_stdin {
         if let Err(e) = run_stdin(&mut vm, &mut symbols) {
             eprintln!("Error: {}", e);
             had_errors = true;
+        }
+    } else if !eval_exprs.is_empty() {
+        for expr in &eval_exprs {
+            if let Err(e) = run_source(expr, "<eval>", &mut vm, &mut symbols) {
+                eprintln!("Error: {}", e);
+                had_errors = true;
+            }
         }
     } else if !files.is_empty() {
         for filename in &files {
@@ -374,7 +395,7 @@ fn main() {
         }
     }
 
-    if !read_stdin && files.is_empty() {
+    if !read_stdin && files.is_empty() && eval_exprs.is_empty() {
         println!();
     }
 

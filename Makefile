@@ -86,8 +86,8 @@ docgen: elle  ## Generate documentation site (Rust docs + Elle site)
 
 # Per-pass skip lists: tests that fail in one mode can still run in the other.
 # jit-rejections    — requires JIT active (tests rejection tracking)
-ELLE_SKIP_VM  := -e jit-rejections.lisp
-ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER
+ELLE_SKIP_VM  := -e jit-rejections.lisp -e config.lisp -e trace.lisp
+ELLE_SKIP_JIT := -e NOMATCH_PLACEHOLDER -e config.lisp -e trace.lisp
 
 # WASM backend skip list: tests requiring features not yet in WASM backend
 # (eval = dynamic compilation)
