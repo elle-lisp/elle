@@ -1,53 +1,38 @@
-# ── silence + runtime panic ──────────────────────────────────────────
+# ── silence: compile-time enforcement ─────────────────────────────────
 #
-# silence imposes no compile-time restriction — any code compiles
-# inside a silenced function. The signal is clamped to silent.
-# At runtime, if ANY signal fires, the process panics.
+# (silence) enforces at compile time that the body's inferred signal
+# fits within the declared ceiling.  Any excess bits are a compile error.
+# Runtime enforcement (vm/call.rs) stays as defense-in-depth.
 
-# ── Should compile: silence with arithmetic ──────────────────────────
+# ── Should compile: silence with pure control flow ───────────────────
 
-(defn fast-add [x y]
+(defn select [flag a b]
   (silence)
-  (+ x y))
+  (if flag a b))
 
-(assert (= (fast-add 3 7) 10) "silenced add works")
+(assert (= (select true 1 2) 1) "select true")
+(assert (= (select false 1 2) 2) "select false")
 
-(defn fast-square [x]
+(defn always [x]
   (silence)
-  (* x x))
+  x)
 
-(assert (= (fast-square 5) 25) "silenced square works")
+(assert (= (always 42) 42) "always returns its argument")
 
-# ── Should compile: silence with comparison + arithmetic ─────────────
+# ── Compile-time rejection: arithmetic emits {:error} ────────────────
 
-(defn fast-abs [x]
-  (silence)
-  (if (> x 0) x (- 0 x)))
+(def [ok? err] (protect (eval '(defn bad-add [x y] (silence) (+ x y)))))
+(assert (not ok?) "silence rejects arithmetic at compile time")
+(assert (string/contains? (get err :message) "may emit") "error mentions excess signal")
 
-(assert (= (fast-abs -7) 7) "silenced abs works")
-(assert (= (fast-abs 5) 5) "silenced abs positive")
+# ── Compile-time rejection: yield ────────────────────────────────────
 
-# ── Should compile: silence with yield (runtime enforcement) ─────────
+(def [ok2? _] (protect (eval '(defn bad-yield [] (silence) (yield 1)))))
+(assert (not ok2?) "silence rejects yield at compile time")
 
-(def [ok? _] (protect (eval '(defn yields-but-silenced [] (silence) (yield 1)))))
-(assert ok? "silence accepts yield at compile time")
+# ── Compile-time rejection: I/O ──────────────────────────────────────
 
-# ── Runtime: error in silenced function causes abort ─────────────────
-# Can't test abort from within Elle (process dies).
-# Verify via subprocess that it aborts with diagnostic.
+(def [ok3? _] (protect (eval '(defn bad-io [x] (silence) (println x)))))
+(assert (not ok3?) "silence rejects I/O at compile time")
 
-(def result (subprocess/system "target/debug/elle"
-  ["--jit=0" "tests/elle/helpers/silence-abort.lisp"]))
-(assert (not (= (get result :exit) 0)) "silenced function aborts on error")
-(assert (string/contains? (get result :stderr) "silence violation")
-  "abort message mentions silence violation")
-
-# ── Runtime: yield in silenced function causes abort ─────────────────
-
-(def result2 (subprocess/system "target/debug/elle"
-  ["--jit=0" "tests/elle/helpers/silence-yield-abort.lisp"]))
-(assert (not (= (get result2 :exit) 0)) "silenced function aborts on yield")
-(assert (string/contains? (get result2 :stderr) "silence violation")
-  "yield abort message mentions silence violation")
-
-(println "all silence+runtime-panic tests passed")
+(println "all silence compile-time enforcement tests passed")

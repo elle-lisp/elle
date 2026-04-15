@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::hir::expr::ParamBound;
+use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::Value;
 use std::rc::Rc;
@@ -226,11 +227,25 @@ impl<'a> Analyzer<'a> {
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
 
-        // When (silence) is declared, clamp the inferred signal to the
-        // declared ceiling unconditionally. No compile-time restriction
-        // on what the body may emit — all enforcement is deferred to
-        // runtime (vm/call.rs panics on any signal from a silent closure).
+        // When (silence) is declared, verify the body's inferred signal
+        // fits within the ceiling.  Any excess bits are a compile error.
         if let Some(ceiling) = &declared_ceiling {
+            let excess = inferred_signals.bits.subtract(ceiling.bits);
+            if !excess.is_empty() {
+                let reg = registry::global_registry().lock().unwrap();
+                return Err(format!(
+                    "{}: function restricted to {} but body may emit {}",
+                    span,
+                    reg.format_signal_bits(ceiling.bits),
+                    reg.format_signal_bits(excess),
+                ));
+            }
+            if ceiling.propagates == 0 && inferred_signals.propagates != 0 {
+                return Err(format!(
+                    "{}: function restricted to silent but body is polymorphic",
+                    span,
+                ));
+            }
             inferred_signals = *ceiling;
         }
 
