@@ -1,3 +1,5 @@
+mod js_lexer;
+mod js_parser;
 mod lexer;
 mod lua_lexer;
 mod lua_parser;
@@ -136,11 +138,14 @@ pub fn strip_markdown(source: &str) -> String {
     out
 }
 
-/// Parse source, dispatching to the Lua reader for `.lua` files
+/// Parse source, dispatching to the Lua reader for `.lua` files,
+/// the JavaScript reader for `.js` files,
 /// and stripping markdown for `.md` files.
 pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
     if source_name.ends_with(".lua") {
         lua_parser::parse_lua_file(input, source_name)
+    } else if source_name.ends_with(".js") {
+        js_parser::parse_js_file(input, source_name)
     } else if source_name.ends_with(".md") {
         let stripped = strip_markdown(input);
         read_syntax_all(&stripped, source_name)
