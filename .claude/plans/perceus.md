@@ -274,32 +274,64 @@ captured by closures with multiple references), add a 1-byte refcount
 to slab slot headers.  `DropValue` checks the refcount: if >1, just
 decrement; if 1, free.  This is the full Perceus completeness story.
 
+## Implementation status
+
+### Phase 1a: Refined rotation safety + shared rotation (DONE)
+
+The core fix has two parts:
+
+1. **Per-parameter independence analysis** (Steps 1-3): `hir_references_binding`
+   walks a HIR subtree checking if any `Var` references a specific binding.
+   `body_escapes_heap_values` uses this for self-tail-calls: a heap-allocating
+   arg is safe if it doesn't reference any parameter whose arg is also
+   heap-allocating.  This classifies `(loop (- i 1) {:a i :b (cons i nil)})`
+   as rotation-safe because arg 1 references `i` (immediate arg) not `prev`
+   (heap arg).
+
+2. **Shared allocator rotation** (runtime fix): the trampoline in `vm/mod.rs`
+   was rotating `self.fiber.heap` which for the root fiber is NOT the active
+   heap — the `ROOT_HEAP` thread-local is.  Fixed to use
+   `with_current_heap_mut`.  Additionally, `rotate_pools` was unconditionally
+   skipping rotation when a shared allocator was active (child fibers under
+   `ev/run`).  Now it calls `SharedAllocator::rotate` using the captured
+   `shared_mark`, which is safe because the refined analysis proves no
+   cross-generation reference chains for rotation-safe functions.
+
+Result: tco-alloc-10000 dropped from 20,002 allocs to 2.
+
+### Phase 1b: DropValue instruction (TODO)
+
+Explicit per-object freeing before tail calls.  Requires coordination
+with pool tracking (pool.allocs/pool.dtors) to avoid double-free during
+rotation teardown.  Options:
+- Disable rotation for DropValue-optimized functions (DropValue handles
+  all freeing; rotation is redundant)
+- Null out freed entries in pool.allocs (modify teardown to skip nulls)
+
+DropValue would reduce peak further (free old param values immediately
+rather than waiting for the swap pool one-iteration lag) and is required
+for Phase 3 (reuse fusion).
+
 ## Test plan
 
-1. Counter-factual: verify tco-alloc-10000 fails (20k allocs) before
-2. Implement Phase 1
-3. Verify tco-alloc-10000 passes (bounded allocs)
-4. Verify all existing tests still pass (make smoke)
-5. Verify cons-build-100 still correctly accumulates (100 allocs)
+1. ~~Counter-factual: verify tco-alloc-10000 fails (20k allocs) before~~ DONE
+2. ~~Implement Phase 1a~~ DONE
+3. ~~Verify tco-alloc-10000 passes (bounded allocs)~~ DONE (allocs=2)
+4. ~~Verify all existing tests still pass~~ DONE (callable-resume pre-existing)
+5. ~~Verify cons-build-100 still correctly accumulates (100 allocs)~~ DONE
 6. Add new scenarios to resource.lisp:
    - tco-replace: struct replaced each iteration, no reference chain
    - tco-mixed: some params replaced, some accumulated
    - tco-nested: nested structs replaced each iteration
 
-## Files to modify
+## Files modified
 
 | File | Change |
 |------|--------|
-| `src/hir/arena.rs` | No changes needed |
-| `src/lir/lower/escape.rs` | Add `hir_references_binding`; refine `body_escapes_heap_values` for self-tail-calls |
-| `src/lir/lower/mod.rs` | Add `current_function_binding` and `current_function_params` fields; set them in lambda/entry lowering |
-| `src/lir/lower/lambda.rs` | Set `current_function_params` when entering lambda |
-| `src/lir/lower/control.rs` | Emit `DropValue` before TailCall for dead parameters |
-| `src/lir/types.rs` | Add `LirInstr::DropValue { slot }` variant |
-| `src/lir/emit/mod.rs` | Emit `DropValue` bytecode instruction |
-| `src/bytecode.rs` | Add `Instruction::DropValue` variant |
-| `src/vm/dispatch.rs` | Handle `DropValue` in VM dispatch loop |
-| `src/value/fiberheap/mod.rs` | Add `drop_heap_value` method |
-| `src/value/fiberheap/slab.rs` | Add `owns(ptr) -> bool` to RootSlab |
-| `src/value/shared_alloc.rs` | Add `owns(ptr) -> bool` and `dealloc(ptr)` methods |
-| `tests/elle/resource.lisp` | Update tco-alloc-10000 assertion to expect bounded allocs |
+| `src/lir/lower/escape.rs` | Added `hir_references_binding`; refined `body_escapes_heap_values` for self-tail-calls |
+| `src/lir/lower/mod.rs` | Added `current_function_binding` and `current_function_params` fields; wired through `precompute_rotation_safety` |
+| `src/lir/lower/lambda.rs` | Set/restore function context for escape analysis |
+| `src/lir/lower/binding.rs` | Set function context in `lower_letrec` and `lower_define` for lambda inits |
+| `src/vm/mod.rs` | Fixed trampoline to use `with_current_heap_mut` instead of `self.fiber.heap` |
+| `src/value/fiberheap/mod.rs` | Added `shared_alloc_count` to `RotationBase`; enabled shared allocator rotation; populate `shared_mark` in `rotation_mark()` |
+| `tests/elle/resource.lisp` | Updated tco-alloc-10000 assertions to expect bounded allocs |

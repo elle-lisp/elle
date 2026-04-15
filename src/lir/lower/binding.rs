@@ -134,7 +134,15 @@ impl<'a> Lowerer<'a> {
         }
         // Then initialize
         for (binding, init) in bindings.iter() {
+            // Set function context for lambdas so that
+            // body_escapes_heap_values can detect self-tail-calls.
+            if let HirKind::Lambda { params, .. } = &init.kind {
+                self.current_function_binding = Some(*binding);
+                self.current_function_params = Some(params.clone());
+            }
             let init_reg = self.lower_expr(init)?;
+            self.current_function_binding = None;
+            self.current_function_params = None;
             let slot = self.binding_to_slot[binding];
 
             // Check if this binding needs cell update
@@ -202,8 +210,17 @@ impl<'a> Lowerer<'a> {
             self.upvalue_bindings.insert(binding);
         }
 
+        // Set function context for lambdas so that
+        // body_escapes_heap_values can detect self-tail-calls.
+        if let HirKind::Lambda { params, .. } = &value.kind {
+            self.current_function_binding = Some(binding);
+            self.current_function_params = Some(params.clone());
+        }
+
         // Now lower the value (which can reference the binding)
         let value_reg = self.lower_expr(value)?;
+        self.current_function_binding = None;
+        self.current_function_params = None;
 
         // Record rotation_safe for lambda bindings so callers can
         // check callee safety transitively.

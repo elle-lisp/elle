@@ -965,6 +965,95 @@ fn collect_destructure_bindings<'a>(
 // ── Rotation-safety analysis ──────────────────────────────────────────
 
 impl<'a> Lowerer<'a> {
+    /// Check if a HIR subtree references a specific binding.
+    ///
+    /// Returns true if any `Var(b)` node in the subtree has `b == binding`.
+    /// Used by the refined rotation safety check to determine whether a
+    /// tail-call argument's expression tree references a specific parameter.
+    fn hir_references_binding(hir: &Hir, binding: Binding) -> bool {
+        match &hir.kind {
+            HirKind::Var(b) => *b == binding,
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            | HirKind::String(_)
+            | HirKind::Quote(_)
+            | HirKind::Error => false,
+            // Don't recurse into lambdas — they capture, not reference.
+            HirKind::Lambda { .. } => false,
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                Self::hir_references_binding(cond, binding)
+                    || Self::hir_references_binding(then_branch, binding)
+                    || Self::hir_references_binding(else_branch, binding)
+            }
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| Self::hir_references_binding(e, binding)),
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    Self::hir_references_binding(c, binding)
+                        || Self::hir_references_binding(b, binding)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| Self::hir_references_binding(b, binding))
+            }
+            HirKind::Call { func, args, .. } => {
+                Self::hir_references_binding(func, binding)
+                    || args
+                        .iter()
+                        .any(|a| Self::hir_references_binding(&a.expr, binding))
+            }
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
+                Self::hir_references_binding(value, binding)
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| Self::hir_references_binding(init, binding))
+                    || Self::hir_references_binding(body, binding)
+            }
+            HirKind::While { cond, body } => {
+                Self::hir_references_binding(cond, binding)
+                    || Self::hir_references_binding(body, binding)
+            }
+            HirKind::Block { body, .. } => body
+                .iter()
+                .any(|e| Self::hir_references_binding(e, binding)),
+            HirKind::Break { value, .. } => Self::hir_references_binding(value, binding),
+            HirKind::Match { value, arms } => {
+                Self::hir_references_binding(value, binding)
+                    || arms.iter().any(|(_, guard, body)| {
+                        guard
+                            .as_ref()
+                            .is_some_and(|g| Self::hir_references_binding(g, binding))
+                            || Self::hir_references_binding(body, binding)
+                    })
+            }
+            HirKind::Emit { value, .. } => Self::hir_references_binding(value, binding),
+            HirKind::Destructure { value, .. } => Self::hir_references_binding(value, binding),
+            HirKind::Eval { expr, env } => {
+                Self::hir_references_binding(expr, binding)
+                    || Self::hir_references_binding(env, binding)
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings.iter().any(|(p, v)| {
+                    Self::hir_references_binding(p, binding)
+                        || Self::hir_references_binding(v, binding)
+                }) || Self::hir_references_binding(body, binding)
+            }
+        }
+    }
+
     /// Walk the HIR looking for operations that escape heap values.
     /// Returns true if any escaping operation is found.
     ///
@@ -1003,7 +1092,42 @@ impl<'a> Lowerer<'a> {
                 // Use tail_arg_is_safe which extends result_is_safe with
                 // callee_result_immediate: a call to a user function known
                 // to return immediates cannot produce a dangling heap pointer.
+                //
+                // Refined for self-tail-calls: per-parameter independence
+                // analysis. A heap-allocating arg is safe if it does not
+                // reference any parameter whose arg is also heap-allocating.
+                // This handles `(loop (- i 1) {:a i :b (cons i nil)})`:
+                // arg 1 references param 0 (i), but param 0's arg is
+                // immediate, so no cross-generation reference chain.
                 if *is_tail {
+                    if let (Some(self_binding), Some(ref params)) =
+                        (self.current_function_binding, &self.current_function_params)
+                    {
+                        if let HirKind::Var(callee_binding) = &func.kind {
+                            if *callee_binding == self_binding {
+                                // Self-tail-call: per-parameter analysis.
+                                let heap_args: Vec<bool> = args
+                                    .iter()
+                                    .map(|a| !self.tail_arg_is_safe(&a.expr))
+                                    .collect();
+
+                                // For each heap-allocating arg, check if it
+                                // references any param whose arg is also
+                                // heap-allocating. If so, there's a cross-
+                                // generation reference chain → unsafe.
+                                let escapes = args.iter().enumerate().any(|(k, a)| {
+                                    if !heap_args.get(k).copied().unwrap_or(false) {
+                                        return false;
+                                    }
+                                    params.iter().enumerate().any(|(j, param_binding)| {
+                                        heap_args.get(j).copied().unwrap_or(false)
+                                            && Self::hir_references_binding(&a.expr, *param_binding)
+                                    })
+                                });
+                                return escapes;
+                            }
+                        }
+                    }
                     return args.iter().any(|a| !self.tail_arg_is_safe(&a.expr));
                 }
                 if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {

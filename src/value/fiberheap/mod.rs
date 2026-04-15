@@ -56,10 +56,11 @@ pub struct RotationBase {
     /// differs (unbalanced due to error exit).
     scope_depth: usize,
     /// When shared_alloc is active at mark time, captures the shared
-    /// allocator's pool state for rotation. Reserved for future use
-    /// when reachability analysis enables safe shared rotation.
-    #[allow(dead_code)]
+    /// allocator's pool state for rotation. Activated by the refined
+    /// per-parameter independence analysis (Perceus Phase 1).
     shared_mark: Option<pool::SlabMark>,
+    /// Shared alloc count at mark time, for resetting after rotation.
+    shared_alloc_count: usize,
 }
 
 mod slab;
@@ -460,11 +461,20 @@ impl FiberHeap {
     }
 
     /// Capture a rotation base mark for tail-call pool rotation.
+    ///
+    /// When a shared allocator is active, also captures its pool state
+    /// so that rotation can free shared objects from previous iterations.
     pub fn rotation_mark(&self) -> RotationBase {
+        let shared_mark = if !self.shared_alloc.is_null() {
+            Some(unsafe { &*self.shared_alloc }.rotation_mark())
+        } else {
+            None
+        };
         RotationBase {
             heap_mark: self.mark(),
             scope_depth: self.scope_marks.len(),
-            shared_mark: None,
+            shared_mark,
+            shared_alloc_count: self.shared_alloc_count,
         }
     }
 
@@ -486,16 +496,16 @@ impl FiberHeap {
         }
 
         if !self.shared_alloc.is_null() {
-            // Shared allocator rotation is not yet safe: objects in the
-            // shared pool may be referenced by the fiber's stack, by other
-            // live objects, or form reference chains (e.g., cons lists
-            // accumulated via tail-call arguments). The swap pool's
-            // one-iteration lag is insufficient — chains can extend
-            // arbitrarily far back.
-            //
-            // The infrastructure exists (SharedAllocator::rotate) for when
-            // we have reachability info to determine which objects are safe
-            // to rotate.
+            // Shared allocator rotation: the trampoline only calls
+            // rotate_pools when prev_rotation_safe is true. The refined
+            // per-parameter independence analysis (Perceus Phase 1) proves
+            // that no heap-allocating tail-call argument references a
+            // parameter whose argument is also heap-allocating — so no
+            // cross-generation reference chains exist. Safe to rotate.
+            if let Some(ref shared_base) = base.shared_mark {
+                unsafe { &mut *self.shared_alloc }.rotate(shared_base);
+                self.shared_alloc_count = base.shared_alloc_count;
+            }
             return;
         }
 

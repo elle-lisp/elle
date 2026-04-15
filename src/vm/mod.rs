@@ -104,9 +104,10 @@ impl VM {
             if let Some(tail) = self.pending_tail_call.take() {
                 if prev_rotation_safe {
                     if let Some(ref base) = rotation_base {
-                        self.fiber.heap.rotate_pools(base);
+                        crate::value::fiberheap::with_current_heap_mut(|h| h.rotate_pools(base));
                     } else {
-                        rotation_base = Some(self.fiber.heap.rotation_mark());
+                        rotation_base =
+                            crate::value::fiberheap::with_current_heap_mut(|h| h.rotation_mark());
                     }
                 } else {
                     rotation_base = None;

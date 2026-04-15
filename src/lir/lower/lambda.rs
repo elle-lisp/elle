@@ -157,6 +157,8 @@ impl<'a> Lowerer<'a> {
         let saved_discard_slot = self.discard_slot;
         let saved_pending_region_exits = self.pending_region_exits;
         let saved_region_depth = self.region_depth;
+        let saved_function_binding = self.current_function_binding.take();
+        let saved_function_params = self.current_function_params.take();
 
         self.next_reg = 0;
         self.next_label = 1;
@@ -267,10 +269,20 @@ impl<'a> Lowerer<'a> {
         // Compute escape analysis flags for fiber shared-alloc decisions.
         // Empty scope_bindings: at the lambda boundary, there are no
         // let/letrec bindings in scope — captures come from the parent.
+        //
+        // Restore function context for escape analysis: the parent's
+        // letrec/define set current_function_binding/params for this
+        // lambda before calling lower_expr. We saved them at entry
+        // (via take()), now restore them so body_escapes_heap_values
+        // can detect self-tail-calls with per-parameter analysis.
+        self.current_function_binding = saved_function_binding;
+        self.current_function_params = saved_function_params;
         self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
         self.current_func.has_outward_heap_set =
             self.body_contains_dangerous_outward_set(body, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
+        self.current_function_binding = None;
+        self.current_function_params = None;
 
         let func = std::mem::replace(&mut self.current_func, saved_func);
 

@@ -222,6 +222,12 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
+    /// Binding of the current function being analyzed (for self-tail-call
+    /// detection in escape analysis and drop insertion).
+    current_function_binding: Option<Binding>,
+    /// Parameter bindings of the current function (for per-parameter
+    /// independence analysis in self-tail-calls).
+    current_function_params: Option<Vec<Binding>>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -252,6 +258,8 @@ impl<'a> Lowerer<'a> {
             discard_slot: None,
             symbol_names: HashMap::new(),
             closures: Vec::new(),
+            current_function_binding: None,
+            current_function_params: None,
         }
     }
 
@@ -980,22 +988,26 @@ impl<'a> Lowerer<'a> {
     /// safe, and each pass may flip some to unsafe. Converges because
     /// the only transition is safe→unsafe (monotone).
     fn precompute_rotation_safety(&mut self, hir: &Hir) {
-        // Collect all (binding, lambda_body) pairs from the HIR.
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
+        // Collect all (binding, params, lambda_body) pairs from the HIR.
+        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
+        Self::collect_lambda_defs_with_params(hir, &mut defs);
         if defs.is_empty() {
             return;
         }
 
         // Seed: all functions optimistically safe.
-        for &(binding, _) in &defs {
+        for &(binding, _, _) in &defs {
             self.callee_rotation_safe.insert(binding, true);
         }
 
         // Iterate until stable.
         loop {
             let mut changed = false;
-            for &(binding, body) in &defs {
+            for &(binding, ref params, body) in &defs {
+                // Set context so body_escapes_heap_values can detect
+                // self-tail-calls and apply per-parameter analysis.
+                self.current_function_binding = Some(binding);
+                self.current_function_params = Some(params.clone());
                 let escapes = self.body_escapes_heap_values(body);
                 let was_safe = self.callee_rotation_safe[&binding];
                 if was_safe && escapes {
@@ -1007,6 +1019,10 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
+
+        // Clear context
+        self.current_function_binding = None;
+        self.current_function_params = None;
 
         // Record stats
         self.scope_stats.rotation_analyzed = defs.len();

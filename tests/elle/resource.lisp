@@ -85,11 +85,31 @@
 
    ["tco-alloc-10000"
     (fn []
-      # Allocations escape the let (passed as arg) — exercises swap pool
+      # Per-parameter independence: {:a i :b (cons i nil)} does not
+      # reference prev, so no cross-generation chain. Rotation safe.
       (letrec [[loop (fn [i prev]
                   (if (= i 0) prev
                     (loop (- i 1) {:a i :b (cons i nil)})))]]
         (loop 10000 nil)))]
+
+   ["tco-replace-10000"
+    (fn []
+      # Struct replaced each iteration, no accumulation.
+      # prev is overwritten, never referenced by the new struct.
+      (letrec [[loop (fn [i prev]
+                  (if (= i 0) prev
+                    (loop (- i 1) {:x i :y (+ i 1)})))]]
+        (loop 10000 nil)))]
+
+   ["tco-mixed-10000"
+    (fn []
+      # Mixed: param 1 (prev) is replaced each iteration (rotation-safe),
+      # param 2 (acc) accumulates via cons (rotation-unsafe because
+      # (cons i acc) references acc).
+      (letrec [[loop (fn [i prev acc]
+                  (if (= i 0) acc
+                    (loop (- i 1) {:x i} (cons i acc))))]]
+        (loop 10000 nil nil)))]
 
    ["let-no-escape"
     (fn []
@@ -140,16 +160,28 @@
   (assert (< (m :peak) 10)
     "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
 
-# TCO with per-iteration allocation: values escape via tail-call args
-# and form reference chains (each cons cell points to the previous).
-# Swap pool one-iteration lag can't safely free them — the chain extends
-# arbitrarily far back. This is correctly detected by escape analysis
-# (rotation_safe=false).
+# TCO with per-iteration allocation: per-parameter independence analysis
+# (Perceus Phase 1) proves that {:a i :b (cons i nil)} does not reference
+# the `prev` parameter, so no cross-generation reference chain exists.
+# Swap pool rotation safely frees previous iteration's objects.
 (let [[m (find-result "tco-alloc-10000")]]
-  (assert (= (m :allocs) (m :peak))
-    "tco-alloc-10000: peak equals allocs (no rotation for escaping chains)")
+  (assert (< (m :allocs) 10)
+    "tco-alloc-10000: allocs bounded (rotation working)")
+  (assert (< (m :peak) 10)
+    "tco-alloc-10000: peak bounded (no accumulation)"))
+
+# TCO replace: struct replaced each iteration, no accumulation.
+(let [[m (find-result "tco-replace-10000")]]
+  (assert (< (m :allocs) 10)
+    "tco-replace-10000: allocs bounded (rotation working)")
+  (assert (< (m :peak) 10)
+    "tco-replace-10000: peak bounded (no accumulation)"))
+
+# TCO mixed: prev is replaced (safe), acc accumulates via cons (unsafe).
+# The function is rotation-unsafe because (cons i acc) references acc.
+(let [[m (find-result "tco-mixed-10000")]]
   (assert (> (m :allocs) 10000)
-    "tco-alloc-10000: allocs proportional to iterations (reference chains)"))
+    "tco-mixed-10000: allocs proportional to iterations (acc accumulates)"))
 
 # fib: pure arithmetic, no heap objects expected
 (let [[m (find-result "fib-15")]]
