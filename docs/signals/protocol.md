@@ -222,6 +222,41 @@ And signal bounds on parameters:
 
 These are compile-time contracts. The system enforces them statically and at runtime.
 
+### Compile-time Signal Absorption with muffle
+
+`muffle` absorbs specific signals from a function body, allowing `silence` functions to contain operations that declare those signals:
+
+```lisp
+# Arithmetic declares :error but we know inputs are numeric
+(defn fast-add [x y]
+  (silence)
+  (muffle :error)
+  (+ x y))
+
+# Muffle a set of signals
+(defn fast-square [x]
+  (silence)
+  (muffle |:error|)
+  (* x x))
+```
+
+The function's external signal excludes muffled bits — callers see it as silent. Runtime enforcement (vm/call.rs) aborts if a muffled signal actually fires.
+
+`muffle` also works without `silence`, subtracting the muffled bits from the inferred signal:
+
+```lisp
+# Body infers {:error}, muffle removes it → external signal is silent
+(defn add-quiet [x y]
+  (muffle :error)
+  (+ x y))
+```
+
+| Form | Scope | Effect |
+|------|-------|--------|
+| `(silence)` | whole body | body must be fully silent (compile error otherwise) |
+| `(silence f)` | parameter | `f` must be silent when passed |
+| `(muffle :error)` | specific signal | absorb `:error` from body; abort if it fires |
+
 ### Runtime Signal Enforcement with squelch
 
 `squelch` is a **runtime closure transform primitive** that takes a closure and returns a new closure with runtime signal enforcement:

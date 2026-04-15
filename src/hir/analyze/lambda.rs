@@ -39,6 +39,10 @@ impl<'a> Analyzer<'a> {
         // Save and reset restrict accumulators
         let saved_param_bounds = std::mem::take(&mut self.current_param_bounds);
         let saved_declared_ceiling = self.current_declared_ceiling.take();
+        let saved_muffle_bits = std::mem::replace(
+            &mut self.current_muffle_bits,
+            crate::value::fiber::SignalBits::EMPTY,
+        );
 
         // For nested lambdas, the parent captures are the captures from the enclosing lambda
         self.parent_captures = saved_captures.clone();
@@ -226,11 +230,17 @@ impl<'a> Analyzer<'a> {
             .map(|(binding, signal)| ParamBound { binding, signal })
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
+        let muffle_bits = std::mem::replace(
+            &mut self.current_muffle_bits,
+            crate::value::fiber::SignalBits::EMPTY,
+        );
 
         // When (silence) is declared, verify the body's inferred signal
-        // fits within the ceiling.  Any excess bits are a compile error.
+        // fits within the ceiling.  Muffled bits expand the ceiling —
+        // they are allowed in the body but excluded from the external signal.
         if let Some(ceiling) = &declared_ceiling {
-            let excess = inferred_signals.bits.subtract(ceiling.bits);
+            let effective_ceiling = ceiling.bits | muffle_bits;
+            let excess = inferred_signals.bits.subtract(effective_ceiling);
             if !excess.is_empty() {
                 let reg = registry::global_registry().lock().unwrap();
                 return Err(format!(
@@ -247,6 +257,10 @@ impl<'a> Analyzer<'a> {
                 ));
             }
             inferred_signals = *ceiling;
+        } else if !muffle_bits.is_empty() {
+            // No silence, but muffle is active: subtract muffled bits
+            // from the inferred signal.
+            inferred_signals.bits = inferred_signals.bits.subtract(muffle_bits);
         }
 
         self.pop_scope();
@@ -259,6 +273,7 @@ impl<'a> Analyzer<'a> {
         self.current_lambda_params = saved_lambda_params;
         self.current_param_bounds = saved_param_bounds;
         self.current_declared_ceiling = saved_declared_ceiling;
+        self.current_muffle_bits = saved_muffle_bits;
 
         // No need to sync is_mutated — CaptureInfo reads from the shared Binding directly
 
