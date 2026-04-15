@@ -30,11 +30,11 @@ Polymorphic-by-default keeps the path of least resistance aligned with Elle's se
 The minority case—tight numerical loops, performance-critical inner functions—explicitly uses `(silence)`:
 
 ```lisp
-(defn select [flag a b]
+(defn fast-add [x y]
   (silence)
-  (if flag a b))
+  (+ x y))
 
-(select true 1 2)
+(fast-add 3 7)
 ```
 
 This is similar to how Rust puts `unsafe` on unsafe code, or how Python puts `@jit` on hot code. The burden of intent is acceptable when applied to the minority case, not the majority.

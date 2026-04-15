@@ -207,9 +207,9 @@ The programmer can restrict signals on functions using `silence` (compile-time t
 
 ```lisp
 # Require the function body to be completely silent
-(defn select (flag a b)
+(defn fast-add [x y]
   (silence)
-  (if flag a b))
+  (+ x y))
 ```
 
 And signal bounds on parameters:

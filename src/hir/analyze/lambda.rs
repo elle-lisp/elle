@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::hir::expr::ParamBound;
-use crate::signals::registry;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::Value;
 use std::rc::Rc;
@@ -217,7 +216,7 @@ impl<'a> Analyzer<'a> {
         // Compute the inferred signal based on signal sources.
         // Must happen before draining current_param_bounds, since
         // compute_inferred_signal reads them for bounded params.
-        let inferred_signals = self.compute_inferred_signal(&body, &params);
+        let mut inferred_signals = self.compute_inferred_signal(&body, &params);
 
         // Read bound accumulators (populated by analyze_silence during body analysis)
         let param_bounds: Vec<ParamBound> = self
@@ -227,22 +226,12 @@ impl<'a> Analyzer<'a> {
             .collect();
         let declared_ceiling = self.current_declared_ceiling.take();
 
-        // Check function-level constraint if present.
-        // silence (whitelist): excess = inferred & !ceiling — any excess is an error.
-        // Signal mismatches are fatal — the programmer explicitly declared a
-        // constraint and violated it. Unlike undefined vars (which we accumulate),
-        // this is not something we continue past.
-        if let Some(ceiling) = declared_ceiling {
-            let excess = inferred_signals.bits.subtract(ceiling.bits);
-            if !excess.is_empty() {
-                let reg = registry::global_registry().lock().unwrap();
-                return Err(format!(
-                    "{}: function restricted to {} but body may emit {}",
-                    span,
-                    reg.format_signal_bits(ceiling.bits),
-                    reg.format_signal_bits(excess),
-                ));
-            }
+        // When (silence) is declared, clamp the inferred signal to the
+        // declared ceiling unconditionally. No compile-time restriction
+        // on what the body may emit — all enforcement is deferred to
+        // runtime (vm/call.rs panics on any signal from a silent closure).
+        if let Some(ceiling) = &declared_ceiling {
+            inferred_signals = *ceiling;
         }
 
         self.pop_scope();
