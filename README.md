@@ -31,6 +31,7 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 - [Tooling](#tooling)
 - [Documentation](#documentation)
 - [For Agent Developers](#for-agent-developers)
+- [Alternative Surface Syntaxes](#alternative-surface-syntaxes)
 - [Coming from Another Language](#coming-from-another-language)
 - [Getting Started](#getting-started)
 - [License](#license)
@@ -848,6 +849,31 @@ The compiler computes signal inference, capture analysis, and call graphs for ev
 - **[MCP Server](docs/mcp.md)** — 15 tools: `portrait`, `signal_query`, `impact`, `trace`, `compile_rename`, `compile_extract`, `compile_parallelize`, `verify_invariants`, and SPARQL
 - **[Analysis overview](docs/analysis/README.md)** — How portrait, MCP, and agent reasoning fit together
 
+## Alternative Surface Syntaxes
+
+Elle's native syntax is s-expressions. If you find parentheses unfamiliar, you can write Elle programs using JavaScript or Lua syntax instead. These are purely cosmetic — the reader translates them into the same syntax trees as s-expressions, and the rest of the pipeline (macro expansion, analysis, compilation, execution) is unchanged.
+
+To use an alternative syntax, just name your file with the appropriate extension:
+
+```bash
+elle program.js    # JavaScript syntax
+elle program.lua   # Lua syntax
+elle program.lisp  # s-expression syntax (default)
+```
+
+Each surface syntax maps its idioms to Elle primitives:
+
+| JS | Lua | Elle |
+|---|---|---|
+| `const x = 42` | `local x = 42` | `(def x 42)` |
+| `(x) => x + 1` | `function(x) return x + 1 end` | `(fn (x) (+ x 1))` |
+| `if (c) { a } else { b }` | `if c then a else b end` | `(if c a b)` |
+| `for (const x of arr)` | `for x in arr do ... end` | `(each x in arr ...)` |
+| `{x: 1, y: 2}` | `{x = 1, y = 2}` | `@{:x 1 :y 2}` |
+| `[1, 2, 3]` | `{1, 2, 3}` | `@[1 2 3]` |
+
+See [`demos/syntax.js`](demos/syntax.js) for a comprehensive example of every JS syntax feature.
+
 ## Coming from Another Language
 
 Orientation guides for programmers arriving from other languages — key
@@ -883,7 +909,7 @@ make test                                 # full test suite (~2min)
 
 ### Subcommands
 
-- **`elle [file...]`** — Run Elle files (`.lisp`, `.lua`, `.md`) or start the REPL
+- **`elle [file...]`** — Run Elle files (`.lisp`, `.js`, `.lua`, `.md`) or start the REPL
 - **`elle lint [options] <file|dir>...`** — Static analysis and linting
 - **`elle lsp`** — Start the language server protocol server
 - **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
