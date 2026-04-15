@@ -127,16 +127,21 @@ fn format_error_json(error: &elle::error::LError) -> String {
 
 fn run_stdin(vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
     let mut contents = String::new();
-    io::stdin()
-        .read_to_string(&mut contents)
-        .map_err(|e| format!("Failed to read stdin: {}", e))?;
+    io::stdin().read_to_string(&mut contents).map_err(|e| {
+        let msg = format!("Failed to read stdin: {}", e);
+        eprintln!("✗ {}", msg);
+        msg
+    })?;
 
     run_source(&contents, "<stdin>", vm, symbols)
 }
 
 fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<(), String> {
-    let mut contents =
-        fs::read_to_string(filename).map_err(|e| format!("Failed to read file: {}", e))?;
+    let mut contents = fs::read_to_string(filename).map_err(|e| {
+        let msg = format!("{}: {}", filename, e);
+        eprintln!("✗ {}", msg);
+        msg
+    })?;
 
     // Strip shebang if present (e.g., #!/usr/bin/env elle)
     if contents.starts_with("#!") {
@@ -359,21 +364,18 @@ fn main() {
     }
 
     if read_stdin {
-        if let Err(e) = run_stdin(&mut vm, &mut symbols) {
-            eprintln!("Error: {}", e);
+        if run_stdin(&mut vm, &mut symbols).is_err() {
             had_errors = true;
         }
     } else if !eval_exprs.is_empty() {
         for expr in &eval_exprs {
-            if let Err(e) = run_source(expr, "<eval>", &mut vm, &mut symbols) {
-                eprintln!("Error: {}", e);
+            if run_source(expr, "<eval>", &mut vm, &mut symbols).is_err() {
                 had_errors = true;
             }
         }
     } else if !files.is_empty() {
         for filename in &files {
-            if let Err(e) = run_file(filename, &mut vm, &mut symbols) {
-                eprintln!("Error: {}", e);
+            if run_file(filename, &mut vm, &mut symbols).is_err() {
                 had_errors = true;
             }
         }
