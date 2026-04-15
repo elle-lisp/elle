@@ -32,6 +32,9 @@ pub(crate) struct PendingFiberResume {
 }
 
 pub struct VM {
+    /// Mutable runtime configuration: trace flags, JIT/WASM policy.
+    /// Accessible from Elle via `(vm/config)`.
+    pub runtime_config: crate::config::RuntimeConfig,
     /// The current fiber holding all per-execution state:
     /// operand stack, call frames, exception handlers, coroutine state.
     pub fiber: Fiber,
@@ -145,7 +148,22 @@ impl VM {
         // Root fiber starts alive (it's the currently executing context)
         fiber.status = crate::value::FiberStatus::Alive;
 
+        let rc = crate::config::RuntimeConfig::from_static_config(crate::config::get());
+        // Merge --trace= keywords from CLI into the RuntimeConfig
+        let mut rc = rc;
+        if !crate::config::get().trace_keywords.is_empty() {
+            let mut kws = rc.trace.clone();
+            for kw in &crate::config::get().trace_keywords {
+                kws.insert(kw.clone());
+            }
+            rc.set_trace(kws);
+        }
+
+        let jit_enabled = rc.jit.enabled();
+        let jit_threshold = rc.jit.threshold();
+
         VM {
+            runtime_config: rc,
             fiber,
             current_fiber_handle: None, // root fiber has no handle
             current_fiber_value: None,  // root fiber has no Value
@@ -165,12 +183,8 @@ impl VM {
             eval_expander: None,
             user_args: Vec::new(),
             source_arg: String::new(),
-            jit_enabled: crate::config::get().jit > 0,
-            jit_hotness_threshold: if crate::config::get().jit > 0 {
-                (crate::config::get().jit - 1) as usize
-            } else {
-                0
-            },
+            jit_enabled,
+            jit_hotness_threshold: jit_threshold,
             wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
@@ -502,7 +516,10 @@ impl VM {
                         self.fiber.stack.push(current_value);
                     }
 
-                    if crate::config::get().debug_stack {
+                    if self
+                        .runtime_config
+                        .has_trace_bit(crate::config::trace_bits::CALL)
+                    {
                         let opcode = if frame.ip < frame.bytecode.len() {
                             frame.bytecode[frame.ip]
                         } else {
@@ -553,7 +570,10 @@ impl VM {
 
                     if exec.bits.is_ok() {
                         let (_, v) = self.fiber.signal.take().unwrap();
-                        if crate::config::get().debug_resume {
+                        if self
+                            .runtime_config
+                            .has_trace_bit(crate::config::trace_bits::FIBER)
+                        {
                             eprintln!(
                                 "[resume_suspended] frame {} OK: val_type={} total_frames={}",
                                 i,
@@ -563,7 +583,10 @@ impl VM {
                         }
                         current_value = v;
                     } else {
-                        if crate::config::get().debug_resume {
+                        if self
+                            .runtime_config
+                            .has_trace_bit(crate::config::trace_bits::FIBER)
+                        {
                             let susp_len =
                                 self.fiber.suspended.as_ref().map(|v| v.len()).unwrap_or(0);
                             let remaining = frames.len() - i - 1;

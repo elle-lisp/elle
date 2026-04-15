@@ -13,14 +13,18 @@ fn print_help() {
     println!("       elle lsp                          Start language server");
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
     println!("Options:");
-    println!("  -h, --help        Show this help");
-    println!("  -e, --eval EXPR   Evaluate expression");
-    println!("  -                 Read from stdin");
-    println!("  --dump-ast        Print parsed AST as s-expressions and exit");
-    println!("  --jit=N           JIT threshold (0=off, 1=immediate, default: 11)");
-    println!("  --wasm=N|full     WASM backend (0=off, N=tiered, full=whole-module)");
-    println!("  --stats           Print compilation stats on exit");
-    println!("  --json            JSON output on stderr\n");
+    println!("  -h, --help            Show this help");
+    println!("  -e, --eval EXPR       Evaluate expression");
+    println!("  -                     Read from stdin");
+    println!("  --dump-ast            Print parsed AST as s-expressions and exit");
+    println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
+    println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
+    println!(
+        "  --trace=KW[,KW,...]   Trace subsystems: call, signal, fiber, jit, wasm, compile, ..."
+    );
+    println!("  --trace=all           Trace everything");
+    println!("  --stats               Print compilation stats on exit");
+    println!("  --json                JSON output on stderr\n");
     println!("Syntax:");
     println!("  .lisp             S-expression syntax (default)");
     println!("  .py               Python syntax");

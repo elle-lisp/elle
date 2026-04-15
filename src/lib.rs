@@ -35,6 +35,8 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[macro_use]
+pub mod trace;
 pub mod arithmetic;
 pub mod compiler;
 pub mod config;

@@ -11,6 +11,7 @@ pub mod chan;
 pub mod comparison;
 pub mod compile;
 pub mod concurrency;
+pub mod config;
 pub mod convert;
 pub mod coroutines;
 pub mod debug;
