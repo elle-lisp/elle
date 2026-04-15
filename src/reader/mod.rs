@@ -5,6 +5,8 @@ mod lua_lexer;
 mod lua_parser;
 mod numeric;
 mod parser;
+mod py_lexer;
+mod py_parser;
 mod syntax;
 mod token;
 
@@ -138,14 +140,16 @@ pub fn strip_markdown(source: &str) -> String {
     out
 }
 
-/// Parse source, dispatching to the Lua reader for `.lua` files,
-/// the JavaScript reader for `.js` files,
-/// and stripping markdown for `.md` files.
+/// Parse source, dispatching by file extension:
+/// `.lua` → Lua reader, `.js` → JavaScript reader, `.py` → Python reader,
+/// `.md` → markdown code-block extraction, anything else → s-expressions.
 pub fn read_syntax_all_for(input: &str, source_name: &str) -> Result<Vec<Syntax>, String> {
     if source_name.ends_with(".lua") {
         lua_parser::parse_lua_file(input, source_name)
     } else if source_name.ends_with(".js") {
         js_parser::parse_js_file(input, source_name)
+    } else if source_name.ends_with(".py") {
+        py_parser::parse_py_file(input, source_name)
     } else if source_name.ends_with(".md") {
         let stripped = strip_markdown(input);
         read_syntax_all(&stripped, source_name)

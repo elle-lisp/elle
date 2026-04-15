@@ -14,16 +14,23 @@ fn print_help() {
     println!("       elle rewrite [options] <file...>  Source-to-source rewriting\n");
     println!("Options:");
     println!("  -h, --help        Show this help");
+    println!("  -e, --eval EXPR   Evaluate expression");
     println!("  -                 Read from stdin");
+    println!("  --dump-ast        Print parsed AST as s-expressions and exit");
     println!("  --jit=N           JIT threshold (0=off, 1=immediate, default: 11)");
     println!("  --wasm=N|full     WASM backend (0=off, N=tiered, full=whole-module)");
     println!("  --stats           Print compilation stats on exit");
     println!("  --json            JSON output on stderr\n");
+    println!("Syntax:");
+    println!("  .lisp             S-expression syntax (default)");
+    println!("  .py               Python syntax");
+    println!("  .js               JavaScript syntax");
+    println!("  .lua              Lua syntax");
+    println!("  .md               Literate markdown (```lisp blocks)\n");
     println!("Environment:");
     println!("  ELLE_HOME             Module resolution root");
     println!("  ELLE_PATH             Colon-separated module search path");
-    println!("  ELLE_CACHE            Disk cache directory\n");
-    print!("{}", elle::primitives::help_text());
+    println!("  ELLE_CACHE            Disk cache directory");
 }
 
 /// Format a runtime error with symbol resolution
@@ -147,6 +154,18 @@ fn run_source(
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
+    // --dump-ast: parse and print, then exit without compiling
+    if elle::config::get().dump_ast {
+        let forms = elle::reader::read_syntax_all_for(contents, source_name).map_err(|e| {
+            eprintln!("{}", e);
+            e
+        })?;
+        for form in &forms {
+            println!("{}", form);
+        }
+        return Ok(());
+    }
+
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
     if elle::config::get().wasm_full {
         let no_stdlib = elle::config::get().wasm_no_stdlib;
