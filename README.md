@@ -851,11 +851,21 @@ The compiler computes signal inference, capture analysis, and call graphs for ev
 
 ## Alternative Surface Syntaxes
 
-Elle's native syntax is s-expressions. If you find parentheses unfamiliar, you can write Elle programs using JavaScript or Lua syntax instead. These are purely cosmetic — the reader translates them into the same syntax trees as s-expressions, and the rest of the pipeline (macro expansion, analysis, compilation, execution) is unchanged.
+Elle's native syntax is s-expressions. If you find parentheses unfamiliar,
+you can write Elle programs using Python, JavaScript, or Lua syntax instead.
+These are purely cosmetic — the reader translates them into the same syntax
+trees as s-expressions, and the rest of the pipeline (macro expansion,
+analysis, compilation, execution) is unchanged.
 
-To use an alternative syntax, just name your file with the appropriate extension:
+Note that not all semantics map cleanly to other syntaxes. The alternative
+readers support a common subset of syntax features for testing purposes,
+but they are not as fully-featured as the s-expression reader.
+
+To use an alternative syntax, just name your file with the appropriate
+extension:
 
 ```bash
+elle program.py    # Python syntax
 elle program.js    # JavaScript syntax
 elle program.lua   # Lua syntax
 elle program.lisp  # s-expression syntax (default)
@@ -863,16 +873,18 @@ elle program.lisp  # s-expression syntax (default)
 
 Each surface syntax maps its idioms to Elle primitives:
 
-| JS | Lua | Elle |
-|---|---|---|
-| `const x = 42` | `local x = 42` | `(def x 42)` |
-| `(x) => x + 1` | `function(x) return x + 1 end` | `(fn (x) (+ x 1))` |
-| `if (c) { a } else { b }` | `if c then a else b end` | `(if c a b)` |
-| `for (const x of arr)` | `for x in arr do ... end` | `(each x in arr ...)` |
-| `{x: 1, y: 2}` | `{x = 1, y = 2}` | `@{:x 1 :y 2}` |
-| `[1, 2, 3]` | `{1, 2, 3}` | `@[1 2 3]` |
+| Python | JS | Lua | Elle |
+|---|---|---|---|
+| `x = 42` | `const x = 42` | `local x = 42` | `(def x 42)` |
+| `lambda x: x + 1` | `(x) => x + 1` | `function(x) return x + 1 end` | `(fn (x) (+ x 1))` |
+| `if c: a` / `else: b` | `if (c) { a } else { b }` | `if c then a else b end` | `(if c a b)` |
+| `for x in arr:` | `for (const x of arr)` | `for x in arr do ... end` | `(each x in arr ...)` |
+| `{"x": 1, "y": 2}` | `{x: 1, y: 2}` | `{x = 1, y = 2}` | `@{:x 1 :y 2}` |
+| `[1, 2, 3]` | `[1, 2, 3]` | `{1, 2, 3}` | `@[1 2 3]` |
 
-See [`demos/syntax.js`](demos/syntax.js) for a comprehensive example of every JS syntax feature.
+See [`demos/syntax.py`](demos/syntax.py), [`demos/syntax.js`](demos/syntax.js),
+and [`demos/syntax.lua`](demos/syntax.lua) for comprehensive examples of
+every syntax feature.
 
 ## Coming from Another Language
 
@@ -909,7 +921,7 @@ make test                                 # full test suite (~2min)
 
 ### Subcommands
 
-- **`elle [file...]`** — Run Elle files (`.lisp`, `.js`, `.lua`, `.md`) or start the REPL
+- **`elle [file...]`** — Run Elle files (`.lisp`, `.py`, `.js`, `.lua`, `.md`) or start the REPL
 - **`elle lint [options] <file|dir>...`** — Static analysis and linting
 - **`elle lsp`** — Start the language server protocol server
 - **`elle rewrite [options] <file...>`** — Source-to-source rewriting with rules
