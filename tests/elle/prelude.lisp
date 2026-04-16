@@ -205,3 +205,22 @@
       (assign n (+ n 1))
       (if (= n 3) (break :while :done))))])
   (assert (= result :done) "forever break value"))
+
+# ============================================================================
+# each — iterates coroutines (fibers)
+# ============================================================================
+
+# Drives a coroutine via coro/resume until it stops yielding.
+(let ([seen @[]])
+  (def co (coro/new (fn () (yield 10) (yield 20) (yield 30))))
+  (each x in co (push seen x))
+  (assert (= (length seen) 3) "each+fiber: yielded values consumed")
+  (assert (= (get seen 0) 10) "each+fiber: first value")
+  (assert (= (get seen 1) 20) "each+fiber: second value")
+  (assert (= (get seen 2) 30) "each+fiber: third value"))
+
+# Exhausted coroutine iterates zero times.
+(let ([calls @[0]])
+  (def co (coro/new (fn () nil)))  # body returns immediately, never yields
+  (each _ in co (put calls 0 (inc (get calls 0))))
+  (assert (= (get calls 0) 0) "each+fiber: empty coroutine invokes body zero times"))

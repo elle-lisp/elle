@@ -3,7 +3,7 @@
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
 # are tested via (http:test) which runs sanity checks inside the module.
 
-(def http ((import-file "lib/http.lisp")))
+(def http ((import "std/http")))
 
 # ============================================================================
 # Internal wire-format sanity checks
@@ -45,20 +45,38 @@
   (assert (= u:path "/")        "path /")
   (assert (nil? u:query)         "no query"))
 
-# Error: non-http scheme
-(let [[[ok? err] (protect (http:parse-url "ftp://example.com/"))]]
-  (assert (not ok?)                        "ftp scheme signals error")
-  (assert (= (get err :error) :http-error) "ftp scheme is :http-error"))
-
 # Error: malformed (no scheme)
 (let [[[ok? err] (protect (http:parse-url "example.com/foo"))]]
   (assert (not ok?)                        "bare hostname signals error")
   (assert (= (get err :error) :http-error) "bare hostname is :http-error"))
 
-# Error: https not supported
-(let [[[ok? err] (protect (http:parse-url "https://example.com/"))]]
-  (assert (not ok?)                        "https signals error")
-  (assert (= (get err :error) :http-error) "https is :http-error"))
+# HTTPS: default port 443
+(let [[u (http:parse-url "https://example.com/")]]
+  (assert (= u:scheme "https")       "https scheme")
+  (assert (= u:host   "example.com") "https host")
+  (assert (= u:port   443)            "https default port 443")
+  (assert (= u:path   "/")            "https path"))
+
+# HTTPS: explicit port, path, query
+(let [[u (http:parse-url "https://api.example.com:8443/v1/items?limit=10")]]
+  (assert (= u:scheme "https")            "https scheme")
+  (assert (= u:host   "api.example.com")  "https host")
+  (assert (= u:port   8443)               "https explicit port")
+  (assert (= u:path   "/v1/items")        "https path")
+  (assert (= u:query  "limit=10")         "https query"))
+
+# HTTPS: no path defaults to /
+(let [[u (http:parse-url "https://example.com")]]
+  (assert (= u:port 443) "https no path: default port")
+  (assert (= u:path "/") "https no path: default /"))
+
+# Error: non-http/https scheme
+(let [[[ok? err] (protect (http:parse-url "ftp://example.com/"))]]
+  (assert (not ok?)                        "ftp scheme signals error")
+  (assert (= (get err :error) :http-error) "ftp scheme is :http-error"))
+(let [[[ok? err] (protect (http:parse-url "wss://example.com/"))]]
+  (assert (not ok?)                        "wss scheme signals error")
+  (assert (= (get err :error) :http-error) "wss scheme is :http-error"))
 
 # ============================================================================
 # Response construction (pure, no I/O)
@@ -82,6 +100,141 @@
 # Connection refused (nothing listening on port 1)
 (let [[[ok? _] (protect (http:get "http://127.0.0.1:1/"))]]
   (assert (not ok?) "http:get connection refused signals error"))
+
+# ============================================================================
+# TLS plugin integration — https requires :tls on module init
+# ============================================================================
+
+# Without :tls, https URLs must fail with a clear :tls-not-configured error.
+(let [[[ok? err] (protect (http:get "https://example.com/"))]]
+  (assert (not ok?)                           "https without :tls signals error")
+  (assert (= err:reason :tls-not-configured)
+    "https without :tls reports :tls-not-configured"))
+
+# With :tls, the module uses the supplied plugin. We use a fake plugin that
+# records calls so we can verify the wiring without pulling in real TLS.
+(def tls-log @[])
+(defn push-log [& args] (push tls-log args))
+
+(def fake-tls
+  {:connect   (fn [host port] (push-log :connect host port) :fake-conn)
+   :read      (fn [conn n]   (push-log :read conn n) nil)
+   :read-line (fn [conn]     (push-log :read-line conn) nil)
+   :write     (fn [conn data] (push-log :write conn data) (length data))
+   :close     (fn [conn]     (push-log :close conn))})
+
+(def https-http ((import "std/http") :tls fake-tls))
+
+# The fake TLS plugin returns nil from read-line, which the wire-format
+# code treats as EOF and surfaces as malformed input. That's fine — we
+# just want to confirm the TLS path is taken, not that the full handshake
+# succeeds.
+(let [[[ok? _] (protect (https-http:get "https://example.com/"))]]
+  (assert (not ok?) "https-http:get exits via TLS path"))
+
+(assert (= (first (first tls-log)) :connect)
+  "tls:connect was called via https URL")
+(assert (= (get (first tls-log) 1) "example.com")
+  "tls:connect received the https host")
+(assert (= (get (first tls-log) 2) 443)
+  "tls:connect received the default https port 443")
+
+# Parity: tls-transport's read-line must strip trailing newlines so the
+# wire-format helpers behave identically whether the underlying pipe is
+# TCP or TLS. We simulate a full HTTP/1.1 response from a TLS peer that
+# emits lines with CRLF intact (which is what the real tls:read-line
+# does), and verify the parser doesn't choke.
+
+(def canned-response
+  ["HTTP/1.1 200 OK\r\n"
+   "Content-Type: text/plain\r\n"
+   "Content-Length: 5\r\n"
+   "\r\n"])
+(def canned-cursor @[0])
+
+(defn canned-read-line [conn]
+  "Fake tls:read-line: returns the next response line with CRLF intact."
+  (let [[i (get canned-cursor 0)]]
+    (put canned-cursor 0 (inc i))
+    (when (< i (length canned-response))
+      (get canned-response i))))
+
+(def canned-body-cursor @[0])
+
+(defn canned-read [conn n]
+  "Fake tls:read: dribble out the body one chunk at a time."
+  (let [[i (get canned-body-cursor 0)]
+        [body "hello"]]
+    (when (< i (length body))
+      (let [[end (min (length body) (+ i n))]]
+        (put canned-body-cursor 0 end)
+        (bytes (slice body i end))))))
+
+(def line-strip-tls
+  {:connect   (fn [host port] :canned)
+   :read      canned-read
+   :read-line canned-read-line
+   :write     (fn [conn data] (length data))
+   :close     (fn [conn] nil)})
+
+(def line-strip-http ((import "std/http") :tls line-strip-tls))
+(let [[resp (line-strip-http:get "https://example.com/")]]
+  (assert (= resp:status 200)
+    "tls-transport: read-line stripping yields parseable status")
+  (assert (= resp:body "hello")
+    "tls-transport: full https response round-trips"))
+
+# ============================================================================
+# :compress — raw helpers exposed via http module
+# ============================================================================
+
+# Without :compress, http:gzip signals :compress-not-configured.
+(let [[[ok? err] (protect (http:gzip "hello"))]]
+  (assert (not ok?)                        "no :compress ⇒ http:gzip errors")
+  (assert (= err:reason :compress-not-configured)
+    "no :compress ⇒ :compress-not-configured reason"))
+
+# Fake compress plugin: just record calls and return a tagged value so
+# we don't depend on libz being present in the test environment.
+(def compress-log @[])
+(def fake-compress
+  {:gzip    (fn [data & opts] (push compress-log [:gzip data opts])    (bytes (string "GZ:" data)))
+   :gunzip  (fn [data]         (push compress-log [:gunzip data])       (bytes "ungz"))
+   :zlib    (fn [data & opts] (push compress-log [:zlib data opts])    (bytes (string "ZL:" data)))
+   :unzlib  (fn [data]         (push compress-log [:unzlib data])       (bytes "unzl"))
+   :deflate (fn [data & opts] (push compress-log [:deflate data opts]) (bytes (string "DF:" data)))
+   :inflate (fn [data]         (push compress-log [:inflate data])      (bytes "infl"))
+   :zstd    (fn [data & opts] (push compress-log [:zstd data opts])    (bytes (string "ZD:" data)))
+   :unzstd  (fn [data]         (push compress-log [:unzstd data])       (bytes "unzd"))})
+
+(def http-z ((import "std/http") :compress fake-compress))
+
+(assert (= (string (http-z:gzip "hi")) "GZ:hi")
+  ":compress struct ⇒ http:gzip dispatches to the plugin")
+(assert (= (string (http-z:gunzip (bytes "anything"))) "ungz")
+  ":compress struct ⇒ http:gunzip dispatches to the plugin")
+(assert (= (string (http-z:zstd "hi" 5)) "ZD:hi")
+  ":compress struct ⇒ http:zstd forwards level argument")
+(let [[gzip-call (first compress-log)]]
+  (assert (= (first gzip-call) :gzip)     "compress-log recorded :gzip call")
+  (assert (= (get gzip-call 1) "hi")      "compress-log recorded the data"))
+
+# :compress true ⇒ module imports std/compress itself. We can't easily
+# test libz presence, so just verify the path dispatches (not an error
+# from :compress-not-configured). Use protect so missing libz doesn't
+# break CI environments without zlib.
+(let [[http-auto ((import "std/http") :compress true)]]
+  (let [[[ok? err] (protect (http-auto:gunzip (bytes 0x1f 0x8b 0x08 0x00 0x00 0x00 0x00 0x00 0x00 0x03)))]]
+    # Either the call succeeded (libz available) or it errored — but NOT
+    # with :compress-not-configured.
+    (when (not ok?)
+      (assert (not (= err:reason :compress-not-configured))
+        ":compress true ⇒ module imported, not reporting compress-not-configured"))))
+
+# Invalid :compress value → clear error at module init
+(let [[[ok? err] (protect ((import "std/http") :compress 42))]]
+  (assert (not ok?)                    "invalid :compress signals error")
+  (assert (= err:reason :bad-compress) "invalid :compress reason"))
 
 # ============================================================================
 # Server + Client integration (local loopback)
@@ -117,7 +270,216 @@
               :headers {:x-test "custom-value"})]]
   (assert (= resp:status 200) "loopback custom header: status 200"))
 
+# Test 4: :query encodes a struct into the request path. Elle struct
+# iteration is key-sorted, so we assert on the sorted order the server
+# will actually receive.
+(let [[resp (http:get (string "http://127.0.0.1:" server-port "/search")
+              :query {:q "hello world" :page 2})]]
+  (assert (= resp:status 200) "query struct: status 200")
+  (assert (string/contains? resp:body "/search?page=2&q=hello%20world")
+    "query struct: encoded path echoed in body"))
+
+# Test 5: :query merges with existing URL query (URL first, struct after)
+(let [[resp (http:get (string "http://127.0.0.1:" server-port "/feed?fmt=json")
+              :query {:limit 10})]]
+  (assert (string/contains? resp:body "/feed?fmt=json&limit=10")
+    "query merge: url query retained, struct appended"))
+
 # Shut down: closing the listener cancels the pending accept, server exits
 (port/close listener)
+
+# ============================================================================
+# Chunked transfer integration: server streams response, client decodes
+# ============================================================================
+
+(def chunk-listener (tcp/listen "127.0.0.1" 0))
+(def chunk-port
+  (let [[parts (string/split (port/path chunk-listener) ":")]]
+    (int (get parts (- (length parts) 1)))))
+
+# Two handlers, dispatched on path:
+#  /string — body is a plain string, framed as a single chunk
+#  /stream — body is a closure that emits multiple chunks
+(defn chunked-handler [req]
+  (case req:path
+    "/string"
+    {:status 200
+     :headers {:content-type      "text/plain"
+               :transfer-encoding "chunked"}
+     :body "single-chunk body"}
+
+    "/stream"
+    {:status 200
+     :headers {:content-type      "text/plain"
+               :transfer-encoding "chunked"}
+     :body (fn [write]
+             (write "alpha ")
+             (write "beta ")
+             (write "gamma"))}
+
+    (http:respond 404 "not found")))
+
+(def chunk-fiber
+  (ev/spawn (fn [] (http:serve chunk-listener chunked-handler))))
+
+# Single-chunk body
+(let [[resp (http:get (string "http://127.0.0.1:" chunk-port "/string"))]]
+  (assert (= resp:status 200)               "chunked single: status 200")
+  (assert (= resp:body "single-chunk body") "chunked single: body reassembled")
+  (assert (= (string/lowercase (get resp:headers :transfer-encoding))
+             "chunked")
+    "chunked single: server sent Transfer-Encoding: chunked"))
+
+# Streamed multi-chunk body
+(let [[resp (http:get (string "http://127.0.0.1:" chunk-port "/stream"))]]
+  (assert (= resp:status 200)              "chunked stream: status 200")
+  (assert (= resp:body "alpha beta gamma") "chunked stream: chunks concatenated"))
+
+(port/close chunk-listener)
+
+# ============================================================================
+# Redirect following
+# ============================================================================
+
+(def redir-listener (tcp/listen "127.0.0.1" 0))
+(def redir-port
+  (let [[parts (string/split (port/path redir-listener) ":")]]
+    (int (get parts (- (length parts) 1)))))
+
+(def redir-count @[0])
+
+(defn redir-handler [req]
+  (put redir-count 0 (+ (get redir-count 0) 1))
+  (case req:path
+    # /hop1 → /hop2 (302, rewrites to GET)
+    "/hop1"
+    {:status 302
+     :headers {:location "/hop2" :content-length "0"}
+     :body ""}
+
+    # /hop2 → /hop3 (301, rewrites to GET)
+    "/hop2"
+    {:status 301
+     :headers {:location "/hop3" :content-length "0"}
+     :body ""}
+
+    # /hop3 → /end (307, preserves method/body)
+    "/hop3"
+    {:status 307
+     :headers {:location "/end" :content-length "0"}
+     :body ""}
+
+    # /end: terminal
+    "/end"
+    (http:respond 200 (string req:method " /end"))
+
+    # /loop → /loop (detect loop)
+    "/loop"
+    {:status 302
+     :headers {:location "/loop" :content-length "0"}
+     :body ""}
+
+    # /abs → absolute URL redirect to /end
+    "/abs"
+    {:status 302
+     :headers {:location (string "http://127.0.0.1:" redir-port "/end")
+               :content-length "0"}
+     :body ""}
+
+    (http:respond 404 "not found")))
+
+(def redir-fiber
+  (ev/spawn (fn [] (http:serve redir-listener redir-handler))))
+
+# No follow: redirect status is returned to caller
+(let [[resp (http:get (string "http://127.0.0.1:" redir-port "/hop1"))]]
+  (assert (= resp:status 302) "redirect: without :follow-redirects, returns 302"))
+
+# :follow-redirects true: follows all hops to 200
+(put redir-count 0 0)
+(let [[resp (http:get (string "http://127.0.0.1:" redir-port "/hop1")
+              :follow-redirects true)]]
+  (assert (= resp:status 200) "redirect: :follow-redirects true reaches 200")
+  (assert (= resp:body "GET /end") "redirect: method is GET after rewrite")
+  (assert (= (get redir-count 0) 4)
+    "redirect: server saw 4 requests (hop1, hop2, hop3, end)"))
+
+# :follow-redirects integer: limits hops
+(let [[resp (http:get (string "http://127.0.0.1:" redir-port "/hop1")
+              :follow-redirects 1)]]
+  (assert (= resp:status 301)
+    "redirect: hop limit 1 stops at the second redirect response"))
+
+# 307 preserves method on POST
+(let [[resp (http:post (string "http://127.0.0.1:" redir-port "/hop3")
+              "payload"
+              :follow-redirects true)]]
+  (assert (= resp:status 200) "redirect: 307 POST reaches end")
+  (assert (= resp:body "POST /end") "redirect: 307 preserves POST method"))
+
+# Loop detection: we bound hops, so a redirect loop terminates with
+# the last redirect response rather than hanging.
+(let [[resp (http:get (string "http://127.0.0.1:" redir-port "/loop")
+              :follow-redirects 3)]]
+  (assert (= resp:status 302) "redirect: loops stop at hop limit")
+  (assert (= (get resp:headers :location) "/loop")
+    "redirect: loop final response has the Location header"))
+
+# Absolute Location URL works
+(let [[resp (http:get (string "http://127.0.0.1:" redir-port "/abs")
+              :follow-redirects true)]]
+  (assert (= resp:status 200) "redirect: absolute Location URL followed")
+  (assert (= resp:body "GET /end") "redirect: absolute Location produced GET"))
+
+(port/close redir-listener)
+
+# ============================================================================
+# Server-Sent Events: server emits, client coroutine consumes
+# ============================================================================
+
+(def sse-listener (tcp/listen "127.0.0.1" 0))
+(def sse-server-port
+  (let [[parts (string/split (port/path sse-listener) ":")]]
+    (int (get parts (- (length parts) 1)))))
+
+(defn sse-test-handler [req]
+  (case req:path
+    "/stream"
+    (http:sse-response
+      (fn [send]
+        (send {:data "first"})
+        (send {:event "tick" :data "1" :id "a"})
+        (send {:event "tick" :data "2" :id "b"})
+        (send {:data "multi\nline"})))
+
+    "/retry-then-done"
+    (http:sse-response
+      (fn [send]
+        (send {:retry 50 :id "x"})
+        (send {:event "once" :data "hello" :id "x"})))
+
+    (http:respond 404 "not found")))
+
+(def sse-fiber
+  (ev/spawn (fn [] (http:serve sse-listener sse-test-handler))))
+
+# Basic stream: connect, consume all events, stop when stream ends.
+(let [[events @[]]
+      [source (http:sse-get
+                (string "http://127.0.0.1:" sse-server-port "/stream")
+                :reconnect false)]]
+  (each evt in source
+    (push events evt))
+  (assert (= (length events) 4) "sse: received all four events")
+  (let [[[e0 e1 e2 e3] events]]
+    (assert (= e0:event "message") "sse: first event defaults to 'message'")
+    (assert (= e0:data  "first")   "sse: first event data")
+    (assert (= e1:event "tick")    "sse: named event type")
+    (assert (= e1:id    "a")       "sse: id captured")
+    (assert (= e2:id    "b")       "sse: id advances")
+    (assert (= e3:data  "multi\nline")
+      "sse: multi-line data preserved as single payload")))
+
+(port/close sse-listener)
 
 (println "all http tests passed")

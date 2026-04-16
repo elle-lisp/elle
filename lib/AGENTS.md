@@ -33,6 +33,28 @@ Agent guide for `lib/http.lisp` — Pure Elle HTTP/1.1 client and server.
 HTTP/1.1 over TCP using Elle's existing stream and scheduler primitives.
 Single file. No Rust changes (other than `port/path`, added in Chunk 0).
 
+HTTPS and compression are opt-in via `&named` args on the module init:
+
+```lisp
+(def http ((import "std/http")))                     # http only
+
+# HTTPS:
+(def tls-plug ((import "plugin/tls")))
+(def http ((import "std/http") :tls tls-plug))
+
+# Compress helpers (gzip/zlib/deflate/zstd):
+(def z ((import "std/compress")))
+(def http ((import "std/http") :compress z))
+#   — or have http import it for you:
+(def http ((import "std/http") :compress true))
+
+# Combined:
+(def http ((import "std/http") :tls tls-plug :compress true))
+```
+
+Future plugins (DNS overrides, proxies, etc.) will be added as more
+`&named` args on the same initializer.
+
 ## Data flow
 
 Client:
@@ -52,13 +74,96 @@ http-serve port handler → tcp/listen → forever:
 
 | Function | Signature | Effect | Returns |
 |----------|-----------|--------|---------|
-| `http-get` | `(fn [url &named headers])` | Yields | response struct |
-| `http-post` | `(fn [url body &named headers])` | Yields | response struct |
-| `http-request` | `(fn [method url &named body headers])` | Yields | response struct |
-| `http-serve` | `(fn [listener handler &named on-error])` | Yields | nil (runs forever) |
-| `http-send` | `(fn [session method path &named body headers])` | Yields | response struct |
-| `http-respond` | `(fn [status body &named headers])` | Silent | response struct |
+| `get` | `(fn [url &named headers query follow-redirects])` | Yields | response struct |
+| `post` | `(fn [url body &named headers query follow-redirects])` | Yields | response struct |
+| `request` | `(fn [method url &named body headers query follow-redirects])` | Yields | response struct |
+| `serve` | `(fn [listener handler &named on-error])` | Yields | nil (runs forever) |
+| `send` | `(fn [session method path &named body headers])` | Yields | response struct |
+| `respond` | `(fn [status body &named headers])` | Silent | response struct |
 | `parse-url` | `(fn [url])` | Errors | url struct |
+| `query-encode` | `(fn [params])` | Silent | string |
+| `header->kw` / `kw->header` | `(fn [name])` | Silent | keyword / string |
+| `chunked?` | `(fn [headers])` | Silent | boolean |
+| `write-chunk` / `write-last-chunk` | `(fn [t [data]])` | Yields | nil |
+| `tcp-transport` / `tls-transport` | `(fn [port-or-conn])` | Silent | transport struct |
+| `gzip` / `gunzip` / `zlib` / `unzlib` / `deflate` / `inflate` / `zstd` / `unzstd` | `(fn [data & opts])` | FFI | bytes |
+| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | Yields | coroutine yielding events |
+| `sse-response` | `(fn [body-fn &named headers])` | Silent | response struct |
+| `format-sse-event` | `(fn [event])` | Silent | string |
+
+### `:query` named arg
+
+Accepts either a pre-encoded string or a struct. Struct values are
+percent-encoded with `query-encode`:
+
+- scalars (strings, integers, floats, keywords, booleans) → `key=value`
+- arrays/lists → repeated `key=v1&key=v2`
+- `nil` → dropped (useful for conditional parameters)
+
+If the URL already carries a query (`?foo=bar`), `:query` is appended
+with `&`. Keys iterate in struct order (sorted by key name).
+
+### `:follow-redirects` named arg
+
+Controls HTTP 3xx handling on the client:
+
+| Value | Behavior |
+|-------|----------|
+| `nil` / `false` | Return the 3xx response as-is (default) |
+| `true`           | Follow up to 10 hops |
+| `<integer>`      | Follow up to N hops |
+
+Per RFC 9110, `301` / `302` / `303` are followed with `GET` and an
+empty body; `307` / `308` preserve the original method and body.
+`Location` values may be absolute URLs, scheme-relative (`//host/path`),
+or absolute paths (`/path`). On hop exhaustion the last redirect
+response is returned to the caller.
+
+### `:compress` — raw helpers
+
+No auto-negotiation: supplying `:compress` merely exposes
+gzip/gunzip/zlib/unzlib/deflate/inflate/zstd/unzstd as `http:<name>`.
+Callers apply them explicitly to bodies or individual chunks. Calls
+signal `:http-error :compress-not-configured` if `:compress` was not
+passed at module init.
+
+## Server-Sent Events
+
+| Function | Signature | Returns |
+|----------|-----------|---------|
+| `sse-get` | `(fn [url &named headers last-event-id reconnect])` | coroutine |
+| `sse-response` | `(fn [body-fn &named headers])` | response struct |
+| `format-sse-event` | `(fn [event])` | string (SSE wire frame) |
+
+**Client**: `sse-get` returns a coroutine yielding event structs
+`{:event :data :id :retry}`. Iterate with `each`:
+
+```lisp
+(each evt in (http:sse-get "http://server/stream")
+  (println evt:event ": " evt:data))
+```
+
+`:reconnect` defaults to `true` — the client follows EventSource
+semantics: on disconnect/error it waits `retry-ms` (last server-sent
+`:retry`, default 3000) and reopens with `Last-Event-ID`. Stops on HTTP
+204 No Content. Set `:reconnect false` to make the coroutine end on
+the first disconnect.
+
+**Server**: return an `http:sse-response` from a handler. The body
+closure receives a `send-event` function:
+
+```lisp
+(defn handler [req]
+  (http:sse-response
+    (fn [send-event]
+      (send-event {:data "first"})
+      (send-event {:event "tick" :data "1" :id "a"})
+      (send-event {:retry 5000}))))
+```
+
+Under the hood `sse-response` sets `Content-Type: text/event-stream`
+plus `Transfer-Encoding: chunked` and reuses the existing chunked-body
+streaming path; each `send-event` call becomes one chunk on the wire.
 
 ## Struct shapes
 
@@ -80,7 +185,8 @@ http-serve port handler → tcp/listen → forever:
 
 **URL** (produced by parse-url):
 ```lisp
-{:scheme "http" :host "example.com" :port 80 :path "/foo" :query "page=1"}
+{:scheme "http"  :host "example.com" :port 80  :path "/foo" :query "page=1"}
+{:scheme "https" :host "example.com" :port 443 :path "/foo" :query nil}
 ```
 
 ## parse-url function
@@ -93,26 +199,26 @@ http-serve port handler → tcp/listen → forever:
 
 ### Parameters
 
-- `url` (string): HTTP URL to parse. Must start with `"http://"`.
+- `url` (string): URL to parse. Must start with `"http://"` or `"https://"`.
 
 ### Returns
 
 Immutable struct with keys:
-- `:scheme` (string): Always `"http"` (only scheme supported)
+- `:scheme` (string): `"http"` or `"https"`
 - `:host` (string): Hostname or IP address
-- `:port` (integer): Port number, default 80 if absent
+- `:port` (integer): Port number, defaults to 80 (http) or 443 (https) if absent
 - `:path` (string): Request path, default `"/"` if absent
 - `:query` (string or nil): Query string after `?`, or nil if absent
 
 ### Error cases
 
 Signals `:http-error` (via `error` form) for:
-1. **Unsupported scheme**: URL does not start with `"http://"` (e.g., `"ftp://"`, `"https://"`)
+1. **Unsupported scheme**: URL does not start with `"http://"` or `"https://"` (e.g., `"ftp://"`, `"wss://"`)
 2. **Missing host**: URL is `"http://"` with nothing after
 3. **Empty host**: Authority part is empty (e.g., `"http://:8080/"`)
 4. **Malformed port**: Port part is not a valid integer (e.g., `"http://example.com:abc/"`)
 
-Error value is a struct: `{:error :http-error :message "..."}`
+Error value is a struct: `{:error :http-error :reason ... :url ... :message "..."}`
 
 ### Examples
 
@@ -123,25 +229,50 @@ Error value is a struct: `{:error :http-error :message "..."}`
 (parse-url "http://example.com/index.html")
 # → {:scheme "http" :host "example.com" :port 80 :path "/index.html" :query nil}
 
-(parse-url "http://example.com")
-# → {:scheme "http" :host "example.com" :port 80 :path "/" :query nil}
+(parse-url "https://example.com")
+# → {:scheme "https" :host "example.com" :port 443 :path "/" :query nil}
 
-(parse-url "http://localhost:3000/?q=hello")
-# → {:scheme "http" :host "localhost" :port 3000 :path "/" :query "q=hello"}
+(parse-url "https://api.example.com:8443/v1/items?limit=10")
+# → {:scheme "https" :host "api.example.com" :port 8443 :path "/v1/items" :query "limit=10"}
 
 (parse-url "ftp://example.com/")
-# → error {:error :http-error :message "parse-url: unsupported scheme in: ftp://example.com/"}
+# → error {:error :http-error :reason :unsupported-scheme ...}
 ```
+
+Note: `parse-url` supports the `https` scheme unconditionally. `http:get`
+/ `http:post` / `http:request` only speak HTTPS when a TLS plugin was
+supplied via `((import "std/http") :tls tls-plug)` at module init;
+otherwise an `https://` URL signals `:http-error :tls-not-configured`.
+
+## Transport abstraction
+
+All wire-format helpers operate on a **transport**: a struct of closures
+`{:read :read-line :write :flush :close}`. Transports are produced by
+`tcp-transport` (plain TCP port) or `tls-transport` (TLS connection from
+the configured TLS plugin). `open-transport` picks the right one based
+on the parsed URL's scheme. This means the chunked reader, body reader,
+headers code, etc. are shared across http and https with no duplication.
+
+Session structs returned by `http:connect` now carry `:transport` rather
+than `:conn`; the underlying port or TLS conn is reachable via
+`session:transport`'s closures.
 
 ## Invariants
 
 1. Header keys are always lowercase keywords after parsing.
-2. Content-Length is always set in responses produced by `http-respond`.
+2. Content-Length is always set in responses produced by `http:respond`.
 3. Connections are always closed via `defer` — never leaked on error.
-4. `http-serve` absorbs handler errors (500 response); server keeps running.
-5. Only `http://` scheme is supported. No HTTPS, no HTTP/2.
-6. Content-Length body only. No chunked transfer encoding.
-7. No connection pooling. Each request opens and closes a TCP connection.
+4. `http:serve` absorbs handler errors (500 response); server keeps running.
+5. `http://` always uses plain TCP. `https://` requires `:tls` to have
+   been passed to the module initializer; otherwise client calls
+   signal `:http-error :tls-not-configured`.
+6. `http:serve` serves plain HTTP only. HTTPS serving is not first-class
+   yet; users can wrap accepted TCP connections with `tls:accept` and
+   feed the result into `connection-loop` via `tls-transport`.
+7. Chunked transfer encoding is supported on both read and write.
+   `Transfer-Encoding: chunked` takes precedence over `Content-Length`.
+8. No connection pooling. Each `http:get`/`http:post` opens and closes
+   a transport.
 
 ## Running tests
 

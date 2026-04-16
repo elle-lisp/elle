@@ -168,8 +168,8 @@ count                      # => 5
 
 ## each
 
-Iteration macro. `in` is optional sugar. Works on lists, arrays, and
-other sequences.
+Iteration macro. `in` is optional sugar. Works on lists, arrays,
+strings, bytes, sets, structs, and coroutines.
 
 ```lisp
 (var total 0)
@@ -183,6 +183,10 @@ total                      # => 60
     (when (> x 10)
       (break :found x)))
   nil)                     # => 16
+
+# coroutines: drives coro/resume until a nil yield terminates the loop
+(def co (coro/new (fn [] (yield 1) (yield 2) (yield 3))))
+(each n in co (println n))   # prints 1 2 3
 ```
 
 ---
