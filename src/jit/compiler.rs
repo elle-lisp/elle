@@ -8,10 +8,12 @@ use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
-use cranelift_codegen::ir::{AbiParam, Function, InstBuilder, MemFlags, Signature, UserFuncName};
+use cranelift_codegen::ir::{
+    AbiParam, BlockArg, Function, InstBuilder, MemFlags, Signature, UserFuncName,
+};
 use cranelift_codegen::isa::CallConv;
 use cranelift_codegen::settings::{self, Configurable};
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
@@ -23,12 +25,6 @@ use super::code::JitCode;
 use super::translate::FunctionTranslator;
 use super::vtable::{self, RuntimeHelpers};
 use super::JitError;
-
-/// Helper to create a Variable from a register/slot index
-#[inline]
-fn var(n: u32) -> Variable {
-    Variable::from_u32(n)
-}
 
 /// A member of a compilation group (SCC) for batch JIT compilation.
 pub struct BatchMember<'a> {
@@ -410,9 +406,11 @@ impl JitCompiler {
             std::cmp::max(lir.num_regs + lir.num_locals as u32, lir.num_locals as u32),
             local_var_base + num_locally_defined,
         );
-        // Declare 2 * max_logical Cranelift variables (tag + payload per slot)
-        for i in 0..(2 * max_logical) {
-            builder.declare_var(var(i), I64);
+        // Declare 2 * max_logical Cranelift variables (tag + payload per slot).
+        // declare_var allocates sequentially from 0, so the returned Variable
+        // indices match our var(i) scheme.
+        for _ in 0..(2 * max_logical) {
+            builder.declare_var(I64);
         }
         translator.arg_var_base = arg_var_base;
         translator.local_var_base = local_var_base;
@@ -506,7 +504,10 @@ impl JitCompiler {
                         builder
                             .ins()
                             .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    builder.ins().jump(merge_block, &[arg_tag, arg_payload]);
+                    builder.ins().jump(
+                        merge_block,
+                        &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
+                    );
 
                     builder.switch_to_block(else_block);
                     builder.seal_block(else_block);
@@ -514,7 +515,10 @@ impl JitCompiler {
                         .ins()
                         .iconst(I64, crate::value::Value::NIL.tag as i64);
                     let nil_pay = builder.ins().iconst(I64, 0);
-                    builder.ins().jump(merge_block, &[nil_tag, nil_pay]);
+                    builder.ins().jump(
+                        merge_block,
+                        &[BlockArg::Value(nil_tag), BlockArg::Value(nil_pay)],
+                    );
 
                     builder.switch_to_block(merge_block);
                     builder.seal_block(merge_block);
@@ -550,9 +554,14 @@ impl JitCompiler {
             let cons_loop_body = builder.create_block();
             let cons_loop_exit = builder.create_block();
 
-            builder
-                .ins()
-                .jump(cons_loop_head, &[initial_i, empty_tag, empty_pay]);
+            builder.ins().jump(
+                cons_loop_head,
+                &[
+                    BlockArg::Value(initial_i),
+                    BlockArg::Value(empty_tag),
+                    BlockArg::Value(empty_pay),
+                ],
+            );
 
             // loop_head(i, acc_tag, acc_payload)
             builder.switch_to_block(cons_loop_head);
@@ -568,9 +577,16 @@ impl JitCompiler {
             builder.ins().brif(
                 cmp,
                 cons_loop_body,
-                &[i_param, acc_tag_param, acc_pay_param],
+                &[
+                    BlockArg::Value(i_param),
+                    BlockArg::Value(acc_tag_param),
+                    BlockArg::Value(acc_pay_param),
+                ],
                 cons_loop_exit,
-                &[acc_tag_param, acc_pay_param],
+                &[
+                    BlockArg::Value(acc_tag_param),
+                    BlockArg::Value(acc_pay_param),
+                ],
             );
 
             // loop_body(i, acc_tag, acc_payload)
@@ -596,9 +612,14 @@ impl JitCompiler {
             let new_acc_tag = builder.inst_results(call_inst)[0];
             let new_acc_pay = builder.inst_results(call_inst)[1];
             let new_i = builder.ins().isub(i_body, one);
-            builder
-                .ins()
-                .jump(cons_loop_head, &[new_i, new_acc_tag, new_acc_pay]);
+            builder.ins().jump(
+                cons_loop_head,
+                &[
+                    BlockArg::Value(new_i),
+                    BlockArg::Value(new_acc_tag),
+                    BlockArg::Value(new_acc_pay),
+                ],
+            );
 
             // loop_exit(acc_tag, acc_payload)
             builder.switch_to_block(cons_loop_exit);
@@ -660,7 +681,10 @@ impl JitCompiler {
                         builder
                             .ins()
                             .load(I64, MemFlags::trusted(), args_ptr, payload_offset);
-                    builder.ins().jump(merge_block, &[arg_tag, arg_payload]);
+                    builder.ins().jump(
+                        merge_block,
+                        &[BlockArg::Value(arg_tag), BlockArg::Value(arg_payload)],
+                    );
 
                     // else: nil
                     builder.switch_to_block(else_block);
@@ -669,7 +693,10 @@ impl JitCompiler {
                         .ins()
                         .iconst(I64, crate::value::Value::NIL.tag as i64);
                     let nil_pay = builder.ins().iconst(I64, 0);
-                    builder.ins().jump(merge_block, &[nil_tag, nil_pay]);
+                    builder.ins().jump(
+                        merge_block,
+                        &[BlockArg::Value(nil_tag), BlockArg::Value(nil_pay)],
+                    );
 
                     // merge
                     builder.switch_to_block(merge_block);

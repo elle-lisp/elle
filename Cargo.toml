@@ -57,11 +57,11 @@ path-clean = "1.0"
 pathdiff = { version = "0.2", features = ["camino"] }
 
 # JIT compilation
-cranelift-codegen = "0.116"
-cranelift-frontend = "0.116"
-cranelift-module = "0.116"
-cranelift-jit = "0.116"
-cranelift-native = "0.116"
+cranelift-codegen = "0.130"
+cranelift-frontend = "0.130"
+cranelift-module = "0.130"
+cranelift-jit = "0.130"
+cranelift-native = "0.130"
 target-lexicon = "0.13"
 
 # WASM backend (optional, enable with --features wasm)
