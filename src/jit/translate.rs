@@ -566,8 +566,21 @@ impl<'a> FunctionTranslator<'a> {
                             .collect();
 
                         // Rotate slab pools: free iteration N-2, preserve N-1
-                        // (argument SSA values are in registers, safe from rotation).
-                        self.call_rotate_pools(builder, vm)?;
+                        // (argument SSA values are in registers, safe from
+                        // rotation).
+                        //
+                        // Only safe when THIS function is rotation-safe: if
+                        // its body stores a heap value into external mutable
+                        // state (e.g. `(push acc {:index i})` inside the
+                        // loop), rotation would dangle the external pointer
+                        // exactly like the VM-side trampoline bug fixed via
+                        // `body_escapes_heap_values`. When not rotation-safe,
+                        // skip the rotation entirely — leak-style correctness
+                        // matches the VM interpreter's behavior, which also
+                        // declines to rotate non-rotation-safe callers.
+                        if self.lir.rotation_safe {
+                            self.call_rotate_pools(builder, vm)?;
+                        }
 
                         for (i, (at, ap)) in new_arg_vals.into_iter().enumerate() {
                             let base = self.arg_var_base + i as u32;
