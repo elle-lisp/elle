@@ -386,7 +386,9 @@ fn prim_tls_client_state(args: &[Value]) -> (SignalBits, Value) {
     let no_verify = if args.len() > 1 {
         args[1]
             .as_struct()
-            .and_then(|m| m.get(&TableKey::Keyword("no-verify".into())))
+            .and_then(|m| {
+                elle::value::sorted_struct_get(m, &TableKey::Keyword("no-verify".into()))
+            })
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     } else {
@@ -396,7 +398,9 @@ fn prim_tls_client_state(args: &[Value]) -> (SignalBits, Value) {
     let ca_file: Option<String> = if args.len() > 1 {
         args[1]
             .as_struct()
-            .and_then(|m| m.get(&TableKey::Keyword("ca-file".into())))
+            .and_then(|m| {
+                elle::value::sorted_struct_get(m, &TableKey::Keyword("ca-file".into()))
+            })
             .and_then(|v| v.with_string(|s| s.to_string()))
     } else {
         None

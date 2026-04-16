@@ -846,8 +846,8 @@ fn prim_lgroupby(args: &[Value]) -> (SignalBits, Value) {
     };
 
     // Parse aggregation specs
-    let agg_map = if let Some(m) = args[2].as_struct() {
-        m.clone()
+    let agg_map: &[(TableKey, Value)] = if let Some(m) = args[2].as_struct() {
+        m
     } else {
         return (
             SIG_ERROR,
@@ -856,15 +856,15 @@ fn prim_lgroupby(args: &[Value]) -> (SignalBits, Value) {
     };
 
     let mut agg_exprs: Vec<Expr> = Vec::new();
-    for (key, spec) in &agg_map {
+    for (key, spec) in agg_map.iter() {
         let out_name = if let TableKey::Keyword(s) = key {
             s.clone()
         } else {
             continue;
         };
 
-        let spec_map = if let Some(m) = spec.as_struct() {
-            m.clone()
+        let spec_map: &[(TableKey, Value)] = if let Some(m) = spec.as_struct() {
+            m
         } else {
             return (
                 SIG_ERROR,
@@ -875,29 +875,33 @@ fn prim_lgroupby(args: &[Value]) -> (SignalBits, Value) {
             );
         };
 
-        let src_col = spec_map
-            .get(&TableKey::Keyword("col".into()))
-            .and_then(|v| v.with_string(|s| s.to_owned()))
-            .ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val("polars-error", format!("{}: agg spec missing :col", name)),
-                )
-            });
+        let src_col = elle::value::sorted_struct_get(
+            spec_map,
+            &TableKey::Keyword("col".into()),
+        )
+        .and_then(|v| v.with_string(|s| s.to_owned()))
+        .ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val("polars-error", format!("{}: agg spec missing :col", name)),
+            )
+        });
         let src_col = match src_col {
             Ok(s) => s,
             Err(e) => return e,
         };
 
-        let agg_fn = spec_map
-            .get(&TableKey::Keyword("agg".into()))
-            .and_then(|v| v.with_string(|s| s.to_owned()))
-            .ok_or_else(|| {
-                (
-                    SIG_ERROR,
-                    error_val("polars-error", format!("{}: agg spec missing :agg", name)),
-                )
-            });
+        let agg_fn = elle::value::sorted_struct_get(
+            spec_map,
+            &TableKey::Keyword("agg".into()),
+        )
+        .and_then(|v| v.with_string(|s| s.to_owned()))
+        .ok_or_else(|| {
+            (
+                SIG_ERROR,
+                error_val("polars-error", format!("{}: agg spec missing :agg", name)),
+            )
+        });
         let agg_fn = match agg_fn {
             Ok(s) => s,
             Err(e) => return e,

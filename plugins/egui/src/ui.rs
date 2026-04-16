@@ -142,10 +142,13 @@ pub fn value_to_node(val: &Value) -> Result<UiNode, String> {
         .as_keyword_name()
         .ok_or("first element of ui node must be a keyword")?;
 
-    // Check if second element is a props struct
+    // Check if second element is a props struct. `as_struct()` returns
+    // a sorted slice of (key, value) pairs; collect into a BTreeMap so
+    // the existing `get_prop_*` helpers (typed for BTreeMap) work.
     let (props, rest_start) = if elems.len() > 1 {
         if let Some(s) = elems[1].as_struct() {
-            (s.clone(), 2)
+            let map: BTreeMap<TableKey, Value> = s.iter().cloned().collect();
+            (map, 2)
         } else {
             (BTreeMap::new(), 1)
         }

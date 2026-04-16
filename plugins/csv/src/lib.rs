@@ -36,7 +36,7 @@ fn extract_delimiter(opts: &Value, name: &str) -> Result<u8, (SignalBits, Value)
     }
     // opts must be a struct (immutable or mutable)
     let delim_val = if let Some(map) = opts.as_struct() {
-        map.get(&TableKey::Keyword("delimiter".into())).copied()
+        elle::value::sorted_struct_get(map, &TableKey::Keyword("delimiter".into())).copied()
     } else if let Some(map_ref) = opts.as_struct_mut() {
         map_ref
             .borrow()
@@ -241,8 +241,8 @@ fn prim_csv_write(args: &[Value]) -> (SignalBits, Value) {
     } else {
         let first = rows[0];
         if let Some(map) = first.as_struct() {
-            map.keys()
-                .filter_map(|k| {
+            map.iter()
+                .filter_map(|(k, _)| {
                     if let TableKey::Keyword(s) = k {
                         Some(s.clone())
                     } else {
@@ -290,7 +290,7 @@ fn prim_csv_write(args: &[Value]) -> (SignalBits, Value) {
         let record: Vec<String> = if let Some(map) = row.as_struct() {
             keys.iter()
                 .map(|k| {
-                    map.get(&TableKey::Keyword(k.clone()))
+                    elle::value::sorted_struct_get(map, &TableKey::Keyword(k.clone()))
                         .map(|v| value_to_csv_field(*v))
                         .unwrap_or_default()
                 })

@@ -263,7 +263,7 @@ pub(crate) fn extract_string_array(
 /// Look up a key in a struct (immutable or mutable).
 pub(crate) fn struct_get(val: Value, key: &TableKey) -> Option<Value> {
     if let Some(s) = val.as_struct() {
-        return s.get(key).copied();
+        return elle::value::sorted_struct_get(s, key).copied();
     }
     if let Some(s) = val.as_struct_mut() {
         return s.borrow().get(key).copied();
