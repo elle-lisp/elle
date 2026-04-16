@@ -255,9 +255,12 @@ impl<'a> Analyzer<'a> {
                 pass2_bindings = Some(std::mem::replace(&mut scope.bindings, snapshot.clone()));
             }
 
-            // Clear errors before fixpoint — re-analysis may re-accumulate
-            // the same errors. We keep only the final set.
-            self.errors.clear();
+            // Before fixpoint re-analysis, save Pass 2 errors and clear —
+            // re-analysis may re-accumulate the same errors inside lambda
+            // bodies, and we only want the final iteration's set for
+            // lambdas. Non-lambda (def/var) errors from Pass 2 are
+            // preserved and merged back below.
+            let pass2_errors = std::mem::take(&mut self.errors);
             const MAX_FIXPOINT_ITERS: usize = 10;
             for _ in 0..MAX_FIXPOINT_ITERS {
                 let mut changed = false;
@@ -288,6 +291,15 @@ impl<'a> Analyzer<'a> {
             if let (Some(saved), Some(scope)) = (pass2_bindings, self.scopes.last_mut()) {
                 scope.bindings = saved;
             }
+
+            // Merge Pass 2 errors (from non-lambda entries) with the
+            // final-iteration lambda errors. Without this, non-lambda
+            // errors (e.g. `(def x (some-undef))`) would be silently
+            // dropped and their poison nodes would surface later as
+            // "internal: error poison node in lowerer".
+            let mut merged = pass2_errors;
+            merged.extend(std::mem::take(&mut self.errors));
+            self.errors = merged;
         }
 
         // Body: reference to the last binding (the file's return value).

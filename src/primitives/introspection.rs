@@ -74,6 +74,28 @@ pub(crate) fn prim_mutates_params(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+/// (fn/gpu-eligible? value) — true if closure is eligible for GPU compilation
+pub(crate) fn prim_gpu_eligible(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fn/gpu-eligible?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(closure) = args[0].as_closure() {
+        let eligible = match &closure.template.lir_function {
+            Some(lir) => lir.is_gpu_eligible(),
+            None => closure.template.is_gpu_candidate(),
+        };
+        (SIG_OK, Value::bool(eligible))
+    } else {
+        (SIG_OK, Value::FALSE)
+    }
+}
+
 /// (fn/errors? value) — true if closure may error
 pub(crate) fn prim_errors(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
@@ -318,6 +340,73 @@ pub(crate) fn prim_jit_rejections(args: &[Value]) -> (SignalBits, Value) {
     )
 }
 
+/// (mlir/compile-spirv closure [workgroup-size]) — compile closure to SPIR-V bytes
+#[cfg(feature = "mlir")]
+pub(crate) fn prim_compile_spirv(args: &[Value]) -> (SignalBits, Value) {
+    if args.is_empty() || args.len() > 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "mlir/compile-spirv: expected 1-2 arguments, got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    let closure = match args[0].as_closure() {
+        Some(c) => c,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!(
+                        "mlir/compile-spirv: expected closure, got {}",
+                        args[0].type_name()
+                    ),
+                ),
+            )
+        }
+    };
+    let lir = match &closure.template.lir_function {
+        Some(lir) => lir,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "mlir-error",
+                    "mlir/compile-spirv: closure has no LIR".to_string(),
+                ),
+            )
+        }
+    };
+    if !lir.is_gpu_eligible() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "mlir-error",
+                "mlir/compile-spirv: closure is not GPU-eligible".to_string(),
+            ),
+        );
+    }
+    let workgroup_size = if args.len() == 2 {
+        args[1].as_int().unwrap_or(256) as u32
+    } else {
+        256
+    };
+    // Use SIG_QUERY to access the VM's MlirCache for shared context
+    // and SPIR-V caching. The VM handles the query in dispatch_query.
+    (
+        SIG_QUERY,
+        Value::cons(
+            Value::keyword("mlir/compile-spirv"),
+            Value::cons(args[0], Value::int(workgroup_size as i64)),
+        ),
+    )
+}
+
 /// Declarative primitive definitions for introspection operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -374,6 +463,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "fn",
         example: "(fn/mutates-params? (fn (x) (assign x 1)))",
         aliases: &["mutates-params?"],
+    },
+    PrimitiveDef {
+        name: "fn/gpu-eligible?",
+        func: prim_gpu_eligible,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if closure passes signal and structural checks for GPU compilation",
+        params: &["value"],
+        category: "fn",
+        example: "(fn/gpu-eligible? (fn [a b] (+ a b)))",
+        aliases: &[],
     },
     PrimitiveDef {
         name: "fn/errors?",
@@ -488,5 +588,17 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         category: "conversion",
         example: "(keyword \"foo\")",
         aliases: &["string->keyword"],
+    },
+    #[cfg(feature = "mlir")]
+    PrimitiveDef {
+        name: "mlir/compile-spirv",
+        func: prim_compile_spirv,
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        arity: Arity::Range(1, 2),
+        doc: "Compile a GPU-eligible closure to SPIR-V bytes. Optional second arg is workgroup size (default 256).",
+        params: &["closure", "workgroup-size"],
+        category: "mlir",
+        example: "(mlir/compile-spirv (fn [a b] (+ a b)))",
+        aliases: &[],
     },
 ];

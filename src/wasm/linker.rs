@@ -10,7 +10,7 @@ use crate::value::Value;
 pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
     let mut linker = Linker::new(engine);
 
-    // call_primitive(prim_id: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i32)
+    // call_primitive(prim_id: i32, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i64)
     linker.func_wrap(
         "elle",
         "call_primitive",
@@ -19,16 +19,16 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i32) {
+         -> (i64, i64, i64) {
             let args = read_args_from_memory(&mut caller, args_ptr, nargs);
             let (bits, result) = caller.data_mut().call_primitive(prim_id as u32, &args);
             let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.raw() as i32)
+            (tag, payload, bits.raw() as i64)
         },
     )?;
 
-    // rt_call(func_tag: i64, func_payload: i64, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i32)
+    // rt_call(func_tag: i64, func_payload: i64, args_ptr: i32, nargs: i32, ctx: i32) -> (tag: i64, payload: i64, signal: i64)
     linker.func_wrap(
         "elle",
         "rt_call",
@@ -38,7 +38,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i32) {
+         -> (i64, i64, i64) {
             // Resolve the function value
             let func_val = caller.data().wasm_to_value(func_tag, func_payload);
 
@@ -96,7 +96,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 }
 
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                (tag, payload, bits.raw() as i32)
+                (tag, payload, bits.raw() as i64)
             } else if let Some((id, default)) = func_val.as_parameter() {
                 if caller.data().debug {
                     eprintln!("[rt_call] parameter id={} default={:?}", id, default);
@@ -192,7 +192,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
             let arity_count = read_i64(mp + 32) as usize;
             let capture_params_mask = read_i64(mp + 40) as u64;
             let capture_locals_mask = read_i64(mp + 48) as u64;
-            let signal_bits = read_i64(mp + 56) as u32;
+            let signal_bits = read_i64(mp + 56) as u64;
 
             // Read captures from linear memory
             let mut captures = Vec::with_capacity(num_captures as usize);
@@ -235,6 +235,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 },
                 capture_params_mask,
                 capture_locals_mask,
+
                 symbol_names: std::rc::Rc::new(std::collections::HashMap::new()),
                 location_map: std::rc::Rc::new(crate::error::LocationMap::new()),
                 rotation_safe: false,
@@ -246,6 +247,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: Some(table_idx as u32),
+                spirv: std::cell::OnceCell::new(),
             });
 
             let closure = crate::value::closure::Closure {
@@ -260,15 +262,15 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
-    // rt_data_op(op: i32, args_ptr: i32, nargs: i32) -> (tag: i64, payload: i64, signal: i32)
+    // rt_data_op(op: i32, args_ptr: i32, nargs: i32) -> (tag: i64, payload: i64, signal: i64)
     linker.func_wrap(
         "elle",
         "rt_data_op",
-        |mut caller: Caller<'_, ElleHost>, op: i32, args_ptr: i32, nargs: i32| -> (i64, i64, i32) {
+        |mut caller: Caller<'_, ElleHost>, op: i32, args_ptr: i32, nargs: i32| -> (i64, i64, i64) {
             let args = read_args_from_memory(&mut caller, args_ptr, nargs);
             let (bits, result) = dispatch_data_op(op, &args);
             let (tag, payload) = caller.data_mut().value_to_wasm(result);
-            (tag, payload, bits.raw() as i32)
+            (tag, payload, bits.raw() as i64)
         },
     )?;
 
@@ -337,7 +339,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          args_ptr: i32,
          nargs: i32,
          caller_env_ptr: i32|
-         -> (i32, i32, i32, i64, i64, i32) {
+         -> (i32, i32, i32, i64, i64, i64) {
             let func_val = caller.data().wasm_to_value(func_tag, func_payload);
 
             if caller.data().debug {
@@ -412,21 +414,21 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                     .expect("rt_prepare_tail_call: expected NativeFn");
                 let (bits, result) = native_fn(&args);
                 let (bits, result) = caller.data_mut().maybe_execute_io(bits, result);
-                // Write non-zero signal to memory[0..4] so handle_wasm_result
+                // Write non-zero signal to memory[0..8] so handle_wasm_result
                 // picks it up. The WASM tail call dispatch returns immediately
                 // after this host call (just tag/payload/0), so no WASM code
-                // overwrites memory[0..4] before the function exits.
+                // overwrites memory[0..8] before the function exits.
                 if bits.raw() != 0 {
                     if let Some(memory) = caller
                         .get_export("__elle_memory")
                         .and_then(|e| e.into_memory())
                     {
-                        memory.data_mut(&mut caller)[0..4]
-                            .copy_from_slice(&(bits.raw() as i32).to_le_bytes());
+                        memory.data_mut(&mut caller)[0..8]
+                            .copy_from_slice(&(bits.raw() as i64).to_le_bytes());
                     }
                 }
                 let (tag, payload) = caller.data_mut().value_to_wasm(result);
-                return (0, 0, 0, tag, payload, bits.raw() as i32);
+                return (0, 0, 0, tag, payload, bits.raw() as i64);
             }
 
             if let Some((id, default)) = func_val.as_parameter() {
@@ -452,7 +454,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
         },
     )?;
 
-    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32, func_idx: i32, signal_bits: i32)
+    // rt_yield(tag: i64, payload: i64, resume_state: i32, regs_ptr: i32, num_regs: i32, func_idx: i32, signal_bits: i64)
     // Save yielded value and live registers to a WasmSuspensionFrame.
     linker.func_wrap(
         "elle",
@@ -464,7 +466,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
          regs_ptr: i32,
          num_regs: i32,
          func_idx: i32,
-         signal_bits: i32| {
+         signal_bits: i64| {
             // Read saved registers from linear memory
             let saved_regs = read_reg_pairs(&mut caller, regs_ptr, num_regs);
 
@@ -482,7 +484,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
                 saved_regs,
                 env_snapshot: Vec::new(),
                 env_base: 0,
-                signal_bits: signal_bits as u32,
+                signal_bits: signal_bits as u64,
             });
         },
     )?;

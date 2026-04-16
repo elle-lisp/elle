@@ -244,11 +244,11 @@ impl WasmEmitter {
         // 0: entry function
         types
             .ty()
-            .function([ValType::I32], [ValType::I64, ValType::I64, ValType::I32]);
+            .function([ValType::I32], [ValType::I64, ValType::I64, ValType::I64]);
         // 1: call_primitive
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I64],
         );
         // 2: rt_call
         types.ty().function(
@@ -259,7 +259,7 @@ impl WasmEmitter {
                 ValType::I32,
                 ValType::I32,
             ],
-            [ValType::I64, ValType::I64, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I64],
         );
         // 3: rt_load_const
         types
@@ -268,12 +268,12 @@ impl WasmEmitter {
         // 4: rt_data_op
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I64],
         );
         // 5: closure function
         types.ty().function(
             [ValType::I32, ValType::I32, ValType::I32, ValType::I32],
-            [ValType::I64, ValType::I64, ValType::I32],
+            [ValType::I64, ValType::I64, ValType::I64],
         );
         // 6: rt_make_closure
         types.ty().function(
@@ -299,7 +299,7 @@ impl WasmEmitter {
                 ValType::I32,
                 ValType::I64,
                 ValType::I64,
-                ValType::I32,
+                ValType::I64,
             ],
         );
         // 10: rt_yield
@@ -311,7 +311,7 @@ impl WasmEmitter {
                 ValType::I32,
                 ValType::I32,
                 ValType::I32,
-                ValType::I32,
+                ValType::I64,
             ],
             [],
         );
@@ -423,7 +423,7 @@ impl WasmEmitter {
                 // as a standalone Module and dispatched via rt_call.
                 // The stub is never reached at runtime.
                 let mut stub =
-                    Function::new([(1, ValType::I64), (1, ValType::I64), (1, ValType::I32)]);
+                    Function::new([(1, ValType::I64), (1, ValType::I64), (1, ValType::I64)]);
                 stub.instruction(&Instruction::Unreachable);
                 stub.instruction(&Instruction::End);
                 closure_bodies.push(stub);
@@ -536,7 +536,7 @@ impl WasmEmitter {
             (n, ValType::I64),
             (n, ValType::I64),
             (1, ValType::I32),
-            (1, ValType::I32),
+            (1, ValType::I64),
         ]);
 
         self.emit_cfg(&mut f, func);
@@ -629,7 +629,8 @@ impl WasmEmitter {
                 (n, ValType::I64),
                 (m, ValType::I64),
                 (m, ValType::I64),
-                (4, ValType::I32),
+                (1, ValType::I64),
+                (3, ValType::I32),
                 (2, ValType::I64),
             ]);
             self.emit_cfg(&mut f, func);
@@ -641,7 +642,8 @@ impl WasmEmitter {
                 (n, ValType::I64),
                 (m, ValType::I64),
                 (m, ValType::I64),
-                (4, ValType::I32),
+                (1, ValType::I64),
+                (3, ValType::I32),
             ]);
             self.emit_cfg(&mut f, func);
             f.instruction(&Instruction::End);

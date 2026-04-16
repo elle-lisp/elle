@@ -436,13 +436,14 @@ impl<'a> Analyzer<'a> {
                 self.arity_env.insert(binding, arity);
             }
 
+            let value_signal = value.signal;
             Ok(Hir::new(
                 HirKind::Define {
                     binding,
                     value: Box::new(value),
                 },
                 span,
-                Signal::silent(),
+                value_signal,
             ))
         } else {
             // At top level, creates a local binding.
@@ -489,13 +490,14 @@ impl<'a> Analyzer<'a> {
                 self.arity_env.insert(binding, arity);
             }
 
+            let value_signal = value.signal;
             Ok(Hir::new(
                 HirKind::Define {
                     binding,
                     value: Box::new(value),
                 },
                 span,
-                Signal::silent(),
+                value_signal,
             ))
         }
     }

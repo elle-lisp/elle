@@ -363,6 +363,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
                 signal: closure_rc.template.signal,
                 capture_params_mask: closure_rc.template.capture_params_mask,
                 capture_locals_mask: closure_rc.template.capture_locals_mask,
+
                 symbol_names: (*closure_rc.template.symbol_names).clone(),
                 location_map: (*closure_rc.template.location_map).clone(),
                 doc,
@@ -831,6 +832,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 signal: sc.signal,
                 capture_params_mask: sc.capture_params_mask,
                 capture_locals_mask: sc.capture_locals_mask,
+
                 symbol_names: Rc::new(sc.symbol_names),
                 location_map: Rc::new(sc.location_map),
                 rotation_safe: false,
@@ -842,6 +844,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: None,
+                spirv: std::cell::OnceCell::new(),
             });
 
             let val = Value::closure(Closure {
@@ -982,6 +985,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure = Closure {
             template,
@@ -1049,6 +1053,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let outer_closure = Closure {
             template: outer_template,

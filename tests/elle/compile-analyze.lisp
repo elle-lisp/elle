@@ -25,7 +25,9 @@
 # ── Signal queries ──────────────────────────────────────────────────────
 
 (def sig (compile/signal a :add))
-(assert (get sig :silent) "add is silent")
+# add has SIG_ERROR (from + type checking) so it's not strictly silent,
+# but it doesn't suspend and is jit-eligible
+(assert (not (get sig :silent)) "add has SIG_ERROR from +")
 (assert (get sig :jit-eligible) "add is jit-eligible")
 (assert (not (get sig :io)) "add does not do I/O")
 (assert (not (get sig :yields)) "add does not yield")
@@ -76,7 +78,8 @@
 
 (def silent-fns (compile/query-signal a :silent))
 (assert (array? silent-fns) "query-signal returns array")
-(assert (not (empty? silent-fns)) "there are silent functions")
+# add has SIG_ERROR so it's not silent — no silent functions here
+(assert (empty? silent-fns) "no silent functions (add has SIG_ERROR)")
 
 # ── Multi-function analysis ─────────────────────────────────────────────
 
@@ -86,9 +89,11 @@
 ")
 (def a2 (compile/analyze src2))
 
-# Both should be silent
-(assert (get (compile/signal a2 :pure-fn) :silent) "pure-fn is silent")
-(assert (get (compile/signal a2 :caller) :silent) "caller is silent")
+# Both have SIG_ERROR (from * and +) but don't suspend
+(assert (not (get (compile/signal a2 :pure-fn) :silent)) "pure-fn has SIG_ERROR from *")
+(assert (not (get (compile/signal a2 :caller) :silent)) "caller has SIG_ERROR from + and pure-fn")
+(assert (get (compile/signal a2 :pure-fn) :jit-eligible) "pure-fn is jit-eligible")
+(assert (get (compile/signal a2 :caller) :jit-eligible) "caller is jit-eligible")
 
 # caller calls pure-fn
 (def callees2 (compile/callees a2 :caller))

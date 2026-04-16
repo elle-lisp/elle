@@ -183,20 +183,19 @@ pub enum SuspendedFrame {
 
 /// Signal type bits. The first 16 are compiler-reserved.
 ///
-/// Newtype over `u32` providing named methods and bitwise operator impls.
+/// Newtype over `u64` providing named methods and bitwise operator impls.
 ///
 /// The inner representation is an implementation detail. All code outside
 /// this impl block should use the provided methods instead of accessing
-/// the raw field. This allows changing the underlying integer width
-/// (e.g. to `u64`) with a single edit to this definition.
+/// the raw field.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SignalBits(u32);
+pub struct SignalBits(u64);
 
 impl SignalBits {
     // -- Constructors --------------------------------------------------------
 
     /// Wrap a raw bitmask.
-    pub const fn new(bits: u32) -> Self {
+    pub const fn new(bits: u64) -> Self {
         SignalBits(bits)
     }
 
@@ -208,13 +207,12 @@ impl SignalBits {
 
     /// A single-bit mask for bit position `pos`.
     pub const fn from_bit(pos: u32) -> Self {
-        SignalBits(1 << pos)
+        SignalBits(1u64 << pos)
     }
 
     /// Construct from an i64 (e.g. from an Elle integer value).
-    /// Truncates to the inner width.
     pub const fn from_i64(v: i64) -> Self {
-        SignalBits(v as u32)
+        SignalBits(v as u64)
     }
 
     // -- Predicates ----------------------------------------------------------
@@ -287,9 +285,9 @@ impl SignalBits {
         self.0.trailing_zeros()
     }
 
-    /// Raw bits as `u32`. Prefer named methods; use this only for
+    /// Raw bits as `u64`. Prefer named methods; use this only for
     /// serialization, FFI, or bytecode encoding.
-    pub const fn raw(self) -> u32 {
+    pub const fn raw(self) -> u64 {
         self.0
     }
 }
@@ -339,14 +337,20 @@ impl std::fmt::Display for SignalBits {
     }
 }
 
-impl From<u32> for SignalBits {
-    fn from(v: u32) -> Self {
+impl From<u64> for SignalBits {
+    fn from(v: u64) -> Self {
         SignalBits::new(v)
     }
 }
 
-impl From<SignalBits> for u32 {
-    fn from(v: SignalBits) -> u32 {
+impl From<u32> for SignalBits {
+    fn from(v: u32) -> Self {
+        SignalBits::new(v as u64)
+    }
+}
+
+impl From<SignalBits> for u64 {
+    fn from(v: SignalBits) -> u64 {
         v.raw()
     }
 }
@@ -554,6 +558,7 @@ mod tests {
                 signal: Signal::silent(),
                 capture_params_mask: 0,
                 capture_locals_mask: 0,
+
                 symbol_names: Rc::new(HashMap::new()),
                 location_map: Rc::new(LocationMap::new()),
                 rotation_safe: false,
@@ -565,6 +570,7 @@ mod tests {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: None,
+                spirv: std::cell::OnceCell::new(),
             }),
             env: Rc::new(vec![]),
             squelch_mask: SignalBits::EMPTY,
@@ -788,7 +794,7 @@ mod tests {
     #[test]
     fn test_fiber_full_mask() {
         // A fiber with all bits set catches everything
-        let fiber = Fiber::new(test_closure(), SignalBits::new(u32::MAX));
+        let fiber = Fiber::new(test_closure(), SignalBits::new(u64::MAX));
         assert!(fiber.mask.contains(SIG_ERROR));
         assert!(fiber.mask.contains(SIG_YIELD));
         assert!(fiber.mask.contains(SIG_DEBUG));

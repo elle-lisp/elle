@@ -172,7 +172,7 @@ impl WasmEmitter {
                     self.emit_call(f, dst, *func, args);
                     f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-                    f.instruction(&Instruction::I32Const(0));
+                    f.instruction(&Instruction::I64Const(0));
                     f.instruction(&Instruction::Return);
                 } else {
                     for (i, arg) in args.iter().enumerate() {
@@ -254,7 +254,7 @@ impl WasmEmitter {
                     self.emit_call_array(f, dst, *func, *args);
                     f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
                     f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-                    f.instruction(&Instruction::I32Const(0));
+                    f.instruction(&Instruction::I64Const(0));
                     f.instruction(&Instruction::Return);
                 } else {
                     self.write_val_to_mem(f, *args, 1);
@@ -459,16 +459,18 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I32Store(MemArg {
+        f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,
-            align: 2,
+            align: 3,
             memory_index: 0,
         }));
         f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I64Const(0));
+        f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);
     }
@@ -506,7 +508,7 @@ impl WasmEmitter {
         {
             f.instruction(&Instruction::LocalGet(tc_tag));
             f.instruction(&Instruction::LocalGet(tc_payload));
-            f.instruction(&Instruction::I32Const(0));
+            f.instruction(&Instruction::I64Const(0));
             f.instruction(&Instruction::Return);
         }
         f.instruction(&Instruction::End);

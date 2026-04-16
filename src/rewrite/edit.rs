@@ -11,7 +11,7 @@ pub(crate) struct Edit {
 /// Apply edits to source text. Sorts back-to-front so byte offsets remain valid.
 /// Returns Err if any edits overlap.
 pub(crate) fn apply_edits(source: &str, edits: &mut [Edit]) -> Result<String, String> {
-    edits.sort_by(|a, b| b.byte_offset.cmp(&a.byte_offset));
+    edits.sort_by_key(|e| std::cmp::Reverse(e.byte_offset));
 
     // Check for overlaps (edits are now sorted descending by offset)
     for window in edits.windows(2) {

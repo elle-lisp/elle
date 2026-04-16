@@ -32,7 +32,8 @@ fn test_quasiquote_simple_list() {
     );
 
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-    // Should expand to (list (quote a) (quote b) (quote c))
+    // Should expand to (list <lit:a> <lit:b> <lit:c>)
+    // Symbols become SyntaxLiteral (not (quote ...)) to preserve scopes
     let result_str = result.to_string();
     assert!(
         result_str.contains("list"),
@@ -40,8 +41,8 @@ fn test_quasiquote_simple_list() {
         result_str
     );
     assert!(
-        result_str.contains("quote"),
-        "Result should contain 'quote': {}",
+        result_str.contains("syntax-literal"),
+        "Result should contain syntax-literals for symbols: {}",
         result_str
     );
 }
@@ -76,9 +77,10 @@ fn test_quasiquote_with_unquote() {
         "Result should contain 'list': {}",
         result_str
     );
+    // Non-unquoted symbols become SyntaxLiteral for scope preservation
     assert!(
-        result_str.contains("quote"),
-        "Result should contain 'quote': {}",
+        result_str.contains("syntax-literal"),
+        "Result should contain syntax-literals for quoted symbols: {}",
         result_str
     );
     assert!(
@@ -147,10 +149,10 @@ fn test_quasiquote_non_list() {
 
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     let result_str = result.to_string();
-    // Should expand to (quote x)
+    // Bare symbol becomes SyntaxLiteral to preserve scopes
     assert!(
-        result_str.contains("quote"),
-        "Result should contain 'quote': {}",
+        result_str.contains("syntax-literal"),
+        "Result should be a syntax-literal: {}",
         result_str
     );
     assert!(

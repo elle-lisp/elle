@@ -408,6 +408,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    spirv: std::cell::OnceCell::new(),
 
                     rotation_safe: func.rotation_safe,
                 };
@@ -917,10 +918,12 @@ impl Emitter {
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::CheckSignalBound);
-                // Emit SignalBits raw value as two u16s (low half first, then high half)
+                // Emit SignalBits raw value as four u16s (least-significant first)
                 let raw = allowed_bits.raw();
                 self.bytecode.emit_u16(raw as u16);
                 self.bytecode.emit_u16((raw >> 16) as u16);
+                self.bytecode.emit_u16((raw >> 32) as u16);
+                self.bytecode.emit_u16((raw >> 48) as u16);
                 // Value consumed by the check
                 self.pop();
             }

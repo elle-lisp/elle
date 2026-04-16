@@ -1,0 +1,332 @@
+//! Lower GPU-eligible LirFunction to MLIR.
+//!
+//! Produces an MLIR module using the arith, func, cf, and memref dialects.
+//! Only handles the GPU-safe instruction subset — no heap allocation,
+//! closures, function calls, or signal emission.
+//!
+//! Local slots use `memref.alloca` for correct cross-block semantics
+//! (StoreLocal in one block, LoadLocal in another).
+
+use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
+use melior::dialect::arith::CmpiPredicate;
+use melior::dialect::{arith, cf, func, memref, DialectRegistry};
+use melior::ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute};
+use melior::ir::operation::OperationLike;
+use melior::ir::r#type::{FunctionType, IntegerType, MemRefType};
+use melior::ir::{Block, BlockLike, Location, Module, Region, RegionLike, Type, Value};
+use melior::Context;
+use std::collections::HashMap;
+
+/// Create an MLIR context with all dialects registered.
+pub fn create_context() -> Context {
+    let context = Context::new();
+    let registry = DialectRegistry::new();
+    melior::utility::register_all_dialects(&registry);
+    context.append_dialect_registry(&registry);
+    context.load_all_available_dialects();
+    context
+}
+
+/// Lower a GPU-eligible LirFunction into an MLIR module.
+///
+/// The module contains a single `func.func` with `llvm.emit_c_interface`
+/// so the execution engine can call it via C calling convention.
+///
+/// Local slots are allocated with `memref.alloca` in the entry block
+/// for correct cross-block semantics (phi-like patterns via memory).
+pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Module<'c>, String> {
+    let location = Location::unknown(context);
+    let module = Module::new(location);
+
+    let i64_type: Type = IntegerType::new(context, 64).into();
+    let num_params = lir.arity.fixed_params();
+
+    let param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
+    let func_type = FunctionType::new(context, &param_types, &[i64_type]);
+    let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
+
+    let region = Region::new();
+
+    // Map LIR labels to block indices
+    let mut label_to_idx: HashMap<u32, usize> = HashMap::new();
+    let mut blocks: Vec<Block> = Vec::new();
+
+    for (i, lir_block) in lir.blocks.iter().enumerate() {
+        let block = if i == 0 {
+            Block::new(
+                &param_types
+                    .iter()
+                    .map(|t| (*t, location))
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            Block::new(&[])
+        };
+        label_to_idx.insert(lir_block.label.0, i);
+        blocks.push(block);
+    }
+
+    // SSA register map: LIR Reg → MLIR Value (for within-block SSA values)
+    let mut regs: HashMap<u32, Value> = HashMap::new();
+
+    // Allocate memref slots for locals in the entry block.
+    // Local slots handle cross-block value passing (phi patterns).
+    let scalar_memref = MemRefType::new(i64_type, &[], None, None);
+    let num_locals = lir.num_locals as u32;
+    let mut local_slots: HashMap<u32, Value> = HashMap::new();
+
+    if !blocks.is_empty() {
+        let entry = &blocks[0];
+
+        // Pre-populate regs with entry block parameters
+        for i in 0..num_params {
+            regs.insert(i as u32, entry.argument(i).unwrap().into());
+        }
+
+        // Allocate a memref<i64> for each local slot
+        for slot in 0..num_locals {
+            let alloca_op = entry.append_operation(memref::alloca(
+                context,
+                scalar_memref,
+                &[],
+                &[],
+                None,
+                location,
+            ));
+            local_slots.insert(slot, alloca_op.result(0).unwrap().into());
+        }
+    }
+
+    // Lower instructions
+    for (block_idx, lir_block) in lir.blocks.iter().enumerate() {
+        let block = &blocks[block_idx];
+
+        for si in &lir_block.instructions {
+            match &si.instr {
+                LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
+                    if (*index as usize) < num_params {
+                        // Parameters are entry block arguments
+                        regs.insert(dst.0, blocks[0].argument(*index as usize).unwrap().into());
+                    }
+                }
+                LirInstr::Const { dst, value } => {
+                    let n = match value {
+                        LirConst::Int(n) => *n,
+                        LirConst::Bool(b) => i64::from(*b),
+                        LirConst::Nil => 0i64,
+                        LirConst::Float(f) => f.to_bits() as i64,
+                        _ => return Err(format!("unsupported constant: {:?}", value)),
+                    };
+                    let op = arith::constant(
+                        context,
+                        IntegerAttribute::new(i64_type, n).into(),
+                        location,
+                    );
+                    let op_ref = block.append_operation(op);
+                    regs.insert(dst.0, op_ref.result(0).unwrap().into());
+                }
+                LirInstr::BinOp { dst, op, lhs, rhs } => {
+                    let lv = *regs
+                        .get(&lhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", lhs.0))?;
+                    let rv = *regs
+                        .get(&rhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
+                    let mlir_op = match op {
+                        BinOp::Add => arith::addi(lv, rv, location),
+                        BinOp::Sub => arith::subi(lv, rv, location),
+                        BinOp::Mul => arith::muli(lv, rv, location),
+                        BinOp::Div => arith::divsi(lv, rv, location),
+                        BinOp::Rem => arith::remsi(lv, rv, location),
+                        BinOp::BitAnd => arith::andi(lv, rv, location),
+                        BinOp::BitOr => arith::ori(lv, rv, location),
+                        BinOp::BitXor => arith::xori(lv, rv, location),
+                        BinOp::Shl => arith::shli(lv, rv, location),
+                        BinOp::Shr => arith::shrsi(lv, rv, location),
+                    };
+                    let op_ref = block.append_operation(mlir_op);
+                    regs.insert(dst.0, op_ref.result(0).unwrap().into());
+                }
+                LirInstr::Compare { dst, op, lhs, rhs } => {
+                    let lv = *regs
+                        .get(&lhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", lhs.0))?;
+                    let rv = *regs
+                        .get(&rhs.0)
+                        .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
+                    let pred = match op {
+                        CmpOp::Eq => CmpiPredicate::Eq,
+                        CmpOp::Ne => CmpiPredicate::Ne,
+                        CmpOp::Lt => CmpiPredicate::Slt,
+                        CmpOp::Le => CmpiPredicate::Sle,
+                        CmpOp::Gt => CmpiPredicate::Sgt,
+                        CmpOp::Ge => CmpiPredicate::Sge,
+                    };
+                    let op_ref =
+                        block.append_operation(arith::cmpi(context, pred, lv, rv, location));
+                    // cmpi returns i1; extend to i64 for consistency
+                    let i1_val: Value = op_ref.result(0).unwrap().into();
+                    let ext_ref = block.append_operation(arith::extui(i1_val, i64_type, location));
+                    regs.insert(dst.0, ext_ref.result(0).unwrap().into());
+                }
+                LirInstr::UnaryOp { dst, op, src } => {
+                    let sv = *regs
+                        .get(&src.0)
+                        .ok_or_else(|| format!("undefined reg r{}", src.0))?;
+                    let result = match op {
+                        UnaryOp::Neg => {
+                            let zero = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, 0).into(),
+                                location,
+                            ));
+                            let zero_val: Value = zero.result(0).unwrap().into();
+                            let sub = block.append_operation(arith::subi(zero_val, sv, location));
+                            sub.result(0).unwrap().into()
+                        }
+                        UnaryOp::Not => {
+                            let zero = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, 0).into(),
+                                location,
+                            ));
+                            let zero_val: Value = zero.result(0).unwrap().into();
+                            let cmp = block.append_operation(arith::cmpi(
+                                context,
+                                CmpiPredicate::Eq,
+                                sv,
+                                zero_val,
+                                location,
+                            ));
+                            let i1_val: Value = cmp.result(0).unwrap().into();
+                            let ext =
+                                block.append_operation(arith::extui(i1_val, i64_type, location));
+                            ext.result(0).unwrap().into()
+                        }
+                        UnaryOp::BitNot => {
+                            let neg1 = block.append_operation(arith::constant(
+                                context,
+                                IntegerAttribute::new(i64_type, -1).into(),
+                                location,
+                            ));
+                            let neg1_val: Value = neg1.result(0).unwrap().into();
+                            let xor = block.append_operation(arith::xori(sv, neg1_val, location));
+                            xor.result(0).unwrap().into()
+                        }
+                    };
+                    regs.insert(dst.0, result);
+                }
+                LirInstr::StoreLocal { slot, src } => {
+                    let val = *regs
+                        .get(&src.0)
+                        .ok_or_else(|| format!("undefined reg r{} in StoreLocal", src.0))?;
+                    let slot_ptr = *local_slots
+                        .get(&(*slot as u32))
+                        .ok_or_else(|| format!("unallocated local slot {}", slot))?;
+                    block.append_operation(memref::store(val, slot_ptr, &[], location));
+                }
+                LirInstr::LoadLocal { dst, slot } => {
+                    let slot_ptr = *local_slots
+                        .get(&(*slot as u32))
+                        .ok_or_else(|| format!("unallocated local slot {}", slot))?;
+                    let load_op = block.append_operation(memref::load(slot_ptr, &[], location));
+                    regs.insert(dst.0, load_op.result(0).unwrap().into());
+                }
+                _ => return Err(format!("unsupported instruction: {:?}", si.instr)),
+            }
+        }
+
+        // Terminator
+        match &lir_block.terminator.terminator {
+            Terminator::Return(reg) => {
+                let val = *regs
+                    .get(&reg.0)
+                    .ok_or_else(|| format!("undefined reg r{} in return", reg.0))?;
+                block.append_operation(func::r#return(&[val], location));
+            }
+            Terminator::Jump(label) => {
+                let target_idx = label_to_idx
+                    .get(&label.0)
+                    .ok_or_else(|| format!("unknown label {}", label.0))?;
+                block.append_operation(cf::br(&blocks[*target_idx], &[], location));
+            }
+            Terminator::Branch {
+                cond,
+                then_label,
+                else_label,
+            } => {
+                let cond_i64 = *regs
+                    .get(&cond.0)
+                    .ok_or_else(|| format!("undefined reg r{} in branch", cond.0))?;
+                // Compare to zero for truthiness (0=false, nonzero=true).
+                // trunci would take the LSB, giving wrong results for even
+                // nonzero values (e.g. 2 → false).
+                let zero = block.append_operation(arith::constant(
+                    context,
+                    IntegerAttribute::new(i64_type, 0).into(),
+                    location,
+                ));
+                let zero_val: Value = zero.result(0).unwrap().into();
+                let cmp = block.append_operation(arith::cmpi(
+                    context,
+                    CmpiPredicate::Ne,
+                    cond_i64,
+                    zero_val,
+                    location,
+                ));
+                let cond_val: Value = cmp.result(0).unwrap().into();
+                let then_idx = *label_to_idx
+                    .get(&then_label.0)
+                    .ok_or_else(|| format!("unknown then label {}", then_label.0))?;
+                let else_idx = *label_to_idx
+                    .get(&else_label.0)
+                    .ok_or_else(|| format!("unknown else label {}", else_label.0))?;
+                block.append_operation(cf::cond_br(
+                    context,
+                    cond_val,
+                    &blocks[then_idx],
+                    &blocks[else_idx],
+                    &[],
+                    &[],
+                    location,
+                ));
+            }
+            _ => {
+                return Err(format!(
+                    "unsupported terminator: {:?}",
+                    lir_block.terminator.terminator
+                ))
+            }
+        }
+    }
+
+    for block in blocks {
+        region.append_block(block);
+    }
+
+    let func_op = func::func(
+        context,
+        StringAttribute::new(context, func_name),
+        TypeAttribute::new(func_type.into()),
+        region,
+        &[(
+            melior::ir::Identifier::new(context, "llvm.emit_c_interface"),
+            melior::ir::attribute::Attribute::unit(context),
+        )],
+        location,
+    );
+    module.body().append_operation(func_op);
+
+    if !module.as_operation().verify() {
+        return Err("MLIR verification failed".to_string());
+    }
+
+    Ok(module)
+}
+
+/// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
+pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
+    let context = create_context();
+    let module = lower_to_module(&context, lir)?;
+    Ok(module.as_operation().to_string())
+}

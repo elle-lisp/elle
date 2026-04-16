@@ -238,8 +238,21 @@ impl VM {
 
             // Tiered WASM compilation and dispatch.
             // Checked before JIT because WASM is the preferred fast path when enabled.
+            #[cfg(feature = "wasm")]
             if closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_wasm_call(closure, &args) {
+                    self.fiber.call_depth -= 1;
+                    self.fiber.call_stack.pop();
+                    return bits;
+                }
+            }
+
+            // MLIR tier-2: GPU-eligible functions compiled through LLVM.
+            // Checked before Cranelift — MLIR produces better optimized code
+            // for numeric functions (LLVM vectorization, LICM, GVN).
+            #[cfg(feature = "mlir")]
+            if closure.template.lir_function.is_some() {
+                if let Some(bits) = self.try_mlir_call(closure, &args) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();
                     return bits;
@@ -326,6 +339,28 @@ impl VM {
             self.fiber.call_depth -= 1;
 
             let bits = result.bits;
+
+            // Silence enforcement: if the closure declared (silence) and
+            // the body produced ANY signal, that's a purity violation.
+            // The programmer asserted purity — any signal (error, yield,
+            // I/O) is a programmer bug. Abort with a clear diagnostic.
+            if closure.template.signal.bits.is_empty()
+                && closure.template.signal.propagates == 0
+                && self.fiber.signal.as_ref().is_some_and(|(b, _)| !b.is_ok())
+            {
+                let (sig_bits, sig_val) = self.fiber.signal.take().unwrap();
+                let name = closure.template.name.as_deref().unwrap_or("<anonymous>");
+                let reg = crate::signals::registry::global_registry().lock().unwrap();
+                eprintln!("panic: silence violation in '{}'", name);
+                eprintln!("  A (silence)'d function signaled at runtime.");
+                eprintln!("  silence asserts purity — any signal is a programmer bug.");
+                eprintln!("  signal: {}", reg.format_signal_bits(sig_bits));
+                eprintln!("  value:  {}", sig_val);
+                if let Some(loc) = self.error_loc.as_ref() {
+                    eprintln!("  at {}", loc);
+                }
+                std::process::abort();
+            }
 
             // Squelch enforcement: if the closure has a squelch mask and the callee
             // returned a non-OK, non-error, non-halt signal that matches the mask,

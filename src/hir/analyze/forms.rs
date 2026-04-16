@@ -350,6 +350,7 @@ impl<'a> Analyzer<'a> {
                         "parameterize" => return self.analyze_parameterize(items, span),
 
                         "silence" => return self.analyze_silence(items, span),
+                        "muffle" => return self.analyze_muffle(items, span),
 
                         "signal" => {
                             if items.len() != 2 {

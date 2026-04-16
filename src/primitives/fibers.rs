@@ -663,6 +663,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -674,6 +675,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
 
         Value::closure(Closure {

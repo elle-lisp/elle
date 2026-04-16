@@ -66,6 +66,32 @@ pub struct ClosureTemplate {
     /// WASM function table index (if compiled to WASM backend).
     /// When set, rt_call dispatches to this WASM function instead of bytecode.
     pub wasm_func_idx: Option<u32>,
+    /// Cached SPIR-V bytes (write-once). Populated by `(git f)`.
+    /// SPIR-V is a property of the code, not the instance — all closures
+    /// from the same lambda share the template, so the cache is shared.
+    pub spirv: std::cell::OnceCell<Vec<u8>>,
+}
+
+impl ClosureTemplate {
+    /// True if signal and structural checks pass for GPU eligibility.
+    ///
+    /// This is a necessary but not sufficient condition — the full
+    /// `LirFunction::is_gpu_eligible()` also walks instructions.
+    /// Use this for cheap runtime queries on compiled closures.
+    /// True if signal and structural checks pass for GPU eligibility.
+    ///
+    /// Allows SIG_ERROR (arithmetic type errors can't happen on unboxed GPU
+    /// scalars) but rejects yield, I/O, FFI, and polymorphism.
+    pub fn is_gpu_candidate(&self) -> bool {
+        // Allow error-only signals (arithmetic ops on unboxed types can't type-error)
+        let non_error_bits = self.signal.bits.subtract(crate::signals::SIG_ERROR);
+        non_error_bits.is_empty()
+            && self.signal.propagates == 0
+            && self.num_captures == 0
+            && matches!(self.arity, Arity::Exact(_))
+            && self.capture_params_mask == 0
+            && self.capture_locals_mask == 0
+    }
 }
 
 /// Closure with captured environment
@@ -164,6 +190,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -175,6 +202,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         })
     }
 
@@ -201,6 +229,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -212,6 +241,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure = Closure {
             template,
@@ -230,6 +260,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -241,6 +272,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure2 = Closure {
             template: template2,
@@ -259,6 +291,7 @@ mod tests {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -270,6 +303,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure3 = Closure {
             template: template3,

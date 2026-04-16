@@ -222,7 +222,28 @@ pub fn compile_file_to_lir(
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
+    let errors = analyzer.take_errors();
     drop(analyzer);
+
+    // If analysis accumulated any recoverable errors (undefined vars,
+    // signal mismatches, etc.), surface the first one now in the standard
+    // "file:line:col: message" format. Without this, poison nodes from
+    // accumulated errors reach the lowerer and surface as the opaque
+    // "internal: error poison node in lowerer".
+    if !errors.is_empty() {
+        let err = &errors[0];
+        let msg = match &err.location {
+            Some(loc) => format!(
+                "{}:{}:{}: {}",
+                loc.file,
+                loc.line,
+                loc.col,
+                err.description()
+            ),
+            None => err.description(),
+        };
+        return Err(msg);
+    }
 
     mark_tail_calls(&mut hir);
 

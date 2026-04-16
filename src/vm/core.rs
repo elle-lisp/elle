@@ -98,9 +98,15 @@ pub struct VM {
     pub jit_hotness_threshold: usize,
     /// Lazy WASM compilation tier. When `--wasm=N`, hot closures are
     /// compiled to per-closure WASM modules and dispatched through Wasmtime.
+    #[cfg(feature = "wasm")]
     pub wasm_tier: Option<crate::wasm::lazy::WasmTier>,
     /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
+    #[cfg(feature = "wasm")]
     pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
+    /// MLIR compilation cache for GPU-eligible functions.
+    /// Lazily initialized on first GPU-eligible call.
+    #[cfg(feature = "mlir")]
+    pub(crate) mlir_cache: Option<crate::mlir::MlirCache>,
 }
 
 /// Create a dummy root closure for the root fiber.
@@ -122,6 +128,7 @@ fn root_closure() -> Rc<Closure> {
             signal: Signal::silent(),
             capture_params_mask: 0,
             capture_locals_mask: 0,
+
             symbol_names: Rc::new(HashMap::new()),
             location_map: Rc::new(LocationMap::new()),
             rotation_safe: false,
@@ -133,6 +140,7 @@ fn root_closure() -> Rc<Closure> {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         }),
         env: Rc::new(vec![]),
         squelch_mask: SignalBits::EMPTY,
@@ -185,12 +193,16 @@ impl VM {
             source_arg: String::new(),
             jit_enabled,
             jit_hotness_threshold: jit_threshold,
+            #[cfg(feature = "wasm")]
             wasm_tier: if crate::config::get().wasm > 0 && !crate::config::get().wasm_full {
                 crate::wasm::lazy::WasmTier::new().ok()
             } else {
                 None
             },
+            #[cfg(feature = "wasm")]
             wasm_rejections: FxHashMap::default(),
+            #[cfg(feature = "mlir")]
+            mlir_cache: None,
         }
     }
 

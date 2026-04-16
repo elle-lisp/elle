@@ -391,12 +391,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
         i += 1;
 
         match instr {
-            Instruction::LoadConst => {
-                if i + 1 < instructions.len() {
-                    let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (const_idx={})", idx));
-                    i += 2;
-                }
+            Instruction::LoadConst if i + 1 < instructions.len() => {
+                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (const_idx={})", idx));
+                i += 2;
             }
             Instruction::LoadGlobal | Instruction::StoreGlobal => {
                 // Dead instructions — skip operands for disassembly
@@ -405,88 +403,77 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                     i += 2;
                 }
             }
-            Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue => {
-                if i + 1 < instructions.len() {
-                    let high = instructions[i] as i8 as i16;
-                    let low = instructions[i + 1] as i16;
-                    let offset = (high << 8) | (low & 0xFF);
-                    let target = (i + 2) as i32 + offset as i32;
-                    line.push_str(&format!(" (offset={}, target={})", offset, target));
-                    i += 2;
-                }
+            Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue
+                if i + 1 < instructions.len() =>
+            {
+                let high = instructions[i] as i8 as i16;
+                let low = instructions[i + 1] as i16;
+                let offset = (high << 8) | (low & 0xFF);
+                let target = (i + 2) as i32 + offset as i32;
+                line.push_str(&format!(" (offset={}, target={})", offset, target));
+                i += 2;
             }
-            Instruction::LoadLocal | Instruction::StoreLocal => {
-                if i + 1 < instructions.len() {
-                    let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (index={})", index));
-                    i += 2;
-                }
+            Instruction::LoadLocal | Instruction::StoreLocal if i + 1 < instructions.len() => {
+                let index = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (index={})", index));
+                i += 2;
             }
-            Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue => {
-                if i + 2 < instructions.len() {
-                    let depth = instructions[i];
-                    let index = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
-                    line.push_str(&format!(" (depth={}, index={})", depth, index));
-                    i += 3;
-                }
+            Instruction::LoadUpvalue | Instruction::LoadUpvalueRaw | Instruction::StoreUpvalue
+                if i + 2 < instructions.len() =>
+            {
+                let depth = instructions[i];
+                let index = ((instructions[i + 1] as u16) << 8) | (instructions[i + 2] as u16);
+                line.push_str(&format!(" (depth={}, index={})", depth, index));
+                i += 3;
             }
-            Instruction::Call | Instruction::TailCall => {
-                if i + 1 < instructions.len() {
-                    let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (args={})", arg_count));
-                    i += 2;
-                }
+            Instruction::Call | Instruction::TailCall if i + 1 < instructions.len() => {
+                let arg_count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (args={})", arg_count));
+                i += 2;
             }
-            Instruction::DupN => {
-                if i < instructions.len() {
-                    let offset = instructions[i];
-                    line.push_str(&format!(" (offset={})", offset));
-                    i += 1;
-                }
+            Instruction::DupN if i < instructions.len() => {
+                let offset = instructions[i];
+                line.push_str(&format!(" (offset={})", offset));
+                i += 1;
             }
-            Instruction::MakeClosure => {
-                if i + 3 < instructions.len() {
-                    let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    let num_captures =
-                        ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
-                    line.push_str(&format!(
-                        " (const_idx={}, num_captures={})",
-                        const_idx, num_captures
-                    ));
-                    i += 4;
-                }
+            Instruction::MakeClosure if i + 3 < instructions.len() => {
+                let const_idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                let num_captures =
+                    ((instructions[i + 2] as u16) << 8) | (instructions[i + 3] as u16);
+                line.push_str(&format!(
+                    " (const_idx={}, num_captures={})",
+                    const_idx, num_captures
+                ));
+                i += 4;
             }
             Instruction::ArrayMutRefDestructure
             | Instruction::ArrayMutSliceFrom
-            | Instruction::ArrayMutRefOrNil => {
-                if i + 1 < instructions.len() {
-                    let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (index={})", idx));
-                    i += 2;
-                }
+            | Instruction::ArrayMutRefOrNil
+                if i + 1 < instructions.len() =>
+            {
+                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (index={})", idx));
+                i += 2;
             }
-            Instruction::StructGetOrNil | Instruction::StructGetDestructure => {
-                if i + 1 < instructions.len() {
-                    let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (const_idx={})", idx));
-                    i += 2;
-                }
+            Instruction::StructGetOrNil | Instruction::StructGetDestructure
+                if i + 1 < instructions.len() =>
+            {
+                let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                line.push_str(&format!(" (const_idx={})", idx));
+                i += 2;
             }
-            Instruction::StructRest => {
-                if i + 1 < instructions.len() {
-                    let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    i += 2;
-                    let mut keys = Vec::new();
-                    for _ in 0..count {
-                        if i + 1 < instructions.len() {
-                            let idx =
-                                ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                            i += 2;
-                            keys.push(format!("const[{}]", idx));
-                        }
+            Instruction::StructRest if i + 1 < instructions.len() => {
+                let count = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                i += 2;
+                let mut keys = Vec::new();
+                for _ in 0..count {
+                    if i + 1 < instructions.len() {
+                        let idx = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                        i += 2;
+                        keys.push(format!("const[{}]", idx));
                     }
-                    line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
                 }
+                line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
             }
             Instruction::Eval => {
                 // No operands — pops 2 from stack, pushes 1
@@ -500,12 +487,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::RegionEnter | Instruction::RegionExit | Instruction::RegionExitCall => {
                 // No operands
             }
-            Instruction::PushParamFrame => {
-                if i < instructions.len() {
-                    let count = instructions[i];
-                    line.push_str(&format!(" (count={})", count));
-                    i += 1;
-                }
+            Instruction::PushParamFrame if i < instructions.len() => {
+                let count = instructions[i];
+                line.push_str(&format!(" (count={})", count));
+                i += 1;
             }
             Instruction::PopParamFrame => {
                 // No operands

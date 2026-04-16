@@ -1,4 +1,5 @@
 //! Smoke test: compile Elle source through LIR → WASM → Wasmtime.
+#![cfg(feature = "wasm")]
 
 fn eval(source: &str) -> String {
     match elle::wasm::eval_wasm(source, "<test>") {

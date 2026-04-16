@@ -91,6 +91,42 @@ impl<'a> Analyzer<'a> {
         ))
     }
 
+    /// Analyze a `(muffle signal-spec)` form.
+    ///
+    /// muffle is a declaration, not an expression. It must appear inside
+    /// a lambda body. It absorbs specific signal bits from the body's
+    /// inferred signal — they are allowed in the body but excluded from
+    /// the function's external signal.
+    ///
+    /// When used with `(silence)`, muffled bits expand the ceiling:
+    /// `(silence) (muffle :error)` allows `:error` in the body.
+    /// Without `(silence)`, muffled bits are subtracted from the inferred signal.
+    ///
+    /// Forms:
+    /// - `(muffle :keyword)` — absorb a single signal
+    /// - `(muffle |:kw1 :kw2|)` — absorb a set of signals
+    pub(crate) fn analyze_muffle(&mut self, items: &[Syntax], span: Span) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: muffle must appear inside a function body",
+                span
+            ));
+        }
+
+        let args = &items[1..];
+        if args.len() != 1 {
+            return Err(format!(
+                "{}: muffle requires exactly one argument (signal keyword or set)",
+                span
+            ));
+        }
+
+        let bits = self.resolve_static_signal(&args[0])?;
+        self.current_muffle_bits |= bits;
+
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
     /// `(emit <signal> <value>)` — general signal emission.
     ///
     /// The first argument must be a compile-time constant: a literal keyword

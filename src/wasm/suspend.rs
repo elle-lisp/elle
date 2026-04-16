@@ -37,8 +37,10 @@ impl WasmEmitter {
 
         // Check SIG_YIELD (bit 1 = value 2)
         f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I32Const(2));
-        f.instruction(&Instruction::I32And);
+        f.instruction(&Instruction::I64Const(2));
+        f.instruction(&Instruction::I64And);
+        f.instruction(&Instruction::I64Const(0));
+        f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
         {
             let total_saved = self.num_regs + self.num_stack_locals;
@@ -53,24 +55,26 @@ impl WasmEmitter {
             f.instruction(&Instruction::Call(FN_RT_YIELD));
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::I64Const(resume_state as i64));
             f.instruction(&Instruction::Return);
         }
         f.instruction(&Instruction::End);
 
         // Check other signals (error etc.)
         f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I64Const(0));
+        f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I32Store(MemArg {
+        f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,
-            align: 2,
+            align: 3,
             memory_index: 0,
         }));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);
     }
@@ -98,8 +102,10 @@ impl WasmEmitter {
         f.instruction(&Instruction::LocalSet(self.tag_local(dst)));
 
         f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I32Const(2));
-        f.instruction(&Instruction::I32And);
+        f.instruction(&Instruction::I64Const(2));
+        f.instruction(&Instruction::I64And);
+        f.instruction(&Instruction::I64Const(0));
+        f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
         {
             let total_saved = self.num_regs + self.num_stack_locals;
@@ -114,23 +120,25 @@ impl WasmEmitter {
             f.instruction(&Instruction::Call(FN_RT_YIELD));
             f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
             f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-            f.instruction(&Instruction::I32Const(resume_state as i32));
+            f.instruction(&Instruction::I64Const(resume_state as i64));
             f.instruction(&Instruction::Return);
         }
         f.instruction(&Instruction::End);
 
         f.instruction(&Instruction::LocalGet(self.signal_local));
+        f.instruction(&Instruction::I64Const(0));
+        f.instruction(&Instruction::I64Ne);
         f.instruction(&Instruction::If(BlockType::Empty));
         f.instruction(&Instruction::I32Const(0));
         f.instruction(&Instruction::LocalGet(self.signal_local));
-        f.instruction(&Instruction::I32Store(MemArg {
+        f.instruction(&Instruction::I64Store(MemArg {
             offset: 0,
-            align: 2,
+            align: 3,
             memory_index: 0,
         }));
         f.instruction(&Instruction::LocalGet(self.tag_local(dst)));
         f.instruction(&Instruction::LocalGet(self.pay_local(dst)));
-        f.instruction(&Instruction::I32Const(0));
+        f.instruction(&Instruction::I64Const(0));
         f.instruction(&Instruction::Return);
         f.instruction(&Instruction::End);
     }
@@ -194,7 +202,7 @@ impl WasmEmitter {
 
     /// Emit the resume prologue for suspending closures.
     pub(super) fn emit_resume_prologue(&self, f: &mut Function, state_local: u32) {
-        let entry_idx = self.label_to_idx.values().min().copied().unwrap_or(0) as i32;
+        let entry_idx = self.label_to_idx.values().min().copied().unwrap_or(0) as i64;
 
         f.instruction(&Instruction::LocalGet(self.ctx_local));
         f.instruction(&Instruction::If(BlockType::Empty));
@@ -222,7 +230,7 @@ impl WasmEmitter {
                 f.instruction(&Instruction::End);
                 let info = &self.resume_states[idx];
                 self.emit_restore_all(f, info.num_saved);
-                f.instruction(&Instruction::I32Const(info.target_block_idx));
+                f.instruction(&Instruction::I64Const(info.target_block_idx as i64));
                 f.instruction(&Instruction::LocalSet(state_local));
                 f.instruction(&Instruction::Br(idx as u32));
             }
@@ -230,7 +238,7 @@ impl WasmEmitter {
         }
         f.instruction(&Instruction::Else);
         {
-            f.instruction(&Instruction::I32Const(entry_idx));
+            f.instruction(&Instruction::I64Const(entry_idx));
             f.instruction(&Instruction::LocalSet(state_local));
         }
         f.instruction(&Instruction::End);

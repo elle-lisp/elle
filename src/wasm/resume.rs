@@ -9,7 +9,7 @@ use crate::value::Value;
 /// Read signal_bits from the front (innermost) suspension frame for a fiber.
 /// The innermost frame carries the original signal (e.g. SIG_IO); outer frames
 /// only have SIG_YIELD.
-fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u32 {
+fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u64 {
     caller
         .data()
         .first_suspension_frame()
@@ -20,8 +20,8 @@ fn front_frame_signal(caller: &Caller<'_, ElleHost>) -> u32 {
 /// Resume outcome from drive_resume_chain.
 enum ResumeOutcome {
     Dead(Value),
-    Yielded(i64, i64, u32),
-    Error(i64, i64, u32),
+    Yielded(i64, i64, u64),
+    Error(i64, i64, u64),
 }
 
 /// Drive the resume chain to completion or next yield.
@@ -37,7 +37,7 @@ enum ResumeOutcome {
 /// the new yield point. We evict the stale frames so the next
 /// resume starts from the new innermost frame.
 fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -> ResumeOutcome {
-    let yield_signal = crate::value::fiber::SIG_YIELD.raw() as i32;
+    let yield_signal = crate::value::fiber::SIG_YIELD.raw() as i64;
     let mut result_val = initial_value;
 
     loop {
@@ -65,7 +65,7 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
                     let sig_bits = front_frame_signal(caller);
                     return ResumeOutcome::Yielded(t, p, sig_bits);
                 } else if s != 0 {
-                    return ResumeOutcome::Error(t, p, s as u32);
+                    return ResumeOutcome::Error(t, p, s as u64);
                 }
                 result_val = caller.data().wasm_to_value(t, p);
             }
@@ -81,7 +81,7 @@ fn drive_resume_chain(caller: &mut Caller<'_, ElleHost>, initial_value: Value) -
 pub(super) fn handle_fiber_resume(
     caller: &mut Caller<'_, ElleHost>,
     fiber_value: Value,
-) -> (i64, i64, i32) {
+) -> (i64, i64, i64) {
     use crate::value::fiber::{FiberStatus, SignalBits, SIG_ERROR, SIG_OK, SIG_YIELD};
 
     let fiber_handle = match fiber_value.as_fiber() {
@@ -89,7 +89,7 @@ pub(super) fn handle_fiber_resume(
         None => {
             let err = crate::value::error_val("type-error", "fiber/resume: not a fiber");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.raw() as i32);
+            return (tag, payload, SIG_ERROR.raw() as i64);
         }
     };
 
@@ -107,11 +107,11 @@ pub(super) fn handle_fiber_resume(
             let err =
                 crate::value::error_val("internal-error", "fiber/resume: bytecode closure in WASM");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            return (tag, payload, SIG_ERROR.raw() as i32);
+            return (tag, payload, SIG_ERROR.raw() as i64);
         }
     };
 
-    let yield_signal = SIG_YIELD.raw() as i32;
+    let yield_signal = SIG_YIELD.raw() as i64;
     let fiber_id = fiber_handle.id();
 
     match status {
@@ -146,7 +146,7 @@ pub(super) fn handle_fiber_resume(
                 let err_val = caller.data().wasm_to_value(tag, payload);
                 fiber_handle.with_mut(|f| {
                     f.status = FiberStatus::Error;
-                    f.signal = Some((SignalBits::new(signal as u32), err_val));
+                    f.signal = Some((SignalBits::new(signal as u64), err_val));
                 });
                 caller.data_mut().fiber_id_stack.pop();
                 (tag, payload, signal)
@@ -180,7 +180,7 @@ pub(super) fn handle_fiber_resume(
                         f.status = FiberStatus::Error;
                         f.signal = Some((SignalBits::new(s), err_val));
                     });
-                    (t, p, s as i32)
+                    (t, p, s as i64)
                 }
                 ResumeOutcome::Dead(result_val) => {
                     fiber_handle.with_mut(|f| {
@@ -198,7 +198,7 @@ pub(super) fn handle_fiber_resume(
         _ => {
             let err = crate::value::error_val("fiber-error", "fiber/resume: fiber not resumable");
             let (tag, payload) = caller.data_mut().value_to_wasm(err);
-            (tag, payload, SIG_ERROR.raw() as i32)
+            (tag, payload, SIG_ERROR.raw() as i64)
         }
     }
 }

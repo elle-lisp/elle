@@ -14,11 +14,14 @@ pub mod execute;
 pub mod fiber;
 mod jit_entry;
 pub mod literals;
+#[cfg(feature = "mlir")]
+mod mlir_entry;
 pub mod parameters;
 pub mod signal;
 pub mod stack;
 pub mod types;
 pub mod variables;
+#[cfg(feature = "wasm")]
 mod wasm_entry;
 
 pub use crate::value::fiber::CallFrame;
@@ -239,6 +242,7 @@ impl VM {
                 signal: bytecode.signal,
                 capture_params_mask: 0,
                 capture_locals_mask: 0,
+
                 symbol_names: Rc::new(std::collections::HashMap::new()),
                 location_map: Rc::new(bytecode.location_map.clone()),
                 rotation_safe: false,
@@ -250,6 +254,7 @@ impl VM {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: None,
+                spirv: std::cell::OnceCell::new(),
             }),
             env: Rc::new(vec![]),
             squelch_mask: SignalBits::EMPTY,

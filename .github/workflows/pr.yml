@@ -41,12 +41,22 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     if: needs.changes.outputs.source == 'true'
+    env:
+      MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+      TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+      LIBCLANG_PATH: /usr/lib/llvm-22/lib
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt,clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install LLVM 22 (for mlir feature)
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22
       - name: Check formatting
         run: cargo fmt -- --check
       - name: Run clippy on workspace
@@ -99,6 +109,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: plugin-${{ matrix.plugin }}
+      - name: Install libclang (for bindgen — oxrocksdb-sys, etc.)
+        run: |
+          sudo apt-get update
+          # llvm-dev brings llvm-config so we can locate libclang.so
+          # reliably on any Ubuntu version the runner happens to be on.
+          sudo apt-get install -y libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Build plugin
         run: cargo build --release -p elle-${{ matrix.plugin }}
       - name: Upload plugin .so
@@ -164,6 +181,34 @@ jobs:
       - name: Run property tests
         run: "cargo test --test lib property::"
 
+  mlir:
+    name: MLIR Backend Tests
+    needs: changes
+    runs-on: ubuntu-latest
+    if: needs.changes.outputs.source == 'true'
+    env:
+      MLIR_SYS_220_PREFIX: /usr/lib/llvm-22
+      TABLEGEN_220_PREFIX: /usr/lib/llvm-22
+      LIBCLANG_PATH: /usr/lib/llvm-22/lib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mlir
+      - name: Install LLVM 22 and GNU parallel
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-22 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-22-dev libpolly-22-dev mlir-22-tools libmlir-22-dev libclang-22-dev clang-22 parallel
+      - name: Build with MLIR
+        run: cargo build --release -p elle --features mlir
+      - name: Run MLIR and SPIR-V tests
+        run: |
+          ./target/release/elle tests/elle/mlir.lisp
+          ./target/release/elle tests/elle/spirv.lisp
+
   aarch64:
     name: AArch64 Build & Smoke
     needs: changes
@@ -204,7 +249,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests, aarch64, macos]
+    needs: [changes, qa, check-plugin-list, tests-combined, build-plugins, tests, plugin-tests, mlir, aarch64, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -225,6 +270,9 @@ jobs:
         run: exit 1
       - name: Check plugin tests
         if: needs.plugin-tests.result == 'failure'
+        run: exit 1
+      - name: Check MLIR
+        if: needs.mlir.result == 'failure'
         run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'

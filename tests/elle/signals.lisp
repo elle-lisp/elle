@@ -162,7 +162,8 @@
     (silence f)
     (let ((safe-g (squelch g :yield)))
       (begin (f x) (begin (safe-g x)))))
-  (assert (= (apply-sq-sil (fn (x) (* x 2)) (fn (x) (+ x 1)) 5) 6) "squelch and silence on different params: both annotations coexist"))
+  # f must be truly silent (no SIG_ERROR); use identity instead of (* x 2)
+  (assert (= (apply-sq-sil (fn (x) x) (fn (x) (+ x 1)) 5) 6) "squelch and silence on different params: both annotations coexist"))
 
 # squelch catches :yield at runtime — use let for non-tail position.
 (begin

@@ -50,7 +50,7 @@ impl std::fmt::Debug for TaskFn {
 
 /// How to configure a subprocess stdio stream.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum StdioDisposition {
+pub enum StdioDisposition {
     /// Create a pipe; return it as a port.
     Pipe,
     /// Inherit the parent process fd.
@@ -61,7 +61,7 @@ pub(crate) enum StdioDisposition {
 
 /// Subprocess configuration, shared between IoOp::Spawn and the backend helpers.
 #[derive(Debug)]
-pub(crate) struct SpawnRequest {
+pub struct SpawnRequest {
     pub program: String,
     pub args: Vec<String>,
     pub env: Option<Vec<(String, String)>>,
@@ -160,7 +160,7 @@ fn pipe_to_port<T: Into<std::os::unix::io::OwnedFd>>(
 
 /// I/O operation descriptor.
 #[derive(Debug)]
-pub(crate) enum IoOp {
+pub enum IoOp {
     /// Read one line (up to `\n`). Returns string or nil (EOF).
     ReadLine,
     /// Read up to `count` bytes. Returns bytes/string or nil (EOF).
@@ -237,7 +237,7 @@ pub(crate) enum IoOp {
 
 /// Address for connect operations.
 #[derive(Debug)]
-pub(crate) enum ConnectAddr {
+pub enum ConnectAddr {
     Tcp { addr: String, port: u16 },
     Unix { path: String },
 }
@@ -248,7 +248,7 @@ pub(crate) enum ConnectAddr {
 /// - The `Value` holds the `Rc` to the `ExternalObject` containing the `Port`
 /// - The backend extracts `&Port` via `value.as_external::<Port>()`
 #[derive(Debug)]
-pub(crate) struct IoRequest {
+pub struct IoRequest {
     pub op: IoOp,
     pub port: Value,
     pub timeout: Option<Duration>,

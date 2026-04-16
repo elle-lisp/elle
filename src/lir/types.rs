@@ -207,6 +207,108 @@ impl LirFunction {
         })
     }
 
+    /// True if this function is eligible for GPU compilation.
+    ///
+    /// GPU-eligible functions use only numeric operations (arithmetic,
+    /// comparison, local variable access, control flow) with no heap
+    /// allocation, closures, function calls, or signal emission.
+    ///
+    /// Checked in order of increasing cost:
+    /// 1. Signal check (cheapest — just field reads)
+    /// 2. Structural check (arity, captures, cells)
+    /// 3. Instruction whitelist (walks all basic blocks)
+    pub fn is_gpu_eligible(&self) -> bool {
+        // Signal: allow error-only (arithmetic type errors can't happen on
+        // unboxed GPU scalars), reject yield/IO/FFI/polymorphic
+        let non_error = self.signal.bits.subtract(crate::signals::SIG_ERROR);
+        if !non_error.is_empty() || self.signal.propagates != 0 {
+            return false;
+        }
+        // Structural: no closures, no variadics, no mutable cells
+        if self.num_captures > 0 {
+            return false;
+        }
+        if !matches!(self.arity, Arity::Exact(_)) {
+            return false;
+        }
+        if self.capture_params_mask != 0 || self.capture_locals_mask != 0 {
+            return false;
+        }
+        // Instruction whitelist: every instruction and terminator must be GPU-safe
+        self.blocks.iter().all(|b| {
+            b.instructions
+                .iter()
+                .all(|si| is_gpu_instruction(&si.instr))
+                && is_gpu_terminator(&b.terminator.terminator)
+        })
+    }
+
+    /// True if this function is safe for the CPU MLIR tier-2 path.
+    ///
+    /// Stricter than `is_gpu_eligible`: the return register must be
+    /// producible from integer operations only. MLIR represents all
+    /// values as i64, so nil (→ 0), bool (→ 0/1), and Compare results
+    /// (→ 0/1) can't round-trip back to their original Value types when
+    /// the function is called from regular Elle code.
+    ///
+    /// GPU dispatch (via `gpu:map`) doesn't have this problem — the
+    /// caller reads integers out of a buffer and treats them as integers.
+    pub fn is_mlir_cpu_eligible(&self) -> bool {
+        if !self.is_gpu_eligible() {
+            return false;
+        }
+        for block in &self.blocks {
+            if let Terminator::Return(reg) = &block.terminator.terminator {
+                if self.register_reaches_non_int(*reg) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// True if `target` is transitively produced by a non-int value source
+    /// (Nil constant, Bool constant, or Compare result). Walks backward
+    /// through definitions — Const sources, LoadLocal/StoreLocal chains.
+    /// LoadCapture is treated as int (args are validated at call site).
+    fn register_reaches_non_int(&self, target: Reg) -> bool {
+        use std::collections::HashSet;
+        let mut regs_to_check: Vec<Reg> = vec![target];
+        let mut seen_regs: HashSet<u32> = HashSet::new();
+        let mut seen_slots: HashSet<u16> = HashSet::new();
+        while let Some(r) = regs_to_check.pop() {
+            if !seen_regs.insert(r.0) {
+                continue;
+            }
+            for block in &self.blocks {
+                for si in &block.instructions {
+                    match &si.instr {
+                        LirInstr::Const {
+                            dst,
+                            value: LirConst::Nil | LirConst::Bool(_),
+                        } if *dst == r => return true,
+                        LirInstr::Compare { dst, .. } if *dst == r => return true,
+                        LirInstr::LoadLocal { dst, slot }
+                            if *dst == r && seen_slots.insert(*slot) =>
+                        {
+                            for b2 in &self.blocks {
+                                for si2 in &b2.instructions {
+                                    if let LirInstr::StoreLocal { slot: s, src } = &si2.instr {
+                                        if *s == *slot {
+                                            regs_to_check.push(*src);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Convert ValueConst instructions to Const (LirConst) for safe cross-thread transfer.
     /// NativeFn ValueConsts are safe to keep as-is (function pointers are Send+Sync).
     /// Closure ValueConsts are converted to `ClosureRef(idx)` using the intern table.
@@ -600,4 +702,39 @@ pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
     } else {
         v.with_string(|s| s.to_string()).map(LirConst::String)
     }
+}
+
+/// True if this LIR instruction is safe for GPU compilation.
+///
+/// GPU-safe: numeric constants, arithmetic, comparison, local/parameter
+/// access. Everything else requires heap, closures, calls, or signals.
+///
+/// LoadCapture/LoadCaptureRaw are parameter loads when num_captures == 0
+/// (checked by is_gpu_eligible before reaching the instruction walk).
+fn is_gpu_instruction(i: &LirInstr) -> bool {
+    matches!(
+        i,
+        LirInstr::Const {
+            value: LirConst::Int(_) | LirConst::Float(_) | LirConst::Bool(_) | LirConst::Nil,
+            ..
+        } | LirInstr::BinOp { .. }
+            | LirInstr::UnaryOp { .. }
+            | LirInstr::Compare { .. }
+            | LirInstr::LoadLocal { .. }
+            | LirInstr::StoreLocal { .. }
+            | LirInstr::LoadCapture { .. }
+            | LirInstr::LoadCaptureRaw { .. }
+    )
+}
+
+/// True if this block terminator is safe for GPU compilation.
+///
+/// GPU-safe: return, jump, branch. Emit (any signal) and Unreachable are not.
+/// An Emit terminator means the function deliberately signals — even :error
+/// via `(error ...)` is not GPU-safe.
+fn is_gpu_terminator(t: &Terminator) -> bool {
+    matches!(
+        t,
+        Terminator::Return(_) | Terminator::Jump(_) | Terminator::Branch { .. }
+    )
 }

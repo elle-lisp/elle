@@ -189,7 +189,7 @@ impl WasmTier {
 
         // Call the closure function
         let func = instance
-            .get_typed_func::<(i32, i32, i32, i32), (i64, i64, i32)>(&mut store, "__elle_closure")
+            .get_typed_func::<(i32, i32, i32, i32), (i64, i64, i64)>(&mut store, "__elle_closure")
             .map_err(|e| e.to_string())?;
 
         let (tag, payload, status) = func
@@ -197,7 +197,7 @@ impl WasmTier {
             .map_err(|e| e.to_string())?;
 
         let value = store.data().inner.wasm_to_value(tag, payload);
-        let signal = SignalBits::new(status as u32);
+        let signal = SignalBits::new(status as u64);
         Ok((value, signal))
     }
 }
@@ -301,7 +301,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i32) {
+         -> (i64, i64, i64) {
             let args = read_args(&mut caller, args_ptr, nargs);
             let (bits, result) = caller
                 .data_mut()
@@ -309,7 +309,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 .call_primitive(prim_id as u32, &args);
             let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-            (tag, payload, bits.raw() as i32)
+            (tag, payload, bits.raw() as i64)
         },
     )?;
 
@@ -323,7 +323,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          args_ptr: i32,
          nargs: i32,
          _ctx: i32|
-         -> (i64, i64, i32) {
+         -> (i64, i64, i64) {
             let func_val = caller.data().inner.wasm_to_value(func_tag, func_payload);
             let args = read_args(&mut caller, args_ptr, nargs);
 
@@ -332,7 +332,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                 let (bits, result) = native_fn(&args);
                 let (bits, result) = caller.data_mut().inner.maybe_execute_io(bits, result);
                 let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-                return (tag, payload, bits.raw() as i32);
+                return (tag, payload, bits.raw() as i64);
             }
 
             if let Some((id, default)) = func_val.as_parameter() {
@@ -370,7 +370,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                         .unwrap_func()
                         .expect("rt_call: table entry is not a function");
 
-                    let mut results = [Val::I64(0), Val::I64(0), Val::I32(0)];
+                    let mut results = [Val::I64(0), Val::I64(0), Val::I64(0)];
                     match func.call(
                         &mut caller,
                         &[
@@ -384,7 +384,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                         Ok(()) => {
                             let tag = results[0].unwrap_i64();
                             let payload = results[1].unwrap_i64();
-                            let status = results[2].unwrap_i32();
+                            let status = results[2].unwrap_i64();
                             // Restore env_stack_ptr after the call
                             caller.data_mut().inner.env_stack_ptr = env_base;
                             return (tag, payload, status);
@@ -421,7 +421,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                                 return (tag, payload, 0);
                             }
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(value);
-                            return (tag, payload, signal.raw() as i32);
+                            return (tag, payload, signal.raw() as i64);
                         }
                         Err(e) => {
                             let err =
@@ -454,7 +454,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                                 .map(|(_, v)| *v)
                                 .unwrap_or(Value::NIL);
                             let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                            (tag, payload, bits.raw() as i32)
+                            (tag, payload, bits.raw() as i64)
                         }
                     }
                     None => {
@@ -471,7 +471,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
                             .map(|(b, _)| *b)
                             .unwrap_or(crate::value::SIG_ERROR);
                         let (tag, payload) = caller.data_mut().inner.value_to_wasm(val);
-                        (tag, payload, bits.raw() as i32)
+                        (tag, payload, bits.raw() as i64)
                     }
                 }
             } else {
@@ -509,11 +509,11 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          op: i32,
          args_ptr: i32,
          nargs: i32|
-         -> (i64, i64, i32) {
+         -> (i64, i64, i64) {
             let args = read_args(&mut caller, args_ptr, nargs);
             let (bits, result) = super::linker::dispatch_data_op(op, &args);
             let (tag, payload) = caller.data_mut().inner.value_to_wasm(result);
-            (tag, payload, bits.raw() as i32)
+            (tag, payload, bits.raw() as i64)
         },
     )?;
 
@@ -579,7 +579,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          _args_ptr: i32,
          _nargs: i32,
          _caller_env_ptr: i32|
-         -> (i32, i32, i32, i64, i64, i32) {
+         -> (i32, i32, i32, i64, i64, i64) {
             panic!("rt_prepare_tail_call called in tiered mode — should not happen");
         },
     )?;
@@ -595,7 +595,7 @@ fn create_tiered_linker(engine: &Engine) -> Result<Linker<TieredHost>> {
          _regs_ptr: i32,
          _num_regs: i32,
          _func_idx: i32,
-         _signal_bits: i32|
+         _signal_bits: i64|
          -> () {
             panic!("rt_yield called in tiered mode — should not happen");
         },

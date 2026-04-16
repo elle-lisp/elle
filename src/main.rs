@@ -24,17 +24,16 @@ fn print_help() {
     );
     println!("  --trace=all           Trace everything");
     println!("  --stats               Print compilation stats on exit");
+    println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");
+    println!("  --path=DIRS           Colon-separated module search path (env: ELLE_PATH)");
+    println!("  --cache=DIR           Disk cache directory (env: ELLE_CACHE)");
     println!("  --json                JSON output on stderr\n");
     println!("Syntax:");
     println!("  .lisp             S-expression syntax (default)");
     println!("  .py               Python syntax");
     println!("  .js               JavaScript syntax");
     println!("  .lua              Lua syntax");
-    println!("  .md               Literate markdown (```lisp blocks)\n");
-    println!("Environment:");
-    println!("  ELLE_HOME             Module resolution root");
-    println!("  ELLE_PATH             Colon-separated module search path");
-    println!("  ELLE_CACHE            Disk cache directory");
+    println!("  .md               Literate markdown (```lisp blocks)");
 }
 
 /// Format a runtime error with symbol resolution
@@ -176,6 +175,7 @@ fn run_source(
     }
 
     // WASM backend: compile and run through Wasmtime instead of bytecode VM
+    #[cfg(feature = "wasm")]
     if elle::config::get().wasm_full {
         let no_stdlib = elle::config::get().wasm_no_stdlib;
         let eval_fn = if no_stdlib {

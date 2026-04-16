@@ -468,7 +468,31 @@ fn prim_to_string_single(val: Value) -> (SignalBits, Value) {
             }
         }
 
-        let vec_str = format!("[{}]", formatted_items.join(", "));
+        let vec_str = format!("@[{}]", formatted_items.join(" "));
+        return (SIG_OK, Value::string(vec_str));
+    }
+
+    if let Some(elems) = val.as_array() {
+        let mut formatted_items = Vec::new();
+        for v in elems.iter() {
+            let (sig, result) = prim_to_string_single(*v);
+            if sig != SIG_OK {
+                return (sig, result);
+            }
+            if let Some(s) = result.with_string(|s| s.to_string()) {
+                formatted_items.push(s);
+            } else {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "internal-error",
+                        "to-string: failed to convert array item".to_string(),
+                    ),
+                );
+            }
+        }
+
+        let vec_str = format!("[{}]", formatted_items.join(" "));
         return (SIG_OK, Value::string(vec_str));
     }
 

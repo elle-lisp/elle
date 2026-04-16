@@ -35,20 +35,20 @@
 
 (println "3: diagnostics have messages ok")
 
-# ── Bug 2: signal mismatch raises structured error ────────────────────
-# compile/analyze raises on signal mismatch; verify via fiber catch
+# ── Bug 2: compile error raises structured error ─────────────────────
+# compile/analyze raises on immutable assignment; verify via fiber catch
 
-(def signal-src "(defn yields [] (fiber/emit :yield 42))\n(defn q [] (silence) (yields))")
-(def signal-fiber
+(def immut-src "(def x 1)\n(assign x 2)")
+(def immut-fiber
   (fiber/new
-    (fn [] (compile/analyze signal-src {:file "signal.lisp"}) :no-error)
+    (fn [] (compile/analyze immut-src {:file "immut.lisp"}) :no-error)
     |:error|))
-(def signal-result (fiber/resume signal-fiber))
+(def immut-result (fiber/resume immut-fiber))
 
 # Should have caught an error (fiber yields the error struct)
-(assert (not (= signal-result :no-error)) "signal mismatch raises error")
+(assert (not (= immut-result :no-error)) "immutable assign raises error")
 
-(println "4: signal mismatch raises structured error ok")
+(println "4: compile error raises structured error ok")
 
 # ── Clean code produces no diagnostics ────────────────────────────────
 

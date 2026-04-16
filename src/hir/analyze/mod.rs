@@ -161,6 +161,9 @@ pub struct Analyzer<'a> {
     /// Accumulated function-level constraint from silence forms in current lambda.
     /// Populated by `analyze_silence`, consumed by `analyze_lambda`.
     current_declared_ceiling: Option<Signal>,
+    /// Accumulated muffle bits from muffle forms in current lambda.
+    /// Populated by `analyze_muffle`, consumed by `analyze_lambda`.
+    current_muffle_bits: crate::value::fiber::SignalBits,
     /// Accumulated non-fatal errors. Recoverable error sites (undefined var,
     /// signal mismatch) push here and return `Ok(Hir::error(span))` to
     /// continue analysis. The pipeline checks this after analysis.
@@ -209,6 +212,7 @@ impl<'a> Analyzer<'a> {
             primitive_values: HashMap::new(),
             current_param_bounds: HashMap::new(),
             current_declared_ceiling: None,
+            current_muffle_bits: crate::value::fiber::SignalBits::EMPTY,
             errors: Vec::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
