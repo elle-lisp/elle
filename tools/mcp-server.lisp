@@ -324,14 +324,6 @@
                               :depth    {:type "integer" :description "Max Rust call depth (default: 2)"}}
                  :required ["path" "function"]}})
 
-(def all-tools
-  [tool-ping tool-sparql-query tool-sparql-update tool-load-rdf tool-dump-rdf
-   tool-analyze-file tool-portrait tool-signal-query tool-impact
-   tool-verify-invariants tool-compile-rename tool-compile-extract
-   tool-compile-parallelize tool-trace
-   tool-test-run tool-test-status tool-test-history tool-test-gate
-   tool-push-ready tool-push-wip])
-
 # ── SPARQL tool handlers ─────────────────────────────────────────────────
 
 (defn call-sparql-query [arguments]
@@ -730,6 +722,22 @@
                               :branch {:type "string" :description "Branch name"}}
                  :required ["branch"]}})
 
+# ── Aggregate all tools ──────────────────────────────────────────────────
+#
+# Must come after every (def tool-* ...) form: the surrounding
+# (parameterize ...) body is analyzed sequentially, not as a letrec,
+# so forward references to tools defined later would fail with
+# "undefined variable: tool-..." (surfacing as a poison node at the
+# array-literal expansion site).
+
+(def all-tools
+  [tool-ping tool-sparql-query tool-sparql-update tool-load-rdf tool-dump-rdf
+   tool-analyze-file tool-portrait tool-signal-query tool-impact
+   tool-verify-invariants tool-compile-rename tool-compile-extract
+   tool-compile-parallelize tool-trace
+   tool-test-run tool-test-status tool-test-history tool-test-gate
+   tool-push-ready tool-push-wip])
+
 # ── Test orchestration handlers ──────────────────────────────────────────
 
 (defn git-sha []
@@ -744,7 +752,7 @@
 
 (defn run-make-target [target jit-override]
   "Run a make target, return {:exit-code :stdout :stderr :duration}."
-  (let* [[start (time/monotonic)]
+  (let* [[start (clock/monotonic)]
          [env-args (if jit-override
                      {:env {:ELLE_JIT jit-override}}
                      {})]
@@ -752,7 +760,7 @@
          [stdout (port/read-all (get proc :stdout))]
          [stderr (port/read-all (get proc :stderr))]
          [status (subprocess/wait proc)]
-         [duration (- (time/monotonic) start)]]
+         [duration (- (clock/monotonic) start)]]
     {:exit-code (get status :exit-code)
      :stdout stdout
      :stderr stderr
@@ -768,9 +776,9 @@
 
 (defn store-test-result [sha mode clean passed duration failures stderr]
   "Store test result as RDF triples."
-  (let [[iri (string/format "urn:test:{}:{}" sha mode)]
-        [timestamp (time/now)]
-        [ttl (string/format
+  (let* [[iri (string/format "urn:test:{}:{}" sha mode)]
+         [timestamp (clock/realtime)]
+         [ttl (string/format
                "<{}> a <urn:elle:TestRun> ;
                    <urn:elle:sha> \"{}\" ;
                    <urn:elle:mode> \"{}\" ;

@@ -142,9 +142,9 @@
   (send pin {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}})
   (let [[r (recv-response pout 2)]]
     (let [[tools (get (get r "result") "tools")]]
-      (test "tools/list: exposes 14 tools"
-        (= (length tools) 14)
-        (string "expected 14, got " (length tools)))))
+      (test "tools/list: exposes 20 tools"
+        (= (length tools) 20)
+        (string "expected 20, got " (length tools)))))
 
   ## ── 3. ping ───────────────────────────────────────────────────────────
   (send pin {:jsonrpc "2.0" :id 3 :method "ping" :params {}})
