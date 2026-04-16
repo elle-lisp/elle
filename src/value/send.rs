@@ -518,7 +518,7 @@ impl SendValue {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LArrayMut {
-                    data: std::cell::RefCell::new(values),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(values)),
                     traits: traits_val,
                 })
             }
@@ -546,7 +546,7 @@ impl SendValue {
             SendValue::Buffer(bytes, traits) => {
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LStringMut {
-                    data: std::cell::RefCell::new(bytes),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
                 })
             }
@@ -561,7 +561,7 @@ impl SendValue {
             SendValue::Blob(bytes, traits) => {
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LBytesMut {
-                    data: std::cell::RefCell::new(bytes),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
                 })
             }
@@ -569,7 +569,7 @@ impl SendValue {
                 let val = contents.into_value();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LBox {
-                    cell: std::cell::RefCell::new(val),
+                    cell: std::rc::Rc::new(std::cell::RefCell::new(val)),
                     traits: traits_val,
                 })
             }
@@ -577,7 +577,7 @@ impl SendValue {
                 let val = contents.into_value();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::CaptureCell {
-                    cell: std::cell::RefCell::new(val),
+                    cell: std::rc::Rc::new(std::cell::RefCell::new(val)),
                     traits: traits_val,
                 })
             }
@@ -598,7 +598,7 @@ impl SendValue {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LSetMut {
-                    data: std::cell::RefCell::new(set),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(set)),
                     traits: traits_val,
                 })
             }
@@ -665,7 +665,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LArrayMut {
-                data: RefCell::new(values),
+                data: std::rc::Rc::new(RefCell::new(values)),
                 traits: traits_val,
             })
         }
@@ -696,7 +696,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
         SendValue::Buffer(bytes, traits) => {
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LStringMut {
-                data: RefCell::new(bytes),
+                data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
             })
         }
@@ -711,7 +711,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
         SendValue::Blob(bytes, traits) => {
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LBytesMut {
-                data: RefCell::new(bytes),
+                data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
             })
         }
@@ -730,7 +730,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let lbox_val = alloc(HeapObject::LBox {
-                cell: RefCell::new(inner_val),
+                cell: std::rc::Rc::new(RefCell::new(inner_val)),
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
@@ -753,7 +753,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let cell_val = alloc(HeapObject::CaptureCell {
-                cell: RefCell::new(inner_val),
+                cell: std::rc::Rc::new(RefCell::new(inner_val)),
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
@@ -785,7 +785,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LSetMut {
-                data: RefCell::new(set),
+                data: std::rc::Rc::new(RefCell::new(set)),
                 traits: traits_val,
             })
         }

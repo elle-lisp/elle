@@ -341,7 +341,10 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LArrayMut { data, .. } => Some(data),
+            // Deref the Rc to expose the inner RefCell directly. Callers
+            // already borrow from the RefCell; the Rc is an implementation
+            // detail that enables cross-fiber sharing (see heap.rs).
+            HeapObject::LArrayMut { data, .. } => Some(&**data),
             _ => None,
         }
     }

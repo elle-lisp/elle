@@ -54,11 +54,15 @@ fn test_fiber_heap_non_drop_types_not_tracked() {
     // Use another non-drop type instead.
     heap.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));
     heap.alloc(HeapObject::LBox {
-        cell: std::cell::RefCell::new(Value::NIL),
+        cell: std::rc::Rc::new(std::cell::RefCell::new(Value::NIL)),
         traits: Value::NIL,
     });
-    assert_eq!(heap.len(), 3); // 3 total objects
-    assert_eq!(heap.dtor_count(), 0); // None need Drop tracking
+    // 3 total objects; only the LBox needs Drop tracking. LBox wraps
+    // its value in `Rc<RefCell<Value>>` for cross-fiber sharing, so
+    // dropping it must decrement the Rc's strong count. The two Cons
+    // cells are pure bit-copies and need no Drop.
+    assert_eq!(heap.len(), 3);
+    assert_eq!(heap.dtor_count(), 1);
 }
 
 #[test]
@@ -67,12 +71,17 @@ fn test_fiber_heap_needs_drop_exhaustive() {
     // If a new HeapTag variant is added, `needs_drop` won't compile
     // until a decision is made.
     assert!(!needs_drop(HeapTag::Cons));
-    assert!(!needs_drop(HeapTag::LBox));
     assert!(!needs_drop(HeapTag::Float));
     assert!(!needs_drop(HeapTag::NativeFn));
     assert!(!needs_drop(HeapTag::LibHandle));
     assert!(!needs_drop(HeapTag::ManagedPointer));
     assert!(!needs_drop(HeapTag::Parameter));
+
+    // LBox and CaptureCell now wrap their value in Rc<RefCell<Value>>
+    // so that cross-fiber sharing survives deep_copy_to_outbox. Dropping
+    // the Rc decrements the strong count — must be tracked.
+    assert!(needs_drop(HeapTag::LBox));
+    assert!(needs_drop(HeapTag::CaptureCell));
 
     assert!(needs_drop(HeapTag::LString));
     assert!(needs_drop(HeapTag::LArrayMut));

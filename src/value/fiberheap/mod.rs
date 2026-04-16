@@ -984,11 +984,14 @@ impl FiberHeap {
                 })
             }
             HeapObject::LBox { cell, traits } => outbox.alloc(HeapObject::LBox {
-                cell: RefCell::new(*cell.borrow()),
+                // Share the backing cell.
+                cell: cell.clone(),
                 traits: *traits,
             }),
             HeapObject::CaptureCell { cell, traits } => outbox.alloc(HeapObject::CaptureCell {
-                cell: RefCell::new(*cell.borrow()),
+                // Share the backing cell — mutations in a captured lambda
+                // are visible to every fiber that holds the capture cell.
+                cell: cell.clone(),
                 traits: *traits,
             }),
             HeapObject::Float(f) => outbox.alloc(HeapObject::Float(*f)),
@@ -997,30 +1000,31 @@ impl FiberHeap {
                 traits: *traits,
             }),
             HeapObject::LArrayMut { data, traits } => {
-                let elems: Vec<Value> = data.borrow().clone();
-                // Drop outbox borrow before recursing.
-                let elems: Vec<Value> = elems
-                    .into_iter()
-                    .map(|v| self.deep_copy_to_outbox(v))
-                    .collect();
-                self.outbox.as_mut().unwrap().alloc(HeapObject::LArrayMut {
-                    data: RefCell::new(elems),
+                // Share the backing Vec across the outbox copy: cloning
+                // the Rc preserves the "mutable reference" semantics that
+                // Elle users expect when a mutable array crosses a fiber
+                // boundary via yield. Elements are Values (tag+ptr), so
+                // they don't need deep-copy — the arena slots they point
+                // to are shared already. If an element's slot does need
+                // relocation (e.g. for a Fiber crossing outbox), that's
+                // handled when the consumer iterates and deep-copies on
+                // access; the shared `Rc` ensures they see live updates.
+                outbox.alloc(HeapObject::LArrayMut {
+                    data: data.clone(),
                     traits: *traits,
                 })
             }
             HeapObject::LStructMut { data, traits } => {
-                let entries: Vec<_> = data.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
-                let entries: std::collections::BTreeMap<_, _> = entries
-                    .into_iter()
-                    .map(|(k, v)| (k, self.deep_copy_to_outbox(v)))
-                    .collect();
-                self.outbox.as_mut().unwrap().alloc(HeapObject::LStructMut {
-                    data: RefCell::new(entries),
+                // Share the backing BTreeMap — see `LArrayMut` above for the
+                // cross-fiber live-update rationale.
+                outbox.alloc(HeapObject::LStructMut {
+                    data: data.clone(),
                     traits: *traits,
                 })
             }
             HeapObject::LStringMut { data, traits } => outbox.alloc(HeapObject::LStringMut {
-                data: RefCell::new(data.borrow().clone()),
+                // Share the backing Vec<u8>.
+                data: data.clone(),
                 traits: *traits,
             }),
             HeapObject::LBytes { data, traits } => outbox.alloc(HeapObject::LBytes {
@@ -1028,7 +1032,8 @@ impl FiberHeap {
                 traits: *traits,
             }),
             HeapObject::LBytesMut { data, traits } => outbox.alloc(HeapObject::LBytesMut {
-                data: RefCell::new(data.borrow().clone()),
+                // Share the backing Vec<u8>.
+                data: data.clone(),
                 traits: *traits,
             }),
             HeapObject::LSet { data, traits } => {
@@ -1048,7 +1053,8 @@ impl FiberHeap {
                 })
             }
             HeapObject::LSetMut { data, traits } => outbox.alloc(HeapObject::LSetMut {
-                data: RefCell::new(data.borrow().clone()),
+                // Share the backing BTreeSet.
+                data: data.clone(),
                 traits: *traits,
             }),
             HeapObject::NativeFn(f) => outbox.alloc(HeapObject::NativeFn(f)),
@@ -1211,8 +1217,10 @@ pub(crate) fn needs_drop(tag: HeapTag) -> bool {
     match tag {
         // Copy/scalar innards — no heap allocations
         HeapTag::Cons => false,
-        HeapTag::LBox => false,
-        HeapTag::CaptureCell => false,
+        // LBox and CaptureCell hold Rc<RefCell<Value>> for cross-fiber
+        // sharing; dropping them must decrement the Rc strong count.
+        HeapTag::LBox => true,
+        HeapTag::CaptureCell => true,
         HeapTag::Float => false,
         HeapTag::NativeFn => false,
         HeapTag::LibHandle => false,

@@ -88,12 +88,17 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             rest: cons.rest,
             traits: table,
         }))),
+        // Mutable collections wrap their backing storage in Rc<RefCell<_>>
+        // so cross-fiber sharing survives deep_copy_to_outbox. But
+        // with-traits is documented as returning an INDEPENDENT copy: a
+        // push to the original must not be visible through the traited
+        // copy. So we materialize a fresh Rc with a cloned inner value.
         HeapObject::LArrayMut { data, .. } => Ok(alloc(HeapObject::LArrayMut {
-            data: data.clone(),
+            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
         HeapObject::LStructMut { data, .. } => Ok(alloc(HeapObject::LStructMut {
-            data: data.clone(),
+            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
         HeapObject::LStruct { data, .. } => Ok(alloc(HeapObject::LStruct {
@@ -109,7 +114,7 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             traits: table,
         })),
         HeapObject::LStringMut { data, .. } => Ok(alloc(HeapObject::LStringMut {
-            data: data.clone(),
+            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
         HeapObject::LBytes { data, .. } => Ok(alloc(HeapObject::LBytes {
@@ -117,15 +122,15 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             traits: table,
         })),
         HeapObject::LBytesMut { data, .. } => Ok(alloc(HeapObject::LBytesMut {
-            data: data.clone(),
+            data: std::rc::Rc::new(std::cell::RefCell::new(data.borrow().clone())),
             traits: table,
         })),
         HeapObject::LBox { cell, .. } => Ok(alloc(HeapObject::LBox {
-            cell: cell.clone(),
+            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
             traits: table,
         })),
         HeapObject::CaptureCell { cell, .. } => Ok(alloc(HeapObject::CaptureCell {
-            cell: cell.clone(),
+            cell: std::rc::Rc::new(std::cell::RefCell::new(*cell.borrow())),
             traits: table,
         })),
         HeapObject::Fiber { handle, .. } => Ok(alloc(HeapObject::Fiber {

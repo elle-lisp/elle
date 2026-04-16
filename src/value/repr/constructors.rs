@@ -122,8 +122,9 @@ impl Value {
     pub fn array_mut(elements: Vec<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LArrayMut {
-            data: RefCell::new(elements),
+            data: Rc::new(RefCell::new(elements)),
             traits: Value::NIL,
         })
     }
@@ -134,8 +135,9 @@ impl Value {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
         use std::collections::BTreeMap;
+        use std::rc::Rc;
         alloc(HeapObject::LStructMut {
-            data: RefCell::new(BTreeMap::new()),
+            data: Rc::new(RefCell::new(BTreeMap::new())),
             traits: Value::NIL,
         })
     }
@@ -147,8 +149,9 @@ impl Value {
     ) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LStructMut {
-            data: RefCell::new(entries),
+            data: Rc::new(RefCell::new(entries)),
             traits: Value::NIL,
         })
     }
@@ -196,8 +199,9 @@ impl Value {
     pub fn lbox(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LBox {
-            cell: RefCell::new(value),
+            cell: Rc::new(RefCell::new(value)),
             traits: Value::NIL,
         })
     }
@@ -208,8 +212,9 @@ impl Value {
     pub fn capture_cell(value: Value) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::CaptureCell {
-            cell: RefCell::new(value),
+            cell: Rc::new(RefCell::new(value)),
             traits: Value::NIL,
         })
     }
@@ -239,8 +244,9 @@ impl Value {
     pub fn string_mut(bytes: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LStringMut {
-            data: RefCell::new(bytes),
+            data: Rc::new(RefCell::new(bytes)),
             traits: Value::NIL,
         })
     }
@@ -262,8 +268,9 @@ impl Value {
     pub fn bytes_mut(data: Vec<u8>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LBytesMut {
-            data: RefCell::new(data),
+            data: Rc::new(RefCell::new(data)),
             traits: Value::NIL,
         })
     }
@@ -397,8 +404,9 @@ impl Value {
     pub fn set_mut(items: BTreeSet<Value>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         use std::cell::RefCell;
+        use std::rc::Rc;
         alloc(HeapObject::LSetMut {
-            data: RefCell::new(items),
+            data: Rc::new(RefCell::new(items)),
             traits: Value::NIL,
         })
     }

@@ -131,15 +131,24 @@ pub enum HeapObject {
     /// Cons cell (list pair)
     Cons(Cons),
 
-    /// Mutable array
+    /// Mutable array.
+    ///
+    /// `data` is `Rc<RefCell<...>>` so that cross-fiber sharing survives
+    /// `deep_copy_to_outbox`: when a fiber yields an `@[]` through a
+    /// request (e.g. `{:op :select :fibers pool}`), the outbox copy
+    /// shares the same backing `Vec<Value>` as the original. Mutations
+    /// made by one side are visible to the other — without this, the
+    /// scheduler would see a snapshot of the pool at yield time and
+    /// miss fibers pushed after it parked in `select-sets`.
     LArrayMut {
-        data: RefCell<Vec<Value>>,
+        data: std::rc::Rc<RefCell<Vec<Value>>>,
         traits: Value,
     },
 
-    /// Mutable struct (hash map)
+    /// Mutable struct (hash map). See `LArrayMut` for the Rc-sharing
+    /// rationale (cross-fiber live updates through yield).
     LStructMut {
-        data: RefCell<BTreeMap<TableKey, Value>>,
+        data: std::rc::Rc<RefCell<BTreeMap<TableKey, Value>>>,
         traits: Value,
     },
 
@@ -163,9 +172,10 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable @string (byte sequence)
+    /// Mutable @string (byte sequence). Rc-shared for cross-fiber
+    /// live-update semantics across `deep_copy_to_outbox`.
     LStringMut {
-        data: RefCell<Vec<u8>>,
+        data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
     },
 
@@ -175,19 +185,29 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable byte sequence (binary data workspace)
+    /// Mutable byte sequence (binary data workspace). Rc-shared for
+    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
     LBytesMut {
-        data: RefCell<Vec<u8>>,
+        data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
     },
 
     /// User-facing mutable box, created via `(box v)`.
-    /// Not auto-unwrapped by LoadUpvalue.
-    LBox { cell: RefCell<Value>, traits: Value },
+    /// Not auto-unwrapped by LoadUpvalue. Rc-shared for cross-fiber
+    /// live-update semantics across `deep_copy_to_outbox`.
+    LBox {
+        cell: std::rc::Rc<RefCell<Value>>,
+        traits: Value,
+    },
 
     /// Compiler-created capture cell for mutable captured variables.
     /// Auto-unwrapped by LoadUpvalue; never visible to user code.
-    CaptureCell { cell: RefCell<Value>, traits: Value },
+    /// Rc-shared so a mutation in a child fiber is visible to the parent
+    /// when the closure crosses a yield boundary.
+    CaptureCell {
+        cell: std::rc::Rc<RefCell<Value>>,
+        traits: Value,
+    },
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
@@ -249,9 +269,10 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Mutable set (BTreeSet wrapped in RefCell)
+    /// Mutable set (BTreeSet wrapped in `Rc<RefCell>`) — Rc-shared for
+    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
     LSetMut {
-        data: RefCell<BTreeSet<Value>>,
+        data: std::rc::Rc<RefCell<BTreeSet<Value>>>,
         traits: Value,
     },
 }
