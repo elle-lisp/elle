@@ -173,13 +173,6 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
     use elle::config::dump_bits;
     let cfg = elle::config::get();
 
-    if cfg.dump.contains("git") {
-        println!(";; ── git ────────────────────────────────────────────────────");
-        // `git` is reserved for SPIR-V output (wired up on another branch);
-        // currently a stub so --dump=git is accepted without error.
-        println!("; git: SPIR-V dump not implemented in this branch");
-    }
-
     // AST — parsed syntax forms (cheapest stage; no analyzer needed).
     let needs_ast = cfg.dump.contains("ast");
     if needs_ast {
@@ -193,12 +186,13 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         }
     }
 
-    // HIR / LIR / CFG / DFA / JIT all flow off compile_file_to_lir. Only
-    // run the pipeline once if any of them are requested.
+    // HIR / LIR / CFG / DFA / JIT / git (SPIR-V) all flow off
+    // compile_file_to_lir. Only run the pipeline once if any of them are
+    // requested.
     let needs_pipeline = cfg
         .dump
         .iter()
-        .any(|k| matches!(k.as_str(), "hir" | "lir" | "cfg" | "dfa" | "jit"));
+        .any(|k| matches!(k.as_str(), "hir" | "lir" | "cfg" | "dfa" | "jit" | "git"));
     if !needs_pipeline {
         return Ok(());
     }
@@ -254,8 +248,66 @@ fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Res
         print_jit_candidates(&module);
     }
 
+    if cfg.dump.contains("git") {
+        println!(";; ── git ────────────────────────────────────────────────────");
+        print_spirv_module(&module);
+    }
+
     let _ = dump_bits::ALL; // keep import used even if a stage is added lazily
     Ok(())
+}
+
+/// Dump SPIR-V disassembly for each GPU-eligible closure. The "git" keyword
+/// names this stage (a shorthand; it's the GPU codegen output).
+fn print_spirv_module(module: &elle::lir::LirModule) {
+    print_spirv_function("entry", &module.entry);
+    for (i, f) in module.closures.iter().enumerate() {
+        print_spirv_function(&format!("closure[{}]", i), f);
+    }
+}
+
+#[cfg(feature = "mlir")]
+fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
+    let name = f.name.as_deref().unwrap_or("<anon>");
+    println!("; {} {}", tag, name);
+    if !f.is_gpu_eligible() {
+        println!(";   (not GPU-eligible; skipped)");
+        println!();
+        return;
+    }
+    // Workgroup size of 1 is a safe default for dump purposes — users
+    // selecting a workgroup size do so via vm/config at runtime.
+    match elle::mlir::lower_to_spirv(f, 1) {
+        Ok(bytes) => {
+            println!(";   SPIR-V ({} bytes):", bytes.len());
+            // Words are 32-bit in SPIR-V. Print as hex, 8 words per line.
+            let words: Vec<u32> = bytes
+                .chunks_exact(4)
+                .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            for (i, chunk) in words.chunks(8).enumerate() {
+                print!("  {:04x}:", i * 8);
+                for w in chunk {
+                    print!(" {:08x}", w);
+                }
+                println!();
+            }
+            println!();
+        }
+        Err(e) => {
+            println!(";   SPIR-V lowering failed: {}", e);
+            println!();
+        }
+    }
+}
+
+#[cfg(not(feature = "mlir"))]
+fn print_spirv_function(tag: &str, f: &elle::lir::LirFunction) {
+    let name = f.name.as_deref().unwrap_or("<anon>");
+    println!("; {} {}", tag, name);
+    println!(";   (SPIR-V dump requires the `mlir` feature)");
+    println!();
+    let _ = f;
 }
 
 fn print_lir_module(module: &elle::lir::LirModule) {

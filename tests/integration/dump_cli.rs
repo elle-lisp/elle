@@ -91,19 +91,29 @@ fn jit_reports_eligibility() {
 }
 
 #[test]
-fn git_stage_is_stub() {
-    // `git` is reserved for SPIR-V output wired up on another branch;
-    // currently a stub so accepting the keyword is what matters.
+fn git_stage_emits_per_closure_output() {
+    // `git` is the SPIR-V dump stage. It emits a per-closure block;
+    // without the `mlir` feature, each block notes that the feature is
+    // required. With the feature, it emits real SPIR-V words. Either way
+    // the banner must appear and at least one `entry` line must follow.
     let (out, _, status) = dump("git", "(+ 1 2)");
     assert!(status.success());
     assert!(out.contains("── git"), "missing git banner:\n{}", out);
+    assert!(
+        out.contains("; entry"),
+        "expected per-closure 'entry' line in git dump:\n{}",
+        out
+    );
 }
 
 #[test]
 fn all_stages_run_in_pipeline_order() {
     let (out, _, status) = dump("all", "(defn f [x] x)");
     assert!(status.success());
-    let order = ["git", "ast", "hir", "lir", "cfg", "dfa", "jit"];
+    // Ordering follows the compilation pipeline: AST → HIR → LIR →
+    // CFG → DFA → JIT → git (SPIR-V). `git` is last because it is a
+    // codegen stage like JIT, not a pre-analysis stage.
+    let order = ["ast", "hir", "lir", "cfg", "dfa", "jit", "git"];
     let mut last = 0;
     for stage in order {
         let banner = format!("── {}", stage);
