@@ -111,7 +111,10 @@ fn test_signal_nested_propagation() {
 #[test]
 fn test_signal_pure_call() {
     // (def f (fn (x) (+ x 1)))
-    // (f 42) should be Pure
+    // (f 42) carries the same signal as the function — Signal::errors(),
+    // because `+` can type-error on non-numeric args. Non-suspension bits
+    // (error) are preserved through the analyzer; they only get erased
+    // if the body is truly silent.
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(begin (def f (fn (x) (+ x 1))) (f 42))",
@@ -122,8 +125,8 @@ fn test_signal_pure_call() {
     .unwrap();
     assert_eq!(
         result.hir.signal,
-        Signal::silent(),
-        "Calling a pure function should remain Pure"
+        Signal::errors(),
+        "Calling an error-capable function propagates the error signal"
     );
 }
 
@@ -791,7 +794,10 @@ fn test_polymorphic_inference_with_known_yielding_call() {
 
 #[test]
 fn test_polymorphic_inference_pure_function() {
-    // A pure function should have Pure signal, not Polymorphic
+    // An error-capable function should have the :error signal, not
+    // Polymorphic. (+) can type-error on non-numeric args, so its
+    // declared primitive signal is Signal::errors() and a function
+    // that calls it inherits SIG_ERROR without becoming polymorphic.
     let (mut symbols, mut vm) = setup();
     let result = analyze(
         "(def add1 (fn (x) (+ x 1)))",
@@ -808,8 +814,8 @@ fn test_polymorphic_inference_pure_function() {
         {
             assert_eq!(
                 *inferred_signals,
-                Signal::silent(),
-                "Pure function should have Pure signal"
+                Signal::errors(),
+                "Error-capable function carries :error, not Polymorphic"
             );
         } else {
             panic!("Expected Lambda");
