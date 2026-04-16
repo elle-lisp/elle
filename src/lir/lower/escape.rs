@@ -1080,8 +1080,19 @@ impl<'a> Lowerer<'a> {
                 // Mutating primitives escape even in tail position:
                 // (put table key @{...}) stores a heap value externally
                 // before returning, regardless of tail-call optimization.
+                //
+                // Use the stricter `arg_is_compile_time_immediate` (not
+                // `result_is_safe`): for scope/region safety, Vars of
+                // outer bindings are "safe" because they were allocated
+                // before RegionEnter. But for rotation safety, a Var may
+                // hold a heap Value that was freshly allocated in the
+                // current rotation frame — pushing it into an external
+                // mutable collection creates a dangling reference when
+                // rotation drops that frame.
                 if self.callee_is_mutating_primitive(func)
-                    && args.iter().any(|a| !self.result_is_safe(&a.expr, &[]))
+                    && args
+                        .iter()
+                        .any(|a| !Self::arg_is_compile_time_immediate(&a.expr))
                 {
                     return true;
                 }
@@ -1128,7 +1139,18 @@ impl<'a> Lowerer<'a> {
                             }
                         }
                     }
-                    return args.iter().any(|a| !self.tail_arg_is_safe(&a.expr));
+                    // Non-self tail call: args must not dangle AND callee
+                    // itself must not escape. Without the callee check, a
+                    // rotation-safe caller could tail-call a function that
+                    // stores its args into external mutable state, creating
+                    // a dangling reference when the caller's arena rotates.
+                    if args.iter().any(|a| !self.tail_arg_is_safe(&a.expr)) {
+                        return true;
+                    }
+                    if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
+                        return true;
+                    }
+                    return false;
                 }
                 if !self.callee_is_primitive(func) && !self.callee_is_rotation_safe(func) {
                     return true;
@@ -1217,5 +1239,27 @@ impl<'a> Lowerer<'a> {
         };
         let bi = self.arena.get(*binding);
         self.mutating_primitives.contains(&bi.name)
+    }
+
+    /// Check if an expression is statically proven to produce an immediate
+    /// (non-heap) Value. Conservative: returns false if we cannot prove it.
+    ///
+    /// This is stricter than `result_is_safe`, which is about scope/region
+    /// lifetimes (outer-bound Vars are "safe" because they outlive the
+    /// scope). For rotation-safety analysis we need value-type certainty:
+    /// a Var may hold a heap Value regardless of its scope, so mutating-
+    /// primitive calls with Var args must be treated as escaping.
+    fn arg_is_compile_time_immediate(hir: &Hir) -> bool {
+        match &hir.kind {
+            HirKind::Int(_)
+            | HirKind::Float(_)
+            | HirKind::Bool(_)
+            | HirKind::Nil
+            | HirKind::Keyword(_)
+            | HirKind::EmptyList
+            // String literals live in the constant pool, not the fiber heap.
+            | HirKind::String(_) => true,
+            _ => false,
+        }
     }
 }
