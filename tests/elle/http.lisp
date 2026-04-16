@@ -219,17 +219,20 @@
   (assert (= (first gzip-call) :gzip)     "compress-log recorded :gzip call")
   (assert (= (get gzip-call 1) "hi")      "compress-log recorded the data"))
 
-# :compress true ⇒ module imports std/compress itself. We can't easily
-# test libz presence, so just verify the path dispatches (not an error
-# from :compress-not-configured). Use protect so missing libz doesn't
-# break CI environments without zlib.
-(let [[http-auto ((import "std/http") :compress true)]]
-  (let [[[ok? err] (protect (http-auto:gunzip (bytes 0x1f 0x8b 0x08 0x00 0x00 0x00 0x00 0x00 0x00 0x03)))]]
-    # Either the call succeeded (libz available) or it errored — but NOT
-    # with :compress-not-configured.
-    (when (not ok?)
-      (assert (not (= err:reason :compress-not-configured))
-        ":compress true ⇒ module imported, not reporting compress-not-configured"))))
+# :compress true ⇒ module imports std/compress itself. Only meaningful
+# when libz/libzstd are available — on macOS the FFI loader expects
+# libz.dylib, which lib/compress.lisp doesn't currently probe for.
+# Mirror the skip guard from tests/elle/compress.lisp.
+(let [[[libz-ok? _] (protect ((fn [] (ffi/native "libz.so"))))]
+      [[zstd-ok? _] (protect ((fn [] (ffi/native "libzstd.so"))))]]
+  (if (and libz-ok? zstd-ok?)
+    (let [[http-auto ((import "std/http") :compress true)]]
+      (let* [[data (bytes 0x1f 0x8b 0x08 0x00 0x00 0x00 0x00 0x00 0x00 0x03)]
+             [[ok? err] (protect (http-auto:gunzip data))]]
+        (when (not ok?)
+          (assert (not (= err:reason :compress-not-configured))
+            ":compress true ⇒ module imported, not reporting compress-not-configured"))))
+    (println "SKIP: :compress true test — libz/libzstd not available")))
 
 # Invalid :compress value → clear error at module init
 (let [[[ok? err] (protect ((import "std/http") :compress 42))]]
