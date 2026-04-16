@@ -112,7 +112,10 @@ jobs:
       - name: Install libclang (for bindgen — oxrocksdb-sys, etc.)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev
+          # llvm-dev brings llvm-config so we can locate libclang.so
+          # reliably on any Ubuntu version the runner happens to be on.
+          sudo apt-get install -y libclang-dev llvm-dev clang
+          echo "LIBCLANG_PATH=$(llvm-config --libdir)" >> "$GITHUB_ENV"
       - name: Build plugin
         run: cargo build --release -p elle-${{ matrix.plugin }}
       - name: Upload plugin .so
