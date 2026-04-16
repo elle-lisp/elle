@@ -800,4 +800,58 @@ mod tests {
         assert!(fiber.mask.contains(SIG_DEBUG));
         assert!(fiber.mask.contains(SIG_RESUME));
     }
+
+    /// Regression: two Fiber values that wrap the *same* `FiberHandle` but
+    /// are stored in distinct arena slots must compare equal and hash
+    /// identically.
+    ///
+    /// The motivating scenario is `deep_copy_to_outbox` on fiber yield: a
+    /// signal value containing a fiber gets re-allocated in the outbox,
+    /// producing a new `HeapObject::Fiber` slot whose `handle` is a clone
+    /// of the original. Both values represent the same fiber — the Elle
+    /// scheduler stores fibers as keys in `waiters`/`completed` maps, and
+    /// those lookups must hit regardless of which slot the caller holds.
+    ///
+    /// Historically `Value::eq`/`Value::hash` used the slot pointer, so
+    /// the copied fiber became a *different* map key. That desync caused
+    /// `ev/join` on a recently-spawned fiber to park forever.
+    #[test]
+    fn test_fiber_values_sharing_a_handle_are_identity_equal() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
+
+        // Two independent arena allocations of the *same* handle — this
+        // is exactly what deep_copy_to_outbox produces.
+        let v1 = Value::fiber_from_handle(handle.clone());
+        let v2 = Value::fiber_from_handle(handle.clone());
+
+        // Precondition: the two values really are at distinct slots.
+        // (If they ever coalesce, the test becomes trivially green and
+        // no longer exercises the bug.)
+        assert_ne!(
+            v1.payload, v2.payload,
+            "precondition: two separate allocations should have distinct slot addresses"
+        );
+
+        // Same fiber => equal.
+        assert_eq!(v1, v2, "fibers sharing a handle must compare equal");
+
+        // Same fiber => same hash (Hash/Eq contract).
+        let mut h1 = DefaultHasher::new();
+        let mut h2 = DefaultHasher::new();
+        v1.hash(&mut h1);
+        v2.hash(&mut h2);
+        assert_eq!(
+            h1.finish(),
+            h2.finish(),
+            "fibers sharing a handle must hash identically"
+        );
+
+        // Unrelated fibers still compare not-equal.
+        let other_handle = FiberHandle::new(Fiber::new(test_closure(), SIG_OK));
+        let v3 = Value::fiber_from_handle(other_handle);
+        assert_ne!(v1, v3, "distinct fibers must not compare equal");
+    }
 }

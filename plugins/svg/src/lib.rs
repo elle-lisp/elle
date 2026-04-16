@@ -35,9 +35,7 @@ fn emit_element(val: &Value, out: &mut String) {
     };
     out.push('<');
     out.push_str(&tag);
-    if let Some(attrs_val) =
-        elle::value::sorted_struct_get(s, &TableKey::Keyword("attrs".into()))
-    {
+    if let Some(attrs_val) = elle::value::sorted_struct_get(s, &TableKey::Keyword("attrs".into())) {
         if let Some(attrs) = attrs_val.as_struct() {
             for (k, v) in attrs.iter() {
                 let key = match k {
@@ -164,9 +162,8 @@ fn parse_render_opts(args: &[Value], idx: usize) -> RenderOpts {
             {
                 opts.width = Some(w as u32);
             }
-            if let Some(h) =
-                elle::value::sorted_struct_get(s, &TableKey::Keyword("height".into()))
-                    .and_then(|v| v.as_int())
+            if let Some(h) = elle::value::sorted_struct_get(s, &TableKey::Keyword("height".into()))
+                .and_then(|v| v.as_int())
             {
                 opts.height = Some(h as u32);
             }

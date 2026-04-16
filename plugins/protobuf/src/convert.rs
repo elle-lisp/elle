@@ -831,8 +831,7 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let status_key = TableKey::Keyword("status".into());
-        let status_val =
-            get_field(decoded_struct.as_struct().unwrap(), &status_key).unwrap();
+        let status_val = get_field(decoded_struct.as_struct().unwrap(), &status_key).unwrap();
         // Enum keyword :OK
         assert_eq!(
             status_val.as_keyword_name().as_deref(),
@@ -874,8 +873,7 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let members_key = TableKey::Keyword("members".into());
-        let members_val =
-            get_field(decoded_struct.as_struct().unwrap(), &members_key).unwrap();
+        let members_val = get_field(decoded_struct.as_struct().unwrap(), &members_key).unwrap();
         let members_arr = members_val.as_array().expect("members should be array");
         assert_eq!(members_arr.len(), 1, "members length mismatch");
 
@@ -915,8 +913,7 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let scores_key = TableKey::Keyword("scores".into());
-        let scores_val =
-            get_field(decoded_struct.as_struct().unwrap(), &scores_key).unwrap();
+        let scores_val = get_field(decoded_struct.as_struct().unwrap(), &scores_key).unwrap();
         let scores_struct = scores_val.as_struct().expect("scores should be struct");
 
         let math_key = TableKey::Keyword("math".into());

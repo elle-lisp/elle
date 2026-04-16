@@ -232,7 +232,9 @@ fn prim_mqtt_state(args: &[Value]) -> (SignalBits, Value) {
 
     if !args.is_empty() {
         if let Some(opts) = args[0].as_struct() {
-            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("protocol".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("protocol".into()))
+            {
                 if let Some(i) = v.as_int() {
                     if i == 4 || i == 5 {
                         protocol = i as u8;
@@ -241,7 +243,9 @@ fn prim_mqtt_state(args: &[Value]) -> (SignalBits, Value) {
                     }
                 }
             }
-            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("keep-alive".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("keep-alive".into()))
+            {
                 if let Some(i) = v.as_int() {
                     keep_alive = i as u16;
                 }
@@ -277,10 +281,9 @@ fn prim_mqtt_encode_connect(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let client_id =
-        elle::value::sorted_struct_get(opts, &TableKey::Keyword("client-id".into()))
-            .and_then(|v| v.with_string(|s| s.to_string()))
-            .unwrap_or_default();
+    let client_id = elle::value::sorted_struct_get(opts, &TableKey::Keyword("client-id".into()))
+        .and_then(|v| v.with_string(|s| s.to_string()))
+        .unwrap_or_default();
 
     let clean_session =
         elle::value::sorted_struct_get(opts, &TableKey::Keyword("clean-session".into()))
@@ -350,7 +353,8 @@ fn prim_mqtt_encode_publish(args: &[Value]) -> (SignalBits, Value) {
 
     if args.len() > 3 {
         if let Some(opts) = args[3].as_struct() {
-            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("qos".into())) {
+            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("qos".into()))
+            {
                 if let Some(i) = v.as_int() {
                     qos = match qos_from_int(i) {
                         Some(q) => q,
@@ -358,7 +362,9 @@ fn prim_mqtt_encode_publish(args: &[Value]) -> (SignalBits, Value) {
                     };
                 }
             }
-            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("retain".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("retain".into()))
+            {
                 if let Some(b) = v.as_bool() {
                     retain = b;
                 }

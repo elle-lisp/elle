@@ -61,7 +61,8 @@ fn prim_open(args: &[Value]) -> (SignalBits, Value) {
                     width = w;
                 }
             }
-            if let Some(v) = elle::value::sorted_struct_get(s, &TableKey::Keyword("height".into())) {
+            if let Some(v) = elle::value::sorted_struct_get(s, &TableKey::Keyword("height".into()))
+            {
                 if let Some(h) = v.as_float().or_else(|| v.as_int().map(|i| i as f64)) {
                     height = h;
                 }

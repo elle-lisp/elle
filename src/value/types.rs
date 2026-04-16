@@ -180,7 +180,11 @@ impl std::hash::Hash for TableKey {
             TableKey::Symbol(id) => id.hash(state),
             TableKey::String(s) => s.hash(state),
             TableKey::Keyword(s) => s.hash(state),
-            TableKey::Identity(v) => (v.tag, v.payload).hash(state),
+            // Delegate to Value's Hash. For Fiber/ThreadHandle/External
+            // that encodes a stable Rc/Arc-backed identity rather than
+            // the slot pointer, so outbox relocation on fiber yield
+            // doesn't turn the same fiber into a different map key.
+            TableKey::Identity(v) => v.hash(state),
         }
     }
 }
@@ -194,9 +198,9 @@ impl PartialEq for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
             (TableKey::String(a), TableKey::String(b)) => a == b,
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
-            (TableKey::Identity(a), TableKey::Identity(b)) => {
-                a.tag == b.tag && a.payload == b.payload
-            }
+            // Delegate to Value's PartialEq (stable identity for Fiber
+            // and friends — see Hash impl above).
+            (TableKey::Identity(a), TableKey::Identity(b)) => a == b,
             _ => false,
         }
     }
@@ -227,9 +231,9 @@ impl Ord for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
             (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
-            (TableKey::Identity(a), TableKey::Identity(b)) => {
-                (a.tag, a.payload).cmp(&(b.tag, b.payload))
-            }
+            // Delegate to Value's Ord. Stable identity for Fiber and
+            // friends — see Hash impl above.
+            (TableKey::Identity(a), TableKey::Identity(b)) => a.cmp(b),
             _ => unreachable!("discriminant match already handled"),
         }
     }
