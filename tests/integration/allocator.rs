@@ -60,6 +60,26 @@ fn make_heap() -> Box<FiberHeap> {
     Box::new(FiberHeap::new())
 }
 
+/// Allocate an LString HeapObject whose bytes live inline in `heap`'s arena.
+/// After Phase 2, LString.s is an `InlineSlice<u8>` rather than a `Box<str>`,
+/// so allocating a string is a two-step process: slice first, HeapObject next.
+fn alloc_str(heap: &mut FiberHeap, text: &str) -> Value {
+    let s = heap.alloc_inline_slice::<u8>(text.as_bytes());
+    heap.alloc(HeapObject::LString {
+        s,
+        traits: Value::NIL,
+    })
+}
+
+/// Allocate an LBytes HeapObject whose bytes live inline in `heap`'s arena.
+fn alloc_bytes(heap: &mut FiberHeap, data: &[u8]) -> Value {
+    let d = heap.alloc_inline_slice::<u8>(data);
+    heap.alloc(HeapObject::LBytes {
+        data: d,
+        traits: Value::NIL,
+    })
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[test]
@@ -72,10 +92,7 @@ fn test_custom_alloc_dispatch() {
 
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::LString {
-        s: "hello".into(),
-        traits: Value::NIL,
-    });
+    alloc_str(&mut heap, "hello");
 
     // All 3 allocations should have gone through the custom allocator.
     assert_eq!(heap.len(), 3);
@@ -147,22 +164,16 @@ fn test_custom_alloc_counts() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::LString {
-        s: "test".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LBytes {
-        data: vec![1, 2, 3],
-        traits: Value::NIL,
-    });
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))); // 1
+    alloc_str(&mut heap, "test"); // 2 (inline bytes + HeapObject)
+    alloc_bytes(&mut heap, &[1, 2, 3]); // 2
 
-    assert_eq!(alloc_count(), 3);
+    assert_eq!(alloc_count(), 5);
     assert_eq!(dealloc_count(), 0);
 
     heap.pop_custom_allocator();
 
-    assert_eq!(dealloc_count(), 3);
+    assert_eq!(dealloc_count(), 5);
 }
 
 #[test]
@@ -178,25 +189,23 @@ fn test_scope_exit_deallocs_custom_objects() {
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(alloc_count(), 1);
 
-    // Enter scope, allocate inside, then exit scope
+    // Enter scope, allocate inside, then exit scope.
+    // alloc_str is 2 allocs (inline bytes + HeapObject); Cons is 1.
     heap.push_scope_mark();
-    heap.alloc(HeapObject::LString {
-        s: "scoped".into(),
-        traits: Value::NIL,
-    });
+    alloc_str(&mut heap, "scoped");
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(alloc_count(), 3);
+    assert_eq!(alloc_count(), 4);
     assert_eq!(dealloc_count(), 0);
 
     heap.pop_scope_mark_and_release();
 
-    // Scope exit should dealloc the 2 scoped objects
-    assert_eq!(dealloc_count(), 2);
-    assert_eq!(heap.len(), 1); // only the pre-scope object remains
+    // Scope exit should dealloc the 3 scoped allocations (bytes + LString + Cons)
+    assert_eq!(dealloc_count(), 3);
+    assert_eq!(heap.len(), 1); // only the pre-scope Cons HeapObject remains
 
     // Pop allocator should dealloc the remaining 1
     heap.pop_custom_allocator();
-    assert_eq!(dealloc_count(), 3);
+    assert_eq!(dealloc_count(), 4);
 }
 
 #[test]
@@ -208,17 +217,14 @@ fn test_form_exit_deallocs_remaining() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::LString {
-        s: "stays".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(alloc_count(), 2);
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))); // 1
+    alloc_str(&mut heap, "stays"); // 2 (inline bytes + HeapObject)
+    assert_eq!(alloc_count(), 3);
 
     heap.pop_custom_allocator();
 
-    // Both should be deallocated
-    assert_eq!(dealloc_count(), 2);
+    // All three should be deallocated
+    assert_eq!(dealloc_count(), 3);
 }
 
 #[test]
@@ -230,20 +236,14 @@ fn test_clear_cleans_up_custom_allocators() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::LString {
-        s: "a".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::LString {
-        s: "b".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(alloc_count(), 3);
+    alloc_str(&mut heap, "a"); // 2 allocs: inline bytes + HeapObject
+    alloc_str(&mut heap, "b"); // 2 allocs
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))); // 1 alloc
+    assert_eq!(alloc_count(), 5);
 
     heap.clear();
 
-    assert_eq!(dealloc_count(), 3);
+    assert_eq!(dealloc_count(), 5);
     assert_eq!(heap.len(), 0);
 }
 
@@ -297,19 +297,16 @@ fn test_nested_allocators() {
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(OUTER_ALLOCS.with(|c| c.get()), 1);
 
-    // Push inner
+    // Push inner. Cons = 1 alloc, alloc_str = 2 allocs.
     heap.push_custom_allocator(Rc::new(AllocatorBox::new(InnerAlloc)));
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    heap.alloc(HeapObject::LString {
-        s: "inner".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(INNER_ALLOCS.with(|c| c.get()), 2);
+    alloc_str(&mut heap, "inner");
+    assert_eq!(INNER_ALLOCS.with(|c| c.get()), 3);
     assert_eq!(OUTER_ALLOCS.with(|c| c.get()), 1); // outer unchanged
 
     // Pop inner
     heap.pop_custom_allocator();
-    assert_eq!(INNER_DEALLOCS.with(|c| c.get()), 2);
+    assert_eq!(INNER_DEALLOCS.with(|c| c.get()), 3);
     assert_eq!(OUTER_DEALLOCS.with(|c| c.get()), 0);
 
     // Allocate more on outer
@@ -330,15 +327,12 @@ fn test_drop_cleans_up_custom_allocators() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::LString {
-        s: "will-drop".into(),
-        traits: Value::NIL,
-    });
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-    assert_eq!(alloc_count(), 2);
+    alloc_str(&mut heap, "will-drop"); // 2 (inline bytes + HeapObject)
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))); // 1
+    assert_eq!(alloc_count(), 3);
 
     drop(heap);
-    assert_eq!(dealloc_count(), 2);
+    assert_eq!(dealloc_count(), 3);
 }
 
 #[test]
@@ -346,11 +340,10 @@ fn test_no_custom_allocator_unchanged_behavior() {
     // Without custom allocator, behavior is unchanged.
     let mut heap = make_heap();
     let mark = heap.mark();
-    heap.alloc(HeapObject::LString {
-        s: "normal".into(),
-        traits: Value::NIL,
-    });
+    alloc_str(&mut heap, "normal");
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    // Two HeapObject allocs (LString + Cons); the inline bytes slice for the
+    // string doesn't register as a HeapObject but does live in the arena.
     assert_eq!(heap.len(), 2);
     heap.release(mark);
     assert_eq!(heap.len(), 0);
@@ -365,28 +358,22 @@ fn test_nested_scopes_with_custom_allocator() {
     let alloc = Rc::new(AllocatorBox::new(TlCountingAllocator));
     heap.push_custom_allocator(alloc);
 
-    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
+    heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL))); // 1
 
     heap.push_scope_mark(); // outer scope
-    heap.alloc(HeapObject::LString {
-        s: "outer-scoped".into(),
-        traits: Value::NIL,
-    });
+    alloc_str(&mut heap, "outer-scoped"); // 2 (inline bytes + HeapObject)
 
     heap.push_scope_mark(); // inner scope
-    heap.alloc(HeapObject::LString {
-        s: "inner-scoped".into(),
-        traits: Value::NIL,
-    });
-    assert_eq!(alloc_count(), 3);
+    alloc_str(&mut heap, "inner-scoped"); // 2
+    assert_eq!(alloc_count(), 5);
 
     heap.pop_scope_mark_and_release(); // exit inner scope
-    assert_eq!(dealloc_count(), 1); // inner-scoped freed
+    assert_eq!(dealloc_count(), 2); // inner-scoped bytes + HeapObject freed
 
     heap.pop_scope_mark_and_release(); // exit outer scope
-    assert_eq!(dealloc_count(), 2); // outer-scoped freed
+    assert_eq!(dealloc_count(), 4); // outer-scoped bytes + HeapObject freed
 
-    // Pop allocator frees the remaining pre-scope object
+    // Pop allocator frees the remaining pre-scope Cons
     heap.pop_custom_allocator();
-    assert_eq!(dealloc_count(), 3);
+    assert_eq!(dealloc_count(), 5);
 }

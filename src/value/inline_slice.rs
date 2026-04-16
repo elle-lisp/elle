@@ -79,15 +79,14 @@ impl<T: 'static> InlineSlice<T> {
 }
 
 // Manual Clone/Copy: just copies the pointer and length.
+// Written manually rather than derived because `T` is not required to be Clone
+// or Copy — `InlineSlice` is still Copy regardless of T.
+impl<T: 'static> Copy for InlineSlice<T> {}
 impl<T: 'static> Clone for InlineSlice<T> {
     fn clone(&self) -> Self {
-        InlineSlice {
-            ptr: self.ptr,
-            len: self.len,
-        }
+        *self
     }
 }
-impl<T: 'static> Copy for InlineSlice<T> {}
 
 impl<T: 'static> std::ops::Deref for InlineSlice<T> {
     type Target = [T];

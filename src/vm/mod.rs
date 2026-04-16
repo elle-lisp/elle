@@ -257,7 +257,7 @@ impl VM {
                 wasm_func_idx: None,
                 spirv: std::cell::OnceCell::new(),
             }),
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         });
 

@@ -231,7 +231,6 @@ mod tests {
 
         let bytecode = Rc::new(bytecode);
         let constants = Rc::new(constants);
-        let env = Rc::new(env);
 
         let template = Rc::new(ClosureTemplate {
             bytecode: bytecode.clone(),
@@ -258,9 +257,13 @@ mod tests {
             rotation_safe: false,
         });
 
+        // VM must exist before allocating the closure env slice so a root
+        // fiber heap is installed.
+        let mut vm = crate::vm::VM::new();
+
         let closure = crate::value::Closure {
             template: template.clone(),
-            env,
+            env: crate::value::arena::alloc_inline_slice::<Value>(&env),
             squelch_mask: SignalBits::EMPTY,
         };
 
@@ -268,8 +271,6 @@ mod tests {
         let closure_val = Value::closure(closure);
 
         let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-
-        let mut vm = crate::vm::VM::new();
         vm.jit_cache.insert(bytecode_ptr, jit_code);
 
         (vm, closure_val)
@@ -293,7 +294,6 @@ mod tests {
 
         let bytecode = Rc::new(bytecode);
         let constants = Rc::new(constants);
-        let env = Rc::new(env);
 
         let template = Rc::new(ClosureTemplate {
             bytecode: bytecode.clone(),
@@ -320,9 +320,13 @@ mod tests {
             rotation_safe: false,
         });
 
+        // VM must exist before allocating the closure env slice so a root
+        // fiber heap is installed.
+        let mut vm = crate::vm::VM::new();
+
         let closure = crate::value::Closure {
             template: template.clone(),
-            env,
+            env: crate::value::arena::alloc_inline_slice::<Value>(&env),
             squelch_mask: SignalBits::EMPTY,
         };
 
@@ -330,8 +334,6 @@ mod tests {
         let closure_val = Value::closure(closure);
 
         let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
-
-        let mut vm = crate::vm::VM::new();
         vm.jit_cache.insert(bytecode_ptr, jit_code);
 
         (vm, closure_val)

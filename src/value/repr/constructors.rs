@@ -179,13 +179,14 @@ impl Value {
         })
     }
 
-    /// Create a closure.
+    /// Create a closure. The closure is stored by value inline in the arena;
+    /// `Closure`'s non-Copy fields are `Rc`-shared (`ClosureTemplate`), so
+    /// cloning on access is O(1).
     #[inline]
     pub fn closure(c: crate::value::heap::Closure) -> Self {
         use crate::value::heap::{alloc, HeapObject};
-        use std::rc::Rc;
         alloc(HeapObject::Closure {
-            closure: Rc::new(c),
+            closure: c,
             traits: Value::NIL,
         })
     }

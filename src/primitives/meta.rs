@@ -451,10 +451,11 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
         Err(err) => return err,
     };
 
-    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap).
+    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
+    // InlineSlice copy is a (ptr, len) pair).
     let new_closure = Closure {
         template: closure_rc.template.clone(),
-        env: closure_rc.env.clone(),
+        env: closure_rc.env,
         squelch_mask: closure_rc.squelch_mask.union(new_bits),
     };
 
@@ -855,7 +856,7 @@ mod tests {
         });
         Value::closure(Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
     }

@@ -252,7 +252,7 @@ pub fn create_linker(engine: &Engine) -> Result<Linker<ElleHost>> {
 
             let closure = crate::value::closure::Closure {
                 template,
-                env: std::rc::Rc::new(captures),
+                env: crate::value::arena::alloc_inline_slice::<Value>(&captures),
                 squelch_mask: crate::value::fiber::SignalBits::EMPTY,
             };
 

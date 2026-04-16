@@ -1196,7 +1196,7 @@ fn test_spawn_primitive() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: std::rc::Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -1729,7 +1729,7 @@ fn test_json_serialize_errors() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: std::rc::Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
     let result = call_primitive(&json_serialize, &[closure]);

@@ -725,21 +725,35 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
 
   | Module | Description |
   |--------|-------------|
+  | `aws` | Elle-native AWS client (SigV4, HTTPS) |
   | `base64` | Base64 encoding/decoding |
   | `cli` | Declarative CLI argument parsing |
+  | `color` | Color spaces, mixing, gradients, perceptual distance |
   | `compress` | Gzip, zlib, deflate, zstd (FFI to libz + libzstd) |
+  | `contract` | Compositional validation for function boundaries |
+  | `dns` | Pure Elle DNS client (RFC 1035) |
+  | `egui` | Immediate-mode GUI wrapping the `egui` plugin |
   | `git` | Git repository operations (FFI to libgit2) |
   | `glob` | Filesystem glob pattern matching |
+  | `gtk4` | GTK4 bindings via FFI (pure Elle, no plugin) |
+  | `hash` | Streaming hash helpers (ports, coroutines) |
+  | `http` | Pure Elle HTTP/1.1 client and server |
+  | `irc` | Coroutine-based IRCv3 client with SASL |
+  | `lua` | Lua compatibility prelude |
+  | `mqtt` | MQTT client (uses the `mqtt` plugin for packet codec) |
+  | `portrait` | Semantic portraits from `compile/analyze` |
+  | `process` | Erlang-style GenServer, Supervisor, Actor, Task |
+  | `rdf` | RDF triple generation for the Elle knowledge graph |
+  | `redis` | Pure Elle Redis client (RESP2) |
+  | `resource` | Deterministic resource consumption measurement |
+  | `sdl3` | SDL3 bindings via FFI |
   | `semver` | Semantic version parsing and comparison |
   | `sqlite` | SQLite database (FFI to libsqlite3) |
-  | `uuid` | UUID generation and parsing |
-  | `http` | Pure Elle HTTP/1.1 client and server |
-  | `tls` | TLS client and server (wraps tls plugin) |
-  | `dns` | Pure Elle DNS client (RFC 1035) |
-  | `redis` | Pure Elle Redis client (RESP2) |
-  | `aws` | Elle-native AWS client (SigV4, HTTPS) |
+  | `svg` | SVG construction and emission (pure Elle) |
   | `sync` | Locks, semaphores, condvars, barriers, queues |
-  | `process` | Erlang-style GenServer, Supervisor, Actor, Task |
+  | `telemetry` | OpenTelemetry metrics (OTLP/HTTP JSON export) |
+  | `tls` | TLS client and server (wraps `tls` plugin) |
+  | `uuid` | UUID generation and parsing |
   | `watch` | Event-driven filesystem watcher |
   | `zmq` | ZeroMQ bindings via FFI |
 
@@ -754,15 +768,16 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   # => ({:match "1" ...} {:match "2" ...} ...)
   ```
 
-- **20 plugins ship with Elle.** See [docs/plugins.md](docs/plugins.md) for details.
+- **22 plugins ship with Elle.** See [docs/plugins.md](docs/plugins.md) for details.
 
   | Plugin | Description |
   |--------|-------------|
   | `arrow` | Apache Arrow columnar data and Parquet serialization |
   | `crypto` | SHA-2 hashing and HMAC |
   | `csv` | CSV reading and writing |
-  | `egui` | Immediate-mode GUI |
+  | `egui` | Immediate-mode GUI (egui + winit + glow) |
   | `hash` | Universal hashing (MD5, SHA-1/2/3, BLAKE2/3, CRC32, xxHash) |
+  | `image` | Raster image I/O, transforms, drawing, and analysis |
   | `jiff` | Date, time, and duration arithmetic |
   | `mqtt` | MQTT packet codec |
   | `msgpack` | MessagePack serialization |
@@ -772,6 +787,7 @@ See [docs/libraries.md](docs/libraries.md) for full documentation.
   | `random` | Pseudo-random number generation |
   | `regex` | Regular expressions |
   | `selkie` | Mermaid diagram rendering |
+  | `svg` | SVG rasterization via resvg (construction lives in `lib/svg.lisp`) |
   | `syn` | Rust source code parsing |
   | `tls` | TLS client and server via rustls |
   | `toml` | TOML parsing and generation |

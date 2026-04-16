@@ -107,7 +107,7 @@ impl BumpArena {
     /// `T` must be `Copy` so items can be memcpy'd. Returns a pointer
     /// to the first element in the arena.
     pub fn alloc_slice<T: Copy>(&mut self, items: &[T]) -> *mut T {
-        let size = size_of::<T>() * items.len();
+        let size = std::mem::size_of_val(items);
         if size == 0 {
             // Return a dangling-but-aligned pointer for zero-length slices.
             return std::ptr::NonNull::<T>::dangling().as_ptr();
@@ -176,6 +176,7 @@ impl BumpArena {
     }
 
     /// Running `HeapObject` allocation count (never decremented; rotation metrics).
+    #[allow(dead_code)]
     pub fn alloc_count(&self) -> usize {
         self.alloc_count
     }

@@ -86,7 +86,7 @@ For `block`: conditions 1-4 plus all break values targeting this block are safe 
 - **Tier 7**: Breaks targeting blocks inside the scope (safe — don't exit the region)
 - **Tier 8**: Outward sets with provably immediate values (safe — don't escape heap pointers)
 
-**Compile-time scope stats** (`ScopeStats`): The lowerer counts how many scopes were analyzed, how many qualified for scope allocation, and the first-failing condition for each rejected scope (captured, suspends, unsafe-result, outward-set, break). Access via `lowerer.scope_stats()` after `lower()` completes. Set `ELLE_SCOPE_STATS=1` to print stats to stderr during compilation.
+**Compile-time scope stats** (`ScopeStats`): The lowerer counts how many scopes were analyzed, how many qualified for scope allocation, and the first-failing condition for each rejected scope (captured, suspends, unsafe-result, outward-set, break). Access via `lowerer.scope_stats()` after `lower()` completes. Pass `--stats` to the elle CLI to print the aggregated stats to stderr on program exit (alongside JIT stats).
 
 **Known limitations and why they exist:**
 

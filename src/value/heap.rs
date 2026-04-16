@@ -151,8 +151,11 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Function closure (interpreted)
-    Closure { closure: Rc<Closure>, traits: Value },
+    /// Function closure (interpreted). The `Closure` lives by value in the
+    /// arena alongside its `HeapObject` header. `ClosureTemplate` remains
+    /// `Rc`-shared across closure instances (bytecode, constants, location
+    /// map, etc.), so cloning a `Closure` is O(1) (Rc bump + Copy fields).
+    Closure { closure: Closure, traits: Value },
 
     /// Immutable array (fixed-length sequence, inline in arena)
     LArray {

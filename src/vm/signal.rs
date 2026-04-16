@@ -419,7 +419,7 @@ impl VM {
                                 let id = (*ptr).intern(n);
                                 Value::symbol(id.0)
                             } else {
-                                Value::string(n.to_string())
+                                Value::string(n)
                             }
                         })
                         .collect()
@@ -462,29 +462,22 @@ impl VM {
                     let mut fields = BTreeMap::new();
                     fields.insert(
                         TableKey::Keyword("name".to_string()),
-                        Value::string(doc.name.to_string()),
+                        Value::string(doc.name),
                     );
-                    fields.insert(
-                        TableKey::Keyword("doc".to_string()),
-                        Value::string(doc.doc.to_string()),
-                    );
+                    fields.insert(TableKey::Keyword("doc".to_string()), Value::string(doc.doc));
                     // params as a list of strings
-                    let params: Vec<Value> = doc
-                        .params
-                        .iter()
-                        .map(|p| Value::string(p.to_string()))
-                        .collect();
+                    let params: Vec<Value> = doc.params.iter().map(|p| Value::string(*p)).collect();
                     fields.insert(
                         TableKey::Keyword("params".to_string()),
                         crate::value::list(params),
                     );
                     fields.insert(
                         TableKey::Keyword("category".to_string()),
-                        Value::string(doc.category.to_string()),
+                        Value::string(doc.category),
                     );
                     fields.insert(
                         TableKey::Keyword("example".to_string()),
-                        Value::string(doc.example.to_string()),
+                        Value::string(doc.example),
                     );
                     fields.insert(
                         TableKey::Keyword("arity".to_string()),
@@ -495,11 +488,8 @@ impl VM {
                         Value::string(format!("{}", doc.signal)),
                     );
                     // aliases as a list of strings
-                    let aliases: Vec<Value> = doc
-                        .aliases
-                        .iter()
-                        .map(|a| Value::string(a.to_string()))
-                        .collect();
+                    let aliases: Vec<Value> =
+                        doc.aliases.iter().map(|a| Value::string(*a)).collect();
                     fields.insert(
                         TableKey::Keyword("aliases".to_string()),
                         crate::value::list(aliases),
@@ -618,10 +608,7 @@ impl VM {
                     .map(|(ptr, info)| {
                         let mut fields = BTreeMap::new();
                         let name = info.name.as_deref().unwrap_or("<anon>");
-                        fields.insert(
-                            TableKey::Keyword("name".to_string()),
-                            Value::string(name.to_string()),
-                        );
+                        fields.insert(TableKey::Keyword("name".to_string()), Value::string(name));
                         fields.insert(
                             TableKey::Keyword("reason".to_string()),
                             Value::string(info.reason.to_string()),

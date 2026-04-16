@@ -48,7 +48,7 @@ fn test_closure_type_identification() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     let value = Value::closure(closure);
@@ -86,7 +86,7 @@ fn test_closure_display() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     let value = Value::closure(closure);
@@ -121,7 +121,7 @@ fn test_closure_clone() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![Value::int(42)]),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(42)]),
         squelch_mask: SignalBits::EMPTY,
     };
     let value1 = Value::closure(closure.clone());
@@ -202,7 +202,7 @@ fn test_closure_empty_environment() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 0);
@@ -236,7 +236,7 @@ fn test_closure_single_captured_variable() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(env),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 1);
@@ -276,7 +276,7 @@ fn test_closure_multiple_captured_variables() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(env),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.env.len(), 4);
@@ -286,8 +286,13 @@ fn test_closure_multiple_captured_variables() {
 
 #[test]
 fn test_closure_environment_sharing() {
-    // Multiple closures can share environment data
-    let shared_env = Rc::new(vec![Value::int(100), Value::int(200)]);
+    // Multiple closures can share environment data.
+    // With InlineSlice, sharing is the same (ptr,len) pointing into the same
+    // arena slice; copying the slice copies the pointer without reallocating.
+    let shared_env = elle::value::arena::alloc_inline_slice::<Value>(&[
+        Value::int(100),
+        Value::int(200),
+    ]);
 
     let closure1 = Closure {
         template: Rc::new(ClosureTemplate {
@@ -313,7 +318,7 @@ fn test_closure_environment_sharing() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: shared_env.clone(),
+        env: shared_env,
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -341,7 +346,7 @@ fn test_closure_environment_sharing() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: shared_env.clone(),
+        env: shared_env,
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -382,7 +387,7 @@ fn test_closure_bytecode_storage() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(*closure.template.bytecode, bytecode);
@@ -416,7 +421,7 @@ fn test_closure_constants_storage() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(*closure.template.constants, constants);
@@ -450,7 +455,7 @@ fn test_closure_num_locals() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
             }),
-            env: Rc::new(vec![]),
+            env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, num_locals);
@@ -487,7 +492,7 @@ fn test_closure_zero_parameters() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(0));
@@ -520,7 +525,7 @@ fn test_closure_single_parameter() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(1));
@@ -552,7 +557,7 @@ fn test_closure_multiple_parameters() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(3));
@@ -586,7 +591,7 @@ fn test_closure_variadic_parameters() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert!(closure.template.arity.matches(1));
@@ -625,7 +630,7 @@ fn test_closures_never_equal() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -653,7 +658,7 @@ fn test_closures_never_equal() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -688,7 +693,7 @@ fn test_same_closure_reference_equality() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -733,7 +738,7 @@ fn test_closure_with_nested_captured_values() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(env),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -767,7 +772,7 @@ fn test_closure_with_closure_in_constants() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -795,7 +800,7 @@ fn test_closure_with_closure_in_constants() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -831,7 +836,7 @@ fn test_closure_with_many_upvalues() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(env),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&env),
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -870,7 +875,7 @@ fn test_closure_as_method() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![Value::int(10)]),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(10)]),
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -911,7 +916,7 @@ fn test_closure_type_check() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     });
 
@@ -928,8 +933,8 @@ fn test_closure_type_check() {
 #[test]
 fn test_closure_environment_isolation() {
     // Different closures should have different environments
-    let env1 = Rc::new(vec![Value::int(1)]);
-    let env2 = Rc::new(vec![Value::int(2)]);
+    let env1 = elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(1)]);
+    let env2 = elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(2)]);
 
     let closure1 = Closure {
         template: Rc::new(ClosureTemplate {
@@ -1018,7 +1023,7 @@ fn test_closure_local_variables_count() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
             }),
-            env: Rc::new(vec![]),
+            env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.template.num_locals, locals);
@@ -1055,7 +1060,7 @@ fn test_closure_with_empty_bytecode() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.template.bytecode.len(), 0);
@@ -1089,7 +1094,7 @@ fn test_closure_with_large_bytecode() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
     assert_eq!(closure.template.bytecode.len(), 10000);
@@ -1125,7 +1130,7 @@ fn test_closure_rc_reference_counting() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![]),
+        env: elle::value::inline_slice::InlineSlice::empty(),
         squelch_mask: SignalBits::EMPTY,
     };
 
@@ -1164,7 +1169,7 @@ fn test_closure_debug_format() {
             wasm_func_idx: None,
             spirv: std::cell::OnceCell::new(),
         }),
-        env: Rc::new(vec![Value::int(42)]),
+        env: elle::value::arena::alloc_inline_slice::<Value>(&[Value::int(42)]),
         squelch_mask: SignalBits::EMPTY,
     };
 

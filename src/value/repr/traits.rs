@@ -138,11 +138,13 @@ impl PartialEq for Value {
                     *s1.borrow() == *s2.borrow()
                 }
 
-                // Closure comparison (compare by reference)
+                // Closure comparison (compare by identity of the arena-resident
+                // Closure: two closure Values are structurally equal iff they
+                // point at the same HeapObject).
                 (
                     HeapObject::Closure { closure: c1, .. },
                     HeapObject::Closure { closure: c2, .. },
-                ) => std::rc::Rc::ptr_eq(c1, c2),
+                ) => std::ptr::eq(c1, c2),
 
                 // Box comparison (compare contents)
                 (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. })

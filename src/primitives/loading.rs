@@ -234,7 +234,7 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
         }
     };
     let closure_rc = match args[1].as_closure() {
-        Some(c) => c.clone(),
+        Some(c) => std::rc::Rc::new(c.clone()),
         None => {
             return (
                 SIG_ERROR,

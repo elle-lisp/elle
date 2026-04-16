@@ -1,7 +1,7 @@
 use super::core::VM;
+use crate::value::arena::alloc_inline_slice;
 use crate::value::fiber::SignalBits;
 use crate::value::{Closure, Value};
-use std::rc::Rc;
 
 pub(crate) fn handle_make_closure(
     vm: &mut VM,
@@ -29,10 +29,11 @@ pub(crate) fn handle_make_closure(
     }
     captured.reverse();
 
-    // Create closure with shared template and captured environment
+    // Create closure with shared template and captured environment.
+    // `env` is arena-allocated inline; its lifetime matches the Closure's.
     let closure = Closure {
         template: template_closure.template.clone(),
-        env: Rc::new(captured),
+        env: alloc_inline_slice::<Value>(&captured),
         squelch_mask: SignalBits::EMPTY,
     };
 

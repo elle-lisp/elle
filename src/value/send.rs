@@ -863,7 +863,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
 
             let val = Value::closure(Closure {
                 template,
-                env: Rc::new(env),
+                env: crate::value::arena::alloc_inline_slice::<Value>(&env),
                 squelch_mask: sc.squelch_mask,
             });
             ctx.states[idx] = ReconState::Done(val);
@@ -1003,11 +1003,11 @@ mod tests {
         });
         let closure = Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         crate::value::heap::alloc(HeapObject::Closure {
-            closure: Rc::new(closure),
+            closure,
             traits: Value::NIL,
         })
     }
@@ -1071,11 +1071,12 @@ mod tests {
         });
         let outer_closure = Closure {
             template: outer_template,
-            env: Rc::new(vec![inner]), // make `inner` reachable from the bundle
+            // make `inner` reachable from the bundle
+            env: crate::value::arena::alloc_inline_slice::<Value>(&[inner]),
             squelch_mask: SignalBits::EMPTY,
         };
         let outer_val = crate::value::heap::alloc(HeapObject::Closure {
-            closure: Rc::new(outer_closure),
+            closure: outer_closure,
             traits: Value::NIL,
         });
 

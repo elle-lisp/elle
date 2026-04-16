@@ -414,7 +414,7 @@ impl Emitter {
                 };
                 let closure = Closure {
                     template: Rc::new(template),
-                    env: Rc::new(vec![]),
+                    env: crate::value::inline_slice::InlineSlice::empty(),
                     squelch_mask: SignalBits::EMPTY,
                 };
 

@@ -56,7 +56,7 @@ impl VM {
         if buf.capacity() < needed {
             buf.reserve(needed - buf.len());
         }
-        buf.extend((*closure.env).iter().cloned());
+        buf.extend(closure.env.iter().copied());
 
         match closure.template.arity {
             crate::value::Arity::AtLeast(min) => {

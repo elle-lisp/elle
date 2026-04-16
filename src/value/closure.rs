@@ -9,6 +9,7 @@
 use crate::error::LocationMap;
 use crate::signals::Signal;
 use crate::value::fiber::SignalBits;
+use crate::value::inline_slice::InlineSlice;
 use crate::value::types::Arity;
 use crate::value::Value;
 use std::collections::HashMap;
@@ -99,8 +100,9 @@ impl ClosureTemplate {
 pub struct Closure {
     /// Shared per-definition data
     pub template: Rc<ClosureTemplate>,
-    /// Captured environment (upvalues)
-    pub env: Rc<Vec<Value>>,
+    /// Captured environment (upvalues). Arena-allocated inline slice; its
+    /// lifetime matches the arena that allocated the enclosing Closure.
+    pub env: InlineSlice<Value>,
     /// Per-instance squelch mask. Empty = no squelch; non-empty bits identify
     /// signals that are suppressed at the call boundary and converted to errors.
     pub squelch_mask: SignalBits,
@@ -210,7 +212,7 @@ mod tests {
     fn test_closure_signal() {
         let closure = Closure {
             template: make_template(),
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.signal(), Signal::silent());
@@ -245,7 +247,7 @@ mod tests {
         });
         let closure = Closure {
             template,
-            env: Rc::new(vec![Value::NIL, Value::NIL]),
+            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL, Value::NIL]),
             squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.env_capacity(), 7);
@@ -276,7 +278,7 @@ mod tests {
         });
         let closure2 = Closure {
             template: template2,
-            env: Rc::new(vec![Value::NIL]),
+            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::NIL]),
             squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure2.env_capacity(), 5);
@@ -307,7 +309,7 @@ mod tests {
         });
         let closure3 = Closure {
             template: template3,
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure3.env_capacity(), 3);
@@ -317,7 +319,7 @@ mod tests {
     fn test_effective_signal_no_squelch() {
         let closure = Closure {
             template: make_template(),
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         assert_eq!(closure.effective_signal(), Signal::silent());
@@ -332,7 +334,7 @@ mod tests {
         });
         let closure = Closure {
             template,
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SIG_YIELD,
         };
         let eff = closure.effective_signal();
@@ -345,7 +347,7 @@ mod tests {
         use crate::signals::SIG_YIELD;
         let closure = Closure {
             template: make_template(), // signal = silent()
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SIG_YIELD,
         };
         assert_eq!(closure.effective_signal(), Signal::silent());
@@ -363,7 +365,7 @@ mod tests {
         });
         let closure = Closure {
             template,
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SIG_YIELD, // only squelch yield
         };
         let eff = closure.effective_signal();
@@ -385,13 +387,13 @@ mod tests {
         });
         let closure1 = Closure {
             template: template.clone(),
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: SIG_YIELD,
         };
         // Simulate composing a second squelch
         let closure2 = Closure {
             template: template.clone(),
-            env: Rc::new(vec![]),
+            env: InlineSlice::empty(),
             squelch_mask: closure1.squelch_mask.union(SIG_IO),
         };
         let eff = closure2.effective_signal();

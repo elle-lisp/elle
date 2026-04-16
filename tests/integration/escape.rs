@@ -446,6 +446,75 @@ fn no_region_when_set_to_global() {
     ));
 }
 
+// ── Diagnostics for regression_global_set_not_freed (hang-narrowing) ───
+//
+// `regression_global_set_not_freed` (below in this file) uses three
+// SIBLING top-level forms — not wrapped in `(begin ...)`. It fails: after
+// the let exits, `holder` (a global var) holds a value that reads as
+// `(nil)` instead of `(1 2 3)`.
+//
+// The matching escape-analyzer test `no_region_when_set_to_global` covers
+// the same pattern **wrapped in `(begin ...)`** and passes, so condition 4
+// works for the begin-wrapped shape. These two tests probe whether the
+// top-level-form shape behaves the same way.
+
+#[test]
+fn assign_to_global_begin_wrapped_preserves_value() {
+    // Same shape as `no_region_when_set_to_global` (begin-wrapped, where
+    // `has_region` returns false — scope-alloc correctly rejected), but
+    // calls `length` afterward inside the same begin. If this PASSES,
+    // the begin-wrapped shape works end-to-end; the regression bug is
+    // specific to top-level siblings. If this also FAILS, the bug is
+    // deeper than form layout (arena reset, Perceus rotation, etc.).
+    let result = eval_source(
+        "(begin
+           (var holder nil)
+           (let ((x (list 1 2 3))) (assign holder x) 42)
+           (length holder))",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(3));
+}
+
+#[test]
+fn diag_dump_bytecode_for_regression_case() {
+    // Prints the disassembled bytecode so we can see whether `DropValue`
+    // is emitted after (assign holder x). Run with:
+    //   cargo test --test lib -- diag_dump_bytecode_for_regression_case --nocapture
+    let mut symbols = SymbolTable::new();
+    let compiled = compile(
+        "(begin
+           (var holder nil)
+           (let ((x (list 1 2 3))) (assign holder x) 42)
+           (length holder))",
+        &mut symbols,
+        "<diag>",
+    )
+    .expect("compilation failed");
+    for line in disassemble_lines(&compiled.bytecode.instructions) {
+        eprintln!("{}", line);
+    }
+}
+
+#[test]
+fn assign_to_global_preserves_value_via_first() {
+    // Like regression_global_set_not_freed but reads the head of `holder`
+    // via `first` (which returns an immediate int). The car of the first
+    // cons in the list should be `10`, regardless of whether the tail
+    // cells are corrupted. If the car is nil instead, the VERY FIRST cons
+    // was overwritten/freed. If the car is 10 but `length` still returns
+    // 1, only the tail (cdr chain) was corrupted.
+    let result = eval_source(
+        "(var holder nil)
+         (let ((x (list 10 20 30)))
+           (assign holder x)
+           42)
+         (first holder)",
+    )
+    .unwrap();
+    assert_eq!(result, Value::int(10));
+}
+
 #[test]
 fn no_region_when_result_is_quote() {
     // Quote might produce a heap value

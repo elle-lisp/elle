@@ -125,7 +125,7 @@ pub fn create_store(
 /// `TieredHost` (per-closure) via the `WasmEnvHost` trait.
 pub fn prepare_wasm_env<T: super::host::WasmEnvHost>(
     caller: &mut Caller<'_, T>,
-    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    closure: &crate::value::closure::Closure,
     args: &[Value],
     env_base: usize,
 ) {
@@ -328,7 +328,7 @@ pub(super) fn handle_wasm_result(
 /// each other's environments.
 pub(super) fn call_wasm_closure(
     caller: &mut Caller<'_, ElleHost>,
-    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    closure: &crate::value::closure::Closure,
     wasm_idx: u32,
     args: &[Value],
 ) -> (i64, i64, i64) {
@@ -622,7 +622,7 @@ fn build_env_in_store(
 /// the result back to the caller's handle space.
 pub(super) fn call_precached_closure(
     caller: &mut Caller<'_, ElleHost>,
-    closure: &std::rc::Rc<crate::value::closure::Closure>,
+    closure: &crate::value::closure::Closure,
     pc: &super::host::PrecachedClosure,
     args: &[crate::value::Value],
 ) -> (i64, i64, i64) {

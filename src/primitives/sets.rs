@@ -30,7 +30,7 @@ pub(crate) fn freeze_value(v: Value) -> Value {
         Value::set(items)
     } else if let Some(buf) = v.as_string_mut() {
         let bytes = buf.borrow().clone();
-        Value::string(String::from_utf8_lossy(&bytes).into_owned())
+        Value::string(&*String::from_utf8_lossy(&bytes))
     } else if let Some(blob) = v.as_bytes_mut() {
         let data = blob.borrow().clone();
         Value::bytes(data)
@@ -391,7 +391,7 @@ pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(s) = args[0].as_set() {
-        let items: Vec<Value> = s.iter().copied().collect();
+        let items: Vec<Value> = s.to_vec();
         (SIG_OK, Value::array(items))
     } else if let Some(s) = args[0].as_set_mut() {
         let items: Vec<Value> = s.borrow().iter().copied().collect();

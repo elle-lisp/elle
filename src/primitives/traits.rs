@@ -80,7 +80,7 @@ pub(crate) fn prim_with_traits(args: &[Value]) -> (SignalBits, Value) {
 unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String> {
     match deref(value) {
         HeapObject::LString { s, .. } => Ok(alloc(HeapObject::LString {
-            s: s.clone(),
+            s: *s,
             traits: table,
         })),
         HeapObject::Cons(cons) => Ok(alloc(HeapObject::Cons(crate::value::heap::Cons {
@@ -105,7 +105,7 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             traits: table,
         })),
         HeapObject::LArray { elements, .. } => Ok(alloc(HeapObject::LArray {
-            elements: elements.clone(),
+            elements: *elements,
             traits: table,
         })),
         HeapObject::LStringMut { data, .. } => Ok(alloc(HeapObject::LStringMut {
@@ -113,7 +113,7 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             traits: table,
         })),
         HeapObject::LBytes { data, .. } => Ok(alloc(HeapObject::LBytes {
-            data: data.clone(),
+            data: *data,
             traits: table,
         })),
         HeapObject::LBytesMut { data, .. } => Ok(alloc(HeapObject::LBytesMut {
@@ -154,7 +154,7 @@ unsafe fn clone_with_traits(value: Value, table: Value) -> Result<Value, String>
             traits: table,
         })),
         HeapObject::LSet { data, .. } => Ok(alloc(HeapObject::LSet {
-            data: data.clone(),
+            data: *data,
             traits: table,
         })),
         HeapObject::LSetMut { data, .. } => Ok(alloc(HeapObject::LSetMut {

@@ -164,6 +164,10 @@ pub struct FiberHeap {
     outbox: Option<Box<SlabPool>>,
     /// Previous outbox pools from earlier yields. Kept alive so the parent
     /// can still read values from previous yields. Freed on fiber death.
+    ///
+    /// `Box<SlabPool>` is intentional: the outbox is handed off by raw
+    /// pointer via `install_outbox`, and boxing stabilizes its address.
+    #[allow(clippy::vec_box)]
     old_outboxes: Vec<Box<SlabPool>>,
     /// True when allocations should route to the outbox (between
     /// `OutboxEnter` and `OutboxExit` bytecodes).
@@ -287,7 +291,7 @@ impl FiberHeap {
         }
         // Custom allocator: allocate raw bytes, copy items, return slice.
         if let Some(state) = self.custom_alloc_stack.last_mut() {
-            let size = std::mem::size_of::<T>() * items.len();
+            let size = std::mem::size_of_val(items);
             let align = std::mem::align_of::<T>();
             let ptr = state.allocator.inner.alloc(size, align);
             if !ptr.is_null() {
@@ -715,6 +719,7 @@ impl FiberHeap {
     /// call pushes a new `SharedAllocator` that accumulates until the
     /// owner's `FiberHeap::clear()` runs. Reusing the last allocator keeps
     /// `owned_shared` at most length 1 for non-propagation cases.
+    #[allow(dead_code)]
     pub(crate) fn get_or_create_shared_allocator(
         &mut self,
     ) -> *mut crate::value::shared_alloc::SharedAllocator {
@@ -738,6 +743,7 @@ impl FiberHeap {
 
     /// Set the shared allocator pointer for this fiber.
     /// When non-null, `alloc()` routes all allocations to the shared allocator.
+    #[allow(dead_code)]
     pub(crate) fn set_shared_alloc(
         &mut self,
         ptr: *mut crate::value::shared_alloc::SharedAllocator,
@@ -768,6 +774,7 @@ impl FiberHeap {
 
     /// Detach and return the outbox pool. Called at yield time.
     /// The parent stores the outbox and reads yielded values from it.
+    #[allow(dead_code)]
     pub(crate) fn take_outbox(&mut self) -> Option<Box<SlabPool>> {
         self.outbox_active = false;
         self.outbox.take()
@@ -867,7 +874,7 @@ impl FiberHeap {
             }
             HeapObject::LString { s, traits } => {
                 let new_obj = HeapObject::LString {
-                    s: s.clone(),
+                    s: *s,
                     traits: *traits,
                 };
                 outbox.alloc(new_obj)
@@ -941,7 +948,7 @@ impl FiberHeap {
                 traits: *traits,
             }),
             HeapObject::LBytes { data, traits } => outbox.alloc(HeapObject::LBytes {
-                data: data.clone(),
+                data: *data,
                 traits: *traits,
             }),
             HeapObject::LBytesMut { data, traits } => outbox.alloc(HeapObject::LBytesMut {
@@ -968,7 +975,7 @@ impl FiberHeap {
                 data: RefCell::new(data.borrow().clone()),
                 traits: *traits,
             }),
-            HeapObject::NativeFn(f) => outbox.alloc(HeapObject::NativeFn(*f)),
+            HeapObject::NativeFn(f) => outbox.alloc(HeapObject::NativeFn(f)),
             HeapObject::Parameter {
                 id,
                 default,

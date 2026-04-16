@@ -57,7 +57,7 @@ fn prim_path_join(args: &[Value]) -> (SignalBits, Value) {
 
 fn prim_path_parent(args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/parent", |s| match crate::path::parent(s) {
-        Some(p) if !p.is_empty() => (SIG_OK, Value::string(p.to_string())),
+        Some(p) if !p.is_empty() => (SIG_OK, Value::string(p)),
         Some(_) => (SIG_OK, Value::NIL), // empty parent (e.g., parent("foo") is "")
         None => (SIG_OK, Value::NIL),
     })
@@ -66,7 +66,7 @@ fn prim_path_parent(args: &[Value]) -> (SignalBits, Value) {
 fn prim_path_filename(args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/filename", |s| {
         match crate::path::filename(s) {
-            Some(f) => (SIG_OK, Value::string(f.to_string())),
+            Some(f) => (SIG_OK, Value::string(f)),
             None => (SIG_OK, Value::NIL),
         }
     })
@@ -74,7 +74,7 @@ fn prim_path_filename(args: &[Value]) -> (SignalBits, Value) {
 
 fn prim_path_stem(args: &[Value]) -> (SignalBits, Value) {
     with_str_arg(&args[0], "path/stem", |s| match crate::path::stem(s) {
-        Some(st) => (SIG_OK, Value::string(st.to_string())),
+        Some(st) => (SIG_OK, Value::string(st)),
         None => (SIG_OK, Value::NIL),
     })
 }
@@ -84,7 +84,7 @@ fn prim_path_extension(args: &[Value]) -> (SignalBits, Value) {
         &args[0],
         "path/extension",
         |s| match crate::path::extension(s) {
-            Some(e) => (SIG_OK, Value::string(e.to_string())),
+            Some(e) => (SIG_OK, Value::string(e)),
             None => (SIG_OK, Value::NIL),
         },
     )

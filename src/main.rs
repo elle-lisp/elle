@@ -19,9 +19,10 @@ fn print_help() {
     println!("  --dump-ast            Print parsed AST as s-expressions and exit");
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
-    println!(
-        "  --trace=KW[,KW,...]   Trace subsystems: call, signal, fiber, jit, wasm, compile, ..."
-    );
+    println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
+    println!("                          call, signal, compile, fiber, hir, lir,");
+    println!("                          emit, jit, io, gc, import, macro, wasm,");
+    println!("                          capture, arena, escape, bytecode");
     println!("  --trace=all           Trace everything");
     println!("  --stats               Print compilation stats on exit");
     println!("  --home=DIR            Module resolution root (env: ELLE_HOME)");

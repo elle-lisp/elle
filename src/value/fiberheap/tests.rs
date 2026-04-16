@@ -6,8 +6,9 @@ use crate::value::heap::{Cons, HeapObject};
 #[test]
 fn test_fiber_heap_alloc() {
     let mut heap = FiberHeap::new();
+    let s = heap.alloc_inline_slice::<u8>(b"hello");
     let v = heap.alloc(HeapObject::LString {
-        s: "hello".into(),
+        s,
         traits: Value::NIL,
     });
     assert_eq!(heap.len(), 1);
@@ -15,7 +16,7 @@ fn test_fiber_heap_alloc() {
     unsafe {
         let obj = crate::value::arena::deref(v);
         match obj {
-            HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
+            HeapObject::LString { s, .. } => assert_eq!(s.as_slice(), b"hello"),
             _ => panic!("Expected String"),
         }
     }
@@ -23,18 +24,23 @@ fn test_fiber_heap_alloc() {
 
 #[test]
 fn test_fiber_heap_clear_runs_destructors() {
+    // After the Phase 1–2 redesign, LString bytes live inline in the arena
+    // and don't need per-object Drop. The arena itself reclaims everything
+    // on clear(). No HeapObject variant currently needs individual Drop, so
+    // this test now verifies that clear() resets the live count regardless.
     let mut heap = FiberHeap::new();
+    let sa = heap.alloc_inline_slice::<u8>(b"a");
     heap.alloc(HeapObject::LString {
-        s: "a".into(),
+        s: sa,
         traits: Value::NIL,
     });
+    let sb = heap.alloc_inline_slice::<u8>(b"b");
     heap.alloc(HeapObject::LString {
-        s: "b".into(),
+        s: sb,
         traits: Value::NIL,
     });
     heap.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
     assert_eq!(heap.len(), 3); // 3 total objects allocated
-    assert_eq!(heap.dtor_count(), 2); // 2 need Drop (Strings)
     heap.clear();
     assert_eq!(heap.len(), 0);
     assert!(heap.is_empty());
@@ -112,16 +118,19 @@ fn test_no_heap_by_default() {
 fn test_save_restore() {
     let mut heap_a = Box::new(FiberHeap::new());
     let mut heap_b = Box::new(FiberHeap::new());
+    let sa = heap_a.alloc_inline_slice::<u8>(b"a");
     heap_a.alloc(HeapObject::LString {
-        s: "a".into(),
+        s: sa,
         traits: Value::NIL,
     });
+    let sb1 = heap_b.alloc_inline_slice::<u8>(b"b1");
     heap_b.alloc(HeapObject::LString {
-        s: "b1".into(),
+        s: sb1,
         traits: Value::NIL,
     });
+    let sb2 = heap_b.alloc_inline_slice::<u8>(b"b2");
     heap_b.alloc(HeapObject::LString {
-        s: "b2".into(),
+        s: sb2,
         traits: Value::NIL,
     });
 
@@ -188,10 +197,8 @@ fn test_alloc_without_installed_heap_lazy_inits() {
     // alloc() with no heap installed triggers lazy root heap installation.
     uninstall_fiber_heap();
     // alloc() should not panic even with no heap installed.
-    let v = crate::value::arena::alloc(HeapObject::LString {
-        s: "lazy-test".into(),
-        traits: Value::NIL,
-    });
+    // Go through Value::string so the inline slice alloc also lazy-inits.
+    let v = Value::string("lazy-test");
     assert!(v.is_heap());
     // Root heap is now installed.
     assert!(is_fiber_heap_installed());
@@ -208,14 +215,14 @@ fn test_shared_alloc_routing() {
     heap.set_shared_alloc(sa_ptr);
 
     // Allocate via FiberHeap — should route to shared
+    let s = heap.alloc_inline_slice::<u8>(b"routed");
     heap.alloc(HeapObject::LString {
-        s: "routed".into(),
+        s,
         traits: Value::NIL,
     });
 
     // Private pool should be untouched
     assert_eq!(heap.len(), 0);
-    assert_eq!(heap.dtor_count(), 0);
 
     // Shared allocator should have the allocation
     let sa = unsafe { &*sa_ptr };
@@ -228,8 +235,9 @@ fn test_private_alloc_when_no_shared() {
     // shared_alloc is null by default
     assert!(heap.shared_alloc().is_null());
 
+    let s = heap.alloc_inline_slice::<u8>(b"private");
     heap.alloc(HeapObject::LString {
-        s: "private".into(),
+        s,
         traits: Value::NIL,
     });
     assert_eq!(heap.len(), 1);
@@ -243,8 +251,9 @@ fn test_drop_tears_down_owned_shared() {
     let mut heap = FiberHeap::new();
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
+    let s = heap.alloc_inline_slice::<u8>(b"will-be-dropped");
     heap.alloc(HeapObject::LString {
-        s: "will-be-dropped".into(),
+        s,
         traits: Value::NIL,
     });
     // Drop runs here — should not leak or panic.
@@ -262,24 +271,27 @@ fn test_multiple_shared_allocs_all_torn_down() {
     // Create 3 shared allocs, allocate strings into each
     let sa1 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa1);
+    let s1 = heap.alloc_inline_slice::<u8>(b"sa1-val");
     heap.alloc(HeapObject::LString {
-        s: "sa1-val".into(),
+        s: s1,
         traits: Value::NIL,
     });
     heap.clear_shared_alloc();
 
     let sa2 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa2);
+    let s2 = heap.alloc_inline_slice::<u8>(b"sa2-val");
     heap.alloc(HeapObject::LString {
-        s: "sa2-val".into(),
+        s: s2,
         traits: Value::NIL,
     });
     heap.clear_shared_alloc();
 
     let sa3 = heap.create_shared_allocator();
     heap.set_shared_alloc(sa3);
+    let s3 = heap.alloc_inline_slice::<u8>(b"sa3-val");
     heap.alloc(HeapObject::LString {
-        s: "sa3-val".into(),
+        s: s3,
         traits: Value::NIL,
     });
     heap.clear_shared_alloc();
@@ -302,15 +314,17 @@ fn test_shared_alloc_survives_private_clear() {
 
     let sa_ptr = heap.create_shared_allocator();
     heap.set_shared_alloc(sa_ptr);
+    let s_shared = heap.alloc_inline_slice::<u8>(b"in-shared");
     heap.alloc(HeapObject::LString {
-        s: "in-shared".into(),
+        s: s_shared,
         traits: Value::NIL,
     });
     heap.clear_shared_alloc();
 
     // Allocate privately
+    let s_private = heap.alloc_inline_slice::<u8>(b"in-private");
     heap.alloc(HeapObject::LString {
-        s: "in-private".into(),
+        s: s_private,
         traits: Value::NIL,
     });
     assert_eq!(heap.len(), 1); // private count
@@ -318,8 +332,9 @@ fn test_shared_alloc_survives_private_clear() {
 
     // Mark/release on private pool does not touch shared
     let mark = heap.mark();
+    let s_scoped = heap.alloc_inline_slice::<u8>(b"scoped");
     heap.alloc(HeapObject::LString {
-        s: "scoped".into(),
+        s: s_scoped,
         traits: Value::NIL,
     });
     heap.release(mark);

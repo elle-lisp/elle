@@ -244,8 +244,8 @@ and each `BlockLowerContext` records `region_depth_at_entry`.
 scopes were analyzed, how many qualified for scope allocation, and the
 first-failing condition for each rejected scope (captured, suspends,
 unsafe-result, outward-set, break). Access via `lowerer.scope_stats()`
-after `lower()` completes. Set `ELLE_SCOPE_STATS=1` to print stats to
-stderr during compilation.
+after `lower()` completes. Pass `--stats` to the elle CLI to print the
+aggregated stats to stderr on program exit (alongside JIT stats).
 
 ## Emit as terminator
 

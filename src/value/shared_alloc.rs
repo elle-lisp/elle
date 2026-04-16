@@ -175,19 +175,25 @@ mod tests {
     use super::*;
     use crate::value::heap::{Cons, HeapObject};
 
+    /// Allocate an `LString` HeapObject with its bytes inline in `sa`'s arena.
+    fn alloc_str(sa: &mut SharedAllocator, text: &str) -> Value {
+        let s = sa.alloc_inline_slice::<u8>(text.as_bytes());
+        sa.alloc(HeapObject::LString {
+            s,
+            traits: Value::NIL,
+        })
+    }
+
     #[test]
     fn test_shared_alloc_basic() {
         let mut sa = SharedAllocator::new();
-        let v = sa.alloc(HeapObject::LString {
-            s: "hello".into(),
-            traits: Value::NIL,
-        });
+        let v = alloc_str(&mut sa, "hello");
         assert_eq!(sa.len(), 1);
         assert!(v.is_heap());
         unsafe {
             let obj = crate::value::heap::deref(v);
             match obj {
-                HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
+                HeapObject::LString { s, .. } => assert_eq!(s.as_slice(), b"hello"),
                 _ => panic!("Expected String"),
             }
         }
@@ -198,42 +204,32 @@ mod tests {
         let mut sa = SharedAllocator::new();
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 1);
-        assert_eq!(sa.pool.dtor_count(), 0);
         assert_eq!(sa.pool.allocs.len(), 1);
     }
 
     #[test]
     fn test_shared_alloc_drop_types_tracked() {
+        // Post-Phase-2: LString no longer owns a Box<str>, so it doesn't need
+        // Drop tracking. This test verifies `len()` still counts all live
+        // objects and the alloc list records every pointer.
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::LString {
-            s: "tracked".into(),
-            traits: Value::NIL,
-        });
+        alloc_str(&mut sa, "tracked");
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 2);
-        assert_eq!(sa.pool.dtor_count(), 1); // only String
         assert_eq!(sa.pool.allocs.len(), 2);
     }
 
     #[test]
     fn test_shared_alloc_teardown_runs_dtors() {
         let mut sa = SharedAllocator::new();
-        sa.alloc(HeapObject::LString {
-            s: "a".into(),
-            traits: Value::NIL,
-        });
-        sa.alloc(HeapObject::LString {
-            s: "b".into(),
-            traits: Value::NIL,
-        });
+        alloc_str(&mut sa, "a");
+        alloc_str(&mut sa, "b");
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.len(), 3);
-        assert_eq!(sa.pool.dtor_count(), 2);
 
         sa.teardown();
         assert_eq!(sa.len(), 0);
         assert!(sa.is_empty());
-        assert_eq!(sa.pool.dtor_count(), 0);
         assert_eq!(sa.pool.allocs.len(), 0);
     }
 
@@ -241,10 +237,7 @@ mod tests {
     fn test_shared_alloc_teardown_reuses_memory() {
         let mut sa = SharedAllocator::new();
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        sa.alloc(HeapObject::LString {
-            s: "x".into(),
-            traits: Value::NIL,
-        });
+        alloc_str(&mut sa, "x");
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.pool.live_count(), 3);
         sa.teardown();
@@ -252,10 +245,7 @@ mod tests {
         assert_eq!(sa.len(), 0);
 
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
-        sa.alloc(HeapObject::LString {
-            s: "y".into(),
-            traits: Value::NIL,
-        });
+        alloc_str(&mut sa, "y");
         sa.alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
         assert_eq!(sa.pool.live_count(), 3);
         let bytes_round1 = sa.pool.allocated_bytes();
@@ -282,10 +272,7 @@ mod tests {
         assert_eq!(sa.len(), 1);
         assert!(!sa.is_empty());
 
-        sa.alloc(HeapObject::LString {
-            s: "x".into(),
-            traits: Value::NIL,
-        });
+        alloc_str(&mut sa, "x");
         assert_eq!(sa.len(), 2);
 
         sa.alloc(HeapObject::Cons(Cons::new(Value::TRUE, Value::EMPTY_LIST)));

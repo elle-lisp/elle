@@ -579,15 +579,15 @@ mod tests {
             "different lists must not be eq"
         );
 
-        let s1 = Value::string("hello".to_string());
-        let s2 = Value::string("hello".to_string());
+        let s1 = Value::string("hello");
+        let s2 = Value::string("hello");
         assert_eq!(
             elle_jit_eq(s1.tag, s1.payload, s2.tag, s2.payload),
             JitValue::bool_val(true),
             "equal strings must be eq"
         );
 
-        let s3 = Value::string("world".to_string());
+        let s3 = Value::string("world");
         assert_eq!(
             elle_jit_eq(s1.tag, s1.payload, s3.tag, s3.payload),
             JitValue::bool_val(false),
@@ -597,8 +597,8 @@ mod tests {
 
     #[test]
     fn test_lt_strings() {
-        let a = Value::string("apple".to_string());
-        let b = Value::string("banana".to_string());
+        let a = Value::string("apple");
+        let b = Value::string("banana");
         assert_eq!(
             elle_jit_lt(a.tag, a.payload, b.tag, b.payload),
             JitValue::bool_val(true)
@@ -615,8 +615,8 @@ mod tests {
 
     #[test]
     fn test_gt_strings() {
-        let a = Value::string("banana".to_string());
-        let b = Value::string("apple".to_string());
+        let a = Value::string("banana");
+        let b = Value::string("apple");
         assert_eq!(
             elle_jit_gt(a.tag, a.payload, b.tag, b.payload),
             JitValue::bool_val(true)
@@ -629,8 +629,8 @@ mod tests {
 
     #[test]
     fn test_le_strings() {
-        let a = Value::string("apple".to_string());
-        let b = Value::string("banana".to_string());
+        let a = Value::string("apple");
+        let b = Value::string("banana");
         assert_eq!(
             elle_jit_le(a.tag, a.payload, b.tag, b.payload),
             JitValue::bool_val(true)
@@ -647,8 +647,8 @@ mod tests {
 
     #[test]
     fn test_ge_strings() {
-        let a = Value::string("banana".to_string());
-        let b = Value::string("apple".to_string());
+        let a = Value::string("banana");
+        let b = Value::string("apple");
         assert_eq!(
             elle_jit_ge(a.tag, a.payload, b.tag, b.payload),
             JitValue::bool_val(true)

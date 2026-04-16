@@ -201,12 +201,13 @@ This demo shows that Elle's compiler can automatically optimize memory managemen
 cargo run --release -- demos/scope-alloc/scope-alloc.lisp
 ```
 
-To see detailed escape analysis statistics, set the environment variable:
+To see detailed escape analysis statistics, pass `--stats`:
 ```bash
-ELLE_SCOPE_STATS=1 cargo run --release -- demos/scope-alloc/scope-alloc.lisp
+cargo run --release -- --stats demos/scope-alloc/scope-alloc.lisp
 ```
 
-This prints the compiler's escape analysis decisions for each scope.
+This prints the compiler's escape analysis decisions for each scope
+(alongside JIT compilation stats) on stderr when the program exits.
 
 ## Further Reading
 

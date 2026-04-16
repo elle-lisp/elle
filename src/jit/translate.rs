@@ -678,7 +678,7 @@ impl<'a> FunctionTranslator<'a> {
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),
-                    env: std::rc::Rc::new(vec![]),
+                    env: crate::value::inline_slice::InlineSlice::empty(),
                     squelch_mask: SignalBits::EMPTY,
                 };
 
