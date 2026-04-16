@@ -550,7 +550,7 @@ pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
             );
         }
         let wg_size = if args.len() == 2 {
-            args[1].as_int().unwrap_or(256) as i64
+            args[1].as_int().unwrap_or(256)
         } else {
             256
         };

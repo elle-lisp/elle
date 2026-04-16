@@ -288,14 +288,14 @@ impl LirFunction {
                             value: LirConst::Nil | LirConst::Bool(_),
                         } if *dst == r => return true,
                         LirInstr::Compare { dst, .. } if *dst == r => return true,
-                        LirInstr::LoadLocal { dst, slot } if *dst == r => {
-                            if seen_slots.insert(*slot) {
-                                for b2 in &self.blocks {
-                                    for si2 in &b2.instructions {
-                                        if let LirInstr::StoreLocal { slot: s, src } = &si2.instr {
-                                            if *s == *slot {
-                                                regs_to_check.push(*src);
-                                            }
+                        LirInstr::LoadLocal { dst, slot }
+                            if *dst == r && seen_slots.insert(*slot) =>
+                        {
+                            for b2 in &self.blocks {
+                                for si2 in &b2.instructions {
+                                    if let LirInstr::StoreLocal { slot: s, src } = &si2.instr {
+                                        if *s == *slot {
+                                            regs_to_check.push(*src);
                                         }
                                     }
                                 }

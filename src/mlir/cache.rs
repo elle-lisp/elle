@@ -30,6 +30,12 @@ pub struct MlirCache {
 unsafe impl Send for MlirCache {}
 unsafe impl Sync for MlirCache {}
 
+impl Default for MlirCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MlirCache {
     pub fn new() -> Self {
         MlirCache {

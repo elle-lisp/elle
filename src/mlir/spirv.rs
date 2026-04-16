@@ -31,7 +31,7 @@ pub fn lower_to_spirv_with_context(
 
     // Pass pipeline: convert standard dialects to SPIR-V inside gpu.module,
     // then convert gpu.module to spirv.module, then lower ABI/VCE.
-    let pm = pass::PassManager::new(&context);
+    let pm = pass::PassManager::new(context);
 
     // Nest passes inside gpu.module
     let gpu_pm = pm.nested_under("gpu.module");
@@ -289,8 +289,18 @@ fn emit_multiblock(
                     Terminator::Jump(l) => *l,
                     Terminator::Return(_) => {
                         return emit_if_return(
-                            lir, regs, num_params, block_idx, then_idx, else_idx, &cond_val,
-                            buf_size, indent, out,
+                            lir,
+                            regs,
+                            num_params,
+                            IfReturn {
+                                entry_idx: block_idx,
+                                then_idx,
+                                else_idx,
+                                cond_val: &cond_val,
+                                buf_size,
+                                indent,
+                            },
+                            out,
                         );
                     }
                     _ => return Err("then block must end with Jump or Return".to_string()),
@@ -376,20 +386,28 @@ fn find_store_slot(block: &crate::lir::BasicBlock) -> Option<u16> {
     None
 }
 
+/// Indices into `lir.blocks` describing an `if` that returns directly.
+struct IfReturn<'a> {
+    entry_idx: usize,
+    then_idx: usize,
+    else_idx: usize,
+    cond_val: &'a str,
+    buf_size: &'a str,
+    indent: &'a str,
+}
+
 fn emit_if_return(
     lir: &LirFunction,
     regs: &mut HashMap<u32, String>,
     num_params: usize,
-    _entry_idx: usize,
-    then_idx: usize,
-    else_idx: usize,
-    cond_val: &str,
-    buf_size: &str,
-    indent: &str,
+    idx: IfReturn<'_>,
     out: &mut String,
 ) -> Result<(), String> {
-    let then_block = &lir.blocks[then_idx];
-    let else_block = &lir.blocks[else_idx];
+    let cond_val = idx.cond_val;
+    let buf_size = idx.buf_size;
+    let indent = idx.indent;
+    let then_block = &lir.blocks[idx.then_idx];
+    let else_block = &lir.blocks[idx.else_idx];
 
     let then_ret = match &then_block.terminator.terminator {
         Terminator::Return(r) => r.0,
@@ -400,7 +418,7 @@ fn emit_if_return(
         _ => return Err("expected return in else".to_string()),
     };
 
-    let if_result = format!("%if_ret_{}", _entry_idx);
+    let if_result = format!("%if_ret_{}", idx.entry_idx);
     out.push_str(&format!(
         "{indent}{if_result} = scf.if {cond_val} -> (i64) {{\n"
     ));
@@ -412,7 +430,7 @@ fn emit_if_return(
         &then_block.instructions,
         &mut then_regs,
         num_params,
-        then_idx,
+        idx.then_idx,
         &inner,
         out,
     )?;
@@ -425,7 +443,7 @@ fn emit_if_return(
         &else_block.instructions,
         &mut else_regs,
         num_params,
-        else_idx,
+        idx.else_idx,
         &inner,
         out,
     )?;

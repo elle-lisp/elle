@@ -320,14 +320,13 @@ fn collect_pattern_vars(
     span_syn: &Syntax,
 ) -> Result<(), String> {
     match pat {
-        Pattern::Variable(name) => {
-            if !seen.insert(name.clone()) {
-                return Err(format!(
-                    "{}: syntax-case: duplicate pattern variable '{}'",
-                    span_syn.span, name
-                ));
-            }
+        Pattern::Variable(name) if !seen.insert(name.clone()) => {
+            return Err(format!(
+                "{}: syntax-case: duplicate pattern variable '{}'",
+                span_syn.span, name
+            ));
         }
+        Pattern::Variable(_) => {}
         Pattern::List(sub_pats) => {
             for sp in sub_pats {
                 collect_pattern_vars(sp, seen, span_syn)?;
