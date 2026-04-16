@@ -14,7 +14,7 @@
 
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::types::I64;
-use cranelift_codegen::ir::InstBuilder;
+use cranelift_codegen::ir::{BlockArg, InstBuilder};
 use cranelift_frontend::FunctionBuilder;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
@@ -138,7 +138,10 @@ pub(crate) fn emit_int_binop_fast_path(
             (tag, raw)
         }
     };
-    builder.ins().jump(merge_block, &[fast_tag, fast_payload]);
+    builder.ins().jump(
+        merge_block,
+        &[BlockArg::Value(fast_tag), BlockArg::Value(fast_payload)],
+    );
 
     // Slow block: call runtime helper
     builder.switch_to_block(slow_block);
@@ -150,7 +153,10 @@ pub(crate) fn emit_int_binop_fast_path(
         .call(func_ref, &[lhs_tag, lhs_payload, rhs_tag, rhs_payload]);
     let slow_tag = builder.inst_results(call)[0];
     let slow_payload = builder.inst_results(call)[1];
-    builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
+    builder.ins().jump(
+        merge_block,
+        &[BlockArg::Value(slow_tag), BlockArg::Value(slow_payload)],
+    );
 
     // Merge block
     builder.switch_to_block(merge_block);
@@ -238,7 +244,10 @@ pub(crate) fn emit_int_cmpop_fast_path(
             builder.ins().select(cmp, tag_true, tag_false)
         }
     };
-    builder.ins().jump(merge_block, &[fast_tag, zero_payload]);
+    builder.ins().jump(
+        merge_block,
+        &[BlockArg::Value(fast_tag), BlockArg::Value(zero_payload)],
+    );
 
     // Slow block: call runtime helper
     builder.switch_to_block(slow_block);
@@ -250,7 +259,10 @@ pub(crate) fn emit_int_cmpop_fast_path(
         .call(func_ref, &[lhs_tag, lhs_payload, rhs_tag, rhs_payload]);
     let slow_tag = builder.inst_results(call)[0];
     let slow_payload = builder.inst_results(call)[1];
-    builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
+    builder.ins().jump(
+        merge_block,
+        &[BlockArg::Value(slow_tag), BlockArg::Value(slow_payload)],
+    );
 
     builder.switch_to_block(merge_block);
     builder.seal_block(merge_block);
@@ -324,7 +336,10 @@ pub(crate) fn emit_unary_fast_path(
                 }
                 UnaryOp::Not => unreachable!(),
             };
-            builder.ins().jump(merge_block, &[fast_tag, fast_payload]);
+            builder.ins().jump(
+                merge_block,
+                &[BlockArg::Value(fast_tag), BlockArg::Value(fast_payload)],
+            );
 
             builder.switch_to_block(slow_block);
             builder.seal_block(slow_block);
@@ -333,7 +348,10 @@ pub(crate) fn emit_unary_fast_path(
             let call = builder.ins().call(func_ref, &[src_tag, src_payload]);
             let slow_tag = builder.inst_results(call)[0];
             let slow_payload = builder.inst_results(call)[1];
-            builder.ins().jump(merge_block, &[slow_tag, slow_payload]);
+            builder.ins().jump(
+                merge_block,
+                &[BlockArg::Value(slow_tag), BlockArg::Value(slow_payload)],
+            );
 
             builder.switch_to_block(merge_block);
             builder.seal_block(merge_block);
