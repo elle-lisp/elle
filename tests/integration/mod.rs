@@ -99,6 +99,12 @@ mod meta {
 mod elle_scripts {
     include!("elle_scripts.rs");
 }
+mod dump_cli {
+    include!("dump_cli.rs");
+}
+mod flip_cli {
+    include!("flip_cli.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

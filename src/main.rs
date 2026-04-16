@@ -16,9 +16,19 @@ fn print_help() {
     println!("  -h, --help            Show this help");
     println!("  -e, --eval EXPR       Evaluate expression");
     println!("  -                     Read from stdin");
-    println!("  --dump-ast            Print parsed AST as s-expressions and exit");
+    println!("  --dump=KW[,KW,...]    Dump compiler artifacts and exit. Keywords:");
+    println!("                          ast  — parsed syntax forms");
+    println!("                          hir  — resolved HIR");
+    println!("                          lir  — lowered LIR (SSA)");
+    println!("                          jit  — JIT eligibility per function");
+    println!("                          cfg  — per-function control-flow graph");
+    println!("                          dfa  — dataflow / signal inference results");
+    println!("                          git  — (reserved for SPIR-V output)");
+    println!("  --dump=all            Dump every stage");
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
+    println!("  --flip=on|off         Insert FlipEnter/FlipSwap/FlipExit instructions");
+    println!("                          (experimental explicit rotation; default off)");
     println!("  --trace=KW[,KW,...]   Trace subsystems. Keywords:");
     println!("                          call, signal, compile, fiber, hir, lir,");
     println!("                          emit, jit, io, gc, import, macro, wasm,");
@@ -155,6 +165,195 @@ fn run_file(filename: &str, vm: &mut VM, symbols: &mut SymbolTable) -> Result<()
     run_source(&contents, filename, vm, symbols)
 }
 
+/// Implementation of `--dump=...`. Each requested stage prints a banner
+/// followed by the artifact. Stages run in pipeline order (git, ast, hir,
+/// lir, cfg, dfa, jit), so asking for multiple stages gives a coherent
+/// top-to-bottom dump of the compiler.
+fn run_dump(contents: &str, source_name: &str, symbols: &mut SymbolTable) -> Result<(), String> {
+    use elle::config::dump_bits;
+    let cfg = elle::config::get();
+
+    if cfg.dump.contains("git") {
+        println!(";; ── git ────────────────────────────────────────────────────");
+        // `git` is reserved for SPIR-V output (wired up on another branch);
+        // currently a stub so --dump=git is accepted without error.
+        println!("; git: SPIR-V dump not implemented in this branch");
+    }
+
+    // AST — parsed syntax forms (cheapest stage; no analyzer needed).
+    let needs_ast = cfg.dump.contains("ast");
+    if needs_ast {
+        println!(";; ── ast ────────────────────────────────────────────────────");
+        let forms = elle::reader::read_syntax_all_for(contents, source_name).map_err(|e| {
+            eprintln!("{}", e);
+            e
+        })?;
+        for form in &forms {
+            println!("{}", form);
+        }
+    }
+
+    // HIR / LIR / CFG / DFA / JIT all flow off compile_file_to_lir. Only
+    // run the pipeline once if any of them are requested.
+    let needs_pipeline = cfg
+        .dump
+        .iter()
+        .any(|k| matches!(k.as_str(), "hir" | "lir" | "cfg" | "dfa" | "jit"));
+    if !needs_pipeline {
+        return Ok(());
+    }
+
+    let module =
+        elle::pipeline::compile_file_to_lir(contents, symbols, source_name, 0).map_err(|e| {
+            eprintln!("{}", e);
+            e
+        })?;
+
+    if cfg.dump.contains("hir") {
+        println!(";; ── hir ────────────────────────────────────────────────────");
+        // No dedicated pretty-printer — use Debug. The per-function
+        // `syntax` Rc on each LirFunction carries the pre-expansion form
+        // for reference; we print that for a compact overview.
+        for (i, f) in std::iter::once(&module.entry)
+            .chain(module.closures.iter())
+            .enumerate()
+        {
+            let tag = if i == 0 {
+                "entry".to_string()
+            } else {
+                format!("closure[{}]", i - 1)
+            };
+            let name = f.name.as_deref().unwrap_or("<anon>");
+            println!(
+                "; {} {} (arity={}, signal={:?})",
+                tag, name, f.arity, f.signal
+            );
+            if let Some(syn) = &f.syntax {
+                println!("{}", syn);
+            }
+        }
+    }
+
+    if cfg.dump.contains("lir") {
+        println!(";; ── lir ────────────────────────────────────────────────────");
+        print_lir_module(&module);
+    }
+
+    if cfg.dump.contains("cfg") {
+        println!(";; ── cfg ────────────────────────────────────────────────────");
+        print_cfg_module(&module);
+    }
+
+    if cfg.dump.contains("dfa") {
+        println!(";; ── dfa ────────────────────────────────────────────────────");
+        print_dfa_module(&module);
+    }
+
+    if cfg.dump.contains("jit") {
+        println!(";; ── jit ────────────────────────────────────────────────────");
+        print_jit_candidates(&module);
+    }
+
+    let _ = dump_bits::ALL; // keep import used even if a stage is added lazily
+    Ok(())
+}
+
+fn print_lir_module(module: &elle::lir::LirModule) {
+    print_lir_function("entry", &module.entry);
+    for (i, f) in module.closures.iter().enumerate() {
+        print_lir_function(&format!("closure[{}]", i), f);
+    }
+}
+
+fn print_lir_function(tag: &str, f: &elle::lir::LirFunction) {
+    let name = f.name.as_deref().unwrap_or("<anon>");
+    println!(
+        "; {} {} (arity={}, signal={:?}, regs={}, locals={})",
+        tag, name, f.arity, f.signal, f.num_regs, f.num_locals
+    );
+    for block in &f.blocks {
+        println!("  {}:", block.label);
+        for si in &block.instructions {
+            println!("    {}", si.instr);
+        }
+        println!("    -> {:?}", block.terminator.terminator);
+    }
+    println!();
+}
+
+fn print_cfg_module(module: &elle::lir::LirModule) {
+    print_cfg_function("entry", &module.entry);
+    for (i, f) in module.closures.iter().enumerate() {
+        print_cfg_function(&format!("closure[{}]", i), f);
+    }
+}
+
+fn print_cfg_function(tag: &str, f: &elle::lir::LirFunction) {
+    use elle::lir::Terminator;
+    let name = f.name.as_deref().unwrap_or("<anon>");
+    println!("; {} {}", tag, name);
+    println!("  entry: {}", f.entry);
+    for block in &f.blocks {
+        let succs: Vec<String> = match &block.terminator.terminator {
+            Terminator::Jump(l) => vec![l.to_string()],
+            Terminator::Branch {
+                then_label,
+                else_label,
+                ..
+            } => vec![then_label.to_string(), else_label.to_string()],
+            Terminator::Emit { resume_label, .. } => vec![resume_label.to_string()],
+            Terminator::Return(_) | Terminator::Unreachable => vec![],
+        };
+        println!("  {} → [{}]", block.label, succs.join(", "));
+    }
+    println!();
+}
+
+fn print_dfa_module(module: &elle::lir::LirModule) {
+    print_dfa_function("entry", &module.entry);
+    for (i, f) in module.closures.iter().enumerate() {
+        print_dfa_function(&format!("closure[{}]", i), f);
+    }
+}
+
+fn print_dfa_function(tag: &str, f: &elle::lir::LirFunction) {
+    let name = f.name.as_deref().unwrap_or("<anon>");
+    println!(
+        "; {} {}: signal={:?} rotation_safe={} result_immediate={} outward_heap_set={} \
+         capture_params_mask=0x{:x} capture_locals_mask=0x{:x}",
+        tag,
+        name,
+        f.signal,
+        f.rotation_safe,
+        f.result_is_immediate,
+        f.has_outward_heap_set,
+        f.capture_params_mask,
+        f.capture_locals_mask,
+    );
+}
+
+fn print_jit_candidates(module: &elle::lir::LirModule) {
+    // JIT rejects polymorphic closures (those whose signal's `propagates`
+    // bits are set — signal depends on a caller-supplied function). Silent
+    // and statically-yielding functions are eligible. Callable mutability
+    // (captures) is handled separately by the JIT.
+    let report = |tag: &str, f: &elle::lir::LirFunction| {
+        let eligible = f.signal.propagates == 0;
+        println!(
+            "; {} {}: signal={{bits={:?}, propagates=0b{:b}}} eligible={}",
+            tag,
+            f.name.as_deref().unwrap_or("<anon>"),
+            f.signal.bits,
+            f.signal.propagates,
+            eligible,
+        );
+    };
+    report("entry", &module.entry);
+    for (i, f) in module.closures.iter().enumerate() {
+        report(&format!("closure[{}]", i), f);
+    }
+}
+
 /// Run Elle source code from a string.
 /// Only prints non-nil results.
 fn run_source(
@@ -163,16 +362,10 @@ fn run_source(
     vm: &mut VM,
     symbols: &mut SymbolTable,
 ) -> Result<(), String> {
-    // --dump-ast: parse and print, then exit without compiling
-    if elle::config::get().dump_ast {
-        let forms = elle::reader::read_syntax_all_for(contents, source_name).map_err(|e| {
-            eprintln!("{}", e);
-            e
-        })?;
-        for form in &forms {
-            println!("{}", form);
-        }
-        return Ok(());
+    // --dump=...: run the compiler up to each requested stage, print the
+    // artifact, and exit without executing.
+    if !elle::config::get().dump.is_empty() {
+        return run_dump(contents, source_name, symbols);
     }
 
     // WASM backend: compile and run through Wasmtime instead of bytecode VM

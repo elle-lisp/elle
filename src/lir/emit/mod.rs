@@ -905,25 +905,14 @@ impl Emitter {
                 // No stack effect
             }
 
-            LirInstr::DropValue { slot } => {
-                self.bytecode.emit(Instruction::DropValue);
-                self.bytecode.emit_u16(*slot);
-                // No stack effect — slot-addressed
+            LirInstr::FlipEnter => {
+                self.bytecode.emit(Instruction::FlipEnter);
             }
-
-            LirInstr::ReuseSlotCons {
-                dst,
-                slot,
-                head,
-                tail,
-            } => {
-                self.ensure_on_top(*tail);
-                self.ensure_on_top(*head);
-                self.bytecode.emit(Instruction::ReuseSlotCons);
-                self.bytecode.emit_u16(*slot);
-                self.pop(); // head consumed
-                self.pop(); // tail consumed
-                self.push_reg(*dst);
+            LirInstr::FlipSwap => {
+                self.bytecode.emit(Instruction::FlipSwap);
+            }
+            LirInstr::FlipExit => {
+                self.bytecode.emit(Instruction::FlipExit);
             }
 
             LirInstr::PushParamFrame { pairs } => {

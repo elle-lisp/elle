@@ -60,11 +60,29 @@ impl BumpArena {
     ///
     /// Advances to a new page if the current page lacks space.
     /// Returns a pointer to uninitialized bytes.
+    ///
+    /// Allocations larger than `PAGE_SIZE` get a dedicated oversized
+    /// page of exactly `size` bytes. Subsequent allocations resume in
+    /// a fresh standard-sized page — the oversized page is not reused.
     pub fn alloc_raw(&mut self, size: usize, align: usize) -> *mut u8 {
         if self.pages.is_empty() {
             self.add_page();
             self.current_page = 0;
             self.offset = 0;
+        }
+
+        // Oversized allocations get a dedicated page of exactly `size`
+        // bytes. Bypasses the standard page to avoid a buffer overflow
+        // from `offset += size` running past PAGE_SIZE.
+        if size > PAGE_SIZE {
+            self.add_oversized_page(size);
+            self.current_page = self.pages.len() - 1;
+            let page = &mut self.pages[self.current_page];
+            let ptr = page.as_mut_ptr() as *mut u8;
+            // Mark this page as fully consumed so the next alloc
+            // advances to a new standard page.
+            self.offset = self.pages[self.current_page].len();
+            return ptr;
         }
 
         // Align current offset up to the required alignment.
@@ -184,6 +202,16 @@ impl BumpArena {
     fn add_page(&mut self) {
         let page: Box<[MaybeUninit<u8>]> = std::iter::repeat_with(MaybeUninit::uninit)
             .take(PAGE_SIZE)
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        self.pages.push(page);
+    }
+
+    /// Push a dedicated oversized page sized exactly for one allocation.
+    /// Used when a single allocation exceeds PAGE_SIZE.
+    fn add_oversized_page(&mut self, size: usize) {
+        let page: Box<[MaybeUninit<u8>]> = std::iter::repeat_with(MaybeUninit::uninit)
+            .take(size)
             .collect::<Vec<_>>()
             .into_boxed_slice();
         self.pages.push(page);

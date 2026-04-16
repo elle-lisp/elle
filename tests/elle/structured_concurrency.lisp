@@ -59,6 +59,19 @@
   (fiber/abort f {:error :aborted})
   (assert (= :error (fiber/status f)) "8a: fiber/abort on :new sets to :error"))
 
+# === 8b. fiber/abort — on :dead fiber is silent no-op (bug #2 Option A) ===
+# Before the fix, fiber/abort on a Dead target raised a state-error
+# ("cannot abort a completed fiber"). Now it returns SIG_OK with the
+# fiber's final value, matching ev/abort's "No-op if already completed"
+# docstring. Exercised via (protect ...) so a regression would surface
+# as ok?=false.
+
+(let ([f (ev/spawn (fn [] 42))])
+  (ev/join f)
+  (let (([ok? val] (protect (fiber/abort f {:error :aborted}))))
+    (assert ok? "8b: fiber/abort on :dead no longer errors")
+    (assert (= :dead (fiber/status f)) "8b: :dead fiber stays :dead after abort")))
+
 # === 9. ev/select — returns [completed remaining] ===
 
 (let ([fast (ev/spawn (fn [] :fast))]

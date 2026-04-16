@@ -1142,12 +1142,11 @@ impl<'a> FunctionTranslator<'a> {
                 self.emit_exception_check_after_call(builder)?;
             }
 
-            // DropValue/ReuseSlotCons are VM-only optimizations. The JIT
-            // uses rotation for self-tail-call loops; no-ops here.
-            LirInstr::DropValue { .. } | LirInstr::ReuseSlotCons { .. } => {}
-
             // Outbox routing is VM-only; the JIT doesn't support yielding.
             LirInstr::OutboxEnter | LirInstr::OutboxExit => {}
+            // Flip rotation is VM-only; the JIT uses `rotate_pools_jit`
+            // via its own trampoline path.
+            LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
         }
         Ok(false)
     }

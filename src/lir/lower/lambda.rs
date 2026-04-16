@@ -159,12 +159,10 @@ impl<'a> Lowerer<'a> {
         let saved_region_depth = self.region_depth;
         // Save function context. It's set by the caller (lower_letrec,
         // lower_define) before lower_expr so escape analysis can detect
-        // self-tail-calls. We save it here and restore it for both the
-        // body lowering (so DropValue insertion can detect self-calls)
-        // and the post-lowering escape analysis.
+        // self-tail-calls. We save it here and restore it for the
+        // post-lowering escape analysis.
         let saved_function_binding = self.current_function_binding.take();
         let saved_function_params = self.current_function_params.take();
-        let saved_begin_drops = std::mem::take(&mut self.begin_drops);
 
         self.next_reg = 0;
         self.next_label = 1;
@@ -303,7 +301,6 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = saved_discard_slot;
         self.pending_region_exits = saved_pending_region_exits;
         self.region_depth = saved_region_depth;
-        self.begin_drops = saved_begin_drops;
 
         Ok(func)
     }

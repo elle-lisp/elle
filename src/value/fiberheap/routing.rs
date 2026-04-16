@@ -130,71 +130,6 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
     })
 }
 
-/// Eagerly drop a heap value: run the destructor (freeing inner heap data),
-/// overwrite the slab slot with a `Cons(NIL, NIL)` sentinel, and decrement
-/// the current heap's allocation count.
-///
-/// The slab slot stays in the pool's allocs/dtors — rotation/teardown see
-/// the sentinel (needs_drop=false for Cons) and skip the destructor, then
-/// dealloc the slot normally. No pool tracking coordination needed.
-///
-/// Called by the VM's `DropValue` instruction.
-pub fn drop_value(value: crate::value::Value) {
-    if !value.is_heap() {
-        return;
-    }
-    let ptr = value.as_heap_ptr().unwrap() as *mut super::HeapObject;
-    unsafe {
-        let tag = (*ptr).tag();
-        if super::needs_drop(tag) {
-            std::ptr::drop_in_place(ptr);
-        }
-        // Overwrite with Cons(NIL, NIL) sentinel — needs_drop=false,
-        // so rotation/teardown skip the destructor for this slot.
-        std::ptr::write(
-            ptr,
-            super::HeapObject::Cons(crate::value::heap::Cons::new(
-                crate::value::Value::NIL,
-                crate::value::Value::NIL,
-            )),
-        );
-    }
-    // Decrement the allocation count on the current heap so resource
-    // measurement reflects the eager drop.
-    let heap_ptr = current_heap_ptr();
-    if !heap_ptr.is_null() {
-        unsafe { (*heap_ptr).decrement_alloc_count() };
-    }
-}
-
-/// Reuse a slab slot for a new Cons cell. Runs the old value's destructor,
-/// writes new Cons in-place, returns new Value with the same pointer.
-/// Cons is needs_drop=false, so old dtors entries become no-ops (safe).
-/// No alloc_count change — slot was already counted.
-pub fn reuse_slot_cons(
-    old_value: crate::value::Value,
-    head: crate::value::Value,
-    tail: crate::value::Value,
-) -> crate::value::Value {
-    let ptr = old_value.as_heap_ptr().unwrap() as *mut super::HeapObject;
-    unsafe {
-        let tag = (*ptr).tag();
-        if super::needs_drop(tag) {
-            std::ptr::drop_in_place(ptr);
-        }
-        std::ptr::write(
-            ptr,
-            super::HeapObject::Cons(crate::value::heap::Cons::new(head, tail)),
-        );
-    }
-    let value_tag = super::HeapObject::Cons(crate::value::heap::Cons::new(
-        crate::value::Value::NIL,
-        crate::value::Value::NIL,
-    ))
-    .value_tag();
-    crate::value::Value::from_heap_ptr(ptr as *const (), value_tag)
-}
-
 /// Enter outbox routing context on the current FiberHeap.
 /// Allocations between outbox_enter and outbox_exit go to the outbox.
 pub fn outbox_enter() {
@@ -235,5 +170,29 @@ pub fn region_exit_call() {
     let ptr = current_heap_ptr();
     if !ptr.is_null() {
         unsafe { (*ptr).pop_call_scope_marks_and_release() };
+    }
+}
+
+/// Push a flip frame on the current FiberHeap (`FlipEnter`).
+pub fn flip_enter() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_enter() };
+    }
+}
+
+/// Rotate using the top flip frame (`FlipSwap`).
+pub fn flip_swap() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_swap() };
+    }
+}
+
+/// Pop the top flip frame (`FlipExit`).
+pub fn flip_exit() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_exit() };
     }
 }

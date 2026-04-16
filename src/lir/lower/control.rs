@@ -52,12 +52,6 @@ impl<'a> Lowerer<'a> {
                     self.emit(LirInstr::RegionExit);
                 }
 
-                // Perceus: drop dead parameters before tail call.
-                // Args are already evaluated into registers, so DropValue
-                // frees the OLD parameter value (still in its slot), not
-                // the new arg value (in a different register).
-                self.emit_drop_dead_params(func, args);
-
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,

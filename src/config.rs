@@ -143,6 +143,38 @@ pub const TRACE_KEYWORDS: &[&str] = &[
     "spirv", "mlir", "gpu",
 ];
 
+// ── Dump keywords ─────────────────────────────────────────────────
+
+/// Compiler-stage dumps requested from `--dump=<kw>,...`. Unlike `--trace=`
+/// (which enables runtime logging), `--dump=` runs the compiler up to each
+/// requested stage, prints the artifact, and exits without executing.
+pub const DUMP_KEYWORDS: &[&str] = &["ast", "hir", "lir", "jit", "cfg", "dfa", "git"];
+
+pub mod dump_bits {
+    pub const AST: u32 = 1 << 0;
+    pub const HIR: u32 = 1 << 1;
+    pub const LIR: u32 = 1 << 2;
+    pub const JIT: u32 = 1 << 3;
+    pub const CFG: u32 = 1 << 4;
+    pub const DFA: u32 = 1 << 5;
+    pub const GIT: u32 = 1 << 6;
+    pub const ALL: u32 = (1 << 7) - 1;
+
+    /// Convert a keyword name to its bit. Returns 0 for unknown keywords.
+    pub fn from_name(name: &str) -> u32 {
+        match name {
+            "ast" => AST,
+            "hir" => HIR,
+            "lir" => LIR,
+            "jit" => JIT,
+            "cfg" => CFG,
+            "dfa" => DFA,
+            "git" => GIT,
+            _ => 0,
+        }
+    }
+}
+
 /// Bit positions for trace keywords — avoids HashSet lookups on hot paths.
 /// Each keyword maps to a bit in a u32.
 pub mod trace_bits {
@@ -210,8 +242,10 @@ pub struct RuntimeConfig {
     pub wasm: WasmPolicy,
     /// Print bytecode before execution.
     pub debug_bytecode: bool,
-    /// Dump parsed AST and exit.
-    pub dump_ast: bool,
+    /// Active compiler-stage dumps (see `DUMP_KEYWORDS`).
+    pub dump: HashSet<String>,
+    /// Bitfield cache mirroring `dump`.
+    pub dump_bits: u32,
     /// Print compilation stats on exit.
     pub stats: bool,
 }
@@ -263,13 +297,19 @@ impl RuntimeConfig {
             bits |= trace_bits::WASM;
         }
 
+        let mut dump_bits_u = 0u32;
+        for kw in &config.dump {
+            dump_bits_u |= dump_bits::from_name(kw);
+        }
+
         RuntimeConfig {
             trace,
             trace_bits: bits,
             jit,
             wasm,
             debug_bytecode: config.debug,
-            dump_ast: config.dump_ast,
+            dump: config.dump.clone(),
+            dump_bits: dump_bits_u,
             stats: config.stats,
         }
     }
@@ -289,6 +329,12 @@ impl RuntimeConfig {
     pub fn has_trace_bit(&self, bit: u32) -> bool {
         self.trace_bits & bit != 0
     }
+
+    /// Check if a dump bit is set.
+    #[inline(always)]
+    pub fn has_dump_bit(&self, bit: u32) -> bool {
+        self.dump_bits & bit != 0
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -299,7 +345,8 @@ impl Default for RuntimeConfig {
             jit: JitPolicy::Adaptive { threshold: 10 },
             wasm: WasmPolicy::Off,
             debug_bytecode: false,
-            dump_ast: false,
+            dump: HashSet::new(),
+            dump_bits: 0,
             stats: false,
         }
     }
@@ -390,8 +437,17 @@ pub struct Config {
     /// Chunk user expressions into sub-thunks (experimental).
     pub wasm_chunk: bool,
 
-    /// Dump parsed AST (s-expression form) and exit without compiling.
-    pub dump_ast: bool,
+    /// Auto-insert `FlipEnter`/`FlipSwap`/`FlipExit` instructions in
+    /// lowered functions (Phase 4b). Off by default — the existing
+    /// trampoline-driven rotation remains authoritative. Enable via
+    /// `--flip=on` to exercise the Flip instruction path.
+    pub flip_instructions: bool,
+
+    /// Compiler stages to dump (from `--dump=kw1,kw2,...`). Valid keywords
+    /// are listed in `DUMP_KEYWORDS`. When non-empty, the compiler runs up
+    /// to each requested stage, prints its artifact, and exits without
+    /// executing.
+    pub dump: HashSet<String>,
 
     /// Trace keywords from `--trace=kw1,kw2,...`.
     /// Stored here from CLI parsing, then merged into RuntimeConfig on VM init.
@@ -419,7 +475,8 @@ impl Default for Config {
             wasm_dump: false,
             wasm_lir: false,
             wasm_chunk: false,
-            dump_ast: false,
+            flip_instructions: false,
+            dump: HashSet::new(),
             trace_keywords: Vec::new(),
         }
     }
@@ -505,6 +562,17 @@ impl Config {
                 i += 1;
                 continue;
             }
+            if let Some(rest) = arg.strip_prefix("--flip=") {
+                config.flip_instructions = match rest {
+                    "on" | "true" | "1" => true,
+                    "off" | "false" | "0" => false,
+                    _ => {
+                        return Err(format!("--flip: expected on/off, got '{}'", rest));
+                    }
+                };
+                i += 1;
+                continue;
+            }
             if let Some(rest) = arg.strip_prefix("--trace=") {
                 if rest == "all" {
                     for kw in TRACE_KEYWORDS {
@@ -528,6 +596,30 @@ impl Config {
                         "wasm" => config.debug_wasm = true,
                         "bytecode" => config.debug = true,
                         _ => {}
+                    }
+                }
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--dump=") {
+                if rest == "all" {
+                    for kw in DUMP_KEYWORDS {
+                        config.dump.insert((*kw).to_string());
+                    }
+                } else {
+                    for kw in rest.split(',') {
+                        let kw = kw.trim();
+                        if kw.is_empty() {
+                            continue;
+                        }
+                        if dump_bits::from_name(kw) == 0 {
+                            return Err(format!(
+                                "--dump: unknown stage '{}'. Valid: {}",
+                                kw,
+                                DUMP_KEYWORDS.join(", ")
+                            ));
+                        }
+                        config.dump.insert(kw.to_string());
                     }
                 }
                 i += 1;
@@ -583,7 +675,6 @@ impl Config {
                 "--wasm-dump" => config.wasm_dump = true,
                 "--wasm-lir" => config.wasm_lir = true,
                 "--wasm-chunk" => config.wasm_chunk = true,
-                "--dump-ast" => config.dump_ast = true,
                 "--eval" | "-e" => {
                     i += 1;
                     if i >= args.len() {

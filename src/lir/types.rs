@@ -603,25 +603,6 @@ pub enum LirInstr {
         allowed_bits: crate::value::fiber::SignalBits,
     },
 
-    // === Perceus Drop Insertion ===
-    /// Eagerly drop a heap value in a local slot. Runs the HeapObject
-    /// destructor (freeing inner heap data), overwrites the slab slot
-    /// with a Cons(NIL, NIL) sentinel, and writes NIL to the stack slot.
-    /// The slab slot stays in the pool — rotation/teardown see the
-    /// sentinel and skip the destructor (no-op).
-    DropValue { slot: u16 },
-
-    /// Reuse a slab slot for a new Cons cell. Fused from DropValue + Cons
-    /// by the peephole pass. Runs destructor on old value, writes new Cons
-    /// in-place, returns new Value with same pointer. Falls back to normal
-    /// alloc if slot doesn't hold a heap value.
-    ReuseSlotCons {
-        dst: Reg,
-        slot: u16,
-        head: Reg,
-        tail: Reg,
-    },
-
     // === Outbox Routing ===
     /// Enter outbox routing context. Allocations between OutboxEnter and
     /// OutboxExit go to the fiber's outbox (for yield-bound values).
@@ -630,6 +611,19 @@ pub enum LirInstr {
     /// Exit outbox routing context. Allocations revert to private heap.
     /// No registers produced or consumed.
     OutboxExit,
+
+    // === Explicit rotation (Flip) ===
+    /// Push a flip frame (save caller's swap pool; remember heap mark).
+    /// No registers produced or consumed.
+    FlipEnter,
+    /// Rotate generations using the top flip frame's base. Tears down
+    /// iteration N-2 and moves the current iteration into the swap pool.
+    /// No registers produced or consumed.
+    FlipSwap,
+    /// Pop the top flip frame: tear down this frame's remaining swap pool
+    /// and restore the caller's.
+    /// No registers produced or consumed.
+    FlipExit,
 }
 
 /// Binary operations

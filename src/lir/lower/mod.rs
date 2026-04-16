@@ -8,7 +8,6 @@ mod escape;
 mod expr;
 mod lambda;
 mod pattern;
-mod reuse;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
@@ -48,6 +47,51 @@ pub fn global_scope_stats() -> ScopeStats {
         .lock()
         .map(|g| g.clone())
         .unwrap_or_default()
+}
+
+/// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
+/// before every tail call. Used by Phase 4b auto-insertion
+/// (gated by `config.flip_instructions`).
+///
+/// The resulting LIR is semantically equivalent under the runtime's
+/// existing rotation mechanism — `FlipSwap` tears down the previous
+/// iteration's allocations at each tail-call boundary the same way
+/// the trampoline does, and `FlipExit` tears down the trailing
+/// generation when the function returns.
+fn inject_flip(func: &mut LirFunction) {
+    // Locate the entry block: prepend FlipEnter at the top.
+    if let Some(entry_block) = func.blocks.iter_mut().find(|b| b.label == func.entry) {
+        entry_block
+            .instructions
+            .insert(0, SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
+    }
+
+    for block in &mut func.blocks {
+        // Insert FlipSwap immediately before every tail call.
+        let mut i = 0;
+        while i < block.instructions.len() {
+            if matches!(
+                block.instructions[i].instr,
+                LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. }
+            ) {
+                block
+                    .instructions
+                    .insert(i, SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Insert FlipExit before every Return terminator. (TailCalls
+        // leave the frame without a Return, so their exit is subsumed
+        // by the next frame's FlipExit on its own return.)
+        if matches!(block.terminator.terminator, Terminator::Return(_)) {
+            block
+                .instructions
+                .push(SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
+        }
+    }
 }
 
 /// Compile-time scope allocation statistics.
@@ -229,12 +273,6 @@ pub struct Lowerer<'a> {
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
-    /// Pending drops for let-binding last-use in Begin bodies.
-    /// Each entry is (expr_index, slot) meaning "emit DropValue for slot
-    /// after lowering expression at index expr_index in the current Begin."
-    /// Set by lower_let/lower_letrec before lowering the body.
-    /// Consumed by lower_begin after each expression.
-    begin_drops: Vec<(usize, u16)>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -267,7 +305,6 @@ impl<'a> Lowerer<'a> {
             closures: Vec::new(),
             current_function_binding: None,
             current_function_params: None,
-            begin_drops: Vec::new(),
         }
     }
 
@@ -353,10 +390,15 @@ impl<'a> Lowerer<'a> {
             std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
         let mut closures = std::mem::take(&mut self.closures);
 
-        // Perceus Phase 3: fuse DropValue + Cons → ReuseSlotCons
-        reuse::reuse_fusion(&mut entry);
-        for c in &mut closures {
-            reuse::reuse_fusion(c);
+        // Phase 4b: optional FlipEnter/FlipSwap/FlipExit injection. The
+        // pass is a no-op unless `--flip=on` or the vm/config equivalent
+        // is set. It runs after lowering so it doesn't perturb any
+        // scope/rotation analysis upstream.
+        if crate::config::get().flip_instructions {
+            inject_flip(&mut entry);
+            for f in &mut closures {
+                inject_flip(f);
+            }
         }
 
         Ok(LirModule { entry, closures })

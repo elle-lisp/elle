@@ -12,18 +12,8 @@ pub enum Instruction {
     /// Load local variable (index u16)
     LoadLocal,
 
-    /// Dead instruction — never emitted. Retained to preserve repr(u8)
-    /// byte values of subsequent variants. The VM panics if encountered.
-    /// Operands: const_idx u16
-    LoadGlobal,
-
     /// Store local variable (index u16)
     StoreLocal,
-
-    /// Dead instruction — never emitted. Retained to preserve repr(u8)
-    /// byte values of subsequent variants. The VM panics if encountered.
-    /// Operands: const_idx u16
-    StoreGlobal,
 
     /// Load from closure environment
     LoadUpvalue,
@@ -127,21 +117,6 @@ pub enum Instruction {
     /// Boolean constants
     True,
     False,
-
-    /// Dead instruction — never emitted. Retained to preserve repr(u8)
-    /// byte values of subsequent variants. The VM panics if encountered.
-    /// Operands: scope_type u8
-    PushScope,
-
-    /// Dead instruction — never emitted. Retained to preserve repr(u8)
-    /// byte values of subsequent variants. The VM panics if encountered.
-    /// Operands: none
-    PopScope,
-
-    /// Dead instruction — never emitted. Retained to preserve repr(u8)
-    /// byte values of subsequent variants. The VM panics if encountered.
-    /// Operands: symbol_idx u16
-    DefineLocal,
 
     /// Wrap value in a capture cell for shared mutable access (Phase 4)
     /// Pops value from stack, wraps it in a capture cell, pushes the cell
@@ -259,16 +234,6 @@ pub enum Instruction {
     /// Source struct is popped from the stack; result pushed.
     StructRest,
 
-    /// Eagerly drop a heap value in a local slot.
-    /// Operand: u16 slot index (frame-relative).
-    /// Runs the HeapObject destructor, overwrites with Cons(NIL,NIL) sentinel,
-    /// writes NIL to the stack slot. No stack effect.
-    DropValue,
-
-    /// Reuse a slab slot for a new Cons cell (fused DropValue + Cons).
-    /// Operand: u16 slot. Pops tail then head, pushes result.
-    ReuseSlotCons,
-
     /// Enter outbox routing context. No operands.
     /// Toggles allocation routing to the outbox (for yield-bound values).
     OutboxEnter,
@@ -276,6 +241,22 @@ pub enum Instruction {
     /// Exit outbox routing context. No operands.
     /// Reverts allocation routing to the private heap.
     OutboxExit,
+
+    /// Push an explicit rotation frame. No operands.
+    /// Captures the current heap state so `FlipSwap` can rotate relative
+    /// to it and `FlipExit` can tear down this frame's swap pool without
+    /// touching the caller's. Emitted at function entry when the function
+    /// wants explicit rotation (e.g., a self-tail-recursive loop).
+    FlipEnter,
+
+    /// Rotate generations using the top flip frame. No operands.
+    /// Equivalent to the trampoline's implicit `rotate_pools` but keyed
+    /// off the flip stack. Emitted before a self-tail-call.
+    FlipSwap,
+
+    /// Pop the top flip frame and tear down its trailing swap pool. No
+    /// operands. Emitted before every Return in a flip-wrapped function.
+    FlipExit,
 }
 
 /// Compiled bytecode with constants
@@ -414,13 +395,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 line.push_str(&format!(" (const_idx={})", idx));
                 i += 2;
             }
-            Instruction::LoadGlobal | Instruction::StoreGlobal => {
-                // Dead instructions — skip operands for disassembly
-                line.push_str(" (dead)");
-                if i + 1 < instructions.len() {
-                    i += 2;
-                }
-            }
             Instruction::Jump | Instruction::JumpIfFalse | Instruction::JumpIfTrue
                 if i + 1 < instructions.len() =>
             {
@@ -493,13 +467,6 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
                 line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
             }
-            Instruction::DropValue | Instruction::ReuseSlotCons => {
-                if i + 1 < instructions.len() {
-                    let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
-                    line.push_str(&format!(" (slot={})", slot));
-                    i += 2;
-                }
-            }
             Instruction::Eval => {
                 // No operands — pops 2 from stack, pushes 1
             }
@@ -513,7 +480,10 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::RegionExit
             | Instruction::RegionExitCall
             | Instruction::OutboxEnter
-            | Instruction::OutboxExit => {
+            | Instruction::OutboxExit
+            | Instruction::FlipEnter
+            | Instruction::FlipSwap
+            | Instruction::FlipExit => {
                 // No operands
             }
             Instruction::PushParamFrame if i < instructions.len() => {
@@ -619,22 +589,24 @@ mod tests {
     }
 
     #[test]
-    fn test_bytecode_renamed_instructions_round_trip() {
-        // Verify that repr(u8) values of renamed destructuring instructions
-        // have not shifted. Rearranging the enum breaks bytecode on disk/wire.
-        //
-        // Counting from 0: LoadConst=0 ... EmptyList=60,
-        // CarDestructure=61, CdrDestructure=62, ArrayMutRefDestructure=63,
-        // ArrayMutSliceFrom=64, IsArray=65, ..., StructGetOrNil=70,
-        // StructGetDestructure=71.
-        assert_eq!(Instruction::CarDestructure as u8, 61);
-        assert_eq!(Instruction::CdrDestructure as u8, 62);
-        assert_eq!(Instruction::ArrayMutRefDestructure as u8, 63);
-        // StructGetDestructure is new — it must differ from StructGetOrNil
+    fn test_bytecode_variants_distinct() {
+        // Catch accidental duplication of variants (they all get auto-
+        // numbered by the compiler, so any duplicate would be a compile
+        // error anyway — but this test additionally guards against a
+        // refactor that collapses two variants into one). All repr values
+        // must be distinct; pick a few representative ones and spot-check.
         assert_ne!(
             Instruction::StructGetDestructure as u8,
             Instruction::StructGetOrNil as u8,
             "StructGetDestructure must have a distinct byte value from StructGetOrNil"
+        );
+        assert_ne!(
+            Instruction::CarDestructure as u8,
+            Instruction::CdrDestructure as u8,
+        );
+        assert_ne!(
+            Instruction::OutboxEnter as u8,
+            Instruction::OutboxExit as u8,
         );
     }
 

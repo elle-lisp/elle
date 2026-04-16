@@ -127,13 +127,6 @@ impl VM {
                     stack::handle_dup_n(self, bc, &mut ip);
                 }
 
-                // Dead instructions — never emitted after primitives-as-locals.
-                Instruction::LoadGlobal => {
-                    unreachable!("dead instruction: LoadGlobal")
-                }
-                Instruction::StoreGlobal => {
-                    unreachable!("dead instruction: StoreGlobal")
-                }
                 Instruction::StoreLocal => {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
@@ -366,18 +359,6 @@ impl VM {
                     literals::handle_false(self);
                 }
 
-                // Dead instructions — never emitted by the LIR emitter.
-                // Panic immediately if encountered (indicates bytecode bug).
-                Instruction::PushScope => {
-                    panic!("VM bug: PushScope is a dead instruction — never emitted");
-                }
-                Instruction::PopScope => {
-                    panic!("VM bug: PopScope is a dead instruction — never emitted");
-                }
-                Instruction::DefineLocal => {
-                    panic!("VM bug: DefineLocal is a dead instruction — never emitted");
-                }
-
                 // Box operations
                 Instruction::MakeCapture => {
                     capture::handle_make_capture(self);
@@ -455,39 +436,15 @@ impl VM {
                     crate::value::fiberheap::outbox_exit();
                 }
 
-                // Perceus: eagerly drop a heap value in a local slot.
-                Instruction::DropValue => {
-                    let slot = self.read_u16(bc, &mut ip) as usize;
-                    let frame_base = self.current_frame_base();
-                    let abs_idx = frame_base + slot;
-                    let value = self.fiber.stack[abs_idx];
-                    crate::value::fiberheap::drop_value(value);
-                    self.fiber.stack[abs_idx] = Value::NIL;
+                // Explicit rotation: push/rotate/pop a flip frame.
+                Instruction::FlipEnter => {
+                    crate::value::fiberheap::flip_enter();
                 }
-
-                // Perceus: reuse slab slot for new Cons (fused DropValue + Cons).
-                Instruction::ReuseSlotCons => {
-                    let slot = self.read_u16(bc, &mut ip) as usize;
-                    let head = self
-                        .fiber
-                        .stack
-                        .pop()
-                        .expect("VM bug: stack underflow on ReuseSlotCons");
-                    let tail = self
-                        .fiber
-                        .stack
-                        .pop()
-                        .expect("VM bug: stack underflow on ReuseSlotCons");
-                    let frame_base = self.current_frame_base();
-                    let abs_idx = frame_base + slot;
-                    let old_value = self.fiber.stack[abs_idx];
-                    let new_value = if old_value.is_heap() {
-                        crate::value::fiberheap::reuse_slot_cons(old_value, head, tail)
-                    } else {
-                        crate::value::Value::cons(head, tail)
-                    };
-                    self.fiber.stack[abs_idx] = Value::NIL;
-                    self.fiber.stack.push(new_value);
+                Instruction::FlipSwap => {
+                    crate::value::fiberheap::flip_swap();
+                }
+                Instruction::FlipExit => {
+                    crate::value::fiberheap::flip_exit();
                 }
 
                 // Dynamic parameter frame management

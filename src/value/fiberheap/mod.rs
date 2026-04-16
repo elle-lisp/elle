@@ -110,6 +110,23 @@ struct SwapPool {
     dtors: Vec<*mut HeapObject>,
 }
 
+/// A single explicit-rotation frame pushed by `FlipEnter` and popped by
+/// `FlipExit`. Stacks cleanly across nested function calls so each frame
+/// has its own rotation base and its own two-generation swap pool — no
+/// interference between an inner loop's rotation and an outer loop's
+/// live values.
+///
+/// Compare with the trampoline-driven `jit_rotation_base`: the trampoline
+/// infers rotation for self-tail-calls implicitly. Flip frames put the
+/// same contract in bytecode where the optimizer can reason about it
+/// per-function.
+struct FlipFrame {
+    base: RotationBase,
+    /// Caller's `swap_pool` saved on entry and restored on exit so that
+    /// this frame's rotation generations don't collide with the parent's.
+    saved_swap: Option<SwapPool>,
+}
+
 pub struct FiberHeap {
     /// Slab allocator with allocation and destructor tracking.
     /// Shared structure with `SharedAllocator`.
@@ -122,6 +139,11 @@ pub struct FiberHeap {
     /// Saved base mark for JIT self-tail-call rotation. Set by the first
     /// `rotate_pools_jit()` call; cleared when the JIT function exits.
     jit_rotation_base: Option<RotationBase>,
+    /// Explicit rotation frames pushed by `FlipEnter` and popped by
+    /// `FlipExit`. Stacks across nested function calls. Independent of
+    /// the trampoline's implicit rotation — when `FlipSwap` fires it
+    /// only rotates the top frame's generations.
+    flip_stack: Vec<FlipFrame>,
     /// Peak number of objects allocated (high-water mark).
     peak_alloc_count: usize,
     /// Stack of scope marks pushed by `RegionEnter`, popped by `RegionExit`.
@@ -181,6 +203,7 @@ impl FiberHeap {
             swap_pool: None,
             rotation_freed: 0,
             jit_rotation_base: None,
+            flip_stack: Vec::new(),
             peak_alloc_count: 0,
             scope_marks: Vec::new(),
             owned_shared: Vec::new(),
@@ -450,17 +473,6 @@ impl FiberHeap {
         self.pool.alloc_count + self.shared_alloc_count
     }
 
-    /// Decrement the allocation count for a DropValue'd object.
-    /// Routes to shared_alloc_count when a shared allocator is active,
-    /// otherwise to the private pool's alloc_count.
-    pub fn decrement_alloc_count(&mut self) {
-        if !self.shared_alloc.is_null() {
-            self.shared_alloc_count = self.shared_alloc_count.saturating_sub(1);
-        } else {
-            self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
-        }
-    }
-
     pub fn is_empty(&self) -> bool {
         self.pool.alloc_count == 0
     }
@@ -619,6 +631,70 @@ impl FiberHeap {
 
         // 3. Reset alloc tracking to base level (peak stays).
         self.pool.alloc_count = base_count;
+    }
+
+    // ── Explicit rotation: FlipEnter / FlipSwap / FlipExit ─────────
+    //
+    // These mirror the trampoline's implicit rotation but make the
+    // contract visible to the emitter and scheduler. Each `FlipEnter`
+    // pushes a fresh frame (rotation base + saved caller's swap_pool)
+    // so nested functions don't interfere. `FlipSwap` rotates using the
+    // top frame's base. `FlipExit` tears down the frame's remaining
+    // swap pool and restores the caller's.
+    //
+    // When `shared_alloc` is active (yielding child fiber) the legacy
+    // shared-pool rotation owns allocation management, so flip becomes
+    // a no-op on those frames. The frame is still pushed so `FlipExit`
+    // pairings stay balanced.
+
+    /// Push a new flip frame: save the caller's swap pool and remember
+    /// the current heap state as the rotation base.
+    pub fn flip_enter(&mut self) {
+        let base = self.rotation_mark();
+        let saved_swap = self.swap_pool.take();
+        self.flip_stack.push(FlipFrame { base, saved_swap });
+    }
+
+    /// Rotate generations using the top flip frame's base. Equivalent
+    /// to the trampoline's `rotate_pools` but keyed off the flip stack
+    /// instead of a trampoline-local variable. No-op with no frame.
+    pub fn flip_swap(&mut self) {
+        let base = match self.flip_stack.last() {
+            Some(f) => f.base.clone(),
+            None => return,
+        };
+        self.rotate_pools(&base);
+    }
+
+    /// Pop the top flip frame: free this frame's remaining swap pool
+    /// (iteration N-1 is dead at function exit) and restore the
+    /// caller's saved swap pool.
+    pub fn flip_exit(&mut self) {
+        let frame = match self.flip_stack.pop() {
+            Some(f) => f,
+            None => return,
+        };
+        // Tear down this frame's trailing generation. Mirrors step 1 of
+        // `rotate_pools` — those slab slots were held "live for one
+        // iteration" but the function is exiting, so they're dead now.
+        if let Some(old) = self.swap_pool.take() {
+            for i in (0..old.dtors.len()).rev() {
+                unsafe { std::ptr::drop_in_place(old.dtors[i]) };
+            }
+            for &ptr in old.root_allocs.iter().rev() {
+                unsafe { self.pool.dealloc_slot(ptr) };
+            }
+            self.rotation_freed += old.root_allocs.len();
+        }
+        // Restore the caller's swap pool so its own flip frame (if any)
+        // continues to see the right generation.
+        self.swap_pool = frame.saved_swap;
+    }
+
+    /// Number of currently live flip frames. Test-only.
+    #[cfg(test)]
+    pub fn flip_depth(&self) -> usize {
+        self.flip_stack.len()
     }
 
     /// Rotate pools for JIT self-tail-call loops.
