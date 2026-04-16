@@ -730,6 +730,44 @@
                 ((not reconnect)            (break :session)))
               (ev/sleep (/ retry-ms 1000.0))))))))
 
+  (defn sse-post [url body &named headers]
+    "POST to url with body, expecting a text/event-stream response.
+     Returns a coroutine that yields events until the server closes.
+     Unlike sse-get this does NOT auto-reconnect — POST is typically
+     non-idempotent (think LLM streaming: you don't want to silently
+     re-submit a prompt).
+
+     Use case: OpenAI-compatible /v1/chat/completions with
+     {\"stream\": true} — the body is an SSE stream of token deltas
+     terminated by a `data: [DONE]` sentinel the caller can recognize."
+    (coro/new
+      (fn []
+        (let* [[url-parsed   (parse-url url)]
+               [base-headers {:accept       "text/event-stream"
+                              :cache-control "no-cache"
+                              :content-type "application/json"}]
+               [user-headers (freeze (or headers {}))]
+               [final-headers (merge base-headers user-headers)]
+               [t (open-transport url-parsed)]]
+          (defer (protect (t-close t))
+            (write-request-line t "POST" url-parsed:path)
+            (write-headers t (build-request-headers
+                               url-parsed:host final-headers body false))
+            (t-write t "\r\n")
+            (unless (nil? body) (t-write t body))
+            (t-flush t)
+            (let* [[status-line  (read-status-line t)]
+                   [resp-headers (read-headers t)]]
+              (cond
+                ((and (>= status-line:status 200) (< status-line:status 300))
+                 (sse-for-each-event t resp-headers
+                   (fn [evt] (yield evt))))
+                (true
+                 (error {:error :http-error :reason :sse-bad-status
+                         :status status-line:status
+                         :body   (read-body t resp-headers)
+                         :message "SSE POST: non-2xx response"})))))))))
+
   (defn sse-format-field [field value]
     "Serialize one field of an SSE event. Data values with embedded
      newlines are emitted as repeated 'field: line' entries per spec."
@@ -1295,6 +1333,7 @@
 
    # Server-Sent Events
    :sse-get           sse-get
+   :sse-post          sse-post
    :sse-response      sse-response
    :format-sse-event  format-sse-event
 
