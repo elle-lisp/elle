@@ -223,6 +223,8 @@ impl fmt::Display for LirInstr {
             LirInstr::RegionEnter => f.write_str("region-enter"),
             LirInstr::RegionExit => f.write_str("region-exit"),
             LirInstr::RegionExitCall => f.write_str("region-exit-call"),
+            LirInstr::OutboxEnter => f.write_str("outbox-enter"),
+            LirInstr::OutboxExit => f.write_str("outbox-exit"),
 
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {
@@ -241,6 +243,18 @@ impl fmt::Display for LirInstr {
             LirInstr::CheckSignalBound { src, allowed_bits } => {
                 write!(f, "check-signal-bound {} allowed={}", src, allowed_bits)
             }
+
+            LirInstr::DropValue { slot } => write!(f, "DropValue slot={}", slot),
+            LirInstr::ReuseSlotCons {
+                dst,
+                slot,
+                head,
+                tail,
+            } => write!(
+                f,
+                "ReuseSlotCons r{} slot={} r{} r{}",
+                dst.0, slot, head.0, tail.0
+            ),
         }
     }
 }

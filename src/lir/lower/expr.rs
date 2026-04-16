@@ -252,11 +252,27 @@ impl<'a> Lowerer<'a> {
         if exprs.is_empty() {
             return self.emit_const(LirConst::Nil);
         }
+
+        // Take the drop schedule — these are (expr_index, slot) pairs set by
+        // lower_let/lower_letrec for early drop of dead let bindings.
+        let drops = std::mem::take(&mut self.begin_drops);
+
         let mut last_reg = self.lower_expr(&exprs[0])?;
-        for expr in exprs.iter().skip(1) {
-            // Discard the previous result before evaluating the next expression
+        // Emit drops scheduled after expression 0
+        for &(idx, slot) in &drops {
+            if idx == 0 {
+                self.emit(LirInstr::DropValue { slot });
+            }
+        }
+        for (i, expr) in exprs.iter().enumerate().skip(1) {
             self.discard(last_reg);
             last_reg = self.lower_expr(expr)?;
+            // Emit drops scheduled after expression i
+            for &(idx, slot) in &drops {
+                if idx == i {
+                    self.emit(LirInstr::DropValue { slot });
+                }
+            }
         }
         Ok(last_reg)
     }

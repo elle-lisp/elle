@@ -79,6 +79,10 @@ impl<'a> Lowerer<'a> {
         if tail_scoped {
             self.pending_region_exits += 1;
         }
+        // Phase 2: compute early drops for let bindings in Begin bodies.
+        if let HirKind::Begin(exprs) = &body.kind {
+            self.begin_drops = self.compute_let_drops(bindings, exprs);
+        }
         let result = self.lower_expr(body)?;
         if tail_scoped {
             // The raw RegionExits were emitted by lower_call — adjust our
@@ -180,6 +184,10 @@ impl<'a> Lowerer<'a> {
         let tail_scoped = scoped && Self::body_is_tail_call(body);
         if tail_scoped {
             self.pending_region_exits += 1;
+        }
+        // Phase 2: compute early drops for letrec bindings in Begin bodies.
+        if let HirKind::Begin(exprs) = &body.kind {
+            self.begin_drops = self.compute_let_drops(bindings, exprs);
         }
         let result = self.lower_expr(body)?;
         if tail_scoped {

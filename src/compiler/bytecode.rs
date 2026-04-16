@@ -258,6 +258,24 @@ pub enum Instruction {
     /// Operands: u16 count, then count x u16 const_idx (each is a keyword key).
     /// Source struct is popped from the stack; result pushed.
     StructRest,
+
+    /// Eagerly drop a heap value in a local slot.
+    /// Operand: u16 slot index (frame-relative).
+    /// Runs the HeapObject destructor, overwrites with Cons(NIL,NIL) sentinel,
+    /// writes NIL to the stack slot. No stack effect.
+    DropValue,
+
+    /// Reuse a slab slot for a new Cons cell (fused DropValue + Cons).
+    /// Operand: u16 slot. Pops tail then head, pushes result.
+    ReuseSlotCons,
+
+    /// Enter outbox routing context. No operands.
+    /// Toggles allocation routing to the outbox (for yield-bound values).
+    OutboxEnter,
+
+    /// Exit outbox routing context. No operands.
+    /// Reverts allocation routing to the private heap.
+    OutboxExit,
 }
 
 /// Compiled bytecode with constants
@@ -475,6 +493,13 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
                 }
                 line.push_str(&format!(" (count={}, keys=[{}])", count, keys.join(", ")));
             }
+            Instruction::DropValue | Instruction::ReuseSlotCons => {
+                if i + 1 < instructions.len() {
+                    let slot = ((instructions[i] as u16) << 8) | (instructions[i + 1] as u16);
+                    line.push_str(&format!(" (slot={})", slot));
+                    i += 2;
+                }
+            }
             Instruction::Eval => {
                 // No operands — pops 2 from stack, pushes 1
             }
@@ -484,7 +509,11 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             Instruction::CallArrayMut | Instruction::TailCallArrayMut => {
                 // No operands (arg count is dynamic, determined by array length)
             }
-            Instruction::RegionEnter | Instruction::RegionExit | Instruction::RegionExitCall => {
+            Instruction::RegionEnter
+            | Instruction::RegionExit
+            | Instruction::RegionExitCall
+            | Instruction::OutboxEnter
+            | Instruction::OutboxExit => {
                 // No operands
             }
             Instruction::PushParamFrame if i < instructions.len() => {

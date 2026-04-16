@@ -188,6 +188,10 @@ impl WasmEmitter {
                 }
             }
             LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::RegionExitCall => {}
+            // DropValue/ReuseSlotCons are VM-only optimizations.
+            LirInstr::DropValue { .. } | LirInstr::ReuseSlotCons { .. } => {}
+            // Outbox routing is VM-only.
+            LirInstr::OutboxEnter | LirInstr::OutboxExit => {}
             LirInstr::Cons { dst, head, tail } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }

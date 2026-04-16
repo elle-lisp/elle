@@ -151,7 +151,11 @@ fn format_value(
             }
             HeapObject::External { obj: ext, .. } => return format!("#<{}>", ext.type_name),
             HeapObject::Parameter { id, .. } => return format!("<parameter:{}>", id),
-            HeapObject::LString { s, .. } => return format!("\"{}\"", s.escape_default()),
+            HeapObject::LString { s, .. } => {
+                // SAFETY: LString bytes are always valid UTF-8 (enforced by constructors).
+                let as_str = unsafe { std::str::from_utf8_unchecked(s.as_slice()) };
+                return format!("\"{}\"", as_str.escape_default());
+            }
             HeapObject::LSet { data: s, .. } => {
                 let items: Vec<String> = s
                     .iter()

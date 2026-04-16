@@ -579,6 +579,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
     use super::emit::DataOp;
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
     use crate::value::heap::TableKey;
+    use crate::value::sorted_struct_get;
 
     let err = |kind: &str, msg: &str| (SIG_ERROR, crate::value::error_val(kind, msg));
 
@@ -660,7 +661,10 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                     Some(k) => k,
                     None => return (SIG_OK, Value::NIL),
                 };
-                (SIG_OK, s.get(&key).copied().unwrap_or(Value::NIL))
+                (
+                    SIG_OK,
+                    sorted_struct_get(s, &key).copied().unwrap_or(Value::NIL),
+                )
             } else if let Some(s) = args[0].as_struct_mut() {
                 let key = match TableKey::from_value(&args[1]) {
                     Some(k) => k,
@@ -677,7 +681,7 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                     Some(k) => k,
                     None => return (SIG_OK, Value::NIL),
                 };
-                match s.get(&key) {
+                match sorted_struct_get(s, &key) {
                     Some(v) => (SIG_OK, *v),
                     None => err("key-error", "struct get: key not found"),
                 }
@@ -742,26 +746,26 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
             }
         }
         x if x == DataOp::StructRest as i32 => {
-            use std::collections::BTreeMap;
             let exclude_keys: Vec<TableKey> =
                 args[1..].iter().filter_map(TableKey::from_value).collect();
             if let Some(s) = args[0].as_struct() {
-                let filtered: BTreeMap<TableKey, Value> = s
+                let filtered: Vec<(TableKey, Value)> = s
                     .iter()
                     .filter(|(k, _)| !exclude_keys.contains(k))
                     .map(|(k, v)| (k.clone(), *v))
                     .collect();
-                (SIG_OK, Value::struct_from(filtered))
+                (SIG_OK, Value::struct_from_sorted(filtered))
             } else if let Some(s) = args[0].as_struct_mut() {
                 let b = s.borrow();
-                let filtered: BTreeMap<TableKey, Value> = b
+                let mut filtered: Vec<(TableKey, Value)> = b
                     .iter()
                     .filter(|(k, _)| !exclude_keys.contains(k))
                     .map(|(k, v)| (k.clone(), *v))
                     .collect();
-                (SIG_OK, Value::struct_from(filtered))
+                filtered.sort_by(|(a, _), (b, _)| a.cmp(b));
+                (SIG_OK, Value::struct_from_sorted(filtered))
             } else {
-                (SIG_OK, Value::struct_from(BTreeMap::new()))
+                (SIG_OK, Value::struct_from_sorted(vec![]))
             }
         }
         _ => err("internal-error", &format!("rt_data_op: unknown op {op}")),

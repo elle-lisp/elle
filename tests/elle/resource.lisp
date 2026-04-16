@@ -119,6 +119,27 @@
                       (loop (- i 1)))))]]
         (loop 100)))]
 
+   ["let-drop-struct"
+    (fn []
+      # Two struct bindings: a used in expr 0 only, b used in expr 1 only.
+      # DropValue should fire for a after expr 0, for b after expr 1.
+      (letrec [[loop (fn [i]
+                  (if (= i 0) :done
+                    (let [[a {:x i}]
+                          [b {:y (+ i 1)}]]
+                      (+ (a :x) (b :y))
+                      (loop (- i 1)))))]]
+        (loop 100)))]
+
+   ["tco-cons-replace"
+    (fn []
+      # Each iteration replaces prev with a new cons cell.
+      # DropValue + Cons fuses into ReuseSlotCons (in-place reuse).
+      (letrec [[loop (fn [i prev]
+                  (if (= i 0) prev
+                    (loop (- i 1) (cons i nil))))]]
+        (loop 10000 nil)))]
+
    ["string-build-100"
     (fn []
       (let [[acc @[]]]
@@ -160,28 +181,31 @@
   (assert (< (m :peak) 10)
     "tco-loop-10000: peak must be bounded (no per-iteration allocs)"))
 
-# TCO with per-iteration allocation: per-parameter independence analysis
-# (Perceus Phase 1) proves that {:a i :b (cons i nil)} does not reference
-# the `prev` parameter, so no cross-generation reference chain exists.
-# Swap pool rotation safely frees previous iteration's objects.
+# TCO with per-iteration allocation: DropValue (Perceus Phase 1b) frees the
+# `prev` struct parameter before each tail call. The cons cell from
+# (cons i nil) inside the struct expression is NOT a parameter, so it
+# accumulates (~10000 cons cells). The struct drops are verified by
+# comparing to the unoptimized count (20002 → ~10003).
 (let [[m (find-result "tco-alloc-10000")]]
-  (assert (< (m :allocs) 10)
-    "tco-alloc-10000: allocs bounded (rotation working)")
-  (assert (< (m :peak) 10)
-    "tco-alloc-10000: peak bounded (no accumulation)"))
+  (assert (< (m :allocs) 10100)
+    "tco-alloc-10000: struct params dropped (allocs < 10100, not 20002)"))
 
-# TCO replace: struct replaced each iteration, no accumulation.
+# TCO replace: struct replaced each iteration, no sub-expression allocs.
+# DropValue frees the prev struct → allocs and peak bounded.
 (let [[m (find-result "tco-replace-10000")]]
   (assert (< (m :allocs) 10)
-    "tco-replace-10000: allocs bounded (rotation working)")
+    "tco-replace-10000: allocs bounded (DropValue working)")
   (assert (< (m :peak) 10)
-    "tco-replace-10000: peak bounded (no accumulation)"))
+    "tco-replace-10000: peak bounded (DropValue working)"))
 
-# TCO mixed: prev is replaced (safe), acc accumulates via cons (unsafe).
-# The function is rotation-unsafe because (cons i acc) references acc.
+# TCO mixed: prev is replaced (DropValue fires), acc accumulates via cons.
+# (cons i acc) references acc, so acc is NOT dropped. DropValue drops prev
+# only. Allocs = ~10000 (cons cells) + a few overhead, not 20002.
 (let [[m (find-result "tco-mixed-10000")]]
   (assert (> (m :allocs) 10000)
-    "tco-mixed-10000: allocs proportional to iterations (acc accumulates)"))
+    "tco-mixed-10000: cons cells accumulate (acc references prev iteration)")
+  (assert (< (m :allocs) 10100)
+    "tco-mixed-10000: prev struct dropped by DropValue (< 10100, not 20002)"))
 
 # fib: pure arithmetic, no heap objects expected
 (let [[m (find-result "fib-15")]]
@@ -197,6 +221,16 @@
 (let [[m (find-result "string-build-100")]]
   (assert (> (m :allocs) 0)
     "string-build-100: should allocate heap objects for string concatenation"))
+
+# let-drop-struct: DropValue for let bindings should keep allocs bounded
+(let [[m (find-result "let-drop-struct")]]
+  (assert (< (m :allocs) 30)
+    "let-drop-struct: allocs bounded (let binding drops working)"))
+
+# tco-cons-replace: reuse fusion should keep allocs at minimum
+(let [[m (find-result "tco-cons-replace")]]
+  (assert (< (m :allocs) 10)
+    "tco-cons-replace: allocs bounded (reuse fusion working)"))
 
 # All measurements should have non-negative allocs
 (each entry in results

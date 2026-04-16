@@ -36,6 +36,7 @@
 //! `Box` provides pointer stability — the raw pointer remains valid even when
 //! `owned_shared` grows. Teardown happens on `clear()` or `Drop`.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::value::allocator::AllocatorBox;
@@ -50,6 +51,7 @@ pub use routing::*;
 /// trampoline entry. Objects allocated before this mark are never freed
 /// by rotation.
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct RotationBase {
     heap_mark: ArenaMark,
     /// Scope depth at mark time. Rotation is skipped when scope depth
@@ -63,6 +65,7 @@ pub struct RotationBase {
     shared_alloc_count: usize,
 }
 
+mod bump;
 mod slab;
 #[allow(unused_imports)]
 pub(crate) use slab::RootSlab;
@@ -155,6 +158,16 @@ pub struct FiberHeap {
     /// by this heap).  Kept separate from `alloc_count` so that mark/release
     /// scoping is not affected.  `visible_len()` returns the sum.
     shared_alloc_count: usize,
+    /// Current outbox pool for yield-bound allocations. Created by the
+    /// parent via `install_outbox()` before child execution. Allocations
+    /// between `OutboxEnter`/`OutboxExit` go here.
+    outbox: Option<Box<SlabPool>>,
+    /// Previous outbox pools from earlier yields. Kept alive so the parent
+    /// can still read values from previous yields. Freed on fiber death.
+    old_outboxes: Vec<Box<SlabPool>>,
+    /// True when allocations should route to the outbox (between
+    /// `OutboxEnter` and `OutboxExit` bytecodes).
+    outbox_active: bool,
 }
 
 impl FiberHeap {
@@ -174,14 +187,28 @@ impl FiberHeap {
             object_limit: None,
             alloc_error: None,
             shared_alloc_count: 0,
+            outbox: None,
+            old_outboxes: Vec::new(),
+            outbox_active: false,
         }
     }
 
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
-        // When a shared allocator is installed (yielding child fiber),
-        // route ALL allocations to it.  Track shared_alloc_count separately
-        // so arena/count (via visible_len()) reports correct values while
-        // mark/release scoping remains unaffected.
+        // Outbox routing: when outbox is active (between OutboxEnter/OutboxExit),
+        // allocations go to the outbox pool for yield-bound values.
+        if self.outbox_active {
+            if let Some(ref mut outbox) = self.outbox {
+                self.shared_alloc_count += 1;
+                let visible = self.pool.alloc_count + self.shared_alloc_count;
+                if visible > self.peak_alloc_count {
+                    self.peak_alloc_count = visible;
+                }
+                return outbox.alloc(obj);
+            }
+        }
+
+        // Legacy: shared allocator routing for yielding child fibers.
+        // Will be removed once outbox escape-context is fully wired.
         if !self.shared_alloc.is_null() {
             self.shared_alloc_count += 1;
             let visible = self.pool.alloc_count + self.shared_alloc_count;
@@ -232,6 +259,51 @@ impl FiberHeap {
             self.peak_alloc_count = self.pool.alloc_count;
         }
         v
+    }
+
+    /// Copy `items` into the current allocator's arena and return an
+    /// `InlineSlice` pointing to them. Used by immutable collection
+    /// constructors to store variable-length data inline.
+    ///
+    /// Routing mirrors `alloc()`: outbox → shared allocator → custom
+    /// allocator → private pool. The slice shares the lifetime of
+    /// adjacent `alloc()` calls.
+    pub fn alloc_inline_slice<T: Copy + 'static>(
+        &mut self,
+        items: &[T],
+    ) -> crate::value::inline_slice::InlineSlice<T> {
+        if items.is_empty() {
+            return crate::value::inline_slice::InlineSlice::empty();
+        }
+        // Outbox routing.
+        if self.outbox_active {
+            if let Some(ref mut outbox) = self.outbox {
+                return outbox.alloc_inline_slice(items);
+            }
+        }
+        // Shared allocator routing (yielding child fibers).
+        if !self.shared_alloc.is_null() {
+            return unsafe { &mut *self.shared_alloc }.alloc_inline_slice(items);
+        }
+        // Custom allocator: allocate raw bytes, copy items, return slice.
+        if let Some(state) = self.custom_alloc_stack.last_mut() {
+            let size = std::mem::size_of::<T>() * items.len();
+            let align = std::mem::align_of::<T>();
+            let ptr = state.allocator.inner.alloc(size, align);
+            if !ptr.is_null() {
+                let typed = ptr as *mut T;
+                unsafe {
+                    std::ptr::copy_nonoverlapping(items.as_ptr(), typed, items.len());
+                }
+                state.custom_ptrs.push((ptr, size, align));
+                return unsafe {
+                    crate::value::inline_slice::InlineSlice::from_raw(typed, items.len() as u32)
+                };
+            }
+            // Fall through on null
+        }
+        // Private pool.
+        self.pool.alloc_inline_slice(items)
     }
 
     pub fn mark(&self) -> ArenaMark {
@@ -374,6 +446,17 @@ impl FiberHeap {
         self.pool.alloc_count + self.shared_alloc_count
     }
 
+    /// Decrement the allocation count for a DropValue'd object.
+    /// Routes to shared_alloc_count when a shared allocator is active,
+    /// otherwise to the private pool's alloc_count.
+    pub fn decrement_alloc_count(&mut self) {
+        if !self.shared_alloc.is_null() {
+            self.shared_alloc_count = self.shared_alloc_count.saturating_sub(1);
+        } else {
+            self.pool.alloc_count = self.pool.alloc_count.saturating_sub(1);
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.pool.alloc_count == 0
     }
@@ -464,9 +547,13 @@ impl FiberHeap {
     ///
     /// When a shared allocator is active, also captures its pool state
     /// so that rotation can free shared objects from previous iterations.
-    pub fn rotation_mark(&self) -> RotationBase {
+    pub fn rotation_mark(&mut self) -> RotationBase {
         let shared_mark = if !self.shared_alloc.is_null() {
-            Some(unsafe { &*self.shared_alloc }.rotation_mark())
+            // Shared allocator rotation disabled — multiple child fibers
+            // share the same SharedAllocator; rotation by one child can
+            // free objects another child still references.
+            // DropValue (Phase 1b) handles per-object freeing instead.
+            None
         } else {
             None
         };
@@ -488,20 +575,9 @@ impl FiberHeap {
     /// rotation is performed on the shared allocator instead of the
     /// private pool, since that's where allocations actually go.
     pub fn rotate_pools(&mut self, base: &RotationBase) {
-        // Scope depth must match the depth at base-mark time.
-        // If not (unbalanced due to error exit), skip rotation to avoid
-        // invalidating scope marks.
-        if self.scope_marks.len() != base.scope_depth {
-            return;
-        }
-
         if !self.shared_alloc.is_null() {
-            // Shared allocator rotation: the trampoline only calls
-            // rotate_pools when prev_rotation_safe is true. The refined
-            // per-parameter independence analysis (Perceus Phase 1) proves
-            // that no heap-allocating tail-call argument references a
-            // parameter whose argument is also heap-allocating — so no
-            // cross-generation reference chains exist. Safe to rotate.
+            // Shared allocator rotation: rotate the shared pool instead
+            // of the private pool.
             if let Some(ref shared_base) = base.shared_mark {
                 unsafe { &mut *self.shared_alloc }.rotate(shared_base);
                 self.shared_alloc_count = base.shared_alloc_count;
@@ -675,6 +751,277 @@ impl FiberHeap {
         self.shared_alloc = std::ptr::null_mut();
     }
 
+    // ── Outbox management ──────────────────────────────────────────
+
+    /// Install a fresh outbox pool. Called by the parent before each
+    /// child execution. Previous outboxes are preserved so the parent
+    /// can still read values from earlier yields. All outboxes are freed
+    /// in bulk on fiber death (O(1) via clear/drop).
+    pub(crate) fn install_outbox(&mut self, pool: SlabPool) {
+        if let Some(old) = self.outbox.take() {
+            self.old_outboxes.push(old);
+        }
+        self.shared_alloc_count = 0;
+        self.outbox = Some(Box::new(pool));
+        self.outbox_active = false;
+    }
+
+    /// Detach and return the outbox pool. Called at yield time.
+    /// The parent stores the outbox and reads yielded values from it.
+    pub(crate) fn take_outbox(&mut self) -> Option<Box<SlabPool>> {
+        self.outbox_active = false;
+        self.outbox.take()
+    }
+
+    /// Check whether an outbox is installed.
+    pub fn has_outbox(&self) -> bool {
+        self.outbox.is_some()
+    }
+
+    /// Enter outbox routing context. Allocations go to outbox until
+    /// `outbox_exit()` is called. No-op if no outbox is installed.
+    pub fn outbox_enter(&mut self) {
+        if self.outbox.is_some() {
+            self.outbox_active = true;
+        }
+    }
+
+    /// Exit outbox routing context. Allocations revert to private heap.
+    pub fn outbox_exit(&mut self) {
+        self.outbox_active = false;
+    }
+
+    /// Check if a heap value's pointer is in this heap's private pool
+    /// (not in any outbox). Used by the yield/return safety net: if a
+    /// value is in the private pool, it must be deep-copied to the
+    /// outbox before yield (otherwise the parent reads a dangling pointer).
+    pub fn value_in_private_pool(&self, value: Value) -> bool {
+        if !value.is_heap() {
+            return false;
+        }
+        let ptr = match value.as_heap_ptr() {
+            Some(p) => p,
+            None => return false,
+        };
+        // Check if the pointer is in any outbox (current or old).
+        if let Some(ref outbox) = self.outbox {
+            if outbox.owns(ptr) {
+                return false;
+            }
+        }
+        for ob in &self.old_outboxes {
+            if ob.owns(ptr) {
+                return false;
+            }
+        }
+        self.pool.owns(ptr)
+    }
+
+    /// Deep-copy a value from the private pool to the outbox.
+    /// Returns the new value (pointing into the outbox). If the value
+    /// is immediate or already in the outbox, returns it unchanged.
+    ///
+    /// Recursively copies cons cells so the entire reachable graph is
+    /// relocated. Other compound types (struct, array, closure) are
+    /// rebuilt with new slab slots; their inner Rust heap allocations
+    /// (Vec, BTreeMap, Rc) are reference-counted and survive independently
+    /// of the slab slot.
+    pub fn deep_copy_to_outbox(&mut self, value: Value) -> Value {
+        if !value.is_heap() {
+            return value;
+        }
+        let ptr = match value.as_heap_ptr() {
+            Some(p) => p,
+            None => return value,
+        };
+        // If outbox exists and owns it, already safe.
+        if self.outbox.as_ref().is_some_and(|ob| ob.owns(ptr)) {
+            return value;
+        }
+        // If not in private pool either, return as-is (constant pool, etc.).
+        if !self.pool.owns(ptr) {
+            return value;
+        }
+        // Read the HeapObject and rebuild it in the outbox.
+        let heap_obj = unsafe { &*(ptr as *const HeapObject) };
+        self.rebuild_in_outbox(heap_obj)
+    }
+
+    /// Allocate a copy of `obj` into the outbox. For Cons, recursively
+    /// copies sub-values that are in the private pool.
+    ///
+    /// Panics if no outbox is installed. Callers must check `has_outbox()`
+    /// before calling. When no outbox exists (silent fibers), private pool
+    /// values are returned as-is — they live as long as the FiberHandle.
+    fn rebuild_in_outbox(&mut self, obj: &HeapObject) -> Value {
+        let outbox = self.outbox.as_mut().expect("rebuild_in_outbox: no outbox");
+        match obj {
+            HeapObject::Cons(c) => {
+                let head = c.first;
+                let tail = c.rest;
+                // Drop the borrow on self before recursing.
+                let head = self.deep_copy_to_outbox(head);
+                let tail = self.deep_copy_to_outbox(tail);
+                let new_obj = HeapObject::Cons(crate::value::heap::Cons::new(head, tail));
+                self.outbox.as_mut().unwrap().alloc(new_obj)
+            }
+            HeapObject::LString { s, traits } => {
+                let new_obj = HeapObject::LString {
+                    s: s.clone(),
+                    traits: *traits,
+                };
+                outbox.alloc(new_obj)
+            }
+            HeapObject::LStruct { data, traits } => {
+                let entries: Vec<_> = data.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                let traits = *traits;
+                let entries: Vec<_> = entries
+                    .into_iter()
+                    .map(|(k, v)| (k, self.deep_copy_to_outbox(v)))
+                    .collect();
+                self.outbox.as_mut().unwrap().alloc(HeapObject::LStruct {
+                    data: entries,
+                    traits,
+                })
+            }
+            HeapObject::LArray { elements, traits } => {
+                // Snapshot elements so we can drop the borrow on `self` before
+                // recursing (deep_copy_to_outbox needs &mut self).
+                let elems: Vec<Value> = elements.as_slice().to_vec();
+                let traits = *traits;
+                let elems: Vec<Value> = elems
+                    .into_iter()
+                    .map(|v| self.deep_copy_to_outbox(v))
+                    .collect();
+                let outbox = self.outbox.as_mut().unwrap();
+                let slice = outbox.alloc_inline_slice::<Value>(&elems);
+                outbox.alloc(HeapObject::LArray {
+                    elements: slice,
+                    traits,
+                })
+            }
+            HeapObject::LBox { cell, traits } => outbox.alloc(HeapObject::LBox {
+                cell: RefCell::new(*cell.borrow()),
+                traits: *traits,
+            }),
+            HeapObject::CaptureCell { cell, traits } => outbox.alloc(HeapObject::CaptureCell {
+                cell: RefCell::new(*cell.borrow()),
+                traits: *traits,
+            }),
+            HeapObject::Float(f) => outbox.alloc(HeapObject::Float(*f)),
+            HeapObject::Closure { closure, traits } => outbox.alloc(HeapObject::Closure {
+                closure: closure.clone(),
+                traits: *traits,
+            }),
+            HeapObject::LArrayMut { data, traits } => {
+                let elems: Vec<Value> = data.borrow().clone();
+                // Drop outbox borrow before recursing.
+                let elems: Vec<Value> = elems
+                    .into_iter()
+                    .map(|v| self.deep_copy_to_outbox(v))
+                    .collect();
+                self.outbox.as_mut().unwrap().alloc(HeapObject::LArrayMut {
+                    data: RefCell::new(elems),
+                    traits: *traits,
+                })
+            }
+            HeapObject::LStructMut { data, traits } => {
+                let entries: Vec<_> = data.borrow().iter().map(|(k, v)| (k.clone(), *v)).collect();
+                let entries: std::collections::BTreeMap<_, _> = entries
+                    .into_iter()
+                    .map(|(k, v)| (k, self.deep_copy_to_outbox(v)))
+                    .collect();
+                self.outbox.as_mut().unwrap().alloc(HeapObject::LStructMut {
+                    data: RefCell::new(entries),
+                    traits: *traits,
+                })
+            }
+            HeapObject::LStringMut { data, traits } => outbox.alloc(HeapObject::LStringMut {
+                data: RefCell::new(data.borrow().clone()),
+                traits: *traits,
+            }),
+            HeapObject::LBytes { data, traits } => outbox.alloc(HeapObject::LBytes {
+                data: data.clone(),
+                traits: *traits,
+            }),
+            HeapObject::LBytesMut { data, traits } => outbox.alloc(HeapObject::LBytesMut {
+                data: RefCell::new(data.borrow().clone()),
+                traits: *traits,
+            }),
+            HeapObject::LSet { data, traits } => {
+                // Snapshot elements and deep-copy each, then re-intern the
+                // sorted slice into the outbox arena.
+                let elems: Vec<Value> = data.as_slice().to_vec();
+                let traits = *traits;
+                let elems: Vec<Value> = elems
+                    .into_iter()
+                    .map(|v| self.deep_copy_to_outbox(v))
+                    .collect();
+                let outbox = self.outbox.as_mut().unwrap();
+                let slice = outbox.alloc_inline_slice::<Value>(&elems);
+                outbox.alloc(HeapObject::LSet {
+                    data: slice,
+                    traits,
+                })
+            }
+            HeapObject::LSetMut { data, traits } => outbox.alloc(HeapObject::LSetMut {
+                data: RefCell::new(data.borrow().clone()),
+                traits: *traits,
+            }),
+            HeapObject::NativeFn(f) => outbox.alloc(HeapObject::NativeFn(*f)),
+            HeapObject::Parameter {
+                id,
+                default,
+                traits,
+            } => outbox.alloc(HeapObject::Parameter {
+                id: *id,
+                default: *default,
+                traits: *traits,
+            }),
+            HeapObject::ManagedPointer { addr, traits } => {
+                outbox.alloc(HeapObject::ManagedPointer {
+                    addr: std::cell::Cell::new(addr.get()),
+                    traits: *traits,
+                })
+            }
+            HeapObject::Fiber { handle, traits } => outbox.alloc(HeapObject::Fiber {
+                handle: handle.clone(),
+                traits: *traits,
+            }),
+            HeapObject::Syntax { syntax, traits } => outbox.alloc(HeapObject::Syntax {
+                syntax: syntax.clone(),
+                traits: *traits,
+            }),
+            HeapObject::External { obj, traits } => outbox.alloc(HeapObject::External {
+                obj: obj.clone(),
+                traits: *traits,
+            }),
+            HeapObject::FFISignature(sig, cif) => outbox.alloc(HeapObject::FFISignature(
+                sig.clone(),
+                RefCell::new(cif.borrow().clone()),
+            )),
+            HeapObject::FFIType(t) => outbox.alloc(HeapObject::FFIType(t.clone())),
+            HeapObject::ThreadHandle { handle, traits } => outbox.alloc(HeapObject::ThreadHandle {
+                handle: handle.clone(),
+                traits: *traits,
+            }),
+            HeapObject::LibHandle(id) => outbox.alloc(HeapObject::LibHandle(*id)),
+        }
+    }
+
+    /// Forward scope marks to the outbox when outbox is active.
+    pub fn push_scope_mark_outbox(&mut self) {
+        if self.outbox_active {
+            if let Some(ref mut outbox) = self.outbox {
+                // Push a mark on the outbox so RegionExit can release
+                // scoped objects allocated in the outbox.
+                let _mark = outbox.mark();
+                // Note: outbox scope marks are managed through the main
+                // scope_marks stack (which records shared_alloc_count).
+            }
+        }
+    }
+
     /// Drop all tracked objects and reset the slab allocator.
     ///
     /// Also tears down all owned shared allocators and nulls the
@@ -694,6 +1041,15 @@ impl FiberHeap {
         }
         self.owned_shared.clear();
         self.shared_alloc = std::ptr::null_mut();
+
+        // Tear down all outboxes (current and old).
+        if let Some(mut outbox) = self.outbox.take() {
+            outbox.teardown();
+        }
+        for mut ob in self.old_outboxes.drain(..) {
+            ob.teardown();
+        }
+        self.outbox_active = false;
 
         // Dealloc all custom-allocated objects (dtors run by pool.teardown below).
         // We need to run custom dtors and dealloc before pool.teardown
@@ -733,6 +1089,13 @@ impl Drop for FiberHeap {
             for i in (0..old.dtors.len()).rev() {
                 unsafe { std::ptr::drop_in_place(old.dtors[i]) };
             }
+        }
+        // Tear down all outboxes (current and old).
+        if let Some(mut outbox) = self.outbox.take() {
+            outbox.teardown();
+        }
+        for mut ob in self.old_outboxes.drain(..) {
+            ob.teardown();
         }
         // Tear down owned shared allocators before our slab is dropped.
         for sa in &mut self.owned_shared {

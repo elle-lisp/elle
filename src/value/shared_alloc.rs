@@ -55,6 +55,14 @@ impl SharedAllocator {
         self.pool.alloc(obj)
     }
 
+    /// Copy `items` into the shared pool's arena and return an InlineSlice.
+    pub fn alloc_inline_slice<T: Copy + 'static>(
+        &mut self,
+        items: &[T],
+    ) -> crate::value::inline_slice::InlineSlice<T> {
+        self.pool.alloc_inline_slice(items)
+    }
+
     /// Push a scope mark recording the current pool position.
     pub fn push_mark(&mut self) {
         self.marks.push(SharedMark {
@@ -75,6 +83,21 @@ impl SharedAllocator {
     #[allow(dead_code)]
     pub(crate) fn rotation_mark(&self) -> SlabMark {
         self.pool.mark()
+    }
+
+    /// Clear the swap pool without freeing any slots. Used when a new
+    /// trampoline captures a rotation mark: discard stale swap state
+    /// from a previous child fiber so the new child's rotation doesn't
+    /// tear down objects that the previous child still references.
+    #[allow(dead_code)]
+    pub(crate) fn clear_swap(&mut self) {
+        if let Some(old) = self.swap.take() {
+            // Return objects from the swap pool to the main pool tracking.
+            // These objects are still live (they may be referenced by the
+            // previous child fiber). Move them back so teardown handles them.
+            self.pool.allocs.extend(old.allocs);
+            self.pool.dtors.extend(old.dtors);
+        }
     }
 
     /// Rotate the shared pool at a tail-call boundary.

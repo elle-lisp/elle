@@ -274,6 +274,53 @@ impl fmt::Debug for TableKey {
     }
 }
 
+// ── Sorted struct slice helpers ───────────────────────────────────────────
+
+/// Look up a key in a sorted struct slice by binary search.
+#[inline]
+pub fn sorted_struct_get<'a>(
+    entries: &'a [(TableKey, super::Value)],
+    key: &TableKey,
+) -> Option<&'a super::Value> {
+    entries
+        .binary_search_by(|(k, _)| k.cmp(key))
+        .ok()
+        .map(|i| &entries[i].1)
+}
+
+/// Check if a sorted struct slice contains a key.
+#[inline]
+pub fn sorted_struct_contains(entries: &[(TableKey, super::Value)], key: &TableKey) -> bool {
+    entries.binary_search_by(|(k, _)| k.cmp(key)).is_ok()
+}
+
+/// Insert or update a key in a sorted Vec, maintaining sort order.
+/// Returns a new Vec (for immutable struct operations).
+pub fn sorted_struct_insert(
+    entries: &[(TableKey, super::Value)],
+    key: TableKey,
+    value: super::Value,
+) -> Vec<(TableKey, super::Value)> {
+    let mut result = entries.to_vec();
+    match result.binary_search_by(|(k, _)| k.cmp(&key)) {
+        Ok(i) => result[i].1 = value,
+        Err(i) => result.insert(i, (key, value)),
+    }
+    result
+}
+
+/// Remove a key from a sorted slice, returning a new Vec.
+pub fn sorted_struct_remove(
+    entries: &[(TableKey, super::Value)],
+    key: &TableKey,
+) -> Vec<(TableKey, super::Value)> {
+    let mut result = entries.to_vec();
+    if let Ok(i) = result.binary_search_by(|(k, _)| k.cmp(key)) {
+        result.remove(i);
+    }
+    result
+}
+
 /// Primitive function signature.
 ///
 /// All primitives return (signal_bits, value):

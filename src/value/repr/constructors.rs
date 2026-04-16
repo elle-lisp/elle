@@ -84,13 +84,15 @@ impl Value {
     // Heap Value Constructors
     // =========================================================================
 
-    /// Create a string value (heap-allocated).
+    /// Create a string value (heap-allocated, bytes stored inline in arena).
     #[inline]
-    pub fn string(s: impl Into<Box<str>>) -> Self {
+    pub fn string(s: impl AsRef<str>) -> Self {
+        use crate::value::arena::alloc_inline_slice;
         use crate::value::heap::{alloc, HeapObject};
-        let boxed: Box<str> = s.into();
+        let bytes = s.as_ref().as_bytes();
+        let slice = alloc_inline_slice::<u8>(bytes);
         alloc(HeapObject::LString {
-            s: boxed,
+            s: slice,
             traits: Value::NIL,
         })
     }
@@ -99,13 +101,9 @@ impl Value {
     /// to avoid thread-local interner issues when reconstructing values on
     /// a different thread.
     #[inline]
-    pub fn string_no_intern(s: impl Into<Box<str>>) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
-        let boxed: Box<str> = s.into();
-        alloc(HeapObject::LString {
-            s: boxed,
-            traits: Value::NIL,
-        })
+    pub fn string_no_intern(s: impl AsRef<str>) -> Self {
+        // Same path as `string()` now that bytes are arena-allocated.
+        Self::string(s)
     }
 
     /// Create a cons cell.
@@ -155,14 +153,28 @@ impl Value {
         })
     }
 
-    /// Create an immutable struct.
+    /// Create an immutable struct from a BTreeMap (entries will be sorted).
     #[inline]
     pub fn struct_from(
         fields: std::collections::BTreeMap<crate::value::heap::TableKey, Value>,
     ) -> Self {
+        // BTreeMap iterates in sorted order, so Vec is already sorted.
+        let sorted: Vec<(crate::value::heap::TableKey, Value)> = fields.into_iter().collect();
+        Self::struct_from_sorted(sorted)
+    }
+
+    /// Create an immutable struct from a pre-sorted Vec of key-value pairs.
+    ///
+    /// Keeps the Vec on the Rust heap because TableKey::String carries an
+    /// owned allocation; arena memcpy would leak or double-free the String.
+    ///
+    /// # Safety contract
+    /// Caller must ensure entries are sorted by key and contain no duplicates.
+    #[inline]
+    pub fn struct_from_sorted(entries: Vec<(crate::value::heap::TableKey, Value)>) -> Self {
         use crate::value::heap::{alloc, HeapObject};
         alloc(HeapObject::LStruct {
-            data: fields,
+            data: entries,
             traits: Value::NIL,
         })
     }
@@ -209,12 +221,14 @@ impl Value {
         alloc_permanent(HeapObject::NativeFn(def))
     }
 
-    /// Create an immutable array value.
+    /// Create an immutable array value (elements stored inline in arena).
     #[inline]
     pub fn array(elements: Vec<Value>) -> Self {
+        use crate::value::arena::alloc_inline_slice;
         use crate::value::heap::{alloc, HeapObject};
+        let slice = alloc_inline_slice::<Value>(&elements);
         alloc(HeapObject::LArray {
-            elements,
+            elements: slice,
             traits: Value::NIL,
         })
     }
@@ -230,12 +244,14 @@ impl Value {
         })
     }
 
-    /// Create an immutable bytes value.
+    /// Create an immutable bytes value (stored inline in arena).
     #[inline]
     pub fn bytes(data: Vec<u8>) -> Self {
+        use crate::value::arena::alloc_inline_slice;
         use crate::value::heap::{alloc, HeapObject};
+        let slice = alloc_inline_slice::<u8>(&data);
         alloc(HeapObject::LBytes {
-            data,
+            data: slice,
             traits: Value::NIL,
         })
     }
@@ -361,12 +377,16 @@ impl Value {
         })
     }
 
-    /// Create an immutable set value.
+    /// Create an immutable set value (sorted elements stored inline in arena).
     #[inline]
     pub fn set(items: BTreeSet<Value>) -> Self {
+        use crate::value::arena::alloc_inline_slice;
         use crate::value::heap::{alloc, HeapObject};
+        // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
+        let sorted: Vec<Value> = items.into_iter().collect();
+        let slice = alloc_inline_slice::<Value>(&sorted);
         alloc(HeapObject::LSet {
-            data: items,
+            data: slice,
             traits: Value::NIL,
         })
     }

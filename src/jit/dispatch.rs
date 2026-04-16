@@ -9,7 +9,7 @@
 
 use crate::jit::value::JitValue;
 use crate::value::fiber::{SignalBits, SIG_ERROR};
-use crate::value::{error_val, Value};
+use crate::value::{error_val, sorted_struct_get, Value};
 
 // Re-export split modules so compiler.rs / vtable.rs can still use dispatch::elle_jit_*
 pub use super::calls::*;
@@ -187,7 +187,7 @@ pub extern "C" fn elle_jit_struct_get_or_nil(
         None => return JitValue::nil(),
     };
     if let Some(struct_map) = val.as_struct() {
-        if let Some(v) = struct_map.get(&key) {
+        if let Some(v) = sorted_struct_get(struct_map, &key) {
             return JitValue::from_value(*v);
         }
     }
@@ -228,7 +228,7 @@ pub extern "C" fn elle_jit_struct_get_destructure(
         }
     };
     if let Some(struct_map) = val.as_struct() {
-        return match struct_map.get(&key) {
+        return match sorted_struct_get(struct_map, &key) {
             Some(v) => JitValue::from_value(*v),
             None => {
                 vm_ref.fiber.signal = Some((
@@ -291,21 +291,25 @@ pub extern "C" fn elle_jit_struct_rest(
         }
     }
 
-    let mut result = std::collections::BTreeMap::new();
     if let Some(struct_map) = val.as_struct() {
-        for (k, v) in struct_map.iter() {
-            if !exclude.contains(k) {
-                result.insert(k.clone(), *v);
-            }
-        }
+        let result: Vec<_> = struct_map
+            .iter()
+            .filter(|(k, _)| !exclude.contains(k))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        JitValue::from_value(Value::struct_from_sorted(result))
     } else if let Some(table_ref) = val.as_struct_mut() {
-        for (k, v) in table_ref.borrow().iter() {
-            if !exclude.contains(k) {
-                result.insert(k.clone(), *v);
-            }
-        }
+        let mut result: Vec<_> = table_ref
+            .borrow()
+            .iter()
+            .filter(|(k, _)| !exclude.contains(k))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        result.sort_by(|(a, _), (b, _)| a.cmp(b));
+        JitValue::from_value(Value::struct_from_sorted(result))
+    } else {
+        JitValue::from_value(Value::struct_from_sorted(vec![]))
     }
-    JitValue::from_value(Value::struct_from(result))
 }
 
 /// Check that a closure's signal bits are a subset of allowed_bits.

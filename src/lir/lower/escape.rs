@@ -1218,4 +1218,234 @@ impl<'a> Lowerer<'a> {
         let bi = self.arena.get(*binding);
         self.mutating_primitives.contains(&bi.name)
     }
+
+    /// Emit DropValue instructions for dead parameters before a self-tail-call.
+    ///
+    /// For each parameter whose new arg is heap-allocating AND whose old value
+    /// is not referenced by any heap-allocating arg, emit DropValue to free the
+    /// old value's inner heap data before the new args are written.
+    ///
+    /// This reuses the same per-parameter independence analysis as
+    /// `body_escapes_heap_values`, but emits drops instead of computing safety.
+    pub(super) fn emit_drop_dead_params(&mut self, func: &Hir, args: &[CallArg]) {
+        // Must be a self-tail-call
+        let Some(self_binding) = self.current_function_binding else {
+            return;
+        };
+        let Some(params) = self.current_function_params.clone() else {
+            return;
+        };
+        let HirKind::Var(callee_binding) = &func.kind else {
+            return;
+        };
+        if *callee_binding != self_binding {
+            return;
+        }
+
+        // Build set H: which args are heap-allocating
+        let heap_args: Vec<bool> = args
+            .iter()
+            .map(|a| !self.tail_arg_is_safe(&a.expr))
+            .collect();
+
+        for (k, param_binding) in params.iter().enumerate() {
+            // Only drop params whose new arg is heap-allocating
+            if !heap_args.get(k).copied().unwrap_or(false) {
+                continue;
+            }
+
+            // Skip if this param is an upvalue (captured — dropping would
+            // invalidate the closure's reference)
+            if self.upvalue_bindings.contains(param_binding) {
+                continue;
+            }
+
+            // Skip if any heap-allocating arg references this param —
+            // the old value is still needed to compute the new args
+            let referenced_by_heap_arg = args.iter().enumerate().any(|(j, a)| {
+                heap_args.get(j).copied().unwrap_or(false)
+                    && Self::hir_references_binding(&a.expr, *param_binding)
+            });
+            if referenced_by_heap_arg {
+                continue;
+            }
+
+            // Safe to drop: old param value is dead
+            if let Some(&slot) = self.binding_to_slot.get(param_binding) {
+                self.emit(crate::lir::types::LirInstr::DropValue { slot });
+            }
+        }
+    }
+
+    /// Compute last-use indices for let bindings in a Begin sequence.
+    /// Returns (expr_index, slot) pairs for bindings eligible for early drop.
+    ///
+    /// A binding is eligible if:
+    /// - It is not captured by a nested lambda
+    /// - It is not mutated (assigned to)
+    /// - It has a slot in binding_to_slot
+    /// - It is not an upvalue
+    /// - It is never passed as an argument to a non-intrinsic call
+    ///   (calls can alias the value in external mutable state)
+    ///
+    /// For each eligible binding, the last expression index in exprs that
+    /// references the binding (via hir_references_binding) determines when
+    /// to drop. The binding is dead after that point.
+    ///
+    /// Conservative: skips bindings referenced in the last expression
+    /// (they may be the return value).
+    pub(super) fn compute_let_drops(
+        &self,
+        bindings: &[(Binding, Hir)],
+        exprs: &[Hir],
+    ) -> Vec<(usize, u16)> {
+        if exprs.len() < 2 {
+            return Vec::new();
+        }
+        let mut drops = Vec::new();
+        for (binding, _init) in bindings {
+            let bi = self.arena.get(*binding);
+            // Skip captured, mutated, or upvalue bindings
+            if bi.is_captured || bi.is_mutated {
+                continue;
+            }
+            if self.upvalue_bindings.contains(binding) {
+                continue;
+            }
+            // Skip compiler-generated destructure temporaries.
+            // These hold the source value for destructuring; dropping
+            // them can invalidate extracted sub-values.
+            if self
+                .symbol_names
+                .get(&bi.name.0)
+                .is_some_and(|n| n.starts_with("__"))
+            {
+                continue;
+            }
+            let Some(&slot) = self.binding_to_slot.get(binding) else {
+                continue;
+            };
+
+            // Skip if the binding is passed to any non-intrinsic call in the
+            // Begin. Such calls can alias the value (e.g., scheduler stores a
+            // fiber handle), making it unsafe to drop even after the last
+            // HIR reference.
+            if exprs
+                .iter()
+                .any(|e| self.binding_passed_to_call(e, *binding))
+            {
+                continue;
+            }
+
+            // Skip bindings referenced in the last expression — the value
+            // may be the return value, so dropping before it evaluates is
+            // wrong. Dropping after is pointless (scope exits right after).
+            if Self::hir_references_binding(&exprs[exprs.len() - 1], *binding) {
+                continue;
+            }
+
+            // Find last use: scan from the end (excluding the last expr,
+            // which we already checked above).
+            let mut last_use = None;
+            for (i, expr) in exprs[..exprs.len() - 1].iter().enumerate().rev() {
+                if Self::hir_references_binding(expr, *binding) {
+                    last_use = Some(i);
+                    break;
+                }
+            }
+            if let Some(idx) = last_use {
+                drops.push((idx, slot));
+            }
+        }
+        drops
+    }
+
+    /// Check if a binding is passed as an argument to a non-intrinsic
+    /// function call anywhere in a HIR subtree.
+    ///
+    /// This detects aliasing: a function may store the value in mutable
+    /// state (e.g., scheduler maps, mutable arrays), making it unsafe
+    /// to drop the binding even after its last HIR reference.
+    fn binding_passed_to_call(&self, hir: &Hir, binding: Binding) -> bool {
+        match &hir.kind {
+            HirKind::Call { func, args, .. } => {
+                // Check if any arg is (directly) this binding AND the call
+                // is non-intrinsic (intrinsics only read their args).
+                let is_intrinsic = if let HirKind::Var(fb) = &func.kind {
+                    let fbi = self.arena.get(*fb);
+                    fbi.is_immutable && !fbi.is_mutated && self.intrinsics.contains_key(&fbi.name)
+                } else {
+                    false
+                };
+                if !is_intrinsic {
+                    for a in args {
+                        if Self::hir_references_binding(&a.expr, binding) {
+                            return true;
+                        }
+                    }
+                }
+                // Recurse into sub-expressions
+                self.binding_passed_to_call(func, binding)
+                    || args
+                        .iter()
+                        .any(|a| self.binding_passed_to_call(&a.expr, binding))
+            }
+            HirKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.binding_passed_to_call(cond, binding)
+                    || self.binding_passed_to_call(then_branch, binding)
+                    || self.binding_passed_to_call(else_branch, binding)
+            }
+            HirKind::Begin(exprs) | HirKind::And(exprs) | HirKind::Or(exprs) => exprs
+                .iter()
+                .any(|e| self.binding_passed_to_call(e, binding)),
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                bindings
+                    .iter()
+                    .any(|(_, init)| self.binding_passed_to_call(init, binding))
+                    || self.binding_passed_to_call(body, binding)
+            }
+            HirKind::Cond {
+                clauses,
+                else_branch,
+            } => {
+                clauses.iter().any(|(c, b)| {
+                    self.binding_passed_to_call(c, binding)
+                        || self.binding_passed_to_call(b, binding)
+                }) || else_branch
+                    .as_ref()
+                    .is_some_and(|b| self.binding_passed_to_call(b, binding))
+            }
+            HirKind::Match { value, arms } => {
+                self.binding_passed_to_call(value, binding)
+                    || arms.iter().any(|(_, g, b)| {
+                        g.as_ref()
+                            .is_some_and(|g| self.binding_passed_to_call(g, binding))
+                            || self.binding_passed_to_call(b, binding)
+                    })
+            }
+            HirKind::While { cond, body } => {
+                self.binding_passed_to_call(cond, binding)
+                    || self.binding_passed_to_call(body, binding)
+            }
+            HirKind::Block { body, .. } => {
+                body.iter().any(|e| self.binding_passed_to_call(e, binding))
+            }
+            HirKind::Break { value, .. } => self.binding_passed_to_call(value, binding),
+            HirKind::Assign { value, .. } | HirKind::Define { value, .. } => {
+                self.binding_passed_to_call(value, binding)
+            }
+            HirKind::Parameterize { bindings, body } => {
+                bindings.iter().any(|(p, v)| {
+                    self.binding_passed_to_call(p, binding)
+                        || self.binding_passed_to_call(v, binding)
+                }) || self.binding_passed_to_call(body, binding)
+            }
+            // Leaves and lambdas: no calls here
+            _ => false,
+        }
+    }
 }

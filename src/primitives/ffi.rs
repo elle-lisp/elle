@@ -456,8 +456,9 @@ mod tests {
 
     fn error_kind(v: &crate::value::Value) -> Option<String> {
         use crate::value::heap::TableKey;
+        use crate::value::sorted_struct_get;
         v.as_struct()
-            .and_then(|fields| fields.get(&TableKey::Keyword("error".into())))
+            .and_then(|fields| sorted_struct_get(fields, &TableKey::Keyword("error".into())))
             .and_then(|k| k.as_keyword_name())
     }
 

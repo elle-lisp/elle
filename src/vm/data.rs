@@ -1,5 +1,5 @@
 use super::core::VM;
-use crate::value::{cons, error_val, TableKey, Value, SIG_ERROR};
+use crate::value::{cons, error_val, sorted_struct_get, TableKey, Value, SIG_ERROR};
 
 pub(crate) fn handle_cons(vm: &mut VM) {
     let rest = vm
@@ -383,7 +383,7 @@ pub(crate) fn handle_struct_get_or_nil(
 
     // Try struct first (immutable, no RefCell borrow)
     if let Some(struct_map) = val.as_struct() {
-        if let Some(value) = struct_map.get(&key) {
+        if let Some(value) = sorted_struct_get(struct_map, &key) {
             vm.fiber.stack.push(*value);
             return;
         }
@@ -429,7 +429,7 @@ pub(crate) fn handle_struct_get_destructure(
 
     // Try immutable struct
     if let Some(struct_map) = val.as_struct() {
-        match struct_map.get(&key) {
+        match sorted_struct_get(struct_map, &key) {
             Some(value) => {
                 vm.fiber.stack.push(*value);
                 return;
@@ -504,24 +504,26 @@ pub(crate) fn handle_struct_rest(
         .expect("VM bug: Stack underflow on StructRest");
 
     // Collect all keys not in exclude set from struct or @struct
-    let mut result: std::collections::BTreeMap<TableKey, Value> = std::collections::BTreeMap::new();
-
     if let Some(struct_map) = val.as_struct() {
-        for (k, v) in struct_map.iter() {
-            if !exclude.contains(k) {
-                result.insert(k.clone(), *v);
-            }
-        }
+        let result: Vec<(TableKey, Value)> = struct_map
+            .iter()
+            .filter(|(k, _)| !exclude.contains(k))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        vm.fiber.stack.push(Value::struct_from_sorted(result));
     } else if let Some(table_ref) = val.as_struct_mut() {
-        for (k, v) in table_ref.borrow().iter() {
-            if !exclude.contains(k) {
-                result.insert(k.clone(), *v);
-            }
-        }
+        let mut result: Vec<(TableKey, Value)> = table_ref
+            .borrow()
+            .iter()
+            .filter(|(k, _)| !exclude.contains(k))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        result.sort_by(|(a, _), (b, _)| a.cmp(b));
+        vm.fiber.stack.push(Value::struct_from_sorted(result));
+    } else {
+        // Non-struct input → empty struct rest (consistent with StructGetOrNil nil behavior)
+        vm.fiber.stack.push(Value::struct_from_sorted(vec![]));
     }
-    // Non-struct input → empty struct rest (consistent with StructGetOrNil nil behavior)
-
-    vm.fiber.stack.push(Value::struct_from(result));
 }
 
 /// Car with silent nil (parameter destructuring): returns nil if not a cons cell.

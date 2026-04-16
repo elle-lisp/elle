@@ -13,6 +13,7 @@ pub mod ffi;
 pub mod fiber;
 pub mod fiberheap;
 pub mod heap;
+pub mod inline_slice;
 pub mod intern;
 pub mod keyword;
 pub mod repr;
@@ -37,7 +38,10 @@ pub use send::SendBundle;
 pub use send::SendValue;
 
 // Export core types
-pub use types::{Arity, NativeFn, SymbolId, TableKey};
+pub use types::{
+    sorted_struct_contains, sorted_struct_get, sorted_struct_insert, sorted_struct_remove, Arity,
+    NativeFn, SymbolId, TableKey,
+};
 
 // Export fiber heap
 pub use fiberheap::FiberHeap;

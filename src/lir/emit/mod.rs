@@ -895,6 +895,37 @@ impl Emitter {
                 // No stack effect
             }
 
+            LirInstr::OutboxEnter => {
+                self.bytecode.emit(Instruction::OutboxEnter);
+                // No stack effect
+            }
+
+            LirInstr::OutboxExit => {
+                self.bytecode.emit(Instruction::OutboxExit);
+                // No stack effect
+            }
+
+            LirInstr::DropValue { slot } => {
+                self.bytecode.emit(Instruction::DropValue);
+                self.bytecode.emit_u16(*slot);
+                // No stack effect — slot-addressed
+            }
+
+            LirInstr::ReuseSlotCons {
+                dst,
+                slot,
+                head,
+                tail,
+            } => {
+                self.ensure_on_top(*tail);
+                self.ensure_on_top(*head);
+                self.bytecode.emit(Instruction::ReuseSlotCons);
+                self.bytecode.emit_u16(*slot);
+                self.pop(); // head consumed
+                self.pop(); // tail consumed
+                self.push_reg(*dst);
+            }
+
             LirInstr::PushParamFrame { pairs } => {
                 // Push all param/value pairs onto the stack
                 for (param, value) in pairs {

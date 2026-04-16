@@ -5,7 +5,7 @@ use crate::signals::{Signal, SIG_EXEC};
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_HALT, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
-use crate::value::{error_val, list, Value};
+use crate::value::{error_val, list, sorted_struct_get, Value};
 
 /// Exit the process with an optional exit code
 ///
@@ -192,7 +192,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
     };
 
     // :env — struct of string → string, or nil for inherit
-    let env = match fields.get(&TableKey::Keyword("env".into())) {
+    let env = match sorted_struct_get(fields, &TableKey::Keyword("env".into())) {
         Some(v) if v.is_nil() => None,
         Some(v) => {
             let env_fields = match v.as_struct() {
@@ -236,7 +236,7 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
     };
 
     // :cwd — string or nil
-    let cwd = match fields.get(&TableKey::Keyword("cwd".into())) {
+    let cwd = match sorted_struct_get(fields, &TableKey::Keyword("cwd".into())) {
         Some(v) if v.is_nil() => None,
         Some(v) => Some(match v.with_string(|s| s.to_string()) {
             Some(s) => s,
@@ -269,15 +269,15 @@ fn parse_exec_opts(opts: &Value) -> Result<ExecOpts, (SignalBits, Value)> {
         }
     }
 
-    let stdin_disp = match fields.get(&TableKey::Keyword("stdin".into())) {
+    let stdin_disp = match sorted_struct_get(fields, &TableKey::Keyword("stdin".into())) {
         Some(v) => parse_disp(v, ":stdin")?,
         None => StdioDisposition::Pipe,
     };
-    let stdout_disp = match fields.get(&TableKey::Keyword("stdout".into())) {
+    let stdout_disp = match sorted_struct_get(fields, &TableKey::Keyword("stdout".into())) {
         Some(v) => parse_disp(v, ":stdout")?,
         None => StdioDisposition::Pipe,
     };
-    let stderr_disp = match fields.get(&TableKey::Keyword("stderr".into())) {
+    let stderr_disp = match sorted_struct_get(fields, &TableKey::Keyword("stderr".into())) {
         Some(v) => parse_disp(v, ":stderr")?,
         None => StdioDisposition::Pipe,
     };
@@ -293,7 +293,7 @@ fn extract_process_handle(val: &Value, fn_name: &str) -> Result<Value, (SignalBi
         return Ok(*val);
     }
     if let Some(fields) = val.as_struct() {
-        match fields.get(&TableKey::Keyword("process".into())) {
+        match sorted_struct_get(fields, &TableKey::Keyword("process".into())) {
             Some(v) => return Ok(*v),
             None => {
                 return Err((
@@ -948,10 +948,10 @@ mod tests {
         let (sig, val) = prim_sys_env(&[]);
         assert_eq!(sig, SIG_OK);
         let fields = val.as_struct().expect("sys/env should return a struct");
-        let path_val = fields.get(&TableKey::String("PATH".into()));
+        let path_val = crate::value::sorted_struct_get(fields, &TableKey::String("PATH".into()));
         assert!(
             path_val
-                .map(|v| v.with_string(|_| true).unwrap_or(false))
+                .map(|v: &Value| v.with_string(|_| true).unwrap_or(false))
                 .unwrap_or(false),
             "sys/env should contain PATH as a string"
         );

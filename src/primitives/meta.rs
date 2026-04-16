@@ -823,6 +823,7 @@ mod tests {
     use crate::signals::Signal;
     use crate::syntax::{Span, Syntax, SyntaxKind};
     use crate::value::closure::{Closure, ClosureTemplate};
+    use crate::value::sorted_struct_get;
     use crate::value::types::Arity;
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -869,14 +870,11 @@ mod tests {
         assert_eq!(sig, SIG_OK);
 
         let fields = result.as_struct().expect("expected struct");
-        let file_val = fields
-            .get(&TableKey::Keyword("file".to_string()))
+        let file_val = sorted_struct_get(fields, &TableKey::Keyword("file".to_string()))
             .expect(":file key missing");
-        let line_val = fields
-            .get(&TableKey::Keyword("line".to_string()))
+        let line_val = sorted_struct_get(fields, &TableKey::Keyword("line".to_string()))
             .expect(":line key missing");
-        let col_val = fields
-            .get(&TableKey::Keyword("col".to_string()))
+        let col_val = sorted_struct_get(fields, &TableKey::Keyword("col".to_string()))
             .expect(":col key missing");
 
         assert!(

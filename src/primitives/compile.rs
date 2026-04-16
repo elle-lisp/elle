@@ -5,6 +5,7 @@
 //! primitives accept the handle and extract structured views: signals,
 //! bindings, captures, call graph, diagnostics, symbols.
 
+use crate::value::sorted_struct_get;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::context;
@@ -974,8 +975,7 @@ pub(crate) fn prim_compile_analyze(args: &[Value]) -> (SignalBits, Value) {
     // Optional opts struct for :file key.
     let file_name = if args.len() == 2 {
         if let Some(fields) = args[1].as_struct() {
-            fields
-                .get(&kw("file"))
+            sorted_struct_get(fields, &kw("file"))
                 .and_then(|v| v.with_string(|s| s.to_string()))
                 .unwrap_or_else(|| "<analyze>".to_string())
         } else {
@@ -1909,7 +1909,7 @@ fn prim_compile_extract(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let from_name = match opts.get(&kw("from")).and_then(|v| {
+    let from_name = match sorted_struct_get(opts, &kw("from")).and_then(|v| {
         v.as_keyword_name()
             .map(|s| s.to_string())
             .or_else(|| v.with_string(|s| s.to_string()))
@@ -1923,21 +1923,22 @@ fn prim_compile_extract(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let (start_line, end_line) = match opts.get(&kw("lines")).and_then(|v| v.as_array()) {
-        Some(arr) if arr.len() == 2 => {
-            let s = arr[0].as_int().unwrap_or(0) as u32;
-            let e = arr[1].as_int().unwrap_or(0) as u32;
-            (s, e)
-        }
-        _ => {
-            return (
-                SIG_ERROR,
-                error_val("type-error", "compile/extract: :lines must be [start end]"),
-            )
-        }
-    };
+    let (start_line, end_line) =
+        match sorted_struct_get(opts, &kw("lines")).and_then(|v| v.as_array()) {
+            Some(arr) if arr.len() == 2 => {
+                let s = arr[0].as_int().unwrap_or(0) as u32;
+                let e = arr[1].as_int().unwrap_or(0) as u32;
+                (s, e)
+            }
+            _ => {
+                return (
+                    SIG_ERROR,
+                    error_val("type-error", "compile/extract: :lines must be [start end]"),
+                )
+            }
+        };
 
-    let new_fn_name = match opts.get(&kw("name")).and_then(|v| {
+    let new_fn_name = match sorted_struct_get(opts, &kw("name")).and_then(|v| {
         v.as_keyword_name()
             .map(|s| s.to_string())
             .or_else(|| v.with_string(|s| s.to_string()))

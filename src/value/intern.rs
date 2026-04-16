@@ -11,15 +11,28 @@ use std::rc::Rc;
 use crate::value::Value;
 
 use crate::value::heap::HeapObject;
+use crate::value::inline_slice::InlineSlice;
 
 thread_local! {
     static STRING_INTERNER: RefCell<StringInterner> = RefCell::new(StringInterner::new());
 }
 
+/// An interned entry keeps its bytes pinned on the Rust heap in `bytes`, so
+/// the `InlineSlice<u8>` inside `heap.s` stays valid for the lifetime of
+/// this entry. The outer `Rc` is held by the `strings` map; cloning the Rc
+/// does not move either the HeapObject or the byte buffer.
+struct InternEntry {
+    /// Owning storage for the string bytes. Never moved or dropped while
+    /// the entry lives in the interner map.
+    _bytes: Box<[u8]>,
+    /// HeapObject whose InlineSlice points into `_bytes`.
+    heap: HeapObject,
+}
+
 struct StringInterner {
-    // Map from string content to Rc<HeapObject>
+    // Map from string content to Rc<InternEntry>
     // We use Rc to keep the strings alive and prevent them from being dropped
-    strings: HashMap<Box<str>, Rc<HeapObject>>,
+    strings: HashMap<Box<str>, Rc<InternEntry>>,
 }
 
 impl StringInterner {
@@ -32,18 +45,23 @@ impl StringInterner {
     fn intern(&mut self, s: &str) -> *const HeapObject {
         // Check if already interned
         if let Some(rc) = self.strings.get(s) {
-            return Rc::as_ptr(rc);
+            return &rc.heap as *const HeapObject;
         }
 
-        // Allocate new HeapObject::LString
-        let rc = Rc::new(HeapObject::LString {
-            s: s.into(),
-            traits: Value::NIL,
+        // Pin the bytes on the Rust heap so the InlineSlice pointer is stable.
+        let bytes: Box<[u8]> = s.as_bytes().to_vec().into_boxed_slice();
+        let slice = unsafe { InlineSlice::from_raw(bytes.as_ptr(), bytes.len() as u32) };
+        let entry = Rc::new(InternEntry {
+            _bytes: bytes,
+            heap: HeapObject::LString {
+                s: slice,
+                traits: Value::NIL,
+            },
         });
-        let ptr = Rc::as_ptr(&rc);
+        let ptr = &entry.heap as *const HeapObject;
 
         // Store in table
-        self.strings.insert(s.into(), rc);
+        self.strings.insert(s.into(), entry);
 
         ptr
     }
@@ -267,7 +285,7 @@ mod tests {
         let ptr = intern_string("verification test");
         let heap_obj = unsafe { &*ptr };
         match heap_obj {
-            HeapObject::LString { s, .. } => assert_eq!(&**s, "verification test"),
+            HeapObject::LString { s, .. } => assert_eq!(s.as_slice(), b"verification test"),
             _ => panic!("Expected HeapObject::LString"),
         }
     }
@@ -285,7 +303,7 @@ mod tests {
         // Verify content is still accessible
         let heap_obj = unsafe { &*ptr1 };
         match heap_obj {
-            HeapObject::LString { s, .. } => assert_eq!(&**s, "scoped string"),
+            HeapObject::LString { s, .. } => assert_eq!(s.as_slice(), b"scoped string"),
             _ => panic!("Expected HeapObject::LString"),
         }
     }

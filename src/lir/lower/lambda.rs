@@ -157,8 +157,14 @@ impl<'a> Lowerer<'a> {
         let saved_discard_slot = self.discard_slot;
         let saved_pending_region_exits = self.pending_region_exits;
         let saved_region_depth = self.region_depth;
+        // Save function context. It's set by the caller (lower_letrec,
+        // lower_define) before lower_expr so escape analysis can detect
+        // self-tail-calls. We save it here and restore it for both the
+        // body lowering (so DropValue insertion can detect self-calls)
+        // and the post-lowering escape analysis.
         let saved_function_binding = self.current_function_binding.take();
         let saved_function_params = self.current_function_params.take();
+        let saved_begin_drops = std::mem::take(&mut self.begin_drops);
 
         self.next_reg = 0;
         self.next_label = 1;
@@ -236,6 +242,11 @@ impl<'a> Lowerer<'a> {
 
         self.current_func.num_local_params = self.num_local_params as usize;
 
+        // Restore function context for body lowering — needed by
+        // emit_drop_dead_params to detect self-tail-calls.
+        self.current_function_binding = saved_function_binding;
+        self.current_function_params = saved_function_params.clone();
+
         // Emit signal bound checks for each bounded parameter
         for pb in param_bounds {
             if let Some(&slot) = self.binding_to_slot.get(&pb.binding) {
@@ -267,20 +278,14 @@ impl<'a> Lowerer<'a> {
         self.current_func.signal = inferred_signal;
 
         // Compute escape analysis flags for fiber shared-alloc decisions.
-        // Empty scope_bindings: at the lambda boundary, there are no
-        // let/letrec bindings in scope — captures come from the parent.
-        //
-        // Restore function context for escape analysis: the parent's
-        // letrec/define set current_function_binding/params for this
-        // lambda before calling lower_expr. We saved them at entry
-        // (via take()), now restore them so body_escapes_heap_values
-        // can detect self-tail-calls with per-parameter analysis.
-        self.current_function_binding = saved_function_binding;
-        self.current_function_params = saved_function_params;
+        // current_function_binding/params are already set (restored before
+        // body lowering above), so body_escapes_heap_values can detect
+        // self-tail-calls with per-parameter analysis.
         self.current_func.result_is_immediate = self.result_is_safe(body, &[]);
         self.current_func.has_outward_heap_set =
             self.body_contains_dangerous_outward_set(body, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(body);
+        // Clear function context — will be restored to parent's state below.
         self.current_function_binding = None;
         self.current_function_params = None;
 
@@ -298,6 +303,7 @@ impl<'a> Lowerer<'a> {
         self.discard_slot = saved_discard_slot;
         self.pending_region_exits = saved_pending_region_exits;
         self.region_depth = saved_region_depth;
+        self.begin_drops = saved_begin_drops;
 
         Ok(func)
     }

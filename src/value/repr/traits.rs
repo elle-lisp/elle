@@ -42,7 +42,7 @@ impl PartialEq for Value {
                 // String × @string
                 (HeapObject::LString { s: s1, .. }, HeapObject::LStringMut { data: b2, .. })
                 | (HeapObject::LStringMut { data: b2, .. }, HeapObject::LString { s: s1, .. }) => {
-                    s1.as_bytes() == b2.borrow().as_slice()
+                    s1.as_slice() == b2.borrow().as_slice()
                 }
                 // @string × @string
                 (
@@ -80,14 +80,16 @@ impl PartialEq for Value {
                     v1.borrow().as_slice() == v2.borrow().as_slice()
                 }
 
-                // Struct: immutable × immutable
+                // Struct: immutable × immutable (sorted Vec vs sorted Vec)
                 (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
                     s1 == s2
                 }
-                // Struct × @struct
+                // Struct × @struct (sorted Vec vs BTreeMap)
                 (HeapObject::LStruct { data: s1, .. }, HeapObject::LStructMut { data: s2, .. })
-                | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) => {
-                    *s1 == *s2.borrow()
+                | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) =>
+                {
+                    let borrowed = s2.borrow();
+                    s1.len() == borrowed.len() && s1.iter().all(|(k, v)| borrowed.get(k) == Some(v))
                 }
                 // @struct × @struct
                 (
@@ -122,7 +124,9 @@ impl PartialEq for Value {
                 // Set × @set
                 (HeapObject::LSet { data: s1, .. }, HeapObject::LSetMut { data: s2, .. })
                 | (HeapObject::LSetMut { data: s2, .. }, HeapObject::LSet { data: s1, .. }) => {
-                    *s1 == *s2.borrow()
+                    let borrowed = s2.borrow();
+                    s1.len() == borrowed.len()
+                        && s1.iter().zip(borrowed.iter()).all(|(a, b)| a == b)
                 }
                 // @set × @set
                 (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
@@ -246,8 +250,8 @@ impl Hash for Value {
                 HeapObject::Cons(c) => c.hash(state),
                 HeapObject::LArray { elements, .. } => elements.hash(state),
                 HeapObject::LBytes { data, .. } => data.hash(state),
-                HeapObject::LStruct { data: map, .. } => {
-                    for (k, v) in map {
+                HeapObject::LStruct { data: entries, .. } => {
+                    for (k, v) in entries {
                         k.hash(state);
                         v.hash(state);
                     }

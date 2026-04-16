@@ -5,7 +5,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
 use crate::value::types::Arity;
-use crate::value::{error_val, TableKey, Value};
+use crate::value::{error_val, sorted_struct_contains, sorted_struct_remove, TableKey, Value};
 use std::collections::BTreeMap;
 
 use super::access::{prim_get, prim_put};
@@ -187,9 +187,10 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let mut new_map = s.clone();
-        new_map.remove(&key);
-        (SIG_OK, Value::struct_from(new_map)) // Return new struct
+        (
+            SIG_OK,
+            Value::struct_from_sorted(sorted_struct_remove(s, &key)),
+        ) // Return new struct
     } else {
         (
             SIG_ERROR,
@@ -243,7 +244,7 @@ pub(crate) fn prim_keys(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let keys: Vec<Value> = s.keys().map(|k| k.to_value()).collect();
+        let keys: Vec<Value> = s.iter().map(|(k, _)| k.to_value()).collect();
         (SIG_OK, crate::value::list(keys))
     } else {
         (
@@ -298,7 +299,7 @@ pub(crate) fn prim_values(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let values: Vec<Value> = s.values().copied().collect();
+        let values: Vec<Value> = s.iter().map(|(_, v)| *v).collect();
         (SIG_OK, crate::value::list(values))
     } else {
         (
@@ -373,7 +374,7 @@ pub(crate) fn prim_has_key(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        (SIG_OK, Value::bool(s.contains_key(&key)))
+        (SIG_OK, Value::bool(sorted_struct_contains(s, &key)))
     } else {
         (
             SIG_ERROR,

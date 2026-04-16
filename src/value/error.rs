@@ -5,6 +5,7 @@
 
 use super::heap::TableKey;
 use super::repr::Value;
+use super::types::sorted_struct_get;
 use std::collections::BTreeMap;
 
 /// Construct an error value: `{:error :keyword :message "message"}`
@@ -50,8 +51,8 @@ pub fn error_val_extra(kind: &str, msg: impl Into<String>, extra: &[(&str, Value
 pub fn format_error(value: Value) -> String {
     // Struct error: {:error :keyword :message "string"}
     if let Some(fields) = value.as_struct() {
-        let error = fields.get(&TableKey::Keyword("error".into()));
-        let msg = fields.get(&TableKey::Keyword("message".into()));
+        let error = sorted_struct_get(fields, &TableKey::Keyword("error".into()));
+        let msg = sorted_struct_get(fields, &TableKey::Keyword("message".into()));
         if let (Some(error_val), Some(msg_val)) = (error, msg) {
             if let (Some(name), Some(text)) = (
                 error_val.as_keyword_name(),
@@ -86,6 +87,7 @@ pub fn format_error(value: Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::types::sorted_struct_contains;
 
     #[test]
     fn test_error_val_creates_struct() {
@@ -96,14 +98,20 @@ mod tests {
 
         // Should have :error and :message keys
         let fields = err.as_struct().unwrap();
-        assert!(fields.contains_key(&TableKey::Keyword("error".into())));
-        assert!(fields.contains_key(&TableKey::Keyword("message".into())));
+        assert!(sorted_struct_contains(
+            fields,
+            &TableKey::Keyword("error".into())
+        ));
+        assert!(sorted_struct_contains(
+            fields,
+            &TableKey::Keyword("message".into())
+        ));
 
         // Values should be correct
-        let error_key = fields.get(&TableKey::Keyword("error".into())).unwrap();
+        let error_key = sorted_struct_get(fields, &TableKey::Keyword("error".into())).unwrap();
         assert_eq!(error_key.as_keyword_name().as_deref(), Some("type-error"));
 
-        let msg_key = fields.get(&TableKey::Keyword("message".into())).unwrap();
+        let msg_key = sorted_struct_get(fields, &TableKey::Keyword("message".into())).unwrap();
         assert_eq!(
             msg_key.with_string(|s| s.to_string()),
             Some("expected integer".to_string())
@@ -160,17 +168,19 @@ mod tests {
         let fields = err.as_struct().unwrap();
         // :error keyword correct
         assert_eq!(
-            fields
-                .get(&TableKey::Keyword("error".into()))
+            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
                 .unwrap()
                 .as_keyword_name()
                 .as_deref(),
             Some("io-error"),
         );
         // :message correct
-        assert!(fields.contains_key(&TableKey::Keyword("message".into())));
+        assert!(sorted_struct_contains(
+            fields,
+            &TableKey::Keyword("message".into())
+        ));
         // :path extra field present
-        let path_val = fields.get(&TableKey::Keyword("path".into())).unwrap();
+        let path_val = sorted_struct_get(fields, &TableKey::Keyword("path".into())).unwrap();
         assert_eq!(
             path_val.with_string(|s| s.to_string()),
             Some("/no/such".to_string()),

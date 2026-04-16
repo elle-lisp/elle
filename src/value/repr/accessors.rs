@@ -294,7 +294,12 @@ impl Value {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LString { s, .. } => Some(f(s)),
+            HeapObject::LString { s, .. } => {
+                // SAFETY: LString's bytes are always valid UTF-8 (enforced by
+                // constructors). The arena outlives the borrow.
+                let str_ref = unsafe { std::str::from_utf8_unchecked(s.as_slice()) };
+                Some(f(str_ref))
+            }
             _ => None,
         }
     }
@@ -358,10 +363,9 @@ impl Value {
     }
 
     /// Extract as struct if this is a struct.
+    /// Returns a sorted slice of (key, value) pairs.
     #[inline]
-    pub fn as_struct(
-        &self,
-    ) -> Option<&std::collections::BTreeMap<crate::value::heap::TableKey, Value>> {
+    pub fn as_struct(&self) -> Option<&[(crate::value::heap::TableKey, Value)]> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_struct() {
             return None;
@@ -450,14 +454,15 @@ impl Value {
     }
 
     /// Extract as set if this is a set.
+    /// Returns a sorted slice of values (binary search for membership).
     #[inline]
-    pub fn as_set(&self) -> Option<&std::collections::BTreeSet<Value>> {
+    pub fn as_set(&self) -> Option<&[Value]> {
         use crate::value::heap::{deref, HeapObject};
         if !self.is_set() {
             return None;
         }
         match unsafe { deref(*self) } {
-            HeapObject::LSet { data, .. } => Some(data),
+            HeapObject::LSet { data, .. } => Some(data.as_slice()),
             _ => None,
         }
     }

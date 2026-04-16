@@ -447,6 +447,49 @@ impl VM {
                     crate::value::fiberheap::region_exit_call();
                 }
 
+                // Outbox routing: toggle allocation target for yield-bound values.
+                Instruction::OutboxEnter => {
+                    crate::value::fiberheap::outbox_enter();
+                }
+                Instruction::OutboxExit => {
+                    crate::value::fiberheap::outbox_exit();
+                }
+
+                // Perceus: eagerly drop a heap value in a local slot.
+                Instruction::DropValue => {
+                    let slot = self.read_u16(bc, &mut ip) as usize;
+                    let frame_base = self.current_frame_base();
+                    let abs_idx = frame_base + slot;
+                    let value = self.fiber.stack[abs_idx];
+                    crate::value::fiberheap::drop_value(value);
+                    self.fiber.stack[abs_idx] = Value::NIL;
+                }
+
+                // Perceus: reuse slab slot for new Cons (fused DropValue + Cons).
+                Instruction::ReuseSlotCons => {
+                    let slot = self.read_u16(bc, &mut ip) as usize;
+                    let head = self
+                        .fiber
+                        .stack
+                        .pop()
+                        .expect("VM bug: stack underflow on ReuseSlotCons");
+                    let tail = self
+                        .fiber
+                        .stack
+                        .pop()
+                        .expect("VM bug: stack underflow on ReuseSlotCons");
+                    let frame_base = self.current_frame_base();
+                    let abs_idx = frame_base + slot;
+                    let old_value = self.fiber.stack[abs_idx];
+                    let new_value = if old_value.is_heap() {
+                        crate::value::fiberheap::reuse_slot_cons(old_value, head, tail)
+                    } else {
+                        crate::value::Value::cons(head, tail)
+                    };
+                    self.fiber.stack[abs_idx] = Value::NIL;
+                    self.fiber.stack.push(new_value);
+                }
+
                 // Dynamic parameter frame management
                 Instruction::PushParamFrame => {
                     let count = bc[ip] as usize;

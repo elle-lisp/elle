@@ -81,16 +81,19 @@ impl VM {
                 &mut *self.fiber.heap as *mut crate::value::FiberHeap,
             );
         }
-        // 3b. Install shared allocator when escape analysis indicates the fiber
-        // body may produce heap values that escape to the parent:
-        // - result is not provably immediate (return value could be heap)
-        // - body may suspend (yielded values escape)
-        // - body has outward set of heap values (captured mutation)
+        // 3b. Install outbox for yield-bound allocations. The compiler
+        // emits OutboxEnter/OutboxExit around yield/emit value expressions,
+        // routing those allocations to the outbox. The parent reads
+        // yielded values directly from the outbox (zero-copy).
+        //
+        // Default allocation target is the child's private heap. Only
+        // allocations between OutboxEnter/OutboxExit go to the outbox.
+        // install_outbox tears down the previous outbox (reset-on-resume).
         let tmpl = &self.fiber.closure.template;
         if !tmpl.result_is_immediate || tmpl.signal.may_suspend() || tmpl.has_outward_heap_set {
-            let parent_heap: &mut crate::value::FiberHeap = &mut child_fiber.heap;
-            let ptr = parent_heap.get_or_create_shared_allocator();
-            self.fiber.heap.set_shared_alloc(ptr);
+            self.fiber
+                .heap
+                .install_outbox(crate::value::fiberheap::pool::SlabPool::new());
         }
 
         // 4. Execute the closure
@@ -109,8 +112,11 @@ impl VM {
             FiberStatus::Paused
         };
 
-        // 6. Extract the result before swapping back
-        let result_value = self
+        // 6. Extract the result before swapping back.
+        //    Safety net: if the value is heap-allocated in the child's
+        //    private pool (not in the outbox), deep-copy to the outbox
+        //    so the parent doesn't read a dangling pointer.
+        let mut result_value = self
             .fiber
             .signal
             .as_ref()
@@ -118,8 +124,16 @@ impl VM {
             .unwrap_or(Value::NIL);
         let result_bits = self.fiber.signal.as_ref().map(|(b, _)| *b).unwrap_or(bits);
 
-        // 7a. Clear child's shared_alloc pointer — no longer valid after swap-back.
-        self.fiber.heap.clear_shared_alloc();
+        if result_value.is_heap()
+            && self.fiber.heap.has_outbox()
+            && self.fiber.heap.value_in_private_pool(result_value)
+        {
+            result_value = self.fiber.heap.deep_copy_to_outbox(result_value);
+            // Update the signal with the new value so the parent reads the copy.
+            if let Some(ref mut sig) = self.fiber.signal {
+                sig.1 = result_value;
+            }
+        }
 
         // 7. Swap back: parent in, child out; restore parent's heap and handle
         unsafe {

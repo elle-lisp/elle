@@ -8,6 +8,7 @@ mod escape;
 mod expr;
 mod lambda;
 mod pattern;
+mod reuse;
 
 use super::intrinsics::IntrinsicOp;
 use super::types::*;
@@ -228,6 +229,12 @@ pub struct Lowerer<'a> {
     /// Parameter bindings of the current function (for per-parameter
     /// independence analysis in self-tail-calls).
     current_function_params: Option<Vec<Binding>>,
+    /// Pending drops for let-binding last-use in Begin bodies.
+    /// Each entry is (expr_index, slot) meaning "emit DropValue for slot
+    /// after lowering expression at index expr_index in the current Begin."
+    /// Set by lower_let/lower_letrec before lowering the body.
+    /// Consumed by lower_begin after each expression.
+    begin_drops: Vec<(usize, u16)>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -260,6 +267,7 @@ impl<'a> Lowerer<'a> {
             closures: Vec::new(),
             current_function_binding: None,
             current_function_params: None,
+            begin_drops: Vec::new(),
         }
     }
 
@@ -341,8 +349,16 @@ impl<'a> Lowerer<'a> {
         self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
 
-        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
-        let closures = std::mem::take(&mut self.closures);
+        let mut entry =
+            std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
+        let mut closures = std::mem::take(&mut self.closures);
+
+        // Perceus Phase 3: fuse DropValue + Cons → ReuseSlotCons
+        reuse::reuse_fusion(&mut entry);
+        for c in &mut closures {
+            reuse::reuse_fusion(c);
+        }
+
         Ok(LirModule { entry, closures })
     }
 
