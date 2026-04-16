@@ -86,7 +86,10 @@ impl<'a> Lowerer<'a> {
             HirKind::Eval { expr, env } => self.lower_eval(expr, env),
             HirKind::Parameterize { bindings, body } => self.lower_parameterize(bindings, body),
 
-            HirKind::Error => Err("internal: error poison node in lowerer".to_string()),
+            HirKind::Error => Err(format!(
+                "internal: error poison node in lowerer at {}",
+                hir.span
+            )),
         }
     }
 
