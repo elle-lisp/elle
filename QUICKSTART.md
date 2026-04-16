@@ -82,6 +82,10 @@ make smoke                 # run all tests (~30s)
 | [bytecode](docs/impl/bytecode.md) | Instruction set, encoding |
 | [vm](docs/impl/vm.md) | Stack machine, dispatch |
 | [jit](docs/impl/jit.md) | Cranelift JIT compilation |
+| [wasm](docs/impl/wasm.md) | WebAssembly backend (Wasmtime) |
+| [mlir](docs/impl/mlir.md) | MLIR/LLVM CPU tier-2 backend |
+| [spirv](docs/impl/spirv.md) | SPIR-V emission for GPU compute |
+| [gpu](docs/impl/gpu.md) | End-to-end GPU compute (Vulkan) |
 | [values](docs/impl/values.md) | Value representation, tagged union |
 
 ## Reference

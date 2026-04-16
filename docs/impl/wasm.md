@@ -218,3 +218,13 @@ cargo test wasm
 | `--wasm-lir` | Print LIR before WASM emission |
 | `--wasm-no-stdlib` | Skip stdlib (for emitter testing) |
 | `--jit=0` | Disable cranelift optimization in Wasmtime |
+
+---
+
+## See also
+
+- [impl/lir.md](lir.md) — LIR that the WASM emitter consumes
+- [impl/vm.md](vm.md) — bytecode VM (full-module WASM replaces it; tiered complements it)
+- [impl/jit.md](jit.md) — Cranelift JIT alternative
+- [impl/mlir.md](mlir.md) — MLIR/LLVM tier-2 backend
+- [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan

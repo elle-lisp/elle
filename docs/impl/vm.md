@@ -78,4 +78,7 @@ src/vm/fiber.rs       Fiber state management
 
 - [impl/bytecode.md](bytecode.md) — instruction set
 - [impl/jit.md](jit.md) — JIT compilation
+- [impl/mlir.md](mlir.md) — MLIR/LLVM tier-2 path
+- [impl/wasm.md](wasm.md) — WebAssembly backend
+- [impl/gpu.md](gpu.md) — GPU compute pipeline
 - [impl/values.md](values.md) — Value representation
