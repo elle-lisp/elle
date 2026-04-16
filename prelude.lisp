@@ -240,6 +240,11 @@
             (while (< idx len)
               (let ((,var (get pairs idx))) ,;body)
               (assign idx (+ idx 1)))))
+         (:fiber
+          (var v (coro/resume seq))
+          (while v
+            (let ((,var v)) ,;body)
+            (assign v (coro/resume seq))))
          (_ (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
 
 ## case - equality dispatch (flat pairs)
