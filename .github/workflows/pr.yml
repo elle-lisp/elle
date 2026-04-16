@@ -109,6 +109,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: plugin-${{ matrix.plugin }}
+      - name: Install libclang (for bindgen — oxrocksdb-sys, etc.)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev
       - name: Build plugin
         run: cargo build --release -p elle-${{ matrix.plugin }}
       - name: Upload plugin .so
