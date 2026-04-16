@@ -178,7 +178,10 @@ fn emit_block_instructions(
                 regs.insert(dst.0, name);
             }
             LirInstr::Compare { dst, op, lhs, rhs } => {
-                let name = format!("%cmp{}_{}", block_idx, dst.0);
+                // arith.cmpi produces i1; extend to i64 for consistency with
+                // the rest of the i64-only LIR value domain (matches lower.rs).
+                let cmp_i1 = format!("%cmpi1_{}_{}", block_idx, dst.0);
+                let ext_i64 = format!("%cmp{}_{}", block_idx, dst.0);
                 let lv = regs
                     .get(&lhs.0)
                     .ok_or_else(|| format!("undef r{}", lhs.0))?;
@@ -194,9 +197,12 @@ fn emit_block_instructions(
                     CmpOp::Ge => "sge",
                 };
                 out.push_str(&format!(
-                    "{indent}{name} = arith.cmpi {pred}, {lv}, {rv} : i64\n"
+                    "{indent}{cmp_i1} = arith.cmpi {pred}, {lv}, {rv} : i64\n"
                 ));
-                regs.insert(dst.0, name);
+                out.push_str(&format!(
+                    "{indent}{ext_i64} = arith.extui {cmp_i1} : i1 to i64\n"
+                ));
+                regs.insert(dst.0, ext_i64);
             }
             LirInstr::StoreLocal { slot, src } => {
                 if let Some(name) = regs.get(&src.0) {
@@ -255,7 +261,16 @@ fn emit_multiblock(
                 then_label,
                 else_label,
             } => {
-                let cond_val = regs.get(&cond.0).ok_or("undef cond")?.clone();
+                let cond_raw = regs.get(&cond.0).ok_or("undef cond")?.clone();
+                // Compare to zero for truthiness (0=false, nonzero=true).
+                // scf.if expects i1; passing raw i64 fails verification.
+                let cond_cmp = format!("%cond_ne_{}", block_idx);
+                let cond_zero = format!("%cond_zero_{}", block_idx);
+                out.push_str(&format!("{indent}{cond_zero} = arith.constant 0 : i64\n"));
+                out.push_str(&format!(
+                    "{indent}{cond_cmp} = arith.cmpi ne, {cond_raw}, {cond_zero} : i64\n"
+                ));
+                let cond_val = cond_cmp;
                 let then_idx = lir
                     .blocks
                     .iter()

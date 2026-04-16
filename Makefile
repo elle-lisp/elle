@@ -45,10 +45,10 @@ all: elle plugins docs  ## Build everything
 # ── Build ───────────────────────────────────────────────────────────
 
 elle:  ## Build the Elle binary (release)
-	cargo build --release -p elle
+	cargo build --release -p elle --features wasm
 
 dev:  ## Build the Elle binary (debug, fast compile)
-	cargo build -p elle
+	cargo build -p elle --features wasm
 
 plugins:  ## Build all native plugins (.so)
 	@# Build elle alongside every plugin so cargo's feature resolver
@@ -126,7 +126,7 @@ doctest:  ## Test code examples in documentation (literate mode)
 		|| { echo "FAILED: doctest"; exit 1; }
 
 smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest
-	cargo build --release -p elle -q
+	cargo build --release -p elle --features wasm -q
 	./target/release/elle demos/docgen/generate.lisp
 
 plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)

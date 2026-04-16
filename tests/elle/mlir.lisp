@@ -64,4 +64,17 @@
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
 (assert (not (fn/gpu-eligible? ml-with-capture)) "capture disqualifies")
 
+# ── Branching with even values ────────────────────────────────────────
+# Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result
+# 2 would truncate to 0 (false). This test verifies the fix by using
+# comparisons where the branch condition is always 0 or 1.
+
+(defn ml-clamp [x lo hi]
+  (if (< x lo) lo (if (> x hi) hi x)))
+
+(repeat 15 (ml-clamp 5 0 10))
+(assert (= (ml-clamp -3 0 10) 0) "MLIR clamp below")
+(assert (= (ml-clamp 5 0 10) 5) "MLIR clamp within")
+(assert (= (ml-clamp 15 0 10) 10) "MLIR clamp above")
+
 (println "all MLIR tests passed")

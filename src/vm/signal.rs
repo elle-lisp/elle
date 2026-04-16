@@ -701,6 +701,58 @@ impl VM {
                     ),
                 }
             }
+            #[cfg(feature = "mlir")]
+            "git" => {
+                // arg is (closure . workgroup-size)
+                let (closure_val, wg_size): (Value, u32) = match arg.as_cons() {
+                    Some(c) => (c.first, c.rest.as_int().unwrap_or(256) as u32),
+                    None => (arg, 256),
+                };
+
+                let closure = match closure_val.as_closure() {
+                    Some(c) => c,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val(
+                                "type-error",
+                                format!("git: expected closure, got {}", closure_val.type_name()),
+                            ),
+                        )
+                    }
+                };
+                // Already cached? Return early.
+                if closure.template.spirv.get().is_some() {
+                    return (SIG_OK, closure_val);
+                }
+                let lir = match &closure.template.lir_function {
+                    Some(lir) => lir,
+                    None => {
+                        return (
+                            SIG_ERROR,
+                            error_val("mlir-error", "git: closure has no LIR".to_string()),
+                        )
+                    }
+                };
+                if !lir.is_gpu_eligible() {
+                    return (
+                        SIG_ERROR,
+                        error_val("mlir-error", "git: closure is not GPU-eligible".to_string()),
+                    );
+                }
+                let key = closure.template.bytecode.as_ptr();
+                let cache = self
+                    .mlir_cache
+                    .get_or_insert_with(crate::mlir::MlirCache::new);
+                match cache.compile_spirv(key, lir, wg_size) {
+                    Ok(bytes) => {
+                        // Cache on the template (OnceCell — idempotent).
+                        let _ = closure.template.spirv.set(bytes.to_vec());
+                        (SIG_OK, closure_val)
+                    }
+                    Err(e) => (SIG_ERROR, error_val("mlir-error", format!("git: {}", e))),
+                }
+            }
             _ => (
                 SIG_ERROR,
                 error_val(

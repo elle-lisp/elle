@@ -5,7 +5,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::syntax::{Syntax, SyntaxKind};
 use crate::value::closure::Closure;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::{error_val, Value};
@@ -493,6 +493,130 @@ pub(crate) fn prim_meta_origin(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::struct_from(fields))
 }
 
+/// Eagerly compile SPIR-V, cache on template, return the closure.
+///
+/// `(git f)` compiles the closure to SPIR-V and caches the bytes on the
+/// closure template's `spirv` OnceCell. Returns `f` (the template is now
+/// GIT'd — all closures sharing this template see the cached SPIR-V).
+///
+/// Optional second argument is workgroup size (default 256).
+pub(crate) fn prim_git(args: &[Value]) -> (SignalBits, Value) {
+    #[cfg(not(feature = "mlir"))]
+    {
+        let _ = args;
+        (
+            SIG_ERROR,
+            error_val("mlir-error", "git: requires --features mlir"),
+        )
+    }
+    #[cfg(feature = "mlir")]
+    {
+        if args.is_empty() || args.len() > 2 {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "arity-error",
+                    format!("git: expected 1-2 arguments, got {}", args.len()),
+                ),
+            );
+        }
+        let closure = match args[0].as_closure() {
+            Some(c) => c,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("git: expected closure, got {}", args[0].type_name()),
+                    ),
+                )
+            }
+        };
+        // Fast path: already cached
+        if closure.template.spirv.get().is_some() {
+            return (SIG_OK, args[0]);
+        }
+        // Check GPU eligibility upfront
+        if !closure.template.is_gpu_candidate() {
+            return (
+                SIG_ERROR,
+                error_val("mlir-error", "git: closure is not GPU-eligible"),
+            );
+        }
+        if closure.template.lir_function.is_none() {
+            return (
+                SIG_ERROR,
+                error_val("mlir-error", "git: closure has no LIR"),
+            );
+        }
+        let wg_size = if args.len() == 2 {
+            args[1].as_int().unwrap_or(256) as i64
+        } else {
+            256
+        };
+        // Delegate to VM via SIG_QUERY for MlirCache access.
+        (
+            SIG_QUERY,
+            Value::cons(
+                Value::keyword("git"),
+                Value::cons(args[0], Value::int(wg_size)),
+            ),
+        )
+    }
+}
+
+/// `(fn/git? f)` — true if the closure has cached SPIR-V bytes.
+pub(crate) fn prim_fn_git(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("fn/git?: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    if let Some(closure) = args[0].as_closure() {
+        (SIG_OK, Value::bool(closure.template.spirv.get().is_some()))
+    } else {
+        (SIG_OK, Value::FALSE)
+    }
+}
+
+/// `(disgit f)` — return cached SPIR-V bytes from a GIT'd closure.
+///
+/// Errors if `f` is not a closure or has not been GIT'd.
+pub(crate) fn prim_disgit(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() != 1 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!("disgit: expected 1 argument, got {}", args.len()),
+            ),
+        );
+    }
+    let closure = match args[0].as_closure() {
+        Some(c) => c,
+        None => {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "type-error",
+                    format!("disgit: expected closure, got {}", args[0].type_name()),
+                ),
+            )
+        }
+    };
+    match closure.template.spirv.get() {
+        Some(bytes) => (SIG_OK, Value::bytes(bytes.clone())),
+        None => (
+            SIG_ERROR,
+            error_val("mlir-error", "disgit: closure has not been GIT'd"),
+        ),
+    }
+}
+
 /// Declarative primitive definitions for meta-programming operations.
 pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
@@ -650,6 +774,42 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: r#"(defn foo () 42) (meta/origin foo)"#,
         aliases: &[],
     },
+    PrimitiveDef {
+        name: "git",
+        func: prim_git,
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        arity: Arity::Range(1, 2),
+        doc: "Eagerly compile a GPU-eligible closure to SPIR-V and cache on its template. \
+              Returns the closure. All closures sharing the same template see the cached SPIR-V. \
+              Optional second argument is workgroup size (default 256).",
+        params: &["f", "workgroup-size"],
+        category: "fn",
+        example: "(git (fn [a b] (+ a b)))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "fn/git?",
+        func: prim_fn_git,
+        signal: Signal::silent(),
+        arity: Arity::Exact(1),
+        doc: "Returns true if the closure has cached SPIR-V bytes (has been GIT'd).",
+        params: &["f"],
+        category: "fn",
+        example: "(fn/git? (fn [a b] (+ a b)))",
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "disgit",
+        func: prim_disgit,
+        signal: Signal::errors(),
+        arity: Arity::Exact(1),
+        doc: "Return the cached SPIR-V bytes from a GIT'd closure. \
+              Errors if the closure has not been GIT'd.",
+        params: &["f"],
+        category: "fn",
+        example: "(disgit (git (fn [a b] (+ a b))))",
+        aliases: &["fn/disgit"],
+    },
 ];
 
 // Behavioral tests for the primitives in this module are in
@@ -690,6 +850,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         Value::closure(Closure {
             template,

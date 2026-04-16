@@ -408,6 +408,7 @@ impl Emitter {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    spirv: std::cell::OnceCell::new(),
 
                     rotation_safe: func.rotation_safe,
                 };

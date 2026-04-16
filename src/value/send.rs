@@ -844,6 +844,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 result_is_immediate: false,
                 has_outward_heap_set: false,
                 wasm_func_idx: None,
+                spirv: std::cell::OnceCell::new(),
             });
 
             let val = Value::closure(Closure {
@@ -984,6 +985,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure = Closure {
             template,
@@ -1051,6 +1053,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let outer_closure = Closure {
             template: outer_template,

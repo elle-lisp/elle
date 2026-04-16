@@ -251,6 +251,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
             rotation_safe: false,
         });
 
@@ -460,6 +461,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
             rotation_safe: false,
         });
 

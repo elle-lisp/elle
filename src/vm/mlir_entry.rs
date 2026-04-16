@@ -30,7 +30,7 @@ impl VM {
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);
         if cache.contains(bytecode_ptr) {
-            return Some(self.run_mlir_cached(bytecode_ptr, args));
+            return self.run_mlir_cached(bytecode_ptr, args);
         }
         if cache.is_rejected(bytecode_ptr) {
             return None;
@@ -43,9 +43,11 @@ impl VM {
             return None;
         }
 
-        // Full LIR instruction walk (only for hot functions)
+        // Full LIR instruction walk (only for hot functions).
+        // Use the stricter MLIR-CPU eligibility check: the return register
+        // must round-trip through i64 as an integer, not as nil/bool/compare.
         let lir = closure.template.lir_function.as_ref()?;
-        if !lir.is_gpu_eligible() {
+        if !lir.is_mlir_cpu_eligible() {
             return None;
         }
 
@@ -59,7 +61,7 @@ impl VM {
                         closure.template.name.as_deref().unwrap_or("<anon>")
                     );
                 }
-                Some(self.run_mlir_cached(bytecode_ptr, args))
+                self.run_mlir_cached(bytecode_ptr, args)
             }
             Err(e) => {
                 // Cache rejection so we don't retry on every call
@@ -77,22 +79,40 @@ impl VM {
     }
 
     /// Execute a cached MLIR function, unboxing args and reboxing the result.
-    fn run_mlir_cached(&mut self, bytecode_ptr: *const u8, args: &[Value]) -> Option<SignalBits> {
-        // Unbox: extract i64 payload from each Value
-        let i64_args: Vec<i64> = args.iter().map(|v| v.as_int().unwrap_or(0)).collect();
+    ///
+    /// Returns:
+    /// - `None` — MLIR can't handle this call (non-int arg or cache miss);
+    ///   caller should fall through to Cranelift/interpreter.
+    /// - `Some(None)` — handled, no signal.
+    /// - `Some(Some(bits))` — handled with signal (error stored in fiber.signal).
+    fn run_mlir_cached(
+        &mut self,
+        bytecode_ptr: *const u8,
+        args: &[Value],
+    ) -> Option<Option<SignalBits>> {
+        // Type check: all args must be integers. Other types (nil, bool, etc.)
+        // can't round-trip through i64 without losing type information —
+        // the bytecode path handles those correctly.
+        let mut i64_args: Vec<i64> = Vec::with_capacity(args.len());
+        for v in args {
+            match v.as_int() {
+                Some(n) => i64_args.push(n),
+                None => return None, // non-int arg — fall through to bytecode
+            }
+        }
 
         let cache = self.mlir_cache.as_ref().unwrap();
         match cache.call(bytecode_ptr, &i64_args) {
             Some(Ok(result)) => {
                 self.fiber.stack.push(Value::int(result));
-                None // no signal
+                Some(None) // handled, no signal
             }
             Some(Err(_)) => {
                 let err =
                     crate::value::error_val("mlir-error", "MLIR execution failed".to_string());
                 self.fiber.signal = Some((SIG_ERROR, err));
                 self.fiber.stack.push(Value::NIL);
-                None
+                Some(Some(SIG_ERROR))
             }
             None => None,
         }

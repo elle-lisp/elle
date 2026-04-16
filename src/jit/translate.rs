@@ -674,6 +674,7 @@ impl<'a> FunctionTranslator<'a> {
                     result_is_immediate: func.result_is_immediate,
                     has_outward_heap_set: func.has_outward_heap_set,
                     wasm_func_idx: None,
+                    spirv: std::cell::OnceCell::new(),
                 };
                 let template_closure = crate::value::Closure {
                     template: std::rc::Rc::new(template),

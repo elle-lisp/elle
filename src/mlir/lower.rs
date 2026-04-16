@@ -258,10 +258,23 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                 let cond_i64 = *regs
                     .get(&cond.0)
                     .ok_or_else(|| format!("undefined reg r{} in branch", cond.0))?;
-                // Truncate i64 → i1 for cond_br
-                let i1_type: Type = IntegerType::new(context, 1).into();
-                let trunc = block.append_operation(arith::trunci(cond_i64, i1_type, location));
-                let cond_val: Value = trunc.result(0).unwrap().into();
+                // Compare to zero for truthiness (0=false, nonzero=true).
+                // trunci would take the LSB, giving wrong results for even
+                // nonzero values (e.g. 2 → false).
+                let zero = block.append_operation(arith::constant(
+                    context,
+                    IntegerAttribute::new(i64_type, 0).into(),
+                    location,
+                ));
+                let zero_val: Value = zero.result(0).unwrap().into();
+                let cmp = block.append_operation(arith::cmpi(
+                    context,
+                    CmpiPredicate::Ne,
+                    cond_i64,
+                    zero_val,
+                    location,
+                ));
+                let cond_val: Value = cmp.result(0).unwrap().into();
                 let then_idx = *label_to_idx
                     .get(&then_label.0)
                     .ok_or_else(|| format!("unknown then label {}", then_label.0))?;

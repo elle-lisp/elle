@@ -70,36 +70,67 @@
 
 ## ── Compiler-generated GPU map ────────────────────────────────
 
-(defn gpu-map [f data &named ctx dtype wg-size]
-  "Map a GPU-eligible function over an array using compiler-generated SPIR-V.
+## Split a rest-args list at the first keyword: return [inputs kw-struct].
+## Keyword args follow (kw val kw val ...) after the positional args.
+(defn split-kwargs [args]
+  (var xs args)
+  (var inputs @[])
+  (while (and (not (empty? xs)) (not (keyword? (first xs))))
+    (push inputs (first xs))
+    (assign xs (rest xs)))
+  (var kw @{})
+  (let [[pairs (->array xs)]]
+    (var i 0)
+    (while (< i (length pairs))
+      (put kw (pairs i) (pairs (+ i 1)))
+      (assign i (+ i 2))))
+  [inputs kw])
+
+(defn gpu-map [f & rest-args]
+  "Map a GPU-eligible function over N input arrays using compiler-generated SPIR-V.
    f: a GPU-eligible closure (pure arithmetic, no I/O or captures).
-   data: input array of integers.
+   rest-args: one or more input arrays of integers (must match fn arity),
+              optionally followed by keyword args.
    Returns: array of results.
 
    Requires elle built with --features mlir.
 
-   Optional named args:
+   If f has been GIT'd (via (git f)), the cached SPIR-V is reused;
+   otherwise SPIR-V is compiled on the fly via mlir/compile-spirv.
+
+   Optional keyword args:
      :ctx       — Vulkan context (created if not given)
      :dtype     — :i64 (default), :i32, :u32, or :f32
      :wg-size   — workgroup size (default 256)
 
-   Example: (gpu:map (fn [x] (* x x)) [1 2 3 4])"
-  (default ctx (plugin:init))
-  (default dtype :i64)
-  (default wg-size 256)
-  (let* [[n          (length data)]
-         [num-bufs   (+ (fn/arity f) 1)]
-         [spirv      (mlir/compile-spirv f wg-size)]
-         [shader     (plugin:shader ctx spirv num-bufs)]
-         [wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))]
-         [in-buf     {:data data :usage :input :dtype dtype}]
-         [elem-size  (if (= dtype :i64) 8 4)]
-         [out-buf    {:size (* n elem-size) :usage :output}]
-         [handle     (plugin:dispatch shader wg-count 1 1
-                       [in-buf out-buf])]
-         [_          (plugin:wait handle)]
-         [result     (plugin:decode (plugin:collect handle) dtype)]]
-    result))
+   Examples:
+     (gpu:map (fn [x] (* x x)) [1 2 3 4])
+     (gpu:map (fn [a b] (+ a b)) [1 2 3] [4 5 6])
+     (gpu:map select [1 0 1 0] [10 20 30 40] [100 200 300 400])"
+  (let* [[parts      (split-kwargs rest-args)]
+         [inputs     (parts 0)]
+         [opts       (parts 1)]
+         [ctx        (or (get opts :ctx) (plugin:init))]
+         [dtype      (or (get opts :dtype) :i64)]
+         [wg-size    (or (get opts :wg-size) 256)]]
+    (assert (= (length inputs) (fn/arity f))
+            "gpu:map: number of input arrays must match function arity")
+    (let* [[n          (length (inputs 0))]
+           [_          (each inp in inputs
+                        (assert (= (length inp) n)
+                                "gpu:map: all input arrays must have the same length"))]
+           [num-bufs   (+ (length inputs) 1)]
+           [spirv      (if (fn/git? f) (disgit f) (mlir/compile-spirv f wg-size))]
+           [shader     (plugin:shader ctx spirv num-bufs)]
+           [wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))]
+           [elem-size  (if (= dtype :i64) 8 4)]
+           [in-bufs    (map (fn [data] {:data data :usage :input :dtype dtype}) inputs)]
+           [out-buf    {:size (* n elem-size) :usage :output}]
+           [bufs       (push (concat in-bufs) out-buf)]
+           [handle     (plugin:dispatch shader wg-count 1 1 bufs)]
+           [_          (plugin:wait handle)]
+           [result     (plugin:decode (plugin:collect handle) dtype)]]
+      result)))
 
 ## ── Export ─────────────────────────────────────────────────────
 {:init        gpu-init

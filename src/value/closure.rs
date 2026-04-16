@@ -66,6 +66,10 @@ pub struct ClosureTemplate {
     /// WASM function table index (if compiled to WASM backend).
     /// When set, rt_call dispatches to this WASM function instead of bytecode.
     pub wasm_func_idx: Option<u32>,
+    /// Cached SPIR-V bytes (write-once). Populated by `(git f)`.
+    /// SPIR-V is a property of the code, not the instance — all closures
+    /// from the same lambda share the template, so the cache is shared.
+    pub spirv: std::cell::OnceCell<Vec<u8>>,
 }
 
 impl ClosureTemplate {
@@ -198,6 +202,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         })
     }
 
@@ -236,6 +241,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure = Closure {
             template,
@@ -266,6 +272,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure2 = Closure {
             template: template2,
@@ -296,6 +303,7 @@ mod tests {
             result_is_immediate: false,
             has_outward_heap_set: false,
             wasm_func_idx: None,
+            spirv: std::cell::OnceCell::new(),
         });
         let closure3 = Closure {
             template: template3,
