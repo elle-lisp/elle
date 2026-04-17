@@ -142,9 +142,9 @@
   (send pin {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}})
   (let [[r (recv-response pout 2)]]
     (let [[tools (get (get r "result") "tools")]]
-      (test "tools/list: exposes 20 tools"
-        (= (length tools) 20)
-        (string "expected 20, got " (length tools)))))
+      (test "tools/list: exposes 21 tools"
+        (= (length tools) 21)
+        (string "expected 21, got " (length tools)))))
 
   ## ── 3. ping ───────────────────────────────────────────────────────────
   (send pin {:jsonrpc "2.0" :id 3 :method "ping" :params {}})
@@ -249,6 +249,48 @@
   (let [[r (recv-response pout 12)]]
     (test "unknown method: returns error object"
       (not (nil? (get r "error"))) "expected error response"))
+
+  ## ── 13. err-msg: struct error has readable message ──────────────────
+  ## Trigger an error via a bad SPARQL query — the error message should
+  ## contain useful info, not "nil" (which happens if the error is a
+  ## string and the old code calls (get string-error :message)).
+  (let [[r (call-tool pin pout 13 "sparql_query"
+             {:query "THIS IS NOT VALID SPARQL"})]]
+    (let [[text (tool-text r)]]
+      (test "err-msg: SPARQL error has readable message"
+        (and (string/contains? text "SPARQL error")
+             (not (string/contains? text "nil")))
+        (string "got: " text))))
+
+  ## ── 14. err-msg: tool dispatch error has readable message ────────────
+  ## Call a tool with bad arguments that causes an internal error.
+  ## The error message in the response should not be "nil".
+  (let [[r (call-tool pin pout 14 "verify_invariants"
+             {:path "/nonexistent/invariants.lisp"})]]
+    (let [[text (tool-text r)]]
+      (test "err-msg: tool error has readable message"
+        (not (string/contains? text "Internal error: nil"))
+        (string "got: " text))))
+
+  ## ── 15. flush: response arrives immediately ──────────────────────────
+  ## After sending a ping, the response should arrive within 5 seconds.
+  ## This verifies flush is working (without flush, pipe-buffered stdout
+  ## may not deliver the response until the buffer fills).
+  (let [[[ok? r] (protect (ev/timeout 5 (fn []
+      (send pin {:jsonrpc "2.0" :id 15 :method "ping" :params {}})
+      (recv-response pout 15))))]]
+    (test "flush: ping response arrives promptly" ok?
+      "response was not delivered within 5 seconds"))
+
+  ## ── 16. async dispatch: concurrent requests ──────────────────────────
+  ## Send two pings back-to-back; both should get responses.
+  (send pin {:jsonrpc "2.0" :id 16 :method "ping" :params {}})
+  (send pin {:jsonrpc "2.0" :id 17 :method "ping" :params {}})
+  (let [[[ok? _] (protect (ev/timeout 10 (fn []
+      (recv-response pout 16)
+      (recv-response pout 17))))]]
+    (test "async: concurrent pings both respond" ok?
+      "did not receive both responses within 10 seconds"))
 
   (println "")
   (println "all MCP tests passed."))

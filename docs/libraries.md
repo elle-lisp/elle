@@ -28,7 +28,7 @@ pattern and are imported via `(import "std/<name>")`.
 |--------|--------|-------------|
 | portrait | `(import "std/portrait")` | Semantic portraits from compile/analyze: signal profiles, phases, composition |
 | contract | `(import "std/contract")` | Compositional validation for function boundaries |
-| rdf | `(import "std/rdf")` | RDF triple generation for the Elle knowledge graph |
+| rdf | `(import "std/rdf/elle")` | RDF triple generation for the Elle knowledge graph |
 
 ## Observability
 

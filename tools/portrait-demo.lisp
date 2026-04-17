@@ -4,7 +4,7 @@
 ## Elle/Rust boundary, revealing properties the programmer never declared.
 
 (def portrait ((import "std/portrait")))
-(def rdf ((import "std/rdf")))
+(def rdf ((import "std/rdf/elle")))
 
 (def src (file/read "examples/pipeline.lisp"))
 (def a (compile/analyze src {:file "examples/pipeline.lisp"}))

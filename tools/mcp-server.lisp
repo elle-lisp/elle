@@ -31,15 +31,22 @@
 (def saved-stderr (*stderr*))
 
 (def ox (import "plugin/oxigraph"))
-(def syn (import "plugin/syn"))
 (def glob ((import "std/glob")))
 (def portrait-lib ((import "std/portrait")))
-(def rdf ((import "std/rdf")))
-(def rust-rdf ((import "tools/rust-rdf-lib") syn))
+(def rdf ((import "std/rdf/elle")))
 
-# ── Watch library ───────────────────────────────────────────────────────
+# syn plugin is optional — Rust graph features are disabled without it.
+(var syn nil)
+(var rust-rdf nil)
+(let [[[ok? s] (protect (import "plugin/syn"))]]
+  (when ok?
+    (assign syn s)
+    (assign rust-rdf ((import "std/rdf/rust") syn))))
+
+# ── Watch + UUID libraries ──────────────────────────────────────────────
 
 (def watch ((import "std/watch")))
+(def uuid-lib ((import "std/uuid")))
 
 # ── Store initialization ─────────────────────────────────────────────────
 
@@ -52,9 +59,21 @@
     (true                          ".elle-mcp/store")))
 
 (defn nuke-store [path]
-  "Delete a corrupt store directory so it can be recreated fresh."
-  (each entry in (glob:glob (string path "/*"))
-    (file/delete entry))
+  "Delete a corrupt store directory so it can be recreated fresh.
+   Refuses to delete if no oxigraph marker file (LOCK) is found."
+  (let [[entries (glob:glob (string path "/*"))]]
+    (when (not (empty? entries))
+      (var has-marker false)
+      (each e in entries
+        (when (or (string/ends-with? e "/LOCK")
+                  (string/ends-with? e "/CURRENT"))
+          (assign has-marker true)))
+      (unless has-marker
+        (error {:error :safety
+                :message (string "refusing to nuke " path
+                          ": does not look like an oxigraph store")}))
+      (each entry in entries
+        (file/delete entry))))
   nil)
 
 (defn open-store [path]
@@ -86,20 +105,22 @@
 (defn populate-rust []
   "Parse source .rs files, load Rust triples and primitive cross-links.
    Yields between files so the main loop can process requests.
-   Scans only source directories to avoid the deep target/ tree."
-  (var files @[])
-  (each pattern in rust-source-globs
-    (each f in (glob:glob pattern)
-      (push files f)))
-  (var count 0)
-  (each file in files
-    (when-ok [_ (begin
-                  (ox:load store (rust-rdf:file file) :ntriples)
-                  (ox:load store (rust-rdf:primitive-links file) :ntriples))]
-      (assign count (inc count)))
-    (yield nil))
-  (flush-store)
-  count)
+   Skips entirely when the syn plugin is not available."
+  (if (nil? rust-rdf) 0
+    (begin
+      (var files @[])
+      (each pattern in rust-source-globs
+        (each f in (glob:glob pattern)
+          (push files f)))
+      (var count 0)
+      (each file in files
+        (when-ok [_ (begin
+                      (ox:load store (rust-rdf:file file) :ntriples)
+                      (ox:load store (rust-rdf:primitive-links file) :ntriples))]
+          (assign count (inc count)))
+        (yield nil))
+      (flush-store)
+      count)))
 
 (defn clear-file-triples [path]
   "Remove all triples for a file from the RDF store."
@@ -108,7 +129,10 @@
       (string/replace path "\\" "\\\\"))))
 
 (defn populate-file [analysis path]
-  "Load triples for an analyzed file, replacing any existing."
+  "Load triples for an analyzed file, replacing any existing.
+   Delete-then-load is not atomic, but both are FFI calls (no yield),
+   so the gap is crash-only — a crash between them loses triples for
+   this file until the next analyze repopulates them."
   (clear-file-triples path)
   (ox:load store (rdf:file analysis path) :ntriples)
   (flush-store))
@@ -116,21 +140,67 @@
 # ── Analysis cache ───────────────────────────────────────────────────────
 
 (def analysis-cache @{})
+(def analyzing-map @{})
 
 (defn get-or-analyze [path]
-  "Return cached analysis or analyze the file fresh."
+  "Return cached analysis or analyze the file fresh.
+   Guards against concurrent analysis of the same file — if another
+   fiber is already analyzing this path, returns the stale cache entry."
   (var cached (get analysis-cache path))
   (if (not (nil? cached))
     cached
-    (begin
-      (var result (compile/analyze (file/read path) {:file path}))
-      (put analysis-cache path result)
-      (populate-file result path)
-      result)))
+    (if (not (nil? (get analyzing-map path)))
+      nil
+      (begin
+        (put analyzing-map path true)
+        (defer (put analyzing-map path nil)
+          (var result (compile/analyze (file/read path) {:file path}))
+          (put analysis-cache path result)
+          (populate-file result path)
+          result)))))
 
 (defn invalidate-cache [path]
   "Remove a path from the analysis cache so it is re-analyzed on next access."
   (put analysis-cache path nil))
+
+# ── Eval handle table ───────────────────────────────────────────────────
+
+(def eval-handles @{})
+
+(defn handle-put [value]
+  "Store a value in the handle table, return its UUID."
+  (let [[id (uuid-lib:v4)]]
+    (put eval-handles id {:value value})
+    id))
+
+(defn handle-get [id]
+  "Retrieve a value by handle. Errors if the handle is unknown."
+  (let [[entry (get eval-handles id)]]
+    (when (nil? entry)
+      (error {:error :unknown-handle :message (string "unknown handle: " id)}))
+    (get entry :value)))
+
+(defn value-kind [val is-error]
+  "Kind string for a value. Reports :error when the eval failed."
+  (if is-error ":error" (string ":" (type-of val))))
+
+(defn value-shape [val]
+  "Cheap shape hint: count for collections, keys_sample for structs."
+  (case (type-of val)
+    :array   {:count (length val)}
+    :@array  {:count (length val)}
+    :list    {:count (length val)}
+    :struct  (let [[ks (keys val)]]
+               {:count (length ks)
+                :keys_sample (freeze (take 5 ks))})
+    :@struct (let [[ks (keys val)]]
+               {:count (length ks)
+                :keys_sample (freeze (take 5 ks))})
+    :string  {:bytes (length val)}
+    :@string {:bytes (length val)}
+    :set     {:count (length val)}
+    :@set    {:count (length val)}
+    nil))
 
 # ── Signal diff (for watch notifications) ────────────────────────────────
 
@@ -197,7 +267,13 @@
   [{:type "text" :text text :isError true}])
 
 (defn send-response [response]
-  (println (json/serialize response)))
+  (println (json/serialize response))
+  (port/flush (*stdout*)))
+
+(defn err-msg [e]
+  "Safely extract a message from any error value.
+   Works on structs (extracts :message), strings, and other types."
+  (if (struct? e) (or (get e :message) (string e)) (string e)))
 
 (defn ->list [coll]
   "Convert any collection to a list for string/join."
@@ -324,19 +400,32 @@
                               :depth    {:type "integer" :description "Max Rust call depth (default: 2)"}}
                  :required ["path" "function"]}})
 
+(def tool-eval
+  {:name "eval"
+   :description "Evaluate an Elle lambda against the persistent image. Returns a handle (UUID) naming the result — large values stay in the image. Compose by passing prior handles as inputs. stdout/stderr are captured and returned."
+   :inputSchema {:type "object"
+                 :properties {:lambda     {:type "string"
+                                           :description "Elle source for a callable expression, e.g. \"(fn [prev] (take 10 prev))\""}
+                              :inputs     {:type "array"
+                                           :items {:type "string"}
+                                           :description "Handles from prior eval calls, passed positionally as arguments"}
+                              :timeout_ms {:type "integer"
+                                           :description "Wall-clock timeout in milliseconds (default: 10000; 0 to disable)"}}
+                 :required ["lambda"]}})
+
 # ── SPARQL tool handlers ─────────────────────────────────────────────────
 
 (defn call-sparql-query [arguments]
   (let [[query (get arguments "query")]]
     (when (nil? query)
       (error {:error :invalid-params :message "missing required parameter: query"}))
-    (let [[[ok? result] (protect (ox:query store query))]]
+    (let [[[ok? result] (protect (ev/timeout 30 (fn [] (ox:query store query))))]]
       (if ok?
         (text-content (cond
           ((boolean? result) (if result "true" "false"))
           ((array? result)   (if (empty? result) "No results." (json/pretty result)))
           (true              (string result))))
-        (error-content (string/format "SPARQL error: {}" (get result :message)))))))
+        (error-content (string/format "SPARQL error: {}" (err-msg result)))))))
 
 (defn call-sparql-update [arguments]
   (let [[update-str (get arguments "update")]]
@@ -345,7 +434,7 @@
     (let [[[ok? result] (protect (ox:update store update-str))]]
       (if ok?
         (begin (flush-store) (text-content "Update executed successfully."))
-        (error-content (string/format "SPARQL update error: {}" (get result :message)))))))
+        (error-content (string/format "SPARQL update error: {}" (err-msg result)))))))
 
 (defn call-load-rdf [arguments]
   (let [[data (get arguments "data")]
@@ -357,14 +446,14 @@
     (let [[[ok? result] (protect (ox:load store data (keyword fmt)))]]
       (if ok?
         (begin (flush-store) (text-content "RDF data loaded successfully."))
-        (error-content (string/format "Load error: {}" (get result :message)))))))
+        (error-content (string/format "Load error: {}" (err-msg result)))))))
 
 (defn call-dump-rdf [arguments]
   (let* [[fmt (or (get arguments "format") "turtle")]
          [[ok? result] (protect (ox:dump store (keyword fmt)))]]
     (if ok?
       (text-content result)
-      (error-content (string/format "Dump error: {}" (get result :message))))))
+      (error-content (string/format "Dump error: {}" (err-msg result))))))
 
 # ── Semantic tool handlers ───────────────────────────────────────────────
 
@@ -516,7 +605,7 @@
     (if ok?
       (assign invariants result)
       (error {:error :parse-error
-              :message (string/format "cannot parse invariants: {}" (get result :message))})))
+              :message (string/format "cannot parse invariants: {}" (err-msg result))})))
 
   (var out @"")
   (var pass-count 0)
@@ -530,7 +619,7 @@
       (if ok?
         (assign actual result)
         (begin
-          (push out (string/format "  x {} — query error: {}\n" name (get result :message)))
+          (push out (string/format "  x {} — query error: {}\n" name (err-msg result)))
           (assign fail-count (+ fail-count 1)))))
     (when (not (nil? actual))
       (if (= actual expected)
@@ -608,6 +697,9 @@
   (freeze out))
 
 (defn call-trace [arguments]
+  (when (nil? rust-rdf)
+    (error {:error :unavailable
+            :message "trace requires the syn plugin (plugin/syn not found)"}))
   (var path (get arguments "path"))
   (var fn-name (get arguments "function"))
   (var max-depth (or (get arguments "depth") 2))
@@ -669,6 +761,107 @@
         (push out (format-rust-tree children "         ")))))
 
   (text-content (freeze out)))
+
+# ── Eval tool handler ──────────────────────────────────────────────────
+
+(defn call-eval [arguments]
+  (let* [[lambda-src (get arguments "lambda")]
+         [input-ids  (or (get arguments "inputs") [])]
+         [timeout-ms (or (get arguments "timeout_ms") 10000)]]
+
+    (when (nil? lambda-src)
+      (error {:error :invalid-params :message "missing required parameter: lambda"}))
+
+    # Parse the lambda source
+    (var parsed nil)
+    (let [[[ok? val] (protect (read lambda-src))]]
+      (if ok? (assign parsed val)
+        (error {:error :parse-error
+                :message (string "cannot parse lambda: " (err-msg val))})))
+
+    # Eval to get a callable value
+    (var callable nil)
+    (let [[[ok? val] (protect (eval parsed))]]
+      (if ok? (assign callable val)
+        (error {:error :eval-error
+                :message (string "lambda eval failed: " (err-msg val))})))
+
+    (when (not (callable? callable))
+      (error {:error :type-error
+              :message (string "lambda must evaluate to a callable, got "
+                         (type-of callable))}))
+
+    # Resolve input handles
+    (var input-vals @[])
+    (each id in input-ids
+      (push input-vals (handle-get id)))
+
+    # Arity check for closures
+    (when (= (type-of callable) :closure)
+      (let [[a (arity callable)]
+            [n (length input-ids)]]
+        (cond
+          ((nil? a)     nil)
+          ((integer? a) (unless (= a n)
+                          (error {:error :arity-mismatch
+                                  :message (string "lambda expects " a " args, got " n)})))
+          (true         (unless (>= n (first a))
+                          (error {:error :arity-mismatch
+                                  :message (string "lambda expects at least "
+                                             (first a) " args, got " n)}))))))
+
+    # Set up temp files for I/O capture
+    (file/mkdir-all ".elle-mcp")
+    (let* [[eval-id (uuid-lib:v4)]
+           [out-path (string ".elle-mcp/eval-" eval-id "-out")]
+           [err-path (string ".elle-mcp/eval-" eval-id "-err")]
+           [out-port (port/open out-path :write)]
+           [err-port (port/open err-path :write)]]
+      (defer (begin
+               (protect (file/delete out-path))
+               (protect (file/delete err-path)))
+
+        # Execute with I/O capture and optional timeout
+        (let* [[input-list (freeze input-vals)]
+               [thunk (fn []
+                        (parameterize ((*stdout* out-port) (*stderr* err-port))
+                          (apply callable input-list)))]
+               [start (clock/monotonic)]
+               [[ok? result] (if (and timeout-ms (> timeout-ms 0))
+                               (protect (ev/timeout (/ timeout-ms 1000) thunk))
+                               (protect (thunk)))]
+               [duration-ns (int (* (- (clock/monotonic) start) 1000000000))]]
+
+          # Flush and close captured I/O ports
+          (protect (port/flush out-port))
+          (protect (port/flush err-port))
+          (protect (port/close out-port))
+          (protect (port/close err-port))
+
+          # Read captured output
+          (var stdout-text "")
+          (var stderr-text "")
+          (let [[[rd-ok? rd-val] (protect (file/read out-path))]]
+            (when rd-ok? (assign stdout-text rd-val)))
+          (let [[[rd-ok? rd-val] (protect (file/read err-path))]]
+            (when rd-ok? (assign stderr-text rd-val)))
+
+          # Build response
+          (let* [[handle (handle-put result)]
+                 [kind (value-kind result (not ok?))]
+                 [shape (if ok?
+                          (value-shape result)
+                          {:reason (get result :error)
+                           :message (err-msg result)})]]
+            (text-content (json/serialize
+              {:ok ok?
+               :handle handle
+               :kind kind
+               :shape shape
+               :stdout stdout-text
+               :stderr stderr-text
+               :duration_ns duration-ns
+               :fibers []}))))))))
 
 # ── Test orchestration ───────────────────────────────────────────────────
 
@@ -734,7 +927,7 @@
   [tool-ping tool-sparql-query tool-sparql-update tool-load-rdf tool-dump-rdf
    tool-analyze-file tool-portrait tool-signal-query tool-impact
    tool-verify-invariants tool-compile-rename tool-compile-extract
-   tool-compile-parallelize tool-trace
+   tool-compile-parallelize tool-trace tool-eval
    tool-test-run tool-test-status tool-test-history tool-test-gate
    tool-push-ready tool-push-wip])
 
@@ -774,10 +967,21 @@
       (push failures {:message (string/trim line)})))
   (freeze failures))
 
+(defn turtle-escape [s]
+  "Escape a string for embedding in a Turtle literal."
+  (var esc (string/replace s "\\" "\\\\"))
+  (assign esc (string/replace esc "\"" "\\\""))
+  (assign esc (string/replace esc "\n" "\\n"))
+  (assign esc (string/replace esc "\r" "\\r"))
+  esc)
+
 (defn store-test-result [sha mode clean passed duration failures stderr]
-  "Store test result as RDF triples."
+  "Store test result as RDF triples, including truncated stderr."
   (let* [[iri (string/format "urn:test:{}:{}" sha mode)]
          [timestamp (clock/realtime)]
+         [trunc-stderr (if (> (length stderr) 10000)
+                         (string (slice stderr 0 10000) "\n...[truncated]")
+                         stderr)]
          [ttl (string/format
                "<{}> a <urn:elle:TestRun> ;
                    <urn:elle:sha> \"{}\" ;
@@ -786,13 +990,16 @@
                    <urn:elle:passed> {} ;
                    <urn:elle:duration> {} ;
                    <urn:elle:timestamp> \"{}\" ;
-                   <urn:elle:failed-count> {} ."
+                   <urn:elle:failed-count> {} ;
+                   <urn:elle:stderr> \"{}\" ."
                iri sha mode
                (if clean "true" "false")
                (if passed "true" "false")
                duration timestamp
-               (length failures))]]
-    # Delete old result for this sha+mode
+               (length failures)
+               (turtle-escape trunc-stderr))]]
+    # Delete old result for this sha+mode, then insert new.
+    # Both are FFI calls (no yield), so the gap is crash-only.
     (protect (ox:update store
       (string/format "DELETE WHERE {{ <{}> ?p ?o . }}" iri)))
     (protect (ox:load store ttl :turtle))
@@ -949,6 +1156,7 @@
     "compile_extract"     (call-compile-extract arguments)
     "compile_parallelize" (call-compile-parallelize arguments)
     "trace"               (call-trace arguments)
+    "eval"                (call-eval arguments)
     "test_run"            (call-test-run arguments)
     "test_status"         (call-test-status arguments)
     "test_history"        (call-test-history arguments)
@@ -978,7 +1186,7 @@
         (jsonrpc-result id {:content content})
         (jsonrpc-result id {:content (error-content
                                        (string/format "Internal error: {}"
-                                         (get content :message)))
+                                         (err-msg content)))
                             :isError true})))))
 
 (defn handle-ping [id _params]
@@ -1004,10 +1212,10 @@
 
 # Population fiber — yields between work units so the main loop
 # can process requests between FFI calls.
+(populate-primitives)
+(eprintln "  primitives: loaded")
+
 (def populator (fiber/new (fn []
-  (populate-primitives)
-  (yield nil)
-  (eprintln "  primitives: loaded")
   (var count (populate-rust))
   (eprintln "  rust: " count " files loaded")
   (send-response {:jsonrpc "2.0"
@@ -1015,7 +1223,7 @@
                   :params {:primitives true :rust count}}))
   |:yield|))
 
-# Kick off population — runs populate-primitives, then yields
+# Initial resume — starts populate-rust, runs until first (yield nil)
 (fiber/resume populator nil)
 
 (defn tick-populator []
@@ -1023,31 +1231,39 @@
   (when (= (fiber/status populator) :paused)
     (fiber/resume populator nil)))
 
-# Watcher fiber
+# Watcher fiber — restarts on crash, capped at 5 attempts.
 (eprintln "  watch: enabled")
 (ev/spawn (fn []
-  (var watcher (watch:start "." :filter ".lisp"))
-  (watch:each watcher (fn [event]
-    (let [[path (get event :path)]]
-      (when (and (string/ends-with? path ".lisp")
-                 (contains? |:create :modify| (get event :kind)))
-        (let [[[ok? err] (protect
-                (begin
-                  (var old-analysis (get analysis-cache path))
-                  (var old-sigs (when (not (nil? old-analysis))
-                                  (snapshot-signals old-analysis)))
-                  (invalidate-cache path)
-                  (var new-analysis (get-or-analyze path))
-                  (var new-sigs (snapshot-signals new-analysis))
-                  (when (not (nil? old-sigs))
-                    (var diff (diff-signals old-sigs new-sigs))
-                    (when (or (not (empty? (get diff :added)))
-                              (not (empty? (get diff :removed)))
-                              (not (empty? (get diff :changed))))
-                      (send-response (build-notification path diff))))
-                  (eprintln "  re-analyzed: " path)))]]
-          (unless ok?
-            (eprintln "  watch error for " path ": " (string err))))))))))
+  (var restarts 0)
+  (while (< restarts 5)
+    (let [[[ok? err] (protect
+            (begin
+              (var watcher (watch:start "." :filter ".lisp"))
+              (watch:each watcher (fn [event]
+                (let [[path (get event :path)]]
+                  (when (and (string/ends-with? path ".lisp")
+                             (contains? |:create :modify| (get event :kind)))
+                    (let [[[ok? err] (protect
+                            (begin
+                              (var old-analysis (get analysis-cache path))
+                              (var old-sigs (when (not (nil? old-analysis))
+                                              (snapshot-signals old-analysis)))
+                              (invalidate-cache path)
+                              (var new-analysis (get-or-analyze path))
+                              (var new-sigs (snapshot-signals new-analysis))
+                              (when (not (nil? old-sigs))
+                                (var diff (diff-signals old-sigs new-sigs))
+                                (when (or (not (empty? (get diff :added)))
+                                          (not (empty? (get diff :removed)))
+                                          (not (empty? (get diff :changed))))
+                                  (send-response (build-notification path diff))))
+                              (eprintln "  re-analyzed: " path)))]]
+                      (unless ok?
+                        (eprintln "  watch error for " path ": " (err-msg err))))))))))]]
+      (unless ok?
+        (eprintln "  watcher crashed (" (inc restarts) "/5): " (err-msg err))
+        (assign restarts (inc restarts))
+        (ev/sleep 1))))))
 
 (forever
   (let [[line (port/read-line (*stdin*))]]
@@ -1055,14 +1271,16 @@
       (eprintln "stdin closed, shutting down")
       (break))
     (tick-populator)
-    (unless (empty? line)
-      (let [[[ok? msg] (protect (json/parse line))]]
-        (if (not ok?)
-          (begin
-            (eprintln "JSON parse error: " (get msg :message))
-            (send-response (jsonrpc-error nil -32700 "parse error")))
-          (let [[response (handle-request msg)]]
-            (unless (nil? response)
-              (send-response response))))))))
+    (if (> (length line) 10000000)
+      (send-response (jsonrpc-error nil -32600 "request too large"))
+      (unless (empty? line)
+        (let [[[ok? msg] (protect (json/parse line))]]
+          (if (not ok?)
+            (begin
+              (eprintln "JSON parse error: " (err-msg msg))
+              (send-response (jsonrpc-error nil -32700 "parse error")))
+            (let [[response (handle-request msg)]]
+              (unless (nil? response)
+                (send-response response)))))))))
 
 ) # end parameterize

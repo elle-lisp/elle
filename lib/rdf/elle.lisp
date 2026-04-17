@@ -1,4 +1,4 @@
-## lib/rdf.lisp — RDF triple generation for the Elle knowledge graph
+## lib/rdf/elle.lisp — RDF triple generation for Elle source analysis
 ##
 ## Canonical representation of Elle semantic data as N-Triples.
 ## Used by both the batch extractor (tools/semantic-graph.lisp) and the
@@ -6,7 +6,7 @@
 ## schema for the knowledge graph.
 ##
 ## Usage:
-##   (def rdf ((import "std/rdf")))
+##   (def rdf ((import "std/rdf/elle")))
 ##   (def triples (rdf:primitives))       # N-Triples string for all Rust prims
 ##   (def triples (rdf:file analysis "path.lisp"))  # for an analyzed Elle file
 
