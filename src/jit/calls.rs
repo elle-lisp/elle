@@ -186,9 +186,13 @@ pub extern "C" fn elle_jit_call(
     };
 
     // Dispatch to native function — zero-copy args via *const Value
-    if let Some(f) = func.as_native_fn() {
+    if let Some(def) = func.as_native_def() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        let (bits, value) = f(args_slice);
+        let (bits, value) = if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
+            crate::plugin_api::call_plugin(def, args_slice)
+        } else {
+            (def.func)(args_slice)
+        };
         return jit_handle_primitive_signal(vm, bits, value);
     }
 
@@ -607,9 +611,13 @@ pub extern "C" fn elle_jit_tail_call(
     };
 
     // Handle native functions
-    if let Some(f) = func.as_native_fn() {
+    if let Some(def) = func.as_native_def() {
         let args_slice = args_ptr_to_value_slice(args_ptr, nargs);
-        let (bits, value) = f(args_slice);
+        let (bits, value) = if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
+            crate::plugin_api::call_plugin(def, args_slice)
+        } else {
+            (def.func)(args_slice)
+        };
         return jit_handle_primitive_signal(vm, bits, value);
     }
 

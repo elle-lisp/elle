@@ -1,4 +1,4 @@
-.PHONY: all elle dev docs docgen smoke test test-git clean help \
+.PHONY: all elle dev mcp docs docgen smoke test test-git clean help \
        smoke-vm smoke-jit smoke-wasm doctest
 
 .DEFAULT_GOAL := all
@@ -23,6 +23,12 @@ elle:  ## Build the Elle binary (release)
 
 dev:  ## Build the Elle binary (debug, fast compile)
 	cargo build -p elle --features wasm
+
+MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
+
+mcp: elle  ## Build elle + MCP plugins (oxigraph, syn)
+	cargo build --release --manifest-path plugins/Cargo.toml --target-dir target \
+		-p elle-oxigraph -p elle-syn $(MCP_PATCH)
 
 # ── Docs ────────────────────────────────────────────────────────────
 
