@@ -38,6 +38,106 @@ pub fn create_context() -> Context {
     context
 }
 
+/// Pre-scan for cross-block mixed-type local slots.
+///
+/// Walks all blocks and checks that each local slot is only stored with
+/// one scalar type across different blocks. Within-block sequential
+/// reassignment (e.g. `var s = 0; s = 1.5`) is allowed.
+///
+/// Called before `lower_to_module` to avoid partially constructing MLIR
+/// ops before discovering the error.
+pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), String> {
+    // For each slot, track (type, block_idx) of the last store per block.
+    let mut slot_block_types: HashMap<u32, (ScalarType, usize)> = HashMap::new();
+    // Simple type inference: track register types from constants and ops.
+    let mut reg_types: HashMap<u32, ScalarType> = HashMap::new();
+    let num_params = lir.arity.fixed_params();
+
+    for i in 0..num_params {
+        let t = if param_types & (1u64 << i) != 0 {
+            ScalarType::Float
+        } else {
+            ScalarType::Int
+        };
+        reg_types.insert(i as u32, t);
+    }
+
+    for (block_idx, block) in lir.blocks.iter().enumerate() {
+        for si in &block.instructions {
+            match &si.instr {
+                LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
+                    if (*index as usize) < num_params {
+                        let t = if param_types & (1u64 << *index) != 0 {
+                            ScalarType::Float
+                        } else {
+                            ScalarType::Int
+                        };
+                        reg_types.insert(dst.0, t);
+                    }
+                }
+                LirInstr::Const { dst, value } => {
+                    let t = if matches!(value, LirConst::Float(_)) {
+                        ScalarType::Float
+                    } else {
+                        ScalarType::Int
+                    };
+                    reg_types.insert(dst.0, t);
+                }
+                LirInstr::BinOp { dst, lhs, rhs, op } => {
+                    let lt = reg_types.get(&lhs.0).copied().unwrap_or(ScalarType::Int);
+                    let rt = reg_types.get(&rhs.0).copied().unwrap_or(ScalarType::Int);
+                    let is_bitwise = matches!(
+                        op,
+                        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+                    );
+                    let t = if is_bitwise {
+                        ScalarType::Int
+                    } else if lt == ScalarType::Float || rt == ScalarType::Float {
+                        ScalarType::Float
+                    } else {
+                        ScalarType::Int
+                    };
+                    reg_types.insert(dst.0, t);
+                }
+                LirInstr::Compare { dst, .. } => {
+                    reg_types.insert(dst.0, ScalarType::Int);
+                }
+                LirInstr::UnaryOp { dst, op, src } => {
+                    let st = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                    let t = match op {
+                        UnaryOp::Neg => st,
+                        UnaryOp::Not | UnaryOp::BitNot => ScalarType::Int,
+                    };
+                    reg_types.insert(dst.0, t);
+                }
+                LirInstr::StoreLocal { slot, src } => {
+                    let src_type = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                    let slot_key = *slot as u32;
+                    if let Some((prev_type, prev_block)) = slot_block_types.get(&slot_key) {
+                        if *prev_type != src_type && *prev_block != block_idx {
+                            return Err(format!(
+                                "mixed-type local slot {}: {:?} in block {}, {:?} in block {}",
+                                slot, prev_type, prev_block, src_type, block_idx
+                            ));
+                        }
+                    }
+                    slot_block_types.insert(slot_key, (src_type, block_idx));
+                    reg_types.insert(slot_key, src_type);
+                }
+                LirInstr::LoadLocal { dst, slot } => {
+                    let t = reg_types
+                        .get(&(*slot as u32))
+                        .copied()
+                        .unwrap_or(ScalarType::Int);
+                    reg_types.insert(dst.0, t);
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Lower a GPU-eligible LirFunction into an MLIR module.
 ///
 /// The module contains a single `func.func` with `llvm.emit_c_interface`
@@ -50,6 +150,9 @@ pub fn lower_to_module<'c>(
     lir: &LirFunction,
     param_types: u64,
 ) -> Result<(Module<'c>, ScalarType), String> {
+    // Pre-scan for cross-block mixed-type slots before building any MLIR ops.
+    check_slot_types(lir, param_types)?;
+
     let location = Location::unknown(context);
     let module = Module::new(location);
 
@@ -57,8 +160,8 @@ pub fn lower_to_module<'c>(
     let f64_type: Type = Type::float64(context);
     let num_params = lir.arity.fixed_params();
 
-    let param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
-    let func_type = FunctionType::new(context, &param_types, &[i64_type]);
+    let mlir_param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
+    let func_type = FunctionType::new(context, &mlir_param_types, &[i64_type]);
     let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
 
     let region = Region::new();
@@ -70,7 +173,7 @@ pub fn lower_to_module<'c>(
     for (i, lir_block) in lir.blocks.iter().enumerate() {
         let block = if i == 0 {
             Block::new(
-                &param_types
+                &mlir_param_types
                     .iter()
                     .map(|t| (*t, location))
                     .collect::<Vec<_>>(),
@@ -88,8 +191,6 @@ pub fn lower_to_module<'c>(
     let mut types: HashMap<u32, ScalarType> = HashMap::new();
     // Local slot types: slot index → ScalarType
     let mut slot_types: HashMap<u32, ScalarType> = HashMap::new();
-    // Which block last typed each slot (for cross-block conflict detection).
-    let mut slot_type_blocks: HashMap<u32, usize> = HashMap::new();
     // Return type: determined from Return terminators
     let mut return_type: Option<ScalarType> = None;
 
@@ -380,27 +481,7 @@ pub fn lower_to_module<'c>(
                         .get(&(*slot as u32))
                         .ok_or_else(|| format!("unallocated local slot {}", slot))?;
                     block.append_operation(memref::store(store_val, slot_ptr, &[], location));
-                    // Reject cross-block mixed-type slots: if a different block
-                    // previously typed this slot differently, we can't statically
-                    // know which type to bitcast on load. Within the same block,
-                    // sequential reassignment is fine (last store wins).
-                    if let Some(prev) = slot_types.get(&(*slot as u32)) {
-                        if *prev != src_type {
-                            let prev_block = slot_type_blocks.get(&(*slot as u32)).copied();
-                            if prev_block != Some(block_idx) {
-                                return Err(format!(
-                                    "mixed-type local slot {}: {:?} in block {}, {:?} in block {}",
-                                    slot,
-                                    prev,
-                                    prev_block.unwrap_or(0),
-                                    src_type,
-                                    block_idx
-                                ));
-                            }
-                        }
-                    }
                     slot_types.insert(*slot as u32, src_type);
-                    slot_type_blocks.insert(*slot as u32, block_idx);
                 }
                 LirInstr::LoadLocal { dst, slot } => {
                     let slot_ptr = *local_slots

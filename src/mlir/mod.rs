@@ -11,7 +11,7 @@ mod spirv;
 
 pub use cache::MlirCache;
 pub use execute::mlir_call;
-pub use lower::{lower_to_mlir, ScalarType};
+pub use lower::{check_slot_types, lower_to_mlir, ScalarType};
 pub use spirv::lower_to_spirv;
 
 #[cfg(test)]
@@ -360,7 +360,9 @@ mod tests {
     #[test]
     fn test_reject_mixed_type_slot() {
         let func = make_mixed_type_slot();
-        let err = lower_to_mlir(&func).unwrap_err();
+        // Use check_slot_types directly to avoid partially constructing
+        // MLIR ops (melior cleanup of partial modules can crash).
+        let err = check_slot_types(&func, 0).unwrap_err();
         assert!(
             err.contains("mixed-type local slot"),
             "should reject cross-block mixed-type slot: {}",
@@ -482,6 +484,100 @@ mod tests {
         let func = make_abs();
         let spirv_bytes =
             lower_to_spirv(&func, 256).expect("multi-block SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
+    /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
+    fn make_float_add() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("float_add".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(2),
+                op: BinOp::Add,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_spirv_float_add() {
+        let func = make_float_add();
+        let spirv_bytes = lower_to_spirv(&func, 256).expect("float SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
+    /// Build LIR: fn(x) { return 2.0 * 3.0 }  (pure float arithmetic)
+    fn make_float_mul() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("float_mul".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Float(2.0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Float(3.0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(3),
+                op: BinOp::Mul,
+                lhs: Reg(1),
+                rhs: Reg(2),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
+        func.blocks.push(block);
+        func.num_regs = 4;
+        func
+    }
+
+    #[test]
+    fn test_spirv_float_mul() {
+        let func = make_float_mul();
+        let spirv_bytes =
+            lower_to_spirv(&func, 256).expect("pure-float SPIR-V lowering should succeed");
         assert!(spirv_bytes.len() >= 20);
         assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
     }
