@@ -2,7 +2,7 @@
 #
 # Covers: BinOp::{Add,Sub,Mul,Div,Rem} in MLIR + JIT + bytecode.
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 (defn add [a b] (+ a b))
 (defn sub [a b] (- a b))

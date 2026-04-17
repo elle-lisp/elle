@@ -6,7 +6,7 @@
 # different per-tier results into call's report-handling logic and
 # verifying assert-agree throws.
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 # An ordinary closure that all tiers agree on — should not throw.
 (defn add [a b] (+ a b))

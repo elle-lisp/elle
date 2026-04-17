@@ -3,7 +3,7 @@
 # Covers: Compare op for each CmpOp variant, Terminator::Branch,
 # multi-block control flow.
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 (defn abs1 [x] (if (< x 0) (- 0 x) x))
 (diff:assert-agree abs1 -7)

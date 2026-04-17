@@ -2,7 +2,7 @@
 #
 # Covers: BinOp::{BitAnd,BitOr,BitXor,Shl,Shr}.
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 (defn band [a b] (bit/and a b))
 (diff:assert-agree band 0xff 0x0f)

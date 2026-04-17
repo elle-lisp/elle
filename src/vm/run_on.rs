@@ -45,17 +45,76 @@ impl VM {
         closure: &crate::value::Closure,
         args: &[Value],
     ) -> (SignalBits, Value) {
+        // Arity check.
+        if !self.check_arity(&closure.template.arity, args.len()) {
+            return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+        }
+
+        // Build environment.
+        let new_env = match self.build_closure_env(closure, args) {
+            Some(env) => env,
+            None => {
+                return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
+            }
+        };
+
         let saved_jit = self.jit_enabled;
         self.jit_enabled = false;
 
-        let result = self.call_closure(closure, args);
+        let squelch_mask = closure.squelch_mask;
+
+        let result = self.execute_bytecode_saving_stack(
+            &closure.template.bytecode,
+            &closure.template.constants,
+            &new_env,
+            &closure.template.location_map,
+        );
 
         self.jit_enabled = saved_jit;
 
-        match result {
-            Ok(v) => (SIG_OK, v),
-            Err(msg) => (SIG_ERROR, crate::value::error_val("runtime-error", msg)),
+        let bits = result.bits;
+        if bits.is_ok() || bits == crate::value::SIG_HALT {
+            let val = if let Some((_, v)) = self.fiber.signal.take() {
+                v
+            } else {
+                Value::NIL
+            };
+            return (SIG_OK, val);
         }
+
+        // Squelch enforcement: if the closure has a squelch mask and a
+        // non-error signal matches, convert to :signal-violation.
+        if !squelch_mask.is_empty()
+            && !bits.contains(SIG_ERROR)
+            && !bits.contains(crate::value::SIG_HALT)
+        {
+            let squelched = bits.intersection(squelch_mask);
+            if !squelched.is_empty() {
+                let squelched_str = {
+                    let registry = crate::signals::registry::global_registry().lock().unwrap();
+                    registry.format_signal_bits(squelched)
+                };
+                self.fiber.suspended = None;
+                self.fiber.signal = None;
+                return (
+                    SIG_ERROR,
+                    error_val_extra(
+                        "signal-violation",
+                        format!("squelch: signal {} caught at boundary", squelched_str),
+                        &[],
+                    ),
+                );
+            }
+        }
+
+        // Other errors: extract from fiber signal.
+        if let Some((sig_bits, val)) = self.fiber.signal.take() {
+            return (sig_bits, val);
+        }
+        (
+            SIG_ERROR,
+            crate::value::error_val("runtime-error", "unexpected signal"),
+        )
     }
 
     /// Run a closure via Cranelift JIT.
@@ -122,14 +181,100 @@ impl VM {
 
         // Capture any signal the JIT set (errors, halts, yields).
         let post_signal = self.fiber.signal.take();
+
+        // Decode the return value — handle tail calls before restoring
+        // the caller's stack, since the trampoline needs the VM state.
+
+        // Tail-call trampoline: if the JIT ended with a tail call, consume
+        // the pending_tail_call and execute the callee via bytecode. This
+        // matches the pattern in run_jit (jit_entry.rs) — the tail-call
+        // target may be a different closure, so we interpret its bytecode.
+        if result_jv == crate::jit::TAIL_CALL_SENTINEL {
+            if let Some(tail) = self.pending_tail_call.take() {
+                let exec_result = self.execute_bytecode_saving_stack(
+                    &tail.bytecode,
+                    &tail.constants,
+                    &tail.env,
+                    &tail.location_map,
+                );
+                let eb = exec_result.bits;
+
+                self.fiber.stack = saved_stack;
+                if let Some(sig) = saved_signal {
+                    self.fiber.signal = Some(sig);
+                }
+
+                if eb.is_ok() || eb == crate::value::SIG_HALT {
+                    // Success — the result is on the fiber signal (set by
+                    // execute_bytecode_saving_stack's Halt handler).
+                    let val = if let Some((_, v)) = self.fiber.signal.take() {
+                        v
+                    } else {
+                        Value::NIL
+                    };
+                    return (SIG_OK, val);
+                } else if eb.contains(SIG_ERROR) {
+                    // Error already set on fiber.signal — extract it.
+                    if let Some((bits, val)) = self.fiber.signal.take() {
+                        return (bits, val);
+                    }
+                    return (
+                        SIG_ERROR,
+                        crate::value::error_val("runtime-error", "tail-call error"),
+                    );
+                } else {
+                    // Suspending signal — not supported under compile/run-on.
+                    return (
+                        SIG_ERROR,
+                        rejected("jit", "tail-call target yielded under compile/run-on"),
+                    );
+                }
+            } else {
+                self.fiber.stack = saved_stack;
+                if let Some(sig) = saved_signal {
+                    self.fiber.signal = Some(sig);
+                }
+                return (
+                    SIG_ERROR,
+                    rejected("jit", "tail-call sentinel without pending call (bug)"),
+                );
+            }
+        }
+
+        // Restore caller state for non-tail-call paths.
         self.fiber.stack = saved_stack;
         if let Some(sig) = saved_signal {
             self.fiber.signal = Some(sig);
         }
 
-        // Decode the return value.
         if result_jv == crate::jit::YIELD_SENTINEL {
-            // The JIT yielded — Phase 1 doesn't support resuming through this path.
+            // Squelch enforcement: if the closure has a squelch mask
+            // covering the yield signal, produce :signal-violation.
+            let squelch_mask = closure.squelch_mask;
+            if !squelch_mask.is_empty() {
+                let yield_bits = if let Some((bits, _)) = &post_signal {
+                    *bits
+                } else {
+                    crate::value::SIG_YIELD
+                };
+                let squelched = yield_bits.intersection(squelch_mask);
+                if !squelched.is_empty() {
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(squelched)
+                    };
+                    self.fiber.suspended = None;
+                    return (
+                        SIG_ERROR,
+                        error_val_extra(
+                            "signal-violation",
+                            format!("squelch: signal {} caught at boundary", squelched_str),
+                            &[],
+                        ),
+                    );
+                }
+            }
+
             if let Some((bits, val)) = post_signal {
                 return (
                     SIG_ERROR,
@@ -149,20 +294,31 @@ impl VM {
             );
         }
 
-        if result_jv == crate::jit::TAIL_CALL_SENTINEL {
-            // Pending tail call — Phase 1 doesn't drive the tail-call loop here.
-            self.pending_tail_call.take();
-            return (
-                SIG_ERROR,
-                rejected(
-                    "jit",
-                    "closure ended in a tail call; not yet supported under compile/run-on",
-                ),
-            );
-        }
-
         // Error or halt set during execution wins over the return value.
         if let Some((bits, val)) = post_signal {
+            // Squelch enforcement for non-yield signals.
+            let squelch_mask = closure.squelch_mask;
+            if !squelch_mask.is_empty()
+                && !bits.contains(SIG_ERROR)
+                && !bits.contains(crate::value::SIG_HALT)
+            {
+                let squelched = bits.intersection(squelch_mask);
+                if !squelched.is_empty() {
+                    let squelched_str = {
+                        let registry = crate::signals::registry::global_registry().lock().unwrap();
+                        registry.format_signal_bits(squelched)
+                    };
+                    self.fiber.suspended = None;
+                    return (
+                        SIG_ERROR,
+                        error_val_extra(
+                            "signal-violation",
+                            format!("squelch: signal {} caught at boundary", squelched_str),
+                            &[],
+                        ),
+                    );
+                }
+            }
             if !bits.is_ok() {
                 return (bits, val);
             }

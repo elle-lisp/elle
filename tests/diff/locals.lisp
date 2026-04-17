@@ -3,7 +3,7 @@
 # Covers: LirInstr::{StoreLocal,LoadLocal}, let bindings, var/assign,
 # cross-block local stores (the memref-vs-SSA boundary in MLIR).
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 # Single-block let.
 (defn poly1 [x]

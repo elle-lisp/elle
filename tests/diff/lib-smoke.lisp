@@ -1,6 +1,6 @@
 # ── lib/differential smoke test ───────────────────────────────────────
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 # Reference closure for the rest of the test.
 (defn add [a b] (+ a b))

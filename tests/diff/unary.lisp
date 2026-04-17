@@ -3,7 +3,7 @@
 # Covers: UnaryOp::{Neg,BitNot}. UnaryOp::Not returns a bool which can't
 # round-trip through MLIR's i64 path — it lives in branch.lisp instead.
 
-(def diff ((import "std/differential")))
+(def diff ((import "tests/diff/harness")))
 
 (defn negv [x] (- 0 x))
 (diff:assert-agree negv 5)
