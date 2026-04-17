@@ -8,7 +8,7 @@ use crate::lir::LirFunction;
 use melior::ExecutionEngine;
 use std::collections::HashMap;
 
-use super::lower::{create_context, lower_to_module};
+use super::lower::{create_context, lower_to_module, ScalarType};
 
 /// Cached MLIR compilation state for the VM.
 ///
@@ -17,8 +17,8 @@ use super::lower::{create_context, lower_to_module};
 pub struct MlirCache {
     /// Shared MLIR context with all dialects registered.
     context: melior::Context,
-    /// Compiled functions: bytecode pointer → engine + function name.
-    engines: HashMap<*const u8, (ExecutionEngine, String)>,
+    /// Compiled functions: bytecode pointer → engine + function name + return type.
+    engines: HashMap<*const u8, (ExecutionEngine, String, ScalarType)>,
     /// Cached SPIR-V bytes: bytecode pointer → compiled SPIR-V binary.
     spirv_cache: HashMap<*const u8, Vec<u8>>,
     /// Functions that failed MLIR compilation — don't retry.
@@ -59,7 +59,7 @@ impl MlirCache {
     /// Compile a GPU-eligible LirFunction and cache the result.
     /// Returns the function name for subsequent invocation.
     pub fn compile(&mut self, key: *const u8, lir: &LirFunction) -> Result<&str, String> {
-        let mut module = lower_to_module(&self.context, lir)?;
+        let (mut module, scalar_type) = lower_to_module(&self.context, lir)?;
 
         let pm = melior::pass::PassManager::new(&self.context);
         pm.add_pass(melior::pass::conversion::create_to_llvm());
@@ -69,14 +69,19 @@ impl MlirCache {
         let engine = ExecutionEngine::new(&module, 2, &[], false, false);
         let name = lir.name.as_deref().unwrap_or("gpu_kernel").to_string();
 
-        self.engines.insert(key, (engine, name));
+        self.engines.insert(key, (engine, name, scalar_type));
         Ok(&self.engines[&key].1)
+    }
+
+    /// Get the return type for a cached function.
+    pub fn return_type(&self, key: *const u8) -> Option<ScalarType> {
+        self.engines.get(&key).map(|(_, _, st)| *st)
     }
 
     /// Call a cached MLIR-compiled function with i64 arguments.
     /// Returns the i64 result, or None if the function is not cached.
     pub fn call(&self, key: *const u8, args: &[i64]) -> Option<Result<i64, String>> {
-        let (engine, name) = self.engines.get(&key)?;
+        let (engine, name, _) = self.engines.get(&key)?;
 
         let mut arg_values: Vec<i64> = args.to_vec();
         let mut result: i64 = 0;

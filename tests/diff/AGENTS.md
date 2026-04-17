@@ -48,6 +48,7 @@ make smoke-diff       # all tests, in parallel
 | `tailcall.lisp` | Tail-call trampoline: GCD, factorial, iterative sum |
 | `eligibility.lisp` | Negative tests: tier rejections for ineligible closures |
 | `const.lisp` | Zero-arg, constant-returning, identity closures |
+| `float.lisp` | Float constants, arithmetic, comparison, negation, mixed promotion, conditional returns |
 | `signal.lisp` | Silent closures (silence + muffle) across tiers |
 | `squelch.lisp` | Squelch enforcement: mask preserved and enforced across tiers |
 | `gpu.lisp` | GPU tier agreement via `gpu:map` (conditional on vulkan) |

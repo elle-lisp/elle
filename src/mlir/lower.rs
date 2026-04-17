@@ -8,14 +8,25 @@
 //! (StoreLocal in one block, LoadLocal in another).
 
 use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
-use melior::dialect::arith::CmpiPredicate;
+use melior::dialect::arith::{CmpfPredicate, CmpiPredicate};
 use melior::dialect::{arith, cf, func, memref, DialectRegistry};
-use melior::ir::attribute::{IntegerAttribute, StringAttribute, TypeAttribute};
+use melior::ir::attribute::{FloatAttribute, IntegerAttribute, StringAttribute, TypeAttribute};
 use melior::ir::operation::OperationLike;
 use melior::ir::r#type::{FunctionType, IntegerType, MemRefType};
 use melior::ir::{Block, BlockLike, Location, Module, Region, RegionLike, Type, Value};
 use melior::Context;
 use std::collections::HashMap;
+
+/// Scalar type tag for MLIR register tracking.
+///
+/// Tracks whether an MLIR SSA value holds an `i64` (integer) or `f64`
+/// (float). Used during lowering to dispatch between integer and float
+/// MLIR ops, and by the caller to rebox the result correctly.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ScalarType {
+    Int,
+    Float,
+}
 
 /// Create an MLIR context with all dialects registered.
 pub fn create_context() -> Context {
@@ -34,11 +45,15 @@ pub fn create_context() -> Context {
 ///
 /// Local slots are allocated with `memref.alloca` in the entry block
 /// for correct cross-block semantics (phi-like patterns via memory).
-pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Module<'c>, String> {
+pub fn lower_to_module<'c>(
+    context: &'c Context,
+    lir: &LirFunction,
+) -> Result<(Module<'c>, ScalarType), String> {
     let location = Location::unknown(context);
     let module = Module::new(location);
 
     let i64_type: Type = IntegerType::new(context, 64).into();
+    let f64_type: Type = Type::float64(context);
     let num_params = lir.arity.fixed_params();
 
     let param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
@@ -68,6 +83,12 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
 
     // SSA register map: LIR Reg → MLIR Value (for within-block SSA values)
     let mut regs: HashMap<u32, Value> = HashMap::new();
+    // Type map: LIR Reg → ScalarType (Int or Float)
+    let mut types: HashMap<u32, ScalarType> = HashMap::new();
+    // Local slot types: slot index → ScalarType
+    let mut slot_types: HashMap<u32, ScalarType> = HashMap::new();
+    // Return type: determined from Return terminators
+    let mut return_type: Option<ScalarType> = None;
 
     // Allocate memref slots for locals in the entry block.
     // Local slots handle cross-block value passing (phi patterns).
@@ -78,9 +99,10 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
     if !blocks.is_empty() {
         let entry = &blocks[0];
 
-        // Pre-populate regs with entry block parameters
+        // Pre-populate regs with entry block parameters (always i64/Int)
         for i in 0..num_params {
             regs.insert(i as u32, entry.argument(i).unwrap().into());
+            types.insert(i as u32, ScalarType::Int);
         }
 
         // Allocate a memref<i64> for each local slot
@@ -105,26 +127,39 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
             match &si.instr {
                 LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
                     if (*index as usize) < num_params {
-                        // Parameters are entry block arguments
+                        // Parameters are entry block arguments (always Int)
                         regs.insert(dst.0, blocks[0].argument(*index as usize).unwrap().into());
+                        types.insert(dst.0, ScalarType::Int);
                     }
                 }
-                LirInstr::Const { dst, value } => {
-                    let n = match value {
-                        LirConst::Int(n) => *n,
-                        LirConst::Bool(b) => i64::from(*b),
-                        LirConst::Nil => 0i64,
-                        LirConst::Float(f) => f.to_bits() as i64,
-                        _ => return Err(format!("unsupported constant: {:?}", value)),
-                    };
-                    let op = arith::constant(
-                        context,
-                        IntegerAttribute::new(i64_type, n).into(),
-                        location,
-                    );
-                    let op_ref = block.append_operation(op);
-                    regs.insert(dst.0, op_ref.result(0).unwrap().into());
-                }
+                LirInstr::Const { dst, value } => match value {
+                    LirConst::Float(f) => {
+                        let op = arith::constant(
+                            context,
+                            FloatAttribute::new(context, f64_type, *f).into(),
+                            location,
+                        );
+                        let op_ref = block.append_operation(op);
+                        regs.insert(dst.0, op_ref.result(0).unwrap().into());
+                        types.insert(dst.0, ScalarType::Float);
+                    }
+                    _ => {
+                        let n = match value {
+                            LirConst::Int(n) => *n,
+                            LirConst::Bool(b) => i64::from(*b),
+                            LirConst::Nil => 0i64,
+                            _ => return Err(format!("unsupported constant: {:?}", value)),
+                        };
+                        let op = arith::constant(
+                            context,
+                            IntegerAttribute::new(i64_type, n).into(),
+                            location,
+                        );
+                        let op_ref = block.append_operation(op);
+                        regs.insert(dst.0, op_ref.result(0).unwrap().into());
+                        types.insert(dst.0, ScalarType::Int);
+                    }
+                },
                 LirInstr::BinOp { dst, op, lhs, rhs } => {
                     let lv = *regs
                         .get(&lhs.0)
@@ -132,20 +167,57 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                     let rv = *regs
                         .get(&rhs.0)
                         .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
-                    let mlir_op = match op {
-                        BinOp::Add => arith::addi(lv, rv, location),
-                        BinOp::Sub => arith::subi(lv, rv, location),
-                        BinOp::Mul => arith::muli(lv, rv, location),
-                        BinOp::Div => arith::divsi(lv, rv, location),
-                        BinOp::Rem => arith::remsi(lv, rv, location),
-                        BinOp::BitAnd => arith::andi(lv, rv, location),
-                        BinOp::BitOr => arith::ori(lv, rv, location),
-                        BinOp::BitXor => arith::xori(lv, rv, location),
-                        BinOp::Shl => arith::shli(lv, rv, location),
-                        BinOp::Shr => arith::shrsi(lv, rv, location),
+                    let lt = types.get(&lhs.0).copied().unwrap_or(ScalarType::Int);
+                    let rt = types.get(&rhs.0).copied().unwrap_or(ScalarType::Int);
+
+                    let is_bitwise = matches!(
+                        op,
+                        BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+                    );
+                    if is_bitwise && (lt == ScalarType::Float || rt == ScalarType::Float) {
+                        return Err("bitwise ops on float operands not supported".to_string());
+                    }
+
+                    // Promote mixed operands: int → float via sitofp
+                    let (eff_lv, eff_rv, result_type) = match (lt, rt) {
+                        (ScalarType::Int, ScalarType::Int) => (lv, rv, ScalarType::Int),
+                        (ScalarType::Float, ScalarType::Float) => (lv, rv, ScalarType::Float),
+                        (ScalarType::Int, ScalarType::Float) => {
+                            let p = block.append_operation(arith::sitofp(lv, f64_type, location));
+                            (p.result(0).unwrap().into(), rv, ScalarType::Float)
+                        }
+                        (ScalarType::Float, ScalarType::Int) => {
+                            let p = block.append_operation(arith::sitofp(rv, f64_type, location));
+                            (lv, p.result(0).unwrap().into(), ScalarType::Float)
+                        }
+                    };
+
+                    let mlir_op = if result_type == ScalarType::Float {
+                        match op {
+                            BinOp::Add => arith::addf(eff_lv, eff_rv, location),
+                            BinOp::Sub => arith::subf(eff_lv, eff_rv, location),
+                            BinOp::Mul => arith::mulf(eff_lv, eff_rv, location),
+                            BinOp::Div => arith::divf(eff_lv, eff_rv, location),
+                            BinOp::Rem => arith::remf(eff_lv, eff_rv, location),
+                            _ => unreachable!("bitwise on float rejected above"),
+                        }
+                    } else {
+                        match op {
+                            BinOp::Add => arith::addi(lv, rv, location),
+                            BinOp::Sub => arith::subi(lv, rv, location),
+                            BinOp::Mul => arith::muli(lv, rv, location),
+                            BinOp::Div => arith::divsi(lv, rv, location),
+                            BinOp::Rem => arith::remsi(lv, rv, location),
+                            BinOp::BitAnd => arith::andi(lv, rv, location),
+                            BinOp::BitOr => arith::ori(lv, rv, location),
+                            BinOp::BitXor => arith::xori(lv, rv, location),
+                            BinOp::Shl => arith::shli(lv, rv, location),
+                            BinOp::Shr => arith::shrsi(lv, rv, location),
+                        }
                     };
                     let op_ref = block.append_operation(mlir_op);
                     regs.insert(dst.0, op_ref.result(0).unwrap().into());
+                    types.insert(dst.0, result_type);
                 }
                 LirInstr::Compare { dst, op, lhs, rhs } => {
                     let lv = *regs
@@ -154,56 +226,120 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                     let rv = *regs
                         .get(&rhs.0)
                         .ok_or_else(|| format!("undefined reg r{}", rhs.0))?;
-                    let pred = match op {
-                        CmpOp::Eq => CmpiPredicate::Eq,
-                        CmpOp::Ne => CmpiPredicate::Ne,
-                        CmpOp::Lt => CmpiPredicate::Slt,
-                        CmpOp::Le => CmpiPredicate::Sle,
-                        CmpOp::Gt => CmpiPredicate::Sgt,
-                        CmpOp::Ge => CmpiPredicate::Sge,
+                    let lt = types.get(&lhs.0).copied().unwrap_or(ScalarType::Int);
+                    let rt = types.get(&rhs.0).copied().unwrap_or(ScalarType::Int);
+                    let use_float = lt == ScalarType::Float || rt == ScalarType::Float;
+
+                    let op_ref = if use_float {
+                        // Promote mixed operands for float comparison
+                        let (eff_lv, eff_rv) = match (lt, rt) {
+                            (ScalarType::Float, ScalarType::Float) => (lv, rv),
+                            (ScalarType::Int, ScalarType::Float) => {
+                                let p =
+                                    block.append_operation(arith::sitofp(lv, f64_type, location));
+                                (p.result(0).unwrap().into(), rv)
+                            }
+                            (ScalarType::Float, ScalarType::Int) => {
+                                let p =
+                                    block.append_operation(arith::sitofp(rv, f64_type, location));
+                                (lv, p.result(0).unwrap().into())
+                            }
+                            _ => unreachable!(),
+                        };
+                        let pred = match op {
+                            CmpOp::Eq => CmpfPredicate::Oeq,
+                            CmpOp::Ne => CmpfPredicate::One,
+                            CmpOp::Lt => CmpfPredicate::Olt,
+                            CmpOp::Le => CmpfPredicate::Ole,
+                            CmpOp::Gt => CmpfPredicate::Ogt,
+                            CmpOp::Ge => CmpfPredicate::Oge,
+                        };
+                        block.append_operation(arith::cmpf(context, pred, eff_lv, eff_rv, location))
+                    } else {
+                        let pred = match op {
+                            CmpOp::Eq => CmpiPredicate::Eq,
+                            CmpOp::Ne => CmpiPredicate::Ne,
+                            CmpOp::Lt => CmpiPredicate::Slt,
+                            CmpOp::Le => CmpiPredicate::Sle,
+                            CmpOp::Gt => CmpiPredicate::Sgt,
+                            CmpOp::Ge => CmpiPredicate::Sge,
+                        };
+                        block.append_operation(arith::cmpi(context, pred, lv, rv, location))
                     };
-                    let op_ref =
-                        block.append_operation(arith::cmpi(context, pred, lv, rv, location));
-                    // cmpi returns i1; extend to i64 for consistency
+                    // cmpi/cmpf returns i1; extend to i64 for consistency
                     let i1_val: Value = op_ref.result(0).unwrap().into();
                     let ext_ref = block.append_operation(arith::extui(i1_val, i64_type, location));
                     regs.insert(dst.0, ext_ref.result(0).unwrap().into());
+                    types.insert(dst.0, ScalarType::Int);
                 }
                 LirInstr::UnaryOp { dst, op, src } => {
                     let sv = *regs
                         .get(&src.0)
                         .ok_or_else(|| format!("undefined reg r{}", src.0))?;
-                    let result = match op {
+                    let src_type = types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                    let (result, result_type) = match op {
                         UnaryOp::Neg => {
-                            let zero = block.append_operation(arith::constant(
-                                context,
-                                IntegerAttribute::new(i64_type, 0).into(),
-                                location,
-                            ));
-                            let zero_val: Value = zero.result(0).unwrap().into();
-                            let sub = block.append_operation(arith::subi(zero_val, sv, location));
-                            sub.result(0).unwrap().into()
+                            if src_type == ScalarType::Float {
+                                let neg = block.append_operation(arith::negf(sv, location));
+                                (neg.result(0).unwrap().into(), ScalarType::Float)
+                            } else {
+                                let zero = block.append_operation(arith::constant(
+                                    context,
+                                    IntegerAttribute::new(i64_type, 0).into(),
+                                    location,
+                                ));
+                                let zero_val: Value = zero.result(0).unwrap().into();
+                                let sub =
+                                    block.append_operation(arith::subi(zero_val, sv, location));
+                                (sub.result(0).unwrap().into(), ScalarType::Int)
+                            }
                         }
                         UnaryOp::Not => {
-                            let zero = block.append_operation(arith::constant(
-                                context,
-                                IntegerAttribute::new(i64_type, 0).into(),
-                                location,
-                            ));
-                            let zero_val: Value = zero.result(0).unwrap().into();
-                            let cmp = block.append_operation(arith::cmpi(
-                                context,
-                                CmpiPredicate::Eq,
-                                sv,
-                                zero_val,
-                                location,
-                            ));
-                            let i1_val: Value = cmp.result(0).unwrap().into();
-                            let ext =
-                                block.append_operation(arith::extui(i1_val, i64_type, location));
-                            ext.result(0).unwrap().into()
+                            if src_type == ScalarType::Float {
+                                // Truthiness: compare float to 0.0
+                                let zero = block.append_operation(arith::constant(
+                                    context,
+                                    FloatAttribute::new(context, f64_type, 0.0).into(),
+                                    location,
+                                ));
+                                let zero_val: Value = zero.result(0).unwrap().into();
+                                let cmp = block.append_operation(arith::cmpf(
+                                    context,
+                                    CmpfPredicate::Oeq,
+                                    sv,
+                                    zero_val,
+                                    location,
+                                ));
+                                let i1_val: Value = cmp.result(0).unwrap().into();
+                                let ext = block
+                                    .append_operation(arith::extui(i1_val, i64_type, location));
+                                (ext.result(0).unwrap().into(), ScalarType::Int)
+                            } else {
+                                let zero = block.append_operation(arith::constant(
+                                    context,
+                                    IntegerAttribute::new(i64_type, 0).into(),
+                                    location,
+                                ));
+                                let zero_val: Value = zero.result(0).unwrap().into();
+                                let cmp = block.append_operation(arith::cmpi(
+                                    context,
+                                    CmpiPredicate::Eq,
+                                    sv,
+                                    zero_val,
+                                    location,
+                                ));
+                                let i1_val: Value = cmp.result(0).unwrap().into();
+                                let ext = block
+                                    .append_operation(arith::extui(i1_val, i64_type, location));
+                                (ext.result(0).unwrap().into(), ScalarType::Int)
+                            }
                         }
                         UnaryOp::BitNot => {
+                            if src_type == ScalarType::Float {
+                                return Err(
+                                    "bitwise not on float operand not supported".to_string()
+                                );
+                            }
                             let neg1 = block.append_operation(arith::constant(
                                 context,
                                 IntegerAttribute::new(i64_type, -1).into(),
@@ -211,26 +347,49 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                             ));
                             let neg1_val: Value = neg1.result(0).unwrap().into();
                             let xor = block.append_operation(arith::xori(sv, neg1_val, location));
-                            xor.result(0).unwrap().into()
+                            (xor.result(0).unwrap().into(), ScalarType::Int)
                         }
                     };
                     regs.insert(dst.0, result);
+                    types.insert(dst.0, result_type);
                 }
                 LirInstr::StoreLocal { slot, src } => {
                     let val = *regs
                         .get(&src.0)
                         .ok_or_else(|| format!("undefined reg r{} in StoreLocal", src.0))?;
+                    let src_type = types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                    // Memref slots are always i64; bitcast f64 → i64 for storage
+                    let store_val = if src_type == ScalarType::Float {
+                        let bc = block.append_operation(arith::bitcast(val, i64_type, location));
+                        bc.result(0).unwrap().into()
+                    } else {
+                        val
+                    };
                     let slot_ptr = *local_slots
                         .get(&(*slot as u32))
                         .ok_or_else(|| format!("unallocated local slot {}", slot))?;
-                    block.append_operation(memref::store(val, slot_ptr, &[], location));
+                    block.append_operation(memref::store(store_val, slot_ptr, &[], location));
+                    slot_types.insert(*slot as u32, src_type);
                 }
                 LirInstr::LoadLocal { dst, slot } => {
                     let slot_ptr = *local_slots
                         .get(&(*slot as u32))
                         .ok_or_else(|| format!("unallocated local slot {}", slot))?;
                     let load_op = block.append_operation(memref::load(slot_ptr, &[], location));
-                    regs.insert(dst.0, load_op.result(0).unwrap().into());
+                    let loaded: Value = load_op.result(0).unwrap().into();
+                    let slot_ty = slot_types
+                        .get(&(*slot as u32))
+                        .copied()
+                        .unwrap_or(ScalarType::Int);
+                    // Memref slots are i64; bitcast i64 → f64 if slot holds a float
+                    let result = if slot_ty == ScalarType::Float {
+                        let bc = block.append_operation(arith::bitcast(loaded, f64_type, location));
+                        bc.result(0).unwrap().into()
+                    } else {
+                        loaded
+                    };
+                    regs.insert(dst.0, result);
+                    types.insert(dst.0, slot_ty);
                 }
                 _ => return Err(format!("unsupported instruction: {:?}", si.instr)),
             }
@@ -242,7 +401,21 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
                 let val = *regs
                     .get(&reg.0)
                     .ok_or_else(|| format!("undefined reg r{} in return", reg.0))?;
-                block.append_operation(func::r#return(&[val], location));
+                let ret_type = types.get(&reg.0).copied().unwrap_or(ScalarType::Int);
+                // Function returns i64; bitcast f64 → i64 for float returns
+                let return_val = if ret_type == ScalarType::Float {
+                    let bc = block.append_operation(arith::bitcast(val, i64_type, location));
+                    bc.result(0).unwrap().into()
+                } else {
+                    val
+                };
+                if let Some(prev) = return_type {
+                    if prev != ret_type {
+                        return Err("inconsistent return types across blocks".to_string());
+                    }
+                }
+                return_type = Some(ret_type);
+                block.append_operation(func::r#return(&[return_val], location));
             }
             Terminator::Jump(label) => {
                 let target_idx = label_to_idx
@@ -321,12 +494,12 @@ pub fn lower_to_module<'c>(context: &'c Context, lir: &LirFunction) -> Result<Mo
         return Err("MLIR verification failed".to_string());
     }
 
-    Ok(module)
+    Ok((module, return_type.unwrap_or(ScalarType::Int)))
 }
 
 /// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
 pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
     let context = create_context();
-    let module = lower_to_module(&context, lir)?;
+    let (module, _) = lower_to_module(&context, lir)?;
     Ok(module.as_operation().to_string())
 }

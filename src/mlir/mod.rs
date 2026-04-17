@@ -11,7 +11,7 @@ mod spirv;
 
 pub use cache::MlirCache;
 pub use execute::mlir_call;
-pub use lower::lower_to_mlir;
+pub use lower::{lower_to_mlir, ScalarType};
 pub use spirv::lower_to_spirv;
 
 #[cfg(test)]
@@ -304,7 +304,7 @@ mod tests {
         let ctx_time = start.elapsed();
 
         let start = Instant::now();
-        let mut module = lower_to_module(&context, &func).unwrap();
+        let (mut module, _) = lower_to_module(&context, &func).unwrap();
         let lower_time = start.elapsed();
 
         let start = Instant::now();

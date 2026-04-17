@@ -497,7 +497,16 @@ impl VM {
         // Reborrow as immutable for call.
         let cache = self.mlir_cache.as_ref().unwrap();
         match cache.call(bytecode_ptr, &int_args) {
-            Some(Ok(result)) => (SIG_OK, Value::int(result)),
+            Some(Ok(result)) => {
+                // Rebox based on the compiled function's return type.
+                let val = match cache.return_type(bytecode_ptr) {
+                    Some(crate::mlir::ScalarType::Float) => {
+                        Value::float(f64::from_bits(result as u64))
+                    }
+                    _ => Value::int(result),
+                };
+                (SIG_OK, val)
+            }
             Some(Err(e)) => (
                 SIG_ERROR,
                 crate::value::error_val("mlir-error", format!("MLIR execution failed: {}", e)),
