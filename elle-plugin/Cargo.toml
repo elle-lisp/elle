@@ -1,0 +1,10 @@
+[package]
+name = "elle-plugin"
+version = "1.0.0"
+edition = "2021"
+description = "Stable ABI types and macros for Elle plugins"
+
+[lib]
+crate-type = ["lib"]
+
+# Zero dependencies — this crate provides only types and macros.

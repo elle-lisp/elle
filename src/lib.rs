@@ -56,6 +56,8 @@ pub mod mlir;
 pub mod path;
 pub mod pipeline;
 pub mod plugin;
+#[allow(improper_ctypes_definitions)]
+pub mod plugin_api;
 pub mod port;
 pub mod primitives;
 pub mod reader;

@@ -1,5 +1,5 @@
-.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git test-mcp mcp check-plugin-list clean help \
-       smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit doctest
+.PHONY: all elle dev docs docgen smoke test test-git clean help \
+       smoke-vm smoke-jit smoke-wasm doctest
 
 .DEFAULT_GOAL := all
 
@@ -11,36 +11,10 @@ else
   JOBS          ?= 16
   ELLE          ?= ./target/debug/elle
   CARGO_PROFILE :=
-  plugin-tests: plugins
 endif
 TIMEOUT ?= 30s
 
-PLUGINS := \
-    arrow \
-    crypto \
-    csv \
-    egui \
-    hash \
-    image \
-    jiff \
-    mqtt \
-    msgpack \
-    oxigraph \
-    polars \
-    protobuf \
-    random \
-    regex \
-    selkie \
-    svg \
-    syn \
-    tls \
-    toml \
-    tree-sitter \
-    vulkan \
-    xml \
-    yaml
-
-all: elle plugins docs  ## Build everything
+all: elle docs  ## Build everything
 
 # ── Build ───────────────────────────────────────────────────────────
 
@@ -49,18 +23,6 @@ elle:  ## Build the Elle binary (release)
 
 dev:  ## Build the Elle binary (debug, fast compile)
 	cargo build -p elle --features wasm
-
-plugins:  ## Build all native plugins (.so)
-	@# Build elle alongside every plugin so cargo's feature resolver
-	@# produces a SINGLE shared compilation of the elle crate. See
-	@# CONTRIBUTING.md — building plugins alone yields a second elle
-	@# rlib with a different HeapObject layout, and plugin functions
-	@# crash with "Cannot call <heap:...>" when invoked.
-	cargo build --release -p elle $(addprefix -p elle-,$(PLUGINS))
-
-plugin-%:  ## Build a single plugin by bare name (e.g., make plugin-crypto)
-	@# Always co-build elle; see the comment on the `plugins` target.
-	cargo build --release -p elle -p elle-$*
 
 # ── Docs ────────────────────────────────────────────────────────────
 
@@ -129,49 +91,11 @@ smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts
 	cargo build --release -p elle --features wasm -q
 	./target/release/elle demos/docgen/generate.lisp
 
-plugin-tests-vm:  ## Run plugin tests (VM, JIT disabled)
-	@echo "=== plugin tests (VM, JIT disabled) ==="
-	@printf '%s\n' tests/elle/plugins/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) --jit=0 {}' \
-		|| { echo "FAILED: plugin tests VM-only pass (JIT was disabled)"; exit 1; }
-
-plugin-tests-jit:  ## Run plugin tests (JIT enabled)
-	@echo "=== plugin tests (JIT enabled) ==="
-	@printf '%s\n' tests/elle/plugins/*.lisp | \
-		parallel -j $(JOBS) --halt now,fail=1 --tag \
-			'timeout $(TIMEOUT) $(ELLE) {}' \
-		|| { echo "FAILED: plugin tests JIT pass (JIT was enabled)"; exit 1; }
-
-plugin-tests: plugin-tests-vm plugin-tests-jit  ## Run plugin tests (VM then JIT)
-
 test-git:  ## Run git plugin integration tests (requires git, no network)
-	@# Co-build elle + elle-git in one cargo invocation; see
-	@# CONTRIBUTING.md on the single-cargo-invocation rule.
-	cargo build $(CARGO_PROFILE) -p elle -p elle-git
+	cargo build $(CARGO_PROFILE) -p elle
 	$(ELLE) tests/git.lisp
 
-mcp:  ## Build elle + MCP plugins (oxigraph, syn)
-	cargo build $(CARGO_PROFILE) -p elle -p elle-oxigraph -p elle-syn
-
-test-mcp: mcp  ## Run the MCP server integration test
-	@echo "=== MCP server integration test ==="
-	@$(ELLE) tools/test-mcp.lisp $(ELLE) \
-		|| { echo "FAILED: MCP server integration test"; exit 1; }
-
-check-plugin-list:  ## Assert every workspace plugin is in PLUGINS
-	@ws=$$(sed -n 's/.*"plugins\/\([^"]*\)".*/\1/p' Cargo.toml | sort); \
-	mk=$$(echo '$(PLUGINS)' | tr ' ' '\n' | sort); \
-	if [ "$$ws" = "$$mk" ]; then \
-		echo "✓ PLUGINS list matches Cargo.toml workspace members"; \
-	else \
-		echo "ERROR: Makefile PLUGINS and Cargo.toml workspace members differ"; \
-		echo "  Cargo.toml:"; echo "$$ws" | sed 's/^/    /'; \
-		echo "  Makefile:";   echo "$$mk" | sed 's/^/    /'; \
-		exit 1; \
-	fi
-
-test: smoke test-mcp  ## Rust unit tests + clippy + fmt + rustdoc after smoke
+test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps

@@ -1,8 +1,20 @@
 # Plugins
 
-Elle ships with 20 Rust plugins and 9 pure Elle standard library modules.
+Elle ships with Rust plugins and pure Elle standard library modules.
 Plugins are cdylib crates loaded at runtime via `import`. Standard modules
 use `import` with the `std/` prefix and require no compilation.
+
+## Stable ABI
+
+Plugins depend on the `elle-plugin` crate — not on `elle` itself. This
+provides a stable ABI: plugins can be compiled independently from elle
+and loaded at runtime without version matching. The ABI uses a named
+function lookup pattern (like `vkGetInstanceProcAddr`). Adding API
+functions to elle never breaks existing plugins.
+
+Plugins live in a [separate repository](https://github.com/elle-lisp/plugins).
+See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for a step-by-step
+guide to writing a plugin.
 
 ## Usage pattern
 
@@ -40,6 +52,7 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 | `elle-tls` | `"plugin/tls"` | TLS client/server (rustls) |
 | `elle-toml` | `"plugin/toml"` | TOML parsing |
 | `elle-tree-sitter` | `"plugin/tree-sitter"` | Multi-language parsing |
+| `elle-wayland` | `"plugin/wayland"` | Wayland compositor interaction |
 | `elle-xml` | `"plugin/xml"` | XML parsing |
 | `elle-yaml` | `"plugin/yaml"` | YAML parsing |
 
@@ -55,6 +68,7 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 | `semver` | `(def sv ((import "std/semver")))` | Semantic versioning |
 | `sqlite` | `(def db ((import "std/sqlite")))` | SQLite database (FFI to libsqlite3) |
 | `uuid` | `(def uuid ((import "std/uuid")))` | UUID generation and parsing |
+| `wayland` | `(def wl ((import "std/wayland") plugin))` | Wayland Elle wrapper |
 | `watch` | `(def w ((import "std/watch")))` | Filesystem watching |
 
 ## Gotchas
@@ -62,13 +76,13 @@ Build plugins before use: `cargo build --release -p elle-crypto`.
 - `import` returns a **struct** — access functions via `get` or
   accessor syntax (`crypto:sha256`)
 - Plugins are **never unloaded** — the library handle is leaked
-- No stable ABI — recompile when upgrading Elle
 - The analyzer has no static knowledge of plugin functions
 - Bind once at top level to avoid redundant loads
 
 ## Writing plugins
 
-See `plugins/AGENTS.md` and `docs/cookbook.md` for the recipe.
+See [`docs/cookbook/plugins.md`](cookbook/plugins.md) for the recipe and
+[`plugins/AGENTS.md`](../plugins/AGENTS.md) for technical reference.
 
 ---
 

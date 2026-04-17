@@ -88,37 +88,25 @@ expected failures. Do not rationalize failures away. Fix them.
 See [AGENTS.md](AGENTS.md) and [docs/testing.md](docs/testing.md) for
 test organization, helpers, and how to add tests.
 
-## Plugins and the single-cargo-invocation rule
+## Plugins and the stable ABI
 
-Every plugin in `plugins/` is a `cdylib` that depends on the `elle`
-library crate. This creates a subtle trap: if you build the elle binary
-and a plugin in *separate* `cargo build` invocations, cargo's feature
-resolver may pick different feature sets for transitive dependencies
-(notably `wasmtime`). That produces two different compilations of the
-elle crate — two different `libelle-*.rlib` files with two different
-`HeapObject` enum layouts.
+Plugins depend on the `elle-plugin` crate — **not** on `elle`. This
+provides a stable ABI: plugins can be compiled separately from elle
+and loaded at runtime. The old single-cargo-invocation rule no longer
+applies.
 
-The symptom is spectacular: the plugin's `Value::native_fn(f)` values
-survive the cross-dylib handoff by pointer, and the tag word on the
-`Value` side reads correctly (`(native-fn? f)` returns `true`), but when
-the main binary dereferences the heap pointer it reads a different
-`HeapObject` variant — typically `LibHandle`. Calling the value fails
-with `type-error: Cannot call <heap:...>`, and `(type f)` returns
-`"library-handle"` even though `(native-fn? f)` just said `true`.
+The ABI uses a named function lookup pattern (like `vkGetInstanceProcAddr`).
+Plugins resolve API functions by name at init time. Adding functions to
+elle never breaks existing plugins.
 
-**The rule:** always build elle and its plugins in a single `cargo
-build` invocation. For example:
-
-```sh
-cargo build -p elle -p elle-oxigraph -p elle-syn
+```toml
+# Plugin Cargo.toml
+[dependencies]
+elle-plugin = { path = "../../elle-plugin" }  # NOT elle
 ```
 
-The `test-mcp` target in the Makefile already follows this rule. If
-you add a new target that depends on a plugin, do the same. Never
-chain `cargo build -p elle` followed by `cargo build -p elle-X` as
-separate steps — the chain looks harmless but produces a broken
-binary that only fails when the plugin's functions are actually
-called.
+See [`docs/plugins.md`](docs/plugins.md) for the full list and
+[`docs/cookbook/plugins.md`](docs/cookbook/plugins.md) for the recipe.
 
 ## Conventions
 
