@@ -178,7 +178,12 @@ impl VM {
                     location_map,
                 );
             }
-            let (bits, value) = (def.func)(args.as_slice());
+            let (bits, value) =
+                if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
+                    crate::plugin_api::call_plugin(def, args.as_slice())
+                } else {
+                    (def.func)(args.as_slice())
+                };
             return self.handle_primitive_signal(
                 bits,
                 value,
@@ -578,7 +583,12 @@ impl VM {
             if !blocked.is_empty() {
                 return Some(self.handle_capability_denial_tail(def, blocked, &args));
             }
-            let (bits, value) = (def.func)(&args);
+            let (bits, value) =
+                if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
+                    crate::plugin_api::call_plugin(def, &args)
+                } else {
+                    (def.func)(&args)
+                };
             return Some(self.handle_primitive_signal_tail(bits, value));
         }
 

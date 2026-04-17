@@ -1,30 +1,7 @@
 [workspace]
 members = [
     ".",
-    "plugins/arrow",
-    "plugins/crypto",
-    "plugins/csv",
-    "plugins/hash",
-    "plugins/jiff",
-    "plugins/mqtt",
-    "plugins/msgpack",
-    "plugins/oxigraph",
-    "plugins/polars",
-    "plugins/protobuf",
-    "plugins/random",
-    "plugins/regex",
-    "plugins/image",
-    "plugins/selkie",
-    "plugins/svg",
-    "plugins/syn",
-    "plugins/tls",
-    "plugins/toml",
-    "plugins/tree-sitter",
-    "plugins/vulkan",
-
-    "plugins/xml",
-    "plugins/yaml",
-    "plugins/egui",
+    "elle-plugin",
 ]
 resolver = "2"
 
