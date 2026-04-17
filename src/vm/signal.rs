@@ -740,11 +740,106 @@ impl VM {
                     Err(e) => (SIG_ERROR, error_val("mlir-error", format!("git: {}", e))),
                 }
             }
+            "compile/run-on" => self.dispatch_compile_run_on(arg),
             _ => (
                 SIG_ERROR,
                 error_val(
                     "argument-error",
                     format!("SIG_QUERY: unknown operation: {}", op_name),
+                ),
+            ),
+        }
+    }
+
+    /// Force-dispatch a closure on a specific tier.
+    ///
+    /// `arg` is a list `(tier closure arg1 arg2 ...)`. Routes to the
+    /// matching `invoke_closure_*` method on `VM`.
+    fn dispatch_compile_run_on(&mut self, arg: Value) -> (SignalBits, Value) {
+        let parts = match arg.list_to_vec() {
+            Ok(v) => v,
+            Err(e) => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!("compile/run-on: malformed args list ({})", e),
+                    ),
+                )
+            }
+        };
+
+        if parts.len() < 2 {
+            return (
+                SIG_ERROR,
+                error_val(
+                    "arity-error",
+                    "compile/run-on: expected (tier closure & args), got fewer than 2 parts",
+                ),
+            );
+        }
+
+        let tier_kw = match parts[0].as_keyword_name() {
+            Some(k) => k,
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "compile/run-on: tier must be a keyword, got {}",
+                            parts[0].type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+
+        let closure_val = parts[1];
+        let closure = match closure_val.as_closure() {
+            Some(c) => c.clone(),
+            None => {
+                return (
+                    SIG_ERROR,
+                    error_val(
+                        "type-error",
+                        format!(
+                            "compile/run-on: target must be a closure, got {}",
+                            closure_val.type_name()
+                        ),
+                    ),
+                )
+            }
+        };
+
+        let call_args: Vec<Value> = parts[2..].to_vec();
+
+        match tier_kw.as_str() {
+            "bytecode" => self.invoke_closure_bytecode(closure_val, &closure, &call_args),
+            "jit" => self.invoke_closure_jit(closure_val, &closure, &call_args),
+            #[cfg(feature = "mlir")]
+            "mlir-cpu" => self.invoke_closure_mlir_cpu(closure_val, &closure, &call_args),
+            #[cfg(not(feature = "mlir"))]
+            "mlir-cpu" => (
+                SIG_ERROR,
+                crate::value::error_val_extra(
+                    "tier-rejected",
+                    "compile/run-on :mlir-cpu requires --features mlir",
+                    &[
+                        ("tier", Value::keyword("mlir-cpu")),
+                        ("reason", Value::keyword("feature-disabled")),
+                    ],
+                ),
+            ),
+            other => (
+                SIG_ERROR,
+                crate::value::error_val_extra(
+                    "tier-rejected",
+                    format!("compile/run-on: unknown tier :{}", other),
+                    &[
+                        ("tier", parts[0]),
+                        ("reason", Value::keyword("unknown-tier")),
+                    ],
                 ),
             ),
         }

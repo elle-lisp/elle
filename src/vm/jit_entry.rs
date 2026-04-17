@@ -246,7 +246,7 @@ impl VM {
     ///
     /// `func_value` is the original Value representing the closure, used for
     /// self-tail-call detection in the JIT code.
-    fn call_jit(
+    pub(crate) fn call_jit(
         &mut self,
         jit_code: &JitCode,
         closure: &crate::value::Closure,

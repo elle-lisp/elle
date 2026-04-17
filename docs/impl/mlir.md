@@ -126,3 +126,4 @@ src/lir/types.rs      is_gpu_eligible / is_mlir_cpu_eligible / is_gpu_instructio
 - [impl/jit.md](jit.md) — the Cranelift tier that runs after MLIR rejection
 - [impl/spirv.md](spirv.md) — the GPU lowering path that shares the eligibility check
 - [impl/gpu.md](gpu.md) — end-to-end GPU compute via MLIR + SPIR-V + Vulkan
+- [impl/differential.md](differential.md) — cross-tier agreement harness using `compile/run-on`

@@ -20,7 +20,7 @@ use crate::signals::registry::global_registry;
 use crate::signals::Signal;
 use crate::symbols::{SymbolDef, SymbolIndex, SymbolKind};
 use crate::value::error_val;
-use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
+use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK, SIG_QUERY};
 use crate::value::heap::TableKey;
 use crate::value::types::Arity;
 use crate::value::Value;
@@ -2306,6 +2306,67 @@ fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
     }
 }
 
+// ── compile/run-on ─────────────────────────────────────────────────────
+
+/// `(compile/run-on tier f & args)` — force-dispatch `f` on the named tier.
+///
+/// Powers `lib/differential.lisp`. Returns the result, or signals
+/// `:tier-rejected` if the tier doesn't accept this closure.
+///
+/// Tiers: `:bytecode`, `:jit`, `:mlir-cpu` (the last requires `--features mlir`).
+///
+/// Implementation: returns `SIG_QUERY` with payload `(tier closure arg1 arg2 ...)`;
+/// the VM's `dispatch_compile_run_on` handler does the actual work because it
+/// needs `&mut VM` access for the JIT cache, MLIR cache, and call machinery.
+pub(crate) fn prim_compile_run_on(args: &[Value]) -> (SignalBits, Value) {
+    if args.len() < 2 {
+        return (
+            SIG_ERROR,
+            error_val(
+                "arity-error",
+                format!(
+                    "compile/run-on: expected at least 2 arguments (tier closure & args), got {}",
+                    args.len()
+                ),
+            ),
+        );
+    }
+    // Cheap front-end validation — full type checks happen in the dispatch handler.
+    if args[0].as_keyword_name().is_none() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "compile/run-on: tier must be a keyword, got {}",
+                    args[0].type_name()
+                ),
+            ),
+        );
+    }
+    if args[1].as_closure().is_none() {
+        return (
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!(
+                    "compile/run-on: target must be a closure, got {}",
+                    args[1].type_name()
+                ),
+            ),
+        );
+    }
+
+    // Forward the entire arg list to the VM dispatcher.
+    (
+        SIG_QUERY,
+        Value::cons(
+            Value::keyword("compile/run-on"),
+            crate::value::list(args.to_vec()),
+        ),
+    )
+}
+
 // ── Registration ───────────────────────────────────────────────────────
 
 pub const PRIMITIVES: &[PrimitiveDef] = &[
@@ -2494,6 +2555,17 @@ pub const PRIMITIVES: &[PrimitiveDef] = &[
         params: &["analysis", "fn-name", "signal-kind"],
         category: "compile",
         example: r#"(compile/add-handler analysis :fetch-page :error)"#,
+        aliases: &[],
+    },
+    PrimitiveDef {
+        name: "compile/run-on",
+        func: prim_compile_run_on,
+        signal: Signal { bits: SIG_QUERY.union(SIG_ERROR), propagates: 0 },
+        arity: Arity::AtLeast(2),
+        doc: "Force-dispatch a closure on a specific tier (:bytecode, :jit, :mlir-cpu). Used by lib/differential.lisp to verify tier agreement. Returns the result, or signals :tier-rejected if the tier doesn't accept the closure.",
+        params: &["tier", "f"],
+        category: "compile",
+        example: r#"(compile/run-on :bytecode (fn [a b] (+ a b)) 3 4)"#,
         aliases: &[],
     },
 ];

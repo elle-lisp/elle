@@ -1,5 +1,5 @@
-.PHONY: all elle dev mcp docs docgen smoke test test-git clean help \
-       smoke-vm smoke-jit smoke-wasm doctest
+.PHONY: all elle dev docs docgen smoke test test-git clean help \
+       smoke-vm smoke-jit smoke-wasm smoke-diff doctest
 
 .DEFAULT_GOAL := all
 
@@ -93,7 +93,14 @@ doctest:  ## Test code examples in documentation (literate mode)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest
+smoke-diff:  ## Cross-tier differential agreement tests (compile/run-on)
+	@echo "=== differential tier-agreement tests ==="
+	@printf '%s\n' tests/diff/*.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: differential tests"; exit 1; }
+
+smoke: dev smoke-vm smoke-jit smoke-wasm smoke-diff doctest  ## Run examples + elle scripts (VM, JIT, WASM, differential) + docgen + doctest
 	cargo build --release -p elle --features wasm -q
 	./target/release/elle demos/docgen/generate.lisp
 

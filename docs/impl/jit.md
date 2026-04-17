@@ -69,3 +69,4 @@ src/jit/dispatch.rs    JIT dispatch integration with VM
 - [impl/mlir.md](mlir.md) — MLIR tier-2 path consulted before Cranelift
 - [impl/wasm.md](wasm.md) — WebAssembly backend
 - [impl/gpu.md](gpu.md) — GPU compute via SPIR-V + Vulkan
+- [impl/differential.md](differential.md) — cross-tier agreement harness
