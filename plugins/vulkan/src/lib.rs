@@ -479,15 +479,12 @@ fn parse_buffer_spec(
 }
 
 fn struct_get(val: &Value, key: &str) -> Option<Value> {
+    let tk = elle::value::TableKey::Keyword(key.to_string());
     if let Some(fields) = val.as_struct() {
-        fields
-            .get(&elle::value::TableKey::Keyword(key.to_string()))
-            .copied()
+        // Immutable structs are a sorted slice of (key, value) pairs.
+        fields.iter().find(|(k, _)| k == &tk).map(|(_, v)| *v)
     } else if let Some(fields) = val.as_struct_mut() {
-        fields
-            .borrow()
-            .get(&elle::value::TableKey::Keyword(key.to_string()))
-            .copied()
+        fields.borrow().get(&tk).copied()
     } else {
         None
     }
