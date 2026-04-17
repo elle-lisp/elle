@@ -37,9 +37,10 @@
 (def rdf ((import "std/rdf")))
 (def rust-rdf ((import "tools/rust-rdf-lib") syn))
 
-# ── Watch library ───────────────────────────────────────────────────────
+# ── Watch + UUID libraries ──────────────────────────────────────────────
 
 (def watch ((import "std/watch")))
+(def uuid-lib ((import "std/uuid")))
 
 # ── Store initialization ─────────────────────────────────────────────────
 
@@ -131,6 +132,45 @@
 (defn invalidate-cache [path]
   "Remove a path from the analysis cache so it is re-analyzed on next access."
   (put analysis-cache path nil))
+
+# ── Eval handle table ───────────────────────────────────────────────────
+
+(def eval-handles @{})
+
+(defn handle-put [value]
+  "Store a value in the handle table, return its UUID."
+  (let [[id (uuid-lib:v4)]]
+    (put eval-handles id {:value value})
+    id))
+
+(defn handle-get [id]
+  "Retrieve a value by handle. Errors if the handle is unknown."
+  (let [[entry (get eval-handles id)]]
+    (when (nil? entry)
+      (error {:error :unknown-handle :message (string "unknown handle: " id)}))
+    (get entry :value)))
+
+(defn value-kind [val is-error]
+  "Kind string for a value. Reports :error when the eval failed."
+  (if is-error ":error" (string ":" (type-of val))))
+
+(defn value-shape [val]
+  "Cheap shape hint: count for collections, keys_sample for structs."
+  (case (type-of val)
+    :array   {:count (length val)}
+    :@array  {:count (length val)}
+    :list    {:count (length val)}
+    :struct  (let [[ks (keys val)]]
+               {:count (length ks)
+                :keys_sample (freeze (take 5 ks))})
+    :@struct (let [[ks (keys val)]]
+               {:count (length ks)
+                :keys_sample (freeze (take 5 ks))})
+    :string  {:bytes (length val)}
+    :@string {:bytes (length val)}
+    :set     {:count (length val)}
+    :@set    {:count (length val)}
+    nil))
 
 # ── Signal diff (for watch notifications) ────────────────────────────────
 
@@ -323,6 +363,19 @@
                               :function {:type "string" :description "Function name to trace"}
                               :depth    {:type "integer" :description "Max Rust call depth (default: 2)"}}
                  :required ["path" "function"]}})
+
+(def tool-eval
+  {:name "eval"
+   :description "Evaluate an Elle lambda against the persistent image. Returns a handle (UUID) naming the result — large values stay in the image. Compose by passing prior handles as inputs. stdout/stderr are captured and returned."
+   :inputSchema {:type "object"
+                 :properties {:lambda     {:type "string"
+                                           :description "Elle source for a callable expression, e.g. \"(fn [prev] (take 10 prev))\""}
+                              :inputs     {:type "array"
+                                           :items {:type "string"}
+                                           :description "Handles from prior eval calls, passed positionally as arguments"}
+                              :timeout_ms {:type "integer"
+                                           :description "Wall-clock timeout in milliseconds (default: 10000; 0 to disable)"}}
+                 :required ["lambda"]}})
 
 # ── SPARQL tool handlers ─────────────────────────────────────────────────
 
@@ -670,6 +723,107 @@
 
   (text-content (freeze out)))
 
+# ── Eval tool handler ──────────────────────────────────────────────────
+
+(defn call-eval [arguments]
+  (let* [[lambda-src (get arguments "lambda")]
+         [input-ids  (or (get arguments "inputs") [])]
+         [timeout-ms (or (get arguments "timeout_ms") 10000)]]
+
+    (when (nil? lambda-src)
+      (error {:error :invalid-params :message "missing required parameter: lambda"}))
+
+    # Parse the lambda source
+    (var parsed nil)
+    (let [[[ok? val] (protect (read lambda-src))]]
+      (if ok? (assign parsed val)
+        (error {:error :parse-error
+                :message (string "cannot parse lambda: " (get val :message))})))
+
+    # Eval to get a callable value
+    (var callable nil)
+    (let [[[ok? val] (protect (eval parsed))]]
+      (if ok? (assign callable val)
+        (error {:error :eval-error
+                :message (string "lambda eval failed: " (get val :message))})))
+
+    (when (not (callable? callable))
+      (error {:error :type-error
+              :message (string "lambda must evaluate to a callable, got "
+                         (type-of callable))}))
+
+    # Resolve input handles
+    (var input-vals @[])
+    (each id in input-ids
+      (push input-vals (handle-get id)))
+
+    # Arity check for closures
+    (when (= (type-of callable) :closure)
+      (let [[a (arity callable)]
+            [n (length input-ids)]]
+        (cond
+          ((nil? a)     nil)
+          ((integer? a) (unless (= a n)
+                          (error {:error :arity-mismatch
+                                  :message (string "lambda expects " a " args, got " n)})))
+          (true         (unless (>= n (first a))
+                          (error {:error :arity-mismatch
+                                  :message (string "lambda expects at least "
+                                             (first a) " args, got " n)}))))))
+
+    # Set up temp files for I/O capture
+    (file/mkdir-all ".elle-mcp")
+    (let* [[eval-id (uuid-lib:v4)]
+           [out-path (string ".elle-mcp/eval-" eval-id "-out")]
+           [err-path (string ".elle-mcp/eval-" eval-id "-err")]
+           [out-port (port/open out-path :write)]
+           [err-port (port/open err-path :write)]]
+      (defer (begin
+               (protect (file/delete out-path))
+               (protect (file/delete err-path)))
+
+        # Execute with I/O capture and optional timeout
+        (let* [[input-list (freeze input-vals)]
+               [thunk (fn []
+                        (parameterize ((*stdout* out-port) (*stderr* err-port))
+                          (apply callable input-list)))]
+               [start (clock/monotonic)]
+               [[ok? result] (if (and timeout-ms (> timeout-ms 0))
+                               (protect (ev/timeout (/ timeout-ms 1000) thunk))
+                               (protect (thunk)))]
+               [duration-ns (int (* (- (clock/monotonic) start) 1000000000))]]
+
+          # Flush and close captured I/O ports
+          (protect (port/flush out-port))
+          (protect (port/flush err-port))
+          (protect (port/close out-port))
+          (protect (port/close err-port))
+
+          # Read captured output
+          (var stdout-text "")
+          (var stderr-text "")
+          (let [[[rd-ok? rd-val] (protect (file/read out-path))]]
+            (when rd-ok? (assign stdout-text rd-val)))
+          (let [[[rd-ok? rd-val] (protect (file/read err-path))]]
+            (when rd-ok? (assign stderr-text rd-val)))
+
+          # Build response
+          (let* [[handle (handle-put result)]
+                 [kind (value-kind result (not ok?))]
+                 [shape (if ok?
+                          (value-shape result)
+                          {:reason (get result :error)
+                           :message (get result :message)})]]
+            (text-content (json/serialize
+              {:ok ok?
+               :handle handle
+               :kind kind
+               :shape shape
+               :stdout stdout-text
+               :stderr stderr-text
+               :duration_ns duration-ns
+               :fibers []}))))))))
+
 # ── Test orchestration ───────────────────────────────────────────────────
 
 (def tool-test-run
@@ -734,7 +888,7 @@
   [tool-ping tool-sparql-query tool-sparql-update tool-load-rdf tool-dump-rdf
    tool-analyze-file tool-portrait tool-signal-query tool-impact
    tool-verify-invariants tool-compile-rename tool-compile-extract
-   tool-compile-parallelize tool-trace
+   tool-compile-parallelize tool-trace tool-eval
    tool-test-run tool-test-status tool-test-history tool-test-gate
    tool-push-ready tool-push-wip])
 
@@ -949,6 +1103,7 @@
     "compile_extract"     (call-compile-extract arguments)
     "compile_parallelize" (call-compile-parallelize arguments)
     "trace"               (call-trace arguments)
+    "eval"                (call-eval arguments)
     "test_run"            (call-test-run arguments)
     "test_status"         (call-test-status arguments)
     "test_history"        (call-test-history arguments)
