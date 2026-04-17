@@ -817,6 +817,20 @@ impl VM {
         match tier_kw.as_str() {
             "bytecode" => self.invoke_closure_bytecode(closure_val, &closure, &call_args),
             "jit" => self.invoke_closure_jit(closure_val, &closure, &call_args),
+            #[cfg(feature = "wasm")]
+            "wasm" => self.invoke_closure_wasm(closure_val, &closure, &call_args),
+            #[cfg(not(feature = "wasm"))]
+            "wasm" => (
+                SIG_ERROR,
+                crate::value::error_val_extra(
+                    "tier-rejected",
+                    "compile/run-on :wasm requires --features wasm",
+                    &[
+                        ("tier", Value::keyword("wasm")),
+                        ("reason", Value::keyword("feature-disabled")),
+                    ],
+                ),
+            ),
             #[cfg(feature = "mlir")]
             "mlir-cpu" => self.invoke_closure_mlir_cpu(closure_val, &closure, &call_args),
             #[cfg(not(feature = "mlir"))]

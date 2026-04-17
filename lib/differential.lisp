@@ -20,7 +20,7 @@
 ## ── Tiers ───────────────────────────────────────────────────────────
 
 ## Every tier we attempt. Order matters: :bytecode is the reference.
-(def all-tiers [:bytecode :jit :mlir-cpu])
+(def all-tiers [:bytecode :jit :wasm :mlir-cpu])
 
 ## ── Try-on-tier ─────────────────────────────────────────────────────
 

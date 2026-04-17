@@ -5,8 +5,9 @@ Elle compiles closures through up to four execution tiers:
 ```text
 1. bytecode   — interpreter, always available
 2. jit        — Cranelift native code, requires LIR + non-polymorphic
-3. mlir-cpu   — MLIR/LLVM tier-2, requires --features mlir + GPU eligibility
-4. gpu        — SPIR-V on Vulkan, via gpu:map (--features mlir + vulkan plugin)
+3. wasm       — Wasmtime tiered, requires --features wasm + no tail calls
+4. mlir-cpu   — MLIR/LLVM tier-2, requires --features mlir + GPU eligibility
+5. gpu        — SPIR-V on Vulkan, via gpu:map (--features mlir + vulkan plugin)
 ```
 
 Each tier is a separate code path with its own value representation,
@@ -32,6 +33,8 @@ the result. `tier` is one of:
 
 - `:bytecode` — pure interpreter (JIT temporarily disabled for the call)
 - `:jit` — force-compiles via Cranelift, then dispatches to native code
+- `:wasm` — force-compiles via Wasmtime tiered backend (only available
+  with `--features wasm`; rejects closures with tail calls)
 - `:mlir-cpu` — force-compiles via MLIR + LLVM, then invokes via the
   `MlirCache` (only available with `--features mlir`)
 
@@ -108,11 +111,11 @@ GPU-eligible code.
 
 ## Phase 1 scope
 
-This page describes Phase 1: `:bytecode`, `:jit`, `:mlir-cpu`. The
-GPU tier is added in Phase 2 by routing through `(gpu:map f [args])` —
-operationally identical to "call on GPU" for one-element batches. Float
-tolerance modes, property-based generators, and auto-promoted existing
-tests follow in later phases.
+Phase 1 ships `:bytecode`, `:jit`, `:wasm`, `:mlir-cpu`. The GPU tier
+is added in Phase 2 by routing through `(gpu:map f [args])` —
+operationally identical to "call on GPU" for one-element batches.
+Tail-call loop support, float tolerance modes, property-based
+generators, and auto-promoted existing tests follow in later phases.
 
 ## See also
 
