@@ -722,6 +722,16 @@ mod tests {
     use super::*;
     use crate::schema::parse_proto_string;
 
+    /// Test helper: look up a key in a sorted-struct slice.
+    /// Introduced when `as_struct()` switched from BTreeMap to sorted
+    /// slice; keeps the assertions readable.
+    fn get_field<'a>(entries: &'a [(TableKey, Value)], key: &TableKey) -> Option<&'a Value> {
+        entries
+            .binary_search_by(|(k, _)| k.cmp(key))
+            .ok()
+            .map(|i| &entries[i].1)
+    }
+
     const TEST_PROTO: &str = r#"
 syntax = "proto3";
 package test;
@@ -780,7 +790,7 @@ message Team {
 
         // Verify :name
         let name_key = TableKey::Keyword("name".into());
-        let name_val = decoded_struct.as_struct().unwrap().get(&name_key).unwrap();
+        let name_val = get_field(decoded_struct.as_struct().unwrap(), &name_key).unwrap();
         assert!(
             name_val.with_string(|s| s == "Alice").unwrap_or(false),
             "name mismatch"
@@ -788,12 +798,12 @@ message Team {
 
         // Verify :age
         let age_key = TableKey::Keyword("age".into());
-        let age_val = decoded_struct.as_struct().unwrap().get(&age_key).unwrap();
+        let age_val = get_field(decoded_struct.as_struct().unwrap(), &age_key).unwrap();
         assert_eq!(age_val.as_int(), Some(30), "age mismatch");
 
         // Verify :tags
         let tags_key = TableKey::Keyword("tags".into());
-        let tags_val = decoded_struct.as_struct().unwrap().get(&tags_key).unwrap();
+        let tags_val = get_field(decoded_struct.as_struct().unwrap(), &tags_key).unwrap();
         let tags_arr = tags_val.as_array().expect("tags should be array");
         assert_eq!(tags_arr.len(), 2, "tags length mismatch");
         assert!(tags_arr[0].with_string(|s| s == "dev").unwrap_or(false));
@@ -821,11 +831,7 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let status_key = TableKey::Keyword("status".into());
-        let status_val = decoded_struct
-            .as_struct()
-            .unwrap()
-            .get(&status_key)
-            .unwrap();
+        let status_val = get_field(decoded_struct.as_struct().unwrap(), &status_key).unwrap();
         // Enum keyword :OK
         assert_eq!(
             status_val.as_keyword_name().as_deref(),
@@ -867,17 +873,13 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let members_key = TableKey::Keyword("members".into());
-        let members_val = decoded_struct
-            .as_struct()
-            .unwrap()
-            .get(&members_key)
-            .unwrap();
+        let members_val = get_field(decoded_struct.as_struct().unwrap(), &members_key).unwrap();
         let members_arr = members_val.as_array().expect("members should be array");
         assert_eq!(members_arr.len(), 1, "members length mismatch");
 
         let alice = members_arr[0];
         let name_key = TableKey::Keyword("name".into());
-        let alice_name = alice.as_struct().unwrap().get(&name_key).unwrap();
+        let alice_name = get_field(alice.as_struct().unwrap(), &name_key).unwrap();
         assert!(
             alice_name.with_string(|s| s == "Alice").unwrap_or(false),
             "nested member name mismatch"
@@ -911,15 +913,11 @@ message Team {
         let decoded_struct = decode_message(&decoded_msg).expect("decode_message failed");
 
         let scores_key = TableKey::Keyword("scores".into());
-        let scores_val = decoded_struct
-            .as_struct()
-            .unwrap()
-            .get(&scores_key)
-            .unwrap();
+        let scores_val = get_field(decoded_struct.as_struct().unwrap(), &scores_key).unwrap();
         let scores_struct = scores_val.as_struct().expect("scores should be struct");
 
         let math_key = TableKey::Keyword("math".into());
-        let math_val = scores_struct.get(&math_key).unwrap();
+        let math_val = get_field(scores_struct, &math_key).unwrap();
         assert_eq!(math_val.as_int(), Some(95), "math score mismatch");
     }
 
@@ -945,7 +943,7 @@ message BigNum { int64 id = 1; }
         let decoded_msg = DynamicMessage::decode(desc, encoded.as_slice()).unwrap();
         let decoded = decode_message(&decoded_msg).unwrap();
         let id_key = TableKey::Keyword("id".into());
-        let id_val = decoded.as_struct().unwrap().get(&id_key).unwrap();
+        let id_val = get_field(decoded.as_struct().unwrap(), &id_key).unwrap();
         assert_eq!(id_val.as_int(), Some(n), "int64 max roundtrip failed");
     }
 
@@ -979,12 +977,12 @@ message Counter { map<uint64, int32> counts = 1; }
         let decoded = decode_message(&decoded_msg).unwrap();
 
         let counts_key = TableKey::Keyword("counts".into());
-        let counts_val = decoded.as_struct().unwrap().get(&counts_key).unwrap();
+        let counts_val = get_field(decoded.as_struct().unwrap(), &counts_key).unwrap();
         let counts_struct = counts_val.as_struct().expect("counts should be struct");
 
         // uint64 key 42 fits in i64, so decoded as int key
         let key_42 = TableKey::Int(42);
-        let val_42 = counts_struct.get(&key_42).unwrap();
+        let val_42 = get_field(counts_struct, &key_42).unwrap();
         assert_eq!(
             val_42.as_int(),
             Some(100),
@@ -1024,15 +1022,15 @@ message Event {
         let text_key = TableKey::Keyword("text".into());
         let code_key = TableKey::Keyword("code".into());
         assert!(
-            decoded_map.contains_key(&text_key),
+            get_field(decoded_map, &text_key).is_some(),
             "text should be present"
         );
         assert!(
-            !decoded_map.contains_key(&code_key),
+            get_field(decoded_map, &code_key).is_none(),
             "code should be absent (oneof)"
         );
 
-        let text_val = decoded_map.get(&text_key).unwrap();
+        let text_val = get_field(decoded_map, &text_key).unwrap();
         assert!(text_val.with_string(|s| s == "hello").unwrap_or(false));
     }
 
@@ -1069,18 +1067,17 @@ message Bag { repeated Item items = 1; }
         let decoded = decode_message(&decoded_msg).unwrap();
 
         let items_key = TableKey::Keyword("items".into());
-        let items = decoded.as_struct().unwrap().get(&items_key).unwrap();
+        let items = get_field(decoded.as_struct().unwrap(), &items_key).unwrap();
         let arr = items.as_array().expect("items should be array");
         assert_eq!(arr.len(), 2);
 
         let item0 = arr[0].as_struct().unwrap();
         let label_key = TableKey::Keyword("label".into());
         let val_key = TableKey::Keyword("value".into());
-        assert!(item0
-            .get(&label_key)
+        assert!(get_field(item0, &label_key)
             .unwrap()
             .with_string(|s| s == "a")
             .unwrap_or(false));
-        assert_eq!(item0.get(&val_key).unwrap().as_int(), Some(1));
+        assert_eq!(get_field(item0, &val_key).unwrap().as_int(), Some(1));
     }
 }

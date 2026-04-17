@@ -13,8 +13,8 @@ use crate::primitives::access::resolve_index;
 use crate::value::error_val;
 use crate::value::fiber::CallFrame;
 use crate::value::{
-    BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR, SIG_HALT, SIG_OK,
-    SIG_SWITCH,
+    sorted_struct_get, BytecodeFrame, SignalBits, SuspendedFrame, TableKey, Value, SIG_ERROR,
+    SIG_HALT, SIG_OK, SIG_SWITCH,
 };
 // SmallVec was tried here but benchmarks showed no improvement over Vec
 // for the common 0-8 arg case. The inline storage (64 bytes) touches a
@@ -741,7 +741,7 @@ pub(crate) fn call_collection(
             }
         };
         let default = if args.len() == 2 { args[1] } else { Value::NIL };
-        return Some(Ok(s.get(&key).copied().unwrap_or(default)));
+        return Some(Ok(sorted_struct_get(s, &key).copied().unwrap_or(default)));
     }
     if let Some(s) = func.as_struct_mut() {
         if args.is_empty() || args.len() > 2 {

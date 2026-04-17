@@ -180,7 +180,11 @@ impl std::hash::Hash for TableKey {
             TableKey::Symbol(id) => id.hash(state),
             TableKey::String(s) => s.hash(state),
             TableKey::Keyword(s) => s.hash(state),
-            TableKey::Identity(v) => (v.tag, v.payload).hash(state),
+            // Delegate to Value's Hash. For Fiber/ThreadHandle/External
+            // that encodes a stable Rc/Arc-backed identity rather than
+            // the slot pointer, so outbox relocation on fiber yield
+            // doesn't turn the same fiber into a different map key.
+            TableKey::Identity(v) => v.hash(state),
         }
     }
 }
@@ -194,9 +198,9 @@ impl PartialEq for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a == b,
             (TableKey::String(a), TableKey::String(b)) => a == b,
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a == b,
-            (TableKey::Identity(a), TableKey::Identity(b)) => {
-                a.tag == b.tag && a.payload == b.payload
-            }
+            // Delegate to Value's PartialEq (stable identity for Fiber
+            // and friends — see Hash impl above).
+            (TableKey::Identity(a), TableKey::Identity(b)) => a == b,
             _ => false,
         }
     }
@@ -227,9 +231,9 @@ impl Ord for TableKey {
             (TableKey::Symbol(a), TableKey::Symbol(b)) => a.cmp(b),
             (TableKey::String(a), TableKey::String(b)) => a.cmp(b),
             (TableKey::Keyword(a), TableKey::Keyword(b)) => a.cmp(b),
-            (TableKey::Identity(a), TableKey::Identity(b)) => {
-                (a.tag, a.payload).cmp(&(b.tag, b.payload))
-            }
+            // Delegate to Value's Ord. Stable identity for Fiber and
+            // friends — see Hash impl above.
+            (TableKey::Identity(a), TableKey::Identity(b)) => a.cmp(b),
             _ => unreachable!("discriminant match already handled"),
         }
     }
@@ -272,6 +276,53 @@ impl fmt::Debug for TableKey {
             TableKey::Identity(v) => write!(f, "{:?}", v),
         }
     }
+}
+
+// ── Sorted struct slice helpers ───────────────────────────────────────────
+
+/// Look up a key in a sorted struct slice by binary search.
+#[inline]
+pub fn sorted_struct_get<'a>(
+    entries: &'a [(TableKey, super::Value)],
+    key: &TableKey,
+) -> Option<&'a super::Value> {
+    entries
+        .binary_search_by(|(k, _)| k.cmp(key))
+        .ok()
+        .map(|i| &entries[i].1)
+}
+
+/// Check if a sorted struct slice contains a key.
+#[inline]
+pub fn sorted_struct_contains(entries: &[(TableKey, super::Value)], key: &TableKey) -> bool {
+    entries.binary_search_by(|(k, _)| k.cmp(key)).is_ok()
+}
+
+/// Insert or update a key in a sorted Vec, maintaining sort order.
+/// Returns a new Vec (for immutable struct operations).
+pub fn sorted_struct_insert(
+    entries: &[(TableKey, super::Value)],
+    key: TableKey,
+    value: super::Value,
+) -> Vec<(TableKey, super::Value)> {
+    let mut result = entries.to_vec();
+    match result.binary_search_by(|(k, _)| k.cmp(&key)) {
+        Ok(i) => result[i].1 = value,
+        Err(i) => result.insert(i, (key, value)),
+    }
+    result
+}
+
+/// Remove a key from a sorted slice, returning a new Vec.
+pub fn sorted_struct_remove(
+    entries: &[(TableKey, super::Value)],
+    key: &TableKey,
+) -> Vec<(TableKey, super::Value)> {
+    let mut result = entries.to_vec();
+    if let Ok(i) = result.binary_search_by(|(k, _)| k.cmp(key)) {
+        result.remove(i);
+    }
+    result
 }
 
 /// Primitive function signature.

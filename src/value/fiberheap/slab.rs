@@ -122,6 +122,22 @@ impl RootSlab {
         self.live_count
     }
 
+    /// Check if a pointer falls within any of this slab's chunks.
+    ///
+    /// O(chunks), but chunks are few (typically 1-2). Used by the outbox
+    /// safety net to detect pointers into the private heap at yield time.
+    pub fn owns(&self, ptr: *const ()) -> bool {
+        let addr = ptr as usize;
+        for chunk in &self.chunks {
+            let base = chunk.as_ptr() as usize;
+            let end = base + CHUNK_SIZE * size_of::<HeapObject>();
+            if addr >= base && addr < end {
+                return true;
+            }
+        }
+        false
+    }
+
     // ── Private helpers ──────────────────────────────────────────────
 
     fn add_chunk(&mut self) {

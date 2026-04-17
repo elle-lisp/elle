@@ -32,8 +32,9 @@ fn test_quasiquote_simple_list() {
     );
 
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
-    // Should expand to (list <lit:a> <lit:b> <lit:c>)
-    // Symbols become SyntaxLiteral (not (quote ...)) to preserve scopes
+    // Symbols in a quasiquoted list become `SyntaxLiteral(Value::syntax(...))`
+    // wrappers (Flatt 2016 §3 — preserves definition-site scopes), so the
+    // expansion is `(list #<syntax-literal:...> #<syntax-literal:...> ...)`.
     let result_str = result.to_string();
     assert!(
         result_str.contains("list"),
@@ -42,7 +43,7 @@ fn test_quasiquote_simple_list() {
     );
     assert!(
         result_str.contains("syntax-literal"),
-        "Result should contain syntax-literals for symbols: {}",
+        "Quasiquoted symbols should expand to syntax-literal wrappers: {}",
         result_str
     );
 }
@@ -71,6 +72,8 @@ fn test_quasiquote_with_unquote() {
     );
 
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
+    // `(a ,x b) expands to `(list <syntax-literal a> x <syntax-literal b>)` —
+    // the unquoted `x` appears bare while the other symbols are wrapped.
     let result_str = result.to_string();
     assert!(
         result_str.contains("list"),
@@ -80,12 +83,12 @@ fn test_quasiquote_with_unquote() {
     // Non-unquoted symbols become SyntaxLiteral for scope preservation
     assert!(
         result_str.contains("syntax-literal"),
-        "Result should contain syntax-literals for quoted symbols: {}",
+        "Quasiquoted symbols should expand to syntax-literal wrappers: {}",
         result_str
     );
     assert!(
         result_str.contains("x"),
-        "Result should contain 'x': {}",
+        "Unquoted symbol should appear bare: {}",
         result_str
     );
 }
@@ -149,10 +152,12 @@ fn test_quasiquote_non_list() {
 
     let result = expander.expand(syntax, &mut symbols, &mut vm).unwrap();
     let result_str = result.to_string();
-    // Bare symbol becomes SyntaxLiteral to preserve scopes
+    // A bare quasiquoted symbol expands to a syntax-literal wrapper that
+    // carries the original syntax (with its scopes) through the Value
+    // round-trip.
     assert!(
         result_str.contains("syntax-literal"),
-        "Result should be a syntax-literal: {}",
+        "Quasiquoted symbol should expand to a syntax-literal wrapper: {}",
         result_str
     );
     assert!(

@@ -68,7 +68,7 @@ fn value_to_toml(v: Value, name: &str) -> Result<toml::Value, (SignalBits, Value
     // Immutable struct — keyword keys become TOML table keys
     if let Some(map) = v.as_struct() {
         let mut table = toml::map::Map::new();
-        for (k, &val) in map.iter() {
+        for &(ref k, val) in map.iter() {
             let key = match k {
                 TableKey::Keyword(s) => s.clone(),
                 other => {
@@ -89,7 +89,7 @@ fn value_to_toml(v: Value, name: &str) -> Result<toml::Value, (SignalBits, Value
     if let Some(map_ref) = v.as_struct_mut() {
         let map = map_ref.borrow();
         let mut table = toml::map::Map::new();
-        for (k, &val) in map.iter() {
+        for (k, val) in map.iter() {
             let key = match k {
                 TableKey::Keyword(s) => s.clone(),
                 other => {
@@ -102,7 +102,7 @@ fn value_to_toml(v: Value, name: &str) -> Result<toml::Value, (SignalBits, Value
                     ))
                 }
             };
-            table.insert(key, value_to_toml(val, name)?);
+            table.insert(key, value_to_toml(*val, name)?);
         }
         return Ok(toml::Value::Table(table));
     }

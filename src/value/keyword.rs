@@ -125,6 +125,16 @@ pub fn intern_keyword(name: &str) -> u64 {
     hash
 }
 
+/// Return the number of registered keywords in the global name table.
+pub fn keyword_count() -> usize {
+    let ptr = LOOKUP_FN_PTR.load(Ordering::Acquire);
+    if ptr != 0 {
+        // In a plugin context, we can't size the host table — return 0.
+        return 0;
+    }
+    KEYWORD_NAMES.read().unwrap().len()
+}
+
 /// Look up a keyword name by its 47-bit hash.
 ///
 /// In the host binary, looks up in the local `KEYWORD_NAMES` table.

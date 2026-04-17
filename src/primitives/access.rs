@@ -5,7 +5,7 @@
 //! - `put`: updates values in @arrays, arrays, strings, @strings, @bytes, and structs
 
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_OK};
-use crate::value::{error_val, TableKey, Value};
+use crate::value::{error_val, sorted_struct_get, sorted_struct_insert, TableKey, Value};
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Resolve a possibly-negative index. Returns None if out of bounds.
@@ -305,7 +305,10 @@ pub(crate) fn prim_get(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        return (SIG_OK, s.get(&key).copied().unwrap_or(default));
+        return (
+            SIG_OK,
+            sorted_struct_get(s, &key).copied().unwrap_or(default),
+        );
     }
 
     // List (cons-based)
@@ -721,9 +724,10 @@ pub(crate) fn prim_put(args: &[Value]) -> (SignalBits, Value) {
                 )
             }
         };
-        let mut new_map = s.clone();
-        new_map.insert(key, value);
-        return (SIG_OK, Value::struct_from(new_map)); // Return new struct
+        return (
+            SIG_OK,
+            Value::struct_from_sorted(sorted_struct_insert(s, key, value)),
+        ); // Return new struct
     }
 
     // Unsupported type

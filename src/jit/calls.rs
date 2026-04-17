@@ -553,16 +553,15 @@ pub extern "C" fn elle_jit_make_closure(
         .template
         .clone();
 
-    let env: Vec<Value> = if count == 0 {
-        vec![]
+    let env_slice: &[Value] = if count == 0 {
+        &[]
     } else {
-        let slice = unsafe { std::slice::from_raw_parts(captures_ptr, count) };
-        slice.to_vec()
+        unsafe { std::slice::from_raw_parts(captures_ptr, count) }
     };
 
     let result = Value::closure(crate::value::Closure {
         template: closure_template,
-        env: std::rc::Rc::new(env),
+        env: crate::value::arena::alloc_inline_slice::<Value>(env_slice),
         squelch_mask: SignalBits::EMPTY,
     });
     JitValue::from_value(result)

@@ -243,7 +243,7 @@ fn get_string_field(val: &Value, field: &str) -> Result<String, String> {
     let s = val
         .as_struct()
         .ok_or_else(|| format!("xml/emit: expected struct, got {}", val.type_name()))?;
-    match s.get(&TableKey::Keyword(field.into())) {
+    match elle::value::sorted_struct_get(s, &TableKey::Keyword(field.into())) {
         Some(v) => v.with_string(|s| s.to_string()).ok_or_else(|| {
             format!(
                 "xml/emit: field '{}' must be a string, got {}",
@@ -259,7 +259,7 @@ fn get_struct_field(val: &Value, field: &str) -> Result<Value, String> {
     let s = val
         .as_struct()
         .ok_or_else(|| format!("xml/emit: expected struct, got {}", val.type_name()))?;
-    match s.get(&TableKey::Keyword(field.into())) {
+    match elle::value::sorted_struct_get(s, &TableKey::Keyword(field.into())) {
         Some(v) => {
             if v.as_struct().is_some() || v.as_struct_mut().is_some() {
                 Ok(*v)
@@ -279,7 +279,7 @@ fn get_array_field(val: &Value, field: &str) -> Result<Vec<Value>, String> {
     let s = val
         .as_struct()
         .ok_or_else(|| format!("xml/emit: expected struct, got {}", val.type_name()))?;
-    match s.get(&TableKey::Keyword(field.into())) {
+    match elle::value::sorted_struct_get(s, &TableKey::Keyword(field.into())) {
         Some(v) => {
             if let Some(arr) = v.as_array() {
                 Ok(arr.to_vec())

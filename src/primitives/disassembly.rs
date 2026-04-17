@@ -123,7 +123,7 @@ pub(crate) fn prim_disjit(args: &[Value]) -> (SignalBits, Value) {
 }
 
 /// Build the CFG struct from a closure's LIR.
-fn flow_from_closure(closure: &std::rc::Rc<crate::value::heap::Closure>) -> (SignalBits, Value) {
+fn flow_from_closure(closure: &crate::value::heap::Closure) -> (SignalBits, Value) {
     let lir = match &closure.template.lir_function {
         Some(lir) => lir,
         None => return (SIG_OK, Value::NIL),

@@ -414,7 +414,7 @@ impl Emitter {
                 };
                 let closure = Closure {
                     template: Rc::new(template),
-                    env: Rc::new(vec![]),
+                    env: crate::value::inline_slice::InlineSlice::empty(),
                     squelch_mask: SignalBits::EMPTY,
                 };
 
@@ -893,6 +893,26 @@ impl Emitter {
             LirInstr::RegionExitCall => {
                 self.bytecode.emit(Instruction::RegionExitCall);
                 // No stack effect
+            }
+
+            LirInstr::OutboxEnter => {
+                self.bytecode.emit(Instruction::OutboxEnter);
+                // No stack effect
+            }
+
+            LirInstr::OutboxExit => {
+                self.bytecode.emit(Instruction::OutboxExit);
+                // No stack effect
+            }
+
+            LirInstr::FlipEnter => {
+                self.bytecode.emit(Instruction::FlipEnter);
+            }
+            LirInstr::FlipSwap => {
+                self.bytecode.emit(Instruction::FlipSwap);
+            }
+            LirInstr::FlipExit => {
+                self.bytecode.emit(Instruction::FlipExit);
             }
 
             LirInstr::PushParamFrame { pairs } => {

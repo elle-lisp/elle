@@ -451,10 +451,11 @@ pub(crate) fn prim_squelch(args: &[Value]) -> (SignalBits, Value) {
         Err(err) => return err,
     };
 
-    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap).
+    // Create new closure with OR'd squelch mask (composable — Rc bumps are cheap,
+    // InlineSlice copy is a (ptr, len) pair).
     let new_closure = Closure {
         template: closure_rc.template.clone(),
-        env: closure_rc.env.clone(),
+        env: closure_rc.env,
         squelch_mask: closure_rc.squelch_mask.union(new_bits),
     };
 
@@ -823,6 +824,7 @@ mod tests {
     use crate::signals::Signal;
     use crate::syntax::{Span, Syntax, SyntaxKind};
     use crate::value::closure::{Closure, ClosureTemplate};
+    use crate::value::sorted_struct_get;
     use crate::value::types::Arity;
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -854,7 +856,7 @@ mod tests {
         });
         Value::closure(Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
     }
@@ -869,14 +871,11 @@ mod tests {
         assert_eq!(sig, SIG_OK);
 
         let fields = result.as_struct().expect("expected struct");
-        let file_val = fields
-            .get(&TableKey::Keyword("file".to_string()))
+        let file_val = sorted_struct_get(fields, &TableKey::Keyword("file".to_string()))
             .expect(":file key missing");
-        let line_val = fields
-            .get(&TableKey::Keyword("line".to_string()))
+        let line_val = sorted_struct_get(fields, &TableKey::Keyword("line".to_string()))
             .expect(":line key missing");
-        let col_val = fields
-            .get(&TableKey::Keyword("col".to_string()))
+        let col_val = sorted_struct_get(fields, &TableKey::Keyword("col".to_string()))
             .expect(":col key missing");
 
         assert!(

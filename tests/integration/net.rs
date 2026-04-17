@@ -126,7 +126,8 @@ fn test_udp_roundtrip() {
     // Result is a struct with :data, :addr, :port
     let fields = result.as_struct().expect("expected struct result");
     use elle::value::heap::TableKey;
-    let data = fields.get(&TableKey::Keyword("data".into())).unwrap();
+    use elle::value::sorted_struct_get;
+    let data = sorted_struct_get(fields, &TableKey::Keyword("data".into())).unwrap();
     let data_bytes = data.as_bytes().unwrap();
     assert_eq!(data_bytes, b"udp-hello");
 

@@ -30,7 +30,7 @@ pub(crate) fn freeze_value(v: Value) -> Value {
         Value::set(items)
     } else if let Some(buf) = v.as_string_mut() {
         let bytes = buf.borrow().clone();
-        Value::string(String::from_utf8_lossy(&bytes).into_owned())
+        Value::string(&*String::from_utf8_lossy(&bytes))
     } else if let Some(blob) = v.as_bytes_mut() {
         let data = blob.borrow().clone();
         Value::bytes(data)
@@ -107,7 +107,7 @@ pub(crate) fn prim_contains(args: &[Value]) -> (SignalBits, Value) {
     // Set membership check
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
-        return (SIG_OK, Value::bool(s.contains(&frozen)));
+        return (SIG_OK, Value::bool(s.binary_search(&frozen).is_ok()));
     } else if let Some(s) = args[0].as_set_mut() {
         return (SIG_OK, Value::bool(s.borrow().contains(&frozen)));
     }
@@ -211,7 +211,7 @@ pub(crate) fn prim_add(args: &[Value]) -> (SignalBits, Value) {
     }
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
-        let mut new_set = s.clone();
+        let mut new_set: BTreeSet<Value> = s.iter().copied().collect();
         new_set.insert(frozen);
         (SIG_OK, Value::set(new_set))
     } else if let Some(s) = args[0].as_set_mut() {
@@ -249,7 +249,7 @@ pub(crate) fn prim_del(args: &[Value]) -> (SignalBits, Value) {
     }
     let frozen = freeze_value(args[1]);
     if let Some(s) = args[0].as_set() {
-        let mut new_set = s.clone();
+        let mut new_set: BTreeSet<Value> = s.iter().copied().collect();
         new_set.remove(&frozen);
         (SIG_OK, Value::set(new_set))
     } else if let Some(s) = args[0].as_set_mut() {
@@ -286,7 +286,9 @@ pub(crate) fn prim_union(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let result: BTreeSet<Value> = a.union(b).copied().collect();
+        let sa: BTreeSet<Value> = a.iter().copied().collect();
+        let sb: BTreeSet<Value> = b.iter().copied().collect();
+        let result: BTreeSet<Value> = sa.union(&sb).copied().collect();
         (SIG_OK, Value::set(result))
     } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
         let result: BTreeSet<Value> = a.borrow().union(&*b.borrow()).copied().collect();
@@ -319,7 +321,9 @@ pub(crate) fn prim_intersection(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let result: BTreeSet<Value> = a.intersection(b).copied().collect();
+        let sa: BTreeSet<Value> = a.iter().copied().collect();
+        let sb: BTreeSet<Value> = b.iter().copied().collect();
+        let result: BTreeSet<Value> = sa.intersection(&sb).copied().collect();
         (SIG_OK, Value::set(result))
     } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
         let result: BTreeSet<Value> = a.borrow().intersection(&*b.borrow()).copied().collect();
@@ -353,7 +357,9 @@ pub(crate) fn prim_difference(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let (Some(a), Some(b)) = (args[0].as_set(), args[1].as_set()) {
-        let result: BTreeSet<Value> = a.difference(b).copied().collect();
+        let sa: BTreeSet<Value> = a.iter().copied().collect();
+        let sb: BTreeSet<Value> = b.iter().copied().collect();
+        let result: BTreeSet<Value> = sa.difference(&sb).copied().collect();
         (SIG_OK, Value::set(result))
     } else if let (Some(a), Some(b)) = (args[0].as_set_mut(), args[1].as_set_mut()) {
         let result: BTreeSet<Value> = a.borrow().difference(&*b.borrow()).copied().collect();
@@ -385,7 +391,7 @@ pub(crate) fn prim_set_to_array(args: &[Value]) -> (SignalBits, Value) {
         );
     }
     if let Some(s) = args[0].as_set() {
-        let items: Vec<Value> = s.iter().copied().collect();
+        let items: Vec<Value> = s.to_vec();
         (SIG_OK, Value::array(items))
     } else if let Some(s) = args[0].as_set_mut() {
         let items: Vec<Value> = s.borrow().iter().copied().collect();

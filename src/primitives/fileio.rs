@@ -653,10 +653,7 @@ pub(crate) fn prim_read_lines(args: &[Value]) -> (SignalBits, Value) {
         args[0]
             .with_string(|path| match std::fs::read_to_string(path) {
                 Ok(content) => {
-                    let lines: Vec<Value> = content
-                        .lines()
-                        .map(|line| Value::string(line.to_string()))
-                        .collect();
+                    let lines: Vec<Value> = content.lines().map(Value::string).collect();
                     (SIG_OK, crate::value::list(lines))
                 }
                 Err(e) => (

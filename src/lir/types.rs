@@ -602,6 +602,28 @@ pub enum LirInstr {
         src: Reg,
         allowed_bits: crate::value::fiber::SignalBits,
     },
+
+    // === Outbox Routing ===
+    /// Enter outbox routing context. Allocations between OutboxEnter and
+    /// OutboxExit go to the fiber's outbox (for yield-bound values).
+    /// No registers produced or consumed.
+    OutboxEnter,
+    /// Exit outbox routing context. Allocations revert to private heap.
+    /// No registers produced or consumed.
+    OutboxExit,
+
+    // === Explicit rotation (Flip) ===
+    /// Push a flip frame (save caller's swap pool; remember heap mark).
+    /// No registers produced or consumed.
+    FlipEnter,
+    /// Rotate generations using the top flip frame's base. Tears down
+    /// iteration N-2 and moves the current iteration into the swap pool.
+    /// No registers produced or consumed.
+    FlipSwap,
+    /// Pop the top flip frame: tear down this frame's remaining swap pool
+    /// and restore the caller's.
+    /// No registers produced or consumed.
+    FlipExit,
 }
 
 /// Binary operations

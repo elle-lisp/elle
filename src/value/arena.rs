@@ -170,6 +170,23 @@ pub fn alloc(obj: HeapObject) -> Value {
     unsafe { (*heap_ptr).alloc(obj) }
 }
 
+/// Allocate a `Copy` slice into the current FiberHeap's arena and return
+/// an `InlineSlice` pointing to it.
+///
+/// The slice's lifetime matches the arena: it is reclaimed by the next
+/// `release_to(mark)` or `teardown()` that crosses the allocation point.
+/// Callers embed the returned `InlineSlice` inside a `HeapObject` that is
+/// allocated shortly after — both live and die together.
+pub fn alloc_inline_slice<T: Copy + 'static>(items: &[T]) -> super::inline_slice::InlineSlice<T> {
+    let heap_ptr = crate::value::fiberheap::current_heap_ptr();
+    let heap_ptr = if !heap_ptr.is_null() {
+        heap_ptr
+    } else {
+        crate::value::fiberheap::ensure_and_install_root_heap()
+    };
+    unsafe { (*heap_ptr).alloc_inline_slice(items) }
+}
+
 /// Allocate a heap object permanently (bypasses arena tracking).
 /// Used for objects that must outlive any mark/release scope (e.g., NativeFn).
 pub fn alloc_permanent(obj: HeapObject) -> Value {

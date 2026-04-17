@@ -127,13 +127,6 @@ impl VM {
                     stack::handle_dup_n(self, bc, &mut ip);
                 }
 
-                // Dead instructions — never emitted after primitives-as-locals.
-                Instruction::LoadGlobal => {
-                    unreachable!("dead instruction: LoadGlobal")
-                }
-                Instruction::StoreGlobal => {
-                    unreachable!("dead instruction: StoreGlobal")
-                }
                 Instruction::StoreLocal => {
                     variables::handle_store_local(self, bc, &mut ip);
                 }
@@ -366,18 +359,6 @@ impl VM {
                     literals::handle_false(self);
                 }
 
-                // Dead instructions — never emitted by the LIR emitter.
-                // Panic immediately if encountered (indicates bytecode bug).
-                Instruction::PushScope => {
-                    panic!("VM bug: PushScope is a dead instruction — never emitted");
-                }
-                Instruction::PopScope => {
-                    panic!("VM bug: PopScope is a dead instruction — never emitted");
-                }
-                Instruction::DefineLocal => {
-                    panic!("VM bug: DefineLocal is a dead instruction — never emitted");
-                }
-
                 // Box operations
                 Instruction::MakeCapture => {
                     capture::handle_make_capture(self);
@@ -445,6 +426,25 @@ impl VM {
                 }
                 Instruction::RegionExitCall => {
                     crate::value::fiberheap::region_exit_call();
+                }
+
+                // Outbox routing: toggle allocation target for yield-bound values.
+                Instruction::OutboxEnter => {
+                    crate::value::fiberheap::outbox_enter();
+                }
+                Instruction::OutboxExit => {
+                    crate::value::fiberheap::outbox_exit();
+                }
+
+                // Explicit rotation: push/rotate/pop a flip frame.
+                Instruction::FlipEnter => {
+                    crate::value::fiberheap::flip_enter();
+                }
+                Instruction::FlipSwap => {
+                    crate::value::fiberheap::flip_swap();
+                }
+                Instruction::FlipExit => {
+                    crate::value::fiberheap::flip_exit();
                 }
 
                 // Dynamic parameter frame management

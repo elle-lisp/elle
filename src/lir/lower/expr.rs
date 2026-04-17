@@ -252,9 +252,9 @@ impl<'a> Lowerer<'a> {
         if exprs.is_empty() {
             return self.emit_const(LirConst::Nil);
         }
+
         let mut last_reg = self.lower_expr(&exprs[0])?;
         for expr in exprs.iter().skip(1) {
-            // Discard the previous result before evaluating the next expression
             self.discard(last_reg);
             last_reg = self.lower_expr(expr)?;
         }

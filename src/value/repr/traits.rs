@@ -42,7 +42,7 @@ impl PartialEq for Value {
                 // String × @string
                 (HeapObject::LString { s: s1, .. }, HeapObject::LStringMut { data: b2, .. })
                 | (HeapObject::LStringMut { data: b2, .. }, HeapObject::LString { s: s1, .. }) => {
-                    s1.as_bytes() == b2.borrow().as_slice()
+                    s1.as_slice() == b2.borrow().as_slice()
                 }
                 // @string × @string
                 (
@@ -80,14 +80,16 @@ impl PartialEq for Value {
                     v1.borrow().as_slice() == v2.borrow().as_slice()
                 }
 
-                // Struct: immutable × immutable
+                // Struct: immutable × immutable (sorted Vec vs sorted Vec)
                 (HeapObject::LStruct { data: s1, .. }, HeapObject::LStruct { data: s2, .. }) => {
                     s1 == s2
                 }
-                // Struct × @struct
+                // Struct × @struct (sorted Vec vs BTreeMap)
                 (HeapObject::LStruct { data: s1, .. }, HeapObject::LStructMut { data: s2, .. })
-                | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) => {
-                    *s1 == *s2.borrow()
+                | (HeapObject::LStructMut { data: s2, .. }, HeapObject::LStruct { data: s1, .. }) =>
+                {
+                    let borrowed = s2.borrow();
+                    s1.len() == borrowed.len() && s1.iter().all(|(k, v)| borrowed.get(k) == Some(v))
                 }
                 // @struct × @struct
                 (
@@ -122,7 +124,9 @@ impl PartialEq for Value {
                 // Set × @set
                 (HeapObject::LSet { data: s1, .. }, HeapObject::LSetMut { data: s2, .. })
                 | (HeapObject::LSetMut { data: s2, .. }, HeapObject::LSet { data: s1, .. }) => {
-                    *s1 == *s2.borrow()
+                    let borrowed = s2.borrow();
+                    s1.len() == borrowed.len()
+                        && s1.iter().zip(borrowed.iter()).all(|(a, b)| a == b)
                 }
                 // @set × @set
                 (HeapObject::LSetMut { data: s1, .. }, HeapObject::LSetMut { data: s2, .. }) => {
@@ -134,11 +138,13 @@ impl PartialEq for Value {
                     *s1.borrow() == *s2.borrow()
                 }
 
-                // Closure comparison (compare by reference)
+                // Closure comparison (compare by identity of the arena-resident
+                // Closure: two closure Values are structurally equal iff they
+                // point at the same HeapObject).
                 (
                     HeapObject::Closure { closure: c1, .. },
                     HeapObject::Closure { closure: c2, .. },
-                ) => std::rc::Rc::ptr_eq(c1, c2),
+                ) => std::ptr::eq(c1, c2),
 
                 // Box comparison (compare contents)
                 (HeapObject::LBox { cell: c1, .. }, HeapObject::LBox { cell: c2, .. })
@@ -162,14 +168,25 @@ impl PartialEq for Value {
                 // LibHandle comparison
                 (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1 == h2,
 
-                // ThreadHandle comparison (compare by reference)
-                (HeapObject::ThreadHandle { .. }, HeapObject::ThreadHandle { .. }) => {
-                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
-                }
+                // ThreadHandle comparison: stable identity via the `Arc`
+                // backing `result`. Comparing slot pointers would break
+                // when a ThreadHandle value is relocated (e.g., copied to
+                // another fiber's outbox on yield) — the same underlying
+                // handle would then become a distinct map key.
+                (
+                    HeapObject::ThreadHandle { handle: h1, .. },
+                    HeapObject::ThreadHandle { handle: h2, .. },
+                ) => std::sync::Arc::ptr_eq(&h1.result, &h2.result),
 
-                // Fiber comparison (compare by reference)
-                (HeapObject::Fiber { .. }, HeapObject::Fiber { .. }) => {
-                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                // Fiber comparison: stable identity via the `Rc` inside
+                // the `FiberHandle`. Slot-pointer equality is wrong here
+                // because `deep_copy_to_outbox` re-allocates the Fiber
+                // slot on yield; both slots wrap clones of the same
+                // handle and must be treated as the same fiber so that
+                // scheduler maps keyed on fibers (`waiters`, `completed`)
+                // don't desync.
+                (HeapObject::Fiber { handle: h1, .. }, HeapObject::Fiber { handle: h2, .. }) => {
+                    h1.id() == h2.id()
                 }
 
                 // Syntax comparison (by reference — same Rc)
@@ -188,9 +205,12 @@ impl PartialEq for Value {
                     std::ptr::eq(self_obj as *const _, other_obj as *const _)
                 }
 
-                // External object comparison (by identity — same heap object)
-                (HeapObject::External { .. }, HeapObject::External { .. }) => {
-                    std::ptr::eq(self_obj as *const _, other_obj as *const _)
+                // External object comparison: stable identity via the
+                // `Rc<dyn Any>` backing `data`. See Fiber/ThreadHandle
+                // rationale — slot pointers are unstable across outbox
+                // relocation.
+                (HeapObject::External { obj: o1, .. }, HeapObject::External { obj: o2, .. }) => {
+                    std::rc::Rc::ptr_eq(&o1.data, &o2.data)
                 }
 
                 // Parameter comparison (by identity — same heap object)
@@ -246,8 +266,8 @@ impl Hash for Value {
                 HeapObject::Cons(c) => c.hash(state),
                 HeapObject::LArray { elements, .. } => elements.hash(state),
                 HeapObject::LBytes { data, .. } => data.hash(state),
-                HeapObject::LStruct { data: map, .. } => {
-                    for (k, v) in map {
+                HeapObject::LStruct { data: entries, .. } => {
+                    for (k, v) in entries {
                         k.hash(state);
                         v.hash(state);
                     }
@@ -297,8 +317,23 @@ impl Hash for Value {
                 HeapObject::FFISignature(sig, _) => sig.hash(state),
                 HeapObject::FFIType(desc) => desc.hash(state),
 
-                // Reference-identity types: hash by payload (encodes pointer).
-                // This matches PartialEq which uses pointer identity for these.
+                // Stable-identity types: hash by the backing Rc/Arc
+                // pointer, NOT by the slot address. Slot pointers are
+                // unstable under outbox relocation on fiber yield;
+                // hashing them would break map lookups across yields.
+                // Keep these in sync with the PartialEq arms above.
+                HeapObject::Fiber { handle, .. } => handle.id().hash(state),
+                HeapObject::ThreadHandle { handle, .. } => {
+                    (std::sync::Arc::as_ptr(&handle.result) as usize).hash(state)
+                }
+                HeapObject::External { obj, .. } => {
+                    (std::rc::Rc::as_ptr(&obj.data) as *const () as usize).hash(state)
+                }
+
+                // Remaining reference-identity types (Closure,
+                // NativeFn, ManagedPointer, Parameter, Syntax): hash by
+                // payload (the slot pointer). These are not subject to
+                // outbox relocation under the current model.
                 _ => self.payload.hash(state),
             }
         }
@@ -525,6 +560,27 @@ unsafe fn cmp_heap(a: &Value, b: &Value) -> std::cmp::Ordering {
 
         // LibHandle — by u32 ID
         (HeapObject::LibHandle(h1), HeapObject::LibHandle(h2)) => h1.cmp(h2),
+
+        // Fiber — stable identity via FiberHandle's Rc pointer.
+        // Matches PartialEq; slot pointers are unstable across outbox
+        // relocation on yield, so BTreeMap keyed on Fiber values would
+        // lose entries if compared by slot address.
+        (HeapObject::Fiber { handle: h1, .. }, HeapObject::Fiber { handle: h2, .. }) => {
+            h1.id().cmp(&h2.id())
+        }
+
+        // ThreadHandle — stable identity via the Arc backing `result`.
+        (
+            HeapObject::ThreadHandle { handle: h1, .. },
+            HeapObject::ThreadHandle { handle: h2, .. },
+        ) => (std::sync::Arc::as_ptr(&h1.result) as usize)
+            .cmp(&(std::sync::Arc::as_ptr(&h2.result) as usize)),
+
+        // External — stable identity via the Rc backing `data`.
+        (HeapObject::External { obj: o1, .. }, HeapObject::External { obj: o2, .. }) => {
+            (std::rc::Rc::as_ptr(&o1.data) as *const () as usize)
+                .cmp(&(std::rc::Rc::as_ptr(&o2.data) as *const () as usize))
+        }
 
         // LSet — element-wise lexicographic (BTreeSet iteration is sorted)
         (HeapObject::LSet { data: s1, .. }, HeapObject::LSet { data: s2, .. }) => {

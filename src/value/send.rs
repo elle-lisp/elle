@@ -186,7 +186,9 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
 
     match unsafe { deref(value) } {
         // Strings are immutable and safe
-        HeapObject::LString { s, .. } => Ok(SendValue::String(s.to_string())),
+        HeapObject::LString { s, .. } => Ok(SendValue::String(unsafe {
+            std::str::from_utf8_unchecked(s.as_slice()).to_string()
+        })),
 
         // Cons cells - deep copy both first and rest, plus traits
         HeapObject::Cons(cons) => {
@@ -432,7 +434,7 @@ fn from_value_inner(value: Value, ctx: &mut SerContext) -> Result<SendValue, Str
             data: b, traits, ..
         } => {
             let traits_sv = from_value_inner(*traits, ctx)?;
-            Ok(SendValue::Bytes(b.clone(), Box::new(traits_sv)))
+            Ok(SendValue::Bytes(b.as_slice().to_vec(), Box::new(traits_sv)))
         }
 
         // @bytes - deep copy the bytes, plus traits
@@ -516,47 +518,50 @@ impl SendValue {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LArrayMut {
-                    data: std::cell::RefCell::new(values),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(values)),
                     traits: traits_val,
                 })
             }
             SendValue::Struct(map, traits) => {
-                let values: BTreeMap<_, _> = map
+                // BTreeMap iterates in sorted order, so Vec is already sorted.
+                let entries: Vec<_> = map
                     .into_iter()
                     .map(|(k, sv)| (k, sv.into_value()))
                     .collect();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LStruct {
-                    data: values,
+                    data: entries,
                     traits: traits_val,
                 })
             }
             SendValue::Tuple(items, traits) => {
                 let values: Vec<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
+                let slice = crate::value::arena::alloc_inline_slice::<Value>(&values);
                 alloc(HeapObject::LArray {
-                    elements: values,
+                    elements: slice,
                     traits: traits_val,
                 })
             }
             SendValue::Buffer(bytes, traits) => {
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LStringMut {
-                    data: std::cell::RefCell::new(bytes),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
                 })
             }
             SendValue::Bytes(bytes, traits) => {
                 let traits_val = traits.into_value();
+                let slice = crate::value::arena::alloc_inline_slice::<u8>(&bytes);
                 alloc(HeapObject::LBytes {
-                    data: bytes,
+                    data: slice,
                     traits: traits_val,
                 })
             }
             SendValue::Blob(bytes, traits) => {
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LBytesMut {
-                    data: std::cell::RefCell::new(bytes),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(bytes)),
                     traits: traits_val,
                 })
             }
@@ -564,7 +569,7 @@ impl SendValue {
                 let val = contents.into_value();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LBox {
-                    cell: std::cell::RefCell::new(val),
+                    cell: std::rc::Rc::new(std::cell::RefCell::new(val)),
                     traits: traits_val,
                 })
             }
@@ -572,7 +577,7 @@ impl SendValue {
                 let val = contents.into_value();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::CaptureCell {
-                    cell: std::cell::RefCell::new(val),
+                    cell: std::rc::Rc::new(std::cell::RefCell::new(val)),
                     traits: traits_val,
                 })
             }
@@ -581,8 +586,11 @@ impl SendValue {
             SendValue::LSet(items, traits) => {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
+                // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
+                let sorted: Vec<Value> = set.into_iter().collect();
+                let slice = crate::value::arena::alloc_inline_slice::<Value>(&sorted);
                 alloc(HeapObject::LSet {
-                    data: set,
+                    data: slice,
                     traits: traits_val,
                 })
             }
@@ -590,7 +598,7 @@ impl SendValue {
                 let set: BTreeSet<Value> = items.into_iter().map(|sv| sv.into_value()).collect();
                 let traits_val = traits.into_value();
                 alloc(HeapObject::LSetMut {
-                    data: std::cell::RefCell::new(set),
+                    data: std::rc::Rc::new(std::cell::RefCell::new(set)),
                     traits: traits_val,
                 })
             }
@@ -657,18 +665,19 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LArrayMut {
-                data: RefCell::new(values),
+                data: std::rc::Rc::new(RefCell::new(values)),
                 traits: traits_val,
             })
         }
         SendValue::Struct(map, traits) => {
-            let values: std::collections::BTreeMap<_, _> = map
+            // BTreeMap iterates in sorted order, so Vec is already sorted.
+            let entries: Vec<_> = map
                 .into_iter()
                 .map(|(k, sv)| (k, into_value_inner(sv, ctx)))
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LStruct {
-                data: values,
+                data: entries,
                 traits: traits_val,
             })
         }
@@ -678,29 +687,31 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
+            let slice = crate::value::arena::alloc_inline_slice::<Value>(&values);
             alloc(HeapObject::LArray {
-                elements: values,
+                elements: slice,
                 traits: traits_val,
             })
         }
         SendValue::Buffer(bytes, traits) => {
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LStringMut {
-                data: RefCell::new(bytes),
+                data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
             })
         }
         SendValue::Bytes(bytes, traits) => {
             let traits_val = into_value_inner(*traits, ctx);
+            let slice = crate::value::arena::alloc_inline_slice::<u8>(&bytes);
             alloc(HeapObject::LBytes {
-                data: bytes,
+                data: slice,
                 traits: traits_val,
             })
         }
         SendValue::Blob(bytes, traits) => {
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LBytesMut {
-                data: RefCell::new(bytes),
+                data: std::rc::Rc::new(RefCell::new(bytes)),
                 traits: traits_val,
             })
         }
@@ -719,7 +730,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let lbox_val = alloc(HeapObject::LBox {
-                cell: RefCell::new(inner_val),
+                cell: std::rc::Rc::new(RefCell::new(inner_val)),
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
@@ -742,7 +753,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
             let inner_val = into_value_inner(*contents, ctx);
             let traits_val = into_value_inner(*traits, ctx);
             let cell_val = alloc(HeapObject::CaptureCell {
-                cell: RefCell::new(inner_val),
+                cell: std::rc::Rc::new(RefCell::new(inner_val)),
                 traits: traits_val,
             });
             if let Some(idx) = fixup_idx {
@@ -759,8 +770,11 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .map(|sv| into_value_inner(sv, ctx))
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
+            // BTreeSet iterates in sorted order; collect into Vec and copy into arena.
+            let sorted: Vec<Value> = set.into_iter().collect();
+            let slice = crate::value::arena::alloc_inline_slice::<Value>(&sorted);
             alloc(HeapObject::LSet {
-                data: set,
+                data: slice,
                 traits: traits_val,
             })
         }
@@ -771,7 +785,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
                 .collect();
             let traits_val = into_value_inner(*traits, ctx);
             alloc(HeapObject::LSetMut {
-                data: RefCell::new(set),
+                data: std::rc::Rc::new(RefCell::new(set)),
                 traits: traits_val,
             })
         }
@@ -849,7 +863,7 @@ fn into_value_inner(sv: SendValue, ctx: &mut DeserContext) -> Value {
 
             let val = Value::closure(Closure {
                 template,
-                env: Rc::new(env),
+                env: crate::value::arena::alloc_inline_slice::<Value>(&env),
                 squelch_mask: sc.squelch_mask,
             });
             ctx.states[idx] = ReconState::Done(val);
@@ -989,11 +1003,11 @@ mod tests {
         });
         let closure = Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         crate::value::heap::alloc(HeapObject::Closure {
-            closure: Rc::new(closure),
+            closure,
             traits: Value::NIL,
         })
     }
@@ -1057,11 +1071,12 @@ mod tests {
         });
         let outer_closure = Closure {
             template: outer_template,
-            env: Rc::new(vec![inner]), // make `inner` reachable from the bundle
+            // make `inner` reachable from the bundle
+            env: crate::value::arena::alloc_inline_slice::<Value>(&[inner]),
             squelch_mask: SignalBits::EMPTY,
         };
         let outer_val = crate::value::heap::alloc(HeapObject::Closure {
-            closure: Rc::new(outer_closure),
+            closure: outer_closure,
             traits: Value::NIL,
         });
 

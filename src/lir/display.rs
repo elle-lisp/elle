@@ -223,6 +223,11 @@ impl fmt::Display for LirInstr {
             LirInstr::RegionEnter => f.write_str("region-enter"),
             LirInstr::RegionExit => f.write_str("region-exit"),
             LirInstr::RegionExitCall => f.write_str("region-exit-call"),
+            LirInstr::OutboxEnter => f.write_str("outbox-enter"),
+            LirInstr::OutboxExit => f.write_str("outbox-exit"),
+            LirInstr::FlipEnter => f.write_str("flip-enter"),
+            LirInstr::FlipSwap => f.write_str("flip-swap"),
+            LirInstr::FlipExit => f.write_str("flip-exit"),
 
             // === Dynamic Parameters ===
             LirInstr::PushParamFrame { pairs } => {

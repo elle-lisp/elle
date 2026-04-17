@@ -345,9 +345,14 @@ pub(crate) fn prim_fiber_abort(args: &[Value]) -> (SignalBits, Value) {
             SIG_ERROR,
             error_val("state-error", "fiber/abort: cannot abort a running fiber"),
         ),
+        // Option A: Already completed — no-op. Matches `ev/abort`'s
+        // docstring ("No-op if the fiber is already completed") and lets
+        // the scheduler's `handle-abort` race harmlessly with a fiber's
+        // normal termination instead of raising a state-error. Returns
+        // the fiber's final value (same convention as `fiber/value`).
         FiberStatus::Dead => (
-            SIG_ERROR,
-            error_val("state-error", "fiber/abort: cannot abort a completed fiber"),
+            SIG_OK,
+            handle.with(|fiber| fiber.signal.as_ref().map(|(_, v)| *v).unwrap_or(Value::NIL)),
         ),
         FiberStatus::Error => (
             SIG_ERROR,

@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::syntax::Syntax;
 use crate::value::fiber::FiberHandle;
+use crate::value::inline_slice::InlineSlice;
 use crate::value::Value;
 
 // Re-export types for convenience
@@ -124,58 +125,89 @@ pub enum HeapTag {
 /// `Value::NIL`). The 5 infrastructure variants (Float, NativeFn, LibHandle,
 /// FFISignature, FFIType) do not carry traits.
 pub enum HeapObject {
-    /// Immutable string
-    LString { s: Box<str>, traits: Value },
+    /// Immutable string. Bytes stored inline in the arena.
+    LString { s: InlineSlice<u8>, traits: Value },
 
     /// Cons cell (list pair)
     Cons(Cons),
 
-    /// Mutable array
+    /// Mutable array.
+    ///
+    /// `data` is `Rc<RefCell<...>>` so that cross-fiber sharing survives
+    /// `deep_copy_to_outbox`: when a fiber yields an `@[]` through a
+    /// request (e.g. `{:op :select :fibers pool}`), the outbox copy
+    /// shares the same backing `Vec<Value>` as the original. Mutations
+    /// made by one side are visible to the other — without this, the
+    /// scheduler would see a snapshot of the pool at yield time and
+    /// miss fibers pushed after it parked in `select-sets`.
     LArrayMut {
-        data: RefCell<Vec<Value>>,
+        data: std::rc::Rc<RefCell<Vec<Value>>>,
         traits: Value,
     },
 
-    /// Mutable struct (hash map)
+    /// Mutable struct (hash map). See `LArrayMut` for the Rc-sharing
+    /// rationale (cross-fiber live updates through yield).
     LStructMut {
-        data: RefCell<BTreeMap<TableKey, Value>>,
+        data: std::rc::Rc<RefCell<BTreeMap<TableKey, Value>>>,
         traits: Value,
     },
 
-    /// Immutable struct
+    /// Immutable struct (sorted array of key-value pairs).
+    /// Keys may contain owned String data, so this stays on the Rust heap
+    /// (Vec) rather than inline in the arena.
     LStruct {
-        data: BTreeMap<TableKey, Value>,
+        data: Vec<(TableKey, Value)>,
         traits: Value,
     },
 
-    /// Function closure (interpreted)
-    Closure { closure: Rc<Closure>, traits: Value },
+    /// Function closure (interpreted). The `Closure` lives by value in the
+    /// arena alongside its `HeapObject` header. `ClosureTemplate` remains
+    /// `Rc`-shared across closure instances (bytecode, constants, location
+    /// map, etc.), so cloning a `Closure` is O(1) (Rc bump + Copy fields).
+    Closure { closure: Closure, traits: Value },
 
-    /// Immutable array (fixed-length sequence)
-    LArray { elements: Vec<Value>, traits: Value },
+    /// Immutable array (fixed-length sequence, inline in arena)
+    LArray {
+        elements: InlineSlice<Value>,
+        traits: Value,
+    },
 
-    /// Mutable @string (byte sequence)
+    /// Mutable @string (byte sequence). Rc-shared for cross-fiber
+    /// live-update semantics across `deep_copy_to_outbox`.
     LStringMut {
-        data: RefCell<Vec<u8>>,
+        data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
     },
 
-    /// Immutable byte sequence (binary data)
-    LBytes { data: Vec<u8>, traits: Value },
+    /// Immutable byte sequence (binary data, inline in arena)
+    LBytes {
+        data: InlineSlice<u8>,
+        traits: Value,
+    },
 
-    /// Mutable byte sequence (binary data workspace)
+    /// Mutable byte sequence (binary data workspace). Rc-shared for
+    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
     LBytesMut {
-        data: RefCell<Vec<u8>>,
+        data: std::rc::Rc<RefCell<Vec<u8>>>,
         traits: Value,
     },
 
     /// User-facing mutable box, created via `(box v)`.
-    /// Not auto-unwrapped by LoadUpvalue.
-    LBox { cell: RefCell<Value>, traits: Value },
+    /// Not auto-unwrapped by LoadUpvalue. Rc-shared for cross-fiber
+    /// live-update semantics across `deep_copy_to_outbox`.
+    LBox {
+        cell: std::rc::Rc<RefCell<Value>>,
+        traits: Value,
+    },
 
     /// Compiler-created capture cell for mutable captured variables.
     /// Auto-unwrapped by LoadUpvalue; never visible to user code.
-    CaptureCell { cell: RefCell<Value>, traits: Value },
+    /// Rc-shared so a mutation in a child fiber is visible to the parent
+    /// when the closure crosses a yield boundary.
+    CaptureCell {
+        cell: std::rc::Rc<RefCell<Value>>,
+        traits: Value,
+    },
 
     /// Float value that couldn't be stored inline (NaN payload)
     Float(f64),
@@ -231,15 +263,16 @@ pub enum HeapObject {
         traits: Value,
     },
 
-    /// Immutable set (BTreeSet, no RefCell)
+    /// Immutable set (sorted array of values, inline in arena)
     LSet {
-        data: BTreeSet<Value>,
+        data: InlineSlice<Value>,
         traits: Value,
     },
 
-    /// Mutable set (BTreeSet wrapped in RefCell)
+    /// Mutable set (BTreeSet wrapped in `Rc<RefCell>`) — Rc-shared for
+    /// cross-fiber live-update semantics across `deep_copy_to_outbox`.
     LSetMut {
-        data: RefCell<BTreeSet<Value>>,
+        data: std::rc::Rc<RefCell<BTreeSet<Value>>>,
         traits: Value,
     },
 }
@@ -408,7 +441,9 @@ impl HeapObject {
 impl std::fmt::Debug for HeapObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HeapObject::LString { s, .. } => write!(f, "\"{}\"", s),
+            HeapObject::LString { s, .. } => {
+                write!(f, "\"{}\"", String::from_utf8_lossy(s.as_slice()))
+            }
             HeapObject::Cons(c) => write!(f, "({:?} . {:?})", c.first, c.rest),
             HeapObject::LArrayMut { data, .. } => {
                 if let Ok(borrowed) = data.try_borrow() {
@@ -500,32 +535,21 @@ mod tests {
 
     #[test]
     fn test_alloc_string() {
-        let v = alloc(HeapObject::LString {
-            s: "hello".into(),
-            traits: Value::NIL,
-        });
+        let v = Value::string("hello");
         assert!(v.is_heap());
-        unsafe {
-            let obj = deref(v);
-            match obj {
-                HeapObject::LString { s, .. } => assert_eq!(&**s, "hello"),
-                _ => panic!("Expected LString"),
-            }
-        }
+        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "hello");
     }
 
     #[test]
-    fn test_alloc_permanent_string() {
-        let v = alloc_permanent(HeapObject::LString {
-            s: "permanent".into(),
-            traits: Value::NIL,
-        });
+    fn test_alloc_permanent_cons() {
+        // Cons has no inner arena allocation, safe for alloc_permanent.
+        let v = alloc_permanent(HeapObject::Cons(Cons::new(Value::NIL, Value::int(1))));
         assert!(v.is_heap());
         unsafe {
             let obj = deref(v);
             match obj {
-                HeapObject::LString { s, .. } => assert_eq!(&**s, "permanent"),
-                _ => panic!("Expected LString"),
+                HeapObject::Cons(c) => assert_eq!(c.rest.as_int(), Some(1)),
+                _ => panic!("Expected Cons"),
             }
             drop_heap(v);
         }
@@ -534,18 +558,9 @@ mod tests {
     #[test]
     fn test_arena_mark_release() {
         let mark = heap_arena_mark();
-        let v = alloc(HeapObject::LString {
-            s: "temporary".into(),
-            traits: Value::NIL,
-        });
+        let v = Value::string("temporary");
         assert!(v.is_heap());
-        unsafe {
-            let obj = deref(v);
-            match obj {
-                HeapObject::LString { s, .. } => assert_eq!(&**s, "temporary"),
-                _ => panic!("Expected LString"),
-            }
-        }
+        assert_eq!(v.with_string(|s| s.to_string()).unwrap(), "temporary");
         heap_arena_release(mark);
     }
 
@@ -554,10 +569,7 @@ mod tests {
         let before = heap_arena_len();
         {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::LString {
-                s: "guarded".into(),
-                traits: Value::NIL,
-            });
+            Value::string("guarded");
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             let during = heap_arena_len();
             assert_eq!(during, before + 2);
@@ -571,16 +583,10 @@ mod tests {
         let before = heap_arena_len();
         {
             let _outer = ArenaGuard::new();
-            alloc(HeapObject::LString {
-                s: "outer alloc".into(),
-                traits: Value::NIL,
-            });
+            Value::string("outer alloc");
             {
                 let _inner = ArenaGuard::new();
-                alloc(HeapObject::LString {
-                    s: "inner alloc".into(),
-                    traits: Value::NIL,
-                });
+                Value::string("inner alloc");
                 let during_inner = heap_arena_len();
                 assert_eq!(during_inner, before + 2);
             }
@@ -596,10 +602,7 @@ mod tests {
         let before = heap_arena_len();
         let result: Result<(), String> = {
             let _guard = ArenaGuard::new();
-            alloc(HeapObject::LString {
-                s: "will be freed".into(),
-                traits: Value::NIL,
-            });
+            Value::string("will be freed");
             alloc(HeapObject::Cons(Cons::new(Value::NIL, Value::NIL)));
             Err("simulated error".to_string())
         };
@@ -610,10 +613,8 @@ mod tests {
 
     #[test]
     fn test_heap_tag() {
-        let s = HeapObject::LString {
-            s: "test".into(),
-            traits: Value::NIL,
-        };
+        let v = Value::string("test");
+        let s = unsafe { deref(v) };
         assert_eq!(s.tag(), HeapTag::LString);
         assert_eq!(s.type_name(), "string");
     }

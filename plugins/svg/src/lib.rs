@@ -26,7 +26,7 @@ fn emit_element(val: &Value, out: &mut String) {
         Some(s) => s,
         None => return,
     };
-    let tag = match s.get(&TableKey::Keyword("tag".into())) {
+    let tag = match elle::value::sorted_struct_get(s, &TableKey::Keyword("tag".into())) {
         Some(v) => match v.as_keyword_name() {
             Some(name) => name,
             None => return,
@@ -35,9 +35,9 @@ fn emit_element(val: &Value, out: &mut String) {
     };
     out.push('<');
     out.push_str(&tag);
-    if let Some(attrs_val) = s.get(&TableKey::Keyword("attrs".into())) {
+    if let Some(attrs_val) = elle::value::sorted_struct_get(s, &TableKey::Keyword("attrs".into())) {
         if let Some(attrs) = attrs_val.as_struct() {
-            for (k, v) in attrs {
+            for (k, v) in attrs.iter() {
                 let key = match k {
                     TableKey::Keyword(name) => name.clone(),
                     TableKey::String(name) => name.clone(),
@@ -62,8 +62,7 @@ fn emit_element(val: &Value, out: &mut String) {
             }
         }
     }
-    let children = s
-        .get(&TableKey::Keyword("children".into()))
+    let children = elle::value::sorted_struct_get(s, &TableKey::Keyword("children".into()))
         .and_then(|v| v.as_array());
     match children {
         Some([]) => out.push_str("/>"),
@@ -158,14 +157,12 @@ fn parse_render_opts(args: &[Value], idx: usize) -> RenderOpts {
     };
     if args.len() > idx {
         if let Some(s) = args[idx].as_struct() {
-            if let Some(w) = s
-                .get(&TableKey::Keyword("width".into()))
+            if let Some(w) = elle::value::sorted_struct_get(s, &TableKey::Keyword("width".into()))
                 .and_then(|v| v.as_int())
             {
                 opts.width = Some(w as u32);
             }
-            if let Some(h) = s
-                .get(&TableKey::Keyword("height".into()))
+            if let Some(h) = elle::value::sorted_struct_get(s, &TableKey::Keyword("height".into()))
                 .and_then(|v| v.as_int())
             {
                 opts.height = Some(h as u32);

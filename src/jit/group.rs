@@ -257,7 +257,7 @@ mod tests {
 
         let closure = crate::value::Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
         Value::closure(closure)
@@ -467,7 +467,7 @@ mod tests {
 
         let closure = crate::value::Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         };
 

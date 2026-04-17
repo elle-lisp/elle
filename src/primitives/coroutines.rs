@@ -36,7 +36,7 @@ pub(crate) fn prim_make_coroutine(args: &[Value]) -> (SignalBits, Value) {
     }
 
     if let Some(c) = args[0].as_closure() {
-        let fiber = Fiber::new((*c).clone(), SIG_YIELD);
+        let fiber = Fiber::new(std::rc::Rc::new(c.clone()), SIG_YIELD);
         (SIG_OK, Value::fiber(fiber))
     } else {
         (
@@ -383,7 +383,7 @@ mod tests {
                 wasm_func_idx: None,
                 spirv: std::cell::OnceCell::new(),
             }),
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
     }

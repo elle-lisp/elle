@@ -6,7 +6,7 @@ use crate::primitives::def::PrimitiveDef;
 use crate::signals::Signal;
 use crate::value::fiber::{SignalBits, SIG_ERROR, SIG_IO, SIG_OK, SIG_YIELD};
 use crate::value::types::Arity;
-use crate::value::{error_val, Value};
+use crate::value::{error_val, sorted_struct_get, Value};
 
 /// (watch) — create a filesystem watcher, returns an External handle.
 fn prim_watch(args: &[Value]) -> (SignalBits, Value) {
@@ -62,8 +62,11 @@ fn prim_watch_add(args: &[Value]) -> (SignalBits, Value) {
         args[2]
             .as_struct()
             .and_then(|s| {
-                s.get(&crate::value::heap::TableKey::Keyword("recursive".into()))
-                    .map(|v| v.is_truthy())
+                sorted_struct_get(
+                    s,
+                    &crate::value::heap::TableKey::Keyword("recursive".into()),
+                )
+                .map(|v| v.is_truthy())
             })
             .unwrap_or(true)
     } else {

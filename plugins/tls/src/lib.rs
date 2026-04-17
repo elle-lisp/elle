@@ -386,7 +386,7 @@ fn prim_tls_client_state(args: &[Value]) -> (SignalBits, Value) {
     let no_verify = if args.len() > 1 {
         args[1]
             .as_struct()
-            .and_then(|m| m.get(&TableKey::Keyword("no-verify".into())))
+            .and_then(|m| elle::value::sorted_struct_get(m, &TableKey::Keyword("no-verify".into())))
             .and_then(|v| v.as_bool())
             .unwrap_or(false)
     } else {
@@ -396,7 +396,7 @@ fn prim_tls_client_state(args: &[Value]) -> (SignalBits, Value) {
     let ca_file: Option<String> = if args.len() > 1 {
         args[1]
             .as_struct()
-            .and_then(|m| m.get(&TableKey::Keyword("ca-file".into())))
+            .and_then(|m| elle::value::sorted_struct_get(m, &TableKey::Keyword("ca-file".into())))
             .and_then(|v| v.with_string(|s| s.to_string()))
     } else {
         None
@@ -1221,8 +1221,7 @@ mod tests {
         );
 
         let fields = result.as_struct().expect("result must be a struct");
-        let status = fields
-            .get(&TableKey::Keyword("status".into()))
+        let status = elle::value::sorted_struct_get(fields, &TableKey::Keyword("status".into()))
             .expect("must have :status field");
         assert_eq!(
             status.as_keyword_name().as_deref(),
@@ -1347,19 +1346,18 @@ mod tests {
             .as_struct()
             .expect("write result must be a struct");
         assert_eq!(
-            write_fields
-                .get(&TableKey::Keyword("status".into()))
+            elle::value::sorted_struct_get(write_fields, &TableKey::Keyword("status".into()))
                 .and_then(|v| v.as_keyword_name())
                 .as_deref(),
             Some("ok"),
             "write-plaintext status must be :ok after handshake"
         );
-        let ciphertext_for_server = write_fields
-            .get(&TableKey::Keyword("outgoing".into()))
-            .expect("write result must have :outgoing")
-            .as_bytes()
-            .expect(":outgoing must be bytes")
-            .to_vec();
+        let ciphertext_for_server =
+            elle::value::sorted_struct_get(write_fields, &TableKey::Keyword("outgoing".into()))
+                .expect("write result must have :outgoing")
+                .as_bytes()
+                .expect(":outgoing must be bytes")
+                .to_vec();
         assert!(
             !ciphertext_for_server.is_empty(),
             "encrypted client→server payload must not be empty"
@@ -1388,12 +1386,12 @@ mod tests {
         let write_fields = write_result
             .as_struct()
             .expect("write result must be a struct");
-        let ciphertext_for_client = write_fields
-            .get(&TableKey::Keyword("outgoing".into()))
-            .expect("write result must have :outgoing")
-            .as_bytes()
-            .expect(":outgoing must be bytes")
-            .to_vec();
+        let ciphertext_for_client =
+            elle::value::sorted_struct_get(write_fields, &TableKey::Keyword("outgoing".into()))
+                .expect("write result must have :outgoing")
+                .as_bytes()
+                .expect(":outgoing must be bytes")
+                .to_vec();
         assert!(
             !ciphertext_for_client.is_empty(),
             "encrypted server→client payload must not be empty"

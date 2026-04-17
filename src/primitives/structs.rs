@@ -193,11 +193,11 @@ fn deep_freeze_val(val: Value) -> Value {
     }
     // immutable struct → deep-freeze each value
     if let Some(t) = val.as_struct() {
-        let map: BTreeMap<TableKey, Value> = t
+        let entries: Vec<(TableKey, Value)> = t
             .iter()
             .map(|(k, v)| (k.clone(), deep_freeze_val(*v)))
             .collect();
-        return Value::struct_from(map);
+        return Value::struct_from_sorted(entries);
     }
 
     // @set → freeze to set, deep-freeze each element
@@ -254,7 +254,7 @@ pub(crate) fn prim_thaw(args: &[Value]) -> (SignalBits, Value) {
 
     // struct → @struct
     if let Some(s) = args[0].as_struct() {
-        let map = s.clone();
+        let map: BTreeMap<_, _> = s.iter().map(|(k, v)| (k.clone(), *v)).collect();
         return (SIG_OK, Value::struct_mut_from(map));
     }
     if args[0].is_struct_mut() {
@@ -311,10 +311,10 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
         );
     }
 
-    // Helper: convert a BTreeMap into a list of [key value] pairs
-    fn pairs_from_map(map: &BTreeMap<TableKey, Value>) -> Value {
+    // Helper: convert a slice of (TableKey, Value) pairs into a list of [key value] pairs
+    fn pairs_from_slice(entries: &[(TableKey, Value)]) -> Value {
         let mut result = Value::EMPTY_LIST;
-        for (key, value) in map.iter().rev() {
+        for (key, value) in entries.iter().rev() {
             let key_val = match key {
                 TableKey::Nil => Value::NIL,
                 TableKey::Bool(b) => Value::bool(*b),
@@ -330,12 +330,15 @@ pub(crate) fn prim_pairs(args: &[Value]) -> (SignalBits, Value) {
         result
     }
 
-    if let Some(map) = args[0].as_struct() {
-        return (SIG_OK, pairs_from_map(map));
+    if let Some(entries) = args[0].as_struct() {
+        return (SIG_OK, pairs_from_slice(entries));
     }
 
     if let Some(map) = args[0].as_struct_mut() {
-        return (SIG_OK, pairs_from_map(&map.borrow()));
+        let borrowed = map.borrow();
+        let entries: Vec<(TableKey, Value)> =
+            borrowed.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        return (SIG_OK, pairs_from_slice(&entries));
     }
 
     (

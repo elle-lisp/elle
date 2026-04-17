@@ -364,7 +364,7 @@ fn collect_elements(val: &Value) -> Result<Vec<Value>, (SignalBits, Value)> {
     }
     // Set / @set
     if let Some(set) = val.as_set() {
-        return Ok(set.iter().copied().collect());
+        return Ok(set.to_vec());
     }
     if let Some(set) = val.as_set_mut() {
         return Ok(set.borrow().iter().copied().collect());

@@ -454,7 +454,7 @@ mod tests {
         });
         let closure = Value::closure(crate::value::Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         });
         assert!(serialize_value(&closure).is_err());

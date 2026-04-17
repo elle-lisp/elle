@@ -198,7 +198,7 @@ pub(crate) fn prim_fiber_new(args: &[Value]) -> (SignalBits, Value) {
     }
 
     let closure = match args[0].as_closure() {
-        Some(c) => c.clone(),
+        Some(c) => std::rc::Rc::new(c.clone()),
         None => {
             return (
                 SIG_ERROR,
@@ -680,7 +680,7 @@ mod tests {
 
         Value::closure(Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
     }

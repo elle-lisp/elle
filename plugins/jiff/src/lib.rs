@@ -178,7 +178,7 @@ pub fn jiff_err(fn_name: &str, e: impl std::fmt::Display) -> (SignalBits, Value)
 /// Look up a keyword key in a struct value.
 pub fn struct_get_kw(v: &Value, key: &str) -> Option<Value> {
     v.as_struct()
-        .and_then(|m| m.get(&TableKey::Keyword(key.into())).copied())
+        .and_then(|m| elle::value::sorted_struct_get(m, &TableKey::Keyword(key.into())).copied())
 }
 
 /// Get an optional i64 from a keyword field of a struct.

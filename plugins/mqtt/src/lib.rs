@@ -232,7 +232,9 @@ fn prim_mqtt_state(args: &[Value]) -> (SignalBits, Value) {
 
     if !args.is_empty() {
         if let Some(opts) = args[0].as_struct() {
-            if let Some(v) = opts.get(&TableKey::Keyword("protocol".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("protocol".into()))
+            {
                 if let Some(i) = v.as_int() {
                     if i == 4 || i == 5 {
                         protocol = i as u8;
@@ -241,7 +243,9 @@ fn prim_mqtt_state(args: &[Value]) -> (SignalBits, Value) {
                     }
                 }
             }
-            if let Some(v) = opts.get(&TableKey::Keyword("keep-alive".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("keep-alive".into()))
+            {
                 if let Some(i) = v.as_int() {
                     keep_alive = i as u16;
                 }
@@ -277,28 +281,29 @@ fn prim_mqtt_encode_connect(args: &[Value]) -> (SignalBits, Value) {
         }
     };
 
-    let client_id = opts
-        .get(&TableKey::Keyword("client-id".into()))
+    let client_id = elle::value::sorted_struct_get(opts, &TableKey::Keyword("client-id".into()))
         .and_then(|v| v.with_string(|s| s.to_string()))
         .unwrap_or_default();
 
-    let clean_session = opts
-        .get(&TableKey::Keyword("clean-session".into()))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
+    let clean_session =
+        elle::value::sorted_struct_get(opts, &TableKey::Keyword("clean-session".into()))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
     let mut connect = v4::Connect::new(&client_id);
     connect.keep_alive = st.keep_alive.get();
     connect.clean_session = clean_session;
 
-    if let Some(v) = opts.get(&TableKey::Keyword("username".into())) {
+    if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("username".into())) {
         if let Some(u) = v.with_string(|s| s.to_string()) {
             connect.login = Some(v4::Login {
                 username: u,
-                password: opts
-                    .get(&TableKey::Keyword("password".into()))
-                    .and_then(|v| v.with_string(|s| s.to_string()))
-                    .unwrap_or_default(),
+                password: elle::value::sorted_struct_get(
+                    opts,
+                    &TableKey::Keyword("password".into()),
+                )
+                .and_then(|v| v.with_string(|s| s.to_string()))
+                .unwrap_or_default(),
             });
         }
     }
@@ -348,7 +353,8 @@ fn prim_mqtt_encode_publish(args: &[Value]) -> (SignalBits, Value) {
 
     if args.len() > 3 {
         if let Some(opts) = args[3].as_struct() {
-            if let Some(v) = opts.get(&TableKey::Keyword("qos".into())) {
+            if let Some(v) = elle::value::sorted_struct_get(opts, &TableKey::Keyword("qos".into()))
+            {
                 if let Some(i) = v.as_int() {
                     qos = match qos_from_int(i) {
                         Some(q) => q,
@@ -356,7 +362,9 @@ fn prim_mqtt_encode_publish(args: &[Value]) -> (SignalBits, Value) {
                     };
                 }
             }
-            if let Some(v) = opts.get(&TableKey::Keyword("retain".into())) {
+            if let Some(v) =
+                elle::value::sorted_struct_get(opts, &TableKey::Keyword("retain".into()))
+            {
                 if let Some(b) = v.as_bool() {
                     retain = b;
                 }

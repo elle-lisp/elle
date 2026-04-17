@@ -90,7 +90,7 @@ fn value_to_yaml(v: Value, name: &str) -> Result<serde_yaml_ng::Value, (SignalBi
     // Immutable struct — keyword keys become YAML mapping string keys
     if let Some(map) = v.as_struct() {
         let mut mapping = serde_yaml_ng::Mapping::new();
-        for (k, &val) in map.iter() {
+        for &(ref k, val) in map.iter() {
             let key = match k {
                 TableKey::Keyword(s) => serde_yaml_ng::Value::String(s.clone()),
                 other => {

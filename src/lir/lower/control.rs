@@ -51,6 +51,7 @@ impl<'a> Lowerer<'a> {
                 for _ in 0..self.pending_region_exits {
                     self.emit(LirInstr::RegionExit);
                 }
+
                 self.emit(LirInstr::TailCall {
                     func: func_reg,
                     args: arg_regs,
@@ -377,7 +378,12 @@ impl<'a> Lowerer<'a> {
         signal: crate::value::fiber::SignalBits,
         value: &Hir,
     ) -> Result<Reg, String> {
+        // Wrap value expression in OutboxEnter/OutboxExit so that
+        // yield-bound allocations route to the outbox (for zero-copy
+        // reading by the parent after yield).
+        self.emit(LirInstr::OutboxEnter);
         let value_reg = self.lower_expr(value)?;
+        self.emit(LirInstr::OutboxExit);
 
         let resume_label = self.fresh_label();
 

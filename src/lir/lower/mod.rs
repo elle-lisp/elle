@@ -49,6 +49,51 @@ pub fn global_scope_stats() -> ScopeStats {
         .unwrap_or_default()
 }
 
+/// Wrap `func`'s body with `FlipEnter`/`FlipExit` and insert `FlipSwap`
+/// before every tail call. Used by Phase 4b auto-insertion
+/// (gated by `config.flip_instructions`).
+///
+/// The resulting LIR is semantically equivalent under the runtime's
+/// existing rotation mechanism — `FlipSwap` tears down the previous
+/// iteration's allocations at each tail-call boundary the same way
+/// the trampoline does, and `FlipExit` tears down the trailing
+/// generation when the function returns.
+fn inject_flip(func: &mut LirFunction) {
+    // Locate the entry block: prepend FlipEnter at the top.
+    if let Some(entry_block) = func.blocks.iter_mut().find(|b| b.label == func.entry) {
+        entry_block
+            .instructions
+            .insert(0, SpannedInstr::new(LirInstr::FlipEnter, Span::synthetic()));
+    }
+
+    for block in &mut func.blocks {
+        // Insert FlipSwap immediately before every tail call.
+        let mut i = 0;
+        while i < block.instructions.len() {
+            if matches!(
+                block.instructions[i].instr,
+                LirInstr::TailCall { .. } | LirInstr::TailCallArrayMut { .. }
+            ) {
+                block
+                    .instructions
+                    .insert(i, SpannedInstr::new(LirInstr::FlipSwap, Span::synthetic()));
+                i += 2;
+            } else {
+                i += 1;
+            }
+        }
+
+        // Insert FlipExit before every Return terminator. (TailCalls
+        // leave the frame without a Return, so their exit is subsumed
+        // by the next frame's FlipExit on its own return.)
+        if matches!(block.terminator.terminator, Terminator::Return(_)) {
+            block
+                .instructions
+                .push(SpannedInstr::new(LirInstr::FlipExit, Span::synthetic()));
+        }
+    }
+}
+
 /// Compile-time scope allocation statistics.
 ///
 /// Tracks how many let/letrec/block scopes were analyzed for scope
@@ -201,6 +246,13 @@ pub struct Lowerer<'a> {
     /// Precomputed via fixpoint iteration. Bit i set means param i
     /// might be returned identity-unchanged by the function.
     callee_return_params: HashMap<Binding, u64>,
+    /// Binding → `Some(rest_index)` for variadic user functions (those
+    /// with `&opt`/`&named`/`&keys`/`&args`). When set, call-site
+    /// args at position >= rest_index all collapse into the rest param.
+    /// `can_scope_allocate_call` needs this to account for the
+    /// many-to-one arg-to-param mapping when deciding whether heap
+    /// args might flow into the callee's return.
+    callee_rest_index: HashMap<Binding, usize>,
     /// Compile-time constant values for immutable bindings (for LoadConst optimization)
     immutable_values: HashMap<Binding, Value>,
     /// Stack of active block contexts for `break` lowering
@@ -222,6 +274,12 @@ pub struct Lowerer<'a> {
     /// closures by `ClosureId` (index into this list). Built depth-first
     /// during lowering.
     closures: Vec<LirFunction>,
+    /// Binding of the current function being analyzed (for self-tail-call
+    /// detection in escape analysis and drop insertion).
+    current_function_binding: Option<Binding>,
+    /// Parameter bindings of the current function (for per-parameter
+    /// independence analysis in self-tail-calls).
+    current_function_params: Option<Vec<Binding>>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -244,6 +302,7 @@ impl<'a> Lowerer<'a> {
             callee_rotation_safe: HashMap::new(),
             callee_result_immediate: HashMap::new(),
             callee_return_params: HashMap::new(),
+            callee_rest_index: HashMap::new(),
             immutable_values: HashMap::new(),
             block_lower_contexts: Vec::new(),
             region_depth: 0,
@@ -252,6 +311,8 @@ impl<'a> Lowerer<'a> {
             discard_slot: None,
             symbol_names: HashMap::new(),
             closures: Vec::new(),
+            current_function_binding: None,
+            current_function_params: None,
         }
     }
 
@@ -315,6 +376,7 @@ impl<'a> Lowerer<'a> {
         // the callee having been lowered, so it reads from closures[].
         self.precompute_result_immediate(hir);
         self.precompute_return_params(hir);
+        self.precompute_rest_index(hir);
         self.precompute_rotation_safety(hir);
 
         let result_reg = self.lower_expr(hir)?;
@@ -333,8 +395,21 @@ impl<'a> Lowerer<'a> {
         self.current_func.has_outward_heap_set = self.body_contains_dangerous_outward_set(hir, &[]);
         self.current_func.rotation_safe = !self.body_escapes_heap_values(hir);
 
-        let entry = std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
-        let closures = std::mem::take(&mut self.closures);
+        let mut entry =
+            std::mem::replace(&mut self.current_func, LirFunction::new(Arity::Exact(0)));
+        let mut closures = std::mem::take(&mut self.closures);
+
+        // Phase 4b: optional FlipEnter/FlipSwap/FlipExit injection. The
+        // pass is a no-op unless `--flip=on` or the vm/config equivalent
+        // is set. It runs after lowering so it doesn't perturb any
+        // scope/rotation analysis upstream.
+        if crate::config::get().flip_instructions {
+            inject_flip(&mut entry);
+            for f in &mut closures {
+                inject_flip(f);
+            }
+        }
+
         Ok(LirModule { entry, closures })
     }
 
@@ -635,13 +710,32 @@ impl<'a> Lowerer<'a> {
         //
         // Check: for each arg position i in the callee's return_params,
         // if arg i is heap-allocating (!result_is_safe), reject.
+        //
+        // Variadic handling: a callee with `&opt`/`&named`/`&keys`/
+        // `&args` collapses every call-site arg at position >= rest_index
+        // into a single rest param at `rest_index`. When that rest param
+        // flows to the return (bit `rest_index` of `callee_rp`), all
+        // collapsing args effectively flow too. Without this mapping,
+        // `(defn request [&keys opts] opts)` with `opts` returned looked
+        // like "no bits set for args 0..N-1" and the caller wrongly
+        // scope-freed heap args that the callee had re-embedded in its
+        // `opts` struct.
         let callee_rp = self
             .callee_return_params
             .get(binding)
             .copied()
             .unwrap_or(!0); // unknown callee: assume all params returned
+        let rest_index = self.callee_rest_index.get(binding).copied();
         for (i, arg) in args.iter().enumerate() {
-            if i < 64 && (callee_rp & (1u64 << i)) != 0 && !self.result_is_safe(&arg.expr, &[]) {
+            // Map the call-site arg position to the callee's param slot.
+            let param_slot = match rest_index {
+                Some(r) if i >= r => r,
+                _ => i,
+            };
+            if param_slot < 64
+                && (callee_rp & (1u64 << param_slot)) != 0
+                && !self.result_is_safe(&arg.expr, &[])
+            {
                 return false;
             }
         }
@@ -704,6 +798,50 @@ impl<'a> Lowerer<'a> {
             if !changed {
                 break;
             }
+        }
+    }
+
+    /// Precompute `callee_rest_index` for all user functions. The rest
+    /// param index is `params.len() - 1` when `rest_param` is `Some`
+    /// (the rest-collecting binding is the last entry in `params`).
+    fn precompute_rest_index(&mut self, hir: &Hir) {
+        Self::collect_rest_indices(hir, &mut self.callee_rest_index);
+    }
+
+    fn collect_rest_indices(hir: &Hir, out: &mut HashMap<Binding, usize>) {
+        match &hir.kind {
+            HirKind::Define { binding, value } => {
+                if let HirKind::Lambda {
+                    params, rest_param, ..
+                } = &value.kind
+                {
+                    if rest_param.is_some() && !params.is_empty() {
+                        out.insert(*binding, params.len() - 1);
+                    }
+                }
+                Self::collect_rest_indices(value, out);
+            }
+            HirKind::Begin(exprs) => {
+                for e in exprs {
+                    Self::collect_rest_indices(e, out);
+                }
+            }
+            HirKind::Let { bindings, body } | HirKind::Letrec { bindings, body } => {
+                for (binding, init) in bindings {
+                    if let HirKind::Lambda {
+                        params, rest_param, ..
+                    } = &init.kind
+                    {
+                        if rest_param.is_some() && !params.is_empty() {
+                            out.insert(*binding, params.len() - 1);
+                        }
+                    }
+                    Self::collect_rest_indices(init, out);
+                }
+                Self::collect_rest_indices(body, out);
+            }
+            HirKind::Lambda { .. } => {}
+            _ => {}
         }
     }
 
@@ -821,24 +959,34 @@ impl<'a> Lowerer<'a> {
             }
             HirKind::While { .. } | HirKind::Destructure { .. } => 0, // returns nil
 
-            // Tail call: map callee's return_params through our args
-            HirKind::Call {
-                func,
-                args,
-                is_tail: true,
-                ..
-            } => {
+            // Call: map callee's return_params through our args.
+            //
+            // This applies to both tail and non-tail calls: a non-tail
+            // call in return position of this function (e.g. `(defn f [y]
+            // (array :first y))` where `(array ...)` is the whole body)
+            // still forwards its args into the result. The flag only
+            // affects the trampoline, not the data-flow.
+            //
+            // Default for unknown callees is `!0` (assume every arg can
+            // flow into the return), matching `can_scope_allocate_call`.
+            // User-defined functions are seeded in `callee_return_params`
+            // and refined by fixpoint iteration. Primitives aren't in
+            // the map — `unwrap_or(!0)` treats them conservatively: a
+            // container-like primitive (`array`, `struct`, `cons`) DOES
+            // embed its args in the result; an intrinsic like `+` does
+            // not. Both cases are safe under `!0`: the caller's scope
+            // analysis may reject some scope-allocations that would
+            // actually be fine, but it won't drop a value the callee
+            // handed back inside its return.
+            HirKind::Call { func, args, .. } => {
                 let callee_rp = if let HirKind::Var(b) = &func.kind {
-                    self.callee_return_params.get(b).copied().unwrap_or(0)
+                    self.callee_return_params.get(b).copied().unwrap_or(!0)
                 } else {
-                    // Unknown callee — conservatively assume it could
-                    // return any arg. But we can't map, so return 0.
-                    return 0;
+                    // Non-Var callee (e.g. `((get sched :pump))`):
+                    // we can't identify it, so assume every arg flows
+                    // to the return.
+                    !0
                 };
-                // Map callee's return_params through call-site args:
-                // if callee returns its param j, and arg j at this call
-                // site is Var(param_k) of our function, then our
-                // return_params includes k.
                 let mut mask = 0u64;
                 for (j, arg) in args.iter().enumerate() {
                     if j < 64 && (callee_rp & (1u64 << j)) != 0 {
@@ -855,10 +1003,6 @@ impl<'a> Lowerer<'a> {
                 }
                 mask
             }
-
-            // Non-tail call: the callee's return value is freshly
-            // computed, not one of our params passed through.
-            HirKind::Call { .. } => 0,
 
             // Parameterize: result is body's result
             HirKind::Parameterize { body, .. } => self.compute_return_params(body, params),
@@ -980,22 +1124,26 @@ impl<'a> Lowerer<'a> {
     /// safe, and each pass may flip some to unsafe. Converges because
     /// the only transition is safe→unsafe (monotone).
     fn precompute_rotation_safety(&mut self, hir: &Hir) {
-        // Collect all (binding, lambda_body) pairs from the HIR.
-        let mut defs: Vec<(Binding, &Hir)> = Vec::new();
-        Self::collect_lambda_defs(hir, &mut defs);
+        // Collect all (binding, params, lambda_body) pairs from the HIR.
+        let mut defs: Vec<(Binding, Vec<Binding>, &Hir)> = Vec::new();
+        Self::collect_lambda_defs_with_params(hir, &mut defs);
         if defs.is_empty() {
             return;
         }
 
         // Seed: all functions optimistically safe.
-        for &(binding, _) in &defs {
+        for &(binding, _, _) in &defs {
             self.callee_rotation_safe.insert(binding, true);
         }
 
         // Iterate until stable.
         loop {
             let mut changed = false;
-            for &(binding, body) in &defs {
+            for &(binding, ref params, body) in &defs {
+                // Set context so body_escapes_heap_values can detect
+                // self-tail-calls and apply per-parameter analysis.
+                self.current_function_binding = Some(binding);
+                self.current_function_params = Some(params.clone());
                 let escapes = self.body_escapes_heap_values(body);
                 let was_safe = self.callee_rotation_safe[&binding];
                 if was_safe && escapes {
@@ -1007,6 +1155,10 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
+
+        // Clear context
+        self.current_function_binding = None;
+        self.current_function_params = None;
 
         // Record stats
         self.scope_stats.rotation_analyzed = defs.len();

@@ -188,6 +188,11 @@ impl WasmEmitter {
                 }
             }
             LirInstr::RegionEnter | LirInstr::RegionExit | LirInstr::RegionExitCall => {}
+            // Outbox routing is VM-only.
+            LirInstr::OutboxEnter | LirInstr::OutboxExit => {}
+            // Flip rotation is VM-only (the WASM backend uses its own
+            // GC strategy).
+            LirInstr::FlipEnter | LirInstr::FlipSwap | LirInstr::FlipExit => {}
             LirInstr::Cons { dst, head, tail } => {
                 self.emit_data_op2(f, *dst, OP_CONS, *head, *tail);
             }

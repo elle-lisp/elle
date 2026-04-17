@@ -1045,32 +1045,40 @@
         # Wake select waiters
         (wake-select-waiters fiber)))
 
+    (defn get-completion [fiber]
+      "Return fiber's completion status (:ok or :error), or nil if the fiber
+       has not yet terminated. Lazily records completion from the fiber's raw
+       status — if the fiber transitioned to :dead/:error via a path the
+       scheduler observed only indirectly (e.g. while handling another fiber),
+       record the completion atomically the first time we inspect it. This
+       keeps `completed` in sync with reality and lets handle-abort /
+       handle-join / handle-select make consistent decisions."
+      (let ([recorded (get completed fiber)])
+        (if (not (nil? recorded))
+          recorded
+          (case (fiber/status fiber)
+            :dead  (begin (complete-fiber fiber :ok)    :ok)
+            :error (begin (complete-fiber fiber :error) :error)
+            nil))))
+
     (defn handle-join [caller target]
       "Handle a :join wait request. Resumes caller with [ok? value]."
       (add joined target)
-      (let ([comp (get completed target)])
+      (let ([comp (get-completion target)])
         (if (not (nil? comp))
           # Already completed — resume immediately
           (begin (fiber/resume caller [(= comp :ok) (fiber/value target)])
                  (handle-fiber-after-resume caller))
-          # Check raw fiber status
-          (let ([status (fiber/status target)])
-            (cond
-              ((= status :dead)
-               (begin (fiber/resume caller [true (fiber/value target)])
-                      (handle-fiber-after-resume caller)))
-              ((= status :error)
-               (begin (fiber/resume caller [false (fiber/value target)])
-                      (handle-fiber-after-resume caller)))
-              (true
-               (let ([ws (or (get waiters target)
-                             (let ([w @[]]) (put waiters target w) w))])
-                 (push ws caller))))))))
+          # Still running — park caller on target's join waiter list
+          (let ([ws (or (get waiters target)
+                        (let ([w @[]]) (put waiters target w) w))])
+            (push ws caller)))))
 
     (defn handle-select [caller candidates]
       "Handle a :select wait request."
-      # Check if any candidate already completed
-      (let ([done (find (fn [f] (not (nil? (get completed f))))
+      # Check if any candidate already completed (records completion lazily
+      # via get-completion so the scheduler stays consistent).
+      (let ([done (find (fn [f] (not (nil? (get-completion f))))
                         candidates)])
         (if done
           # Immediate: resume with the completed fiber
@@ -1084,7 +1092,13 @@
     (defn handle-abort [caller target]
       "Handle an :abort wait request."
       (add joined target)
-      (when (nil? (get completed target))
+      # get-completion records the completion if target has already
+      # transitioned to :dead/:error but the scheduler hadn't noticed yet.
+      # Without this, the guard below would pass and fiber/abort would be
+      # called on an already-terminal target (state-error without Option A,
+      # silent no-op with it — but either way, the abort logic below is
+      # wrong on a dead fiber).
+      (when (nil? (get-completion target))
         # Cancel pending I/O if any
         (let ([id (get fiber-io target)])
           (when (not (nil? id))

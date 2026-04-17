@@ -462,7 +462,7 @@ mod tests {
         });
         Rc::new(Closure {
             template,
-            env: Rc::new(vec![]),
+            env: crate::value::inline_slice::InlineSlice::empty(),
             squelch_mask: SignalBits::EMPTY,
         })
     }
@@ -570,7 +570,7 @@ mod tests {
 
         let closure = Rc::new(Closure {
             template,
-            env: Rc::new(vec![Value::int(99)]), // 1 capture
+            env: crate::value::arena::alloc_inline_slice::<Value>(&[Value::int(99)]), // 1 capture
             squelch_mask: SignalBits::EMPTY,
         });
         let args = vec![Value::int(42)];

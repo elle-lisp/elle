@@ -107,6 +107,18 @@ pub unsafe fn restore_saved_heap(saved: *mut FiberHeap) {
     CURRENT_FIBER_HEAP.with(|cell| cell.set(saved));
 }
 
+/// Check whether the current fiber heap has a shared allocator active.
+pub fn current_heap_has_shared_alloc() -> bool {
+    CURRENT_FIBER_HEAP.with(|cell| {
+        let ptr = cell.get();
+        if ptr.is_null() {
+            false
+        } else {
+            unsafe { (*ptr).has_shared_alloc() }
+        }
+    })
+}
+
 pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R> {
     CURRENT_FIBER_HEAP.with(|cell| {
         let ptr = cell.get();
@@ -116,6 +128,23 @@ pub fn with_current_heap_mut<R>(f: impl FnOnce(&mut FiberHeap) -> R) -> Option<R
             Some(f(unsafe { &mut *ptr }))
         }
     })
+}
+
+/// Enter outbox routing context on the current FiberHeap.
+/// Allocations between outbox_enter and outbox_exit go to the outbox.
+pub fn outbox_enter() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).outbox_enter() };
+    }
+}
+
+/// Exit outbox routing context on the current FiberHeap.
+pub fn outbox_exit() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).outbox_exit() };
+    }
 }
 
 /// Push a scope mark on the current FiberHeap (called by VM `RegionEnter`).
@@ -141,5 +170,29 @@ pub fn region_exit_call() {
     let ptr = current_heap_ptr();
     if !ptr.is_null() {
         unsafe { (*ptr).pop_call_scope_marks_and_release() };
+    }
+}
+
+/// Push a flip frame on the current FiberHeap (`FlipEnter`).
+pub fn flip_enter() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_enter() };
+    }
+}
+
+/// Rotate using the top flip frame (`FlipSwap`).
+pub fn flip_swap() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_swap() };
+    }
+}
+
+/// Pop the top flip frame (`FlipExit`).
+pub fn flip_exit() {
+    let ptr = current_heap_ptr();
+    if !ptr.is_null() {
+        unsafe { (*ptr).flip_exit() };
     }
 }

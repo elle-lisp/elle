@@ -1585,6 +1585,7 @@ mod tests {
     use crate::io::request::{IoOp, IoRequest};
     use crate::port::{Direction, Encoding, Port};
     use crate::value::heap::TableKey;
+    use crate::value::sorted_struct_get;
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -1731,16 +1732,16 @@ mod tests {
         let v = c.to_value();
         let fields = v.as_struct().unwrap();
         assert_eq!(
-            fields
-                .get(&TableKey::Keyword("id".into()))
+            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
                 .unwrap()
                 .as_int(),
             Some(42)
         );
-        assert!(fields
-            .get(&TableKey::Keyword("error".into()))
-            .unwrap()
-            .is_nil());
+        assert!(
+            sorted_struct_get(fields, &TableKey::Keyword("error".into()))
+                .unwrap()
+                .is_nil()
+        );
     }
 
     #[test]
@@ -1752,20 +1753,21 @@ mod tests {
         let v = c.to_value();
         let fields = v.as_struct().unwrap();
         assert_eq!(
-            fields
-                .get(&TableKey::Keyword("id".into()))
+            sorted_struct_get(fields, &TableKey::Keyword("id".into()))
                 .unwrap()
                 .as_int(),
             Some(7)
         );
-        assert!(fields
-            .get(&TableKey::Keyword("value".into()))
-            .unwrap()
-            .is_nil());
-        assert!(!fields
-            .get(&TableKey::Keyword("error".into()))
-            .unwrap()
-            .is_nil());
+        assert!(
+            sorted_struct_get(fields, &TableKey::Keyword("value".into()))
+                .unwrap()
+                .is_nil()
+        );
+        assert!(
+            !sorted_struct_get(fields, &TableKey::Keyword("error".into()))
+                .unwrap()
+                .is_nil()
+        );
     }
 
     #[test]
@@ -2210,8 +2212,7 @@ mod tests {
         let val = completions[0].result.as_ref().expect("spawn failed");
         let fields = val.as_struct().expect("expected struct");
         assert!(
-            fields
-                .get(&TableKey::Keyword("pid".into()))
+            sorted_struct_get(fields, &TableKey::Keyword("pid".into()))
                 .unwrap()
                 .as_int()
                 .unwrap()
