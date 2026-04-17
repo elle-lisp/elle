@@ -142,6 +142,18 @@
         ((= status :error)   (put errors  tier payload)))))
   (let* [[ran-tiers   (keys results)]
          [num-results (length ran-tiers)]]
+    ## Safety check: if the reference tier (:bytecode) errored but other
+    ## tiers produced results, that's a disagreement — a tier succeeded
+    ## on input that the reference tier rejected.
+    (if (and (> num-results 0)
+             (contains? errors :bytecode))
+      {:agreed false
+       :tiers (apply set ran-tiers)
+       :results results
+       :ref-tier :bytecode
+       :skipped skipped
+       :errors  errors
+       :safety  "tier(s) succeeded but :bytecode errored"}
     (cond
       ## No tier ran — caller almost certainly made a mistake.
       ((= num-results 0)
@@ -179,7 +191,7 @@
              :results results
              :ref-tier ref-tier
              :skipped skipped
-             :errors  errors}))))))
+             :errors  errors})))))))
 
 ## ── format-disagreement ─────────────────────────────────────────────
 

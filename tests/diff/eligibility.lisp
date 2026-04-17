@@ -61,4 +61,18 @@
     (assert (= (get err-mb :error) :tier-rejected)
             (string "mlir-cpu bool rejection should be :tier-rejected, got: " err-mb))))
 
+# ── Safety gap: string to arithmetic must not silently succeed ─────────
+
+(def diff ((import "tests/diff/harness")))
+
+(defn add1 [x] (+ x 1))
+## Bytecode should error on string input to arithmetic.
+## If any other tier silently succeeds, the harness must detect the
+## disagreement (the safety gap fix). If no tier succeeds, that's fine too.
+(let [[report (diff:call add1 "hello")]]
+  (assert (not (get report :agreed))
+          (string "string input to arithmetic must not agree, got: " report))
+  (assert (contains? (get report :errors) :bytecode)
+          "bytecode must error on string + int"))
+
 (println "eligibility: OK")
