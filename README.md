@@ -607,8 +607,10 @@ concurrency layer.
 
 ## Execution Backends
 
-Elle has two execution backends. Both share the same front end (reader →
+Elle has four execution tiers. All share the same front end (reader →
 expander → analyzer → HIR → LIR); they diverge at code generation.
+The VM tries tiers in order and falls through automatically — no
+annotations needed.
 
 ### Bytecode VM + Cranelift JIT (default)
 
@@ -616,6 +618,43 @@ The default backend emits bytecode from LIR and runs it on a stack-based
 VM. Hot functions are automatically compiled to native code via Cranelift
 at runtime — no annotations, no opt-in. The compiler's signal system
 identifies eligible functions; the JIT fires transparently.
+
+### MLIR-CPU (tier-2, optional)
+
+Pure numeric functions (arithmetic, comparison, local variables, control
+flow — no heap allocation, no calls, no signals beyond `:error`) are
+compiled through MLIR → LLVM → native code. This runs **before** the
+Cranelift JIT in the dispatch chain: hot eligible functions get MLIR
+instead of Cranelift.
+
+Eligible functions may capture variables (passed as extra parameters)
+and return booleans. The caller reboxes the raw `i64` result based on
+the return type. Non-numeric arguments fall through to bytecode.
+
+Requires `--features mlir` and LLVM 22 + MLIR at build time.
+
+See [`docs/impl/mlir.md`](docs/impl/mlir.md) for details.
+
+### GPU / SPIR-V (optional)
+
+The same eligibility predicate drives SPIR-V emission: a pure numeric
+closure is lowered to a compute kernel and dispatched to the GPU via
+Vulkan. `gpu:map` applies a scalar function across arrays in parallel —
+each workgroup thread runs the function on one element.
+
+```lisp
+(def gpu ((import "std/gpu")))
+(gpu:map (fn [x] (* x x)) [1 2 3 4])  # => [1 4 9 16]
+```
+
+The fiber suspends on the GPU fence fd — no thread pool thread is
+held while the GPU works. SPIR-V can also be written by hand via
+`lib/spirv.lisp` for fused or custom kernels.
+
+Requires `--features mlir` and the `vulkan` plugin.
+
+See [`docs/impl/gpu.md`](docs/impl/gpu.md) and
+[`docs/impl/spirv.md`](docs/impl/spirv.md) for details.
 
 ### WASM backend (experimental)
 
