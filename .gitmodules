@@ -1,3 +1,6 @@
 [submodule "plugins"]
 	path = plugins
 	url = git@github.com:elle-lisp/plugins.git
+[submodule "mcp"]
+	path = mcp
+	url = git@github.com:elle-lisp/mcp.git

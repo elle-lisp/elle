@@ -283,66 +283,11 @@ When in doubt, run the tests.
 
 ## MCP Server
 
-See [`docs/mcp.md`](docs/mcp.md) for full documentation.
+The MCP server lives in a [separate repository](https://github.com/elle-lisp/mcp)
+(available as a submodule at `tools/mcp/`). It requires the `elle-oxigraph`
+and `elle-syn` plugins from [elle-lisp/plugins](https://github.com/elle-lisp/plugins).
 
-`tools/mcp-server.lisp` is an MCP (Model Context Protocol) server that
-exposes an oxigraph RDF store over SPARQL via JSON-RPC 2.0 on stdio.
-
-### Tools exposed
-
-| Tool | Purpose |
-|------|---------|
-| `sparql_query` | Execute SPARQL SELECT / ASK / CONSTRUCT |
-| `sparql_update` | Execute SPARQL UPDATE (INSERT DATA, DELETE, etc.) |
-| `load_rdf` | Load RDF data from a string (turtle/ntriples/nquads/rdfxml) |
-| `dump_rdf` | Serialize the store to a string |
-
-### Store location
-
-Resolution order:
-1. CLI arg: `elle tools/mcp-server.lisp -- /path/to/store`
-2. Env var: `ELLE_MCP_STORE=/path/to/store`
-3. Default: `.elle-mcp/store/` in CWD (auto-created)
-
-The store is always persistent (no in-memory fallback). `.elle-mcp/` is
-gitignored.
-
-### Related tools
-
-| File | Purpose |
-|------|---------|
-| `tools/elle-graph.lisp` | Extract RDF triples from Elle source files via `read-all` |
-| `tools/rust-graph.lisp` | Extract RDF triples from Rust source files via syn plugin |
-| `tools/load-all.lisp` | Extract Elle + Rust graphs and load into oxigraph store |
-| `tools/demo-queries.lisp` | Example SPARQL queries against the Elle knowledge graph |
-| `tools/test-mcp.lisp` | Smoke test: spawns server, exercises all tools |
-| `tools/test-oxigraph-load.lisp` | Verifies oxigraph plugin loads |
-| `tools/bug-repro.lisp` | VM panic repro: glob + nested let+protect + push |
-
-### Graph schema
-
-`elle-graph.lisp` emits ntriples with `urn:elle:` namespace:
-
-| Type | Predicates |
-|------|-----------|
-| `elle:Fn` | `elle:name`, `elle:file`, `elle:arity`, `elle:param`, `elle:doc` |
-| `elle:Def` | `elle:name`, `elle:file` |
-| `elle:Macro` | `elle:name`, `elle:file` |
-| `elle:Import` | `elle:name`, `elle:path`, `elle:file` |
-
-`rust-graph.lisp` and the `extract_rust` MCP tool emit ntriples with
-`urn:rust:` namespace:
-
-| Type | Predicates |
-|------|-----------|
-| `rust:Fn` | `rust:name`, `rust:file`, `rust:param`, `rust:param-type`, `rust:return-type`, `rust:async`, `rust:unsafe`, `rust:visibility`, `rust:attribute` |
-| `rust:Struct` | `rust:name`, `rust:file`, `rust:kind`, `rust:field`, `rust:field-type`, `rust:visibility`, `rust:attribute` |
-| `rust:Enum` | `rust:name`, `rust:file`, `rust:variant`, `rust:visibility`, `rust:attribute` |
-| `rust:Trait` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Const` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Static` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Type` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
-| `rust:Mod` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
+See [`docs/mcp.md`](docs/mcp.md) for protocol documentation.
 
 ## Standard Library
 

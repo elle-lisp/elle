@@ -1,4 +1,4 @@
-.PHONY: all elle dev docs docgen smoke test test-git test-mcp clean help \
+.PHONY: all elle dev docs docgen smoke test test-git clean help \
        smoke-vm smoke-jit smoke-wasm doctest
 
 .DEFAULT_GOAL := all
@@ -95,13 +95,7 @@ test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build $(CARGO_PROFILE) -p elle
 	$(ELLE) tests/git.lisp
 
-test-mcp:  ## Run the MCP server integration test
-	@echo "=== MCP server integration test ==="
-	cargo build $(CARGO_PROFILE) -p elle
-	@$(ELLE) tools/test-mcp.lisp $(ELLE) \
-		|| { echo "FAILED: MCP server integration test"; exit 1; }
-
-test: smoke test-mcp  ## Rust unit tests + clippy + fmt + rustdoc after smoke
+test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
 	cargo clippy --workspace --all-targets -- -D warnings
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
