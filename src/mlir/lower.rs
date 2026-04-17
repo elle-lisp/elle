@@ -88,6 +88,8 @@ pub fn lower_to_module<'c>(
     let mut types: HashMap<u32, ScalarType> = HashMap::new();
     // Local slot types: slot index → ScalarType
     let mut slot_types: HashMap<u32, ScalarType> = HashMap::new();
+    // Which block last typed each slot (for cross-block conflict detection).
+    let mut slot_type_blocks: HashMap<u32, usize> = HashMap::new();
     // Return type: determined from Return terminators
     let mut return_type: Option<ScalarType> = None;
 
@@ -378,18 +380,27 @@ pub fn lower_to_module<'c>(
                         .get(&(*slot as u32))
                         .ok_or_else(|| format!("unallocated local slot {}", slot))?;
                     block.append_operation(memref::store(store_val, slot_ptr, &[], location));
-                    // Reject mixed-type slots: if a slot was previously typed
-                    // differently, we can't statically know which type to
-                    // bitcast on load. Fall through to bytecode/JIT.
+                    // Reject cross-block mixed-type slots: if a different block
+                    // previously typed this slot differently, we can't statically
+                    // know which type to bitcast on load. Within the same block,
+                    // sequential reassignment is fine (last store wins).
                     if let Some(prev) = slot_types.get(&(*slot as u32)) {
                         if *prev != src_type {
-                            return Err(format!(
-                                "mixed-type local slot {}: was {:?}, now {:?}",
-                                slot, prev, src_type
-                            ));
+                            let prev_block = slot_type_blocks.get(&(*slot as u32)).copied();
+                            if prev_block != Some(block_idx) {
+                                return Err(format!(
+                                    "mixed-type local slot {}: {:?} in block {}, {:?} in block {}",
+                                    slot,
+                                    prev,
+                                    prev_block.unwrap_or(0),
+                                    src_type,
+                                    block_idx
+                                ));
+                            }
                         }
                     }
                     slot_types.insert(*slot as u32, src_type);
+                    slot_type_blocks.insert(*slot as u32, block_idx);
                 }
                 LirInstr::LoadLocal { dst, slot } => {
                     let slot_ptr = *local_slots

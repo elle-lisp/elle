@@ -363,9 +363,91 @@ mod tests {
         let err = lower_to_mlir(&func).unwrap_err();
         assert!(
             err.contains("mixed-type local slot"),
-            "should reject mixed-type slot: {}",
+            "should reject cross-block mixed-type slot: {}",
             err
         );
+    }
+
+    /// Build LIR: fn(x) { var s = 0; s = 1.5; return s }
+    /// Sequential reassignment within a single block — should succeed.
+    fn make_sequential_reassign() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("seq_reassign".to_string());
+        func.signal = Signal::errors();
+        func.num_locals = 1;
+
+        let mut b0 = BasicBlock::new(Label(0));
+        // Load param (unused, just for arity)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        // var s = 0 (Int)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(1),
+            },
+            s(),
+        ));
+        // s = 1.5 (Float — same block, sequential reassignment)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(2),
+            },
+            s(),
+        ));
+        // Load and return s
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadLocal {
+                dst: Reg(3),
+                slot: 0,
+            },
+            s(),
+        ));
+        b0.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
+
+        func.blocks = vec![b0];
+        func.num_regs = 4;
+        func
+    }
+
+    #[test]
+    fn test_accept_sequential_reassign() {
+        let func = make_sequential_reassign();
+        // Should lower successfully — sequential reassignment in same block is fine.
+        let mlir_text = lower_to_mlir(&func).expect("sequential reassignment should succeed");
+        assert!(
+            mlir_text.contains("func.func"),
+            "should produce valid MLIR: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_execute_sequential_reassign() {
+        let func = make_sequential_reassign();
+        let result = mlir_call(&func, &[0]).expect("execution should succeed");
+        // s was reassigned from 0 (Int) to 1.5 (Float); result is f64 bits
+        assert_eq!(result, 1.5f64.to_bits() as i64);
     }
 
     // ── SPIR-V tests ─────────────────────────────────────────────
