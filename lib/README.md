@@ -69,7 +69,7 @@ Make a GET request. Returns `{:status :headers :body}`.
 
 **Example:**
 ```lisp
-(let ((resp (http:get "http://example.com/")))
+(let [resp (http:get "http://example.com/")]
   (println (get resp :status))
   (println (get resp :body)))
 ```
@@ -87,7 +87,7 @@ Make a POST request. `body` is a string. Returns `{:status :headers :body}`.
 
 **Example:**
 ```lisp
-(let ((resp (http:post "http://example.com/api" "{\"key\": \"value\"}")))
+(let [resp (http:post "http://example.com/api" "{\"key\": \"value\"}")]
   (println (get resp :status)))
 ```
 
@@ -152,7 +152,7 @@ Parse a URL string into `{:scheme :host :port :path :query}`.
 
 **Example:**
 ```lisp
-(let ((u (http:parse-url "http://example.com:8080/api?q=test")))
+(let [u (http:parse-url "http://example.com:8080/api?q=test")]
   (println (get u :host))   # "example.com"
   (println (get u :port))   # 8080
   (println (get u :path))   # "/api"
@@ -193,6 +193,6 @@ The server handles connections concurrently — each accepted connection
 runs in its own fiber.
 
 ```lisp
-(let ((resp (http:get "http://example.com/")))
+(let [resp (http:get "http://example.com/")]
   (println (get resp :status)))
 ```

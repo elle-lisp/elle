@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 # Regression test: let* + yield + calls that store heap objects externally.
 #
@@ -18,9 +19,9 @@
 
 (defn timed-op [table thunk &named attributes]
   "let* where second binding yields, body stores heap objects externally."
-  (let* [[start (clock/monotonic)]
-         [result (thunk)]
-         [elapsed (- (clock/monotonic) start)]]
+  (let* [start (clock/monotonic)
+         result (thunk)
+         elapsed (- (clock/monotonic) start)]
     (store-in-table table "latest" elapsed)
     result))
 
@@ -33,9 +34,9 @@
     (var checks 0)
     (while (< checks 200)
       (ev/sleep 0.001)
-      (let [[entry (get table "latest")]]
+      (let [entry (get table "latest")]
         (when entry
-          (let [[[ok? err] (protect (get entry :data))]]
+          (let [[ok? err] (protect (get entry :data))]
             (unless ok?
               (push errors err)
               (break)))))

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Advanced Runtime Features and Pattern Matching Tests
 ##
 ## Migrated from tests/integration/advanced.rs
@@ -11,8 +12,8 @@
 
 # import-file tests
 (assert (fn () (import-file "tests/modules/test.lisp")) "import-file with valid file succeeds")
-(let (([ok? _] (protect ((fn () (import-file "./lib/nonexistent.lisp")))))) (assert (not ok?) "import-file with non-existent relative path fails"))
-(let (([ok? _] (protect ((fn () (import-file "/absolute/nonexistent.lisp")))))) (assert (not ok?) "import-file with non-existent absolute path fails"))
+(let [[ok? _] (protect ((fn () (import-file "./lib/nonexistent.lisp"))))] (assert (not ok?) "import-file with non-existent relative path fails"))
+(let [[ok? _] (protect ((fn () (import-file "/absolute/nonexistent.lisp"))))] (assert (not ok?) "import-file with non-existent absolute path fails"))
 
 # spawn and thread-id tests
 (assert (int? (current-thread-id)) "current-thread-id returns an integer")
@@ -28,7 +29,7 @@
 (assert (= (trace "computation" (+ 5 3)) 8) "trace works with expressions")
 
 # memory-usage test
-(assert (fn () (let ((result (memory-usage)))
+(assert (fn () (let [result (memory-usage)]
                       (or (list? result) (nil? result)))) "memory-usage returns a list or nil")
 
 # concurrency with arithmetic
@@ -71,52 +72,52 @@
 # ============================================================================
 
 # import-file wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(import-file))))))) (assert (not ok?) "import-file with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(import-file "a" "b"))))))) (assert (not ok?) "import-file with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(import-file)))))] (assert (not ok?) "import-file with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(import-file "a" "b")))))] (assert (not ok?) "import-file with two arguments fails"))
 
 # import-file wrong argument type
-(let (([ok? _] (protect ((fn () (import-file 42)))))) (assert (not ok?) "import-file with int argument fails"))
-(let (([ok? _] (protect ((fn () (import-file nil)))))) (assert (not ok?) "import-file with nil argument fails"))
+(let [[ok? _] (protect ((fn () (import-file 42))))] (assert (not ok?) "import-file with int argument fails"))
+(let [[ok? _] (protect ((fn () (import-file nil))))] (assert (not ok?) "import-file with nil argument fails"))
 
 # spawn wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(spawn))))))) (assert (not ok?) "spawn with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(spawn + *))))))) (assert (not ok?) "spawn with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(spawn)))))] (assert (not ok?) "spawn with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(spawn + *)))))] (assert (not ok?) "spawn with two arguments fails"))
 
 # spawn wrong argument type
-(let (([ok? _] (protect ((fn () (spawn 42)))))) (assert (not ok?) "spawn with int argument fails"))
-(let (([ok? _] (protect ((fn () (spawn "not a function")))))) (assert (not ok?) "spawn with string argument fails"))
+(let [[ok? _] (protect ((fn () (spawn 42))))] (assert (not ok?) "spawn with int argument fails"))
+(let [[ok? _] (protect ((fn () (spawn "not a function"))))] (assert (not ok?) "spawn with string argument fails"))
 
 # join wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(join))))))) (assert (not ok?) "join with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(join "a" "b"))))))) (assert (not ok?) "join with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(join)))))] (assert (not ok?) "join with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(join "a" "b")))))] (assert (not ok?) "join with two arguments fails"))
 
 # sleep wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(time/sleep))))))) (assert (not ok?) "time/sleep with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(time/sleep 1 2))))))) (assert (not ok?) "time/sleep with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(time/sleep)))))] (assert (not ok?) "time/sleep with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(time/sleep 1 2)))))] (assert (not ok?) "time/sleep with two arguments fails"))
 
 # sleep wrong argument type
-(let (([ok? _] (protect ((fn () (time/sleep "not a number")))))) (assert (not ok?) "time/sleep with string argument fails"))
-(let (([ok? _] (protect ((fn () (time/sleep nil)))))) (assert (not ok?) "time/sleep with nil argument fails"))
+(let [[ok? _] (protect ((fn () (time/sleep "not a number"))))] (assert (not ok?) "time/sleep with string argument fails"))
+(let [[ok? _] (protect ((fn () (time/sleep nil))))] (assert (not ok?) "time/sleep with nil argument fails"))
 
 # sleep negative duration
-(let (([ok? _] (protect ((fn () (time/sleep -1)))))) (assert (not ok?) "time/sleep with negative int fails"))
-(let (([ok? _] (protect ((fn () (time/sleep -0.5)))))) (assert (not ok?) "time/sleep with negative float fails"))
+(let [[ok? _] (protect ((fn () (time/sleep -1))))] (assert (not ok?) "time/sleep with negative int fails"))
+(let [[ok? _] (protect ((fn () (time/sleep -0.5))))] (assert (not ok?) "time/sleep with negative float fails"))
 
 # current-thread-id no arguments
 (assert (fn () (current-thread-id)) "current-thread-id with no arguments succeeds")
 
 # debug-print wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(debug-print))))))) (assert (not ok?) "debug-print with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(debug-print 1 2))))))) (assert (not ok?) "debug-print with two arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(debug-print)))))] (assert (not ok?) "debug-print with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(debug-print 1 2)))))] (assert (not ok?) "debug-print with two arguments fails"))
 
 # trace wrong argument count
-(let (([ok? _] (protect ((fn () (eval '(trace))))))) (assert (not ok?) "trace with no arguments fails"))
-(let (([ok? _] (protect ((fn () (eval '(trace "label"))))))) (assert (not ok?) "trace with one argument fails"))
-(let (([ok? _] (protect ((fn () (eval '(trace "a" "b" "c"))))))) (assert (not ok?) "trace with three arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(trace)))))] (assert (not ok?) "trace with no arguments fails"))
+(let [[ok? _] (protect ((fn () (eval '(trace "label")))))] (assert (not ok?) "trace with one argument fails"))
+(let [[ok? _] (protect ((fn () (eval '(trace "a" "b" "c")))))] (assert (not ok?) "trace with three arguments fails"))
 
 # trace invalid label type
-(let (([ok? _] (protect ((fn () (trace 42 100)))))) (assert (not ok?) "trace with int label fails"))
-(let (([ok? _] (protect ((fn () (trace nil 100)))))) (assert (not ok?) "trace with nil label fails"))
+(let [[ok? _] (protect ((fn () (trace 42 100))))] (assert (not ok?) "trace with int label fails"))
+(let [[ok? _] (protect ((fn () (trace nil 100))))] (assert (not ok?) "trace with nil label fails"))
 
 # memory-usage no arguments
 (assert (fn () (memory-usage)) "memory-usage with no arguments succeeds")
@@ -133,7 +134,7 @@
 (assert (fn () (match "test" (_ true))) "wildcard matches string")
 
 # match returns result expression
-(assert (fn () (let ((v (match 5 (5 42) (10 0) (_ nil))))
+(assert (fn () (let [v (match 5 (5 42) (10 0) (_ nil))]
                       (and (int? v) (> v 0)))) "match returns positive number")
 
 # match clause ordering
@@ -172,16 +173,16 @@
 # ============================================================================
 
 # error in trace argument
-(let (([ok? _] (protect ((fn () (eval '(trace "bad" (undefined-var)))))))) (assert (not ok?) "trace with undefined variable fails"))
+(let [[ok? _] (protect ((fn () (eval '(trace "bad" (undefined-var))))))] (assert (not ok?) "trace with undefined variable fails"))
 
 # debug and trace chain
 (assert (fn () (trace "a" (debug-print (+ 1 2)))) "debug-print and trace can be chained")
 
 # sleep in arithmetic context
-(let (([ok? _] (protect ((fn () (+ 1 (time/sleep 0))))))) (assert (not ok?) "sleep result cannot be used in arithmetic"))
+(let [[ok? _] (protect ((fn () (+ 1 (time/sleep 0)))))] (assert (not ok?) "sleep result cannot be used in arithmetic"))
 
 # import-file returns last value
-(assert (fn () (let ((result (import-file "tests/modules/test.lisp")))
+(assert (fn () (let [result (import-file "tests/modules/test.lisp")]
                       (list? result))) "import-file returns list")
 
 # import-file with variable definitions
@@ -192,8 +193,8 @@
 (assert (fn () (import-file "tests/modules/test.lisp")) "second import-file succeeds")
 
 # import same file twice idempotent
-(assert (fn () (let ((r1 (import-file "tests/modules/test.lisp"))
-                          (r2 (import-file "tests/modules/test.lisp")))
+(assert (fn () (let [r1 (import-file "tests/modules/test.lisp")
+                          r2 (import-file "tests/modules/test.lisp")]
                       (and (list? r1) (= r2 true)))) "import-file idempotent: first returns list, second returns true")
 
 # import-file with relative paths
@@ -276,7 +277,7 @@
 # ============================================================================
 
 # match non-exhaustive is error
-(let (([ok? _] (protect ((fn () (eval '(match 42 (1 "one") (2 "two")))))))) (assert (not ok?) "non-exhaustive match is error"))
+(let [[ok? _] (protect ((fn () (eval '(match 42 (1 "one") (2 "two"))))))] (assert (not ok?) "non-exhaustive match is error"))
 
 # ============================================================================
 # Variadic macro tests
@@ -292,7 +293,7 @@
 (assert (= (begin (defmacro my-list (& items) `(list ,;items)) (my-list)) (list)) "variadic macro with empty rest")
 
 # variadic macro arity error
-(let (([ok? _] (protect ((fn () (eval '(begin (defmacro foo (a b & rest) `(list ,a ,b ,;rest)) (foo 1)))))))) (assert (not ok?) "variadic macro arity error"))
+(let [[ok? _] (protect ((fn () (eval '(begin (defmacro foo (a b & rest) `(list ,a ,b ,;rest)) (foo 1))))))] (assert (not ok?) "variadic macro arity error"))
 
 # variadic macro when multi body
 (assert (= (begin (defmacro my-when (test & body) `(if ,test (begin ,;body) nil)) (my-when true 1 2 3)) 3) "variadic macro with when and multi body")
@@ -333,7 +334,7 @@
 (assert (= (match 99 ((or (x . _) x) x) (_ 0)) 99) "or pattern with binding second alternative")
 
 # or pattern different bindings error
-(let (([ok? _] (protect ((fn () (eval '(match 1 ((or (x . y) (x . _)) :ok) (_ :no)))))))) (assert (not ok?) "or pattern different bindings error"))
+(let [[ok? _] (protect ((fn () (eval '(match 1 ((or (x . y) (x . _)) :ok) (_ :no))))))] (assert (not ok?) "or pattern different bindings error"))
 
 # or pattern with guard
 (assert (= (match 2 ((or 1 2 3) when true :yes) (_ :no)) :yes) "or pattern with guard")
@@ -380,7 +381,7 @@
 (assert (= (match 5 (x when false :a) (_ :fallback)) :fallback) "guard fallthrough to wildcard")
 
 # guard complex body
-(assert (= (match 10 (x when (> x 5) (let ((y (* x 2))) y)) (x x)) 20) "guard complex body")
+(assert (= (match 10 (x when (> x 5) (let [y (* x 2)] y)) (x x)) 20) "guard complex body")
 
 # guard no binding leak
 (assert (= (match 5 (x when false x) (y (+ y 1))) 6) "guard no binding leak")
@@ -389,7 +390,7 @@
 (assert (= (match 5 (x when (> x 10) :big) (x when (> x 3) :medium) (x :small)) :medium) "guard middle arm matches")
 
 # or pattern guard outer var
-(assert (= (let ((threshold 3)) (match 2 ((or 1 2 3) when (< threshold 5) :yes) (_ :no))) :yes) "or pattern guard outer var")
+(assert (= (let [threshold 3] (match 2 ((or 1 2 3) when (< threshold 5) :yes) (_ :no))) :yes) "or pattern guard outer var")
 
 # or pattern binding guard
 (assert (= (match (cons 6 :x) ((or (a . _) (_ . a)) when (> a 5) :big) (_ :small)) :big) "or pattern binding guard")
@@ -408,7 +409,7 @@
 (assert (= (match 42 (1 :one) (x x)) 42) "exhaustive match with variable")
 
 # non-exhaustive match error
-(let (([ok? _] (protect ((fn () (eval '(match 42 (1 :one) (2 :two)))))))) (assert (not ok?) "non-exhaustive match error"))
+(let [[ok? _] (protect ((fn () (eval '(match 42 (1 :one) (2 :two))))))] (assert (not ok?) "non-exhaustive match error"))
 
 # exhaustive match booleans
 (assert (= (match true (true :t) (false :f)) :t) "exhaustive match booleans")
@@ -417,7 +418,7 @@
 (assert (= (match true ((or true false) :both)) :both) "exhaustive or pattern booleans")
 
 # non-exhaustive guard on last arm
-(let (([ok? _] (protect ((fn () (eval '(match 42 (x when (> x 0) :pos)))))))) (assert (not ok?) "non-exhaustive guard on last arm"))
+(let [[ok? _] (protect ((fn () (eval '(match 42 (x when (> x 0) :pos))))))] (assert (not ok?) "non-exhaustive guard on last arm"))
 
 # ============================================================================
 # Decision tree specific tests

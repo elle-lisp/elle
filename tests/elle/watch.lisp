@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Filesystem watch tests — event-driven via inotify/kqueue
 
 (def dir "/tmp/elle-watch-test")

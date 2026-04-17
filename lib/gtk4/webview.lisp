@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/gtk4/webview.lisp — WebKit6 WebView integration
 ##
 ## Creates webviews, sets up JS→Elle IPC, provides eval/send/load.
@@ -27,17 +28,17 @@
 
 (defn make-webview (win-handle props)
   "Create a WebKit WebView with JS→Elle IPC via user content manager."
-  (let* [[ptr (b:webkit-web-view-new)]
-         [id  props:id]
-         [ucm (b:webkit-web-view-get-user-content-manager ptr)]]
+  (let* [ptr (b:webkit-web-view-new)
+         id  props:id
+         ucm (b:webkit-web-view-get-user-content-manager ptr)]
     (b:webkit-ucm-register-script-message-handler ucm "elle" nil)
-    (let [[cb (ffi/callback sig-void-ptr-ptr-ptr
+    (let [cb (ffi/callback sig-void-ptr-ptr-ptr
                 (fn (manager js-value data)
-                  (let [[cstr (b:jsc-value-to-string js-value)]]
+                  (let [cstr (b:jsc-value-to-string js-value)]
                     (unless (w:null? cstr)
                       (w:emit win-handle
                         {:type :webview :id id
-                         :value (ffi/string cstr)})))))]]
+                         :value (ffi/string cstr)})))))]
       (w:connect win-handle ucm "script-message-received::elle"
                  sig-void-ptr-ptr-ptr cb))
     (when props:height (b:gtk-widget-set-size-request ptr -1 props:height))
@@ -54,7 +55,7 @@
 
 (defn webview-eval (win-handle id js)
   "Evaluate JavaScript in a webview. Fire-and-forget."
-  (when-let [[{:ptr ptr} (win-handle:widgets id)]]
+  (when-let [{:ptr ptr} (win-handle:widgets id)]
     (b:webkit-web-view-evaluate-javascript ptr js -1 nil nil nil nil)))
 
 (defn webview-send (win-handle id msg)
@@ -65,12 +66,12 @@
 
 (defn webview-load-html (win-handle id html)
   "Load HTML string into webview."
-  (when-let [[{:ptr ptr} (win-handle:widgets id)]]
+  (when-let [{:ptr ptr} (win-handle:widgets id)]
     (b:webkit-web-view-load-html ptr html nil)))
 
 (defn webview-load-url (win-handle id url)
   "Navigate webview to URL."
-  (when-let [[{:ptr ptr} (win-handle:widgets id)]]
+  (when-let [{:ptr ptr} (win-handle:widgets id)]
     (b:webkit-web-view-load-uri ptr url)))
 
 # ── Export ────────────────────────────────────────────────────────

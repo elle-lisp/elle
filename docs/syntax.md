@@ -77,10 +77,10 @@ Quasiquote (`` ` ``) builds templates. `,expr` unquotes (evaluates one
 subexpression). `,;expr` unquote-splices (evaluates and spreads).
 
 ```lisp
-(let ([x 10])
+(let [x 10]
   `(a ,x b))        # => (a 10 b)
 
-(let ([items '(2 3 4)])
+(let [items '(2 3 4)]
   `(1 ,;items 5))   # => (1 2 3 4 5)
 ```
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 6)
+(elle/epoch 7)
 
 # Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
 #
@@ -20,7 +20,7 @@
 (def [gpu-ok? gpu] (protect ((import "std/gpu"))))
 (def gpu-ctx
   (when gpu-ok?
-    (let [[[ok? ctx] (protect (gpu:init))]]
+    (let [[ok? ctx] (protect (gpu:init))]
       (when ok? (println "GPU: enabled") ctx))))
 
 (when (not gpu-ctx) (println "GPU: not available, using CPU"))
@@ -74,12 +74,12 @@
 
 (defn viewport []
   "Compute viewport parameters from current view state."
-  (let* [[aspect (/ (float HEIGHT) (float WIDTH))]
-         [scale  (view :scale)]
-         [x-min  (- (view :cx) (/ scale 2.0))]
-         [y-min  (- (view :cy) (/ (* scale aspect) 2.0))]
-         [dx     (/ scale (float WIDTH))]
-         [dy     (/ (* scale aspect) (float HEIGHT))]]
+  (let* [aspect (/ (float HEIGHT) (float WIDTH))
+         scale  (view :scale)
+         x-min  (- (view :cx) (/ scale 2.0))
+         y-min  (- (view :cy) (/ (* scale aspect) 2.0))
+         dx     (/ scale (float WIDTH))
+         dy     (/ (* scale aspect) (float HEIGHT))]
     {:x-min x-min :y-min y-min :dx dx :dy dy :aspect aspect}))
 
 # ── Pixel buffer ─────────────────────────────────────────────────
@@ -92,11 +92,11 @@
 
 (def palette
   (map (fn [i]
-    (let* [[t   (/ (float i) 256.0)]
-           [omt (- 1.0 t)]
-           [r   (min 255 (integer (* 255.0 9.0 omt t t t)))]
-           [g   (min 255 (integer (* 255.0 15.0 omt omt t t)))]
-           [b   (min 255 (integer (* 255.0 8.5 omt omt omt t)))]]
+    (let* [t   (/ (float i) 256.0)
+           omt (- 1.0 t)
+           r   (min 255 (integer (* 255.0 9.0 omt t t t)))
+           g   (min 255 (integer (* 255.0 15.0 omt omt t t)))
+           b   (min 255 (integer (* 255.0 8.5 omt omt omt t)))]
       (bit/or (bit/shl 0xFF 24) (bit/shl r 16) (bit/shl g 8) b)))
     (range 256)))
 
@@ -108,58 +108,58 @@
 (def gpu-shader
   (when gpu-ctx
     (gpu:compile gpu-ctx 256 2 (fn [s]
-      (let* [[id       (s:global-id)]
+      (let* [id       (s:global-id)
              # ── viewport params from buffer 0 ──────────
-             [x-min    (s:load 0 (s:const-u 0))]
-             [y-min    (s:load 0 (s:const-u 1))]
-             [dx       (s:load 0 (s:const-u 2))]
-             [dy       (s:load 0 (s:const-u 3))]
-             [width-f  (s:load 0 (s:const-u 4))]
-             [limit    (s:f2u (s:load 0 (s:const-u 5)))]
+             x-min    (s:load 0 (s:const-u 0))
+             y-min    (s:load 0 (s:const-u 1))
+             dx       (s:load 0 (s:const-u 2))
+             dy       (s:load 0 (s:const-u 3))
+             width-f  (s:load 0 (s:const-u 4))
+             limit    (s:f2u (s:load 0 (s:const-u 5)))
              # ── pixel coords from global-id ────────────
-             [id-f     (s:u2f id)]
-             [py-u     (s:f2u (s:fdiv id-f width-f))]
-             [px-u     (s:isub id (s:imul py-u (s:f2u width-f)))]
-             [cx       (s:fadd x-min (s:fmul (s:u2f px-u) dx))]
-             [cy       (s:fadd y-min (s:fmul (s:u2f py-u) dy))]
+             id-f     (s:u2f id)
+             py-u     (s:f2u (s:fdiv id-f width-f))
+             px-u     (s:isub id (s:imul py-u (s:f2u width-f)))
+             cx       (s:fadd x-min (s:fmul (s:u2f px-u) dx))
+             cy       (s:fadd y-min (s:fmul (s:u2f py-u) dy))
              # ── mandelbrot iteration ───────────────────
-             [zr       (s:var-f)]
-             [zi       (s:var-f)]
-             [iter     (s:var-u)]
-             [four     (s:const-f 4.0)]
-             [zero-f   (s:const-f 0.0)]
-             [zero-u   (s:const-u 0)]
-             [one-u    (s:const-u 1)]
-             [hdr      (s:block)]
-             [body     (s:block)]
-             [cont     (s:block)]
-             [merge    (s:block)]]
+             zr       (s:var-f)
+             zi       (s:var-f)
+             iter     (s:var-u)
+             four     (s:const-f 4.0)
+             zero-f   (s:const-f 0.0)
+             zero-u   (s:const-u 0)
+             one-u    (s:const-u 1)
+             hdr      (s:block)
+             body     (s:block)
+             cont     (s:block)
+             merge    (s:block)]
         (s:store-var zr zero-f)
         (s:store-var zi zero-f)
         (s:store-var iter zero-u)
         (s:branch hdr)
         # loop header
         (s:begin-block hdr)
-        (let* [[r   (s:load-var zr)]
-               [i   (s:load-var zi)]
-               [r2  (s:fmul r r)]
-               [i2  (s:fmul i i)]
-               [mag (s:fadd r2 i2)]
-               [ok  (s:flt mag four)]
-               [n   (s:load-var iter)]
-               [lim (s:slt n limit)]
-               [go  (s:logical-and ok lim)]]
+        (let* [r   (s:load-var zr)
+               i   (s:load-var zi)
+               r2  (s:fmul r r)
+               i2  (s:fmul i i)
+               mag (s:fadd r2 i2)
+               ok  (s:flt mag four)
+               n   (s:load-var iter)
+               lim (s:slt n limit)
+               go  (s:logical-and ok lim)]
           (s:loop-merge merge cont)
           (s:branch-cond go body merge))
         # loop body: z = z² + c
         (s:begin-block body)
-        (let* [[r  (s:load-var zr)]
-               [i  (s:load-var zi)]
-               [ri (s:fmul r i)]
-               [r2 (s:fmul r r)]
-               [i2 (s:fmul i i)]
-               [nr (s:fadd (s:fsub r2 i2) cx)]
-               [ni (s:fadd (s:fadd ri ri) cy)]]
+        (let* [r  (s:load-var zr)
+               i  (s:load-var zi)
+               ri (s:fmul r i)
+               r2 (s:fmul r r)
+               i2 (s:fmul i i)
+               nr (s:fadd (s:fsub r2 i2) cx)
+               ni (s:fadd (s:fadd ri ri) cy)]
           (s:store-var zr nr)
           (s:store-var zi ni)
           (s:store-var iter (s:iadd (s:load-var iter) one-u))
@@ -168,22 +168,22 @@
         (s:branch hdr)
         # color mapping (Bernstein polynomials → ARGB32)
         (s:begin-block merge)
-        (let* [[n-iters  (s:load-var iter)]
-               [inside?  (s:logical-not (s:slt n-iters limit))]
-               [idx      (s:umod (s:imul n-iters (s:const-u 3)) (s:const-u 256))]
-               [t-val    (s:fdiv (s:u2f idx) (s:const-f 256.0))]
-               [omt      (s:fsub (s:const-f 1.0) t-val)]
-               [c255     (s:const-f 255.0)]
-               [t3       (s:fmul t-val (s:fmul t-val t-val))]
-               [ru       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 9.0)  (s:fmul omt t3)))) (s:const-u 255))]
-               [t2       (s:fmul t-val t-val)]
-               [omt2     (s:fmul omt omt)]
-               [gu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 15.0) (s:fmul omt2 t2)))) (s:const-u 255))]
-               [omt3     (s:fmul omt omt2)]
-               [bu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 8.5)  (s:fmul omt3 t-val)))) (s:const-u 255))]
-               [alpha    (s:const-u 0xFF000000)]
-               [color    (s:ior alpha (s:ior (s:ishl ru (s:const-u 16)) (s:ior (s:ishl gu (s:const-u 8)) bu)))]
-               [pixel    (s:select-u inside? alpha color)]]
+        (let* [n-iters  (s:load-var iter)
+               inside?  (s:logical-not (s:slt n-iters limit))
+               idx      (s:umod (s:imul n-iters (s:const-u 3)) (s:const-u 256))
+               t-val    (s:fdiv (s:u2f idx) (s:const-f 256.0))
+               omt      (s:fsub (s:const-f 1.0) t-val)
+               c255     (s:const-f 255.0)
+               t3       (s:fmul t-val (s:fmul t-val t-val))
+               ru       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 9.0)  (s:fmul omt t3)))) (s:const-u 255))
+               t2       (s:fmul t-val t-val)
+               omt2     (s:fmul omt omt)
+               gu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 15.0) (s:fmul omt2 t2)))) (s:const-u 255))
+               omt3     (s:fmul omt omt2)
+               bu       (s:umin (s:f2u (s:fmul c255 (s:fmul (s:const-f 8.5)  (s:fmul omt3 t-val)))) (s:const-u 255))
+               alpha    (s:const-u 0xFF000000)
+               color    (s:ior alpha (s:ior (s:ishl ru (s:const-u 16)) (s:ior (s:ishl gu (s:const-u 8)) bu)))
+               pixel    (s:select-u inside? alpha color)]
           (s:store 1 id (s:bitcast-u2f pixel))))))))
 
 (defn compute-mandelbrot-gpu []
@@ -219,15 +219,15 @@
             (assign iter (inc iter)))
           (if (= iter max-iter)
             BLACK
-            (let* [[log-zn (/ (math/log (+ zr2 zi2)) 2.0)]
-                   [smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))]
-                   [idx    (mod (integer (* smooth 3.0)) 256)]]
+            (let* [log-zn (/ (math/log (+ zr2 zi2)) 2.0)
+                   smooth (- (+ (float iter) 1.0) (/ (math/log log-zn) LN2))
+                   idx    (mod (integer (* smooth 3.0)) 256)]
               (palette idx))))))
     (put buf px color)
     (assign px (inc px))))
 
 (defn recv-blocking [rx]
-  (let [[sel (chan/select @[rx])]] (sel 1)))
+  (let [sel (chan/select @[rx])] (sel 1)))
 
 (var work-txs @[])
 (var done-rx  nil)
@@ -299,14 +299,14 @@
   (cairo-surf-free surf))
 
 (defn on-click [gesture _n x y _data]
-  (let* [[btn    (gtk-get-btn gesture)]
-         [aspect (/ (float HEIGHT) (float WIDTH))]
-         [scale  (view :scale)]
-         [nx     (/ x (float actual-w))]
-         [ny     (/ y (float actual-h))]
-         [cx     (+ (- (view :cx) (/ scale 2.0)) (* nx scale))]
-         [cy     (+ (- (view :cy) (/ (* scale aspect) 2.0)) (* ny (* scale aspect)))]
-         [factor (cond ((= btn 1) 0.5) ((= btn 3) 2.0) (true nil))]]
+  (let* [btn    (gtk-get-btn gesture)
+         aspect (/ (float HEIGHT) (float WIDTH))
+         scale  (view :scale)
+         nx     (/ x (float actual-w))
+         ny     (/ y (float actual-h))
+         cx     (+ (- (view :cx) (/ scale 2.0)) (* nx scale))
+         cy     (+ (- (view :cy) (/ (* scale aspect) 2.0)) (* ny (* scale aspect)))
+         factor (cond ((= btn 1) 0.5) ((= btn 3) 2.0) (true nil))]
     (when factor
       (put view :cx cx)
       (put view :cy cy)
@@ -319,7 +319,7 @@
   1)
 
 (defn on-key [_ctrl keyval _keycode _state _data]
-  (let [[step (/ (view :scale) 4.0)]]
+  (let [step (/ (view :scale) 4.0)]
     (cond
       ((or (= keyval 0xff1b) (= keyval 0x71))           # ESC / Q
         (when app-window (b:gtk-window-destroy app-window))
@@ -356,20 +356,20 @@
     (ffi/callback (ffi/signature :void [:ptr :ptr :int :int :ptr]) on-draw)
     nil nil)
 
-  (let [[click (gtk-click-new)]]
+  (let [click (gtk-click-new)]
     (gtk-gesture-btn click 0)
     (b:g-signal-connect-data click "pressed"
       (ffi/callback (ffi/signature :void [:ptr :int :double :double :ptr]) on-click)
       nil nil 0)
     (gtk-add-ctrl da click))
 
-  (let [[scroll (gtk-scroll-new SCROLL_VERTICAL)]]
+  (let [scroll (gtk-scroll-new SCROLL_VERTICAL)]
     (b:g-signal-connect-data scroll "scroll"
       (ffi/callback (ffi/signature :int [:ptr :double :double :ptr]) on-scroll)
       nil nil 0)
     (gtk-add-ctrl da scroll))
 
-  (let [[keys (gtk-key-new)]]
+  (let [keys (gtk-key-new)]
     (b:g-signal-connect-data keys "key-pressed"
       (ffi/callback (ffi/signature :int [:ptr :u32 :u32 :u32 :ptr]) on-key)
       nil nil 0)

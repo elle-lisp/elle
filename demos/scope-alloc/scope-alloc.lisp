@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 
 # Scope Allocation Workload — measuring escape analysis tiers
 #
@@ -30,7 +30,7 @@
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
-      (let ([data @[1 2 3 4 5]])
+      (let [data @[1 2 3 4 5]]
         (length data))
       (assign i (+ i 1)))
     (- (arena/count) before))))
@@ -41,7 +41,7 @@
     (var i 0)
     (var last nil)
     (while (< i 10000)
-      (let ([data @[1 2 3 4 5]])
+      (let [data @[1 2 3 4 5]]
         (assign last data))
       (assign i (+ i 1)))
     (- (arena/count) before))))
@@ -64,7 +64,7 @@
     (var i 0)
     (var outer-val 0)
     (while (< i 10000)
-      (let ([temp @[1 2 3]])
+      (let [temp @[1 2 3]]
         (assign outer-val (+ outer-val (length temp)))
         outer-val)
       (assign i (+ i 1)))
@@ -87,8 +87,8 @@
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
-      (let ([xs @[10 20 30]])
-        (let ([n (length xs)])
+      (let [xs @[10 20 30]]
+        (let [n (length xs)]
           (+ n 1)))
       (assign i (+ i 1)))
     (- (arena/count) before))))
@@ -108,7 +108,7 @@
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
-      (let ([tag (mod i 3)])
+      (let [tag (mod i 3)]
         (match tag
           (0 :zero)
           (1 :one)
@@ -132,7 +132,7 @@
   (run (fn []
     (var counter 0)
     (while (< counter 10000)
-      (let ([tmp @[1 2 3]])
+      (let [tmp @[1 2 3]]
         (length tmp))
       (assign counter (+ counter 1)))
     (arena/stats))))
@@ -156,17 +156,17 @@
     (var i 0)
     (while (< i 5000)
       # Tier 1: whitelist (length)
-      (let ([xs @[1 2 3 4 5]])
+      (let [xs @[1 2 3 4 5]]
         (assign total (+ total (length xs))))
       # Tier 3: return outer binding
-      (let ([tmp @[10 20]])
+      (let [tmp @[10 20]]
         total)
       # Tier 4: nested let → arithmetic
-      (let ([a @[1 2]])
-        (let ([n (length a)])
+      (let [a @[1 2]]
+        (let [n (length a)]
           (+ n i)))
       # Tier 5: match → keyword
-      (let ([tag (mod i 2)])
+      (let [tag (mod i 2)]
         (match tag (0 :even) (_ :odd)))
       (assign i (+ i 1)))
     {:net (- (arena/count) before)

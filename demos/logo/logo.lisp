@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 # Logo generator — the elle-lisp glyph rendered as colored fibers
 #
@@ -41,7 +42,7 @@
 (defn bezier-eval [seg t]
   "Evaluate cubic bezier at parameter t ∈ [0,1].
    seg is {:p0 [x y] :p1 [x y] :p2 [x y] :p3 [x y]}."
-  (let* ([u  (- 1.0 t)]
+  (let* [[u  (- 1.0 t)]
          [u2 (* u u)]
          [u3 (* u2 u)]
          [t2 (* t t)]
@@ -49,7 +50,7 @@
          [p0 seg:p0]
          [p1 seg:p1]
          [p2 seg:p2]
-         [p3 seg:p3])
+         [p3 seg:p3]]
     (v+ (v+ (v* u3 p0)
             (v* (* 3.0 (* u2 t)) p1))
         (v+ (v* (* 3.0 (* u t2)) p2)
@@ -57,7 +58,7 @@
 
 (defn bezier-tangent [seg t]
   "Tangent vector of cubic bezier at parameter t."
-  (let* ([u  (- 1.0 t)]
+  (let* [[u  (- 1.0 t)]
          [u2 (* u u)]
          [t2 (* t t)]
          [p0 seg:p0]
@@ -67,15 +68,15 @@
          # derivative: 3(1-t)^2(p1-p0) + 6(1-t)t(p2-p1) + 3t^2(p3-p2)
          [a (v* (* 3.0 u2) (v- p1 p0))]
          [b (v* (* 6.0 (* u t)) (v- p2 p1))]
-         [c (v* (* 3.0 t2) (v- p3 p2))])
+         [c (v* (* 3.0 t2) (v- p3 p2))]]
     (v+ a (v+ b c))))
 
 (defn normal-at [seg t]
   "Unit normal (perpendicular to tangent, pointing left) at parameter t."
-  (let* ([tang (bezier-tangent seg t)]
+  (let* [[tang (bezier-tangent seg t)]
          [dx (tang 0)]
          [dy (tang 1)]
-         [len (vlength tang)])
+         [len (vlength tang)]]
     (if (< len 0.001)
       [0.0 0.0]
       [(/ (- 0.0 dy) len)
@@ -83,8 +84,8 @@
 
 (defn offset-point [seg t dist]
   "Point offset from bezier centerline by dist along the normal."
-  (let* ([pt (bezier-eval seg t)]
-         [n  (normal-at seg t)])
+  (let* [[pt (bezier-eval seg t)]
+         [n  (normal-at seg t)]]
     (v+ pt (v* dist n))))
 
 
@@ -117,11 +118,11 @@
   (each seg in segments
     (var i 0)
     (while (<= i nsteps)
-      (let* ([t (/ (float i) (float nsteps))]
+      (let* [[t (/ (float i) (float nsteps))]
              # global t across all segments for taper
              [global-t (/ (float (+ (* seg-idx nsteps) i)) (float total-steps))]
              [tapered-dist (* dist (taper global-t))]
-             [pt (offset-point seg t tapered-dist)])
+             [pt (offset-point seg t tapered-dist)]]
         (if first-point
           (begin
             (assign path-str (-> "M " (append (coord-str pt))))
@@ -150,8 +151,8 @@
 
 (defn line->bezier [p0 p3]
   "Promote a line segment to a degenerate cubic bezier."
-  (let* ([p1 (v+ p0 (v* (/ 1.0 3.0) (v- p3 p0)))]
-         [p2 (v+ p0 (v* (/ 2.0 3.0) (v- p3 p0)))])
+  (let* [[p1 (v+ p0 (v* (/ 1.0 3.0) (v- p3 p0)))]
+         [p2 (v+ p0 (v* (/ 2.0 3.0) (v- p3 p0)))]]
     {:p0 p0 :p1 p1 :p2 p2 :p3 p3}))
 
 # Junction point — where the diagonal meets the base
@@ -226,13 +227,13 @@
   (var paths @[])
   (var i 0)
   (while (< i num-fibers)
-    (let* ([frac (/ (float i) (float (- num-fibers 1)))]
+    (let* [[frac (/ (float i) (float (- num-fibers 1)))]
            # offset ranges from -spread/2 to +spread/2
            [dist (- (* frac fiber-spread) (/ fiber-spread 2.0))]
            [color (fiber-colors i)]
            [opacity (fiber-opacities i)]
            [path-data (fiber-path-data segments dist samples-per-segment)]
-           [svg (svg-path path-data color opacity fiber-width)])
+           [svg (svg-path path-data color opacity fiber-width)]]
       (push paths svg))
     (assign i (+ i 1)))
   paths)

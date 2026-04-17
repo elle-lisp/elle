@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Determinism tests
 #
 # Migrated from tests/property/determinism.rs
@@ -17,7 +18,7 @@
 # ============================================================================
 
 # test_let_determinism
-(assert (= (let ((x 42) (y -17)) (+ x y)) 25) "let: (let ((x 42) (y -17)) (+ x y)) == 25")
+(assert (= (let [x 42 y -17] (+ x y)) 25) "let: (let ((x 42) (y -17)) (+ x y)) == 25")
 
 # ============================================================================
 # Lambda
@@ -38,7 +39,7 @@
 # ============================================================================
 
 # test_closure_determinism
-(assert (= (let ((captured 10)) ((fn (x) (+ x captured)) 32)) 42) "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
+(assert (= (let [captured 10] ((fn (x) (+ x captured)) 32)) 42) "closure: (let ((captured 10)) ((fn (x) (+ x captured)) 32)) == 42")
 
 # ============================================================================
 # Conditional

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## protobuf plugin integration tests
 
@@ -53,22 +54,22 @@ message Team {
 (assert (> (length msgs) 0) "protobuf/messages returns non-empty array")
 
 ## Check that Person and Team are present
-(def has-person (let ((found false))
-  (letrec ((check (fn (i)
+(def has-person (let [found false]
+  (letrec [check (fn (i)
     (if (>= i (length msgs))
       found
       (if (= (get msgs i) "Person")
         true
-        (check (+ i 1)))))))
+        (check (+ i 1)))))]
   (check 0))))
 
-(def has-team (let ((found false))
-  (letrec ((check (fn (i)
+(def has-team (let [found false]
+  (letrec [check (fn (i)
     (if (>= i (length msgs))
       found
       (if (= (get msgs i) "Team")
         true
-        (check (+ i 1)))))))
+        (check (+ i 1)))))]
   (check 0))))
 
 (assert has-person "protobuf/messages includes Person")
@@ -84,12 +85,12 @@ message Team {
 
 ## Find a field by name in the fields array
 (def find-field (fn (fields name)
-  (letrec ((search (fn (i)
+  (letrec [search (fn (i)
     (if (>= i (length fields))
       nil
       (if (= (get (get fields i) :name) name)
         (get fields i)
-        (search (+ i 1)))))))
+        (search (+ i 1)))))]
   (search 0))))
 
 (def f-name   (find-field person-fields "name"))
@@ -124,12 +125,12 @@ message Team {
 
 ## Find the Status enum
 (def find-enum (fn (enums name)
-  (letrec ((search (fn (i)
+  (letrec [search (fn (i)
     (if (>= i (length enums))
       nil
       (if (= (get (get enums i) :name) name)
         (get enums i)
-        (search (+ i 1)))))))
+        (search (+ i 1)))))]
   (search 0))))
 
 (def status-enum (find-enum enums "Status"))
@@ -142,12 +143,12 @@ message Team {
 
 ## Find enum value by name
 (def find-enum-val (fn (values name)
-  (letrec ((search (fn (i)
+  (letrec [search (fn (i)
     (if (>= i (length values))
       nil
       (if (= (get (get values i) :name) name)
         (get values i)
-        (search (+ i 1)))))))
+        (search (+ i 1)))))]
   (search 0))))
 
 (def v-unknown (find-enum-val status-values "UNKNOWN"))
@@ -241,18 +242,18 @@ message Team {
 
 ## ── Error: unknown message name ─────────────────────────────────────
 
-(let (([ok? err] (protect ((fn () (encode-fn pool "NoSuchMessage" {:x 1})))))) (assert (not ok?) "encode with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "encode with unknown message name gives protobuf-error"))
+(let [[ok? err] (protect ((fn () (encode-fn pool "NoSuchMessage" {:x 1}))))] (assert (not ok?) "encode with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "encode with unknown message name gives protobuf-error"))
 
-(let (([ok? err] (protect ((fn () (decode-fn pool "NoSuchMessage" (bytes 0))))))) (assert (not ok?) "decode with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "decode with unknown message name gives protobuf-error"))
+(let [[ok? err] (protect ((fn () (decode-fn pool "NoSuchMessage" (bytes 0)))))] (assert (not ok?) "decode with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "decode with unknown message name gives protobuf-error"))
 
-(let (([ok? err] (protect ((fn () (fields-fn pool "NoSuchMessage")))))) (assert (not ok?) "fields with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "fields with unknown message name gives protobuf-error"))
+(let [[ok? err] (protect ((fn () (fields-fn pool "NoSuchMessage"))))] (assert (not ok?) "fields with unknown message name gives protobuf-error") (assert (= (get err :error) :protobuf-error) "fields with unknown message name gives protobuf-error"))
 
 ## ── Error: wrong types ───────────────────────────────────────────────
 
-(let (([ok? err] (protect ((fn () (schema-fn 42)))))) (assert (not ok?) "protobuf/schema non-string gives type-error") (assert (= (get err :error) :type-error) "protobuf/schema non-string gives type-error"))
+(let [[ok? err] (protect ((fn () (schema-fn 42))))] (assert (not ok?) "protobuf/schema non-string gives type-error") (assert (= (get err :error) :type-error) "protobuf/schema non-string gives type-error"))
 
-(let (([ok? err] (protect ((fn () (encode-fn pool "Person" "not a struct")))))) (assert (not ok?) "encode non-struct gives type-error") (assert (= (get err :error) :type-error) "encode non-struct gives type-error"))
+(let [[ok? err] (protect ((fn () (encode-fn pool "Person" "not a struct"))))] (assert (not ok?) "encode non-struct gives type-error") (assert (= (get err :error) :type-error) "encode non-struct gives type-error"))
 
-(let (([ok? err] (protect ((fn () (decode-fn pool "Person" "not bytes")))))) (assert (not ok?) "decode non-bytes gives type-error") (assert (= (get err :error) :type-error) "decode non-bytes gives type-error"))
+(let [[ok? err] (protect ((fn () (decode-fn pool "Person" "not bytes"))))] (assert (not ok?) "decode non-bytes gives type-error") (assert (= (get err :error) :type-error) "decode non-bytes gives type-error"))
 
-(let (([ok? err] (protect ((fn () (messages-fn 42)))))) (assert (not ok?) "messages with non-pool gives type-error") (assert (= (get err :error) :type-error) "messages with non-pool gives type-error"))
+(let [[ok? err] (protect ((fn () (messages-fn 42))))] (assert (not ok?) "messages with non-pool gives type-error") (assert (= (get err :error) :type-error) "messages with non-pool gives type-error"))

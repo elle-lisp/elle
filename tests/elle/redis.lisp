@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
@@ -11,7 +12,7 @@
 (println "RESP self-tests passed.")
 
 # Skip if Redis is not reachable
-(let [[[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]]
+(let [[ok? _] (protect (tcp/connect "127.0.0.1" 6379))]
   (when (not ok?)
     (println "SKIP: Redis not available at 127.0.0.1:6379")
     (exit 0)))
@@ -54,7 +55,7 @@
     (assert (= (redis:strlen "test:str") 11) "strlen")
 
     (redis:mset "test:m1" "a" "test:m2" "b")
-    (let [[vals (redis:mget "test:m1" "test:m2" "test:nonexistent")]]
+    (let [vals (redis:mget "test:m1" "test:m2" "test:nonexistent")]
       (assert (= (get vals 0) "a") "mget 0")
       (assert (= (get vals 1) "b") "mget 1")
       (assert (nil? (get vals 2)) "mget nil"))
@@ -71,7 +72,7 @@
 
     (redis:set "test:exp" "val")
     (assert (= (redis:expire "test:exp" 100) true) "expire")
-    (let [[ttl (redis:ttl "test:exp")]]
+    (let [ttl (redis:ttl "test:exp")]
       (assert (> ttl 0) "ttl positive"))
     (assert (= (redis:persist "test:exp") true) "persist")
     (assert (= (redis:ttl "test:exp") -1) "ttl after persist")
@@ -97,7 +98,7 @@
     (assert (= (redis:hexists "test:hash" "name") true) "hexists true")
     (assert (= (redis:hexists "test:hash" "missing") false) "hexists false")
 
-    (let [[h (redis:hgetall "test:hash")]]
+    (let [h (redis:hgetall "test:hash")]
       (assert (= (get h "name") "Alice") "hgetall name")
       (assert (= (get h "age") "30") "hgetall age"))
 
@@ -106,7 +107,7 @@
     (assert (= (redis:hlen "test:hash") 1) "hlen after hdel")
 
     (redis:hmset "test:hm" "a" "1" "b" "2" "c" "3")
-    (let [[vals (redis:hmget "test:hm" "a" "c" "missing")]]
+    (let [vals (redis:hmget "test:hm" "a" "c" "missing")]
       (assert (= (get vals 0) "1") "hmget 0")
       (assert (= (get vals 1) "3") "hmget 1")
       (assert (nil? (get vals 2)) "hmget nil"))
@@ -123,7 +124,7 @@
     (assert (= (redis:lindex "test:list" 0) "a") "lindex 0")
     (assert (= (redis:lindex "test:list" 2) "c") "lindex 2")
 
-    (let [[range (redis:lrange "test:list" 0 -1)]]
+    (let [range (redis:lrange "test:list" 0 -1)]
       (assert (= (length range) 3) "lrange length")
       (assert (= (get range 0) "a") "lrange 0")
       (assert (= (get range 2) "c") "lrange 2"))
@@ -148,9 +149,9 @@
     (assert (= (redis:scard "test:set1") 2) "scard after srem")
 
     (redis:sadd "test:set2" "b" "c" "d")
-    (let [[u (redis:sunion "test:set1" "test:set2")]]
+    (let [u (redis:sunion "test:set1" "test:set2")]
       (assert (>= (length u) 3) "sunion"))
-    (let [[i (redis:sinter "test:set1" "test:set2")]]
+    (let [i (redis:sinter "test:set1" "test:set2")]
       (assert (>= (length i) 1) "sinter"))
 
     (println "  set commands: ok")
@@ -165,7 +166,7 @@
     (assert (= (redis:zscore "test:zset" "b") "2") "zscore")
     (assert (= (redis:zrank "test:zset" "a") 0) "zrank")
 
-    (let [[range (redis:zrange "test:zset" 0 -1)]]
+    (let [range (redis:zrange "test:zset" 0 -1)]
       (assert (= (length range) 3) "zrange length")
       (assert (= (get range 0) "a") "zrange 0"))
 
@@ -178,10 +179,10 @@
 
     (redis:set "test:p1" "x")
     (redis:set "test:p2" "y")
-    (let [[results (redis:pipeline
+    (let [results (redis:pipeline
                      (list "GET" "test:p1")
                      (list "GET" "test:p2")
-                     (list "PING"))]]
+                     (list "PING"))]
       (assert (= (get results 0) "x") "pipeline get 0")
       (assert (= (get results 1) "y") "pipeline get 1")
       (assert (= (get results 2) "PONG") "pipeline ping"))
@@ -190,7 +191,7 @@
 
     # ── DBSIZE ──────────────────────────────────────────────────────
 
-    (let [[sz (redis:dbsize)]]
+    (let [sz (redis:dbsize)]
       (assert (> sz 0) "dbsize"))
     (println "  dbsize: ok")
 
@@ -211,8 +212,8 @@
     # 50 SET/GET pairs
     (assign i 0)
     (while (< i 50)
-      (let [[key (concat "test:sg:" (string i))]
-            [val (concat "value-" (string i))]]
+      (let [key (concat "test:sg:" (string i))
+            val (concat "value-" (string i))]
         (assert (= (redis:set key val) true)
           (concat "set failed at " (string i)))
         (assert (= (redis:get key) val)

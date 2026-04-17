@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
@@ -17,13 +18,13 @@
 (assert (= x :expr_pos_c2c) "signal in expression position")
 
 # signal declaration with non-keyword argument errors
-(let (([ok? _] (protect ((fn () (eval '(signal heartbeat_c2b))))))) (assert (not ok?) "signal declaration requires keyword"))
+(let [[ok? _] (protect ((fn () (eval '(signal heartbeat_c2b)))))] (assert (not ok?) "signal declaration requires keyword"))
 
 # signal declaration of builtin keyword errors
-(let (([ok? _] (protect ((fn () (eval '(signal :error))))))) (assert (not ok?) "signal declaration of builtin errors"))
+(let [[ok? _] (protect ((fn () (eval '(signal :error)))))] (assert (not ok?) "signal declaration of builtin errors"))
 
 # duplicate signal declaration errors
-(let (([ok? _] (protect ((fn () (eval '(begin (signal :dup_c2d) (signal :dup_c2d)))))))) (assert (not ok?) "duplicate signal declaration errors"))
+(let [[ok? _] (protect ((fn () (eval '(begin (signal :dup_c2d) (signal :dup_c2d))))))] (assert (not ok?) "duplicate signal declaration errors"))
 
 # ============================================================================
 # silence runtime checks — passing cases
@@ -130,7 +131,7 @@
 # squelch runtime: a closure emitting the squelched signal is rejected with :signal-violation
 # Use let to force non-tail position so squelch enforcement fires in call_inner.
 (begin
-  (def [ok-sq? err-sq] (protect (let ((r ((squelch (fn () (yield 1)) :yield)))) r)))
+  (def [ok-sq? err-sq] (protect (let [r ((squelch (fn () (yield 1)) :yield))] r)))
   (assert (not ok-sq?) "squelch runtime: squelched signal is rejected")
   (assert (= (get err-sq :error) :signal-violation) "squelch runtime: rejection is :signal-violation"))
 
@@ -139,7 +140,7 @@
 # so we test with a yielding closure to verify the multi-keyword check fires on :yield.
 (begin
   # A closure that yields — :yield is in the forbidden set — use let for non-tail position
-  (def [ok-sq-multi? err-sq-multi] (protect (let ((r ((squelch (fn () (yield 42)) |:yield :error|)))) r)))
+  (def [ok-sq-multi? err-sq-multi] (protect (let [r ((squelch (fn () (yield 42)) |:yield :error|))] r)))
   (assert (not ok-sq-multi?) "squelch runtime: multi-keyword squelch rejects :yield")
   (assert (= (get err-sq-multi :error) :signal-violation) "squelch runtime: multi-keyword rejection is :signal-violation"))
 
@@ -160,14 +161,14 @@
 (begin
   (defn apply-sq-sil (f g x)
     (silence f)
-    (let ((safe-g (squelch g :yield)))
+    (let [safe-g (squelch g :yield)]
       (begin (f x) (begin (safe-g x)))))
   # f must be truly silent (no SIG_ERROR); use identity instead of (* x 2)
   (assert (= (apply-sq-sil (fn (x) x) (fn (x) (+ x 1)) 5) 6) "squelch and silence on different params: both annotations coexist"))
 
 # squelch catches :yield at runtime — use let for non-tail position.
 (begin
-  (def [ok-sq-wins? err-sq-wins] (protect (let ((r ((squelch (fn () (yield 1)) :yield)))) r)))
+  (def [ok-sq-wins? err-sq-wins] (protect (let [r ((squelch (fn () (yield 1)) :yield))] r)))
   (assert (not ok-sq-wins?) "squelch catches :yield: yielding callback is rejected")
   (assert (= (get err-sq-wins :error) :signal-violation) "squelch catches :yield: rejection is :signal-violation"))
 
@@ -186,13 +187,13 @@
 (assert (closure? (squelch (fn () (yield 1)) :yield)) "squelch returns a closure")
 
 # squelch on non-closure produces type-error
-(let (([ok? err] (protect ((fn () (squelch 42 :yield)))))) (assert (not ok?) "squelch on non-closure produces type-error") (assert (= (get err :error) :type-error) "squelch on non-closure produces type-error"))
+(let [[ok? err] (protect ((fn () (squelch 42 :yield))))] (assert (not ok?) "squelch on non-closure produces type-error") (assert (= (get err :error) :type-error) "squelch on non-closure produces type-error"))
 
 # squelch twice ORs the masks; result is still a closure
 (begin
   (def sq-composed
-    (let ((f (fn () (begin (yield 1)))))
-      (let ((sq1 (squelch f :yield)))
+    (let [f (fn () (begin (yield 1)))]
+      (let [sq1 (squelch f :yield)]
         (squelch sq1 :error))))
   (assert (closure? sq-composed) "squelch composable masks: result is a closure"))
 
@@ -206,7 +207,7 @@
 # squelch catches yield at boundary — use let for non-tail position
 (begin
   (def [ok-catch? err-catch]
-    (protect (let ((r ((squelch (fn () (yield 42)) :yield)))) r)))
+    (protect (let [r ((squelch (fn () (yield 42)) :yield))] r)))
   (assert (not ok-catch?) "squelch catches yield at boundary: call is rejected")
   (assert (= (get err-catch :error) :signal-violation) "squelch catches yield at boundary: rejection is :signal-violation"))
 
@@ -215,7 +216,7 @@
   (def inner-nest (fn () (yield 1)))
   (def outer-nest (fn () (inner-nest)))
   (def safe-nest (squelch outer-nest :yield))
-  (def [ok-nest? err-nest] (protect (let ((r (safe-nest))) r)))
+  (def [ok-nest? err-nest] (protect (let [r (safe-nest)] r)))
   (assert (not ok-nest?) "squelch nested call enforcement: yield through nested calls is rejected")
   (assert (= (get err-nest :error) :signal-violation) "squelch nested call enforcement: rejection is :signal-violation"))
 
@@ -223,7 +224,7 @@
 (begin
   (def yielder-tc (fn () (yield 99)))
   (def safe-tc (squelch (fn () (yielder-tc)) :yield))
-  (def [ok-tc? err-tc] (protect (let ((r (safe-tc))) r)))
+  (def [ok-tc? err-tc] (protect (let [r (safe-tc)] r)))
   (assert (not ok-tc?) "squelch tail call enforcement: yield is rejected")
   (assert (= (get err-tc :error) :signal-violation) "squelch tail call enforcement: rejection is :signal-violation"))
 
@@ -231,10 +232,10 @@
 (begin
   (def [ok-comp-rt? err-comp-rt]
     (protect
-      (let* ((f   (fn () (yield 1)))
-             (sq1 (squelch f :yield))
-             (sq2 (squelch sq1 :error)))
-        (let ((r (sq2))) r))))
+      (let* [f   (fn () (yield 1))
+             sq1 (squelch f :yield)
+             sq2 (squelch sq1 :error)]
+        (let [r (sq2)] r))))
   (assert (not ok-comp-rt?) "squelch composable runtime: yield is rejected even with multi-signal squelch")
   (assert (= (get err-comp-rt :error) :signal-violation) "squelch composable runtime: rejection is :signal-violation"))
 

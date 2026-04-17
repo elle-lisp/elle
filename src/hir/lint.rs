@@ -319,7 +319,7 @@ mod tests {
     fn test_hir_linter_nested_expressions() {
         let (mut symbols, mut vm) = setup();
         let result = analyze(
-            "(let ((camelCase 1)) (if true camelCase 0))",
+            "(let [camelCase 1] (if true camelCase 0))",
             &mut symbols,
             &mut vm,
             "<test>",

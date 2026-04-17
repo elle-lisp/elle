@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Core integration tests
 #
 # Migrated from tests/integration/core.rs
@@ -142,19 +143,19 @@
 # ============================================================================
 
 # test_division_by_zero
-(let (([ok? _] (protect ((fn [] (/ 10 0)))))) (assert (not ok?) "division by zero errors"))
+(let [[ok? _] (protect ((fn [] (/ 10 0))))] (assert (not ok?) "division by zero errors"))
 
 # test_type_error
-(let (([ok? _] (protect ((fn [] (+ 1 nil)))))) (assert (not ok?) "type error on + 1 nil"))
+(let [[ok? _] (protect ((fn [] (+ 1 nil))))] (assert (not ok?) "type error on + 1 nil"))
 
 # test_undefined_variable
-(let (([ok? _] (protect ((fn [] (eval 'undefined-var)))))) (assert (not ok?) "undefined variable errors"))
+(let [[ok? _] (protect ((fn [] (eval 'undefined-var))))] (assert (not ok?) "undefined variable errors"))
 
 # test_arity_error
 # + accepts 0 args (identity)
 (assert (= (+) 0) "plus zero args")
 # first requires 1 arg — compile-time error, so use eval to catch it
-(let (([ok? _] (protect ((fn [] (eval '(first))))))) (assert (not ok?) "first with no args errors"))
+(let [[ok? _] (protect ((fn [] (eval '(first)))))] (assert (not ok?) "first with no args errors"))
 
 # ============================================================================
 # Stress tests
@@ -460,70 +461,70 @@
 # ============================================================================
 
 # test_let_simple_binding
-(assert (= (let ([x 5]) x) 5) "let simple binding")
+(assert (= (let [x 5] x) 5) "let simple binding")
 
 # test_let_with_arithmetic
-(assert (= (let ([x 5]) (+ x 3)) 8) "let with arithmetic")
+(assert (= (let [x 5] (+ x 3)) 8) "let with arithmetic")
 
 # test_let_multiple_bindings
-(assert (= (let ([x 5] [y 3]) (+ x y)) 8) "let multiple bindings")
+(assert (= (let [x 5 y 3] (+ x y)) 8) "let multiple bindings")
 
 # test_let_binding_with_expressions
-(assert (= (let ([x (+ 2 3)] [y (* 4 5)]) (+ x y)) 25) "let binding with expressions")
+(assert (= (let [x (+ 2 3) y (* 4 5)] (+ x y)) 25) "let binding with expressions")
 
 # test_let_shadowing_global
 (var x-let-shadow 10)
-(assert (= (let ([x-let-shadow 20]) x-let-shadow) 20) "let shadows global")
+(assert (= (let [x-let-shadow 20] x-let-shadow) 20) "let shadows global")
 
 # test_let_does_not_modify_global
 (var x-let-global 10)
-(let ([x-let-global 20]) x-let-global)
+(let [x-let-global 20] x-let-global)
 (assert (= x-let-global 10) "let does not modify global")
 
 # test_let_with_lists
-(assert (= (let ([lst (list 1 2 3)]) (first lst)) 1) "let with lists")
+(assert (= (let [lst (list 1 2 3)] (first lst)) 1) "let with lists")
 
 # test_let_with_string_operations
-(assert (let ([s "hello"]) (string? s)) "let with string ops")
+(assert (let [s "hello"] (string? s)) "let with string ops")
 
 # test_let_with_conditional
-(assert (= (let ([x 10]) (if (> x 5) "big" "small")) "big") "let with conditional")
+(assert (= (let [x 10] (if (> x 5) "big" "small")) "big") "let with conditional")
 
 # test_let_empty_body_returns_nil
-(assert (= (let ([x 5])) nil) "let empty body returns nil")
+(assert (= (let [x 5]) nil) "let empty body returns nil")
 
 # test_let_multiple_body_expressions
-(assert (= (let ([x 5]) (+ x 1) (+ x 2) (+ x 3)) 8) "let multiple body returns last")
+(assert (= (let [x 5] (+ x 1) (+ x 2) (+ x 3)) 8) "let multiple body returns last")
 
 # test_let_with_global_reference
 (var y-let-ref 100)
-(assert (= (let ([x 50]) (+ x y-let-ref)) 150) "let with global reference")
+(assert (= (let [x 50] (+ x y-let-ref)) 150) "let with global reference")
 
 # test_let_binding_order
-(assert (= (let ([x 1] [y 2] [z 3]) (+ x y z)) 6) "let binding order")
+(assert (= (let [x 1 y 2 z 3] (+ x y z)) 6) "let binding order")
 
 # test_let_with_list_literal
-(assert (= (let ([x '(1 2 3)]) (rest x)) (list 2 3)) "let with quoted list")
+(assert (= (let [x '(1 2 3)] (rest x)) (list 2 3)) "let with quoted list")
 
 # test_let_shadowing_with_calculation
 (var x-let-calc 10)
-(assert (= (let ([x-let-calc (* 2 x-let-calc)]) x-let-calc) 20) "let shadowing with calculation")
+(assert (= (let [x-let-calc (* 2 x-let-calc)] x-let-calc) 20) "let shadowing with calculation")
 
 # test_let_with_builtin_functions
-(assert (= (let ([len (fn [x] 42)]) (len nil)) 42) "let with builtin function override")
+(assert (= (let [len (fn [x] 42)] (len nil)) 42) "let with builtin function override")
 
 # ============================================================================
 # let* (sequential bindings)
 # ============================================================================
 
 # test_let_star_empty
-(assert (= (let* () 42) 42) "let* empty bindings")
+(assert (= (let* [] 42) 42) "let* empty bindings")
 
 # test_let_star_simple_binding
-(assert (= (let* ([x 5]) x) 5) "let* simple binding")
+(assert (= (let* [x 5] x) 5) "let* simple binding")
 
 # test_let_star_with_multiple_bindings_no_dependencies
-(assert (= (let* ([x 1] [y 2]) (+ x y)) 3) "let* multiple bindings")
+(assert (= (let* [x 1 y 2] (+ x y)) 3) "let* multiple bindings")
 
 # ============================================================================
 # cond
@@ -703,10 +704,10 @@
 # ============================================================================
 
 # test_closure_with_local_define_and_param_arithmetic
-(let ([outer-fn (fn [x]
+(let [outer-fn (fn [x]
                   (begin
                     (var local (* x 2))
-                    (fn [y] (+ local y))))])
+                    (fn [y] (+ local y))))]
   (assert (= ((outer-fn 1) 1) 3) "closure with local define and param"))
 
 # ============================================================================
@@ -715,15 +716,15 @@
 
 # test_let_inside_lambda_with_append
 (defn f-append [x]
-  (if (= x 0) (list) (let ([y x]) (append (list y) (f-append (- x 1))))))
+  (if (= x 0) (list) (let [y x] (append (list y) (f-append (- x 1))))))
 (assert (= (f-append 3) (list 3 2 1)) "let inside lambda with append")
 
 # test_let_inside_lambda_values_correct
-(defn f-let-val [x] (let ([y x]) y))
+(defn f-let-val [x] (let [y x] y))
 (assert (= (f-let-val 42) 42) "let inside lambda values correct")
 
 # test_multiple_let_bindings_in_lambda
-(defn f-multi-let [x] (let ([y x] [z (+ x 1)]) (+ y z)))
+(defn f-multi-let [x] (let [y x z (+ x 1)] (+ y z)))
 (assert (= (f-multi-let 10) 21) "multiple let bindings in lambda")
 
 # ============================================================================

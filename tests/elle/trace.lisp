@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Trace output tests
 #
 # Tests vm/config-set :trace behavior from Elle code.
@@ -13,7 +14,7 @@
 (assert (contains? (vm/config :trace) :call) "trace :call enabled")
 
 (vm/config-set :trace |:call :signal :fiber|)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (contains? t :call) "multi: :call")
   (assert (contains? t :signal) "multi: :signal")
   (assert (contains? t :fiber) "multi: :fiber")
@@ -25,7 +26,7 @@
 # ── Future keywords accepted without error ────────────────────────────
 
 (vm/config-set :trace |:spirv :mlir :gpu|)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (contains? t :spirv) ":spirv accepted")
   (assert (contains? t :mlir) ":mlir accepted")
   (assert (contains? t :gpu) ":gpu accepted"))
@@ -46,6 +47,6 @@
 (vm/config-set :trace |:call :signal :compile :fiber :hir :lir :emit :jit
                         :io :gc :import :macro :wasm :capture :arena :escape
                         :bytecode|)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (>= (length t) 17) "all 17 known keywords accepted"))
 (vm/config-set :trace ||)

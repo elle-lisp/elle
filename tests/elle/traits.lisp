@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Traits test suite
 ##
 ## Tests for the per-value trait table mechanism: `with-traits` and `traits`.
@@ -275,31 +276,31 @@
 # ============================================================================
 
 # Trait table must be an immutable struct — not a mutable struct
-(let (([ok? err] (protect ((fn () (with-traits [1 2 3] @{:a 1})))))) (assert (not ok?) "with-traits rejects mutable struct as table") (assert (= (get err :error) :type-error) "with-traits rejects mutable struct as table"))
+(let [[ok? err] (protect ((fn () (with-traits [1 2 3] @{:a 1}))))] (assert (not ok?) "with-traits rejects mutable struct as table") (assert (= (get err :error) :type-error) "with-traits rejects mutable struct as table"))
 
 # Trait table must be a struct — not an array
-(let (([ok? err] (protect ((fn () (with-traits [1 2 3] [1 2])))))) (assert (not ok?) "with-traits rejects array as table") (assert (= (get err :error) :type-error) "with-traits rejects array as table"))
+(let [[ok? err] (protect ((fn () (with-traits [1 2 3] [1 2]))))] (assert (not ok?) "with-traits rejects array as table") (assert (= (get err :error) :type-error) "with-traits rejects array as table"))
 
 # Trait table must be a struct — not a string
-(let (([ok? err] (protect ((fn () (with-traits [1 2 3] "str")))))) (assert (not ok?) "with-traits rejects string as table") (assert (= (get err :error) :type-error) "with-traits rejects string as table"))
+(let [[ok? err] (protect ((fn () (with-traits [1 2 3] "str"))))] (assert (not ok?) "with-traits rejects string as table") (assert (= (get err :error) :type-error) "with-traits rejects string as table"))
 
 # Trait table must be a struct — not a keyword
-(let (([ok? err] (protect ((fn () (with-traits [1 2 3] :tag)))))) (assert (not ok?) "with-traits rejects keyword as table") (assert (= (get err :error) :type-error) "with-traits rejects keyword as table"))
+(let [[ok? err] (protect ((fn () (with-traits [1 2 3] :tag))))] (assert (not ok?) "with-traits rejects keyword as table") (assert (= (get err :error) :type-error) "with-traits rejects keyword as table"))
 
 # Trait table must be a struct — not an integer
-(let (([ok? err] (protect ((fn () (with-traits [1 2 3] 42)))))) (assert (not ok?) "with-traits rejects integer as table") (assert (= (get err :error) :type-error) "with-traits rejects integer as table"))
+(let [[ok? err] (protect ((fn () (with-traits [1 2 3] 42))))] (assert (not ok?) "with-traits rejects integer as table") (assert (= (get err :error) :type-error) "with-traits rejects integer as table"))
 
 # Arity: with-traits requires exactly 2 arguments
 # (compile-time arity errors are wrapped by eval, so use assert-err not assert-err-kind)
-(let (([ok? _] (protect ((fn () (eval '(with-traits [1 2 3]))))))) (assert (not ok?) "with-traits arity error: too few args"))
+(let [[ok? _] (protect ((fn () (eval '(with-traits [1 2 3])))))] (assert (not ok?) "with-traits arity error: too few args"))
 
-(let (([ok? _] (protect ((fn () (eval '(with-traits [1 2 3] {:a 1} :extra))))))) (assert (not ok?) "with-traits arity error: too many args"))
+(let [[ok? _] (protect ((fn () (eval '(with-traits [1 2 3] {:a 1} :extra)))))] (assert (not ok?) "with-traits arity error: too many args"))
 
 # Arity: traits requires exactly 1 argument
-(let (([ok? _] (protect ((fn () (eval '(traits))))))) (assert (not ok?) "traits arity error: zero args"))
+(let [[ok? _] (protect ((fn () (eval '(traits)))))] (assert (not ok?) "traits arity error: zero args"))
 
-(let (([ok? _] (protect ((fn () (eval '(traits [1] [2]))))))) (assert (not ok?) "traits arity error: two args"))
+(let [[ok? _] (protect ((fn () (eval '(traits [1] [2])))))] (assert (not ok?) "traits arity error: two args"))
 
 # Infrastructure types (NativeFn): with-traits should return a type error.
 # NativeFn values are exposed as primitives; `+` is a NativeFn.
-(let (([ok? err] (protect ((fn () (with-traits + {:a 1})))))) (assert (not ok?) "with-traits rejects NativeFn (infrastructure type)") (assert (= (get err :error) :type-error) "with-traits rejects NativeFn (infrastructure type)"))
+(let [[ok? err] (protect ((fn () (with-traits + {:a 1}))))] (assert (not ok?) "with-traits rejects NativeFn (infrastructure type)") (assert (= (get err :error) :type-error) "with-traits rejects NativeFn (infrastructure type)"))

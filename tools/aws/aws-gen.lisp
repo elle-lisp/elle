@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 ## tools/aws/aws-gen.lisp — Fetch Smithy models and generate Elle API modules
 ##
 ## Usage:

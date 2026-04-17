@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── silence: compile-time enforcement ─────────────────────────────────
 #
 # (silence) enforces at compile time that the body's inferred signal

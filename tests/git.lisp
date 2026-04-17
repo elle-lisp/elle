@@ -1,15 +1,15 @@
-(elle/epoch 1)
+(elle/epoch 7)
 # elle-git integration tests
 # Requires: libelle_git.so built at target/release/libelle_git.so
 
 (import-file "target/release/libelle_git.so")
 
-(let ((tmp (string/concat "/tmp/elle-git-test-" (number->string (integer (clock/realtime))))))
+(let [tmp (string/concat "/tmp/elle-git-test-" (number->string (integer (clock/realtime))))]
 
   # -------------------------------------------------------------------------
   # Chunk 2: Repo lifecycle
   # -------------------------------------------------------------------------
-  (let ((repo (git/init tmp)))
+  (let [repo (git/init tmp)]
     (assert (string? (git/path repo)) "git/path returns string")
     (assert (string? (git/workdir repo)) "git/workdir returns string")
     (assert (not (git/bare? repo)) "not bare")
@@ -22,89 +22,89 @@
     (assert (nil? (git/config-get repo "no.such.key")) "config-get nil for missing")
 
     # HEAD on empty repo should signal
-    (let ((r (protect (git/head repo))))
+    (let [r (protect (git/head repo))]
       (assert (not (first r)) "head errors on empty repo"))
 
     # Resolve on empty repo should signal
-    (let ((r (protect (git/resolve repo "HEAD"))))
+    (let [r (protect (git/resolve repo "HEAD"))]
       (assert (not (first r)) "resolve errors on empty repo"))
 
     # -------------------------------------------------------------------------
     # Write a file and stage it
     # -------------------------------------------------------------------------
-    (let ((filepath (string/concat tmp "/hello.txt")))
+    (let [filepath (string/concat tmp "/hello.txt")]
       (spit filepath "hello\n"))
 
     # Status before staging
-    (let ((s (git/status repo)))
+    (let [s (git/status repo)]
       (assert (= 1 (length s)) "one untracked file")
       (assert (= :new (:workdir (first s))) "workdir :new")
       (assert (nil? (:index (first s))) "index nil"))
 
     # Diff before staging (workdir vs index) — untracked files don't show in diff
-    (let ((d (git/diff repo)))
+    (let [d (git/diff repo)]
       (assert (>= (:files-changed d) 0) "diff returns struct"))
 
     # Stage the file
     (git/add repo "hello.txt")
-    (let ((s (git/status repo)))
+    (let [s (git/status repo)]
       (assert (= :new (:index (first s))) "index :new after add"))
 
     # Cached diff: may error if HEAD is unborn
-    (let ((r (protect (git/diff repo {:cached true}))))
+    (let [r (protect (git/diff repo {:cached true}))]
       # Either succeeds or errors cleanly — both acceptable
       (assert (or (first r) (not (first r))) "diff cached does not crash"))
 
     # -------------------------------------------------------------------------
     # Chunk 4: First commit
     # -------------------------------------------------------------------------
-    (let ((oid (git/commit repo "initial commit")))
+    (let [oid (git/commit repo "initial commit")]
       (assert (string? oid) "commit returns oid string")
 
       # HEAD now resolves
-      (let ((head (git/head repo)))
+      (let [head (git/head repo)]
         (assert (string? (:oid head)) "head oid is string")
         (assert (:symbolic head) "head is symbolic"))
 
       # commit-info
-      (let ((info (git/commit-info repo oid)))
+      (let [info (git/commit-info repo oid)]
         (assert (= oid (:oid info)) "commit-info oid matches")
         (assert (string? (:message info)) "commit-info message is string")
         (assert (= 0 (length (:parents info))) "initial commit has no parents"))
 
       # git/log
-      (let ((log (git/log repo {:limit 5})))
+      (let [log (git/log repo {:limit 5})]
         (assert (= 1 (length log)) "log has 1 commit")
         (assert (= oid (:oid (first log))) "log first oid matches"))
 
       # git/show
-      (let ((contents (git/show repo "HEAD" "hello.txt")))
+      (let [contents (git/show repo "HEAD" "hello.txt")]
         (assert (= "hello\n" contents) "show returns file contents"))
-      (let ((r (protect (git/show repo "HEAD" "nope.txt"))))
+      (let [r (protect (git/show repo "HEAD" "nope.txt"))]
         (assert (not (first r)) "show errors on missing file"))
 
       # git/resolve
-      (let ((resolved (git/resolve repo "HEAD")))
+      (let [resolved (git/resolve repo "HEAD")]
         (assert (string? resolved) "resolve HEAD returns string")
         (assert (= 40 (string/size-of resolved)) "OID is 40 chars"))
 
       # -------------------------------------------------------------------------
       # Status after commit — clean
       # -------------------------------------------------------------------------
-      (let ((s (git/status repo)))
+      (let [s (git/status repo)]
         (assert (= 0 (length s)) "status clean after commit"))
 
-      (let ((d (git/diff repo)))
+      (let [d (git/diff repo)]
         (assert (= 0 (:files-changed d)) "no diff on clean tree"))
 
       # -------------------------------------------------------------------------
       # Chunk 3: Branches
       # -------------------------------------------------------------------------
-      (let ((branches (git/branches repo :local)))
+      (let [branches (git/branches repo :local)]
         (assert (= 1 (length branches)) "one local branch")
         (assert (string? (:name (first branches))) "branch name is string"))
 
-      (let ((branch-oid (git/branch-create repo "feature")))
+      (let [branch-oid (git/branch-create repo "feature")]
         (assert (string? branch-oid) "branch-create returns oid")
         (assert (= 2 (length (git/branches repo :local))) "two branches now"))
 
@@ -117,7 +117,7 @@
       # -------------------------------------------------------------------------
       # Chunk 8: Tags
       # -------------------------------------------------------------------------
-      (let ((tag-oid (git/tag-create repo "v0.1")))
+      (let [tag-oid (git/tag-create repo "v0.1")]
         (assert (string? tag-oid) "tag-create returns oid"))
       (assert (= 1 (length (git/tags repo))) "one tag")
       (assert (= "v0.1" (first (git/tags repo))) "tag name is v0.1")
@@ -125,40 +125,40 @@
       (assert (= 0 (length (git/tags repo))) "no tags after delete")
 
       # Annotated tag
-      (let ((tag-oid (git/tag-create repo "v1.0" "HEAD" "Release 1.0")))
+      (let [tag-oid (git/tag-create repo "v1.0" "HEAD" "Release 1.0")]
         (assert (string? tag-oid) "annotated tag-create returns oid"))
       (git/tag-delete repo "v1.0")
 
       # -------------------------------------------------------------------------
       # Chunk 5: Staging with modification
       # -------------------------------------------------------------------------
-      (let ((filepath (string/concat tmp "/hello.txt")))
+      (let [filepath (string/concat tmp "/hello.txt")]
         (spit filepath "hello world\n"))
 
-      (let ((s (git/status repo)))
+      (let [s (git/status repo)]
         (assert (= :modified (:workdir (first s))) "workdir :modified"))
 
-      (let ((d (git/diff repo)))
+      (let [d (git/diff repo)]
         (assert (= 1 (:files-changed d)) "one file changed in diff")
         (assert (string? (:path (first (:files d)))) "file path is string"))
 
-      (let ((patch (git/diff-patch repo)))
+      (let [patch (git/diff-patch repo)]
         (assert (string? patch) "patch is string")
         (assert (> (string/size-of patch) 0) "patch is non-empty"))
 
       # git/add-all
       (git/add-all repo)
-      (let ((s (git/status repo)))
+      (let [s (git/status repo)]
         (assert (= :modified (:index (first s))) "staged after add-all"))
 
       # Cached diff: index vs HEAD — should show one modified file
-      (let ((d (git/diff repo {:cached true})))
+      (let [d (git/diff repo {:cached true})]
         (assert (>= (:files-changed d) 1) "cached diff shows staged changes"))
 
       # Second commit
-      (let ((oid2 (git/commit repo "second commit")))
+      (let [oid2 (git/commit repo "second commit")]
         (assert (string? oid2) "second commit oid")
-        (let ((log (git/log repo {:limit 10})))
+        (let [log (git/log repo {:limit 10})]
           (assert (= 2 (length log)) "log has 2 commits")))
 
       # -------------------------------------------------------------------------
@@ -170,7 +170,7 @@
       # -------------------------------------------------------------------------
       # Chunk 9: Remotes (basic, no network)
       # -------------------------------------------------------------------------
-      (let ((remote-list (git/remotes repo)))
+      (let [remote-list (git/remotes repo)]
         (assert (= 0 (length remote-list)) "no remotes in fresh repo"))
     ))
 

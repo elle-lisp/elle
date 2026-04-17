@@ -31,10 +31,10 @@ The demo exercises four key linear algebra operations:
 **`alloc-and-write-doubles`** — Allocate C memory and write an Elle array to it
 ```janet
 (defn alloc-and-write-doubles (lst)
-  (let* ((n (length lst))
-         (arr-type (ffi/array :double n))
-         (ptr (ffi/malloc (ffi/size arr-type)))
-         (arr (apply array lst)))
+  (let* [n (length lst)
+         arr-type (ffi/array :double n)
+         ptr (ffi/malloc (ffi/size arr-type))
+         arr (apply array lst)]
     (ffi/write ptr arr-type arr)
     ptr))
 ```
@@ -49,8 +49,8 @@ This:
 **`read-doubles`** — Read N doubles from C memory into an Elle array
 ```janet
 (defn read-doubles (ptr n)
-  (let* ((arr-type (ffi/array :double n))
-         (result (ffi/read ptr arr-type)))
+  (let* [arr-type (ffi/array :double n)
+         result (ffi/read ptr arr-type)]
     result))
 ```
 
@@ -72,14 +72,14 @@ These are CBLAS enum values that control matrix layout and transposition.
 ### Operation 1: DDOT (Dot Product)
 
 ```janet
-(let* ((x (list 1.0 2.0 3.0))
-       (y (list 4.0 5.0 6.0))
-       (n 3)
-       (x-ptr (alloc-and-write-doubles x))
-       (y-ptr (alloc-and-write-doubles y)))
-  (let* ((ddot-sig (ffi/signature :double @[:int :ptr :int :ptr :int]))
-         (ddot-fn (ffi/lookup cblas "cblas_ddot"))
-         (result (ffi/call ddot-fn ddot-sig n x-ptr 1 y-ptr 1)))
+(let* [x (list 1.0 2.0 3.0)
+       y (list 4.0 5.0 6.0)
+       n 3
+       x-ptr (alloc-and-write-doubles x)
+       y-ptr (alloc-and-write-doubles y)]
+  (let* [ddot-sig (ffi/signature :double @[:int :ptr :int :ptr :int])
+         ddot-fn (ffi/lookup cblas "cblas_ddot")
+         result (ffi/call ddot-fn ddot-sig n x-ptr 1 y-ptr 1)]
     ...))
 ```
 
@@ -92,15 +92,15 @@ The call computes: `x·y = 1*4 + 2*5 + 3*6 = 32`
 ### Operation 2: DGEMV (Matrix-Vector Multiply)
 
 ```janet
-(let* ((m 2) (n 3) (alpha 1.0) (beta 0.0)
-       (a (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 2×3 matrix
-       (x (list 1.0 2.0 3.0))               # 3-element vector
-       (y (list 0.0 0.0))                   # 2-element result
-       ...)
-  (let* ((dgemv-sig (ffi/signature :void @[:int :int :int :int :double :ptr :int :ptr :int :double :ptr :int]))
-         (dgemv-fn (ffi/lookup cblas "cblas_dgemv"))
-         (_ (ffi/call dgemv-fn dgemv-sig CblasRowMajor CblasNoTrans m n alpha a-ptr n x-ptr 1 beta y-ptr 1))
-         (result (read-doubles y-ptr m)))
+(let* [m 2  n 3  alpha 1.0  beta 0.0
+       a (list 1.0 2.0 3.0 4.0 5.0 6.0)  # 2×3 matrix
+       x (list 1.0 2.0 3.0)               # 3-element vector
+       y (list 0.0 0.0)                   # 2-element result
+       ...]
+  (let* [dgemv-sig (ffi/signature :void @[:int :int :int :int :double :ptr :int :ptr :int :double :ptr :int])
+         dgemv-fn (ffi/lookup cblas "cblas_dgemv")
+         _ (ffi/call dgemv-fn dgemv-sig CblasRowMajor CblasNoTrans m n alpha a-ptr n x-ptr 1 beta y-ptr 1)
+         result (read-doubles y-ptr m)]
     ...))
 ```
 
@@ -112,15 +112,15 @@ Computes: `y = A*x`
 ### Operation 3: DGEMM (Matrix-Matrix Multiply)
 
 ```janet
-(let* ((m 2) (n 2) (k 3) (alpha 1.0) (beta 0.0)
-       (a (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 2×3
-       (b (list 1.0 2.0 3.0 4.0 5.0 6.0))  # 3×2
-       (c (list 0.0 0.0 0.0 0.0))          # 2×2 result
-       ...)
-  (let* ((dgemm-sig (ffi/signature :void @[:int :int :int :int :int :int :double :ptr :int :ptr :int :double :ptr :int]))
-         (dgemm-fn (ffi/lookup cblas "cblas_dgemm"))
-         (_ (ffi/call dgemm-fn dgemm-sig CblasRowMajor CblasNoTrans CblasNoTrans m n k alpha a-ptr k b-ptr n beta c-ptr n))
-         (result (read-doubles c-ptr (* m n))))
+(let* [m 2  n 2  k 3  alpha 1.0  beta 0.0
+       a (list 1.0 2.0 3.0 4.0 5.0 6.0)  # 2×3
+       b (list 1.0 2.0 3.0 4.0 5.0 6.0)  # 3×2
+       c (list 0.0 0.0 0.0 0.0)          # 2×2 result
+       ...]
+  (let* [dgemm-sig (ffi/signature :void @[:int :int :int :int :int :int :double :ptr :int :ptr :int :double :ptr :int])
+         dgemm-fn (ffi/lookup cblas "cblas_dgemm")
+         _ (ffi/call dgemm-fn dgemm-sig CblasRowMajor CblasNoTrans CblasNoTrans m n k alpha a-ptr k b-ptr n beta c-ptr n)
+         result (read-doubles c-ptr (* m n))]
     ...))
 ```
 
@@ -132,17 +132,17 @@ Computes: `C = A*B`
 ### Operation 4: DGESV (Linear System Solve)
 
 ```janet
-(let* ((n 2) (nrhs 1)
-       (a (list 2.0 1.0 1.0 2.0))  # 2×2 matrix
-       (b (list 3.0 3.0))          # 2-element RHS
-       (a-ptr (alloc-and-write-doubles a))
-       (b-ptr (alloc-and-write-doubles b))
-       (ipiv-type (ffi/array :int n))
-       (ipiv-ptr (ffi/malloc (ffi/size ipiv-type))))
-  (let* ((dgesv-sig (ffi/signature :int @[:int :int :int :ptr :int :ptr :ptr :int]))
-         (dgesv-fn (ffi/lookup lapacke "LAPACKE_dgesv"))
-         (info (ffi/call dgesv-fn dgesv-sig CblasRowMajor n nrhs a-ptr n ipiv-ptr b-ptr nrhs))
-         (result (read-doubles b-ptr n)))
+(let* [n 2  nrhs 1
+       a (list 2.0 1.0 1.0 2.0)  # 2×2 matrix
+       b (list 3.0 3.0)          # 2-element RHS
+       a-ptr (alloc-and-write-doubles a)
+       b-ptr (alloc-and-write-doubles b)
+       ipiv-type (ffi/array :int n)
+       ipiv-ptr (ffi/malloc (ffi/size ipiv-type))]
+  (let* [dgesv-sig (ffi/signature :int @[:int :int :int :ptr :int :ptr :ptr :int])
+         dgesv-fn (ffi/lookup lapacke "LAPACKE_dgesv")
+         info (ffi/call dgesv-fn dgesv-sig CblasRowMajor n nrhs a-ptr n ipiv-ptr b-ptr nrhs)
+         result (read-doubles b-ptr n)]
     ...))
 ```
 

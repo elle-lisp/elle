@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── compile/rename tests ──────────────────────────────────────────────
 
 # ── Basic rename ─────────────────────────────────────────────────────
@@ -27,7 +28,7 @@
 
 (def shadow-src "
 (defn outer [x]
-  (let [[x (+ x 1)]]
+  (let [x (+ x 1)]
     x))
 ")
 (def a3 (compile/analyze shadow-src))

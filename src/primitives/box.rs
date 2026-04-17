@@ -135,7 +135,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Modify the value in a box and return the new value.",
         params: &["box", "value"],
         category: "box",
-        example: "(let ((c (box 1))) (rebox c 2) (unbox c)) #=> 2",
+        example: "(let [c (box 1)] (rebox c 2) (unbox c)) #=> 2",
         aliases: &[],
     },
     PrimitiveDef {

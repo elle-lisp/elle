@@ -42,7 +42,7 @@ fn test_spawned_closure_with_captures_division_by_zero() {
     // A closure that captures a variable, spawned to another thread, errors
     let result = eval_source(
         r#"
-        (let ((divisor 0))
+        (let [divisor 0]
           (join (spawn (fn () (/ 42 divisor)))))
         "#,
     );
@@ -68,7 +68,7 @@ fn test_spawned_closure_success() {
     // Even successful closures should work correctly
     let result = eval_source(
         r#"
-        (let ((x 10) (y 20))
+        (let [x 10 y 20]
           (join (spawn (fn () (+ x y)))))
         "#,
     );
@@ -86,9 +86,9 @@ fn test_multiple_spawned_closures_one_errors() {
     // Spawn multiple closures, one of which errors
     let result = eval_source(
         r#"
-        (let ((h1 (spawn (fn () 42)))
-              (h2 (spawn (fn () (/ 1 0)))))
-          (let ((r1 (join h1)))
+        (let [h1 (spawn (fn () 42))
+              h2 (spawn (fn () (/ 1 0)))]
+          (let [r1 (join h1)]
             (join h2)))
         "#,
     );
@@ -134,7 +134,7 @@ fn test_closure_with_multiple_captures_and_error() {
     // A closure that captures multiple values and then errors
     let result = eval_source(
         r#"
-        (let ((a 1) (b 2) (c 0))
+        (let [a 1 b 2 c 0]
           (join (spawn (fn () (/ (+ a b) c)))))
         "#,
     );
@@ -197,8 +197,8 @@ fn test_spawned_closure_captured_computation() {
     // Closure captures computed values
     let result = eval_source(
         r#"
-        (let ((x (+ 1 2))
-              (y (* 3 4)))
+        (let [x (+ 1 2)
+              y (* 3 4)]
           (join (spawn (fn () (+ x y)))))
         "#,
     );
@@ -216,7 +216,7 @@ fn test_spawned_closure_with_conditional() {
     // Closure uses conditional logic
     let result = eval_source(
         r#"
-        (let ((x 10))
+        (let [x 10]
           (join (spawn (fn () (if (> x 5) "big" "small")))))
         "#,
     );
@@ -271,7 +271,7 @@ fn test_spawned_closure_error_propagation() {
     // Error should propagate from spawned thread to joining thread
     let result = eval_source(
         r#"
-        (let ((handle (spawn (fn () (/ 1 0)))))
+        (let [handle (spawn (fn () (/ 1 0)))]
           (join handle))
         "#,
     );
@@ -316,7 +316,7 @@ fn test_spawned_closure_array_operations() {
     // Closure performs array operations
     let result = eval_source(
         r#"
-        (let ((v @[1 2 3]))
+        (let [v @[1 2 3]]
           (join (spawn (fn () (get v 1)))))
         "#,
     );
@@ -363,7 +363,7 @@ proptest! {
 
         // Now test that spawning and joining preserves the computation
         let spawn_source = format!(
-            "(let ((captured {})) (join (spawn (fn () (+ captured {})))))",
+            "(let [captured {}] (join (spawn (fn () (+ captured {})))))",
             a, b
         );
         let result = eval_source(&spawn_source);
@@ -410,7 +410,7 @@ proptest! {
         c in -50i64..50
     ) {
         let source = format!(
-            "(let ((x {}) (y {}) (z {})) (join (spawn (fn () (+ x (+ y z))))))",
+            "(let [x {} y {} z {}] (join (spawn (fn () (+ x (+ y z))))))",
             a, b, c
         );
         let result = eval_source(&source);
@@ -440,7 +440,7 @@ proptest! {
 fn test_closure_capturing_closure() {
     let result = eval_source(
         r#"
-        (let ((add1 (fn (x) (+ x 1))))
+        (let [add1 (fn (x) (+ x 1))]
           (join (spawn (fn () (add1 41)))))
         "#,
     );
@@ -461,8 +461,8 @@ fn test_closure_capturing_closure() {
 fn test_closure_capturing_nested_closures() {
     let result = eval_source(
         r#"
-        (let ((add1 (fn (x) (+ x 1))))
-          (let ((add2 (fn (x) (add1 (add1 x)))))
+        (let [add1 (fn (x) (+ x 1))]
+          (let [add2 (fn (x) (add1 (add1 x)))]
             (join (spawn (fn () (add2 40))))))
         "#,
     );
@@ -484,8 +484,8 @@ fn test_closure_capturing_non_sendable_rejected() {
     // A closure that captures a mutable @struct (via an inner closure) is rejected.
     let result = eval_source(
         r#"
-        (let ((t (@struct)))
-          (let ((f (fn () t)))
+        (let [t (@struct)]
+          (let [f (fn () t)]
             (spawn (fn () (f)))))
         "#,
     );
@@ -511,7 +511,7 @@ fn test_closure_capturing_non_sendable_rejected() {
 fn test_closure_result_is_closure() {
     let result = eval_source(
         r#"
-        (let ((f (join (spawn (fn () (fn (x) (+ x 1)))))))
+        (let [f (join (spawn (fn () (fn (x) (+ x 1)))))]
           (f 41))
         "#,
     );
@@ -532,7 +532,7 @@ fn test_closure_result_is_closure() {
 fn test_self_recursive_closure() {
     let result = eval_source(
         r#"
-        (letrec ((fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1)))))))
+        (letrec [fact (fn (n) (if (= n 0) 1 (* n (fact (- n 1)))))]
           (join (spawn (fn () (fact 5)))))
         "#,
     );
@@ -553,8 +553,8 @@ fn test_self_recursive_closure() {
 fn test_mutually_recursive_closures() {
     let result = eval_source(
         r#"
-        (letrec ((even? (fn (n) (if (= n 0) true (odd? (- n 1)))))
-                 (odd?  (fn (n) (if (= n 0) false (even? (- n 1))))))
+        (letrec [even? (fn (n) (if (= n 0) true (odd? (- n 1))))
+                 odd?  (fn (n) (if (= n 0) false (even? (- n 1))))]
           (join (spawn (fn () (even? 10)))))
         "#,
     );

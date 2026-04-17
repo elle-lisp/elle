@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── compile/analyze: compiler-as-library tests ──────────────────────────
 
 # ── Basic analysis ──────────────────────────────────────────────────────
@@ -128,7 +129,7 @@
 
 # ── Error on bad source ─────────────────────────────────────────────────
 
-(let [[[ok? _] (protect (compile/analyze "(defn"))]]
+(let [[ok? _] (protect (compile/analyze "(defn"))]
   (assert (not ok?) "bad source produces error"))
 
 (println "all compile/analyze tests passed")

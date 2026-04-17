@@ -132,10 +132,10 @@ fn test_signal_pure_call() {
 
 #[test]
 fn test_signal_let_bound_lambda() {
-    // (let ((gen (fn () (yield 1)))) (gen)) should have Yields signal
+    // (let [gen (fn () (yield 1))] (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(let ((gen (fn () (yield 1)))) (gen))",
+        "(let [gen (fn () (yield 1))] (gen))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -150,10 +150,10 @@ fn test_signal_let_bound_lambda() {
 
 #[test]
 fn test_signal_letrec_bound_lambda() {
-    // (letrec ((gen (fn () (yield 1)))) (gen)) should have Yields signal
+    // (letrec [gen (fn () (yield 1))] (gen)) should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(letrec ((gen (fn () (yield 1)))) (gen) 42)",
+        "(letrec [gen (fn () (yield 1))] (gen) 42)",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -353,13 +353,13 @@ fn test_signal_conditional_yield() {
 
 #[test]
 fn test_signal_closure_captures_yielding() {
-    // (let ((gen (fn () (yield 1))))
-    //   (let ((wrapper (fn () (gen))))
+    // (let [gen (fn () (yield 1))]
+    //   (let [wrapper (fn () (gen))]
     //     (wrapper)))
     // Should have Yields signal
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(let ((gen (fn () (yield 1)))) (let ((wrapper (fn () (gen)))) (wrapper)))",
+        "(let [gen (fn () (yield 1))] (let [wrapper (fn () (gen))] (wrapper)))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -505,7 +505,7 @@ fn test_signal_let_bound_non_lambda_call_is_yields() {
     // Calling a let-bound non-lambda should be Yields
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(let ((f (first fns))) (f 42))",
+        "(let [f (first fns)] (f 42))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1295,7 +1295,7 @@ fn test_squelch_non_squelched_signal_passes() {
     // Kept in Rust: requires negative substring check ("NOT signal-violation").
     // Elle tests cannot assert the absence of a substring in an error message.
     let result =
-        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 42)) :error))) (f))");
+        crate::common::eval_source_bare("(let [f (squelch (fn () (yield 42)) :error)] (f))");
     // The call propagates a yield signal (no signal-violation, just yield propagation error)
     assert!(result.is_err(), "expected error (yield propagates), got ok");
     let err = result.unwrap_err();
@@ -1311,7 +1311,7 @@ fn test_squelch_error_passthrough() {
     // Kept in Rust: requires negative substring check ("NOT signal-violation").
     // Elle tests cannot assert the absence of a substring in an error message.
     let result =
-        crate::common::eval_source_bare("(let ((f (squelch (fn () (/ 1 0)) :yield))) (f))");
+        crate::common::eval_source_bare("(let [f (squelch (fn () (/ 1 0)) :yield)] (f))");
     assert!(result.is_err(), "expected error, got ok");
     let err = result.unwrap_err();
     assert!(
@@ -1330,7 +1330,7 @@ fn test_squelch_signal_violation_error_message() {
     // Kept in Rust: requires checking that error message contains BOTH "yield" AND "squelch"
     // substrings. Elle tests cannot match substrings.
     let result =
-        crate::common::eval_source_bare("(let ((f (squelch (fn () (yield 1)) :yield))) (f))");
+        crate::common::eval_source_bare("(let [f (squelch (fn () (yield 1)) :yield)] (f))");
     assert!(result.is_err(), "expected error, got ok");
     let err = result.unwrap_err();
     assert!(

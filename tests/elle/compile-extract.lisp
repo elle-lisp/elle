@@ -1,11 +1,12 @@
+(elle/epoch 7)
 # ── compile/extract tests ─────────────────────────────────────────────
 
 # ── Basic extraction ─────────────────────────────────────────────────
 
 (def src "
 (defn process [data config]
-  (let [[x (+ data 1)]]
-    (let [[y (* x config)]]
+  (let [x (+ data 1)]
+    (let [y (* x config)]
       (+ y 10))))
 ")
 (def a (compile/analyze src))
@@ -41,11 +42,11 @@
 # ── Error cases ──────────────────────────────────────────────────────
 
 # Non-existent function
-(let [[[ok? _] (protect (compile/extract a {:from :nonexistent :lines [1 1] :name :x}))]]
+(let [[ok? _] (protect (compile/extract a {:from :nonexistent :lines [1 1] :name :x}))]
   (assert (not ok?) "extract from nonexistent function errors"))
 
 # Invalid line range
-(let [[[ok? _] (protect (compile/extract a {:from :process :lines [5 2] :name :x}))]]
+(let [[ok? _] (protect (compile/extract a {:from :process :lines [5 2] :name :x}))]
   (assert (not ok?) "extract with invalid line range errors"))
 
 (println "all compile/extract tests passed")

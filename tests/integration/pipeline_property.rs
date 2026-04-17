@@ -203,7 +203,7 @@ proptest! {
 
     #[test]
     fn let_binds_value(a in -1000i64..1000) {
-        let expr = format!("(let ((x {})) x)", a);
+        let expr = format!("(let [x {}] x)", a);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -212,7 +212,7 @@ proptest! {
 
     #[test]
     fn let_shadows_outer(outer in -100i64..100, inner in -100i64..100) {
-        let expr = format!("(let ((x {})) (let ((x {})) x))", outer, inner);
+        let expr = format!("(let [x {}] (let [x {}] x))", outer, inner);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -223,7 +223,7 @@ proptest! {
     fn let_outer_unchanged_after_inner(outer in -100i64..100, inner in -100i64..100) {
         // After inner let exits, outer binding should be accessible
         let expr = format!(
-            "(let ((x {})) (begin (let ((x {})) x) x))",
+            "(let [x {}] (begin (let [x {}] x) x))",
             outer, inner
         );
         let result = eval_reuse_bare(&expr);
@@ -234,7 +234,7 @@ proptest! {
 
     #[test]
     fn let_multiple_bindings(a in -100i64..100, b in -100i64..100) {
-        let expr = format!("(let ((x {}) (y {})) (+ x y))", a, b);
+        let expr = format!("(let [x {} y {}] (+ x y))", a, b);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -270,7 +270,7 @@ proptest! {
     #[test]
     fn closure_captures_value(captured in -100i64..100, arg in -100i64..100) {
         let expr = format!(
-            "(let ((y {})) ((fn (x) (+ x y)) {}))",
+            "(let [y {}] ((fn (x) (+ x y)) {}))",
             captured, arg
         );
         let result = eval_reuse_bare(&expr);
@@ -535,7 +535,7 @@ proptest! {
 
         // Sum all elements
         let expr = format!(
-            "(let ((sum 0)) (begin (each x (list {}) (assign sum (+ sum x))) sum))",
+            "(let [sum 0] (begin (each x (list {}) (assign sum (+ sum x))) sum))",
             list_str
         );
         let result = eval_reuse_bare(&expr);
@@ -548,7 +548,7 @@ proptest! {
     #[test]
     fn each_empty_list_no_iteration(a in -100i64..100) {
         // Each over empty list should not execute body, return nil
-        let expr = format!("(let ((x {})) (begin (each y (list) (assign x 999)) x))", a);
+        let expr = format!("(let [x {}] (begin (each y (list) (assign x 999)) x))", a);
         let result = eval_reuse_bare(&expr);
 
         prop_assert!(result.is_ok(), "failed: {:?}", result);
@@ -567,7 +567,7 @@ proptest! {
     fn closure_mutation_persists(_start in 0i64..100, increments in 1usize..5) {
         // Counter closure that mutates captured variable
         let mut expr = String::from(
-            "(let ((counter (let ((n 0)) (fn () (begin (assign n (+ n 1)) n)))))"
+            "(let [counter (let [n 0] (fn () (begin (assign n (+ n 1)) n)))]"
         );
 
         // Call counter multiple times
@@ -585,8 +585,7 @@ proptest! {
     fn independent_closures_have_separate_state(a in 1i64..50, b in 1i64..50) {
         // Two independent closures with separate captured state
         let expr = format!(
-            "(let ((c1 (let ((n {})) (fn () (begin (assign n (+ n 1)) n))))
-                   (c2 (let ((m {})) (fn () (begin (assign m (+ m 1)) m)))))
+            "(let [c1 (let [n {}] (fn () (begin (assign n (+ n 1)) n))) c2 (let [m {}] (fn () (begin (assign m (+ m 1)) m)))]
                 (begin (c1) (c1) (c2) (list (c1) (c2))))",
             a, b
         );
@@ -606,8 +605,8 @@ proptest! {
             calls.push_str("(inc) ");
         }
         let expr = format!(
-            "(let ((n {}))
-               (let ((inc (fn () (begin (assign n (+ n 1)) n))))
+            "(let [n {}]
+               (let [inc (fn () (begin (assign n (+ n 1)) n))]
                  (begin {})))",
             start, calls
         );
@@ -621,8 +620,8 @@ proptest! {
     fn counter_factory_single(start in 0i64..100) {
         // Single counter from factory
         let expr = format!(
-            "(let ((make-counter (fn (n) (fn () (begin (assign n (+ n 1)) n)))))
-               (let ((c (make-counter {})))
+            "(let [make-counter (fn (n) (fn () (begin (assign n (+ n 1)) n)))]
+               (let [c (make-counter {})]
                  (begin (c) (c) (c))))",
             start
         );
@@ -640,8 +639,8 @@ proptest! {
         // c2 called once: b+1
         // Final call: c1 at a+3, c2 at b+2
         let expr = format!(
-            "(let ((make-counter (fn (n) (fn () (begin (assign n (+ n 1)) n)))))
-               (let ((c1 (make-counter {})) (c2 (make-counter {})))
+            "(let [make-counter (fn (n) (fn () (begin (assign n (+ n 1)) n)))]
+               (let [c1 (make-counter {}) c2 (make-counter {})]
                  (begin 
                    (c1) (c1)
                    (c2)
@@ -657,8 +656,8 @@ proptest! {
     #[test]
     fn closure_mutates_outer_scope(outer in 0i64..100, delta in 1i64..10) {
         let expr = format!(
-            "(let ((x {}))
-               (let ((add (fn () (assign x (+ x {})))))
+            "(let [x {}]
+               (let [add (fn () (assign x (+ x {})))]
                  (begin (add) (add) x)))",
             outer, delta
         );
@@ -672,10 +671,8 @@ proptest! {
     fn multiple_closures_share_state(init in 0i64..50) {
         // Multiple closures over same variable should share state
         let expr = format!(
-            "(let ((n {}))
-               (let ((inc (fn () (begin (assign n (+ n 1)) n)))
-                     (dec (fn () (begin (assign n (- n 1)) n)))
-                     (get (fn () n)))
+            "(let [n {}]
+               (let [inc (fn () (begin (assign n (+ n 1)) n)) dec (fn () (begin (assign n (- n 1)) n)) get (fn () n)]
                  (begin (inc) (inc) (dec) (get))))",
             init
         );
@@ -689,9 +686,9 @@ proptest! {
     fn nested_closure_mutation(a in 0i64..30, b in 0i64..30) {
         // Nested closures, inner mutates outer's captured var
         let expr = format!(
-            "(let ((x {}))
-               (let ((outer (fn (y)
-                              (begin (assign x (+ x y)) x))))
+            "(let [x {}]
+               (let [outer (fn (y)
+                              (begin (assign x (+ x y)) x))]
                  (begin (outer {}) (outer {}))))",
             a, b, b
         );
@@ -705,9 +702,9 @@ proptest! {
     fn closure_over_parameter(param in 0i64..50, delta in 1i64..10) {
         // Closure captures function parameter and mutates it
         let expr = format!(
-            "(let ((make-mutator (fn (n)
-                                   (fn () (begin (assign n (+ n {})) n)))))
-               (let ((m (make-mutator {})))
+            "(let [make-mutator (fn (n)
+                                   (fn () (begin (assign n (+ n {})) n)))]
+               (let [m (make-mutator {})]
                  (begin (m) (m) (m))))",
             delta, param
         );
@@ -725,8 +722,8 @@ proptest! {
             calls.push_str(&format!("(add {}) ", v));
         }
         let expr = format!(
-            "(let ((total {}))
-               (let ((add (fn (x) (begin (assign total (+ total x)) total))))
+            "(let [total {}]
+               (let [add (fn (x) (begin (assign total (+ total x)) total))]
                  (begin {})))",
             init, calls
         );
@@ -749,7 +746,7 @@ proptest! {
     fn nested_let_in_if(cond in prop::bool::ANY, a in -100i64..100, b in -100i64..100) {
         let cond_str = if cond { "true" } else { "false" };
         let expr = format!(
-            "(if {} (let ((x {})) x) (let ((y {})) y))",
+            "(if {} (let [x {}] x) (let [y {}] y))",
             cond_str, a, b
         );
         let result = eval_reuse_bare(&expr);
@@ -815,7 +812,7 @@ proptest! {
     fn begin_with_side_effects(a in -100i64..100, b in -100i64..100) {
         // Side effect: assign followed by read
         let expr = format!(
-            "(let ((x {})) (begin (assign x {}) x))",
+            "(let [x {}] (begin (assign x {}) x))",
             a, b
         );
         let result = eval_reuse_bare(&expr);
@@ -879,7 +876,7 @@ proptest! {
 
     #[test]
     fn quasiquote_with_unquote(a in -100i64..100) {
-        let expr = format!("(let ((x {})) `(1 ,x 3))", a);
+        let expr = format!("(let [x {}] `(1 ,x 3))", a);
         let result = eval_reuse_bare(&expr);
 
         // If quasiquote is supported, check result is a list with x interpolated
@@ -922,7 +919,7 @@ proptest! {
     #[test]
     fn make_adder_works(n in -50i64..50, x in -50i64..50) {
         let expr = format!(
-            "(let ((make-adder (fn (n) (fn (x) (+ x n)))))
+            "(let [make-adder (fn (n) (fn (x) (+ x n)))]
                ((make-adder {}) {}))",
             n, x
         );
@@ -935,7 +932,7 @@ proptest! {
     #[test]
     fn make_multiplier_works(n in -20i64..20, x in -20i64..20) {
         let expr = format!(
-            "(let ((make-mult (fn (n) (fn (x) (* x n)))))
+            "(let [make-mult (fn (n) (fn (x) (* x n)))]
                ((make-mult {}) {}))",
             n, x
         );
@@ -950,10 +947,10 @@ proptest! {
         // (compose f g)(x) = f(g(x))
         // Use let* because composed references compose, add1, double from earlier bindings
         let expr = format!(
-            "(let* ((compose (fn (f g) (fn (x) (f (g x)))))
-                    (add1 (fn (x) (+ x 1)))
-                    (double (fn (x) (* x 2)))
-                    (composed (compose add1 double)))
+            "(let* [compose (fn (f g) (fn (x) (f (g x))))
+                    add1 (fn (x) (+ x 1))
+                    double (fn (x) (* x 2))
+                    composed (compose add1 double)]
                 (composed {}))",
             a
         );
@@ -966,7 +963,7 @@ proptest! {
     #[test]
     fn apply_n_times(n in 1usize..5, start in 0i64..20) {
         // Apply increment n times
-        let mut expr = "(let ((inc (fn (x) (+ x 1)))) ".to_string();
+        let mut expr = "(let [inc (fn (x) (+ x 1))] ".to_string();
         for _ in 0..n {
             expr.push_str("(inc ");
         }
@@ -994,7 +991,7 @@ proptest! {
     fn manual_curry_add(a in -50i64..50, b in -50i64..50) {
         // curry: (a, b) -> a -> b -> result
         let expr = format!(
-            "(let ((curry-add (fn (a) (fn (b) (+ a b)))))
+            "(let [curry-add (fn (a) (fn (b) (+ a b)))]
                ((curry-add {}) {}))",
             a, b
         );
@@ -1015,7 +1012,7 @@ proptest! {
     #[test]
     fn recursive_factorial(n in 0u8..8) {
         let expr = format!(
-            "(letrec ((fact (fn (n) (if (<= n 1) 1 (* n (fact (- n 1)))))))
+            "(letrec [fact (fn (n) (if (<= n 1) 1 (* n (fact (- n 1)))))]
                (fact {}))",
             n
         );
@@ -1030,7 +1027,7 @@ proptest! {
     #[test]
     fn recursive_sum(n in 0u8..20) {
         let expr = format!(
-            "(letrec ((sum-to (fn (n) (if (<= n 0) 0 (+ n (sum-to (- n 1)))))))
+            "(letrec [sum-to (fn (n) (if (<= n 0) 0 (+ n (sum-to (- n 1)))))]
                (sum-to {}))",
             n
         );
@@ -1046,7 +1043,7 @@ proptest! {
         let elements: Vec<String> = (0..len).map(|i| i.to_string()).collect();
         let list_str = elements.join(" ");
         let expr = format!(
-            "(letrec ((my-length (fn (lst) (if (empty? lst) 0 (+ 1 (my-length (rest lst)))))))
+            "(letrec [my-length (fn (lst) (if (empty? lst) 0 (+ 1 (my-length (rest lst)))))]
                (my-length (list {})))",
             list_str
         );
@@ -1059,7 +1056,7 @@ proptest! {
     #[test]
     fn tail_recursive_sum(n in 0u8..50) {
         let expr = format!(
-            "(letrec ((sum-iter (fn (n acc) (if (<= n 0) acc (sum-iter (- n 1) (+ acc n))))))
+            "(letrec [sum-iter (fn (n acc) (if (<= n 0) acc (sum-iter (- n 1) (+ acc n))))]
                (sum-iter {} 0))",
             n
         );
@@ -1073,8 +1070,7 @@ proptest! {
     #[test]
     fn mutual_recursion_even_odd(n in 0u8..20) {
         let expr = format!(
-            "(letrec ((is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))))
-                      (is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))))
+            "(letrec [is-even (fn (n) (if (= n 0) true (is-odd (- n 1)))) is-odd (fn (n) (if (= n 0) false (is-even (- n 1))))]
                (is-even {}))",
             n
         );
@@ -1095,7 +1091,7 @@ proptest! {
     #[test]
     fn store_function_in_list(a in -50i64..50, b in -50i64..50) {
         let expr = format!(
-            "(let ((fns (list (fn (x) (+ x 1)) (fn (x) (* x 2)))))
+            "(let [fns (list (fn (x) (+ x 1)) (fn (x) (* x 2)))]
                (+ ((first fns) {}) ((first (rest fns)) {})))",
             a, b
         );
@@ -1109,7 +1105,7 @@ proptest! {
     fn function_returning_function_returning_value(a in -30i64..30, b in -30i64..30) {
         // Test a function that returns a function that returns a value
         let expr = format!(
-            "(let ((f (fn (x) (fn (y) (+ x y)))))
+            "(let [f (fn (x) (fn (y) (+ x y)))]
                ((f {}) {}))",
             a, b
         );
@@ -1130,7 +1126,7 @@ proptest! {
     #[test]
     fn map_adds_one(a in -50i64..50, b in -50i64..50, c in -50i64..50) {
         let expr = format!(
-            "(let ((result (map (fn (x) (+ x 1)) (list {} {} {}))))
+            "(let [result (map (fn (x) (+ x 1)) (list {} {} {}))]
                (+ (first result) (+ (first (rest result)) (first (rest (rest result))))))",
             a, b, c
         );
@@ -1143,7 +1139,7 @@ proptest! {
     #[test]
     fn map_doubles(a in -30i64..30, b in -30i64..30) {
         let expr = format!(
-            "(let ((result (map (fn (x) (* x 2)) (list {} {}))))
+            "(let [result (map (fn (x) (* x 2)) (list {} {}))]
                (list (first result) (first (rest result))))",
             a, b
         );
@@ -1272,8 +1268,8 @@ proptest! {
     fn map_with_closure_capture(n in -20i64..20, a in -20i64..20, b in -20i64..20) {
         // Closure captures n from outer scope
         let expr = format!(
-            "(let ((n {}))
-                (let ((result (map (fn (x) (+ x n)) (list {} {}))))
+            "(let [n {}]
+                (let [result (map (fn (x) (+ x n)) (list {} {}))]
                   (+ (first result) (first (rest result)))))",
             n, a, b
         );
@@ -1486,7 +1482,7 @@ proptest! {
     fn deeply_nested_lambdas_with_locals(a in 1i64..10, b in 1i64..10) {
         // Three levels of nested lambdas, each with its own local define
         let expr = format!(
-            "(let ((outer (fn (x)
+            "(let [outer (fn (x)
                             (begin
                               (var outer-local (* x 2))
                               (fn (y)
@@ -1495,7 +1491,7 @@ proptest! {
                                   (fn (z)
                                     (begin
                                       (var inner-local (* z middle-local))
-                                      inner-local))))))))
+                                      inner-local))))))]
                (((outer {}) {}) 3))",
             a, b
         );
@@ -1513,11 +1509,11 @@ proptest! {
         // Inner lambda defines a local with same name as captured variable
         // The local should shadow the capture within the inner scope
         let expr = format!(
-            "(let ((x {}))
-               (let ((f (fn ()
+            "(let [x {}]
+               (let [f (fn ()
                           (begin
                             (var x {})
-                            x))))
+                            x))]
                  (+ (f) x)))",
             outer_val, inner_val
         );
@@ -1534,18 +1530,16 @@ proptest! {
         // Two closures created in the same scope, each with its own local define
         // Their locals should be independent
         let expr = format!(
-            "(let ((make-f1 (fn ()
+            "(let [make-f1 (fn ()
                               (fn (x)
                                 (begin
                                   (var local (* x 2))
-                                  local))))
-                   (make-f2 (fn ()
+                                  local))) make-f2 (fn ()
                               (fn (x)
                                 (begin
                                   (var local (* x 3))
-                                  local)))))
-               (let ((f1 (make-f1))
-                     (f2 (make-f2)))
+                                  local)))]
+               (let [f1 (make-f1) f2 (make-f2)]
                  (+ (f1 {}) (f2 {}))))",
             a, b
         );
@@ -1568,10 +1562,9 @@ proptest! {
     fn letrec_mutual_recursion_in_lambda(n in 0u8..20) {
         // Mutual recursion inside a lambda using letrec
         let expr = format!(
-            "(let ((check (fn ()
-                            (letrec ((is-even (fn (x) (if (= x 0) true (is-odd (- x 1)))))
-                                     (is-odd (fn (x) (if (= x 0) false (is-even (- x 1))))))
-                              (is-even {})))))
+            "(let [check (fn ()
+                            (letrec [is-even (fn (x) (if (= x 0) true (is-odd (- x 1)))) is-odd (fn (x) (if (= x 0) false (is-even (- x 1))))]
+                              (is-even {})))]
                (check))",
             n
         );
@@ -1585,9 +1578,9 @@ proptest! {
     fn nested_letrec_different_scopes(a in 1i64..10, b in 1i64..10) {
         // Nested letrec blocks with independent bindings
         let expr = format!(
-            "(letrec ((outer (fn (x)
-                              (letrec ((inner (fn (y) (* x y))))
-                                (inner {})))))
+            "(letrec [outer (fn (x)
+                              (letrec [inner (fn (y) (* x y))]
+                                (inner {})))]
                (outer {}))",
             b, a
         );
@@ -1601,9 +1594,8 @@ proptest! {
     fn letrec_with_captured_outer_var(outer in 1i64..20, n in 0u8..10) {
         // letrec where inner functions capture outer scope
         let expr = format!(
-            "(let ((base {}))
-               (letrec ((add-base (fn (x) (+ base x)))
-                        (double-add (fn (x) (add-base (add-base x)))))
+            "(let [base {}]
+               (letrec [add-base (fn (x) (+ base x)) double-add (fn (x) (add-base (add-base x)))]
                  (double-add {})))",
             outer, n
         );
@@ -1618,11 +1610,11 @@ proptest! {
     fn self_recursive_with_local_define(n in 1u8..10) {
         // Self-recursion with local define (not mutual - this should work)
         let expr = format!(
-            "(let ((compute (fn (x)
+            "(let [compute (fn (x)
                               (begin
                                 (def helper (fn (n acc)
                                   (if (= n 0) acc (helper (- n 1) (+ acc n)))))
-                                (helper x 0)))))
+                                (helper x 0)))]
                (compute {}))",
             n
         );
@@ -1641,9 +1633,8 @@ proptest! {
             calls.push_str("(inc) ");
         }
         let expr = format!(
-            "(let ((n 0))
-               (letrec ((inc (fn () (begin (assign n (+ n 1)) n)))
-                        (get (fn () n)))
+            "(let [n 0]
+               (letrec [inc (fn () (begin (assign n (+ n 1)) n)) get (fn () n)]
                  (begin {} (get))))",
             calls
         );
@@ -1657,9 +1648,7 @@ proptest! {
     fn three_way_mutual_letrec(n in 0u8..15) {
         // Three mutually recursive functions
         let expr = format!(
-            "(letrec ((f (fn (x) (if (= x 0) \"f\" (g (- x 1)))))
-                      (g (fn (x) (if (= x 0) \"g\" (h (- x 1)))))
-                      (h (fn (x) (if (= x 0) \"h\" (f (- x 1))))))
+            "(letrec [f (fn (x) (if (= x 0) \"f\" (g (- x 1)))) g (fn (x) (if (= x 0) \"g\" (h (- x 1)))) h (fn (x) (if (= x 0) \"h\" (f (- x 1))))]
                (f {}))",
             n
         );
@@ -1679,9 +1668,7 @@ proptest! {
     fn letrec_with_higher_order(a in 1i64..10, b in 1i64..10, _c in 1i64..10) {
         // letrec where functions take other functions as arguments
         let expr = format!(
-            "(letrec ((apply-twice (fn (f x) (f (f x))))
-                      (add-one (fn (x) (+ x 1)))
-                      (double (fn (x) (* x 2))))
+            "(letrec [apply-twice (fn (f x) (f (f x))) add-one (fn (x) (+ x 1)) double (fn (x) (* x 2))]
                (+ (apply-twice add-one {})
                   (apply-twice double {})))",
             a, b
@@ -1698,10 +1685,10 @@ proptest! {
     fn nested_lambda_with_define_no_forward_ref(a in 1i64..20, b in 1i64..20) {
         // Local define without forward references should work
         let expr = format!(
-            "(let ((outer (fn (x)
+            "(let [outer (fn (x)
                             (begin
                               (var local (* x 2))
-                              (fn (y) (+ local y))))))
+                              (fn (y) (+ local y))))]
                ((outer {}) {}))",
             a, b
         );
@@ -1715,12 +1702,12 @@ proptest! {
     fn sequential_defines_no_mutual(a in 1i64..10, b in 1i64..10) {
         // Sequential defines where second uses first (not mutual)
         let expr = format!(
-            "(let ((compute (fn ()
+            "(let [compute (fn ()
                               (begin
                                 (var x {})
                                 (var y (+ x {}))
                                 (var z (* x y))
-                                z))))
+                                z))]
                (compute))",
             a, b
         );

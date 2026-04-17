@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # vm/config tests
 #
 # Tests the unified runtime configuration system: vm/config read/write,
@@ -6,7 +7,7 @@
 # ── vm/config basics — reading the config struct ──────────────────────
 
 # vm/config returns a struct
-(let [[cfg (vm/config)]]
+(let [cfg (vm/config)]
   (assert (struct? cfg) "vm/config returns a struct"))
 
 # Reading specific fields
@@ -14,7 +15,7 @@
 (assert (keyword? (vm/config :wasm)) "vm/config :wasm returns a keyword")
 
 # Trace is a set (possibly empty)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (set? t) "vm/config :trace returns a set"))
 
 # ── JIT policy keywords ──────────────────────────────────────────────
@@ -61,7 +62,7 @@
 
 # Multiple trace keywords
 (vm/config-set :trace |:call :signal :fiber|)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (contains? t :call) "trace set contains :call")
   (assert (contains? t :signal) "trace set contains :signal")
   (assert (contains? t :fiber) "trace set contains :fiber"))
@@ -75,7 +76,7 @@
 # These keywords should be accepted in trace sets without error,
 # even though the subsystems don't exist yet.
 (vm/config-set :trace |:spirv :mlir :gpu|)
-(let [[t (vm/config :trace)]]
+(let [t (vm/config :trace)]
   (assert (contains? t :spirv) "future flag :spirv accepted")
   (assert (contains? t :mlir) "future flag :mlir accepted")
   (assert (contains? t :gpu) "future flag :gpu accepted"))
@@ -101,7 +102,7 @@
 # ── Config struct fields ──────────────────────────────────────────────
 
 # The full config struct should have expected keys
-(let [[cfg (vm/config)]]
+(let [cfg (vm/config)]
   (assert (has-key? cfg :jit) "config has :jit key")
   (assert (has-key? cfg :wasm) "config has :wasm key")
   (assert (has-key? cfg :trace) "config has :trace key")
@@ -109,6 +110,6 @@
 
 # ── Boolean config fields ────────────────────────────────────────────
 
-(let [[cfg (vm/config)]]
+(let [cfg (vm/config)]
   # stats defaults to false
   (assert (= (get cfg :stats) false) "stats defaults to false"))

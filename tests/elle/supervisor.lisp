@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## tests/elle/supervisor.lisp — Tests for supervisor improvements
 ##
 ## Tests for: max-restarts, logger, make-subprocess-child,
@@ -18,8 +19,8 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)]
-        [events @[]])
+  (let [me (process:self)
+        events @[]]
     (process:supervisor-start-link
       [{:id :logged-child :restart :temporary
         :start (fn []
@@ -32,7 +33,7 @@
     (process:recv)  # :started
 
     # Collect the :child-started log event
-    (let ([msg (process:recv)])
+    (let [msg (process:recv)]
       (match msg
         ([:log event]
           (assert (= (get event :event) :child-started)
@@ -48,7 +49,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :crasher :restart :permanent
         :start (fn []
@@ -64,9 +65,9 @@
     (process:recv)  # [:log {:event :child-started ...}]
 
     # Crash the child
-    (let ([pid (process:whereis :log-sup2)])
+    (let [pid (process:whereis :log-sup2)]
       # Find child pid from which-children
-      (let ([kids (process:supervisor-which-children :log-sup2)])
+      (let [kids (process:supervisor-which-children :log-sup2)]
         (process:send (get (get kids 0) :pid) :crash)))
 
     # Should get: exit log, restarting log, started log, then :started msg
@@ -74,7 +75,7 @@
     (var got-restarting false)
     (var count 0)
     (while (< count 10)
-      (let ([msg (process:recv)])
+      (let [msg (process:recv)]
         (match msg
           ([:log event]
             (when (= (get event :event) :child-exited)
@@ -96,7 +97,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (var start-count 0)
 
     (process:supervisor-start-link
@@ -133,7 +134,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :normal-exiter :restart :permanent
         :start (fn []
@@ -163,7 +164,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :trans-crash :restart :transient
         :start (fn []
@@ -189,7 +190,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (var attempts 0)
     (process:supervisor-start-link
       [{:id :bad-start :restart :permanent
@@ -224,7 +225,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :a :restart :permanent
         :start (fn []
@@ -268,7 +269,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (var crash-count 0)
     (process:supervisor-start-link
       [{:id :unlimited :restart :permanent
@@ -301,7 +302,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:trap-exit true)
     (process:supervisor-start-link
       [{:id :bridge :restart :permanent :ready true
@@ -334,7 +335,7 @@
     (assert (= (get events 2) [:starting :client]) "ready: client starts after bridge ready")
 
     # Cleanup
-    (let ([sup-pid (process:whereis :ready-sup)])
+    (let [sup-pid (process:whereis :ready-sup)]
       (process:exit sup-pid :shutdown))))
   :fuel 5000)
 (println "  9. readiness protocol: ok")
@@ -345,7 +346,7 @@
 # ============================================================================
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :crash-before-ready :restart :temporary :ready true
         :start (fn []

@@ -330,11 +330,11 @@ When a closure is passed to a function with a signal bound, the runtime checks t
 
 # Runtime squelch transform
 (defn safe-apply (f x)
-  (let ((safe-f (squelch f :yield)))  # returns a new closure
+  (let [safe-f (squelch f :yield)]  # returns a new closure
     (safe-f x)))
 
 (defn safe-iterate (f xs)
-  (let ((safe-f (squelch f :yield)))  # f must not yield; other signals allowed
+  (let [safe-f (squelch f :yield)]  # f must not yield; other signals allowed
     (map safe-f xs)))
 ```
 

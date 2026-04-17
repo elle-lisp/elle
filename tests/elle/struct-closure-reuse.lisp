@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Regression test: cross-function tail calls must not corrupt closures
 # via slab pool rotation. A letrec closure creates capture cells during
 # execution; if slab rotation frees these prematurely (treating a cross-
@@ -9,9 +10,9 @@
 # See contracts.lisp for the full reproduction.
 
 (def f (fn [x]
-         (letrec [[loop (fn [i]
+         (letrec [loop (fn [i]
                    (if (>= i 3) {:fail x}
-                     (if (= x i) nil (loop (+ i 1)))))]]
+                     (if (= x i) nil (loop (+ i 1)))))]
            (loop 0))))
 
 # Direct calls work (no cross-function rotation)

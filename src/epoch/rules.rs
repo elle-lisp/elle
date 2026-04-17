@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 6;
+pub const CURRENT_EPOCH: u64 = 7;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -51,6 +51,11 @@ pub enum MigrationRule {
         arity: usize,
         template: &'static str,
     },
+    /// Flatten nested-pair binding vectors into flat alternating pairs.
+    /// Matches `(symbol [[p1 v1] [p2 v2] ...] body...)` where the
+    /// bindings container has children that are all 2-element lists/arrays,
+    /// and splices each child's contents into the parent container.
+    FlattenBindings { symbols: &'static [&'static str] },
 }
 
 /// All registered migrations, ordered by epoch.
@@ -102,12 +107,12 @@ static MIGRATIONS: &[Migration] = &[
             MigrationRule::Replace {
                 symbol: "assert-err",
                 arity: 2,
-                template: "(let (([ok? _] (protect ($1)))) (assert (not ok?) $2))",
+                template: "(let [[ok? _] (protect ($1))] (assert (not ok?) $2))",
             },
             MigrationRule::Replace {
                 symbol: "assert-err-kind",
                 arity: 3,
-                template: "(let (([ok? err] (protect ($1)))) (assert (not ok?) $3) (assert (= (get err :error) $2) $3))",
+                template: "(let [[ok? err] (protect ($1))] (assert (not ok?) $3) (assert (= (get err :error) $2) $3))",
             },
         ],
     },
@@ -192,6 +197,13 @@ static MIGRATIONS: &[Migration] = &[
             message: "user code already runs in the async scheduler; remove the ev/run wrapper",
         }],
     },
+    Migration {
+        epoch: 7,
+        summary: "flat let bindings — (let [a 1 b 2] ...) instead of (let [[a 1] [b 2]] ...)",
+        rules: &[MigrationRule::FlattenBindings {
+            symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
+        }],
+    },
 ];
 
 /// Get all migrations for epochs in the range (from, to].
@@ -251,6 +263,23 @@ pub fn unwrap_rules_in_range(from: u64, to: u64) -> HashMap<&'static str, &'stat
         for rule in migration.rules {
             if let MigrationRule::Unwrap { symbol, message } = rule {
                 result.insert(*symbol, *message);
+            }
+        }
+    }
+    result
+}
+
+/// Collect all flatten-bindings rules in a range as sets of symbols.
+pub fn flatten_rules_in_range(from: u64, to: u64) -> Vec<&'static str> {
+    let mut result = Vec::new();
+    for migration in migrations_in_range(from, to) {
+        for rule in migration.rules {
+            if let MigrationRule::FlattenBindings { symbols } = rule {
+                for sym in *symbols {
+                    if !result.contains(sym) {
+                        result.push(sym);
+                    }
+                }
             }
         }
     }
@@ -319,6 +348,18 @@ mod tests {
         let removals = removals_in_range(0, CURRENT_EPOCH);
         assert!(removals.contains_key("write"));
         assert_eq!(removals.len(), 1);
+    }
+
+    #[test]
+    fn test_flatten_rules_epoch_7() {
+        let flattens = flatten_rules_in_range(0, CURRENT_EPOCH);
+        assert!(flattens.contains(&"let"));
+        assert!(flattens.contains(&"letrec"));
+        assert!(flattens.contains(&"let*"));
+        assert!(flattens.contains(&"if-let"));
+        assert!(flattens.contains(&"when-let"));
+        assert!(flattens.contains(&"when-ok"));
+        assert_eq!(flattens.len(), 6);
     }
 
     #[test]

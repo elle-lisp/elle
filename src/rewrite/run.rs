@@ -5,8 +5,8 @@ use super::engine::collect_edits;
 use super::rule::{RenameSymbol, RewriteRule};
 use crate::epoch::detect_epoch_in_source;
 use crate::epoch::rules::{
-    collapsed_renames, removals_in_range, replace_rules_in_range, unwrap_rules_in_range,
-    CURRENT_EPOCH,
+    collapsed_renames, flatten_rules_in_range, removals_in_range, replace_rules_in_range,
+    unwrap_rules_in_range, CURRENT_EPOCH,
 };
 use crate::reader::{Lexer, Token};
 use std::collections::HashMap;
@@ -61,6 +61,13 @@ pub fn run(args: &[String]) -> i32 {
             let unwraps = unwrap_rules_in_range(0, CURRENT_EPOCH);
             for (sym, msg) in &unwraps {
                 println!("  unwrap:  {} ({})", sym, msg);
+            }
+            let flattens = flatten_rules_in_range(0, CURRENT_EPOCH);
+            if !flattens.is_empty() {
+                println!(
+                    "  flatten: {} (nested-pair → flat bindings)",
+                    flattens.join(", ")
+                );
             }
         }
         return 0;
@@ -148,6 +155,23 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         Vec::new()
     };
 
+    // Collect flatten edits: [[p1 v1] [p2 v2]] → [p1 v1 p2 v2]
+    let flatten_edits = if let Some(epoch) = file_epoch {
+        let flattens = flatten_rules_in_range(epoch, CURRENT_EPOCH);
+        if flattens.is_empty() {
+            Vec::new()
+        } else {
+            collect_flatten_edits(source, &flattens)?
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Normalize paren-delimited binding vectors to brackets:
+    // (let (name val) ...) → (let [name val] ...)
+    let binding_forms = &["let", "letrec", "let*", "if-let", "when-let", "when-ok"];
+    let bracket_edits = collect_bracket_edits(source, binding_forms)?;
+
     // Collect replace edits (syntax-level, whole-form rewrites)
     let replace_edits = if let Some(epoch) = file_epoch {
         let replaces = replace_rules_in_range(epoch, CURRENT_EPOCH);
@@ -177,9 +201,14 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
     let rules: Vec<&dyn RewriteRule> = rename_rule.iter().map(|r| r as &dyn RewriteRule).collect();
     let mut edits = collect_edits(source, &rules)?;
 
-    // Merge all structural edits (unwrap + replace), filtering out
+    // Merge all structural edits (unwrap + replace + flatten), filtering out
     // rename edits that fall within their spans.
-    let structural_edits: Vec<Edit> = replace_edits.into_iter().chain(unwrap_edits).collect();
+    let structural_edits: Vec<Edit> = replace_edits
+        .into_iter()
+        .chain(unwrap_edits)
+        .chain(flatten_edits)
+        .chain(bracket_edits)
+        .collect();
     if !structural_edits.is_empty() {
         edits.retain(|edit| {
             !structural_edits.iter().any(|re| {
@@ -190,25 +219,29 @@ fn rewrite_file(source: &str, file_path: &str) -> Result<Option<(String, usize)>
         edits.extend(structural_edits);
     }
 
-    // Remove the old epoch tag (if present) and inject the current epoch as
-    // the first form — after the shebang line if one exists.
-    if let Some(info) = &epoch_info {
-        // Consume trailing whitespace/newline so we don't leave a blank line.
-        let mut end = info.byte_end;
-        while end < source.len() && source.as_bytes()[end] == b' ' {
-            end += 1;
-        }
-        if end < source.len() && source.as_bytes()[end] == b'\n' {
-            end += 1;
-        }
-        edits.push(Edit {
-            byte_offset: info.byte_start,
-            byte_len: end - info.byte_start,
-            replacement: String::new(),
-        });
-    }
+    // Update the epoch tag: replace old tag with current, or add if missing.
+    // Files should always carry an epoch tag for forward compatibility.
+    let needs_epoch_update = match &epoch_info {
+        Some(info) if info.epoch == CURRENT_EPOCH => false, // already current
+        _ => true,                                          // old epoch or no epoch tag
+    };
 
-    if !edits.is_empty() {
+    if needs_epoch_update {
+        // Remove old epoch tag if present.
+        if let Some(info) = &epoch_info {
+            let mut end = info.byte_end;
+            while end < source.len() && source.as_bytes()[end] == b' ' {
+                end += 1;
+            }
+            if end < source.len() && source.as_bytes()[end] == b'\n' {
+                end += 1;
+            }
+            edits.push(Edit {
+                byte_offset: info.byte_start,
+                byte_len: end - info.byte_start,
+                replacement: String::new(),
+            });
+        }
         // Insert current epoch as the first form, after the shebang if present.
         let insert_offset = if source.starts_with("#!") {
             source.find('\n').map(|i| i + 1).unwrap_or(source.len())
@@ -536,6 +569,189 @@ fn skip_pipe_form(tokens: &[(Token<'_>, usize, usize)], start: usize) -> usize {
     pos
 }
 
+/// Lex source and collect edits that flatten nested-pair binding vectors.
+/// Matches `( let|letrec [ [p1 v1] [p2 v2] ... ] body... )` and deletes
+/// the inner `[`/`]` (or `(`/`)`) delimiters, leaving the contents flat.
+fn collect_flatten_edits(source: &str, flatten_syms: &[&str]) -> Result<Vec<Edit>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        // Look for `(` symbol `[`  where symbol is in flatten_syms
+        if matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
+            if let Some((Token::Symbol(s), _, _)) = tokens.get(i + 1) {
+                if flatten_syms.contains(s) {
+                    if let Some(new_edits) = try_match_flatten(source, &tokens, i) {
+                        edits.extend(new_edits);
+                        // Don't skip the whole form — advance past `(` and symbol
+                        // so nested let/letrec forms in the body are still visited.
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    Ok(edits)
+}
+
+/// Try to flatten the bindings vector of a let/letrec form at token `i`.
+/// Returns edits that delete the inner pair delimiters if the form matches
+/// the nested-pair pattern.
+fn try_match_flatten(
+    _source: &str,
+    tokens: &[(Token<'_>, usize, usize)],
+    i: usize,
+) -> Option<Vec<Edit>> {
+    // tokens[i] = `(`, tokens[i+1] = let/letrec, tokens[i+2] should be `[` or `(`
+    let bindings_open = i + 2;
+    if bindings_open >= tokens.len() {
+        return None;
+    }
+    let open_token = &tokens[bindings_open].0;
+    if !matches!(open_token, Token::LeftBracket | Token::LeftParen) {
+        return None;
+    }
+
+    // Find the matching close of the bindings container
+    let bindings_close = skip_balanced_form(tokens, bindings_open);
+    if bindings_close == 0 {
+        return None;
+    }
+    let close_idx = bindings_close - 1; // index of the `]` or `)` token
+
+    // Walk direct children of the bindings container.
+    // Each child must be a 2-element list/array (the nested-pair format).
+    // If any child is an atom, it's already flat — skip.
+    let mut pairs: Vec<(usize, usize)> = Vec::new(); // (open_idx, close_idx) for each inner pair
+    let mut pos = bindings_open + 1; // skip the opening `[` of bindings
+    while pos < close_idx {
+        match &tokens[pos].0 {
+            Token::LeftBracket | Token::LeftParen => {
+                let pair_open = pos;
+                let pair_close_next = skip_balanced_form(tokens, pos);
+                if pair_close_next == 0 {
+                    return None;
+                }
+                let pair_close = pair_close_next - 1;
+
+                // Count the children of this inner form to verify it has exactly 2
+                let mut child_count = 0;
+                let mut child_pos = pair_open + 1;
+                while child_pos < pair_close {
+                    child_count += 1;
+                    child_pos = skip_one_form(tokens, child_pos);
+                }
+
+                if child_count != 2 {
+                    // Not a 2-element pair — this might be a destructuring pattern
+                    // in an already-flat binding. Skip this form entirely.
+                    return None;
+                }
+
+                pairs.push((pair_open, pair_close));
+                pos = pair_close_next;
+            }
+            _ => {
+                // Atom found at top level of bindings — already flat
+                return None;
+            }
+        }
+    }
+
+    if pairs.is_empty() {
+        return None;
+    }
+
+    // Generate edits: for each inner pair, delete the opening and closing delimiters.
+    // We need to handle whitespace carefully — consume trailing whitespace after the
+    // opening delimiter and leading whitespace before the closing delimiter.
+    let mut edits = Vec::new();
+    for &(open_idx, close_idx) in &pairs {
+        let open_byte = tokens[open_idx].1;
+        // Delete the opening delimiter. Also consume any whitespace between it and
+        // the first child form.
+        let next_byte = tokens[open_idx + 1].1;
+        edits.push(Edit {
+            byte_offset: open_byte,
+            byte_len: next_byte - open_byte,
+            replacement: String::new(),
+        });
+
+        // Delete the closing delimiter. Also consume whitespace before it.
+        let close_byte = tokens[close_idx].1;
+        let close_len = tokens[close_idx].2;
+        let prev_end_idx = close_idx - 1;
+        let prev_end = tokens[prev_end_idx].1 + tokens[prev_end_idx].2;
+        edits.push(Edit {
+            byte_offset: prev_end,
+            byte_len: close_byte + close_len - prev_end,
+            replacement: String::new(),
+        });
+    }
+
+    Some(edits)
+}
+
+/// Normalize paren-delimited binding vectors to brackets.
+/// Matches `(let|letrec|let*|if-let|when-let|when-ok (bindings...) body...)`
+/// where the bindings container uses `(...)` and replaces with `[...]`.
+fn collect_bracket_edits(source: &str, binding_forms: &[&str]) -> Result<Vec<Edit>, String> {
+    let mut lexer = Lexer::new(source);
+    let mut tokens: Vec<(Token<'_>, usize, usize)> = Vec::new();
+    loop {
+        match lexer.next_token_with_loc() {
+            Ok(Some(t)) => tokens.push((t.token, t.byte_offset, t.len)),
+            Ok(None) => break,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    let mut edits = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        // Look for `( symbol (` where symbol is a binding form and the
+        // bindings container uses parens instead of brackets.
+        if matches!(tokens.get(i), Some((Token::LeftParen, _, _))) {
+            if let Some((Token::Symbol(s), _, _)) = tokens.get(i + 1) {
+                if binding_forms.contains(s) {
+                    if let Some((Token::LeftParen, open_byte, open_len)) = tokens.get(i + 2) {
+                        // Find the matching close paren
+                        let close_next = skip_balanced_form(&tokens, i + 2);
+                        if close_next > 0 {
+                            let close_idx = close_next - 1;
+                            let (_, close_byte, close_len) = tokens[close_idx];
+                            // Replace `(` with `[` and `)` with `]`
+                            edits.push(Edit {
+                                byte_offset: *open_byte,
+                                byte_len: *open_len,
+                                replacement: "[".to_string(),
+                            });
+                            edits.push(Edit {
+                                byte_offset: close_byte,
+                                byte_len: close_len,
+                                replacement: "]".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    Ok(edits)
+}
+
 fn print_help() {
     println!("elle rewrite - Source-to-source rewriting tool");
     println!();
@@ -620,14 +836,16 @@ mod tests {
 
     #[test]
     fn test_rewrite_no_epoch_tag_injects_one() {
-        // File at epoch 0 without an explicit tag — the reader assumes current
-        // epoch, so no rewrites fire and no epoch tag is injected.
-        // This is correct: only files that need migration get the tag.
+        // File without an epoch tag gets one added (current epoch).
         let source = "(println \"hello\")\n";
         let result = rewrite_file(source, "<test>").unwrap();
+        assert!(result.is_some(), "epoch tag should be injected");
+        let (new_source, _) = result.unwrap();
+        let epoch_line = format!("(elle/epoch {})\n", CURRENT_EPOCH);
         assert!(
-            result.is_none(),
-            "no rewrites expected for current-epoch file"
+            new_source.starts_with(&epoch_line),
+            "epoch tag should be first form, got: {:?}",
+            &new_source[..new_source.len().min(80)]
         );
     }
 }

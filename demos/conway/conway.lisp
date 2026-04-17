@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 # Conway's Game of Life — SDL3 demo
 #
@@ -87,7 +88,7 @@
     (var i (+ (* r cols) 1))
     (var c 1)
     (while (< c (- cols 1))
-      (let ([n (count-neighbors-fast g i)])
+      (let [n (count-neighbors-fast g i)]
         (when (or (= n 3) (and (= (get g i) 1) (= n 2)))
           (put nxt i 1)))
       (assign i (+ i 1))
@@ -130,7 +131,7 @@
           @[2 5] @[3 5] @[4 5]
           @[5 2] @[5 3] @[5 4]))
   (each off offsets
-    (let ([dr (off 0)] [dc (off 1)])
+    (let [dr (off 0) dc (off 1)]
       (set-cell g (+ r dr)         (+ c dc)         1)
       (set-cell g (+ r dr)         (- (+ c 12) dc)  1)
       (set-cell g (- (+ r 12) dr)  (+ c dc)         1)
@@ -167,8 +168,8 @@
   (var i 0)
   (while (< i ncells)
     (when (nonzero? (g i))
-      (let* ([c (mod i cols)]
-             [r (/ (- i c) cols)])
+      (let* [c (mod i cols)
+             r (/ (- i c) cols)]
         (sdl:fill-rect ren
           (float (+ (* c cell) 1)) (float (+ (* r cell) 1))
           (float (- cell 2))       (float (- cell 2)))))
@@ -211,8 +212,8 @@
 (defn handle-mouse [state ev]
   (when (or (= ev:type :mouse-down)
             (and (= ev:type :mouse-motion) (nonzero? ev:state)))
-    (let* ([gc (int (/ ev:x (float cell)))]
-           [gr (int (/ ev:y (float cell)))])
+    (let* [gc (int (/ ev:x (float cell)))
+           gr (int (/ ev:y (float cell)))]
       (when (and (>= gr 0) (< gr rows) (>= gc 0) (< gc cols))
         (set-cell (state :grid) gr gc
           (if (= ev:type :mouse-down)
@@ -265,7 +266,7 @@
 
     # FPS counter
     (assign frame-count (+ frame-count 1))
-    (let ([now (sdl:ticks)])
+    (let [now (sdl:ticks)]
       (when (>= (- now last-tick) 1000)
         (assign fps frame-count)
         (assign frame-count 0)

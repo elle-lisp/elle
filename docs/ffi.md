@@ -257,8 +257,8 @@ functions to be passed to C APIs that expect function pointer arguments
 ```lisp
 (def cmp-sig (ffi/signature :int [:ptr :ptr]))
 (def cmp-fn (fn (a b)
-  (let ((va (ffi/read a :int))
-        (vb (ffi/read b :int)))
+  (let [va (ffi/read a :int)
+        vb (ffi/read b :int)]
     (- va vb))))
 
 (def cb-ptr (ffi/callback cmp-sig cmp-fn))
@@ -330,8 +330,8 @@ wrapper function — all at definition time.
 
 ```lisp
 (def abs
-  (let ((ptr__ (ffi/lookup libc "abs"))
-        (sig__ (ffi/signature :int [:int])))
+  (let [ptr__ (ffi/lookup libc "abs")
+        sig__ (ffi/signature :int [:int])]
     (fn (a0) (ffi/call ptr__ sig__ a0))))
 ```
 

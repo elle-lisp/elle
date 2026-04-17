@@ -64,7 +64,7 @@ subset of the other).
 Example:
 ```lisp
 (defmacro inc (x) `(+ ,x 1))
-(let ((+ -))  ; Shadow + with -
+(let [+ -]  ; Shadow + with -
   (inc 5))    ; Still uses +, not -, because macro's + has different scope
 ```
 

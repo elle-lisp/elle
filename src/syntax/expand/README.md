@@ -34,7 +34,7 @@ Each expansion adds a fresh `ScopeId` to introduced identifiers. Two identifiers
 
 ```janet
 (defmacro inc (x) `(+ ,x 1))
-(let ((+ -))  ; Shadow + with -
+(let [+ -]  ; Shadow + with -
   (inc 5))    ; Still uses +, not -, because macro's + has different scope
 ```
 

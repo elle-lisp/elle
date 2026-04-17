@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Coroutine Tests
 ##
 ## Migrated from tests/property/coroutines.rs (behavioral property tests).
@@ -40,7 +41,7 @@
 # resume_values_flow_into_yield: resume values become yield return values
 (begin
   (def gen2 (fn []
-    (let ([acc 0])
+    (let [acc 0]
       (assign acc (+ acc (yield acc)))
       acc)))
   (var co2 (make-coroutine gen2))
@@ -49,7 +50,7 @@
 
 (begin
   (def gen2b (fn []
-    (let ([acc 0])
+    (let [acc 0]
       (assign acc (+ acc (yield acc)))
       (assign acc (+ acc (yield acc)))
       acc)))
@@ -80,7 +81,7 @@
 # yield_in_loop: yield inside while loop
 (begin
   (def gen4 (fn []
-    (let ([i 0])
+    (let [i 0]
       (while (< i 3)
         (begin
           (yield i)
@@ -94,7 +95,7 @@
 
 (begin
   (def gen4b (fn []
-    (let ([i 0])
+    (let [i 0]
       (while (< i 5)
         (begin
           (yield i)
@@ -299,19 +300,19 @@
 
 # test_coroutine_with_captured_variables
 (begin
-  (let ((x 10))
+  (let [x 10]
     (var co (make-coroutine (fn [] (yield x))))
     (assert (= (coro/resume co) 10) "captured variables")))
 
 # test_coroutine_with_multiple_captured_variables
 (begin
-  (let ((x 10) (y 20))
+  (let [x 10 y 20]
     (var co (make-coroutine (fn [] (yield (+ x y)))))
     (assert (= (coro/resume co) 30) "multiple captured variables")))
 
 # test_coroutine_captures_mutable_state
 (begin
-  (let ((counter (box 0)))
+  (let [counter (box 0)]
     (var co (make-coroutine (fn []
       (rebox counter (+ (unbox counter) 1))
       (yield (unbox counter)))))
@@ -483,14 +484,14 @@
 # test_cps_yield_in_let
 (begin
   (def gen (fn []
-    (let ((x 10))
+    (let [x 10]
       (yield x))))
   (var co (make-coroutine gen))
   (assert (= (coro/resume co) 10) "CPS: yield in let"))
 
 # test_cps_yield_with_captured_var
 (begin
-  (let ((x 42))
+  (let [x 42]
     (def gen (fn [] (yield x)))
     (var co (make-coroutine gen))
     (assert (= (coro/resume co) 42) "CPS: yield with captured var")))
@@ -614,10 +615,10 @@
 # ============================================================================
 
 # resume_done_coroutine_fails
-(let (([ok? _] (protect ((fn ()
-  (let ((co (make-coroutine (fn () 42))))
+(let [[ok? _] (protect ((fn ()
+  (let [co (make-coroutine (fn () 42))]
     (coro/resume co)
-    (coro/resume co))))))) (assert (not ok?) "resuming done coroutine fails"))
+    (coro/resume co)))))] (assert (not ok?) "resuming done coroutine fails"))
 
 # ============================================================================
 # Runtime signal checks (Pure closure warnings)
@@ -625,12 +626,12 @@
 
 # test_make_coroutine_silent_closure_still_works
 (begin
-  (let ((co (make-coroutine (fn [] 42))))
+  (let [co (make-coroutine (fn [] 42))]
     (assert (= (coro/resume co) 42) "silent closure in coroutine")))
 
 # test_make_coroutine_yielding_closure_works
 (begin
-  (let ((co (make-coroutine (fn [] (yield 42)))))
+  (let [co (make-coroutine (fn [] (yield 42)))]
     (assert (= (coro/resume co) 42) "yielding closure in coroutine")))
 
 # test_coroutine_resume_silent_closure_completes_immediately
@@ -685,7 +686,7 @@
 # ============================================================================
 
 # resume_done_coroutine_fails
-(let (([ok? _] (protect ((fn ()
-  (let ((co (make-coroutine (fn () 42))))
+(let [[ok? _] (protect ((fn ()
+  (let [co (make-coroutine (fn () 42))]
     (coro/resume co)
-    (coro/resume co))))))) (assert (not ok?) "resuming done coroutine fails"))
+    (coro/resume co)))))] (assert (not ok?) "resuming done coroutine fails"))

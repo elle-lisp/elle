@@ -54,9 +54,9 @@ Each macro expansion creates a fresh `ScopeId`. Identifiers introduced by the ma
 
 ```janet
 (defmacro swap (a b)
-  `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+  `(let [tmp ,a] (set ,a ,b) (set ,b tmp)))
 
-(let ((tmp 10) (x 1) (y 2))
+(let [tmp 10 x 1 y 2]
   (swap x y)
   tmp)  ; Still 10, not affected by macro's tmp
 ```
@@ -150,7 +150,7 @@ These are loaded by `Expander::load_prelude()` before user code expansion.
 
 ```janet
 (defmacro aif (test then else)
-  `(let ((,(datum->syntax test 'it) ,test))
+  `(let [,(datum->syntax test 'it) ,test]
      (if ,(datum->syntax test 'it) ,then ,else)))
 ```
 

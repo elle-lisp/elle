@@ -20,7 +20,7 @@ The lowering phase transforms HIR into LIR by allocating stack slots, determinin
 When a variable is both captured by a closure AND mutated, it needs lbox boxing:
 
 ```janet
-(let ((counter 0))
+(let [counter 0]
   (def inc (fn () (set counter (+ counter 1))))
   (inc)
   counter)  ; Should be 1, not 0

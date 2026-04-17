@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/zmq.lisp — ZeroMQ bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libzmq. No Rust plugin needed.
@@ -96,7 +97,7 @@
   (if (= len 0) (bytes) (ffi/read ptr (ffi/array :u8 len))))
 
 (defn setsockopt-bytes [sock opt-int buf name]
-  (let* [[ptr (ffi/pin buf)]]
+  (let* [ptr (ffi/pin buf)]
     (defer (ffi/free ptr)
       (check (zmq-setsockopt sock opt-int ptr (length buf)) name))
     nil))
@@ -108,20 +109,20 @@
 
 (defn getsockopt-bytes [sock opt-int name]
   (ffi/with-stack [[szptr :size 256] [buf 256]]
-    (let* [[rc (zmq-getsockopt sock opt-int buf szptr)]
-           [result (ptr->bytes buf (ffi/read szptr :size))]]
+    (let* [rc (zmq-getsockopt sock opt-int buf szptr)
+           result (ptr->bytes buf (ffi/read szptr :size))]
       (check rc name)
       result)))
 
 (defn getsockopt-int [sock opt-int name]
   (ffi/with-stack [[buf :int 0] [szptr :size (ffi/size :int)]]
-    (let* [[rc (zmq-getsockopt sock opt-int buf szptr)]
-           [result (ffi/read buf :int)]]
+    (let* [rc (zmq-getsockopt sock opt-int buf szptr)
+           result (ffi/read buf :int)]
       (check rc name)
       result)))
 
 (defn resolve-option [opt-kw name]
-  (let [[opt-int (get option-map opt-kw)]]
+  (let [opt-int (get option-map opt-kw)]
     (when (nil? opt-int)
       (error {:error :zmq-error
               :message (concat name ": unknown option " (string opt-kw))}))
@@ -131,7 +132,7 @@
 
 (defn zmq/context []
   "Create a new ZMQ context."
-  (let [[ctx (zmq-ctx-new)]]
+  (let [ctx (zmq-ctx-new)]
     (when (null? ctx) (zmq-error "zmq/context"))
     ctx))
 
@@ -141,11 +142,11 @@
 
 (defn zmq/socket [ctx type-kw]
   "Create a socket. type-kw: :req :rep :pub :sub :push :pull :dealer :router :pair"
-  (let [[type-int (get socket-type-map type-kw)]]
+  (let [type-int (get socket-type-map type-kw)]
     (unless type-int
       (error {:error :zmq-error
               :message (concat "zmq/socket: unknown type " (string type-kw))}))
-    (let [[sock (zmq-socket ctx type-int)]]
+    (let [sock (zmq-socket ctx type-int)]
       (when (null? sock) (zmq-error "zmq/socket"))
       sock)))
 
@@ -157,24 +158,24 @@
 
 (defn zmq/send [sock data &named dontwait sndmore]
   "Send bytes or string. :dontwait true for non-blocking, :sndmore true for multipart."
-  (let* [[buf (as-bytes data)]
-         [flags (+ (if dontwait ZMQ_DONTWAIT 0)
-                   (if sndmore  ZMQ_SNDMORE  0))]
-         [ptr (ffi/pin buf)]]
+  (let* [buf (as-bytes data)
+         flags (+ (if dontwait ZMQ_DONTWAIT 0)
+                   (if sndmore  ZMQ_SNDMORE  0))
+         ptr (ffi/pin buf)]
     (defer (ffi/free ptr)
       (check (zmq-send sock ptr (length buf) flags) "zmq/send"))
     nil))
 
 (defn zmq/recv [sock &named dontwait]
   "Receive bytes. :dontwait true for non-blocking."
-  (let [[flags (if dontwait ZMQ_DONTWAIT 0)]]
+  (let [flags (if dontwait ZMQ_DONTWAIT 0)]
     (ffi/with-stack [[msg (ffi/size msg-type)]]
       (zmq-msg-init msg)
-      (let [[rc (zmq-msg-recv msg sock flags)]]
+      (let [rc (zmq-msg-recv msg sock flags)]
         (when (< rc 0)
           (zmq-msg-close msg)
           (zmq-error "zmq/recv"))
-        (let [[result (ptr->bytes (zmq-msg-data msg) (zmq-msg-size msg))]]
+        (let [result (ptr->bytes (zmq-msg-data msg) (zmq-msg-size msg))]
           (zmq-msg-close msg)
           result)))))
 
@@ -192,17 +193,17 @@
 
 (defn zmq/set-option [sock opt-kw value]
   "Set a socket option. opt-kw: :linger :sndhwm :rcvhwm :rcvtimeo :sndtimeo :identity"
-  (let [[opt-int (resolve-option opt-kw "zmq/set-option")]]
+  (let [opt-int (resolve-option opt-kw "zmq/set-option")]
     (if (contains? byte-options opt-kw)
       (setsockopt-bytes sock opt-int (as-bytes value) "zmq/set-option")
       (setsockopt-int sock opt-int value "zmq/set-option"))))
 
 (defn zmq/get-option [sock opt-kw]
   "Get a socket option."
-  (let [[opt-int (resolve-option opt-kw "zmq/get-option")]]
+  (let [opt-int (resolve-option opt-kw "zmq/get-option")]
     (if (contains? byte-options opt-kw)
       (getsockopt-bytes sock opt-int "zmq/get-option")
-      (let [[result (getsockopt-int sock opt-int "zmq/get-option")]]
+      (let [result (getsockopt-int sock opt-int "zmq/get-option")]
         (if (= opt-kw :rcvmore) (not (zero? result)) result)))))
 
 (defn zmq/has-more? [sock]
@@ -211,14 +212,14 @@
 
 (defn zmq/send-multipart [sock frames]
   "Send an array of frames as a multipart message."
-  (let [[last-idx (- (length frames) 1)]]
+  (let [last-idx (- (length frames) 1)]
     (each i in (range (length frames))
       (zmq/send sock (get frames i)
         :sndmore (< i last-idx)))))
 
 (defn zmq/recv-multipart [sock &named dontwait]
   "Receive all frames of a multipart message as an array."
-  (let [[parts @[]]]
+  (let [parts @[]]
     (push parts (zmq/recv sock :dontwait dontwait))
     (while (zmq/has-more? sock)
       (push parts (zmq/recv sock :dontwait dontwait)))

@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 ## tests/elle/aws.lisp — Elle-native AWS client test
 ##
 ## Requires AWS credentials in env:

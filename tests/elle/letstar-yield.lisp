@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Reproducer for let*-ffi-signature bug (#673 remaining)
 #
 # TRIGGER: let* + yield + &named + large letrec env from import
@@ -33,7 +34,7 @@
   (var elapsed (- (clock/monotonic) start))
   {:elapsed elapsed :result result :attrs attributes})
 
-(let [[r (time-var yielding-thunk :attributes {:a 1})]]
+(let [r (time-var yielding-thunk :attributes {:a 1})]
   (assert (number? r:elapsed) "var: elapsed is number")
   (assert (= r:result 42) "var: result is 42")
   (assert (struct? r:attrs) "var: attrs is struct"))
@@ -43,12 +44,12 @@
 # let* works fine when the thunk doesn't yield.
 
 (defn time-let [thunk &named attributes]
-  (let* [[start (clock/monotonic)]
-         [result (thunk)]
-         [elapsed (- (clock/monotonic) start)]]
+  (let* [start (clock/monotonic)
+         result (thunk)
+         elapsed (- (clock/monotonic) start)]
     {:elapsed elapsed :result result :attrs attributes}))
 
-(let [[r (time-let (fn [] 42) :attributes {:a 1})]]
+(let [r (time-let (fn [] 42) :attributes {:a 1})]
   (assert (number? r:elapsed) "let* pure: elapsed is number")
   (assert (= r:result 42) "let* pure: result is 42")
   (assert (struct? r:attrs) "let* pure: attrs is struct"))
@@ -58,13 +59,13 @@
 # When the bug is fixed, this will pass. Until then, it demonstrates
 # the corruption. We protect to avoid crashing the test suite.
 
-(let [[[ok? result] (protect
+(let [[ok? result] (protect
         ((fn []
-          (let [[r (time-let yielding-thunk :attributes {:a 1})]]
+          (let [r (time-let yielding-thunk :attributes {:a 1})]
             (assert (number? r:elapsed) "let* yield: elapsed is number")
             (assert (= r:result 42) "let* yield: result is 42")
             (assert (struct? r:attrs) "let* yield: attrs is struct")
-            r))))]]
+            r))))]
   (if ok?
     (println "  let* yield (local defn): PASS — bug may be fixed!")
     (println "  let* yield (local defn): FAIL — " result)))

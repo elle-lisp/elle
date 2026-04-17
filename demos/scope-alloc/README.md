@@ -20,7 +20,7 @@ It demonstrates eight tiers of escape analysis, each recognizing a wider class o
 Some primitives are known to return immediates (non-heap values). If a `let` binding allocates temporary data and returns only the result of a whitelisted primitive, the binding qualifies for scope allocation:
 
 ```janet
-(let ((data @[1 2 3 4 5]))
+(let [data @[1 2 3 4 5]]
   (length data))  # length returns an immediate (integer)
 ```
 
@@ -31,9 +31,9 @@ The `data` array can be freed when the `let` exits, not when the fiber exits.
 When a `let` body returns a variable from *outside* the let, the result is safe (allocated before the scope's RegionEnter):
 
 ```janet
-(let ((outer-val 0))
+(let [outer-val 0]
   (while (< i 10000)
-    (let ((temp @[1 2 3]))
+    (let [temp @[1 2 3]]
       (set outer-val (+ outer-val (length temp)))
       outer-val)  # Returns outer-val, not temp
     (set i (+ i 1))))
@@ -44,8 +44,8 @@ When a `let` body returns a variable from *outside* the let, the result is safe 
 Both the outer and inner `let` qualify. The inner let's bindings are part of the outer scope's region:
 
 ```janet
-(let ((xs @[10 20 30]))
-  (let ((n (length xs)))
+(let [xs @[10 20 30]]
+  (let [n (length xs)]
     (+ n 1)))  # Returns arithmetic result (immediate)
 ```
 
@@ -54,7 +54,7 @@ Both the outer and inner `let` qualify. The inner let's bindings are part of the
 All match arms return keywords or integers → result is safe:
 
 ```janet
-(let ((tag (mod i 3)))
+(let [tag (mod i 3)]
   (match tag
     (0 :zero)
     (1 :one)
@@ -68,7 +68,7 @@ An outward `set` with a provably immediate value is harmless:
 ```janet
 (var counter 0)
 (while (< counter 10000)
-  (let ((tmp @[1 2 3]))
+  (let [tmp @[1 2 3]]
     (length tmp))
   (set counter (+ counter 1)))  # Immediate value
 ```
@@ -84,7 +84,7 @@ The demo uses three primitives:
 (var before (arena/count))
 (var i 0)
 (while (< i 10000)
-  (let ((data @[1 2 3 4 5]))
+  (let [data @[1 2 3 4 5]]
     (length data))
   (set i (+ i 1)))
 (- (arena/count) before)  # Objects freed early
@@ -95,7 +95,7 @@ The demo uses three primitives:
 - `:dtors-run` — Number of destructors run (objects freed early)
 
 ```janet
-(let ((stats (arena/scope-stats)))
+(let [stats (arena/scope-stats)]
   (print "Enters: ")
   (print (get stats :enters))
   (print "  Dtors: ")
@@ -112,7 +112,7 @@ Each tier runs a tight loop that allocates temporary objects:
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
-      (let ((data @[1 2 3 4 5]))
+      (let [data @[1 2 3 4 5]]
         (length data))
       (set i (+ i 1)))
     (- (arena/count) before))))

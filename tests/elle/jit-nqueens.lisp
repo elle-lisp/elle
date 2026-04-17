@@ -1,6 +1,7 @@
+(elle/epoch 7)
 (defn check-safe-helper [col remaining row-offset]
   (if (empty? remaining) true
-    (let ([placed-col (first remaining)])
+    (let [placed-col (first remaining)]
       (if (or (= col placed-col)
               (= row-offset (abs (- col placed-col))))
         false
@@ -11,7 +12,7 @@
 (defn try-cols-helper [n col queens row]
   (if (= col n) (list)
     (if (safe? col queens)
-      (let ([nq (cons col queens)])
+      (let [nq (cons col queens)]
         (append (solve-helper n (+ row 1) nq) (try-cols-helper n (+ col 1) queens row)))
       (try-cols-helper n (+ col 1) queens row))))
 

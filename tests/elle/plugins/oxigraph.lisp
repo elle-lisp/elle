@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## Oxigraph plugin integration tests
 ## Tests the oxigraph plugin (.so loaded via import-file)
@@ -87,7 +88,7 @@
 (assert (= (get named-bnode 1) "b1") "blank-node explicit: second element is the given id")
 
 ## Malformed IRI signals oxigraph-error
-(let (([ok? err] (protect ((fn () (iri "not a valid IRI")))))) (assert (not ok?) "iri with malformed IRI signals oxigraph-error") (assert (= (get err :error) :oxigraph-error) "iri with malformed IRI signals oxigraph-error"))
+(let [[ok? err] (protect ((fn () (iri "not a valid IRI"))))] (assert (not ok?) "iri with malformed IRI signals oxigraph-error") (assert (= (get err :error) :oxigraph-error) "iri with malformed IRI signals oxigraph-error"))
 
 ## ── Scenario 3: Quad CRUD ──────────────────────────────────────────
 
@@ -192,13 +193,13 @@
 
 ## Binding values for literal: object should be [:literal ...]
 (def row-with-alice
-  (letrec ((find-alice (fn (i)
+  (letrec [find-alice (fn (i)
     (if (>= i (length select-results))
         nil
-        (let ((row (get select-results i)))
+        (let [row (get select-results i)]
           (if (= (get (get row :s) 1) "http://example.org/alice")
               row
-              (find-alice (+ i 1))))))))
+              (find-alice (+ i 1))))))]
     (find-alice 0)))
 
 (assert (not (nil? row-with-alice)) "SELECT result contains row for alice")
@@ -272,7 +273,7 @@
      nil])) "DELETE DATA via update removes triple")
 
 ## Malformed SPARQL UPDATE signals sparql-error
-(let (([ok? err] (protect ((fn () (update update-store "THIS IS NOT SPARQL")))))) (assert (not ok?) "malformed SPARQL UPDATE signals sparql-error") (assert (= (get err :error) :sparql-error) "malformed SPARQL UPDATE signals sparql-error"))
+(let [[ok? err] (protect ((fn () (update update-store "THIS IS NOT SPARQL"))))] (assert (not ok?) "malformed SPARQL UPDATE signals sparql-error") (assert (= (get err :error) :sparql-error) "malformed SPARQL UPDATE signals sparql-error"))
 
 ## ── Scenario 8: Load/dump roundtrip ───────────────────────────────
 
@@ -308,24 +309,24 @@
 
 ## Unknown format keyword signals type-error
 (def fmt-store (store-new))
-(let (([ok? err] (protect ((fn () (load fmt-store "<http://example.org/s> <http://example.org/p> \"x\" .\n" :unknown-format)))))) (assert (not ok?) "unknown format keyword signals type-error on load") (assert (= (get err :error) :type-error) "unknown format keyword signals type-error on load"))
+(let [[ok? err] (protect ((fn () (load fmt-store "<http://example.org/s> <http://example.org/p> \"x\" .\n" :unknown-format))))] (assert (not ok?) "unknown format keyword signals type-error on load") (assert (= (get err :error) :type-error) "unknown format keyword signals type-error on load"))
 
-(let (([ok? err] (protect ((fn () (dump fmt-store :unknown-format)))))) (assert (not ok?) "unknown format keyword signals type-error on dump") (assert (= (get err :error) :type-error) "unknown format keyword signals type-error on dump"))
+(let [[ok? err] (protect ((fn () (dump fmt-store :unknown-format))))] (assert (not ok?) "unknown format keyword signals type-error on dump") (assert (= (get err :error) :type-error) "unknown format keyword signals type-error on dump"))
 
 ## ── Scenario 9: Error cases ────────────────────────────────────────
 
 ## Wrong type for store argument (pass a string instead)
-(let (([ok? err] (protect ((fn () (quads "not-a-store")))))) (assert (not ok?) "wrong type for store argument signals type-error") (assert (= (get err :error) :type-error) "wrong type for store argument signals type-error"))
+(let [[ok? err] (protect ((fn () (quads "not-a-store"))))] (assert (not ok?) "wrong type for store argument signals type-error") (assert (= (get err :error) :type-error) "wrong type for store argument signals type-error"))
 
 ## Wrong type for quad argument (pass a string instead of array)
 (def err-store (store-new))
-(let (([ok? err] (protect ((fn () (insert err-store "not-a-quad")))))) (assert (not ok?) "wrong type for quad argument signals type-error") (assert (= (get err :error) :type-error) "wrong type for quad argument signals type-error"))
+(let [[ok? err] (protect ((fn () (insert err-store "not-a-quad"))))] (assert (not ok?) "wrong type for quad argument signals type-error") (assert (= (get err :error) :type-error) "wrong type for quad argument signals type-error"))
 
 ## Quad array with wrong length (3 elements)
-(let (([ok? err] (protect ((fn () (insert err-store [(iri "http://example.org/s") (iri "http://example.org/p") (literal "o")])))))) (assert (not ok?) "quad array with wrong length signals type-error") (assert (= (get err :error) :type-error) "quad array with wrong length signals type-error"))
+(let [[ok? err] (protect ((fn () (insert err-store [(iri "http://example.org/s") (iri "http://example.org/p") (literal "o")]))))] (assert (not ok?) "quad array with wrong length signals type-error") (assert (= (get err :error) :type-error) "quad array with wrong length signals type-error"))
 
 ## Malformed SPARQL query signals sparql-error
-(let (([ok? err] (protect ((fn () (query err-store "THIS IS NOT SPARQL")))))) (assert (not ok?) "malformed SPARQL query signals sparql-error") (assert (= (get err :error) :sparql-error) "malformed SPARQL query signals sparql-error"))
+(let [[ok? err] (protect ((fn () (query err-store "THIS IS NOT SPARQL"))))] (assert (not ok?) "malformed SPARQL query signals sparql-error") (assert (= (get err :error) :sparql-error) "malformed SPARQL query signals sparql-error"))
 
 ## Malformed IRI in quad signals oxigraph-error
-(let (([ok? err] (protect ((fn () (insert err-store [[:iri "not-an-iri"] (iri "http://example.org/p") (literal "o") nil])))))) (assert (not ok?) "malformed IRI in quad signals oxigraph-error") (assert (= (get err :error) :oxigraph-error) "malformed IRI in quad signals oxigraph-error"))
+(let [[ok? err] (protect ((fn () (insert err-store [[:iri "not-an-iri"] (iri "http://example.org/p") (literal "o") nil]))))] (assert (not ok?) "malformed IRI in quad signals oxigraph-error") (assert (= (get err :error) :oxigraph-error) "malformed IRI in quad signals oxigraph-error"))

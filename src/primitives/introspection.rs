@@ -505,7 +505,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Returns number of captured variables, or nil",
         params: &["value"],
         category: "fn",
-        example: "(fn/captures (let ((x 1)) (fn () x)))",
+        example: "(fn/captures (let [x 1] (fn () x)))",
         aliases: &["captures"],
     },
     PrimitiveDef {

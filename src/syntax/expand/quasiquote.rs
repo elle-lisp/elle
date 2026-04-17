@@ -68,7 +68,7 @@ impl Expander {
             // Array (bracket syntax) — process elements so unquote/splice work
             // inside `[...]`, producing a runtime array via the `array` primitive.
             // This enables `[,a ,b]` in quasiquote and bracket bindings in
-            // macro output: `(let [[,name ,val]] ...)`.
+            // macro output: `(let [,name ,val] ...)`.
             SyntaxKind::Array(items) => {
                 self.quasiquote_array_to_code(items, depth, span, symbols, vm)
             }

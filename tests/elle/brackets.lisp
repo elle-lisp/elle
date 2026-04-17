@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Bracket syntax tests
 #
 # Migrated from tests/integration/bracket_errors.rs
@@ -25,23 +26,23 @@
 # ============================================================================
 
 (begin
-  (assert (= (let [(x 1)] x) 1) "let_bindings_bracket_outer"))
+  (assert (= (let [x 1] x) 1) "let_bindings_bracket_outer"))
 
 (begin
-  (assert (= (let ([x 1]) x) 1) "let_binding_pair_bracket"))
+  (assert (= (let [x 1] x) 1) "let_binding_pair_bracket"))
 
 (begin
-  (assert (= (let [[x 1]] x) 1) "let_bindings_bracket_both"))
+  (assert (= (let [x 1] x) 1) "let_bindings_bracket_both"))
 
 # ============================================================================
 # Letrec binding brackets
 # ============================================================================
 
 (begin
-  (assert (= (letrec [(f (fn (x) x))] (f 1)) 1) "letrec_bindings_bracket"))
+  (assert (= (letrec [f (fn (x) x)] (f 1)) 1) "letrec_bindings_bracket"))
 
 (begin
-  (assert (= (letrec ([f (fn (x) x)]) (f 1)) 1) "letrec_binding_pair_bracket"))
+  (assert (= (letrec [f (fn (x) x)] (f 1)) 1) "letrec_binding_pair_bracket"))
 
 # ============================================================================
 # Cond clause brackets
@@ -92,10 +93,10 @@
 # ============================================================================
 
 # match_arm_non_list_error
-(let (([ok? _] (protect ((fn () (eval '(match 42 99))))))) (assert (not ok?) "match arm non-list is compile error"))
+(let [[ok? _] (protect ((fn () (eval '(match 42 99)))))] (assert (not ok?) "match arm non-list is compile error"))
 
 # fn_params_array_rejected
-(let (([ok? _] (protect ((fn () (eval '(fn @[x] x))))))) (assert (not ok?) "fn params with @[] is compile error"))
+(let [[ok? _] (protect ((fn () (eval '(fn @[x] x)))))] (assert (not ok?) "fn params with @[] is compile error"))
 
 # let_bindings_array_rejected
-(let (([ok? _] (protect ((fn () (eval '(let @[(x 1)] x))))))) (assert (not ok?) "let bindings with @[] is compile error"))
+(let [[ok? _] (protect ((fn () (eval '(let @[(x 1)] x)))))] (assert (not ok?) "let bindings with @[] is compile error"))

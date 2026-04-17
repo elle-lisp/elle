@@ -93,8 +93,8 @@ by `elle rewrite` (see below).
 
 `elle rewrite` is a source-to-source migration tool that updates files in
 place. It applies the same rules as the compiler but modifies the source text
-directly (preserving comments, whitespace, and formatting) and strips the
-`(elle/epoch N)` tag when done.
+directly (preserving comments, whitespace, and formatting) and updates the
+`(elle/epoch N)` tag to the current epoch.
 
 ```
 elle rewrite [OPTIONS] <file...>
@@ -118,8 +118,8 @@ elle rewrite tests/*.lisp
 elle rewrite --check tests/*.lisp
 ```
 
-After rewriting, the file targets the current epoch and the `(elle/epoch N)` tag is
-removed.
+After rewriting, the file's `(elle/epoch N)` tag is updated to the current epoch.
+Files without an epoch tag get one added.
 
 ## Adding a new migration
 
@@ -146,7 +146,7 @@ Migration {
         },
         MigrationRule::Remove {
             symbol: "assert-err",
-            message: "use (let (([ok? _] (protect (f)))) (assert (not ok?) msg)) instead",
+            message: "use (let [[ok? _] (protect (f))] (assert (not ok?) msg)) instead",
         },
     ],
 },
@@ -211,5 +211,24 @@ The old `stream/` names remain as aliases.
 - `put` now accepts 2 arguments for sets: `(put set value)`. The set-specific
   `add` is rewritten to `put` by `elle rewrite`.
 
-`elle rewrite` now updates the `(elle/epoch N)` tag to the current epoch
-instead of stripping it.
+### Epoch 6 — remove ev/run from user code
+
+User code already runs in the async scheduler. `(ev/run (fn [] body...))`
+is unwrapped to just `body...`. Non-lambda forms produce a compile error.
+
+### Epoch 7 — flat let bindings
+
+`let`, `let*`, `letrec`, `if-let`, and `when-let` switch from nested-pair
+bindings to flat (Clojure-style) bindings. Each binding is a pattern/value
+pair laid out flat inside a single bracket form.
+
+| Old (epoch ≤ 6) | New (epoch 7) |
+|-----------------|---------------|
+| `(let [[a 1] [b 2]] ...)` | `(let [a 1 b 2] ...)` |
+| `(let [[[x y] (foo)]] ...)` | `(let [[x y] (foo)] ...)` |
+| `(let* [[a 1] [b (+ a 1)]] ...)` | `(let* [a 1 b (+ a 1)] ...)` |
+| `(if-let [[x (find-it)]] ...)` | `(if-let [x (find-it)] ...)` |
+
+Destructuring is unambiguous: each form occupies exactly one syntactic
+position, alternating pattern then value. `elle rewrite` handles the
+migration mechanically.

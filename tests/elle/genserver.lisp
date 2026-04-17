@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## tests/elle/genserver.lisp — Tests for GenServer, Agent, and Supervisor
 ##
 ## Run: ./target/debug/elle tests/elle/genserver.lisp
@@ -19,14 +20,14 @@
 # ── 1. Basic call/reply ───────────────────────────────────────────────
 
 (process:start (fn []
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [arg] arg)
                 :handle-call (fn [request _from state]
                   (match request
                     (:get     [:reply state state])
                     ([:set v] [:reply :ok v])
                     (_        [:reply :unknown state])))}
-               42)])
+               42)]
     (assert (= 42 (process:gen-server-call pid :get)) "call: get initial state")
     (process:gen-server-call pid [:set 99])
     (assert (= 99 (process:gen-server-call pid :get)) "call: state updated"))))
@@ -69,7 +70,7 @@
   (process:gen-server-cast :log [:push :b])
   (process:gen-server-cast :log [:push :c])
   # call to sync — ensures casts have been processed
-  (let ([result (process:gen-server-call :log :get)])
+  (let [result (process:gen-server-call :log :get)]
     (assert (= result [:a :b :c]) "cast: three items logged"))))
 (println "  3. cast: ok")
 
@@ -77,7 +78,7 @@
 # ── 4. Stop with terminate callback ──────────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:gen-server-start-link
       {:init        (fn [_] :running)
        :handle-call (fn [request _from state]
@@ -89,7 +90,7 @@
     (assert (= :running (process:gen-server-call :stoppable :status))
             "stop: server running")
     (process:gen-server-stop :stoppable :reason :shutdown)
-    (let ([msg (process:recv)])
+    (let [msg (process:recv)]
       (match msg
         ([:terminated reason state]
           (assert (= reason :shutdown) "stop: reason is :shutdown")
@@ -101,8 +102,8 @@
 # ── 5. handle-info for non-protocol messages ──────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
-    (let ([pid (process:gen-server-start-link
+  (let [me (process:self)]
+    (let [pid (process:gen-server-start-link
                  {:init        (fn [_] @[])
                   :handle-call (fn [request _from state]
                     (case request
@@ -110,13 +111,13 @@
                   :handle-info (fn [msg state]
                     (push state msg)
                     [:noreply state])}
-                 nil)])
+                 nil)]
 
       # Send raw messages (not $call/$cast)
       (process:send pid :hello)
       (process:send pid :world)
       # Sync via call
-      (let ([result (process:gen-server-call pid :get)])
+      (let [result (process:gen-server-call pid :get)]
         (assert (= result [:hello :world]) "handle-info: captured messages"))))))
 (println "  5. handle-info: ok")
 
@@ -124,11 +125,11 @@
 # ── 6. Init with [:ok state] form ────────────────────────────────────
 
 (process:start (fn []
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [arg] [:ok (* arg 10)])
                 :handle-call (fn [request _from state]
                   [:reply state state])}
-               5)])
+               5)]
     (assert (= 50 (process:gen-server-call pid :get)) "init [:ok state]: state is 50"))))
 (println "  6. init [:ok state]: ok")
 
@@ -136,7 +137,7 @@
 # ── 7. Deferred reply via gen-server-reply ────────────────────────────
 
 (process:start (fn []
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [_] nil)
                 :handle-call (fn [request from state]
                   # Stash the caller, reply later from handle-info
@@ -145,11 +146,11 @@
                   # state is the stashed [pid ref] from the call
                   (process:gen-server-reply state msg)
                   [:noreply nil])}
-               nil)])
+               nil)]
     # Send a call, then poke the server with a raw message
     (process:spawn (fn []
       (process:send pid :the-answer)))
-    (let ([result (process:gen-server-call pid :anything)])
+    (let [result (process:gen-server-call pid :anything)]
       (assert (= result :the-answer) "deferred reply: got :the-answer")))))
 (println "  7. deferred reply: ok")
 
@@ -158,14 +159,14 @@
 
 (process:start (fn []
   (process:trap-exit true)
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [_] :alive)
                 :handle-call (fn [request _from state]
                   (case request
                     :die [:stop :killed :goodbye state]
                     [:reply state state]))}
-               nil)])
-    (let ([reply (process:gen-server-call pid :die)])
+               nil)]
+    (let [reply (process:gen-server-call pid :die)]
       (assert (= reply :goodbye) "stop-from-call: got goodbye"))
     (match (process:recv)
       ([:EXIT _ _] (assert true "stop-from-call: got EXIT"))
@@ -177,11 +178,11 @@
 
 (process:start (fn []
   (process:trap-exit true)
-  (let ([pid (process:gen-server-start-link
+  (let [pid (process:gen-server-start-link
                {:init        (fn [_] nil)
                 :handle-cast (fn [request state]
                   [:stop :cast-shutdown state])}
-               nil)])
+               nil)]
     (process:gen-server-cast pid :bye)
     (match (process:recv)
       ([:EXIT _ _] (assert true "stop-from-cast: got EXIT"))
@@ -212,7 +213,7 @@
   (process:actor-cast :items (fn [s] (push s :x) s))
   (process:actor-cast :items (fn [s] (push s :y) s))
   # sync to drain
-  (let ([result (process:actor-get :items (fn [s] (freeze s)))])
+  (let [result (process:actor-get :items (fn [s] (freeze s)))]
     (assert (= result [:x :y]) "actor-cast: items are [:x :y]"))))
 (println "  11. actor cast: ok")
 
@@ -235,7 +236,7 @@
 # ── 13. Supervisor starts children ───────────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :worker-a :start (fn []
          (process:register :worker-a)
@@ -258,7 +259,7 @@
 # ── 14. Supervisor restarts permanent child ──────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (var crash-count 0)
     (process:supervisor-start-link
       [{:id :fragile :restart :permanent
@@ -295,7 +296,7 @@
 # ── 15. Supervisor does not restart temporary child ──────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :temp :restart :temporary
         :start (fn []
@@ -316,7 +317,7 @@
 
         # No restart expected — send ourselves proof
         (process:send me :no-restart)
-        (let ([msg (process:recv)])
+        (let [msg (process:recv)]
           (assert (= msg :no-restart) "temporary: not restarted")))
       (_ (assert false "temporary: expected [:started pid]"))))))
 (println "  15. supervisor temporary child: ok")
@@ -325,7 +326,7 @@
 # ── 16. Supervisor transient child — normal exit not restarted ───────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :trans :restart :transient
         :start (fn []
@@ -346,7 +347,7 @@
         (process:recv)
 
         (process:send me :no-restart)
-        (let ([msg (process:recv)])
+        (let [msg (process:recv)]
           (assert (= msg :no-restart) "transient-normal: not restarted")))
       (_ (assert false "transient: expected [:started pid]"))))))
 (println "  16. supervisor transient normal exit: ok")
@@ -355,7 +356,7 @@
 # ── 17. GenServer as supervised child ─────────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :kv :restart :permanent
         :start (fn []
@@ -364,7 +365,7 @@
           (process:register :kv-sup)
           (var state @{})
           (forever
-            (let ([msg (process:recv)])
+            (let [msg (process:recv)]
               (match msg
                 ([:$call caller ref request]
                   (match request
@@ -379,7 +380,7 @@
     (process:recv)  # :kv-ready
 
     (process:gen-server-call :kv-sup [:put :lang "elle"])
-    (let ([val (process:gen-server-call :kv-sup [:get :lang])])
+    (let [val (process:gen-server-call :kv-sup [:get :lang])]
       (assert (= val "elle") "supervised genserver: got elle")))))
 (println "  17. genserver under supervisor: ok")
 
@@ -391,8 +392,8 @@
 # ── 18. Task async/await ──────────────────────────────────────────────
 
 (process:start (fn []
-  (let* ([task (process:task-async (fn [] (* 6 7)))]
-         [result (process:task-await task)])
+  (let* [task (process:task-async (fn [] (* 6 7)))
+         result (process:task-await task)]
     (assert (= result 42) "task: 6*7 = 42"))))
 (println "  18. task async/await: ok")
 
@@ -400,10 +401,10 @@
 # ── 19. Multiple tasks ───────────────────────────────────────────────
 
 (process:start (fn []
-  (let* ([t1 (process:task-async (fn [] (+ 10 20)))]
-         [t2 (process:task-async (fn [] (+ 30 40)))]
-         [r1 (process:task-await t1)]
-         [r2 (process:task-await t2)])
+  (let* [t1 (process:task-async (fn [] (+ 10 20)))
+         t2 (process:task-async (fn [] (+ 30 40)))
+         r1 (process:task-await t1)
+         r2 (process:task-await t2)]
     (assert (= r1 30) "multi-task: t1 = 30")
     (assert (= r2 70) "multi-task: t2 = 70"))))
 (println "  19. multiple tasks: ok")
@@ -416,7 +417,7 @@
 # ── 20. one-for-all strategy ─────────────────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (var starts @[])
     (process:supervisor-start-link
       [{:id :a :restart :permanent
@@ -435,7 +436,7 @@
     (assert (= (length starts) 2) "one-for-all: both started")
 
     # Crash child :a — both should restart
-    (let ([a-pid (get (get starts 0) 1)])
+    (let [a-pid (get (get starts 0) 1)]
       (when (= (get (get starts 0) 0) :a)
         (process:send a-pid :crash))
       (when (= (get (get starts 1) 0) :a)
@@ -452,7 +453,7 @@
 # ── 21. rest-for-one strategy ────────────────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link
       [{:id :x :restart :permanent
         :start (fn []
@@ -497,24 +498,24 @@
 # ── 22. Add/remove children at runtime ───────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:supervisor-start-link [] :name :dyn-sup)
 
     # Start with no children
-    (let ([kids (process:supervisor-which-children :dyn-sup)])
+    (let [kids (process:supervisor-which-children :dyn-sup)]
       (assert (= (length kids) 0) "dynamic: starts empty"))
 
     # Add a child
-    (let ([pid (process:supervisor-start-child :dyn-sup
+    (let [pid (process:supervisor-start-child :dyn-sup
                  {:id :dyn-worker :restart :temporary
                   :start (fn []
                     (process:send me [:started (process:self)])
-                    (forever (match (process:recv) (_ nil))))})])
+                    (forever (match (process:recv) (_ nil))))})]
       (match (process:recv)
         ([:started _pid] nil)
         (_ nil))
 
-      (let ([kids (process:supervisor-which-children :dyn-sup)])
+      (let [kids (process:supervisor-which-children :dyn-sup)]
         (assert (= (length kids) 1) "dynamic: one child"))
 
       # Remove it
@@ -524,7 +525,7 @@
       (process:send me :sync)
       (process:recv)
 
-      (let ([kids (process:supervisor-which-children :dyn-sup)])
+      (let [kids (process:supervisor-which-children :dyn-sup)]
         (assert (= (length kids) 0) "dynamic: back to empty"))))))
 (println "  22. dynamic supervisor: ok")
 
@@ -536,7 +537,7 @@
 # ── 23. Add handler, notify, check state ─────────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:event-manager-start-link :name :events)
 
     # A handler that collects events
@@ -546,18 +547,18 @@
          (push state event)
          [:ok state])})
 
-    (let ([ref (process:event-manager-add-handler :events collector-mod nil)])
+    (let [ref (process:event-manager-add-handler :events collector-mod nil)]
       # Send some events
       (process:event-manager-sync-notify :events :hello)
       (process:event-manager-sync-notify :events :world)
 
       # Check handlers list
-      (let ([handlers (process:event-manager-which-handlers :events)])
+      (let [handlers (process:event-manager-which-handlers :events)]
         (assert (= (length handlers) 1) "event: one handler"))
 
       # Remove handler
       (process:event-manager-remove-handler :events ref)
-      (let ([handlers (process:event-manager-which-handlers :events)])
+      (let [handlers (process:event-manager-which-handlers :events)]
         (assert (= (length handlers) 0) "event: handler removed"))))))
 (println "  23. event manager: ok")
 
@@ -565,7 +566,7 @@
 # ── 24. Multiple handlers receive same event ─────────────────────────
 
 (process:start (fn []
-  (let ([me (process:self)])
+  (let [me (process:self)]
     (process:event-manager-start-link :name :multi-events)
 
     # Two handlers that forward events to us

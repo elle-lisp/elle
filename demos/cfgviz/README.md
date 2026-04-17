@@ -36,8 +36,8 @@ Elle provides the `fn/cfg` primitive to extract a function's CFG:
 ```janet
 (defn render-cfg (f name)
   "Render a function's CFG to a DOT file."
-  (let* ((dot (fn/cfg f :dot))
-         (path (append "demos/cfgviz/" (append name ".dot"))))
+  (let* [dot (fn/cfg f :dot)
+         path (append "demos/cfgviz/" (append name ".dot"))]
     (file/write path dot)
     (println "  wrote " path))))
 ```
@@ -83,8 +83,8 @@ The CFG shows:
     ([:sub a b] (- (eval-expr a) (eval-expr b)))
     ([:mul a b] (* (eval-expr a) (eval-expr b)))
     ([:div a b]
-      (let* ([divisor (eval-expr b)]
-             [dividend (eval-expr a)])
+      (let* [divisor (eval-expr b)
+             dividend (eval-expr a)]
         (if (= divisor 0)
           (error {:error :division-by-zero :message "division by zero in expression"})
           (/ dividend divisor))))

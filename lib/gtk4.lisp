@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/gtk4.lisp — GTK4 bindings for Elle via FFI
 ##
 ## Pure Elle module. No plugin, no subprocess. Calls GTK4's C API
@@ -30,20 +31,20 @@
 (defn gtk4/open (opts)
   "Initialize GTK and create a window. Returns a mutable window handle."
   (b:gtk-init)
-  (let* [[win-ptr (b:gtk-window-new)]
-         [handle @{:window win-ptr
+  (let* [win-ptr (b:gtk-window-new)
+         handle @{:window win-ptr
                    :widgets @{}
                    :events @[]
                    :close-requested false
                    :callbacks @[]
-                   :css-provider nil}]]
+                   :css-provider nil}]
     (b:gtk-window-set-title win-ptr (or opts:title "Elle"))
     (when (and opts:width opts:height)
       (b:gtk-window-set-default-size win-ptr opts:width opts:height))
-    (let [[cb (ffi/callback sig-close
+    (let [cb (ffi/callback sig-close
                 (fn (widget)
                   (put handle :close-requested true)
-                  1))]]
+                  1))]
       (push handle:callbacks cb)
       (b:g-signal-connect-data win-ptr "close-request" cb nil nil 0))
     (b:gtk-window-present win-ptr)
@@ -61,10 +62,10 @@
 
 (defn gtk4/poll (handle)
   "Pump the GLib main loop, drain and return events."
-  (let [[ctx (b:g-main-context-default)]]
+  (let [ctx (b:g-main-context-default)]
     (while (nonzero? (b:g-main-context-pending ctx))
       (b:g-main-context-iteration ctx 0)))
-  (let [[events (freeze handle:events)]]
+  (let [events (freeze handle:events)]
     (while (nonempty? handle:events)
       (pop handle:events))
     events))
@@ -73,19 +74,19 @@
 
 (defn parse-spec (spec)
   "Parse [:tag {props} children...] into [tag props child-specs text]."
-  (let* [[tag      (spec 0)]
-         [rest     (slice spec 1)]
-         [has-props (and (nonempty? rest) (struct? (rest 0)))]
-         [props    (if has-props (rest 0) {})]
-         [children (if has-props (slice rest 1) rest)]
-         [text     (find string? children)]
-         [specs    (filter (complement string?) children)]]
+  (let* [tag      (spec 0)
+         rest     (slice spec 1)
+         has-props (and (nonempty? rest) (struct? (rest 0)))
+         props    (if has-props (rest 0) {})
+         children (if has-props (slice rest 1) rest)
+         text     (find string? children)
+         specs    (filter (complement string?) children)]
     [tag props specs text]))
 
 (defn build-widget (handle spec)
   "Recursively build a widget from a spec. Returns the GTK widget pointer."
-  (let* [[[tag props children text] (parse-spec spec)]
-         [widget (match tag
+  (let* [[tag props children text] (parse-spec spec)
+         widget (match tag
            # display
            (:label        (w:make-label handle props text))
            (:heading      (w:make-heading handle props text))
@@ -121,7 +122,7 @@
            (:revealer    (w:make-revealer handle props))
            # special
            (:webview     (wv:make-webview handle props))
-           (_            (error (string "gtk4:build: unknown widget type " tag))))]]
+           (_            (error (string "gtk4:build: unknown widget type " tag))))]
     (add-children handle tag widget props children)
     widget))
 
@@ -173,16 +174,16 @@
 
 (defn add-grid-children (handle grid props children)
   "Attach children to a grid with auto-flow."
-  (let [[cols (or props:columns 1)]]
+  (let [cols (or props:columns 1)]
     (var auto-col 0)
     (var auto-row 0)
     (each child in children
-      (let* [[cw    (build-widget handle child)]
-             [cp    (if (and (> (length child) 1) (struct? (child 1))) (child 1) {})]
-             [col   (or cp:col auto-col)]
-             [row   (or cp:row auto-row)]
-             [cs    (or cp:col-span 1)]
-             [rs    (or cp:row-span 1)]]
+      (let* [cw    (build-widget handle child)
+             cp    (if (and (> (length child) 1) (struct? (child 1))) (child 1) {})
+             col   (or cp:col auto-col)
+             row   (or cp:row auto-row)
+             cs    (or cp:col-span 1)
+             rs    (or cp:row-span 1)]
         (w:grid-attach grid cw col row cs rs)
         (assign auto-col (+ col cs))
         (when (>= auto-col cols)
@@ -191,22 +192,22 @@
 
 (defn add-stack-child (handle stack child)
   "Add a child to a GtkStack."
-  (let* [[[_ props children text] (parse-spec child)]
-         [name    (or (string props:name) (string props:id))]
-         [title   (or props:title name)]
-         [content (if (nonempty? children)
+  (let* [[_ props children text] (parse-spec child)
+         name    (or (string props:name) (string props:id))
+         title   (or props:title name)
+         content (if (nonempty? children)
                     (build-widget handle (children 0))
-                    (b:gtk-label-new (or text "")))]]
+                    (b:gtk-label-new (or text "")))]
     (b:gtk-stack-add-titled stack content name title)))
 
 (defn add-notebook-child (handle notebook child)
   "Add a tab to a GtkNotebook."
-  (let* [[[_ props children text] (parse-spec child)]
-         [title   (or props:title text "Tab")]
-         [label   (b:gtk-label-new title)]
-         [content (if (nonempty? children)
+  (let* [[_ props children text] (parse-spec child)
+         title   (or props:title text "Tab")
+         label   (b:gtk-label-new title)
+         content (if (nonempty? children)
                     (build-widget handle (children 0))
-                    (b:gtk-label-new ""))]]
+                    (b:gtk-label-new ""))]
     (b:gtk-notebook-append-page notebook content label)))
 
 # ── Public API ────────────────────────────────────────────────────
@@ -218,8 +219,8 @@
 
 (defn gtk4/rebuild (handle id spec)
   "Replace a container's children by rebuilding from spec."
-  (when-let [[{:ptr ptr :type type} (handle:widgets id)]]
-    (let [[child (build-widget handle spec)]]
+  (when-let [{:ptr ptr :type type} (handle:widgets id)]
+    (let [child (build-widget handle spec)]
       (match type
         ((or :box :scroll-area :frame :expander :revealer)
           (match type
@@ -235,7 +236,7 @@
 
 (defn gtk4/set (handle id value)
   "Set a widget's text or value by id."
-  (when-let [[{:ptr ptr :type type} (handle:widgets id)]]
+  (when-let [{:ptr ptr :type type} (handle:widgets id)]
     (match type
       ((or :label :heading) (b:gtk-label-set-text ptr (string value)))
       (:button        (b:gtk-button-set-label ptr (string value)))
@@ -254,12 +255,12 @@
 
 (defn gtk4/get (handle id)
   "Get a widget's current text or value by id."
-  (when-let [[{:ptr ptr :type type} (handle:widgets id)]]
+  (when-let [{:ptr ptr :type type} (handle:widgets id)]
     (match type
       ((or :label :heading) (ffi/string (b:gtk-label-get-text ptr)))
       (:button        (ffi/string (b:gtk-button-get-label ptr)))
       (:text-input    (ffi/string (b:gtk-editable-get-text ptr)))
-      (:text-edit     (let [[buf (b:gtk-text-view-get-buffer ptr)]]
+      (:text-edit     (let [buf (b:gtk-text-view-get-buffer ptr)]
                         (ffi/with-stack [[start 80] [end 80]]
                           (b:gtk-text-buffer-get-start-iter buf start)
                           (b:gtk-text-buffer-get-end-iter buf end)
@@ -275,12 +276,12 @@
 
 (defn gtk4/set-visible (handle id visible)
   "Show or hide a widget."
-  (when-let [[{:ptr ptr} (handle:widgets id)]]
+  (when-let [{:ptr ptr} (handle:widgets id)]
     (b:gtk-widget-set-visible ptr (w:bool->int visible))))
 
 (defn gtk4/set-sensitive (handle id sensitive)
   "Enable or disable a widget."
-  (when-let [[{:ptr ptr} (handle:widgets id)]]
+  (when-let [{:ptr ptr} (handle:widgets id)]
     (b:gtk-widget-set-sensitive ptr (w:bool->int sensitive))))
 
 (defn gtk4/set-title (handle title)
@@ -289,18 +290,18 @@
 
 (defn gtk4/load-css (handle css)
   "Load a CSS string for the whole application."
-  (let [[provider (or handle:css-provider
-                      (let [[p (b:gtk-css-provider-new)]]
+  (let [provider (or handle:css-provider
+                      (let [p (b:gtk-css-provider-new)]
                         (b:gtk-style-context-add-provider-for-display
                           (b:gdk-display-get-default) p
                           b:GTK_STYLE_PROVIDER_PRIORITY_APPLICATION)
                         (put handle :css-provider p)
-                        p))]]
+                        p))]
     (b:gtk-css-provider-load-from-string provider css)))
 
 (defn gtk4/set-stack-page (handle id page-name)
   "Switch the visible page of a GtkStack."
-  (when-let [[{:ptr ptr} (handle:widgets id)]]
+  (when-let [{:ptr ptr} (handle:widgets id)]
     (b:gtk-stack-set-visible-child-name ptr (string page-name))))
 
 # ── WebView passthrough ───────────────────────────────────────────
@@ -314,8 +315,8 @@
 
 (defn gtk4/add (handle parent-id spec)
   "Add a widget to a container."
-  (when-let [[{:ptr ptr :type type} (handle:widgets parent-id)]]
-    (let [[child (build-widget handle spec)]]
+  (when-let [{:ptr ptr :type type} (handle:widgets parent-id)]
+    (let [child (build-widget handle spec)]
       (match type
         (:box         (b:gtk-box-append ptr child))
         (:scroll-area (b:gtk-scrolled-window-set-child ptr child))
@@ -323,7 +324,7 @@
 
 (defn gtk4/remove (handle id)
   "Remove a widget from its parent."
-  (when-let [[{:ptr ptr} (handle:widgets id)]]
+  (when-let [{:ptr ptr} (handle:widgets id)]
     (b:gtk-widget-unparent ptr)
     (put handle:widgets id nil)))
 

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## autograd.lisp — Scalar autograd engine
 ##
 ## Each Value node is a mutable @struct with:
@@ -15,13 +16,13 @@
 
   (defn make-value [data]
     "Create a leaf Value node (no children)."
-    (let* ([id *next-id*])
+    (let* [id *next-id*]
       (assign *next-id* (inc *next-id*))
       @{:id id :data data :grad 0.0 :children @[] :local-grads @[]}))
 
   (defn make-op [data children local-grads]
     "Create a Value node that is the result of an operation."
-    (let* ([id *next-id*])
+    (let* [id *next-id*]
       (assign *next-id* (inc *next-id*))
       @{:id id :data data :grad 0.0
         :children children :local-grads local-grads}))
@@ -46,14 +47,14 @@
     (make-op (pow (v-data a) n) @[a] @[(* n (pow (v-data a) (- n 1.0)))]))
 
   (defn vexp [a]
-    (let* ([ea (exp (v-data a))])
+    (let* [ea (exp (v-data a))]
       (make-op ea @[a] @[ea])))
 
   (defn vlog [a]
     (make-op (log (v-data a)) @[a] @[(/ 1.0 (v-data a))]))
 
   (defn vrelu [a]
-    (let* ([d (v-data a)])
+    (let* [d (v-data a)]
       (make-op (if (> d 0.0) d 0.0) @[a] @[(if (> d 0.0) 1.0 0.0)])))
 
   (defn v- [a b] (v+ a (vneg b)))
@@ -76,11 +77,11 @@
     (default offset-a 0)
     (default offset-b 0)
     (var sum 0.0)
-    (let* ([children @[]] [grads @[]])
+    (let* [children @[] grads @[]]
       (var i 0)
       (while (< i n)
-        (let* ([a (avec (+ offset-a i))]
-               [b (bvec (+ offset-b i))])
+        (let* [a (avec (+ offset-a i))
+               b (bvec (+ offset-b i))]
           (assign sum (+ sum (* a:data b:data)))
           (push children a)
           (push children b)
@@ -92,7 +93,7 @@
   (defn vsum [vec]
     "Fused sum: single Value node with all inputs as children."
     (var sum 0.0)
-    (let ([grads @[]])
+    (let [grads @[]]
       (each v in vec
         (assign sum (+ sum v:data))
         (push grads 1.0))
@@ -102,31 +103,31 @@
 
   (defn topo-sort [root]
     "Topological sort (DFS, post-order) from root."
-    (let* ([topo @[]]
-           [visited @||])
-      (letrec ([walk (fn [node]
+    (let* [topo @[]
+           visited @||]
+      (letrec [walk (fn [node]
         (when (not (contains? visited node:id))
           (add visited node:id)
           (each child in node:children
             (walk child))
-          (push topo node)))])
+          (push topo node)))]
         (walk root))
       topo))
 
   (defn backward [root]
     "Run backpropagation from root."
-    (let* ([topo (topo-sort root)])
+    (let* [topo (topo-sort root)]
       (each node in topo
         (put node :grad 0.0))
       (put root :grad 1.0)
       (each node in (reverse topo)
-        (let* ([children   node:children]
-               [local-grads node:local-grads]
-               [node-grad  node:grad])
+        (let* [children   node:children
+               local-grads node:local-grads
+               node-grad  node:grad]
           (var j 0)
           (while (< j (length children))
-            (let* ([child (children j)]
-                   [lg    (local-grads j)])
+            (let* [child (children j)
+                   lg    (local-grads j)]
               (put child :grad (+ child:grad (* node-grad lg))))
             (assign j (inc j)))))))
 

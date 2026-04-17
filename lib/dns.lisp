@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
 ## Loaded via: (def dns ((import-file "lib/dns.lisp")))
@@ -58,9 +59,9 @@
 (defn encode-name [name]
   "Encode a domain name as DNS wire format (length-prefixed labels + null).
    'example.com' → (bytes 7 'example' 3 'com' 0)"
-  (let [[labels (string/split name ".")]]
+  (let [labels (string/split name ".")]
     (fold (fn [acc label]
-            (let [[label-bytes (bytes label)]]
+            (let [label-bytes (bytes label)]
               (when (> (length label-bytes) 63)
                 (error {:error :dns-error
                         :reason :label-too-long
@@ -89,7 +90,7 @@
               :limit 128
               :message "name decode loop exceeded 128 iterations"}))
     (assign safety (+ safety 1))
-    (let [[b (get buf pos)]]
+    (let [b (get buf pos)]
       (cond
         # Null terminator — end of name
         ((= b 0)
@@ -106,7 +107,7 @@
 
         # Regular label
         (true
-         (let [[label-len b]]
+         (let [label-len b]
            (push parts (string (slice buf (+ pos 1) (+ pos 1 label-len))))
            (assign pos (+ pos 1 label-len)))))))
   {:name (string/join (freeze parts) ".")
@@ -119,15 +120,15 @@
    id: 16-bit transaction ID
    name: domain name string
    qtype: query type (TYPE-A, TYPE-AAAA, etc.)"
-  (let [[header (concat (u16->bytes id)         # ID
+  (let [header (concat (u16->bytes id)         # ID
                         (u16->bytes FLAG-RD)     # Flags: RD=1
                         (u16->bytes 1)           # QDCOUNT=1
                         (u16->bytes 0)           # ANCOUNT=0
                         (u16->bytes 0)           # NSCOUNT=0
-                        (u16->bytes 0))]         # ARCOUNT=0
-        [question (concat (encode-name name)
+                        (u16->bytes 0))         # ARCOUNT=0
+        question (concat (encode-name name)
                           (u16->bytes qtype)
-                          (u16->bytes CLASS-IN))]]
+                          (u16->bytes CLASS-IN))]
     (concat header question)))
 
 ## ── Response parsing ──────────────────────────────────────────────────
@@ -142,7 +143,7 @@
             :length (length buf)
             :minimum 12
             :message "response too short for header"}))
-  (let [[flags (read-u16 buf 2)]]
+  (let [flags (read-u16 buf 2)]
     {:id      (read-u16 buf 0)
      :qr      (not (= 0 (bit/and flags FLAG-QR)))
      :opcode  (bit/and (bit/shr flags 11) 0xf)
@@ -160,10 +161,10 @@
   "Skip 'count' question records starting at offset. Returns new offset."
   (if (<= count 0)
     offset
-    (let* [[decoded (decode-name buf offset)]
-           [after-name decoded:offset]
+    (let* [decoded (decode-name buf offset)
+           after-name decoded:offset
            # Skip QTYPE (2 bytes) + QCLASS (2 bytes)
-           [next (+ after-name 4)]]
+           next (+ after-name 4)]
       (skip-questions buf next (- count 1)))))
 
 (defn format-ipv4 [buf offset]
@@ -180,7 +181,7 @@
   (var groups @[])
   (var i 0)
   (while (< i 8)
-    (let [[val (read-u16 buf (+ offset (* i 2)))]]
+    (let [val (read-u16 buf (+ offset (* i 2)))]
       (push groups (number->string val 16)))
     (assign i (+ i 1)))
   (string/join (freeze groups) ":"))
@@ -192,16 +193,16 @@
   (var pos offset)
   (var i 0)
   (while (< i count)
-    (let* [[name-result (decode-name buf pos)]
-           [name name-result:name]
-           [pos2 name-result:offset]
-           [rtype  (read-u16 buf pos2)]
-           [rclass (read-u16 buf (+ pos2 2))]
-           [ttl    (read-u32 buf (+ pos2 4))]
-           [rdlen  (read-u16 buf (+ pos2 8))]
-           [rdata-start (+ pos2 10)]
-           [rdata-end   (+ rdata-start rdlen)]]
-      (let [[record
+    (let* [name-result (decode-name buf pos)
+           name name-result:name
+           pos2 name-result:offset
+           rtype  (read-u16 buf pos2)
+           rclass (read-u16 buf (+ pos2 2))
+           ttl    (read-u32 buf (+ pos2 4))
+           rdlen  (read-u16 buf (+ pos2 8))
+           rdata-start (+ pos2 10)
+           rdata-end   (+ rdata-start rdlen)]
+      (let [record
               (case rtype
                 TYPE-A
                 (begin
@@ -226,10 +227,10 @@
                   {:type :aaaa :name name :addr (format-ipv6 buf rdata-start) :ttl ttl})
 
                 TYPE-CNAME
-                (let [[cname-result (decode-name buf rdata-start)]]
+                (let [cname-result (decode-name buf rdata-start)]
                   {:type :cname :name name :target cname-result:name :ttl ttl})
 
-                nil)]]
+                nil)]
         (when record (push records record)))
       (assign pos rdata-end))
     (assign i (+ i 1)))
@@ -238,11 +239,11 @@
 (defn parse-response [buf]
   "Parse a complete DNS response packet.
    Returns {:header {...} :answers [...] :authority [...] :additional [...]}."
-  (let* [[header (parse-header buf)]
-         [after-questions (skip-questions buf 12 header:qdcount)]
-         [answers   (parse-records buf after-questions header:ancount)]
-         [authority (parse-records buf answers:offset header:nscount)]
-         [additional (parse-records buf authority:offset header:arcount)]]
+  (let* [header (parse-header buf)
+         after-questions (skip-questions buf 12 header:qdcount)
+         answers   (parse-records buf after-questions header:ancount)
+         authority (parse-records buf answers:offset header:nscount)
+         additional (parse-records buf authority:offset header:arcount)]
     {:header header
      :answers answers:records
      :authority authority:records
@@ -254,11 +255,11 @@
   "Parse /etc/resolv.conf and return a list of nameserver IP strings."
   (var servers @[])
   (each line in (string/split text "\n")
-    (let [[trimmed (string/trim line)]]
+    (let [trimmed (string/trim line)]
       (when (string/starts-with? trimmed "nameserver")
-        (let [[parts (string/split trimmed " ")]]
+        (let [parts (string/split trimmed " ")]
           (when (>= (length parts) 2)
-            (let [[addr (string/trim (get parts 1))]]
+            (let [addr (string/trim (get parts 1))]
               (unless (empty? addr)
                 (push servers addr))))))))
   (freeze servers))
@@ -266,9 +267,9 @@
 (defn read-nameservers []
   "Read nameserver list from /etc/resolv.conf. Returns array of IP strings.
    Falls back to [\"127.0.0.1\"] if file is missing or empty."
-  (let [[[ok? content] (protect (slurp "/etc/resolv.conf"))]]
+  (let [[ok? content] (protect (slurp "/etc/resolv.conf"))]
     (if ok?
-      (let [[servers (parse-resolv-conf content)]]
+      (let [servers (parse-resolv-conf content)]
         (if (empty? servers)
           ["127.0.0.1"]
           servers))
@@ -280,7 +281,7 @@
 
 (defn gen-txid []
   "Generate a monotonically increasing 16-bit transaction ID."
-  (let [[id next-txid]]
+  (let [id next-txid]
     (assign next-txid (bit/and (+ id 1) 0xffff))
     id))
 
@@ -289,20 +290,20 @@
 (defn do-query [server name qtype timeout]
   "Send a single DNS query and return the parsed response.
    Signals :dns-timeout on timeout, :dns-error on protocol errors."
-  (let* [[txid (gen-txid)]
-         [packet (build-query txid name qtype)]
-         [sock (udp/bind "0.0.0.0" 0)]]
+  (let* [txid (gen-txid)
+         packet (build-query txid name qtype)
+         sock (udp/bind "0.0.0.0" 0)]
     (defer (port/close sock)
       (udp/send-to sock packet server 53 :timeout timeout)
-      (let* [[[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]]
+      (let* [[ok? result] (protect (udp/recv-from sock 512 :timeout timeout))]
         (unless ok?
           (error {:error :dns-timeout
                   :reason :query-timeout
                   :server server
                   :name name
                   :message (concat "timeout querying " server " for " name)}))
-        (let* [[resp-buf result:data]
-               [resp (parse-response resp-buf)]]
+        (let* [resp-buf result:data
+               resp (parse-response resp-buf)]
           # Verify transaction ID
           (unless (= resp:header:id txid)
             (error {:error :dns-error
@@ -317,8 +318,8 @@
                     :message "response truncated (TC bit set)"}))
           # Check RCODE
           (unless (= resp:header:rcode RCODE-OK)
-            (let [[rcode-name (or (get rcode-names resp:header:rcode)
-                                  (string resp:header:rcode))]]
+            (let [rcode-name (or (get rcode-names resp:header:rcode)
+                                  (string resp:header:rcode))]
               (error {:error :dns-error
                       :reason :server-error
                       :rcode resp:header:rcode
@@ -334,7 +335,7 @@
   (var last-err nil)
   (var attempt 0)
   (while (< attempt retries)
-    (let [[[ok? result] (protect (do-query server name qtype timeout))]]
+    (let [[ok? result] (protect (do-query server name qtype timeout))]
       (if ok?
         (break result)
         (begin
@@ -363,16 +364,16 @@
               :depth depth
               :limit MAX-CNAME-DEPTH
               :message (concat "CNAME chain too deep for " name)}))
-    (let* [[resp (query-with-retries server current-name qtype timeout retries)]
-           [answers resp:answers]
+    (let* [resp (query-with-retries server current-name qtype timeout retries)
+           answers resp:answers
            # Collect direct answers of the requested type
-           [direct (filter (fn [r] (= r:type (case qtype
+           direct (filter (fn [r] (= r:type (case qtype
                                                     TYPE-A :a
                                                     TYPE-AAAA :aaaa
                                                     nil)))
-                           answers)]
+                           answers)
            # Check for CNAME redirects
-           [cnames (filter (fn [r] (= r:type :cname)) answers)]]
+           cnames (filter (fn [r] (= r:type :cname)) answers)]
       (if (not (empty? direct))
         # Found direct answers — done
         (begin
@@ -395,13 +396,13 @@
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — retry count per query (default: 2)"
-  (let* [[srv (or server (first (read-nameservers)))]
-         [tmo (or timeout DEFAULT-TIMEOUT)]
-         [ret (or retries DEFAULT-RETRIES)]
-         [a-records (let [[[ok? result] (protect (resolve-type name TYPE-A srv tmo ret))]]
-                      (if ok? result ()))]
-         [aaaa-records (let [[[ok? result] (protect (resolve-type name TYPE-AAAA srv tmo ret))]]
-                         (if ok? result ()))]]
+  (let* [srv (or server (first (read-nameservers)))
+         tmo (or timeout DEFAULT-TIMEOUT)
+         ret (or retries DEFAULT-RETRIES)
+         a-records (let [[ok? result] (protect (resolve-type name TYPE-A srv tmo ret))]
+                      (if ok? result ()))
+         aaaa-records (let [[ok? result] (protect (resolve-type name TYPE-AAAA srv tmo ret))]
+                         (if ok? result ()))]
     (concat a-records aaaa-records)))
 
 (defn query [name qtype &named server timeout retries]
@@ -411,9 +412,9 @@
      :server  — nameserver IP (default: from /etc/resolv.conf)
      :timeout — per-query timeout in ms (default: 3000)
      :retries — retry count per query (default: 2)"
-  (let* [[srv (or server (first (read-nameservers)))]
-         [tmo (or timeout DEFAULT-TIMEOUT)]
-         [ret (or retries DEFAULT-RETRIES)]]
+  (let* [srv (or server (first (read-nameservers)))
+         tmo (or timeout DEFAULT-TIMEOUT)
+         ret (or retries DEFAULT-RETRIES)]
     (query-with-retries srv name qtype tmo ret)))
 
 ## ── Internal tests (pure, no network) ─────────────────────────────────
@@ -442,7 +443,7 @@
   (assert (= (read-u32 (bytes 0 0 0xe 0x10) 0) 3600) "read-u32 3600")
 
   # ── name encoding ──
-  (let [[enc (encode-name "example.com")]]
+  (let [enc (encode-name "example.com")]
     (assert (= (get enc 0) 7)               "encode-name: first label length")
     (assert (= (string (slice enc 1 8)) "example") "encode-name: first label")
     (assert (= (get enc 8) 3)               "encode-name: second label length")
@@ -450,23 +451,23 @@
     (assert (= (get enc 12) 0)              "encode-name: null terminator"))
 
   # ── name decode (no compression) ──
-  (let* [[encoded (encode-name "www.example.com")]
-         [result  (decode-name encoded 0)]]
+  (let* [encoded (encode-name "www.example.com")
+         result  (decode-name encoded 0)]
     (assert (= result:name "www.example.com") "decode-name: simple")
     (assert (= result:offset (length encoded)) "decode-name: offset past name"))
 
   # ── name decode (with compression pointer) ──
   # Build a buffer: [7 "example" 3 "com" 0] then [3 "www" 0xC0 0x00]
   # The pointer 0xC0 0x00 points to offset 0 = "example.com"
-  (let* [[base (encode-name "example.com")]
-         [ptr-name (concat (bytes 3) (bytes "www") (bytes 0xc0 0x00))]
-         [buf (concat base ptr-name)]
-         [result (decode-name buf (length base))]]
+  (let* [base (encode-name "example.com")
+         ptr-name (concat (bytes 3) (bytes "www") (bytes 0xc0 0x00))
+         buf (concat base ptr-name)
+         result (decode-name buf (length base))]
     (assert (= result:name "www.example.com")   "decode-name: compression")
     (assert (= result:offset (length buf))      "decode-name: compression offset"))
 
   # ── query building ──
-  (let [[q (build-query 0x1234 "example.com" TYPE-A)]]
+  (let [q (build-query 0x1234 "example.com" TYPE-A)]
     # Header: 12 bytes
     (assert (= (read-u16 q 0) 0x1234) "build-query: txid")
     (assert (= (read-u16 q 2) FLAG-RD) "build-query: flags RD")
@@ -477,14 +478,14 @@
 
   # ── header parsing ──
   # Construct a minimal response header: QR=1, RD=1, RA=1, RCODE=0
-  (let* [[flags (bit/or FLAG-QR (bit/or FLAG-RD 128))]  # QR + RD + RA
-         [header (concat (u16->bytes 0xabcd)    # ID
+  (let* [flags (bit/or FLAG-QR (bit/or FLAG-RD 128))  # QR + RD + RA
+         header (concat (u16->bytes 0xabcd)    # ID
                          (u16->bytes flags)     # Flags
                          (u16->bytes 1)         # QDCOUNT
                          (u16->bytes 2)         # ANCOUNT
                          (u16->bytes 0)         # NSCOUNT
-                         (u16->bytes 0))]       # ARCOUNT
-         [parsed (parse-header header)]]
+                         (u16->bytes 0))       # ARCOUNT
+         parsed (parse-header header)]
     (assert (= parsed:id 0xabcd)        "parse-header: id")
     (assert parsed:qr                   "parse-header: qr")
     (assert parsed:rd                   "parse-header: rd")
@@ -520,97 +521,97 @@
 
   # ── Full response parsing (synthetic A record) ──
   # Build a complete DNS response for "example.com" → 93.184.216.34
-  (let* [[txid 0x1234]
-         [flags (bit/or FLAG-QR (bit/or FLAG-RD 128))]
-         [header (concat (u16->bytes txid)
+  (let* [txid 0x1234
+         flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
+         header (concat (u16->bytes txid)
                          (u16->bytes flags)
                          (u16->bytes 1)    # QDCOUNT
                          (u16->bytes 1)    # ANCOUNT
                          (u16->bytes 0)    # NSCOUNT
-                         (u16->bytes 0))]  # ARCOUNT
-         [qname (encode-name "example.com")]
-         [question (concat qname
+                         (u16->bytes 0))  # ARCOUNT
+         qname (encode-name "example.com")
+         question (concat qname
                            (u16->bytes TYPE-A)
-                           (u16->bytes CLASS-IN))]
+                           (u16->bytes CLASS-IN))
          # Answer: compression pointer to offset 12 (qname in question)
-         [answer (concat (bytes 0xc0 12)          # Name pointer
+         answer (concat (bytes 0xc0 12)          # Name pointer
                          (u16->bytes TYPE-A)       # TYPE
                          (u16->bytes CLASS-IN)     # CLASS
                          (bytes 0 0 0xe 0x10)      # TTL = 3600
                          (u16->bytes 4)            # RDLENGTH
-                         (bytes 93 184 216 34))]   # RDATA
-         [packet (concat header question answer)]
-         [resp (parse-response packet)]]
+                         (bytes 93 184 216 34))   # RDATA
+         packet (concat header question answer)
+         resp (parse-response packet)]
     (assert (= resp:header:id txid)               "full parse: txid")
     (assert resp:header:qr                        "full parse: qr")
     (assert (= (length resp:answers) 1)           "full parse: 1 answer")
-    (let [[a (first resp:answers)]]
+    (let [a (first resp:answers)]
       (assert (= a:type :a)                       "full parse: type A")
       (assert (= a:name "example.com")            "full parse: name")
       (assert (= a:addr "93.184.216.34")          "full parse: addr")
       (assert (= a:ttl 3600)                      "full parse: ttl")))
 
   # ── Full response parsing (synthetic AAAA record) ──
-  (let* [[txid 0x5678]
-         [flags (bit/or FLAG-QR (bit/or FLAG-RD 128))]
-         [header (concat (u16->bytes txid)
+  (let* [txid 0x5678
+         flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
+         header (concat (u16->bytes txid)
                          (u16->bytes flags)
                          (u16->bytes 1)    # QDCOUNT
                          (u16->bytes 1)    # ANCOUNT
                          (u16->bytes 0)
-                         (u16->bytes 0))]
-         [qname (encode-name "example.com")]
-         [question (concat qname
+                         (u16->bytes 0))
+         qname (encode-name "example.com")
+         question (concat qname
                            (u16->bytes TYPE-AAAA)
-                           (u16->bytes CLASS-IN))]
-         [answer (concat (bytes 0xc0 12)           # Name pointer
+                           (u16->bytes CLASS-IN))
+         answer (concat (bytes 0xc0 12)           # Name pointer
                          (u16->bytes TYPE-AAAA)     # TYPE
                          (u16->bytes CLASS-IN)      # CLASS
                          (bytes 0 0 0x0e 0x10)      # TTL = 3600
                          (u16->bytes 16)            # RDLENGTH = 16
                          (bytes 0x26 0x06 0x28 0x00 0x02 0x20 0x00 0x01
-                                0x02 0x48 0x18 0x93 0x25 0xc8 0x19 0x46))]
-         [packet (concat header question answer)]
-         [resp (parse-response packet)]]
+                                0x02 0x48 0x18 0x93 0x25 0xc8 0x19 0x46))
+         packet (concat header question answer)
+         resp (parse-response packet)]
     (assert (= (length resp:answers) 1)            "aaaa parse: 1 answer")
-    (let [[a (first resp:answers)]]
+    (let [a (first resp:answers)]
       (assert (= a:type :aaaa)                     "aaaa parse: type")
       (assert (= a:addr "2606:2800:220:1:248:1893:25c8:1946")
         "aaaa parse: addr")))
 
   # ── CNAME + A response ──
-  (let* [[txid 0x9999]
-         [flags (bit/or FLAG-QR (bit/or FLAG-RD 128))]
-         [header (concat (u16->bytes txid)
+  (let* [txid 0x9999
+         flags (bit/or FLAG-QR (bit/or FLAG-RD 128))
+         header (concat (u16->bytes txid)
                          (u16->bytes flags)
                          (u16->bytes 1)    # QDCOUNT
                          (u16->bytes 2)    # ANCOUNT (CNAME + A)
                          (u16->bytes 0)
-                         (u16->bytes 0))]
-         [qname (encode-name "www.example.com")]
-         [question (concat qname
+                         (u16->bytes 0))
+         qname (encode-name "www.example.com")
+         question (concat qname
                            (u16->bytes TYPE-A)
-                           (u16->bytes CLASS-IN))]
+                           (u16->bytes CLASS-IN))
          # CNAME answer
-         [cname-target (encode-name "example.com")]
-         [cname-answer (concat (bytes 0xc0 12)        # Name pointer
+         cname-target (encode-name "example.com")
+         cname-answer (concat (bytes 0xc0 12)        # Name pointer
                                (u16->bytes TYPE-CNAME)
                                (u16->bytes CLASS-IN)
                                (bytes 0 0 0 60)        # TTL = 60
                                (u16->bytes (length cname-target))
-                               cname-target)]
+                               cname-target)
          # A answer for the CNAME target
-         [a-answer (concat (encode-name "example.com")
+         a-answer (concat (encode-name "example.com")
                            (u16->bytes TYPE-A)
                            (u16->bytes CLASS-IN)
                            (bytes 0 0 0xe 0x10)        # TTL = 3600
                            (u16->bytes 4)
-                           (bytes 93 184 216 34))]
-         [packet (concat header question cname-answer a-answer)]
-         [resp (parse-response packet)]]
+                           (bytes 93 184 216 34))
+         packet (concat header question cname-answer a-answer)
+         resp (parse-response packet)]
     (assert (= (length resp:answers) 2) "cname+a: 2 answers")
-    (let [[cname-rec (first resp:answers)]
-          [a-rec (first (rest resp:answers))]]
+    (let [cname-rec (first resp:answers)
+          a-rec (first (rest resp:answers))]
       (assert (= cname-rec:type :cname)           "cname+a: first is cname")
       (assert (= cname-rec:target "example.com")  "cname+a: target")
       (assert (= a-rec:type :a)                   "cname+a: second is A")

@@ -95,7 +95,7 @@ scope ID. No pattern matching, no ellipsis, no multiple clauses.
 
 1. Check arity: `args.len() == params.len()`
 2. Check recursion depth against `MAX_MACRO_EXPANSION_DEPTH` (200)
-3. Build a let-expression: `(let ((p1 'a1) (p2 'a2)) body)` where
+3. Build a let-expression: `(let [p1 'a1 p2 'a2] body)` where
    each argument is quoted so it becomes data, not code
 4. Compile and execute via `pipeline::eval_syntax()` — the full
    pipeline (expand → analyze → lower → emit → execute) runs on the
@@ -296,7 +296,7 @@ macros that intentionally introduce bindings visible at the call site.
 
 ```text
 (defmacro aif (test then else)
-  `(let ((,(datum->syntax test 'it) ,test))
+  `(let [,(datum->syntax test 'it) ,test]
      (if ,(datum->syntax test 'it) ,then ,else)))
 
 (aif (+ 1 2) (+ it 10) 0)  # → 13

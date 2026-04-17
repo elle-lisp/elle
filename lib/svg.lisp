@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/svg.lisp — SVG construction and emission (pure Elle)
 ##
 ## Build SVG documents as struct trees, emit as XML strings.
@@ -93,8 +94,8 @@
   # ── Text ───────────────────────────────────────────────────────────
 
   (defn text [x y & rest]
-    (let [[attrs {:x (float x) :y (float y)}]
-          [children @[]]]
+    (let [attrs {:x (float x) :y (float y)}
+          children @[]]
       (each item in rest
         (cond
           ## Attrs struct (not an SVG element)
@@ -126,7 +127,7 @@
 
   (defn scale [sx & rest]
     (if (and (not (empty? rest)) (number? (first rest)))
-      (let [[sy (first rest)]]
+      (let [sy (first rest)]
         (element :g {:transform (string "scale(" sx "," sy ")")} (slice rest 1)))
       (element :g {:transform (string "scale(" sx "," sx ")")} rest)))
 
@@ -160,7 +161,7 @@
     (put elem :attrs (put (get elem :attrs) key value)))
 
   (defn add-child [elem child]
-    (let [[kids (thaw (get elem :children))]]
+    (let [kids (thaw (get elem :children))]
       (push kids child)
       (put elem :children (freeze kids))))
 
@@ -194,14 +195,14 @@
     (cond
       ((string? elem) (xml-escape elem))
       ((struct? elem)
-        (let* [[tag (get elem :tag)]
-               [attrs (get elem :attrs)]
-               [children (get elem :children)]
-               [out @""]]
+        (let* [tag (get elem :tag)
+               attrs (get elem :attrs)
+               children (get elem :children)
+               out @""]
           (append out (string "<" tag))
           (when attrs
             (each [k v] in attrs
-              (let [[val-str (emit-attr-value v)]]
+              (let [val-str (emit-attr-value v)]
                 (when val-str
                   (append out (string " " k "=\"" val-str "\""))))))
           (if (or (nil? children) (empty? children))

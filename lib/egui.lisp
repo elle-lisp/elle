@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/egui.lisp — immediate-mode GUI for Elle
 ##
 ## Wraps the elle-egui plugin (egui + winit + glow) with fiber-friendly

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## YAML plugin integration tests
 
@@ -78,8 +79,8 @@
 
 ## ── error: parse invalid YAML ───────────────────────────────────
 
-(let (([ok? err] (protect ((fn () (parse-fn ":\n  - [invalid")))))) (assert (not ok?) "yaml/parse invalid") (assert (= (get err :error) :yaml-error) "yaml/parse invalid"))
+(let [[ok? err] (protect ((fn () (parse-fn ":\n  - [invalid"))))] (assert (not ok?) "yaml/parse invalid") (assert (= (get err :error) :yaml-error) "yaml/parse invalid"))
 
 ## ── error: wrong type to parse ──────────────────────────────────
 
-(let (([ok? _] (protect ((fn () (parse-fn 42)))))) (assert (not ok?) "yaml/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "yaml/parse wrong type"))

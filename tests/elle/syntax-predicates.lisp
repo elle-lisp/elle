@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Syntax predicate and accessor integration tests (issue #581)
 #
 # These tests exercise syntax-pair?, syntax-list?, syntax-symbol?,
@@ -46,55 +47,55 @@
 # ============================================================================
 
 # Success: syntax list with one element → array of length 1 whose element is syntax
-(let ((result (syntax->list syn-list1)))
+(let [result (syntax->list syn-list1)]
   (assert (= (length result) 1) "syntax->list: length 1 list")
   (assert (not (nil? (first result))) "syntax->list: element not nil"))
 
 # Success: empty syntax list → empty array
-(let ((result (syntax->list syn-empty)))
+(let [result (syntax->list syn-empty)]
   (assert (= (length result) 0) "syntax->list: empty list → empty array"))
 
 # Error: non-syntax argument
-(let (([ok? _] (protect ((fn () (syntax->list 42)))))) (assert (not ok?) "syntax->list: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax->list 42))))] (assert (not ok?) "syntax->list: non-syntax errors"))
 
 # Error: syntax wrapping a non-list (e.g. an int)
-(let (([ok? _] (protect ((fn () (syntax->list syn-int)))))) (assert (not ok?) "syntax->list: syntax non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax->list syn-int))))] (assert (not ok?) "syntax->list: syntax non-list errors"))
 
 # ============================================================================
 # syntax-first — runtime callable
 # ============================================================================
 
 # Success: first element of a 2-element syntax list
-(let ((elem (syntax-first syn-list2)))
+(let [elem (syntax-first syn-list2)]
   (assert (= (syntax-e elem) 1) "syntax-first: returns first element"))
 
 # Error: empty syntax list
-(let (([ok? _] (protect ((fn () (syntax-first syn-empty)))))) (assert (not ok?) "syntax-first: empty list errors"))
+(let [[ok? _] (protect ((fn () (syntax-first syn-empty))))] (assert (not ok?) "syntax-first: empty list errors"))
 
 # Error: syntax wrapping a non-list
-(let (([ok? _] (protect ((fn () (syntax-first syn-int)))))) (assert (not ok?) "syntax-first: non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax-first syn-int))))] (assert (not ok?) "syntax-first: non-list errors"))
 
 # Error: plain non-syntax value
-(let (([ok? _] (protect ((fn () (syntax-first 42)))))) (assert (not ok?) "syntax-first: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-first 42))))] (assert (not ok?) "syntax-first: non-syntax errors"))
 
 # ============================================================================
 # syntax-rest — runtime callable
 # ============================================================================
 
 # Success: rest of a 2-element list → syntax list of length 1
-(let ((tail (syntax-rest syn-list2)))
-  (let ((items (syntax->list tail)))
+(let [tail (syntax-rest syn-list2)]
+  (let [items (syntax->list tail)]
     (assert (= (length items) 1) "syntax-rest: rest has 1 element")
     (assert (= (syntax-e (first items)) 2) "syntax-rest: rest element is 2")))
 
 # Error: empty syntax list
-(let (([ok? _] (protect ((fn () (syntax-rest syn-empty)))))) (assert (not ok?) "syntax-rest: empty list errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest syn-empty))))] (assert (not ok?) "syntax-rest: empty list errors"))
 
 # Error: syntax wrapping a non-list
-(let (([ok? _] (protect ((fn () (syntax-rest syn-int)))))) (assert (not ok?) "syntax-rest: non-list errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest syn-int))))] (assert (not ok?) "syntax-rest: non-list errors"))
 
 # Error: plain non-syntax value
-(let (([ok? _] (protect ((fn () (syntax-rest 42)))))) (assert (not ok?) "syntax-rest: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-rest 42))))] (assert (not ok?) "syntax-rest: non-syntax errors"))
 
 # ============================================================================
 # syntax-e — runtime callable
@@ -108,9 +109,9 @@
 
 # Compound: returns the syntax object unchanged (still a syntax?)
 # syntax-e on a list returns the syntax object as-is
-(let ((result (syntax-e syn-list1)))
+(let [result (syntax-e syn-list1)]
   (assert (not (nil? result)) "syntax-e: compound returns non-nil"))
 
 # Error: non-syntax argument
-(let (([ok? _] (protect ((fn () (syntax-e 42)))))) (assert (not ok?) "syntax-e: non-syntax errors"))
-(let (([ok? _] (protect ((fn () (syntax-e :foo)))))) (assert (not ok?) "syntax-e: plain keyword errors"))
+(let [[ok? _] (protect ((fn () (syntax-e 42))))] (assert (not ok?) "syntax-e: non-syntax errors"))
+(let [[ok? _] (protect ((fn () (syntax-e :foo))))] (assert (not ok?) "syntax-e: plain keyword errors"))

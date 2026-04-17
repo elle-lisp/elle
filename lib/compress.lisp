@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/compress.lisp — Gzip, zlib, deflate, and zstd via FFI
 ##
 ## Usage:
@@ -14,7 +15,7 @@
   (def null-ptr (ptr/from-int 0))
 
   (defn cfn [lib name ret args]
-    (let [[p (ffi/lookup lib name)] [s (ffi/signature ret args)]]
+    (let [p (ffi/lookup lib name) s (ffi/signature ret args)]
       (fn [& a] (apply ffi/call p s a))))
 
   ## ── zlib C bindings ──────────────────────────────────────────────
@@ -48,31 +49,31 @@
 
   (defn ptr->bytes [ptr len]
     "Read len bytes from a C pointer into Elle bytes."
-    (let [[acc @[]]]
+    (let [acc @[]]
       (each i in (range len)
         (push acc (ffi/read (ptr/add ptr i) :u8)))
       (freeze (bytes ;acc))))
 
   (defn to-input [data]
     "Coerce to bytes + pin for FFI."
-    (let [[b (if (string? data) (bytes data) data)]]
+    (let [b (if (string? data) (bytes data) data)]
       (ffi/pin b)))
 
   ## ── Deflate-based compression (gzip, zlib, raw deflate) ──────────
 
   (defn deflate-compress [data window-bits level]
     "Compress data using zlib's deflate with the given windowBits."
-    (let* [[input (bytes data)]
-           [in-len (length input)]
-           [out-size (+ (z-bound in-len) 64)]
-           [stream (ffi/malloc Z_STREAM_SIZE)]
-           [out-buf (ffi/malloc out-size)]
-           [in-pin (ffi/pin input)]]
+    (let* [input (bytes data)
+           in-len (length input)
+           out-size (+ (z-bound in-len) 64)
+           stream (ffi/malloc Z_STREAM_SIZE)
+           out-buf (ffi/malloc out-size)
+           in-pin (ffi/pin input)]
       ## Zero the stream struct
       (each i in (range Z_STREAM_SIZE)
         (ffi/write (ptr/add stream i) :u8 0))
       ## deflateInit2(stream, level, Z_DEFLATED=8, windowBits, memLevel=8, Z_DEFAULT_STRATEGY=0)
-      (let [[rc (z-deflateInit2 stream level 8 window-bits 8 0 ZLIB_VERSION Z_STREAM_SIZE)]]
+      (let [rc (z-deflateInit2 stream level 8 window-bits 8 0 ZLIB_VERSION Z_STREAM_SIZE)]
         (unless (= rc Z_OK)
           (ffi/free stream)
           (ffi/free out-buf)
@@ -83,7 +84,7 @@
       (ffi/write (ptr/add stream 24) :ptr out-buf)             # next_out = 24
       (ffi/write (ptr/add stream 32) :u32 out-size)            # avail_out = 32
       ## Compress
-      (let [[rc (z-deflate stream Z_FINISH)]]
+      (let [rc (z-deflate stream Z_FINISH)]
         (unless (= rc Z_STREAM_END)
           (z-deflateEnd stream)
           (ffi/free stream)
@@ -91,9 +92,9 @@
           (error {:error :compress-error :message (string "deflate failed: " rc)})))
       ## Read output size: total_out is at offset 40 (after avail_out at 32 + padding)
       ## Actually total_out offset: next_out(24,8) + avail_out(32,4) + pad(36,4) + total_out(40,8)
-      (let* [[avail-out (ffi/read (ptr/add stream 32) :u32)]
-             [compressed-len (- out-size avail-out)]
-             [result (ptr->bytes out-buf compressed-len)]]
+      (let* [avail-out (ffi/read (ptr/add stream 32) :u32)
+             compressed-len (- out-size avail-out)
+             result (ptr->bytes out-buf compressed-len)]
         (z-deflateEnd stream)
         (ffi/free stream)
         (ffi/free out-buf)
@@ -101,15 +102,15 @@
 
   (defn deflate-decompress [data window-bits]
     "Decompress data using zlib's inflate with the given windowBits."
-    (let* [[input (bytes data)]
-           [in-len (length input)]
-           [out-size (* in-len 4)]   # initial guess
-           [stream (ffi/malloc Z_STREAM_SIZE)]
-           [in-pin (ffi/pin input)]]
+    (let* [input (bytes data)
+           in-len (length input)
+           out-size (* in-len 4)   # initial guess
+           stream (ffi/malloc Z_STREAM_SIZE)
+           in-pin (ffi/pin input)]
       ## Zero the stream
       (each i in (range Z_STREAM_SIZE)
         (ffi/write (ptr/add stream i) :u8 0))
-      (let [[rc (z-inflateInit2 stream window-bits ZLIB_VERSION Z_STREAM_SIZE)]]
+      (let [rc (z-inflateInit2 stream window-bits ZLIB_VERSION Z_STREAM_SIZE)]
         (unless (= rc Z_OK)
           (ffi/free stream)
           (error {:error :compress-error :message (string "inflateInit2 failed: " rc)})))
@@ -122,18 +123,18 @@
       (var total-out 0)
       (var done false)
       (while (not done)
-        (let [[space (- buf-size total-out)]]
+        (let [space (- buf-size total-out)]
           (ffi/write (ptr/add stream 24) :ptr (ptr/add out-buf total-out))
           (ffi/write (ptr/add stream 32) :u32 space)
-          (let [[rc (z-inflate stream 0)]]  # Z_NO_FLUSH = 0
-            (let [[produced (- space (ffi/read (ptr/add stream 32) :u32))]]
+          (let [rc (z-inflate stream 0)]  # Z_NO_FLUSH = 0
+            (let [produced (- space (ffi/read (ptr/add stream 32) :u32))]
               (assign total-out (+ total-out produced)))
             (match rc
               [1 (assign done true)]   # Z_STREAM_END
               [0 (when (zero? (ffi/read (ptr/add stream 32) :u32))
                    ## Output buffer full, grow
-                   (let* [[new-size (* buf-size 2)]
-                          [new-buf (ffi/malloc new-size)]]
+                   (let* [new-size (* buf-size 2)
+                          new-buf (ffi/malloc new-size)]
                      (each i in (range total-out)
                        (ffi/write (ptr/add new-buf i) :u8
                                   (ffi/read (ptr/add out-buf i) :u8)))
@@ -144,7 +145,7 @@
                  (ffi/free stream)
                  (ffi/free out-buf)
                  (error {:error :compress-error :message (string "inflate failed: " rc)})]))))
-      (let [[result (ptr->bytes out-buf total-out)]]
+      (let [result (ptr->bytes out-buf total-out)]
         (z-inflateEnd stream)
         (ffi/free stream)
         (ffi/free out-buf)
@@ -161,36 +162,36 @@
   ## ── Zstd ─────────────────────────────────────────────────────────
 
   (defn zstd [data & opts]
-    (let* [[input (bytes data)]
-           [in-len (length input)]
-           [level (if (> (length opts) 0) (first opts) 3)]
-           [bound (zstd-bound in-len)]
-           [out-buf (ffi/malloc bound)]
-           [in-pin (ffi/pin input)]
-           [rc (zstd-compress out-buf bound in-pin in-len level)]]
+    (let* [input (bytes data)
+           in-len (length input)
+           level (if (> (length opts) 0) (first opts) 3)
+           bound (zstd-bound in-len)
+           out-buf (ffi/malloc bound)
+           in-pin (ffi/pin input)
+           rc (zstd-compress out-buf bound in-pin in-len level)]
       (unless (zero? (zstd-is-error rc))
         (ffi/free out-buf)
         (error {:error :compress-error
                 :message (string "zstd: " (ffi/string (zstd-err-name rc)))}))
-      (let [[result (ptr->bytes out-buf rc)]]
+      (let [result (ptr->bytes out-buf rc)]
         (ffi/free out-buf)
         result)))
 
   (defn unzstd [data]
-    (let* [[input (bytes data)]
-           [in-len (length input)]
-           [in-pin (ffi/pin input)]
-           [frame-size (zstd-frame-size in-pin in-len)]]
+    (let* [input (bytes data)
+           in-len (length input)
+           in-pin (ffi/pin input)
+           frame-size (zstd-frame-size in-pin in-len)]
       (when (< frame-size 0)
         (error {:error :compress-error :message "unzstd: cannot determine frame size"}))
       (if (zero? frame-size) (bytes)
-      (let* [[out-buf (ffi/malloc frame-size)]
-             [rc (zstd-decompress out-buf frame-size in-pin in-len)]]
+      (let* [out-buf (ffi/malloc frame-size)
+             rc (zstd-decompress out-buf frame-size in-pin in-len)]
         (unless (zero? (zstd-is-error rc))
           (ffi/free out-buf)
           (error {:error :compress-error
                   :message (string "unzstd: " (ffi/string (zstd-err-name rc)))}))
-        (let [[result (ptr->bytes out-buf rc)]]
+        (let [result (ptr->bytes out-buf rc)]
           (ffi/free out-buf)
           result)))))
 

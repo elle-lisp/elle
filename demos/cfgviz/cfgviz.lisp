@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 
 # CFG Visualizer Demo
 #
@@ -43,8 +43,8 @@
     ([:sub a b] (- (eval-expr a) (eval-expr b)))
     ([:mul a b] (* (eval-expr a) (eval-expr b)))
     ([:div a b]
-      (let* ([divisor (eval-expr b)]
-             [dividend (eval-expr a)])
+      (let* [divisor (eval-expr b)
+             dividend (eval-expr a)]
         (if (= divisor 0)
           (error {:error :division-by-zero :message "division by zero in expression"})
           (/ dividend divisor))))
@@ -54,8 +54,8 @@
 
 (defn render-cfg [f name]
   "Render a function's CFG to a DOT file."
-  (let* ([dot (fn/cfg f :dot)]
-         [path (string "demos/cfgviz/" name ".dot")])
+  (let* [dot (fn/cfg f :dot)
+         path (string "demos/cfgviz/" name ".dot")]
     (file/write path dot)
     (println "  wrote " path)))
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 # tests/elle/telemetry.lisp — Unit tests for lib/telemetry.lisp
 #
@@ -14,25 +15,25 @@
 (assert (= (telemetry:encode-attributes nil) []) "nil attrs => []")
 
 # string value
-(let [[encoded (telemetry:encode-attributes {"method" "GET"})]]
+(let [encoded (telemetry:encode-attributes {"method" "GET"})]
   (assert (= (length encoded) 1) "one attribute")
-  (let [[kv (get encoded 0)]]
+  (let [kv (get encoded 0)]
     (assert (= (get kv "key") "method") "attr key")
     (assert (= (get (get kv "value") "stringValue") "GET") "attr string value")))
 
 # integer value
-(let [[encoded (telemetry:encode-attributes {"code" 200})]]
-  (let [[kv (get encoded 0)]]
+(let [encoded (telemetry:encode-attributes {"code" 200})]
+  (let [kv (get encoded 0)]
     (assert (= (get (get kv "value") "intValue") "200") "attr int value")))
 
 # float value
-(let [[encoded (telemetry:encode-attributes {"latency" 1.5})]]
-  (let [[kv (get encoded 0)]]
+(let [encoded (telemetry:encode-attributes {"latency" 1.5})]
+  (let [kv (get encoded 0)]
     (assert (= (get (get kv "value") "doubleValue") 1.5) "attr float value")))
 
 # boolean value
-(let [[encoded (telemetry:encode-attributes {"ok" true})]]
-  (let [[kv (get encoded 0)]]
+(let [encoded (telemetry:encode-attributes {"ok" true})]
+  (let [kv (get encoded 0)]
     (assert (= (get (get kv "value") "boolValue") true) "attr bool value")))
 
 (println "  attribute encoding: ok")

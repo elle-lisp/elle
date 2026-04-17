@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Markdown-to-HTML parser for the documentation generator
 ##
 ## Parses standard markdown: headings, code fences, tables, lists,
@@ -22,8 +23,8 @@
 
 (defn find-closing [text start delimiter]
   "Find delimiter in text starting from character position."
-  (let* [[dlen (length delimiter)]
-         [tlen (length text)]]
+  (let* [dlen (length delimiter)
+         tlen (length text)]
     (var pos start)
     (var result nil)
     (while (< pos tlen)
@@ -39,11 +40,11 @@
   (var result "")
   (var src text)
   (while (not (= src ""))
-    (let [[bp (find-closing src 0 "[")]]
+    (let [bp (find-closing src 0 "[")]
       (if (nil? bp)
         (begin (assign result (append result src))
                (assign src ""))
-        (let [[cb (find-closing src (+ bp 1) "]")]]
+        (let [cb (find-closing src (+ bp 1) "]")]
           (if (nil? cb)
             (begin (assign result (append result src))
                    (assign src ""))
@@ -52,7 +53,7 @@
               (begin
                 (assign result (append result (slice src 0 (+ cb 1))))
                 (assign src (slice src (+ cb 1) (length src))))
-              (let [[cp (find-closing src (+ cb 2) ")")]]
+              (let [cp (find-closing src (+ cb 2) ")")]
                 (if (nil? cp)
                   (begin (assign result (append result src))
                          (assign src ""))
@@ -100,7 +101,7 @@
   "Return heading level (1-6) or nil."
   (if (not (string/starts-with? line "#"))
     nil
-    (let* [[len (length line)]]
+    (let* [len (length line)]
       (var level 0)
       (while (and (< level len) (= (slice line level (+ level 1)) "#"))
         (assign level (+ level 1)))
@@ -112,22 +113,22 @@
 
 (defn is-separator-row? [line]
   "Check if a table line is a separator row (|---|---|)."
-  (let [[cleaned (-> line
+  (let [cleaned (-> line
                    (string-replace "|" "")
                    (string-replace "-" "")
                    (string-replace ":" "")
-                   (string-replace " " ""))]]
+                   (string-replace " " ""))]
     (= cleaned "")))
 
 (defn parse-table-cells [line]
   "Split a markdown table row into trimmed cells."
-  (let* [[trimmed (string/trim line)]
-         [inner (if (string/starts-with? trimmed "|")
+  (let* [trimmed (string/trim line)
+         inner (if (string/starts-with? trimmed "|")
                   (slice trimmed 1 (length trimmed))
-                  trimmed)]
-         [inner (if (string/ends-with? inner "|")
+                  trimmed)
+         inner (if (string/ends-with? inner "|")
                   (slice inner 0 (- (length inner) 1))
-                  inner)]]
+                  inner)]
     (map string/trim (string/split inner "|"))))
 
 (defn is-list-item? [line]
@@ -137,7 +138,7 @@
 
 (defn is-block-boundary? [line]
   "Check if line starts a new block (heading, fence, table, list, quote, rule)."
-  (let [[trimmed (string/trim line)]]
+  (let [trimmed (string/trim line)]
     (or (= trimmed "")
         (not (nil? (heading-level line)))
         (string/starts-with? line "```")
@@ -152,7 +153,7 @@
 
 (defn parse [text]
   "Parse markdown text. Returns {:title str :body str :description str}."
-  (let [[lines (string/split text "\n")]]
+  (let [lines (string/split text "\n")]
     (var n (length lines))
     (var i 0)
     (var title nil)
@@ -160,7 +161,7 @@
     (var body @"")
 
     (while (< i n)
-      (let [[line (get lines i)]]
+      (let [line (get lines i)]
         (cond
           # ── Blank line ──
           ((= (string/trim line) "")
@@ -168,7 +169,7 @@
 
           # ── Code fence ──
           ((string/starts-with? line "```")
-           (let [[lang (string/trim (slice line 3 (length line)))]]
+           (let [lang (string/trim (slice line 3 (length line)))]
              (assign i (+ i 1))
              (var code-lines @[])
              (while (and (< i n)
@@ -184,8 +185,8 @@
 
           # ── Heading ──
           ((heading-level line)
-           (let* [[level (heading-level line)]
-                  [htext (string/trim (slice line (+ level 1) (length line)))]]
+           (let* [level (heading-level line)
+                  htext (string/trim (slice line (+ level 1) (length line)))]
              (if (and (= level 1) (nil? title))
                # First h1 becomes page title; following paragraph is description
                (begin
@@ -205,13 +206,13 @@
                    (assign desc (string/join (freeze desc-lines) " "))
                    (push body (string "<p>" (format-inline desc) "</p>\n"))))
                (begin
-                 (let [[id (-> htext
+                 (let [id (-> htext
                              (string-replace " " "-")
                              (string-replace "(" "")
                              (string-replace ")" "")
                              (string-replace "/" "-")
                              (string-replace "'" "")
-                             (string-replace "," ""))]]
+                             (string-replace "," ""))]
                    (push body (string "<h" (string level)
                      " id=\"" (html-escape id) "\">"
                      (format-inline htext)
@@ -225,13 +226,13 @@
                        (string/starts-with? (string/trim (get lines i)) "|"))
              (push table-lines (get lines i))
              (assign i (+ i 1)))
-           (let [[tlines (freeze table-lines)]]
+           (let [tlines (freeze table-lines)]
              (when (>= (length tlines) 2)
-               (let* [[headers (parse-table-cells (get tlines 0))]
-                      [has-sep (and (>= (length tlines) 2)
-                                    (is-separator-row? (get tlines 1)))]
-                      [data-start (if has-sep 2 1)]
-                      [data-rows (slice tlines data-start (length tlines))]]
+               (let* [headers (parse-table-cells (get tlines 0))
+                      has-sep (and (>= (length tlines) 2)
+                                    (is-separator-row? (get tlines 1)))
+                      data-start (if has-sep 2 1)
+                      data-rows (slice tlines data-start (length tlines))]
                  (push body "<table><thead><tr>")
                  (each cell in headers
                    (push body (string "<th>" (format-inline cell) "</th>")))

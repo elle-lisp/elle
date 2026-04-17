@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## Hash plugin integration tests
 
@@ -67,7 +68,7 @@
 ## ── BLAKE3 keyed ─────────────────────────────────────────────────
 
 ## key must be exactly 32 bytes; use blake3 output as the key
-(let* [[key (hash:blake3 "mykey")]]
+(let* [key (hash:blake3 "mykey")]
   (assert (= (length (hash:blake3-keyed key "hello")) 32)
           "blake3-keyed returns 32 bytes"))
 
@@ -98,30 +99,30 @@
 ## new/update/finalize matches one-shot for all algorithms
 (each algo in [:md5 :sha1 :sha256 :sha512 :sha3-256 :blake2b-512 :blake3
                :crc32 :xxh128]
-  (let* [[ctx (hash:new algo)]]
+  (let* [ctx (hash:new algo)]
     (hash:update ctx "hel")
     (hash:update ctx "lo")
     (assert (= (hash:finalize ctx) ((get hash algo) "hello"))
             (concat "streaming matches one-shot for " (string algo)))))
 
 ## finalize resets — context is reusable
-(let* [[ctx (hash:new :sha256)]]
+(let* [ctx (hash:new :sha256)]
   (hash:update ctx "hello")
   (def d1 (hash:finalize ctx))
   (hash:update ctx "hello")
   (assert (= d1 (hash:finalize ctx)) "finalize resets for reuse"))
 
 ## update returns the context (for stream/fold chaining)
-(let* [[ctx (hash:new :sha256)]
-       [ret (hash:update ctx "hello")]]
+(let* [ctx (hash:new :sha256)
+       ret (hash:update ctx "hello")]
   (assert (= (hash:finalize ret) (hash:sha256 "hello"))
           "update returns the context"))
 
 ## stream/fold integration
-(let* [[chunks (coro/new (fn []
+(let* [chunks (coro/new (fn []
                  (yield "hel")
-                 (yield "lo")))]
-       [ctx (stream/fold hash:update (hash:new :sha256) chunks)]]
+                 (yield "lo")))
+       ctx (stream/fold hash:update (hash:new :sha256) chunks)]
   (assert (= (hash:finalize ctx) (hash:sha256 "hello"))
           "stream/fold with hash/update"))
 
@@ -150,10 +151,10 @@
 
 ## ── error cases ──────────────────────────────────────────────────
 
-(let [[[ok? _] (protect (hash:new :bogus))]]
+(let [[ok? _] (protect (hash:new :bogus))]
   (assert (not ok?) "unknown algorithm errors"))
 
-(let [[[ok? _] (protect (hash:update "not-a-context" "data"))]]
+(let [[ok? _] (protect (hash:update "not-a-context" "data"))]
   (assert (not ok?) "update on non-context errors"))
 
 (print "hash: all tests passed\n")

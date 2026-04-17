@@ -333,12 +333,7 @@ mod tests {
     #[test]
     fn test_extract_let_bindings() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze(
-            "(let ((a 1) (b 2)) (+ a b))",
-            &mut symbols,
-            &mut vm,
-            "<test>",
-        );
+        let result = analyze("(let [a 1 b 2] (+ a b))", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 
@@ -370,7 +365,7 @@ mod tests {
     #[test]
     fn test_extract_usages() {
         let (mut symbols, mut vm) = setup();
-        let result = analyze("(let ((x 1)) (+ x x))", &mut symbols, &mut vm, "<test>");
+        let result = analyze("(let [x 1] (+ x x))", &mut symbols, &mut vm, "<test>");
         assert!(result.is_ok());
         let analysis = result.unwrap();
 

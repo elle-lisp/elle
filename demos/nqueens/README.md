@@ -32,7 +32,7 @@ The solver uses three mutually recursive functions:
 (defn check-safe-helper (col remaining row-offset)
   (if (empty? remaining)
     true
-    (let* ((placed-col (first remaining)))
+    (let* [placed-col (first remaining)]
       (if (or (= col placed-col)
               (= row-offset (abs (- col placed-col))))
         false
@@ -56,7 +56,7 @@ This walks through previously placed queens (stored as a list of column indices)
   (if (= col n)
     (list)
     (if (safe? col queens)
-      (let* ((new-queens (cons col queens)))
+      (let* [new-queens (cons col queens)]
         (append (solve-helper n (+ row 1) new-queens)
                 (try-cols-helper n (+ col 1) queens row)))
       (try-cols-helper n (+ col 1) queens row))))

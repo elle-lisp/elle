@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## FFI integration tests
 ## Tests the full pipeline: Elle source → compiler → VM → libffi → C
@@ -14,7 +15,7 @@
 
 (assert (not (nil? (ffi/signature :int @[:int]))) "ffi/signature creation")
 (assert (not (nil? (ffi/signature :void @[]))) "ffi/signature void no args")
-(let (([ok? _] (protect ((fn () (ffi/signature :bad @[:int])))))) (assert (not ok?) "ffi/signature bad type"))
+(let [[ok? _] (protect ((fn () (ffi/signature :bad @[:int]))))] (assert (not ok?) "ffi/signature bad type"))
 
 ## ── Memory management ───────────────────────────────────────────────
 
@@ -34,21 +35,21 @@
 (ffi/free ptr)
 (assert (= val 1.234) "ffi/read write double")
 
-(let (([ok? _] (protect ((fn () (ffi/read nil :i32)))))) (assert (not ok?) "ffi/read null error"))
-(let (([ok? _] (protect ((fn () (ffi/malloc -1)))))) (assert (not ok?) "ffi/malloc negative error"))
+(let [[ok? _] (protect ((fn () (ffi/read nil :i32))))] (assert (not ok?) "ffi/read null error"))
+(let [[ok? _] (protect ((fn () (ffi/malloc -1))))] (assert (not ok?) "ffi/malloc negative error"))
 
-(let (([ok? _] (protect ((fn () (let ((ptr (ffi/malloc 8)))
+(let [[ok? _] (protect ((fn () (let [ptr (ffi/malloc 8)]
                      (ffi/free ptr)
-                     (ffi/free ptr))))))) (assert (not ok?) "ffi/double free error"))
+                     (ffi/free ptr)))))] (assert (not ok?) "ffi/double free error"))
 
-(let (([ok? _] (protect ((fn () (let ((ptr (ffi/malloc 8)))
+(let [[ok? _] (protect ((fn () (let [ptr (ffi/malloc 8)]
                      (ffi/write ptr :int 42)
                      (ffi/free ptr)
-                     (ffi/read ptr :int))))))) (assert (not ok?) "ffi/use after free read error"))
+                     (ffi/read ptr :int)))))] (assert (not ok?) "ffi/use after free read error"))
 
-(let (([ok? _] (protect ((fn () (let ((ptr (ffi/malloc 8)))
+(let [[ok? _] (protect ((fn () (let [ptr (ffi/malloc 8)]
                      (ffi/free ptr)
-                     (ffi/write ptr :int 99))))))) (assert (not ok?) "ffi/use after free write error"))
+                     (ffi/write ptr :int 99)))))] (assert (not ok?) "ffi/use after free write error"))
 
 (def ptr (ffi/malloc 8))
 (ffi/write ptr :int 42)
@@ -91,14 +92,14 @@
 
 ## ── Error handling ──────────────────────────────────────────────────
 
-(let (([ok? _] (protect ((fn () (ffi/native "/nonexistent/lib.so")))))) (assert (not ok?) "ffi/native missing library"))
+(let [[ok? _] (protect ((fn () (ffi/native "/nonexistent/lib.so"))))] (assert (not ok?) "ffi/native missing library"))
 
-(let (([ok? _] (protect ((fn () (def sig (ffi/signature :void @[]))
-                   (ffi/call nil sig)))))) (assert (not ok?) "ffi/call nil pointer"))
+(let [[ok? _] (protect ((fn () (def sig (ffi/signature :void @[]))
+                   (ffi/call nil sig))))] (assert (not ok?) "ffi/call nil pointer"))
 
-(let (([ok? _] (protect ((fn () (def sig (ffi/signature :int @[:int]))
+(let [[ok? _] (protect ((fn () (def sig (ffi/signature :int @[:int]))
                    (def ptr (ffi/malloc 1))
-                   (ffi/call ptr sig)))))) (assert (not ok?) "ffi/call wrong arg count"))
+                   (ffi/call ptr sig))))] (assert (not ok?) "ffi/call wrong arg count"))
 
 ## ── Variadic functions ─────────────────────────────────────────────
 
@@ -112,7 +113,7 @@
 (assert (= result-str "num: 42") "ffi/call snprintf")
 
 (assert (not (nil? (ffi/signature :int @[:ptr :size :string :int] 3))) "ffi/variadic signature creation")
-(let (([ok? _] (protect ((fn () (ffi/signature :int @[:int] 5)))))) (assert (not ok?) "ffi/variadic fixed args out of range"))
+(let [[ok? _] (protect ((fn () (ffi/signature :int @[:int] 5))))] (assert (not ok?) "ffi/variadic fixed args out of range"))
 
 ## ── ffi/string ─────────────────────────────────────────────────────
 
@@ -156,13 +157,13 @@
 (assert (= (get vals 1) 20) "ffi/array read write roundtrip 1")
 (assert (= (get vals 2) 30) "ffi/array read write roundtrip 2")
 
-(let (([ok? _] (protect ((fn () (def st (ffi/struct @[:i32 :double]))
+(let [[ok? _] (protect ((fn () (def st (ffi/struct @[:i32 :double]))
                    (def buf (ffi/malloc (ffi/size st)))
                    (ffi/write buf st @[42])
-                   (ffi/free buf)))))) (assert (not ok?) "ffi/struct wrong field count"))
+                   (ffi/free buf))))] (assert (not ok?) "ffi/struct wrong field count"))
 
-(let (([ok? _] (protect ((fn () (ffi/struct @[])))))) (assert (not ok?) "ffi/struct empty rejected"))
-(let (([ok? _] (protect ((fn () (ffi/array :i32 0)))))) (assert (not ok?) "ffi/array zero rejected"))
+(let [[ok? _] (protect ((fn () (ffi/struct @[]))))] (assert (not ok?) "ffi/struct empty rejected"))
+(let [[ok? _] (protect ((fn () (ffi/array :i32 0))))] (assert (not ok?) "ffi/array zero rejected"))
 
 (def st (ffi/struct @[:i32 :double]))
 (assert (not (nil? (ffi/signature st @[:ptr]))) "ffi/signature with struct type")
@@ -196,16 +197,16 @@
 
 (assert (= (ffi/callback-free nil) nil) "ffi/callback free nil")
 
-(let (([ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :ptr]))
-                   (ffi/callback sig 42)))))) (assert (not ok?) "ffi/callback wrong type"))
+(let [[ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :ptr]))
+                   (ffi/callback sig 42))))] (assert (not ok?) "ffi/callback wrong type"))
 
-(let (([ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :ptr]))
-                   (ffi/callback sig (fn (a) 0))))))) (assert (not ok?) "ffi/callback arity mismatch"))
+(let [[ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :ptr]))
+                   (ffi/callback sig (fn (a) 0)))))] (assert (not ok?) "ffi/callback arity mismatch"))
 
-(let (([ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :int] 1))
-                   (ffi/callback sig (fn (a b) 0))))))) (assert (not ok?) "ffi/callback variadic rejected"))
+(let [[ok? _] (protect ((fn () (def sig (ffi/signature :int @[:ptr :int] 1))
+                   (ffi/callback sig (fn (a b) 0)))))] (assert (not ok?) "ffi/callback variadic rejected"))
 
-(let (([ok? _] (protect ((fn () (ffi/callback-free (ffi/malloc 8))))))) (assert (not ok?) "ffi/callback free unknown ptr"))
+(let [[ok? _] (protect ((fn () (ffi/callback-free (ffi/malloc 8)))))] (assert (not ok?) "ffi/callback free unknown ptr"))
 
 ## ── Callback with qsort ────────────────────────────────────────────
 
@@ -380,19 +381,19 @@
 (ffi/free buf)
 
 # ptr/add error: null pointer
-(let (([ok? _] (protect ((fn () (ptr/add nil 8)))))) (assert (not ok?) "ptr/add null error"))
+(let [[ok? _] (protect ((fn () (ptr/add nil 8))))] (assert (not ok?) "ptr/add null error"))
 
 # ptr/add error: freed pointer
-(let (([ok? _] (protect ((fn () (let ((p (ffi/malloc 8)))
+(let [[ok? _] (protect ((fn () (let [p (ffi/malloc 8)]
                      (ffi/free p)
-                     (ptr/add p 4))))))) (assert (not ok?) "ptr/add freed pointer error"))
+                     (ptr/add p 4)))))] (assert (not ok?) "ptr/add freed pointer error"))
 
 # ptr/add error: wrong type
-(let (([ok? _] (protect ((fn () (ptr/add 42 8)))))) (assert (not ok?) "ptr/add wrong type error"))
+(let [[ok? _] (protect ((fn () (ptr/add 42 8))))] (assert (not ok?) "ptr/add wrong type error"))
 
 # ptr/add error: non-integer offset
-(let (([ok? _] (protect ((fn () (def p (ffi/malloc 8))
-                   (ptr/add p "hello")))))) (assert (not ok?) "ptr/add non-integer offset error"))
+(let [[ok? _] (protect ((fn () (def p (ffi/malloc 8))
+                   (ptr/add p "hello"))))] (assert (not ok?) "ptr/add non-integer offset error"))
 
 # ptr/diff basic
 (def buf (ffi/malloc 64))
@@ -417,18 +418,18 @@
 
 # ptr/from-int error: negative
 ## ptr/from-int accepts negative values (sentinel pointers like SQLITE_TRANSIENT)
-(let [[p (ptr/from-int -1)]]
+(let [p (ptr/from-int -1)]
   (assert (ptr? p) "ptr/from-int negative returns pointer")
   (assert (= (ptr/to-int p) -1) "ptr/from-int negative roundtrips"))
 
 # ptr/from-int error: wrong type
-(let (([ok? _] (protect ((fn () (ptr/from-int "hello")))))) (assert (not ok?) "ptr/from-int wrong type error"))
+(let [[ok? _] (protect ((fn () (ptr/from-int "hello"))))] (assert (not ok?) "ptr/from-int wrong type error"))
 
 # ptr/to-int error: null pointer
-(let (([ok? _] (protect ((fn () (ptr/to-int nil)))))) (assert (not ok?) "ptr/to-int null error"))
+(let [[ok? _] (protect ((fn () (ptr/to-int nil))))] (assert (not ok?) "ptr/to-int null error"))
 
 # ptr/to-int error: wrong type
-(let (([ok? _] (protect ((fn () (ptr/to-int 42)))))) (assert (not ok?) "ptr/to-int wrong type error"))
+(let [[ok? _] (protect ((fn () (ptr/to-int 42))))] (assert (not ok?) "ptr/to-int wrong type error"))
 
 # ptr/add with managed pointer input produces raw pointer usable with ffi/read
 (def buf (ffi/malloc 32))

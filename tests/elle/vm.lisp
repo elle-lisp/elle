@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## === vm/list-primitives returns symbols ===
 
@@ -17,4 +18,4 @@
 
 ## === vm/primitive-meta type error on wrong type ===
 
-(let (([ok? _] (protect ((fn () (vm/primitive-meta 42)))))) (assert (not ok?) "primitive-meta rejects integer"))
+(let [[ok? _] (protect ((fn () (vm/primitive-meta 42))))] (assert (not ok?) "primitive-meta rejects integer"))
