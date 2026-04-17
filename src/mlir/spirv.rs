@@ -63,6 +63,9 @@ pub fn lower_to_spirv_with_context(
 
 /// Generate MLIR text for a gpu.module wrapping the LIR function.
 fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String, String> {
+    if lir.num_captures > 0 {
+        return Err("captures not supported in SPIR-V".to_string());
+    }
     let num_params = lir.arity.fixed_params();
     let buf_size = "?";
     let indent = "      ";

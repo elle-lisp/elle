@@ -35,31 +35,43 @@
     (assert (= (get err-wt :error) :tier-rejected)
             (string "wasm tail-call rejection should be :tier-rejected, got: " err-wt))))
 
-# ── MLIR-CPU rejects closures with captures ──────────────────────────
+# ── MLIR-CPU accepts closures with numeric captures ──────────────────
 
 (def n 5)
 (def captured-fn (fn [x] (+ x n)))
 
-(def [ok-mc? err-mc] (protect (compile/run-on :mlir-cpu captured-fn 3)))
+(def [ok-mc? result-mc] (protect (compile/run-on :mlir-cpu captured-fn 3)))
 (if ok-mc?
-  (println "SKIP: mlir-cpu tier not available")
-  (begin
-    (assert (struct? err-mc) "mlir-cpu rejection must be a struct")
-    (assert (= (get err-mc :error) :tier-rejected)
-            (string "mlir-cpu capture rejection should be :tier-rejected, got: " err-mc))))
+  (assert (= result-mc 8) (string "captured-fn should return 8, got: " result-mc))
+  (let [[err-kind (and (struct? result-mc) (get result-mc :error))]]
+    (if (= err-kind :tier-rejected)
+      (println "SKIP: mlir-cpu tier not available")
+      (error (string "unexpected error from mlir-cpu captured-fn: " result-mc)))))
 
-# ── MLIR-CPU rejects non-integer-returning closures ──────────────────
+# ── MLIR-CPU accepts boolean-returning closures ──────────────────────
 
-# A closure that returns a boolean (from =) is not MLIR-CPU eligible.
+# A closure that returns a boolean (from =) is now MLIR-CPU eligible.
 (defn returns-bool [x] (= x 0))
 
-(def [ok-mb? err-mb] (protect (compile/run-on :mlir-cpu returns-bool 0)))
+(def [ok-mb? result-mb] (protect (compile/run-on :mlir-cpu returns-bool 0)))
 (if ok-mb?
-  (println "SKIP: mlir-cpu tier not available")
+  (assert (= result-mb true) (string "returns-bool 0 should return true, got: " result-mb))
+  (let [[err-kind (and (struct? result-mb) (get result-mb :error))]]
+    (if (= err-kind :tier-rejected)
+      (println "SKIP: mlir-cpu tier not available")
+      (error (string "unexpected error from mlir-cpu returns-bool: " result-mb)))))
+
+# ── MLIR-CPU still rejects nil-returning closures ────────────────────
+
+(defn returns-nil [x] nil)
+
+(def [ok-mn? err-mn] (protect (compile/run-on :mlir-cpu returns-nil 0)))
+(if ok-mn?
+  (println "SKIP: mlir-cpu tier not available (nil test)")
   (begin
-    (assert (struct? err-mb) "mlir-cpu bool rejection must be a struct")
-    (assert (= (get err-mb :error) :tier-rejected)
-            (string "mlir-cpu bool rejection should be :tier-rejected, got: " err-mb))))
+    (assert (struct? err-mn) "mlir-cpu nil rejection must be a struct")
+    (assert (= (get err-mn :error) :tier-rejected)
+            (string "mlir-cpu nil rejection should be :tier-rejected, got: " err-mn))))
 
 # ── Safety gap: string to arithmetic must not silently succeed ─────────
 

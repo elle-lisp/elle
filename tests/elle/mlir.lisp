@@ -51,19 +51,18 @@
 (assert (= (ml-max 10 5) 10) "MLIR max reversed")
 (assert (= (ml-max 4 4) 4) "MLIR max equal")
 
-# ── Non-eligible functions still work ────────────────────────────────
-# These use I/O or captures, so they go through Cranelift or bytecode.
+# ── Captures now eligible for MLIR ───────────────────────────────────
 
 (def outer 100)
 (defn ml-with-capture [x] (+ x outer))
 (repeat 15 (ml-with-capture 1))
-(assert (= (ml-with-capture 5) 105) "captured var works (not MLIR)")
+(assert (= (ml-with-capture 5) 105) "captured var works via MLIR or fallback")
 
 # ── Verify GPU eligibility predicates ────────────────────────────────
 
 (assert (fn/gpu-eligible? ml-add) "ml-add is GPU-eligible")
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
-(assert (not (fn/gpu-eligible? ml-with-capture)) "capture disqualifies")
+(assert (fn/gpu-eligible? ml-with-capture) "numeric capture is GPU-eligible")
 
 # ── Branching with even values ────────────────────────────────────────
 # Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result

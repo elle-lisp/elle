@@ -362,7 +362,7 @@ mod tests {
         let func = make_mixed_type_slot();
         // Use check_slot_types directly to avoid partially constructing
         // MLIR ops (melior cleanup of partial modules can crash).
-        let err = check_slot_types(&func, 0).unwrap_err();
+        let err = check_slot_types(&func, 0, 0, 0).unwrap_err();
         assert!(
             err.contains("mixed-type local slot"),
             "should reject cross-block mixed-type slot: {}",
@@ -650,7 +650,7 @@ mod tests {
     fn test_lower_float_to_int() {
         // Float arg via param_types bitmask
         let context = lower::create_context();
-        let (module, _) = lower::lower_to_module(&context, &make_float_to_int(), 1)
+        let (module, _) = lower::lower_to_module(&context, &make_float_to_int(), 0, 0, 1)
             .expect("lowering should succeed");
         let mlir_text = module.as_operation().to_string();
         assert!(
@@ -673,7 +673,7 @@ mod tests {
         // Need to call with param_types=1 to mark arg as float
         let context = lower::create_context();
         let (mut module, _) =
-            lower::lower_to_module(&context, &func, 1).expect("lowering should succeed");
+            lower::lower_to_module(&context, &func, 0, 0, 1).expect("lowering should succeed");
         let pm = melior::pass::PassManager::new(&context);
         pm.add_pass(melior::pass::conversion::create_to_llvm());
         pm.run(&mut module).expect("LLVM conversion should succeed");
@@ -716,7 +716,7 @@ mod tests {
         let ctx_time = start.elapsed();
 
         let start = Instant::now();
-        let (mut module, _) = lower_to_module(&context, &func, 0).unwrap();
+        let (mut module, _) = lower_to_module(&context, &func, 0, 0, 0).unwrap();
         let lower_time = start.elapsed();
 
         let start = Instant::now();
@@ -785,6 +785,174 @@ mod tests {
         eprintln!(
             "    compile total:     {:?}",
             cranelift_init + cranelift_compile
+        );
+    }
+
+    // ── Bool return tests ──────────────────────────────────────────
+
+    /// Build LIR: fn(x) { return x > 0 }
+    fn make_compare() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("compare_gt".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Compare {
+                dst: Reg(2),
+                op: CmpOp::Gt,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_lower_compare() {
+        let mlir_text = lower_to_mlir(&make_compare()).expect("lowering should succeed");
+        assert!(
+            mlir_text.contains("arith.cmpi"),
+            "should contain arith.cmpi: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_execute_compare_positive() {
+        let result = mlir_call(&make_compare(), &[5]).expect("execution should succeed");
+        assert_eq!(result, 1, "5 > 0 should be 1 (true)");
+    }
+
+    #[test]
+    fn test_execute_compare_negative() {
+        let result = mlir_call(&make_compare(), &[-1]).expect("execution should succeed");
+        assert_eq!(result, 0, "-1 > 0 should be 0 (false)");
+    }
+
+    #[test]
+    fn test_compare_return_type_is_bool() {
+        let context = lower::create_context();
+        let func = make_compare();
+        let (_, ret_type) =
+            lower::lower_to_module(&context, &func, 0, 0, 0).expect("lowering should succeed");
+        assert_eq!(ret_type, ScalarType::Bool, "compare return should be Bool");
+    }
+
+    // ── Capture tests ──────────────────────────────────────────────
+
+    /// Build LIR: fn(x) { return cap[0] + x } with num_captures=1
+    fn make_capture_add() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("capture_add".to_string());
+        func.signal = Signal::errors();
+        func.num_captures = 1;
+        // Env layout: [cap0, param0]
+        let mut block = BasicBlock::new(Label(0));
+        // Load capture (index 0 = first capture)
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        // Load param (index 1 = first param, since 1 capture)
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(1),
+                index: 1,
+            },
+            s(),
+        ));
+        // cap + param
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(2),
+                op: BinOp::Add,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_lower_capture_add() {
+        let context = lower::create_context();
+        let func = make_capture_add();
+        // num_captures=1, capture_types=0 (int), param_types=0 (int)
+        let result = lower::lower_to_module(&context, &func, 1, 0, 0);
+        assert!(result.is_ok(), "capture_add lowering should succeed");
+        let (module, _) = result.unwrap();
+        let text = module.as_operation().to_string();
+        // 2-param MLIR function (1 capture + 1 param)
+        assert!(
+            text.contains("arith.addi"),
+            "should contain arith.addi: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_execute_capture_add() {
+        let context = lower::create_context();
+        let func = make_capture_add();
+        // num_captures=1, capture_types=0, param_types=0
+        let (mut module, _) =
+            lower::lower_to_module(&context, &func, 1, 0, 0).expect("lowering should succeed");
+        let pm = melior::pass::PassManager::new(&context);
+        pm.add_pass(melior::pass::conversion::create_to_llvm());
+        pm.run(&mut module).expect("LLVM conversion should succeed");
+        let engine = melior::ExecutionEngine::new(&module, 2, &[], false, false);
+        // Call with capture=5, arg=3 → should return 8
+        let mut cap: i64 = 5;
+        let mut arg: i64 = 3;
+        let mut result: i64 = 0;
+        unsafe {
+            engine
+                .invoke_packed(
+                    "capture_add",
+                    &mut [
+                        &mut cap as *mut i64 as *mut (),
+                        &mut arg as *mut i64 as *mut (),
+                        &mut result as *mut i64 as *mut (),
+                    ],
+                )
+                .unwrap();
+        }
+        assert_eq!(result, 8, "capture(5) + arg(3) should be 8");
+    }
+
+    #[test]
+    fn test_spirv_rejects_captures() {
+        let func = make_capture_add();
+        let result = lower_to_spirv(&func, 256);
+        assert!(result.is_err(), "SPIR-V should reject captures");
+        assert!(
+            result.unwrap_err().contains("captures not supported"),
+            "error should mention captures"
         );
     }
 }

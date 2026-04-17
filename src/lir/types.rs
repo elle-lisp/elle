@@ -224,10 +224,7 @@ impl LirFunction {
         if !non_error.is_empty() || self.signal.propagates != 0 {
             return false;
         }
-        // Structural: no closures, no variadics, no mutable cells
-        if self.num_captures > 0 {
-            return false;
-        }
+        // Structural: no variadics, no mutable cells
         if !matches!(self.arity, Arity::Exact(_)) {
             return false;
         }
@@ -246,10 +243,10 @@ impl LirFunction {
     /// True if this function is safe for the CPU MLIR tier-2 path.
     ///
     /// Stricter than `is_gpu_eligible`: the return register must be
-    /// producible from integer operations only. MLIR represents all
-    /// values as i64, so nil (→ 0), bool (→ 0/1), and Compare results
-    /// (→ 0/1) can't round-trip back to their original Value types when
-    /// the function is called from regular Elle code.
+    /// producible from numeric operations only. MLIR represents all
+    /// values as i64, so nil (→ 0) can't round-trip back when the
+    /// function is called from regular Elle code. Bool/Compare results
+    /// are safe — the caller reboxes them as `Value::bool(result != 0)`.
     ///
     /// GPU dispatch (via `gpu:map`) doesn't have this problem — the
     /// caller reads integers out of a buffer and treats them as integers.
@@ -267,10 +264,12 @@ impl LirFunction {
         true
     }
 
-    /// True if `target` is transitively produced by a non-int value source
-    /// (Nil constant, Bool constant, or Compare result). Walks backward
+    /// True if `target` is transitively produced by a non-numeric value
+    /// source (Nil constant or IntToFloat conversion). Walks backward
     /// through definitions — Const sources, LoadLocal/StoreLocal chains.
     /// LoadCapture is treated as int (args are validated at call site).
+    /// Bool constants and Compare results are i64 0/1 at the MLIR level;
+    /// the caller reboxes as `Value::bool(result != 0)`.
     fn register_reaches_non_int(&self, target: Reg) -> bool {
         use std::collections::HashSet;
         let mut regs_to_check: Vec<Reg> = vec![target];
@@ -285,9 +284,8 @@ impl LirFunction {
                     match &si.instr {
                         LirInstr::Const {
                             dst,
-                            value: LirConst::Nil | LirConst::Bool(_),
+                            value: LirConst::Nil,
                         } if *dst == r => return true,
-                        LirInstr::Compare { dst, .. } if *dst == r => return true,
                         LirInstr::Convert {
                             dst,
                             op: ConvOp::IntToFloat,
@@ -746,8 +744,8 @@ pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
 /// GPU-safe: numeric constants, arithmetic, comparison, local/parameter
 /// access. Everything else requires heap, closures, calls, or signals.
 ///
-/// LoadCapture/LoadCaptureRaw are parameter loads when num_captures == 0
-/// (checked by is_gpu_eligible before reaching the instruction walk).
+/// LoadCapture/LoadCaptureRaw are parameter or capture loads. Captures
+/// are passed as extra parameters at the MLIR level.
 fn is_gpu_instruction(i: &LirInstr) -> bool {
     matches!(
         i,

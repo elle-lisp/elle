@@ -24,8 +24,19 @@ impl VM {
         }
 
         let bytecode_ptr = closure.template.bytecode.as_ptr();
+        let num_captures = closure.template.num_captures as u16;
 
-        // Check cache first (fast path)
+        // Build capture_types bitmask from the closure's environment.
+        let mut capture_types: u64 = 0;
+        for i in 0..num_captures as usize {
+            let v = closure.env[i];
+            if v.as_float().is_some() {
+                capture_types |= 1u64 << i;
+            } else if v.as_int().is_none() {
+                return None; // non-numeric capture — fall through
+            }
+        }
+
         // Build param_types bitmask: bit i = 1 means param i is Float.
         let mut param_types: u64 = 0;
         for (i, v) in args.iter().enumerate() {
@@ -39,10 +50,10 @@ impl VM {
         let cache = self
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);
-        if cache.contains(bytecode_ptr, param_types) {
-            return self.run_mlir_cached(bytecode_ptr, args, param_types);
+        if cache.contains(bytecode_ptr, capture_types, param_types) {
+            return self.run_mlir_cached(closure, bytecode_ptr, args, capture_types, param_types);
         }
-        if cache.is_rejected(bytecode_ptr, param_types) {
+        if cache.is_rejected(bytecode_ptr, capture_types, param_types) {
             return None;
         }
 
@@ -55,7 +66,7 @@ impl VM {
 
         // Full LIR instruction walk (only for hot functions).
         // Use the stricter MLIR-CPU eligibility check: the return register
-        // must round-trip through i64 as an integer, not as nil/bool/compare.
+        // must round-trip through i64 correctly.
         let lir = closure.template.lir_function.as_ref()?;
         if !lir.is_mlir_cpu_eligible() {
             return None;
@@ -63,7 +74,7 @@ impl VM {
 
         // Compile via MLIR
         let cache = self.mlir_cache.as_mut().unwrap();
-        match cache.compile(bytecode_ptr, lir, param_types) {
+        match cache.compile(bytecode_ptr, lir, num_captures, capture_types, param_types) {
             Ok(_name) => {
                 if crate::config::get().debug_jit {
                     eprintln!(
@@ -71,14 +82,14 @@ impl VM {
                         closure.template.name.as_deref().unwrap_or("<anon>")
                     );
                 }
-                self.run_mlir_cached(bytecode_ptr, args, param_types)
+                self.run_mlir_cached(closure, bytecode_ptr, args, capture_types, param_types)
             }
             Err(e) => {
                 // Cache rejection so we don't retry on every call
                 self.mlir_cache
                     .as_mut()
                     .unwrap()
-                    .reject(bytecode_ptr, param_types);
+                    .reject(bytecode_ptr, capture_types, param_types);
                 if crate::config::get().debug_jit {
                     eprintln!(
                         "[mlir] failed {}: {}",
@@ -91,7 +102,7 @@ impl VM {
         }
     }
 
-    /// Execute a cached MLIR function, unboxing args and reboxing the result.
+    /// Execute a cached MLIR function, unboxing captures+args and reboxing the result.
     ///
     /// Returns:
     /// - `None` — MLIR can't handle this call (non-numeric arg or cache miss);
@@ -100,12 +111,34 @@ impl VM {
     /// - `Some(Some(bits))` — handled with signal (error stored in fiber.signal).
     fn run_mlir_cached(
         &mut self,
+        closure: &crate::value::Closure,
         bytecode_ptr: *const u8,
         args: &[Value],
+        capture_types: u64,
         param_types: u64,
     ) -> Option<Option<SignalBits>> {
-        // Unbox args: ints pass through, floats bitcast f64→i64.
-        let mut i64_args: Vec<i64> = Vec::with_capacity(args.len());
+        let num_captures = closure.template.num_captures;
+
+        // Unbox captures + args: ints pass through, floats bitcast f64→i64.
+        let mut i64_args: Vec<i64> = Vec::with_capacity(num_captures + args.len());
+
+        // Captures first
+        for i in 0..num_captures {
+            let v = closure.env[i];
+            if capture_types & (1u64 << i) != 0 {
+                match v.as_float() {
+                    Some(f) => i64_args.push(f.to_bits() as i64),
+                    None => return None,
+                }
+            } else {
+                match v.as_int() {
+                    Some(n) => i64_args.push(n),
+                    None => return None,
+                }
+            }
+        }
+
+        // Then params
         for (i, v) in args.iter().enumerate() {
             if param_types & (1u64 << i) != 0 {
                 match v.as_float() {
@@ -121,13 +154,14 @@ impl VM {
         }
 
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &i64_args, param_types) {
+        match cache.call(bytecode_ptr, &i64_args, capture_types, param_types) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr, param_types) {
+                let val = match cache.return_type(bytecode_ptr, capture_types, param_types) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }
+                    Some(crate::mlir::ScalarType::Bool) => Value::bool(result != 0),
                     _ => Value::int(result),
                 };
                 self.fiber.stack.push(val);

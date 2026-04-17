@@ -15,7 +15,7 @@ use super::lower::{create_context, lower_to_module};
 /// dialect, then JIT-compiled. Arguments and return value are raw i64.
 pub fn mlir_call(lir: &LirFunction, args: &[i64]) -> Result<i64, String> {
     let context = create_context();
-    let (mut module, _) = lower_to_module(&context, lir, 0)?;
+    let (mut module, _) = lower_to_module(&context, lir, 0, 0, 0)?;
 
     // Convert arith/func/cf → LLVM dialect
     let pass_manager = pass::PassManager::new(&context);

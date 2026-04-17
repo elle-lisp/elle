@@ -26,6 +26,14 @@ use std::collections::HashMap;
 pub enum ScalarType {
     Int,
     Float,
+    Bool,
+}
+
+impl ScalarType {
+    /// True if this type is represented as f64 at the MLIR level.
+    pub fn is_float(self) -> bool {
+        self == ScalarType::Float
+    }
 }
 
 /// Create an MLIR context with all dialects registered.
@@ -46,40 +54,68 @@ pub fn create_context() -> Context {
 ///
 /// Called before `lower_to_module` to avoid partially constructing MLIR
 /// ops before discovering the error.
-pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), String> {
+pub fn check_slot_types(
+    lir: &LirFunction,
+    num_captures: u16,
+    capture_types: u64,
+    param_types: u64,
+) -> Result<(), String> {
     // For each slot, track (type, block_idx) of the last store per block.
     let mut slot_block_types: HashMap<u32, (ScalarType, usize)> = HashMap::new();
     // Simple type inference: track register types from constants and ops.
     let mut reg_types: HashMap<u32, ScalarType> = HashMap::new();
     let num_params = lir.arity.fixed_params();
 
-    for i in 0..num_params {
-        let t = if param_types & (1u64 << i) != 0 {
+    // Seed types for captures (indices 0..num_captures) and params
+    // (indices num_captures..num_captures+num_params) — these are
+    // the MLIR function arguments in order.
+    for i in 0..num_captures as usize {
+        let t = if capture_types & (1u64 << i) != 0 {
             ScalarType::Float
         } else {
             ScalarType::Int
         };
         reg_types.insert(i as u32, t);
     }
+    for i in 0..num_params {
+        let t = if param_types & (1u64 << i) != 0 {
+            ScalarType::Float
+        } else {
+            ScalarType::Int
+        };
+        reg_types.insert((num_captures as usize + i) as u32, t);
+    }
 
     for (block_idx, block) in lir.blocks.iter().enumerate() {
         for si in &block.instructions {
             match &si.instr {
                 LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
-                    if (*index as usize) < num_params {
-                        let t = if param_types & (1u64 << *index) != 0 {
+                    // Env layout: [captures..., params...].
+                    // At MLIR level these are contiguous function arguments.
+                    let idx = *index as usize;
+                    let t = if idx < num_captures as usize {
+                        // Capture — type from capture_types bitmask
+                        if capture_types & (1u64 << idx) != 0 {
                             ScalarType::Float
                         } else {
                             ScalarType::Int
-                        };
-                        reg_types.insert(dst.0, t);
-                    }
+                        }
+                    } else {
+                        // Parameter — type from param_types bitmask
+                        let param_idx = idx - num_captures as usize;
+                        if param_types & (1u64 << param_idx) != 0 {
+                            ScalarType::Float
+                        } else {
+                            ScalarType::Int
+                        }
+                    };
+                    reg_types.insert(dst.0, t);
                 }
                 LirInstr::Const { dst, value } => {
-                    let t = if matches!(value, LirConst::Float(_)) {
-                        ScalarType::Float
-                    } else {
-                        ScalarType::Int
+                    let t = match value {
+                        LirConst::Float(_) => ScalarType::Float,
+                        LirConst::Bool(_) => ScalarType::Bool,
+                        _ => ScalarType::Int,
                     };
                     reg_types.insert(dst.0, t);
                 }
@@ -92,7 +128,7 @@ pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), Strin
                     );
                     let t = if is_bitwise {
                         ScalarType::Int
-                    } else if lt == ScalarType::Float || rt == ScalarType::Float {
+                    } else if lt.is_float() || rt.is_float() {
                         ScalarType::Float
                     } else {
                         ScalarType::Int
@@ -100,7 +136,7 @@ pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), Strin
                     reg_types.insert(dst.0, t);
                 }
                 LirInstr::Compare { dst, .. } => {
-                    reg_types.insert(dst.0, ScalarType::Int);
+                    reg_types.insert(dst.0, ScalarType::Bool);
                 }
                 LirInstr::UnaryOp { dst, op, src } => {
                     let st = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
@@ -121,7 +157,9 @@ pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), Strin
                     let src_type = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
                     let slot_key = *slot as u32;
                     if let Some((prev_type, prev_block)) = slot_block_types.get(&slot_key) {
-                        if *prev_type != src_type && *prev_block != block_idx {
+                        // Float vs non-Float is a real conflict (different bit
+                        // representation). Bool vs Int are both i64 — no conflict.
+                        if prev_type.is_float() != src_type.is_float() && *prev_block != block_idx {
                             return Err(format!(
                                 "mixed-type local slot {}: {:?} in block {}, {:?} in block {}",
                                 slot, prev_type, prev_block, src_type, block_idx
@@ -155,10 +193,12 @@ pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), Strin
 pub fn lower_to_module<'c>(
     context: &'c Context,
     lir: &LirFunction,
+    num_captures: u16,
+    capture_types: u64,
     param_types: u64,
 ) -> Result<(Module<'c>, ScalarType), String> {
     // Pre-scan for cross-block mixed-type slots before building any MLIR ops.
-    check_slot_types(lir, param_types)?;
+    check_slot_types(lir, num_captures, capture_types, param_types)?;
 
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -166,8 +206,9 @@ pub fn lower_to_module<'c>(
     let i64_type: Type = IntegerType::new(context, 64).into();
     let f64_type: Type = Type::float64(context);
     let num_params = lir.arity.fixed_params();
+    let total_args = num_captures as usize + num_params;
 
-    let mlir_param_types: Vec<Type> = (0..num_params).map(|_| i64_type).collect();
+    let mlir_param_types: Vec<Type> = (0..total_args).map(|_| i64_type).collect();
     let func_type = FunctionType::new(context, &mlir_param_types, &[i64_type]);
     let func_name = lir.name.as_deref().unwrap_or("gpu_kernel");
 
@@ -210,17 +251,31 @@ pub fn lower_to_module<'c>(
     if !blocks.is_empty() {
         let entry = &blocks[0];
 
-        // Pre-populate regs with entry block parameters.
-        // Params marked as Float in param_types bitmask get bitcast i64→f64.
-        for i in 0..num_params {
+        // Pre-populate regs with entry block arguments.
+        // MLIR signature: [captures..., params...], all i64.
+        // Captures marked as Float in capture_types get bitcast i64→f64.
+        for i in 0..num_captures as usize {
             let raw: Value = entry.argument(i).unwrap().into();
-            if param_types & (1u64 << i) != 0 {
+            if capture_types & (1u64 << i) != 0 {
                 let bc = entry.append_operation(arith::bitcast(raw, f64_type, location));
                 regs.insert(i as u32, bc.result(0).unwrap().into());
                 types.insert(i as u32, ScalarType::Float);
             } else {
                 regs.insert(i as u32, raw);
                 types.insert(i as u32, ScalarType::Int);
+            }
+        }
+        // Params follow captures in the MLIR argument list.
+        for i in 0..num_params {
+            let arg_idx = num_captures as usize + i;
+            let raw: Value = entry.argument(arg_idx).unwrap().into();
+            if param_types & (1u64 << i) != 0 {
+                let bc = entry.append_operation(arith::bitcast(raw, f64_type, location));
+                regs.insert(arg_idx as u32, bc.result(0).unwrap().into());
+                types.insert(arg_idx as u32, ScalarType::Float);
+            } else {
+                regs.insert(arg_idx as u32, raw);
+                types.insert(arg_idx as u32, ScalarType::Int);
             }
         }
 
@@ -245,10 +300,25 @@ pub fn lower_to_module<'c>(
         for si in &lir_block.instructions {
             match &si.instr {
                 LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
-                    if (*index as usize) < num_params {
-                        // Parameters are entry block arguments (always Int)
-                        regs.insert(dst.0, blocks[0].argument(*index as usize).unwrap().into());
-                        types.insert(dst.0, ScalarType::Int);
+                    // Env layout: [captures..., params...].
+                    // MLIR arguments mirror this layout, so index maps directly
+                    // to the MLIR block argument index.
+                    let idx = *index as usize;
+                    if idx < total_args {
+                        let t = if idx < num_captures as usize {
+                            // Capture — type already set during entry setup
+                            types.get(&(idx as u32)).copied().unwrap_or(ScalarType::Int)
+                        } else {
+                            // Parameter — type already set during entry setup
+                            types.get(&(idx as u32)).copied().unwrap_or(ScalarType::Int)
+                        };
+                        // Use the pre-computed (possibly bitcast) value from regs
+                        if let Some(&val) = regs.get(&(idx as u32)) {
+                            regs.insert(dst.0, val);
+                        } else {
+                            regs.insert(dst.0, blocks[0].argument(idx).unwrap().into());
+                        }
+                        types.insert(dst.0, t);
                     }
                 }
                 LirInstr::Const { dst, value } => match value {
@@ -263,10 +333,10 @@ pub fn lower_to_module<'c>(
                         types.insert(dst.0, ScalarType::Float);
                     }
                     _ => {
-                        let n = match value {
-                            LirConst::Int(n) => *n,
-                            LirConst::Bool(b) => i64::from(*b),
-                            LirConst::Nil => 0i64,
+                        let (n, scalar_type) = match value {
+                            LirConst::Int(n) => (*n, ScalarType::Int),
+                            LirConst::Bool(b) => (i64::from(*b), ScalarType::Bool),
+                            LirConst::Nil => (0i64, ScalarType::Int),
                             _ => return Err(format!("unsupported constant: {:?}", value)),
                         };
                         let op = arith::constant(
@@ -276,7 +346,7 @@ pub fn lower_to_module<'c>(
                         );
                         let op_ref = block.append_operation(op);
                         regs.insert(dst.0, op_ref.result(0).unwrap().into());
-                        types.insert(dst.0, ScalarType::Int);
+                        types.insert(dst.0, scalar_type);
                     }
                 },
                 LirInstr::BinOp { dst, op, lhs, rhs } => {
@@ -389,7 +459,7 @@ pub fn lower_to_module<'c>(
                     let i1_val: Value = op_ref.result(0).unwrap().into();
                     let ext_ref = block.append_operation(arith::extui(i1_val, i64_type, location));
                     regs.insert(dst.0, ext_ref.result(0).unwrap().into());
-                    types.insert(dst.0, ScalarType::Int);
+                    types.insert(dst.0, ScalarType::Bool);
                 }
                 LirInstr::UnaryOp { dst, op, src } => {
                     let sv = *regs
@@ -549,19 +619,26 @@ pub fn lower_to_module<'c>(
                     .get(&reg.0)
                     .ok_or_else(|| format!("undefined reg r{} in return", reg.0))?;
                 let ret_type = types.get(&reg.0).copied().unwrap_or(ScalarType::Int);
-                // Function returns i64; bitcast f64 → i64 for float returns
-                let return_val = if ret_type == ScalarType::Float {
+                // Function returns i64; bitcast f64 → i64 for float returns.
+                // Bool is already i64 0/1 — no bitcast needed.
+                let return_val = if ret_type.is_float() {
                     let bc = block.append_operation(arith::bitcast(val, i64_type, location));
                     bc.result(0).unwrap().into()
                 } else {
                     val
                 };
+                // Consistency check: Float vs non-Float is a real conflict.
+                // Bool vs Int are both i64, so no conflict.
                 if let Some(prev) = return_type {
-                    if prev != ret_type {
+                    if prev.is_float() != ret_type.is_float() {
                         return Err("inconsistent return types across blocks".to_string());
                     }
                 }
-                return_type = Some(ret_type);
+                // Prefer Bool if any return is Bool (for correct reboxing).
+                return_type = Some(match (return_type, ret_type) {
+                    (Some(ScalarType::Bool), _) | (_, ScalarType::Bool) => ScalarType::Bool,
+                    _ => ret_type,
+                });
                 block.append_operation(func::r#return(&[return_val], location));
             }
             Terminator::Jump(label) => {
@@ -647,6 +724,6 @@ pub fn lower_to_module<'c>(
 /// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
 pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
     let context = create_context();
-    let (module, _) = lower_to_module(&context, lir, 0)?;
+    let (module, _) = lower_to_module(&context, lir, 0, 0, 0)?;
     Ok(module.as_operation().to_string())
 }

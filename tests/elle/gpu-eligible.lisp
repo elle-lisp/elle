@@ -23,10 +23,10 @@
 (assert (not (fn/gpu-eligible? (fn [x] (map inc x))))
   "map is not gpu-eligible (polymorphic)")
 
-# ── Not eligible: closures/captures ────────────────────────────
+# ── Eligible: closures with numeric captures ─────────────────
 (def outer 10)
-(assert (not (fn/gpu-eligible? (fn [x] (+ x outer))))
-  "capturing outer is not gpu-eligible")
+(assert (fn/gpu-eligible? (fn [x] (+ x outer)))
+  "capturing numeric outer is gpu-eligible")
 
 # ── Not eligible: variadic ─────────────────────────────────────
 (assert (not (fn/gpu-eligible? (fn [x & rest] x)))

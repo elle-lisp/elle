@@ -458,8 +458,34 @@ impl VM {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 
+        let num_captures = closure.template.num_captures as u16;
+
+        // Unbox captures to i64. They must be numeric (int or float).
+        let mut int_args: Vec<i64> = Vec::with_capacity(closure.env.len() + args.len());
+        let mut capture_types: u64 = 0;
+        for i in 0..num_captures as usize {
+            let v = closure.env[i];
+            if let Some(n) = v.as_int() {
+                int_args.push(n);
+            } else if let Some(f) = v.as_float() {
+                int_args.push(f.to_bits() as i64);
+                capture_types |= 1u64 << i;
+            } else {
+                return (
+                    SIG_ERROR,
+                    rejected(
+                        "mlir-cpu",
+                        format!(
+                            "capture {} is {}, not numeric; MLIR-CPU requires int/float captures",
+                            i,
+                            v.type_name()
+                        ),
+                    ),
+                );
+            }
+        }
+
         // Unbox args to i64. Ints pass through; floats are bitcast f64→i64.
-        let mut int_args: Vec<i64> = Vec::with_capacity(args.len());
         let mut param_types: u64 = 0;
         for (i, v) in args.iter().enumerate() {
             if let Some(n) = v.as_int() {
@@ -487,9 +513,11 @@ impl VM {
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);
 
-        // Ensure compiled for this param_types signature.
-        if !cache.contains(bytecode_ptr, param_types) {
-            if let Err(e) = cache.compile(bytecode_ptr, &lir, param_types) {
+        // Ensure compiled for this (capture_types, param_types) signature.
+        if !cache.contains(bytecode_ptr, capture_types, param_types) {
+            if let Err(e) =
+                cache.compile(bytecode_ptr, &lir, num_captures, capture_types, param_types)
+            {
                 return (
                     SIG_ERROR,
                     rejected("mlir-cpu", format!("MLIR compilation failed: {}", e)),
@@ -499,13 +527,14 @@ impl VM {
 
         // Reborrow as immutable for call.
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &int_args, param_types) {
+        match cache.call(bytecode_ptr, &int_args, capture_types, param_types) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr, param_types) {
+                let val = match cache.return_type(bytecode_ptr, capture_types, param_types) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }
+                    Some(crate::mlir::ScalarType::Bool) => Value::bool(result != 0),
                     _ => Value::int(result),
                 };
                 (SIG_OK, val)
