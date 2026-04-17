@@ -22,7 +22,7 @@ a closure returning a struct.
 | mqtt | `(import "std/mqtt")` | MQTT client wrapper |
 | portrait | `(import "std/portrait")` | Semantic portraits |
 | process | `(import "std/process")` | Erlang-style processes |
-| rdf | `(import "std/rdf")` | RDF knowledge graph |
+| rdf | `(import "std/rdf/elle")` | RDF knowledge graph |
 | redis | `(import "std/redis")` | Redis client |
 | sync | `(import "std/sync")` | Synchronization primitives |
 | telemetry | `(import "std/telemetry")` | Tracing and metrics |

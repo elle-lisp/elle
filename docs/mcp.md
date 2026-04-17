@@ -11,8 +11,9 @@ to an Elle codebase. The server is itself written in Elle
 
 The server maintains a persistent RDF knowledge graph (via the oxigraph
 plugin) that represents the structure of both Elle and Rust source code.
-It exposes 20 tools that let an AI agent query, analyze, refactor
-code through the graph, and orchestrate test runs with result tracking.
+It exposes 21 tools that let an AI agent query, analyze, evaluate,
+refactor code through the graph, and orchestrate test runs with result
+tracking.
 
 ## Tools
 
@@ -42,6 +43,12 @@ code through the graph, and orchestrate test runs with result tracking.
 | `compile_rename` | Binding-aware rename of a function or variable and all its references. Understands lexical scope — won't rename shadowed bindings. |
 | `compile_extract` | Extract a line range into a new function. Computes free variables (which become parameters) and infers the extracted function's signal. |
 | `compile_parallelize` | Check if a set of functions can safely run in parallel. Verifies no shared mutable captures. |
+
+### Evaluation
+
+| Tool | Description |
+|------|-------------|
+| `eval` | Evaluate an Elle lambda against the persistent image. Returns a handle (UUID) naming the result — large values stay in the image. Compose by passing prior handles as `inputs`. stdout/stderr are captured and returned. Optional `timeout_ms` (default 10000). |
 
 ### Cross-language tracing
 
@@ -127,9 +134,12 @@ HAVING (?captures > 1)
 | `rust:Type` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
 | `rust:Mod` | `rust:name`, `rust:file`, `rust:visibility`, `rust:attribute` |
 
-## Running the server
+## Building and running
 
 ```bash
+# Build elle + MCP plugins (oxigraph, syn) in one invocation
+make mcp
+
 # Default store location: .elle-mcp/store/ (auto-created)
 elle tools/mcp-server.lisp
 
@@ -145,10 +155,13 @@ The `.elle-mcp/` directory is gitignored by default.
 
 ## Startup behavior
 
-The server responds to `initialize` immediately. Graph population (Elle
-primitives, Rust function triples) runs in a background fiber so the
-server can handle requests while the graph loads. This keeps MCP client
-connection timeouts from firing on large codebases.
+Elle primitive triples are loaded synchronously at startup (fast).
+Rust function triples load in a background fiber so the server can
+handle requests while the graph loads. This keeps MCP client connection
+timeouts from firing on large codebases.
+
+SPARQL queries sent via `sparql_query` have a 30-second timeout.
+Lines longer than 10 MB on stdin are rejected with a `-32600` error.
 
 When population completes, the server emits a JSON-RPC notification:
 
@@ -413,7 +426,7 @@ Results are stored as RDF triples:
     elle:passed true ;
     elle:duration 32 ;
     elle:timestamp "2026-04-15T..." ;
-    elle:failing-tests () ;
+    elle:failed-count 0 ;
     elle:stderr "" .
 ```
 
@@ -468,7 +481,8 @@ and code understanding.
 |------|---------|
 | [`tools/elle-graph.lisp`](../tools/elle-graph.lisp) | Extract RDF triples from Elle source files |
 | [`tools/rust-graph.lisp`](../tools/rust-graph.lisp) | Extract RDF triples from Rust source files via syn plugin |
-| [`tools/rust-rdf-lib.lisp`](../tools/rust-rdf-lib.lisp) | Shared library for Rust→RDF extraction |
+| [`lib/rdf/elle.lisp`](../lib/rdf/elle.lisp) | Elle→RDF triple generation (`std/rdf/elle`) |
+| [`lib/rdf/rust.lisp`](../lib/rdf/rust.lisp) | Rust→RDF triple generation (`std/rdf/rust`) |
 | [`tools/load-all.lisp`](../tools/load-all.lisp) | Extract both graphs and load into the store |
 | [`tools/demo-queries.lisp`](../tools/demo-queries.lisp) | Example SPARQL queries |
 | [`tools/test-mcp.lisp`](../tools/test-mcp.lisp) | Smoke test: spawns server, exercises all tools |

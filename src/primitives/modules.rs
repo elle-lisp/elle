@@ -60,8 +60,8 @@ pub(crate) fn resolve_import(spec: &str) -> Option<String> {
         }
     }
 
-    // Fast path: already exists with the given name (full path or relative)
-    if as_path.exists() {
+    // Fast path: already exists as a file (skip directories — no semantics for them)
+    if as_path.is_file() {
         return Some(spec.to_string());
     }
 

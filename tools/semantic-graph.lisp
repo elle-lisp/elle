@@ -8,7 +8,7 @@
 ## Usage:
 ##   elle tools/semantic-graph.lisp -- file1.lisp file2.lisp ...
 
-(def rdf ((import "std/rdf")))
+(def rdf ((import "std/rdf/elle")))
 
 (var args (drop 1 (sys/args)))
 

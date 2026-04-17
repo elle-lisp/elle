@@ -1,4 +1,4 @@
-.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git test-mcp check-plugin-list clean help \
+.PHONY: all elle dev plugins docs docgen smoke test plugin-tests test-git test-mcp mcp check-plugin-list clean help \
        smoke-vm smoke-jit smoke-wasm plugin-tests-vm plugin-tests-jit doctest
 
 .DEFAULT_GOAL := all
@@ -151,16 +151,11 @@ test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build $(CARGO_PROFILE) -p elle -p elle-git
 	$(ELLE) tests/git.lisp
 
-test-mcp:  ## Run the MCP server integration test
-	@echo "=== MCP server integration test ==="
-	@# elle and its plugins MUST be built in a SINGLE cargo invocation so
-	@# that cargo's feature resolver produces one shared compilation of
-	@# the elle crate. Building them in separate `cargo build -p X` calls
-	@# yields two `libelle-*.rlib` artifacts with different HeapObject
-	@# layouts; the plugin's `Value::native_fn` values then deref as
-	@# garbage `LibHandle` in the main binary and calls fail with
-	@# `type-error: Cannot call <heap:...>`. See CONTRIBUTING.md.
+mcp:  ## Build elle + MCP plugins (oxigraph, syn)
 	cargo build $(CARGO_PROFILE) -p elle -p elle-oxigraph -p elle-syn
+
+test-mcp: mcp  ## Run the MCP server integration test
+	@echo "=== MCP server integration test ==="
 	@$(ELLE) tools/test-mcp.lisp $(ELLE) \
 		|| { echo "FAILED: MCP server integration test"; exit 1; }
 
