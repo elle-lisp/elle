@@ -918,22 +918,20 @@ differences, concept mappings, and gotchas:
 
 ## Getting Started
 
-### Prerequisites
+See [`INSTALL.md`](INSTALL.md) for full build instructions, system
+dependencies, and optional features (WASM, MLIR).
 
-- **Rust** (stable, 2021 edition) — [install via rustup](https://rustup.rs/)
-- **Linux and macOS** — x86_64 and aarch64. On Linux, Elle uses io_uring for
-  async I/O; on macOS, a thread-pool backend provides the same API.
-- **GNU Make** — for the build targets below.
-
-### Build and run
+### Quick start
 
 ```bash
-make                                      # build elle + plugins
+cargo build --release -p elle              # build elle
 echo '(println "hello")' | ./target/release/elle  # one-liner
 ./target/release/elle                     # REPL
 make smoke                                # run all tests (~30s)
-make test                                 # full test suite (~2min)
 ```
+
+Plugins live in a [separate repository](https://github.com/elle-lisp/plugins)
+and use a stable ABI — they can be built independently from elle.
 
 ### Subcommands
 
