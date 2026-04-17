@@ -41,10 +41,17 @@ LirFunction → generate_gpu_module      (textual MLIR)
             → mlir-translate --serialize-spirv → bytes
 ```
 
+Closures with captures are rejected at the top of
+`generate_gpu_module` — SPIR-V kernels would need extra uniform
+buffers to pass captured values, which is separate work. The
+`is_gpu_eligible` predicate allows captures (for the MLIR-CPU tier),
+so the SPIR-V path has its own guard.
+
 The module is wrapped with the SPIR-V target environment
-(`v1.0`, `[Shader, Int64]`, `[SPV_KHR_storage_buffer_storage_class]`)
-and the `gpu.container_module` attribute. The kernel signature has
-one `memref<?xi64>` per input parameter plus one output buffer; the
+(`v1.0`, `[Shader, Int64, Float64]`,
+`[SPV_KHR_storage_buffer_storage_class]`) and the
+`gpu.container_module` attribute. The kernel signature has one
+`memref<?xi64>` per input parameter plus one output buffer; the
 function body loads `gpu.thread_id x` as the global ID, indexes each
 input with it, runs the lowered LIR, and stores the result into the
 output buffer at the same index.

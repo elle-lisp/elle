@@ -28,32 +28,44 @@ The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
 
 1. **Signal** — only `errors`-or-silent functions; no yield, I/O, FFI,
    or polymorphic.
-2. **Structural** — `Arity::Exact(N)`, no captures, no mutable cells.
+2. **Structural** — `Arity::Exact(N)`, no mutable cells
+   (`capture_params_mask == 0`, `capture_locals_mask == 0`).
+   Immutable captures are allowed — they become extra parameters in
+   the MLIR signature.
 3. **Instruction whitelist** — every `LirInstr` and `Terminator` must
    be GPU-safe (constants, arithmetic, comparison, local slots,
-   parameter loads, `Jump` / `Branch` / `Return`).
+   parameter/capture loads, `Jump` / `Branch` / `Return`).
 
-A second, stricter predicate `is_mlir_cpu_eligible` requires that the
-returned register be reachable from integer operations only — nil,
-bool, and compare results all become `i64` (`0` / `1`) and would lose
-their tag if reboxed as a `Value`. CPU dispatch from the VM uses the
-strict predicate; GPU dispatch (where the caller reads i64s out of a
-buffer) uses the looser one.
+A second, stricter predicate `is_mlir_cpu_eligible` additionally
+checks that the returned register is reachable from numeric
+operations only — nil constants are rejected because `i64(0)` can't
+be distinguished from the integer `0` at rebox time. Bool/compare
+returns are fine: the caller checks `ScalarType::Bool` and reboxes
+with `Value::bool(result != 0)`. CPU dispatch uses the strict
+predicate; GPU dispatch (where the caller reads i64s out of a buffer)
+uses the looser one.
 
 ## Value model
 
 MLIR sees a flat scalar world: every Elle value enters as `i64`.
 Float parameters are bitcast i64→f64 at function entry; float
 returns are bitcast f64→i64 before `func.return`. A `ScalarType`
-tag (`Int` or `Float`) tracks each SSA value's type for dispatch
-between integer and float MLIR ops.
+tag (`Int`, `Float`, or `Bool`) tracks each SSA value's type for
+dispatch between integer and float MLIR ops, and for reboxing
+the result.
 
-| Elle constant | MLIR encoding |
-|---------------|---------------|
-| `Int(n)`      | `arith.constant n : i64` |
-| `Bool(b)`     | `0` or `1` |
-| `Nil`         | `0` |
-| `Float(f)`    | `f.to_bits() as i64` |
+| Elle constant | MLIR encoding | ScalarType |
+|---------------|---------------|------------|
+| `Int(n)`      | `arith.constant n : i64` | Int |
+| `Bool(b)`     | `0` or `1` | Bool |
+| `Nil`         | `0` | Int |
+| `Float(f)`    | `f.to_bits() as i64` | Float |
+| Compare result | `arith.cmpi` → `arith.extui` to i64 | Bool |
+
+Bool and Int are both i64 at the MLIR level; the distinction only
+matters for reboxing (`Value::bool` vs `Value::int`) and for the
+slot conflict check (Bool vs Int don't conflict; Float vs non-Float
+do).
 
 Local slots use `memref.alloca` of `memref<i64>` allocated in the
 entry block — that handles cross-block phi-style patterns
@@ -81,20 +93,31 @@ closure call before the Cranelift JIT path. It:
 6. Compiles via `MlirCache::compile`, caches by bytecode pointer,
    and invokes.
 
-Arguments are unboxed to i64: integers pass through directly; floats
-are bitcast f64→i64 by the caller. A `param_types: u64` bitmask
-(bit i = 1 means param i is float) is passed to `lower_to_module`,
-which inserts `arith.bitcast(i64→f64)` at function entry for float
-params. The same bitmask is part of the cache key, so the same
-closure called with `(f 1)` vs `(f 1.0)` gets separate compiled code.
-Non-numeric args (nil, string, etc.) fall through to bytecode.
+**Captures** are extracted from `closure.env[0..num_captures]`,
+validated as numeric (int or float), unboxed to i64, and prepended
+to the argument array. A `capture_types: u64` bitmask tracks which
+captures are float.
 
-The result is reboxed based on the compiled function's return type
-(`ScalarType::Int` → `Value::int`, `ScalarType::Float` →
-`Value::float(f64::from_bits(...))`). Failures are reported as a
-structured error (`error_val("mlir-error", ...)`) carried via
-`SIG_ERROR` — the rejection is also recorded so future calls don't
-retry.
+**Arguments** are unboxed to i64: integers pass through directly;
+floats are bitcast f64→i64 by the caller. A `param_types: u64`
+bitmask (bit i = 1 means param i is float) is passed to
+`lower_to_module`, which inserts `arith.bitcast(i64→f64)` at
+function entry for float params.
+
+The MLIR function signature is `[captures..., params...]`, all i64.
+Both bitmasks are part of the cache key
+`(bytecode_ptr, capture_types, param_types)`, so the same closure
+called with `(f 1)` vs `(f 1.0)` gets separate compiled code.
+Non-numeric args or captures fall through to bytecode.
+
+The result is reboxed based on the compiled function's return type:
+- `ScalarType::Int` → `Value::int(result)`
+- `ScalarType::Float` → `Value::float(f64::from_bits(result))`
+- `ScalarType::Bool` → `Value::bool(result != 0)`
+
+Failures are reported as a structured error
+(`error_val("mlir-error", ...)`) carried via `SIG_ERROR` — the
+rejection is also recorded so future calls don't retry.
 
 ## MlirCache
 
@@ -102,12 +125,12 @@ retry.
 
 - A single `melior::Context` with all dialects registered (~4ms to
   create — done once).
-- `engines: HashMap<(*const u8, u64), (ExecutionEngine, String, ScalarType)>` —
-  keyed by (bytecode pointer, param_types bitmask).
+- `engines: HashMap<(*const u8, u64, u64), (ExecutionEngine, String, ScalarType)>` —
+  keyed by (bytecode pointer, capture_types, param_types).
 - `spirv_cache: HashMap<*const u8, Vec<u8>>` — SPIR-V bytes from
   `compile_spirv` (see [impl/spirv.md](spirv.md)).
-- `rejections: HashSet<(*const u8, u64)>` — (pointer, param_types)
-  pairs known to fail conversion or verification.
+- `rejections: HashSet<(*const u8, u64, u64)>` — (pointer,
+  capture_types, param_types) triples known to fail.
 
 The cache lives on the VM and is `unsafe impl Send + Sync` because
 the VM is single-threaded; the engine and context are never accessed

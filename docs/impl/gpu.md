@@ -51,7 +51,11 @@ recognized.
 
 The closure must be GPU-eligible — see
 [impl/mlir.md](mlir.md) for the predicate. In short: pure arithmetic,
-fixed arity, no captures, no calls, no signals other than `:error`.
+fixed arity, no mutable cells, no calls, no signals other than
+`:error`. Immutable numeric captures are allowed for the MLIR-CPU
+tier but **not** for SPIR-V — the SPIR-V path rejects closures with
+captures (they would need extra uniform buffers, which is separate
+work).
 
 ## End-to-end: `gpu:compile` + `gpu:run`
 
