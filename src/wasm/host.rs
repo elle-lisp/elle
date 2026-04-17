@@ -235,7 +235,11 @@ impl ElleHost {
     /// Returns (signal_bits, result_value).
     pub fn call_primitive(&mut self, prim_id: u32, args: &[Value]) -> (SignalBits, Value) {
         let def = self.primitives[prim_id as usize];
-        (def.func)(args)
+        if std::ptr::fn_addr_eq(def.func, crate::plugin_api::PLUGIN_SENTINEL) {
+            crate::plugin_api::call_plugin(def, args)
+        } else {
+            (def.func)(args)
+        }
     }
 
     /// Handle SIG_IO from a primitive call.

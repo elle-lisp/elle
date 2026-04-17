@@ -2,7 +2,7 @@
   "mcpServers": {
     "elle-mcp": {
       "command": "elle",
-      "args": ["tools/mcp-server.lisp"]
+      "args": ["mcp/mcp-server.lisp"]
     }
   }
 }
