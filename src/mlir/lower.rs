@@ -48,6 +48,7 @@ pub fn create_context() -> Context {
 pub fn lower_to_module<'c>(
     context: &'c Context,
     lir: &LirFunction,
+    param_types: u64,
 ) -> Result<(Module<'c>, ScalarType), String> {
     let location = Location::unknown(context);
     let module = Module::new(location);
@@ -99,10 +100,18 @@ pub fn lower_to_module<'c>(
     if !blocks.is_empty() {
         let entry = &blocks[0];
 
-        // Pre-populate regs with entry block parameters (always i64/Int)
+        // Pre-populate regs with entry block parameters.
+        // Params marked as Float in param_types bitmask get bitcast i64→f64.
         for i in 0..num_params {
-            regs.insert(i as u32, entry.argument(i).unwrap().into());
-            types.insert(i as u32, ScalarType::Int);
+            let raw: Value = entry.argument(i).unwrap().into();
+            if param_types & (1u64 << i) != 0 {
+                let bc = entry.append_operation(arith::bitcast(raw, f64_type, location));
+                regs.insert(i as u32, bc.result(0).unwrap().into());
+                types.insert(i as u32, ScalarType::Float);
+            } else {
+                regs.insert(i as u32, raw);
+                types.insert(i as u32, ScalarType::Int);
+            }
         }
 
         // Allocate a memref<i64> for each local slot
@@ -369,6 +378,17 @@ pub fn lower_to_module<'c>(
                         .get(&(*slot as u32))
                         .ok_or_else(|| format!("unallocated local slot {}", slot))?;
                     block.append_operation(memref::store(store_val, slot_ptr, &[], location));
+                    // Reject mixed-type slots: if a slot was previously typed
+                    // differently, we can't statically know which type to
+                    // bitcast on load. Fall through to bytecode/JIT.
+                    if let Some(prev) = slot_types.get(&(*slot as u32)) {
+                        if *prev != src_type {
+                            return Err(format!(
+                                "mixed-type local slot {}: was {:?}, now {:?}",
+                                slot, prev, src_type
+                            ));
+                        }
+                    }
                     slot_types.insert(*slot as u32, src_type);
                 }
                 LirInstr::LoadLocal { dst, slot } => {
@@ -500,6 +520,6 @@ pub fn lower_to_module<'c>(
 /// Lower a GPU-eligible LirFunction to MLIR text (for debugging/testing).
 pub fn lower_to_mlir(lir: &LirFunction) -> Result<String, String> {
     let context = create_context();
-    let (module, _) = lower_to_module(&context, lir)?;
+    let (module, _) = lower_to_module(&context, lir, 0)?;
     Ok(module.as_operation().to_string())
 }

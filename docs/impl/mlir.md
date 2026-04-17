@@ -42,7 +42,11 @@ buffer) uses the looser one.
 
 ## Value model
 
-MLIR sees a flat scalar world: every Elle value is an `i64`.
+MLIR sees a flat scalar world: every Elle value enters as `i64`.
+Float parameters are bitcast i64→f64 at function entry; float
+returns are bitcast f64→i64 before `func.return`. A `ScalarType`
+tag (`Int` or `Float`) tracks each SSA value's type for dispatch
+between integer and float MLIR ops.
 
 | Elle constant | MLIR encoding |
 |---------------|---------------|
@@ -77,11 +81,20 @@ closure call before the Cranelift JIT path. It:
 6. Compiles via `MlirCache::compile`, caches by bytecode pointer,
    and invokes.
 
-Argument types are unboxed: every `Value` must be `as_int().is_some()`
-or the call falls through to bytecode. The result is reboxed as
-`Value::int(...)`. Failures are reported as a structured error
-(`error_val("mlir-error", ...)`) carried via `SIG_ERROR` — the
-rejection is also recorded so future calls don't retry.
+Arguments are unboxed to i64: integers pass through directly; floats
+are bitcast f64→i64 by the caller. A `param_types: u64` bitmask
+(bit i = 1 means param i is float) is passed to `lower_to_module`,
+which inserts `arith.bitcast(i64→f64)` at function entry for float
+params. The same bitmask is part of the cache key, so the same
+closure called with `(f 1)` vs `(f 1.0)` gets separate compiled code.
+Non-numeric args (nil, string, etc.) fall through to bytecode.
+
+The result is reboxed based on the compiled function's return type
+(`ScalarType::Int` → `Value::int`, `ScalarType::Float` →
+`Value::float(f64::from_bits(...))`). Failures are reported as a
+structured error (`error_val("mlir-error", ...)`) carried via
+`SIG_ERROR` — the rejection is also recorded so future calls don't
+retry.
 
 ## MlirCache
 
@@ -89,12 +102,12 @@ rejection is also recorded so future calls don't retry.
 
 - A single `melior::Context` with all dialects registered (~4ms to
   create — done once).
-- `engines: HashMap<*const u8, (ExecutionEngine, String)>` — keyed by
-  the `CompiledFunction`'s bytecode pointer.
+- `engines: HashMap<(*const u8, u64), (ExecutionEngine, String, ScalarType)>` —
+  keyed by (bytecode pointer, param_types bitmask).
 - `spirv_cache: HashMap<*const u8, Vec<u8>>` — SPIR-V bytes from
   `compile_spirv` (see [impl/spirv.md](spirv.md)).
-- `rejections: HashSet<*const u8>` — functions known to fail
-  conversion or verification.
+- `rejections: HashSet<(*const u8, u64)>` — (pointer, param_types)
+  pairs known to fail conversion or verification.
 
 The cache lives on the VM and is `unsafe impl Send + Sync` because
 the VM is single-threaded; the engine and context are never accessed

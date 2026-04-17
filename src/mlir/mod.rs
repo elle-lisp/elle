@@ -254,6 +254,120 @@ mod tests {
         assert_eq!(mlir_call(&make_abs(), &[0]).unwrap(), 0);
     }
 
+    // ── Mixed-type slot rejection ─────────────────────────────────
+
+    /// Build LIR: fn(x) { var s = 0; if x > 0 then s = 1.5 else s = 2; return s }
+    /// This has a mixed-type local slot (Int in one branch, Float in another).
+    fn make_mixed_type_slot() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("mixed_slot".to_string());
+        func.signal = Signal::errors();
+        func.num_locals = 1;
+
+        // Block 0: entry — load param, store 0 to slot, compare, branch
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(1),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Compare {
+                dst: Reg(2),
+                op: CmpOp::Gt,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+            s(),
+        );
+
+        // Block 1: then — store 1.5 (Float) to slot, jump to merge
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(3),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(3),
+            },
+            s(),
+        ));
+        b1.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
+
+        // Block 2: else — store 2 (Int) to slot, jump to merge
+        let mut b2 = BasicBlock::new(Label(2));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(4),
+                value: LirConst::Int(2),
+            },
+            s(),
+        ));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(4),
+            },
+            s(),
+        ));
+        b2.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
+
+        // Block 3: merge — load slot, return
+        let mut b3 = BasicBlock::new(Label(3));
+        b3.instructions.push(SpannedInstr::new(
+            LirInstr::LoadLocal {
+                dst: Reg(5),
+                slot: 0,
+            },
+            s(),
+        ));
+        b3.terminator = SpannedTerminator::new(Terminator::Return(Reg(5)), s());
+
+        func.blocks = vec![b0, b1, b2, b3];
+        func.num_regs = 6;
+        func
+    }
+
+    #[test]
+    fn test_reject_mixed_type_slot() {
+        let func = make_mixed_type_slot();
+        let err = lower_to_mlir(&func).unwrap_err();
+        assert!(
+            err.contains("mixed-type local slot"),
+            "should reject mixed-type slot: {}",
+            err
+        );
+    }
+
     // ── SPIR-V tests ─────────────────────────────────────────────
 
     #[test]
@@ -304,7 +418,7 @@ mod tests {
         let ctx_time = start.elapsed();
 
         let start = Instant::now();
-        let (mut module, _) = lower_to_module(&context, &func).unwrap();
+        let (mut module, _) = lower_to_module(&context, &func, 0).unwrap();
         let lower_time = start.elapsed();
 
         let start = Instant::now();

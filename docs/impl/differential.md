@@ -127,9 +127,11 @@ GPU-eligible code.
 **Phase 1** (shipped): `:bytecode`, `:jit`, `:wasm`, `:mlir-cpu` via
 `compile/run-on`. Nine directed tests covering every LirInstr arm.
 
-**Phase 2** (current): tail-call support in JIT tier, negative
+**Phase 2** (shipped): tail-call support in JIT tier, negative
 eligibility tests, const/zero-arg closures, GPU tier via `gpu:map`,
-property-based `diff:prop` generator.
+property-based `diff:prop` generator. Float support: constants,
+arithmetic, comparison, negation, mixed promotion, conditional
+returns, float arguments, and loop-based float accumulation.
 
 **Phase 3** (planned): float tolerance modes, auto-discovery of
 testable closures from stdlib, auto-promoted existing tests.

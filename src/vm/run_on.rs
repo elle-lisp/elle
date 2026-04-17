@@ -432,8 +432,9 @@ impl VM {
     ///
     /// Requires `--features mlir`. The closure must satisfy the
     /// `is_mlir_cpu_eligible` predicate (no captures, exact arity, only
-    /// arithmetic/comparison/local instructions, integer-typed return)
-    /// and all arguments must be integers — MLIR sees a flat i64 world.
+    /// arithmetic/comparison/local instructions). Arguments may be
+    /// integers or floats — floats are bitcast f64→i64 by the caller
+    /// and i64→f64 at MLIR function entry.
     #[cfg(feature = "mlir")]
     pub fn invoke_closure_mlir_cpu(
         &mut self,
@@ -457,25 +458,27 @@ impl VM {
             return self.fiber.signal.take().unwrap_or((SIG_ERROR, Value::NIL));
         }
 
-        // Unbox to i64. Non-int args fall through with a structured error
-        // (same contract as try_mlir_call).
+        // Unbox args to i64. Ints pass through; floats are bitcast f64→i64.
         let mut int_args: Vec<i64> = Vec::with_capacity(args.len());
+        let mut param_types: u64 = 0;
         for (i, v) in args.iter().enumerate() {
-            match v.as_int() {
-                Some(n) => int_args.push(n),
-                None => {
-                    return (
-                        SIG_ERROR,
-                        rejected(
-                            "mlir-cpu",
-                            format!(
-                                "arg {} is {}, not an integer; MLIR-CPU requires i64 args",
-                                i,
-                                v.type_name()
-                            ),
+            if let Some(n) = v.as_int() {
+                int_args.push(n);
+            } else if let Some(f) = v.as_float() {
+                int_args.push(f.to_bits() as i64);
+                param_types |= 1u64 << i;
+            } else {
+                return (
+                    SIG_ERROR,
+                    rejected(
+                        "mlir-cpu",
+                        format!(
+                            "arg {} is {}, not numeric; MLIR-CPU requires int/float args",
+                            i,
+                            v.type_name()
                         ),
-                    )
-                }
+                    ),
+                );
             }
         }
 
@@ -484,9 +487,9 @@ impl VM {
             .mlir_cache
             .get_or_insert_with(crate::mlir::MlirCache::new);
 
-        // Ensure compiled.
-        if !cache.contains(bytecode_ptr) {
-            if let Err(e) = cache.compile(bytecode_ptr, &lir) {
+        // Ensure compiled for this param_types signature.
+        if !cache.contains(bytecode_ptr, param_types) {
+            if let Err(e) = cache.compile(bytecode_ptr, &lir, param_types) {
                 return (
                     SIG_ERROR,
                     rejected("mlir-cpu", format!("MLIR compilation failed: {}", e)),
@@ -496,10 +499,10 @@ impl VM {
 
         // Reborrow as immutable for call.
         let cache = self.mlir_cache.as_ref().unwrap();
-        match cache.call(bytecode_ptr, &int_args) {
+        match cache.call(bytecode_ptr, &int_args, param_types) {
             Some(Ok(result)) => {
                 // Rebox based on the compiled function's return type.
-                let val = match cache.return_type(bytecode_ptr) {
+                let val = match cache.return_type(bytecode_ptr, param_types) {
                     Some(crate::mlir::ScalarType::Float) => {
                         Value::float(f64::from_bits(result as u64))
                     }

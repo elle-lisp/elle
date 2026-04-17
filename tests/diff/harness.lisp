@@ -18,6 +18,11 @@
 ##   ## Property-based: 100 random inputs
 ##   (diff:prop (fn [a b] (+ a b))
 ##              (fn [] [(rng:int -1000 1000) (rng:int -1000 1000)]))
+##
+##   ## Float tolerance: set epsilon for approximate float comparison
+##   (diff:with-tolerance 1e-10)
+##   (diff:assert-agree (fn [x] (* x 0.1)) 3.0)
+##   (diff:with-tolerance nil)  ## back to exact
 
 (fn []
 
@@ -88,6 +93,29 @@
         (assign ts (add ts tier)))))
   ts)
 
+## ── Float tolerance ──────────────────────────────────────────────────
+
+## Module-level epsilon for float comparison. nil = exact equality.
+## Set with (diff:with-tolerance 1e-10), clear with (diff:with-tolerance nil).
+(var tolerance nil)
+
+(defn with-tolerance [eps]
+  (assign tolerance eps))
+
+## Check if two floats are within epsilon of each other.
+(defn float-close? [a b eps]
+  (< (abs (- a b)) eps))
+
+## Compare two values for agreement. When epsilon is nil, use exact
+## equality. When epsilon is set, use approximate comparison for
+## float pairs; all other types still use exact equality.
+(defn values-agree? [a b epsilon]
+  (if (nil? epsilon)
+    (= a b)
+    (if (and (float? a) (float? b))
+      (float-close? a b epsilon)
+      (= a b))))
+
 ## ── call ────────────────────────────────────────────────────────────
 
 ## Run f on every tier; compare results.
@@ -100,6 +128,8 @@
 ##    :skipped {tier rejection ...}   ## tiers that refused this closure
 ##    :errors  {tier error ...}       ## tiers that failed unexpectedly
 ##    :ref-tier <tier>                ## tier used as the reference}
+##
+## Float comparison uses the module-level tolerance (set via with-tolerance).
 (defn call [f & args]
   (var results @{})
   (var skipped @{})
@@ -135,7 +165,7 @@
                             :bytecode
                             (first ran-tiers))]
                [ref-value (results ref-tier)]
-               [agreed?   (all? (fn [t] (= (results t) ref-value))
+               [agreed?   (all? (fn [t] (values-agree? (results t) ref-value tolerance))
                                 ran-tiers)]]
           (if agreed?
             {:agreed true
@@ -179,6 +209,8 @@
 
 ## Test helper: signal :diff-disagreement if any eligible tier returns
 ## a different value. Returns the agreed value on success.
+##
+## Float comparison uses the module-level tolerance (set via with-tolerance).
 (defn assert-agree [f & args]
   (let [[report (apply call f args)]]
     (cond
@@ -218,4 +250,7 @@
  :call           call
  :assert-agree   assert-agree
  :format-disagreement format-disagreement
- :prop           prop})
+ :prop           prop
+ :with-tolerance with-tolerance
+ :float-close?   float-close?
+ :values-agree?  values-agree?})

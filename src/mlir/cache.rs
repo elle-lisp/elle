@@ -17,12 +17,12 @@ use super::lower::{create_context, lower_to_module, ScalarType};
 pub struct MlirCache {
     /// Shared MLIR context with all dialects registered.
     context: melior::Context,
-    /// Compiled functions: bytecode pointer → engine + function name + return type.
-    engines: HashMap<*const u8, (ExecutionEngine, String, ScalarType)>,
+    /// Compiled functions: (bytecode pointer, param_types bitmask) → engine + function name + return type.
+    engines: HashMap<(*const u8, u64), (ExecutionEngine, String, ScalarType)>,
     /// Cached SPIR-V bytes: bytecode pointer → compiled SPIR-V binary.
     spirv_cache: HashMap<*const u8, Vec<u8>>,
     /// Functions that failed MLIR compilation — don't retry.
-    rejections: std::collections::HashSet<*const u8>,
+    rejections: std::collections::HashSet<(*const u8, u64)>,
 }
 
 // Safety: MlirCache is only used from the single-threaded VM.
@@ -47,19 +47,24 @@ impl MlirCache {
     }
 
     /// Record a compilation failure so we don't retry.
-    pub fn reject(&mut self, key: *const u8) {
-        self.rejections.insert(key);
+    pub fn reject(&mut self, key: *const u8, param_types: u64) {
+        self.rejections.insert((key, param_types));
     }
 
     /// Check if a function was previously rejected.
-    pub fn is_rejected(&self, key: *const u8) -> bool {
-        self.rejections.contains(&key)
+    pub fn is_rejected(&self, key: *const u8, param_types: u64) -> bool {
+        self.rejections.contains(&(key, param_types))
     }
 
     /// Compile a GPU-eligible LirFunction and cache the result.
     /// Returns the function name for subsequent invocation.
-    pub fn compile(&mut self, key: *const u8, lir: &LirFunction) -> Result<&str, String> {
-        let (mut module, scalar_type) = lower_to_module(&self.context, lir)?;
+    pub fn compile(
+        &mut self,
+        key: *const u8,
+        lir: &LirFunction,
+        param_types: u64,
+    ) -> Result<&str, String> {
+        let (mut module, scalar_type) = lower_to_module(&self.context, lir, param_types)?;
 
         let pm = melior::pass::PassManager::new(&self.context);
         pm.add_pass(melior::pass::conversion::create_to_llvm());
@@ -69,19 +74,25 @@ impl MlirCache {
         let engine = ExecutionEngine::new(&module, 2, &[], false, false);
         let name = lir.name.as_deref().unwrap_or("gpu_kernel").to_string();
 
-        self.engines.insert(key, (engine, name, scalar_type));
-        Ok(&self.engines[&key].1)
+        let cache_key = (key, param_types);
+        self.engines.insert(cache_key, (engine, name, scalar_type));
+        Ok(&self.engines[&cache_key].1)
     }
 
     /// Get the return type for a cached function.
-    pub fn return_type(&self, key: *const u8) -> Option<ScalarType> {
-        self.engines.get(&key).map(|(_, _, st)| *st)
+    pub fn return_type(&self, key: *const u8, param_types: u64) -> Option<ScalarType> {
+        self.engines.get(&(key, param_types)).map(|(_, _, st)| *st)
     }
 
     /// Call a cached MLIR-compiled function with i64 arguments.
     /// Returns the i64 result, or None if the function is not cached.
-    pub fn call(&self, key: *const u8, args: &[i64]) -> Option<Result<i64, String>> {
-        let (engine, name, _) = self.engines.get(&key)?;
+    pub fn call(
+        &self,
+        key: *const u8,
+        args: &[i64],
+        param_types: u64,
+    ) -> Option<Result<i64, String>> {
+        let (engine, name, _) = self.engines.get(&(key, param_types))?;
 
         let mut arg_values: Vec<i64> = args.to_vec();
         let mut result: i64 = 0;
@@ -101,8 +112,8 @@ impl MlirCache {
     }
 
     /// Check if a function is already compiled (CPU JIT).
-    pub fn contains(&self, key: *const u8) -> bool {
-        self.engines.contains_key(&key)
+    pub fn contains(&self, key: *const u8, param_types: u64) -> bool {
+        self.engines.contains_key(&(key, param_types))
     }
 
     /// Compile a GPU-eligible LirFunction to SPIR-V bytes, using the

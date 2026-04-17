@@ -2,10 +2,7 @@
 #
 # Covers: float constants, float arithmetic (Add/Sub/Mul/Div/Rem),
 # float comparison, float negation, mixed int+float promotion,
-# and float returns through conditional branches.
-#
-# Phase 1: arguments are integers; return values may be floats.
-# Float arguments are a separate concern (Phase 2).
+# float returns through conditional branches, and float arguments.
 
 (def diff ((import "tests/diff/harness")))
 
@@ -66,5 +63,32 @@
 
 (defn mixed-mul [x] (* 3 1.5))
 (diff:assert-agree mixed-mul 0)
+
+# ── Float arguments ──────────────────────────────────────────────
+
+(defn fdouble [x] (* x 2.0))
+(diff:assert-agree fdouble 3.14)
+(diff:assert-agree fdouble 0.0)
+(diff:assert-agree fdouble -1.5)
+
+(defn finc [x] (+ x 1.0))
+(diff:assert-agree finc 2.5)
+(diff:assert-agree finc -0.5)
+
+(defn fsum [a b] (+ a b))
+(diff:assert-agree fsum 1.5 2.5)
+(diff:assert-agree fsum 0.0 0.0)
+(diff:assert-agree fsum -1.0 1.0)
+
+(defn fabs [x] (if (> x 0.0) x (- 0.0 x)))
+(diff:assert-agree fabs 3.14)
+(diff:assert-agree fabs -2.5)
+(diff:assert-agree fabs 0.0)
+
+# ── Mixed int and float arguments ───────────────────────────────
+
+(defn mixed-arg-add [a b] (+ a b))
+(diff:assert-agree mixed-arg-add 1 2.5)
+(diff:assert-agree mixed-arg-add 1.5 2)
 
 (println "float: OK")
