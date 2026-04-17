@@ -46,12 +46,12 @@
 
 (assert (= (decode-fn (encode-fn -1.5)) -1.5) "float -1.5 round-trips")
 
-(assert (= (decode-fn (encode-fn (float "inf"))) (float "inf")) "float +infinity round-trips")
+(assert (= (decode-fn (encode-fn (parse-float "inf"))) (parse-float "inf")) "float +infinity round-trips")
 
-(assert (= (decode-fn (encode-fn (float "-inf"))) (float "-inf")) "float -infinity round-trips")
+(assert (= (decode-fn (encode-fn (parse-float "-inf"))) (parse-float "-inf")) "float -infinity round-trips")
 
 ## NaN: Elle = treats NaN as equal to itself (structural equality); assert-eq works
-(assert (= (decode-fn (encode-fn (float "nan"))) (float "nan")) "NaN round-trips as NaN")
+(assert (= (decode-fn (encode-fn (parse-float "nan"))) (parse-float "nan")) "NaN round-trips as NaN")
 
 (assert (= (decode-fn (encode-fn "")) "") "empty string round-trips")
 

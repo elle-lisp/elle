@@ -20,7 +20,7 @@
                             "Host: " host "\r\n"
                             "Connection: close\r\n\r\n"))
     (def line (tls:read-line conn))
-    (def status (integer (get (string/split (string/trim line) " ") 1)))
+    (def status (parse-int (get (string/split (string/trim line) " ") 1)))
     (def headers @{})
     (forever
       (def hline (tls:read-line conn))
@@ -38,7 +38,7 @@
         ((and te (string-contains? (string/lowercase te) "chunked"))
          (def chunks @[])
          (forever
-           (def sz (integer (string/trim (tls:read-line conn)) 16))
+           (def sz (parse-int (string/trim (tls:read-line conn)) 16))
            (when (= sz 0)
              (tls:read-line conn)
              (break (if (empty? chunks) (bytes) (apply concat chunks))))
@@ -46,7 +46,7 @@
            (push chunks chunk)
            (tls:read-line conn)))
         ((not (nil? cl))
-         (tls:read conn (integer cl)))
+         (tls:read conn (parse-int cl)))
         (true (tls:read-all conn))))
     {:status status :body body}))
 

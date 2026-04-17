@@ -87,10 +87,10 @@ including `0`, `""`, `()`, `[]`, and `@[]`.
 ### String ↔ number
 
 ```lisp
-(integer "42")             # => 42
-(integer "ff" 16)          # => 255 (radix 2-36)
-(integer "1010" 2)         # => 10
-(float "3.14")             # => 3.14
+(parse-int "42")           # => 42
+(parse-int "ff" 16)        # => 255 (radix 2-36)
+(parse-int "1010" 2)       # => 10
+(parse-float "3.14")       # => 3.14
 
 (number->string 42)        # => "42"
 (number->string 255 16)    # => "ff"

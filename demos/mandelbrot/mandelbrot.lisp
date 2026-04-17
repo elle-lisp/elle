@@ -57,7 +57,7 @@
 (def BPP       4)
 (def STRIDE    (* WIDTH BPP))
 (def NPIXELS   (* WIDTH HEIGHT))
-(def NCPU      (integer (or (sys/env "NCPU") "16")))
+(def NCPU      (parse-int (or (sys/env "NCPU") "16")))
 (def BLACK     (bit/shl 0xFF 24))
 (def LN2       (math/log 2.0))
 

@@ -1,4 +1,3 @@
-(elle/epoch 7)
 ## Lua compatibility prelude
 ##
 ## Provides Lua standard library functions mapped to Elle primitives.
@@ -10,7 +9,7 @@
 
 # Lua's type() returns a string; Elle's type-of returns a keyword.
 (def lua_type (fn (v)
-  (let [t (type-of v)]
+  (let ((t (type-of v)))
     (if (= t :integer) "number"
       (if (= t :float) "number"
         (if (= t :string) "string"
@@ -29,9 +28,9 @@
 (def tonumber (fn (v)
   (if (number? v) v
     (if (string? v)
-      (let [[ok result] (protect ((fn () (integer v))))]
+      (let (([ok result] (protect ((fn () (parse-int v))))))
         (if ok result
-          (let [[ok2 result2] (protect ((fn () (float v))))]
+          (let (([ok2 result2] (protect ((fn () (parse-float v))))))
             (if ok2 result2 nil))))
       nil))))
 
@@ -138,7 +137,7 @@
 # pcall: protected call — returns [true result] or [false error]
 # (arrays so Lua destructuring `local ok, err = pcall(...)` works)
 (def pcall (fn (f & args)
-  (let [[ok result] (protect ((fn () (apply f args))))]
+  (let (([ok result] (protect ((fn () (apply f args))))))
     (if ok
       [true result]
       [false result]))))

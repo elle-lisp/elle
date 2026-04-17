@@ -1,5 +1,4 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
 
 # tests/elle/telemetry-jit-yield.lisp
 #
@@ -27,10 +26,10 @@
   (push received request:body)
   (http:respond 200 "ok"))
 
-(let [listener (tcp/listen "127.0.0.1" 0)]
-  (let* [addr (port/path listener)
-         port-num (integer (get (string/split addr ":") 1))
-         url (string "http://127.0.0.1:" port-num "/v1/metrics")]
+(let [[listener (tcp/listen "127.0.0.1" 0)]]
+  (let* [[addr (port/path listener)]
+         [port-num (parse-int (get (string/split addr ":") 1))]
+         [url (string "http://127.0.0.1:" port-num "/v1/metrics")]]
 
     (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
     (def meter (telemetry:meter "t" :endpoint url :interval 9999))
@@ -41,7 +40,7 @@
     (def gauge (telemetry:gauge meter "conns" :unit "1"))
 
     (defn sim [method path status price]
-      (let [attrs {"m" method "p" path "s" status}]
+      (let [[attrs {"m" method "p" path "s" status}]]
         (telemetry:add req-c 1 :attributes attrs)
         (telemetry:time lat
           (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))

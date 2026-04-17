@@ -1,5 +1,4 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
 
 # tests/elle/telemetry-export.lisp — OTLP export integration tests
 #
@@ -23,17 +22,17 @@
   (push received request:body)
   (http:respond 200 "ok"))
 
-(let [listener (tcp/listen "127.0.0.1" 0)]
-  (let* [addr (port/path listener)
-         port-num (integer (get (string/split addr ":") 1))
-         url (string "http://127.0.0.1:" port-num "/v1/metrics")]
+(let [[listener (tcp/listen "127.0.0.1" 0)]]
+  (let* [[addr (port/path listener)]
+         [port-num (parse-int (get (string/split addr ":") 1))]
+         [url (string "http://127.0.0.1:" port-num "/v1/metrics")]]
 
     (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
 
 
     # ── 1. Direct http:post to collector ──────────────────────────────
 
-    (let [r (http:post url "hello")]
+    (let [[r (http:post url "hello")]]
       (assert (= r:status 200) "direct http:post works")
       (assert (= (length received) 1) "collector received direct post"))
     (println "  1. direct http:post: ok")
@@ -41,8 +40,8 @@
 
     # ── 2. http:post with JSON body ───────────────────────────────────
 
-    (let [r (http:post url (json-serialize {"test" true})
-               :headers {:content-type "application/json"})]
+    (let [[r (http:post url (json-serialize {"test" true})
+               :headers {:content-type "application/json"})]]
       (assert (= r:status 200) "JSON http:post works")
       (assert (= (length received) 2) "collector received JSON post"))
     (println "  2. http:post with JSON body: ok")
@@ -70,7 +69,7 @@
     (def payload (telemetry:build-payload meter-stub))
     (def body (json-serialize payload))
 
-    (let [r (http:post url body :headers {:content-type "application/json"})]
+    (let [[r (http:post url body :headers {:content-type "application/json"})]]
       (assert (= r:status 200) "telemetry-sized JSON body works")
       (assert (= (length received) 3) "collector received telemetry body"))
     (println "  3. http:post with telemetry JSON body: ok")
@@ -140,7 +139,7 @@
     (def db-conns (telemetry:gauge meter "sim.connections" :unit "1"))
 
     (defn simulate-request [method path status price]
-      (let [attrs {"http.method" method "http.route" path "http.status" status}]
+      (let [[attrs {"http.method" method "http.route" path "http.status" status}]]
         (telemetry:add http-requests 1 :attributes attrs)
         (telemetry:time latency
           (fn [] (ev/sleep (/ (+ 1 (mod (* status 7) 50)) 1000.0)))

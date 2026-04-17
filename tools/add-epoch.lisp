@@ -8,7 +8,7 @@
   (print "Usage: elle tools/add-epoch.lisp -- <epoch>")
   (exit 1))
 
-(def epoch (integer (first args)))
+(def epoch (parse-int (first args)))
 
 (def glob-plugin (import "glob"))
 (def do-glob (get glob-plugin :glob))
