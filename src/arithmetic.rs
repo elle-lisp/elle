@@ -157,17 +157,20 @@ pub(crate) fn mod_values(a: &Value, b: &Value) -> Result<Value, Value> {
 
 /// Remainder operation (truncated division - result has same sign as dividend)
 pub(crate) fn remainder_values(a: &Value, b: &Value) -> Result<Value, Value> {
-    match (a.as_int(), b.as_int()) {
-        (Some(x), Some(y)) => {
+    match (a.as_int(), a.as_float(), b.as_int(), b.as_float()) {
+        (Some(x), _, Some(y), _) => {
             if y == 0 {
                 return Err(error_val("division-by-zero", "rem: division by zero"));
             }
             Ok(Value::int(x % y))
         }
+        (Some(x), _, _, Some(y)) => Ok(Value::float((x as f64) % y)),
+        (_, Some(x), Some(y), _) => Ok(Value::float(x % (y as f64))),
+        (_, Some(x), _, Some(y)) => Ok(Value::float(x % y)),
         _ => Err(error_val(
             "type-error",
             format!(
-                "rem: expected integer, got {} and {}",
+                "rem: expected number, got {} and {}",
                 a.type_name(),
                 b.type_name()
             ),

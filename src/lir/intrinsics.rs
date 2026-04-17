@@ -9,7 +9,7 @@
 //! bool, nil, keyword, symbol). Used by escape analysis (`result_is_safe`)
 //! to accept calls to these primitives in scope-allocated let bodies.
 
-use super::types::{BinOp, CmpOp, UnaryOp};
+use super::types::{BinOp, CmpOp, ConvOp, UnaryOp};
 use crate::symbol::SymbolTable;
 use crate::value::SymbolId;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -20,6 +20,7 @@ pub(crate) enum IntrinsicOp {
     Binary(BinOp),
     Compare(CmpOp),
     Unary(UnaryOp),
+    Conversion(ConvOp),
 }
 
 /// Build the intrinsics map from a symbol table.
@@ -55,6 +56,11 @@ pub(crate) fn build_intrinsics(symbols: &SymbolTable) -> FxHashMap<SymbolId, Int
     // Unary
     // `-` with 1 arg is handled as a special case in try_lower_intrinsic.
     add("not", IntrinsicOp::Unary(UnaryOp::Not));
+
+    // Conversion (1-arg calls lower to Convert; 2-arg integer/int falls through to Call)
+    add("float", IntrinsicOp::Conversion(ConvOp::IntToFloat));
+    add("integer", IntrinsicOp::Conversion(ConvOp::FloatToInt));
+    add("int", IntrinsicOp::Conversion(ConvOp::FloatToInt));
 
     map
 }
@@ -121,6 +127,12 @@ const IMMEDIATE_PRIMITIVES: &[&str] = &[
     "floor",
     "ceil",
     "round",
+    // Type conversion → int or float
+    "float",
+    "integer",
+    "int",
+    "parse-int",
+    "parse-float",
     // Type introspection → keyword
     "type",
     "type-of",

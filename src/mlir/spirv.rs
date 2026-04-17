@@ -5,7 +5,7 @@
 //!
 //! Pipeline: LIR → MLIR text → parse → pass pipeline → extract binary
 
-use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
+use crate::lir::{BinOp, CmpOp, ConvOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
 
 use super::lower::ScalarType;
 use melior::ir::Module;
@@ -394,6 +394,42 @@ fn emit_block_instructions(
                     }
                 }
                 regs.insert(dst.0, name);
+            }
+            LirInstr::Convert { dst, op, src } => {
+                let sv = regs
+                    .get(&src.0)
+                    .ok_or_else(|| format!("undef r{}", src.0))?
+                    .clone();
+                let st = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                let name = format!("%conv{}_{}", block_idx, dst.0);
+                match op {
+                    ConvOp::IntToFloat => {
+                        if st == ScalarType::Float {
+                            // Identity
+                            regs.insert(dst.0, sv);
+                            reg_types.insert(dst.0, ScalarType::Float);
+                        } else {
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.sitofp {sv} : i64 to f64\n"
+                            ));
+                            regs.insert(dst.0, name);
+                            reg_types.insert(dst.0, ScalarType::Float);
+                        }
+                    }
+                    ConvOp::FloatToInt => {
+                        if st == ScalarType::Int {
+                            // Identity
+                            regs.insert(dst.0, sv);
+                            reg_types.insert(dst.0, ScalarType::Int);
+                        } else {
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.fptosi {sv} : f64 to i64\n"
+                            ));
+                            regs.insert(dst.0, name);
+                            reg_types.insert(dst.0, ScalarType::Int);
+                        }
+                    }
+                }
             }
             LirInstr::StoreLocal { slot, src } => {
                 if let Some(name) = regs.get(&src.0) {

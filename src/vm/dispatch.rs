@@ -293,6 +293,14 @@ impl VM {
                     arithmetic::handle_shr(self);
                 }
 
+                // Type conversions
+                Instruction::IntToFloat => {
+                    arithmetic::handle_int_to_float(self);
+                }
+                Instruction::FloatToInt => {
+                    arithmetic::handle_float_to_int(self);
+                }
+
                 // Comparisons
                 Instruction::Eq => {
                     comparison::handle_eq(self);

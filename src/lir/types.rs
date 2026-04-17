@@ -288,6 +288,12 @@ impl LirFunction {
                             value: LirConst::Nil | LirConst::Bool(_),
                         } if *dst == r => return true,
                         LirInstr::Compare { dst, .. } if *dst == r => return true,
+                        LirInstr::Convert {
+                            dst,
+                            op: ConvOp::IntToFloat,
+                            ..
+                        } if *dst == r => return true,
+                        // FloatToInt produces an int — safe, no action needed
                         LirInstr::LoadLocal { dst, slot }
                             if *dst == r && seen_slots.insert(*slot) =>
                         {
@@ -475,6 +481,8 @@ pub enum LirInstr {
     },
     /// Unary operations
     UnaryOp { dst: Reg, op: UnaryOp, src: Reg },
+    /// Type conversion (float↔int intrinsics)
+    Convert { dst: Reg, op: ConvOp, src: Reg },
     /// Comparison
     Compare {
         dst: Reg,
@@ -649,6 +657,13 @@ pub enum UnaryOp {
     BitNot,
 }
 
+/// Conversion operations (type coercion intrinsics)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConvOp {
+    IntToFloat,
+    FloatToInt,
+}
+
 /// Comparison operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmpOp {
@@ -742,6 +757,7 @@ fn is_gpu_instruction(i: &LirInstr) -> bool {
         } | LirInstr::BinOp { .. }
             | LirInstr::UnaryOp { .. }
             | LirInstr::Compare { .. }
+            | LirInstr::Convert { .. }
             | LirInstr::LoadLocal { .. }
             | LirInstr::StoreLocal { .. }
             | LirInstr::LoadCapture { .. }

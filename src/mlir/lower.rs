@@ -7,7 +7,7 @@
 //! Local slots use `memref.alloca` for correct cross-block semantics
 //! (StoreLocal in one block, LoadLocal in another).
 
-use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
+use crate::lir::{BinOp, CmpOp, ConvOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
 use melior::dialect::arith::{CmpfPredicate, CmpiPredicate};
 use melior::dialect::{arith, cf, func, memref, DialectRegistry};
 use melior::ir::attribute::{FloatAttribute, IntegerAttribute, StringAttribute, TypeAttribute};
@@ -107,6 +107,13 @@ pub fn check_slot_types(lir: &LirFunction, param_types: u64) -> Result<(), Strin
                     let t = match op {
                         UnaryOp::Neg => st,
                         UnaryOp::Not | UnaryOp::BitNot => ScalarType::Int,
+                    };
+                    reg_types.insert(dst.0, t);
+                }
+                LirInstr::Convert { dst, op, .. } => {
+                    let t = match op {
+                        crate::lir::ConvOp::IntToFloat => ScalarType::Float,
+                        crate::lir::ConvOp::FloatToInt => ScalarType::Int,
                     };
                     reg_types.insert(dst.0, t);
                 }
@@ -502,6 +509,34 @@ pub fn lower_to_module<'c>(
                     };
                     regs.insert(dst.0, result);
                     types.insert(dst.0, slot_ty);
+                }
+                LirInstr::Convert { dst, op, src } => {
+                    let sv = *regs
+                        .get(&src.0)
+                        .ok_or_else(|| format!("undefined reg r{}", src.0))?;
+                    let src_type = types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                    let (result, result_type) = match op {
+                        ConvOp::IntToFloat => {
+                            if src_type == ScalarType::Float {
+                                (sv, ScalarType::Float)
+                            } else {
+                                let conv =
+                                    block.append_operation(arith::sitofp(sv, f64_type, location));
+                                (conv.result(0).unwrap().into(), ScalarType::Float)
+                            }
+                        }
+                        ConvOp::FloatToInt => {
+                            if src_type == ScalarType::Int {
+                                (sv, ScalarType::Int)
+                            } else {
+                                let conv =
+                                    block.append_operation(arith::fptosi(sv, i64_type, location));
+                                (conv.result(0).unwrap().into(), ScalarType::Int)
+                            }
+                        }
+                    };
+                    regs.insert(dst.0, result);
+                    types.insert(dst.0, result_type);
                 }
                 _ => return Err(format!("unsupported instruction: {:?}", si.instr)),
             }

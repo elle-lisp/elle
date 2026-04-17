@@ -257,6 +257,11 @@ pub enum Instruction {
     /// Pop the top flip frame and tear down its trailing swap pool. No
     /// operands. Emitted before every Return in a flip-wrapped function.
     FlipExit,
+
+    /// Convert int → float. Pops value, pushes float. Identity on floats.
+    IntToFloat,
+    /// Convert float → int (truncation). Pops value, pushes int. Identity on ints.
+    FloatToInt,
 }
 
 /// Compiled bytecode with constants
@@ -485,6 +490,9 @@ pub fn disassemble_lines(instructions: &[u8]) -> Vec<String> {
             | Instruction::FlipSwap
             | Instruction::FlipExit => {
                 // No operands
+            }
+            Instruction::IntToFloat | Instruction::FloatToInt => {
+                // No operands — pop one, push one
             }
             Instruction::PushParamFrame if i < instructions.len() => {
                 let count = instructions[i];

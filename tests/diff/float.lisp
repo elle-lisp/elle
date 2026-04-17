@@ -91,4 +91,22 @@
 (diff:assert-agree mixed-arg-add 1 2.5)
 (diff:assert-agree mixed-arg-add 1.5 2)
 
+# ── Conversion intrinsics ────────────────────────────────────────────
+
+(defn to-float [x] (float x))
+(diff:assert-agree to-float 42)
+(diff:assert-agree to-float 0)
+(diff:assert-agree to-float -7)
+
+(defn to-int [x] (int x))
+(diff:assert-agree to-int 42)
+(diff:assert-agree to-int 0)
+
+(defn roundtrip [x] (int (float x)))
+(diff:assert-agree roundtrip 42)
+(diff:assert-agree roundtrip -100)
+
+(defn convert-add [x] (+ (float x) 1.5))
+(diff:assert-agree convert-add 10)
+
 (println "float: OK")

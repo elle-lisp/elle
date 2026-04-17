@@ -725,6 +725,16 @@ impl Emitter {
                 self.push_reg(*dst);
             }
 
+            LirInstr::Convert { dst, op, src } => {
+                self.ensure_on_top(*src);
+                match op {
+                    ConvOp::IntToFloat => self.bytecode.emit(Instruction::IntToFloat),
+                    ConvOp::FloatToInt => self.bytecode.emit(Instruction::FloatToInt),
+                }
+                self.pop();
+                self.push_reg(*dst);
+            }
+
             LirInstr::IsNil { dst, src } => {
                 self.ensure_on_top(*src);
                 self.bytecode.emit(Instruction::IsNil);
