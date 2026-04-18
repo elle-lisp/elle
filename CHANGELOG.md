@@ -96,6 +96,7 @@ multi-function compilation, yield side-exit, polymorphic dispatch, and
 cross-thread LIR transfer. Current state: all instruction types supported,
 adaptive tiering, direct self-calls and intra-group calls.
 
+- #737: JIT tail-call trampoline; squelch enforcement in compile/run-on
 - #736: Upgrade Cranelift 0.116 to 0.130 (deduplicate with Wasmtime 43)
 - #720: Sendable channels; JIT SuspendingCall fix; LIR transfer for worker-thread JIT
 - #714: SDL3 bindings; JIT polymorphic+SuspendingCall fixes; upvalue index widened to u16
@@ -145,6 +146,7 @@ MLIR backend lowers LIR to arith/func/cf dialects and JIT-compiles via
 ExecutionEngine. Vulkan compute dispatches async via io_uring fence fds.
 SPIR-V is generated at runtime from Elle code (no GLSL).
 
+- #737: MLIR/SPIR-V float support, differential testing harness (`compile/run-on` across 4 tiers), `LirInstr::Convert`, `ValueConst`
 - #727: Vulkan compute (async dispatch, buffer pooling), SPIR-V emitter (runtime bytecode gen), MLIR backend (melior 0.27), GPU eligibility analysis, SignalBits widened to u64
 
 ---
@@ -211,6 +213,8 @@ Core language features: destructuring, match, parameters, macros, epochs,
 binding forms. The language settled on `def`/`var`/`defn`/`fn` with bracket
 syntax for bindings, `true`/`false` literals, and `#` for comments.
 
+- #737: Epoch 8: immutable-by-default bindings with `@` prefix for opt-in mutability; `integer`/`float` coercion split from `parse-int`/`parse-float`
+- #742: Epoch 7: flat let bindings (Clojure-style `[a 1 b 2]` replaces `[[a 1] [b 2]]`)
 - #648: Epoch-based migration system for breaking language changes
 - #652: Remove assertions.lisp; consolidate to built-in assert; elle rewrite tool
 - #656: Consolidate sync output primitives; print/println/eprint/eprintln; parameterize-aware
@@ -332,6 +336,7 @@ Pure Elle libraries for HTTP, DNS, Redis, IRC, TLS, process management,
 telemetry, contracts, synchronization, AWS, and more. Libraries use the
 closure-as-module pattern and are imported via `(import "std/<name>")`.
 
+- #745: Fix TLS read silently dropping final plaintext segment on TCP close
 - #735: HTTP: chunked transfer, HTTPS/TLS, query params, redirects, compression, SSE
 - #724: IRC module with IRCv3, CAP negotiation, SASL, auto-PONG
 - #715: Move 9 plugins from Rust to native Elle (base64, compress, git, glob, semver, sqlite, uuid, cli, watch)
