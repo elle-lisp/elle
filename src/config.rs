@@ -131,6 +131,60 @@ impl WasmPolicy {
     }
 }
 
+// ── MLIR policy ──────────────────────────────────────────────────
+
+/// MLIR compilation policy for GPU-eligible functions.
+///
+/// Independent of the JIT policy. When the `mlir` feature is compiled in,
+/// GPU-eligible functions are compiled through MLIR → LLVM. This policy
+/// controls when that compilation happens. Functions not eligible for
+/// MLIR fall through to the Cranelift JIT regardless.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MlirPolicy {
+    /// MLIR disabled — GPU-eligible functions fall through to JIT.
+    Off,
+    /// Compile on first eligible call.
+    Eager,
+    /// Compile after N calls (default: threshold=10).
+    Adaptive { threshold: usize },
+}
+
+impl MlirPolicy {
+    /// Whether MLIR compilation is enabled at all.
+    pub fn enabled(&self) -> bool {
+        !matches!(self, MlirPolicy::Off)
+    }
+
+    /// Hotness threshold (calls before compilation).
+    /// Returns 0 for Eager, the threshold for Adaptive, usize::MAX for Off.
+    pub fn threshold(&self) -> usize {
+        match self {
+            MlirPolicy::Off => usize::MAX,
+            MlirPolicy::Eager => 0,
+            MlirPolicy::Adaptive { threshold } => *threshold,
+        }
+    }
+
+    /// Keyword representation for Elle.
+    pub fn keyword(&self) -> &'static str {
+        match self {
+            MlirPolicy::Off => "off",
+            MlirPolicy::Eager => "eager",
+            MlirPolicy::Adaptive { .. } => "adaptive",
+        }
+    }
+
+    /// Parse from a keyword string.
+    pub fn from_keyword(s: &str) -> Option<MlirPolicy> {
+        match s {
+            "off" => Some(MlirPolicy::Off),
+            "eager" => Some(MlirPolicy::Eager),
+            "adaptive" => Some(MlirPolicy::Adaptive { threshold: 10 }),
+            _ => None,
+        }
+    }
+}
+
 // ── Trace keywords ────────────────────────────────────────────────
 
 /// All known trace keywords. Unknown keywords in `--trace=` are rejected;
@@ -240,6 +294,8 @@ pub struct RuntimeConfig {
     pub jit: JitPolicy,
     /// WASM compilation policy.
     pub wasm: WasmPolicy,
+    /// MLIR compilation policy for GPU-eligible functions.
+    pub mlir: MlirPolicy,
     /// Print bytecode before execution.
     pub debug_bytecode: bool,
     /// Active compiler-stage dumps (see `DUMP_KEYWORDS`).
@@ -271,6 +327,16 @@ impl RuntimeConfig {
             }
         } else {
             WasmPolicy::Off
+        };
+
+        let mlir = if config.mlir == 0 {
+            MlirPolicy::Off
+        } else if config.mlir == 1 {
+            MlirPolicy::Eager
+        } else {
+            MlirPolicy::Adaptive {
+                threshold: (config.mlir - 1) as usize,
+            }
         };
 
         // Map old debug_* flags to trace keywords
@@ -307,6 +373,7 @@ impl RuntimeConfig {
             trace_bits: bits,
             jit,
             wasm,
+            mlir,
             debug_bytecode: config.debug,
             dump: config.dump.clone(),
             dump_bits: dump_bits_u,
@@ -344,6 +411,7 @@ impl Default for RuntimeConfig {
             trace_bits: 0,
             jit: JitPolicy::Adaptive { threshold: 10 },
             wasm: WasmPolicy::Off,
+            mlir: MlirPolicy::Adaptive { threshold: 10 },
             debug_bytecode: false,
             dump: HashSet::new(),
             dump_bits: 0,
@@ -381,6 +449,11 @@ pub struct Config {
 
     /// Print compilation stats on exit.
     pub stats: bool,
+
+    // -- MLIR --
+    /// MLIR tier value from `--mlir=N`. 0 = disabled, 1 = eager, N = threshold is N-1.
+    /// Default: 11 (threshold 10, same as JIT).
+    pub mlir: u32,
 
     // -- WASM --
     /// WASM tier value from `--wasm=N`. 0 = disabled, N = threshold is N-1.
@@ -459,6 +532,7 @@ impl Default for Config {
         Config {
             jit: 11,
             stats: false,
+            mlir: 11,
             wasm: 0,
             wasm_full: false,
             wasm_no_stdlib: false,
@@ -534,6 +608,23 @@ impl Config {
                         config.jit = rest.parse::<u32>().map_err(|_| {
                             format!(
                                 "--jit: expected integer or policy name (off/eager/adaptive), got '{}'",
+                                rest
+                            )
+                        })?;
+                    }
+                }
+                i += 1;
+                continue;
+            }
+            if let Some(rest) = arg.strip_prefix("--mlir=") {
+                match rest {
+                    "off" => config.mlir = 0,
+                    "eager" => config.mlir = 1,
+                    "adaptive" => config.mlir = 11,
+                    _ => {
+                        config.mlir = rest.parse::<u32>().map_err(|_| {
+                            format!(
+                                "--mlir: expected integer or policy name (off/eager/adaptive), got '{}'",
                                 rest
                             )
                         })?;

@@ -26,6 +26,7 @@ fn print_help() {
     println!("                          git  — (reserved for SPIR-V output)");
     println!("  --dump=all            Dump every stage");
     println!("  --jit=POLICY          JIT policy: off, eager, adaptive (default), or integer N");
+    println!("  --mlir=POLICY         MLIR policy: off, eager, adaptive (default), or integer N");
     println!("  --wasm=POLICY         WASM policy: off (default), full, lazy, or integer N");
     println!("  --flip=on|off         Insert FlipEnter/FlipSwap/FlipExit instructions");
     println!("                          (experimental explicit rotation; default off)");

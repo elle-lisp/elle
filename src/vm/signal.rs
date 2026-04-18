@@ -877,6 +877,10 @@ impl VM {
                 TableKey::from_value(&Value::keyword("wasm")).unwrap(),
                 Value::keyword(rc.wasm.keyword()),
             );
+            map.insert(
+                TableKey::from_value(&Value::keyword("mlir")).unwrap(),
+                Value::keyword(rc.mlir.keyword()),
+            );
             // trace as a set of keywords
             let trace_set: Vec<Value> = rc.trace.iter().map(|k| Value::keyword(k)).collect();
             map.insert(
@@ -896,6 +900,7 @@ impl VM {
             match kw.as_str() {
                 "jit" => (SIG_OK, Value::keyword(rc.jit.keyword())),
                 "wasm" => (SIG_OK, Value::keyword(rc.wasm.keyword())),
+                "mlir" => (SIG_OK, Value::keyword(rc.mlir.keyword())),
                 "trace" => {
                     let trace_set: Vec<Value> =
                         rc.trace.iter().map(|k| Value::keyword(k)).collect();
@@ -997,6 +1002,34 @@ impl VM {
                         "type-error",
                         format!(
                             "vm/config-set :wasm: expected keyword, got {}",
+                            val.type_name()
+                        ),
+                    );
+                }
+                Value::NIL
+            }
+            "mlir" => {
+                if let Some(policy_kw) = val.as_keyword_name() {
+                    match crate::config::MlirPolicy::from_keyword(&policy_kw) {
+                        Some(policy) => {
+                            #[cfg(feature = "mlir")]
+                            {
+                                self.mlir_enabled = policy.enabled();
+                            }
+                            self.runtime_config.mlir = policy;
+                        }
+                        None => {
+                            return error_val(
+                                "argument-error",
+                                format!("vm/config-set :mlir: unknown policy :{}", policy_kw),
+                            )
+                        }
+                    }
+                } else {
+                    return error_val(
+                        "type-error",
+                        format!(
+                            "vm/config-set :mlir: expected keyword, got {}",
                             val.type_name()
                         ),
                     );

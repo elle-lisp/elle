@@ -103,6 +103,10 @@ pub struct VM {
     /// Closures that failed WASM compilation (contain MakeClosure, TailCall, etc.)
     #[cfg(feature = "wasm")]
     pub(crate) wasm_rejections: FxHashMap<*const u8, ()>,
+    /// Whether MLIR compilation is enabled (runtime gate).
+    /// Controlled by `--mlir=` CLI flag and `(vm/config-set :mlir ...)`.
+    #[cfg(feature = "mlir")]
+    pub(crate) mlir_enabled: bool,
     /// MLIR compilation cache for GPU-eligible functions.
     /// Lazily initialized on first GPU-eligible call.
     #[cfg(feature = "mlir")]
@@ -201,6 +205,8 @@ impl VM {
             },
             #[cfg(feature = "wasm")]
             wasm_rejections: FxHashMap::default(),
+            #[cfg(feature = "mlir")]
+            mlir_enabled: rc.mlir.enabled(),
             #[cfg(feature = "mlir")]
             mlir_cache: None,
         }

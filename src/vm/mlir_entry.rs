@@ -60,7 +60,7 @@ impl VM {
         // Check hotness without incrementing — the counter is owned
         // by try_jit_call which runs after us. We just read it.
         let count = self.get_closure_call_count(bytecode_ptr);
-        if count < self.jit_hotness_threshold {
+        if count < self.runtime_config.mlir.threshold() {
             return None;
         }
 
