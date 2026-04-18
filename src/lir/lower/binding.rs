@@ -16,6 +16,10 @@ impl<'a> Lowerer<'a> {
 
         // Allocate slots and lower initializers
         for (binding, init) in bindings {
+            // Seed immutable_values for constant bindings before lowering
+            // so nested lambdas can see the constant.
+            self.try_seed_immutable(*binding, init);
+
             let init_reg = self.lower_expr(init)?;
             // Record rotation_safe for lambda bindings.
             if matches!(init.kind, HirKind::Lambda { .. }) {
@@ -145,6 +149,17 @@ impl<'a> Lowerer<'a> {
             self.current_function_params = None;
             let slot = self.binding_to_slot[binding];
 
+            // Seed immutable_values after init so subsequent bindings
+            // and the body can use LoadConst for this constant.
+            // Skip nil inits — letrec destructure leaves are initialized
+            // to nil here and later updated by a Destructure node in the body.
+            // For non-nil inits, evict any stale value first (file-scope
+            // duplicate names may reuse the same Binding identity).
+            if !matches!(init.kind, HirKind::Nil) {
+                self.immutable_values.remove(binding);
+                self.try_seed_immutable(*binding, init);
+            }
+
             // Check if this binding needs cell update
             let needs_capture = self.arena.get(*binding).needs_capture();
 
@@ -222,6 +237,9 @@ impl<'a> Lowerer<'a> {
         self.current_function_binding = None;
         self.current_function_params = None;
 
+        // Seed immutable_values for constant definitions
+        self.try_seed_immutable(binding, value);
+
         // Record rotation_safe for lambda bindings so callers can
         // check callee safety transitively.
         if matches!(value.kind, HirKind::Lambda { .. }) {
@@ -290,6 +308,9 @@ impl<'a> Lowerer<'a> {
     }
 
     pub(super) fn lower_assign(&mut self, target: &Binding, value: &Hir) -> Result<Reg, String> {
+        // Evict stale constant — this binding is being mutated.
+        self.immutable_values.remove(target);
+
         let value_reg = self.lower_expr(value)?;
 
         // Check if this binding needs cell update
@@ -711,6 +732,9 @@ impl<'a> Lowerer<'a> {
     /// Store a value into a binding, consuming it from the stack.
     /// Used by lower_destructure.
     fn lower_bind_value(&mut self, binding: Binding, value_reg: Reg) -> Result<Reg, String> {
+        // Evict stale constant — this binding is being (re-)assigned
+        // (e.g., file-scope destructure reusing an earlier binding).
+        self.immutable_values.remove(&binding);
         // Allocate slot if not already done (Begin pre-pass may have done it)
         let slot = if let Some(&existing_slot) = self.binding_to_slot.get(&binding) {
             existing_slot

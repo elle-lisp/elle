@@ -286,6 +286,10 @@ impl LirFunction {
                             dst,
                             value: LirConst::Nil,
                         } if *dst == r => return true,
+                        // ValueConst nil is non-int (same as Const nil)
+                        LirInstr::ValueConst { dst, value } if *dst == r && value.is_nil() => {
+                            return true;
+                        }
                         LirInstr::Convert {
                             dst,
                             op: ConvOp::IntToFloat,
@@ -747,20 +751,26 @@ pub fn value_to_lir_const(v: Value) -> Option<LirConst> {
 /// LoadCapture/LoadCaptureRaw are parameter or capture loads. Captures
 /// are passed as extra parameters at the MLIR level.
 fn is_gpu_instruction(i: &LirInstr) -> bool {
-    matches!(
-        i,
+    match i {
         LirInstr::Const {
             value: LirConst::Int(_) | LirConst::Float(_) | LirConst::Bool(_) | LirConst::Nil,
             ..
-        } | LirInstr::BinOp { .. }
-            | LirInstr::UnaryOp { .. }
-            | LirInstr::Compare { .. }
-            | LirInstr::Convert { .. }
-            | LirInstr::LoadLocal { .. }
-            | LirInstr::StoreLocal { .. }
-            | LirInstr::LoadCapture { .. }
-            | LirInstr::LoadCaptureRaw { .. }
-    )
+        }
+        | LirInstr::BinOp { .. }
+        | LirInstr::UnaryOp { .. }
+        | LirInstr::Compare { .. }
+        | LirInstr::Convert { .. }
+        | LirInstr::LoadLocal { .. }
+        | LirInstr::StoreLocal { .. }
+        | LirInstr::LoadCapture { .. }
+        | LirInstr::LoadCaptureRaw { .. } => true,
+        // ValueConst of numeric/bool/nil types is GPU-safe — these are
+        // immutable binding constants inlined by the lowerer.
+        LirInstr::ValueConst { value, .. } => {
+            value.is_int() || value.is_float() || value.as_bool().is_some() || value.is_nil()
+        }
+        _ => false,
+    }
 }
 
 /// True if this block terminator is safe for GPU compilation.
