@@ -34,7 +34,7 @@ Parameters after `&named` are passed by keyword at call sites.
 the default.
 
 ```lisp
-(defn open-window [&named title width height]
+(defn open-window [&named @title @width @height]
   (default title "Elle")
   (default width 800)
   (default height 600)
@@ -47,7 +47,7 @@ the default.
 # => {:title "Demo" :width 1024 :height 600}
 
 # false and 0 are NOT replaced by default:
-(defn f [&named flag] (default flag true) flag)
+(defn f [&named @flag] (default flag true) flag)
 (f :flag false)        # => false (not true)
 ```
 

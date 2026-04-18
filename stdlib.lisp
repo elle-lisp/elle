@@ -1,4 +1,3 @@
-(elle/epoch 7)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -23,16 +22,16 @@
   "Apply f to each element of coll, returning a new collection of the same type. Type-preserving: lists return lists, arrays return arrays, sets return sets."
   (cond
     ((or (array? coll) (string? coll) (bytes? coll))
-     (let* [len (length coll)
-            acc @[]]
+     (let* [[len (length coll)]
+            [acc @[]]]
        (var i 0)
        (while (< i len)
          (push acc (f (get coll i)))
          (assign i (+ i 1)))
        (if (mutable? coll) acc (freeze acc))))
     ((set? coll)
-     (let* [items (set->array coll)
-            acc @||]
+     (let* [[items (set->array coll)]
+            [acc @||]]
        (each item in items
          (add acc (f item)))
        (if (mutable? coll) acc (freeze acc))))
@@ -45,17 +44,17 @@
   "Return elements of coll for which (p element) is truthy. Type-preserving."
   (cond
     ((or (array? coll) (string? coll) (bytes? coll))
-     (let* [len (length coll)
-            acc @[]]
+     (let* [[len (length coll)]
+            [acc @[]]]
        (var i 0)
        (while (< i len)
-         (let [item (get coll i)]
+         (let [[item (get coll i)]]
            (when (p item) (push acc item)))
          (assign i (+ i 1)))
        (if (mutable? coll) acc (freeze acc))))
     ((set? coll)
-     (let* [items (set->array coll)
-            acc (if (mutable? coll) (@set) (set))]
+     (let* [[items (set->array coll)]
+            [acc (if (mutable? coll) (@set) (set))]]
        (each item in items
          (when (p item) (add acc item)))
        acc))
@@ -111,12 +110,12 @@
          (all? pred (rest coll))
          false)))
     ((or (array? coll) (array? coll))
-     (letrec [loop (fn (i)
+     (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         true
                         (if (pred (get coll i))
                           (loop (+ i 1))
-                          false)))]
+                          false)))))
        (loop 0)))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
@@ -129,12 +128,12 @@
          true
          (any? pred (rest coll)))))
     ((or (array? coll) (array? coll))
-     (letrec [loop (fn (i)
+     (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         false
                         (if (pred (get coll i))
                           true
-                          (loop (+ i 1)))))]
+                          (loop (+ i 1)))))))
        (loop 0)))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
@@ -147,32 +146,32 @@
          (first coll)
          (find pred (rest coll)))))
     ((or (array? coll) (array? coll))
-     (letrec [loop (fn (i)
+     (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         nil
                         (if (pred (get coll i))
                           (get coll i)
-                          (loop (+ i 1)))))]
+                          (loop (+ i 1)))))))
        (loop 0)))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn find-index [pred coll]
   (cond
     ((or (pair? coll) (empty? coll))
-     (letrec [go (fn (i l)
+     (letrec ((go (fn (i l)
                     (if (empty? l)
                       nil
                       (if (pred (first l))
                         i
-                        (go (+ i 1) (rest l)))))]
+                        (go (+ i 1) (rest l)))))))
        (go 0 coll)))
     ((or (array? coll) (array? coll))
-     (letrec [loop (fn (i)
+     (letrec ((loop (fn (i)
                       (if (>= i (length coll))
                         nil
                         (if (pred (get coll i))
                           i
-                          (loop (+ i 1)))))]
+                          (loop (+ i 1)))))))
        (loop 0)))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
@@ -181,10 +180,10 @@
     ((or (pair? coll) (empty? coll))
      (fold (fn (n x) (if (pred x) (+ n 1) n)) 0 coll))
     ((or (array? coll) (array? coll))
-     (letrec [loop (fn (i n)
+     (letrec ((loop (fn (i n)
                       (if (>= i (length coll))
                         n
-                        (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))]
+                        (loop (+ i 1) (if (pred (get coll i)) (+ n 1) n))))))
        (loop 0 0)))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
@@ -196,58 +195,58 @@
 (defn zip [& colls]
   "Zip collections element-wise into a collection of lists. Stops at the shortest input."
   (letrec
-    [to-list (fn (c)
+    ((to-list (fn (c)
        (cond
          ((or (pair? c) (empty? c)) c)
          ((or (array? c) (array? c))
-          (letrec [loop (fn (i acc)
+          (letrec ((loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
-                             (loop (+ i 1) (cons (get c i) acc))))]
+                             (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
-     from-list (fn (lst orig)
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+     (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
          ((array? orig)
-          (let [arr @[]]
+          (let [[arr @[]]]
             (each x in lst (push arr x))
             arr))
-         ((array? orig) (apply array lst))))
-     zip-lists (fn (lists)
+         ((array? orig) (apply array lst)))))
+     (zip-lists (fn (lists)
        (if (any? empty? lists)
          ()
          (cons (map first lists)
-               (zip-lists (map rest lists)))))]
+               (zip-lists (map rest lists)))))))
     (if (empty? colls)
       ()
-      (let* [lists (map to-list colls)
-             result (zip-lists lists)]
+      (let* [[lists (map to-list colls)]
+             [result (zip-lists lists)]]
         (from-list result (first colls))))))
 
 (defn flatten [coll]
   (letrec
-    [to-list (fn (c)
-       (letrec [loop (fn (i acc)
+    ((to-list (fn (c)
+       (letrec ((loop (fn (i acc)
                         (if (>= i (length c))
                           (reverse acc)
-                          (loop (+ i 1) (cons (get c i) acc))))]
-         (loop 0 ())))
-     flat (fn (lst)
+                          (loop (+ i 1) (cons (get c i) acc))))))
+         (loop 0 ()))))
+     (flat (fn (lst)
        (if (empty? lst)
          ()
-         (let [x (first lst)]
+         (let [[x (first lst)]]
            (cond
              ((pair? x)
               (append (flat x) (flat (rest lst))))
              ((or (array? x) (array? x))
               (append (flat (to-list x)) (flat (rest lst))))
              (true
-              (cons x (flat (rest lst))))))))]
+              (cons x (flat (rest lst))))))))))
     (cond
       ((or (pair? coll) (empty? coll)) (flat coll))
       ((array? coll)
-       (let [result @[]]
+       (let [[result @[]]]
          (each x in (flat (to-list coll)) (push result x))
          result))
       ((array? coll)
@@ -256,97 +255,97 @@
 
 (defn take-while [pred coll]
   (letrec
-    [tw-list (fn (lst)
+    ((tw-list (fn (lst)
        (if (empty? lst)
          ()
          (if (pred (first lst))
            (cons (first lst) (tw-list (rest lst)))
-           ())))]
+           ())))))
     (cond
       ((or (pair? coll) (empty? coll)) (tw-list coll))
       ((array? coll)
-       (let [result @[]]
-         (letrec [loop (fn (i)
+       (let [[result @[]]]
+         (letrec ((loop (fn (i)
                           (when (< i (length coll))
-                            (let [x (get coll i)]
+                            (let [[x (get coll i)]]
                               (when (pred x)
                                 (push result x)
-                                (loop (+ i 1))))))]
+                                (loop (+ i 1))))))))
            (loop 0))
          result))
       ((array? coll)
-       (let [lst (tw-list (letrec [loop (fn (i acc)
+       (let [[lst (tw-list (letrec ((loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
-                                              (loop (+ i 1) (cons (get coll i) acc))))]
-                             (loop 0 ())))]
+                                              (loop (+ i 1) (cons (get coll i) acc))))))
+                             (loop 0 ())))]]
          (apply array lst)))
       (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn drop-while [pred coll]
   (letrec
-    [dw-list (fn (lst)
+    ((dw-list (fn (lst)
        (if (empty? lst)
          ()
          (if (pred (first lst))
            (dw-list (rest lst))
-           lst)))]
+           lst)))))
     (cond
       ((or (pair? coll) (empty? coll)) (dw-list coll))
       ((array? coll)
-       (letrec [find-start (fn (i)
+       (letrec ((find-start (fn (i)
                               (if (>= i (length coll))
                                 (length coll)
                                 (if (pred (get coll i))
                                   (find-start (+ i 1))
-                                  i)))]
-         (let [start (find-start 0)
-               result @[]]
-           (letrec [loop (fn (i)
+                                  i)))))
+         (let [[start (find-start 0)]
+               [result @[]]]
+           (letrec ((loop (fn (i)
                             (when (< i (length coll))
                               (push result (get coll i))
-                              (loop (+ i 1))))]
+                              (loop (+ i 1))))))
              (loop start))
            result)))
       ((array? coll)
-       (let [lst (dw-list (letrec [loop (fn (i acc)
+       (let [[lst (dw-list (letrec ((loop (fn (i acc)
                                             (if (>= i (length coll))
                                               (reverse acc)
-                                              (loop (+ i 1) (cons (get coll i) acc))))]
-                             (loop 0 ())))]
+                                              (loop (+ i 1) (cons (get coll i) acc))))))
+                             (loop 0 ())))]]
          (apply array lst)))
       (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
 (defn distinct [coll]
-  (let [seen @{}]
+  (let [[seen @{}]]
     (letrec
-      [dist-list (fn (lst)
+      ((dist-list (fn (lst)
          (if (empty? lst)
            ()
            (if (has? seen (first lst))
              (dist-list (rest lst))
              (begin (put seen (first lst) true)
-                    (cons (first lst) (dist-list (rest lst)))))))]
+                    (cons (first lst) (dist-list (rest lst)))))))))
       (cond
         ((or (pair? coll) (empty? coll)) (dist-list coll))
         ((array? coll)
-         (let [result @[]]
+         (let [[result @[]]]
            (each x in coll
              (unless (has? seen x)
                (put seen x true)
                (push result x)))
            result))
         ((array? coll)
-         (let [lst (dist-list (letrec [loop (fn (i acc)
+         (let [[lst (dist-list (letrec ((loop (fn (i acc)
                                                (if (>= i (length coll))
                                                  (reverse acc)
-                                                 (loop (+ i 1) (cons (get coll i) acc))))]
-                                (loop 0 ())))]
+                                                 (loop (+ i 1) (cons (get coll i) acc))))))
+                                (loop 0 ())))]]
            (apply array lst)))
         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))))
 
 (defn frequencies [coll]
-  (let [counts @{}]
+  (let [[counts @{}]]
     (each x in coll
       (put counts x (+ 1 (if (has? counts x) (get counts x) 0))))
     (freeze counts)))
@@ -356,23 +355,23 @@
     ((or (pair? coll) (empty? coll))
      (fold (fn (acc x) (append acc (f x))) () coll))
     ((array? coll)
-     (let [result @[]]
+     (let [[result @[]]]
        (each x in coll
          (each y in (f x) (push result y)))
        result))
     ((array? coll)
      (apply array (fold (fn (acc x) (append acc (f x))) ()
-                        (letrec [loop (fn (i acc)
+                        (letrec ((loop (fn (i acc)
                                          (if (>= i (length coll))
                                            (reverse acc)
-                                           (loop (+ i 1) (cons (get coll i) acc))))]
+                                           (loop (+ i 1) (cons (get coll i) acc))))))
                           (loop 0 ())))))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn group-by [f coll]
-  (let [groups @{}]
+  (let [[groups @{}]]
     (each x in coll
-      (let [k (f x)]
+      (let [[k (f x)]]
         (if (has? groups k)
           (push (get groups k) x)
           (put groups k @[x]))))
@@ -381,25 +380,25 @@
 (defn map-indexed [f coll]
   (cond
     ((or (pair? coll) (empty? coll))
-     (letrec [go (fn (i l)
+     (letrec ((go (fn (i l)
                     (if (empty? l)
                       ()
-                      (cons (f i (first l)) (go (+ i 1) (rest l)))))]
+                      (cons (f i (first l)) (go (+ i 1) (rest l)))))))
        (go 0 coll)))
     ((array? coll)
-     (let [result @[]]
-       (letrec [loop (fn (i)
+     (let [[result @[]]]
+       (letrec ((loop (fn (i)
                         (when (< i (length coll))
                           (push result (f i (get coll i)))
-                          (loop (+ i 1))))]
+                          (loop (+ i 1))))))
          (loop 0))
        result))
     ((array? coll)
      (apply array
-       (letrec [go (fn (i)
+       (letrec ((go (fn (i)
                       (if (>= i (length coll))
                         ()
-                        (cons (f i (get coll i)) (go (+ i 1)))))]
+                        (cons (f i (get coll i)) (go (+ i 1)))))))
          (go 0))))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
@@ -411,60 +410,60 @@
        (cons (take n coll)
              (partition n (drop n coll)))))
     ((array? coll)
-     (let [result @[]]
-       (letrec [loop (fn (i)
+     (let [[result @[]]]
+       (letrec ((loop (fn (i)
                         (when (< i (length coll))
-                          (let [chunk @[]]
-                            (letrec [inner (fn (j)
+                          (let [[chunk @[]]]
+                            (letrec ((inner (fn (j)
                                              (when (and (< j (+ i n)) (< j (length coll)))
                                                (push chunk (get coll j))
-                                               (inner (+ j 1))))]
+                                               (inner (+ j 1))))))
                               (inner i))
                             (push result chunk)
-                            (loop (+ i n)))))]
+                            (loop (+ i n)))))))
          (loop 0))
        result))
     ((array? coll)
-     (letrec [to-list (fn (c)
-                          (letrec [loop (fn (i acc)
+     (letrec ((to-list (fn (c)
+                          (letrec ((loop (fn (i acc)
                                           (if (>= i (length c))
                                             (reverse acc)
-                                            (loop (+ i 1) (cons (get c i) acc))))]
-                            (loop 0 ())))
-              part (fn (lst)
+                                            (loop (+ i 1) (cons (get c i) acc))))))
+                            (loop 0 ()))))
+              (part (fn (lst)
                       (if (or (<= n 0) (empty? lst))
                         ()
                         (cons (apply array (take n lst))
-                              (part (drop n lst)))))]
+                              (part (drop n lst)))))))
        (apply array (part (to-list coll)))))
     (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
 
 (defn interpose [sep coll]
   (letrec
-    [ip-list (fn (lst)
+    ((ip-list (fn (lst)
        (if (or (empty? lst) (empty? (rest lst)))
          lst
          (cons (first lst)
-               (cons sep (ip-list (rest lst))))))]
+               (cons sep (ip-list (rest lst))))))))
     (cond
       ((or (pair? coll) (empty? coll)) (ip-list coll))
       ((array? coll)
        (if (< (length coll) 2)
          coll
-         (let [result @[(get coll 0)]]
-           (letrec [loop (fn (i)
+         (let [[result @[(get coll 0)]]]
+           (letrec ((loop (fn (i)
                             (when (< i (length coll))
                               (push result sep)
                               (push result (get coll i))
-                              (loop (+ i 1))))]
+                              (loop (+ i 1))))))
              (loop 1))
            result)))
       ((array? coll)
-       (let [lst (ip-list (letrec [loop (fn (i acc)
+       (let [[lst (ip-list (letrec ((loop (fn (i acc)
                                            (if (>= i (length coll))
                                              (reverse acc)
-                                             (loop (+ i 1) (cons (get coll i) acc))))]
-                             (loop 0 ())))]
+                                             (loop (+ i 1) (cons (get coll i) acc))))))
+                             (loop 0 ())))]]
          (apply array lst)))
       (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
 
@@ -479,94 +478,94 @@
         (rest args)))
 
 (defn memoize [f]
-  (let [cache @{}]
+  (let [[cache @{}]]
     (fn (& args)
-      (let [key (if (= (length args) 1) (first args) (string args))]
+      (let [[key (if (= (length args) 1) (first args) (string args))]]
         (if (has? cache key)
           (get cache key)
-          (let [result (f ;args)]
+          (let [[result (f ;args)]]
             (put cache key result)
             result))))))
 
 (defn sort-by [keyfn coll]
   (letrec
-    [to-list (fn (c)
+    ((to-list (fn (c)
        (cond
          ((or (pair? c) (empty? c)) c)
          ((or (array? c) (array? c))
-          (letrec [loop (fn (i acc)
+          (letrec ((loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
-                             (loop (+ i 1) (cons (get c i) acc))))]
+                             (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
-     from-list (fn (lst orig)
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+     (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
          ((array? orig)
-          (let [arr @[]]
+          (let [[arr @[]]]
             (each x in lst (push arr x))
             arr))
-         ((array? orig) (apply array lst))))
-     merge (fn (a b)
+         ((array? orig) (apply array lst)))))
+     (merge (fn (a b)
        (cond
          ((empty? a) b)
          ((empty? b) a)
          ((<= (first (first a)) (first (first b)))
           (cons (first a) (merge (rest a) b)))
          (true
-          (cons (first b) (merge a (rest b))))))
-     halve (fn (lst)
-       (let [mid (/ (length lst) 2)]
-         [(take mid lst) (drop mid lst)]))
-     msort (fn (lst)
+          (cons (first b) (merge a (rest b)))))))
+     (halve (fn (lst)
+       (let [[mid (/ (length lst) 2)]]
+         [(take mid lst) (drop mid lst)])))
+     (msort (fn (lst)
        (if (or (empty? lst) (empty? (rest lst)))
          lst
-         (let [[left right] (halve lst)]
-           (merge (msort left) (msort right)))))]
-    (let* [as-list (to-list coll)
-           decorated (map (fn (x) (list (keyfn x) x)) as-list)
-           sorted (msort decorated)
-           result (map (fn (pair) (first (rest pair))) sorted)]
+         (let [[[left right] (halve lst)]]
+           (merge (msort left) (msort right)))))))
+    (let* [[as-list (to-list coll)]
+           [decorated (map (fn (x) (list (keyfn x) x)) as-list)]
+           [sorted (msort decorated)]
+           [result (map (fn (pair) (first (rest pair))) sorted)]]
       (from-list result coll))))
 
 (defn sort-with [cmp coll]
   "Sort coll using comparator (cmp a b) which returns negative, zero, or positive. Stable merge sort. Type-preserving. Alias: sort-by-cmp."
   (letrec
-    [to-list (fn (c)
+    ((to-list (fn (c)
        (cond
          ((or (pair? c) (empty? c)) c)
          ((array? c)
-          (letrec [loop (fn (i acc)
+          (letrec ((loop (fn (i acc)
                            (if (>= i (length c))
                              (reverse acc)
-                             (loop (+ i 1) (cons (get c i) acc))))]
+                             (loop (+ i 1) (cons (get c i) acc))))))
             (loop 0 ())))
-         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"}))))
-     from-list (fn (lst orig)
+         (true (error {:error :type-error :reason :not-a-sequence :message "not a sequence"})))))
+     (from-list (fn (lst orig)
        (cond
          ((or (pair? orig) (empty? orig)) lst)
          ((mutable? orig)
-          (let [arr @[]]
+          (let [[arr @[]]]
             (each x in lst (push arr x))
             arr))
-         ((array? orig) (apply array lst))))
-     merge-lists (fn (a b)
+         ((array? orig) (apply array lst)))))
+     (merge-lists (fn (a b)
        (cond
          ((empty? a) b)
          ((empty? b) a)
          ((<= (cmp (first a) (first b)) 0)
           (cons (first a) (merge-lists (rest a) b)))
          (true
-          (cons (first b) (merge-lists a (rest b))))))
-     halve (fn (lst)
-       (let [mid (/ (length lst) 2)]
-         [(take mid lst) (drop mid lst)]))
-     msort (fn (lst)
+          (cons (first b) (merge-lists a (rest b)))))))
+     (halve (fn (lst)
+       (let [[mid (/ (length lst) 2)]]
+         [(take mid lst) (drop mid lst)])))
+     (msort (fn (lst)
        (if (or (empty? lst) (empty? (rest lst)))
          lst
-         (let [[left right] (halve lst)]
-           (merge-lists (msort left) (msort right)))))]
+         (let [[[left right] (halve lst)]]
+           (merge-lists (msort left) (msort right)))))))
     (from-list (msort (to-list coll)) coll)))
 
 (def sort-by-cmp sort-with)
@@ -575,13 +574,13 @@
 
 (defn time/stopwatch []
   (coro/new (fn ()
-    (let [start (clock/monotonic)]
+    (let [[start (clock/monotonic)]]
       (while true
         (yield (- (clock/monotonic) start)))))))
 
 (defn time/elapsed [thunk]
-  (let [start (clock/monotonic)]
-    (let [result (thunk)]
+  (let [[start (clock/monotonic)]]
+    (let [[result (thunk)]]
       (list result (- (clock/monotonic) start)))))
 
 ## ── VM query wrappers ───────────────────────────────────────────────
@@ -608,12 +607,12 @@
    (fn/cfg my-fn)          => Mermaid flowchart string
    (fn/cfg my-fn :dot)     => DOT digraph string
    (fn/cfg my-fn :mermaid) => Mermaid flowchart string"
-  (let* [fmt (if (empty? opts)
+  (let* [[fmt (if (empty? opts)
                 :mermaid
                 (if (> (length opts) 1)
                   (error {:error :arity-error :reason :too-many-args :maximum 1 :message "expected at most 1 format keyword"})
-                  (first opts)))
-         cfg (fn/flow target)]
+                  (first opts)))]
+         [cfg (fn/flow target)]]
     (when (nil? cfg)
       (error {:error :type-error :reason :no-lir :message "target has no LIR"}))
     (cond
@@ -623,23 +622,23 @@
 
 (defn fn/cfg-label (cfg)
   "Build the label string from a CFG struct's metadata."
-  (let* [name (get cfg :name)
-         doc (get cfg :doc)]
+  (let* [[name (get cfg :name)]
+         [doc (get cfg :doc)]]
     (if (nil? name)
       (if (nil? doc) "anonymous" doc)
       name)))
 
 (defn fn/cfg-dot (cfg)
   "Render a CFG struct as a DOT digraph string with compact instructions."
-  (letrec [dot-escape (fn (s)
+  (letrec ((dot-escape (fn (s)
              (-> s
                (string/replace "\"" "\\\"")
                (string/replace "{" "\\{")
                (string/replace "}" "\\}")
                (string/replace "|" "\\|")
                (string/replace "<" "\\<")
-               (string/replace ">" "\\>")))]
-    (let [result (-> "digraph {\n  label=\""
+               (string/replace ">" "\\>")))))
+    (let [[@result (-> "digraph {\n  label=\""
                     (append (dot-escape (string/replace (fn/cfg-label cfg) "\n" " ")))
                     (append " arity:")
                     (append (get cfg :arity))
@@ -647,18 +646,18 @@
                     (append (string (get cfg :regs)))
                     (append " locals:")
                     (append (string (get cfg :locals)))
-                    (append "\";\n  node [shape=record fontname=\"monospace\" fontsize=10];\n"))]
+                    (append "\";\n  node [shape=record fontname=\"monospace\" fontsize=10];\n"))]]
       (each block (get cfg :blocks)
-        (let* [lbl (string (get block :label))
-               display (get block :annotated)
-               term-display (get block :term-display)
-               term-kind (get block :term-kind)
-               edges (get block :edges)
-               color (cond
+        (let* [[lbl (string (get block :label))]
+               [display (get block :annotated)]
+               [term-display (get block :term-display)]
+               [term-kind (get block :term-kind)]
+               [edges (get block :edges)]
+               [color (cond
                         ((= term-kind :return) "#4444cc")
                         ((= term-kind :branch) "#cc8800")
                         ((= term-kind :yield)  "#008844")
-                        (true                  "#444444"))]
+                        (true                  "#444444"))]]
           (assign result (-> result
                         (append "  block")
                         (append lbl)
@@ -686,11 +685,11 @@
 
 (defn fn/cfg-mermaid (cfg)
   "Render a CFG struct as a Mermaid flowchart with visual distinctions."
-  (letrec [mmd-escape (fn (s)
+  (letrec ((mmd-escape (fn (s)
              (-> s
                (string/replace "&" "&amp;")
-               (string/replace "\"" "&quot;")))]
-    (let [result (-> "flowchart TD\n"
+               (string/replace "\"" "&quot;")))))
+    (let [[@result (-> "flowchart TD\n"
                     (append "  %% ")
                     (append (string/replace (fn/cfg-label cfg) "\n" " "))
                     (append " arity:")
@@ -704,28 +703,28 @@
                     (append "  classDef ret fill:#cce5ff,stroke:#004085,stroke-width:2px\n")
                     (append "  classDef branch fill:#fff3cd,stroke:#856404,stroke-width:2px\n")
                     (append "  classDef yield_block fill:#d1ecf1,stroke:#0c5460,stroke-width:2px\n")
-                    (append "  classDef normal fill:#f8f9fa,stroke:#6c757d\n"))]
+                    (append "  classDef normal fill:#f8f9fa,stroke:#6c757d\n"))]]
       (each block (get cfg :blocks)
-        (let* [lbl (string (get block :label))
-               display (get block :display)
-               term-display (get block :term-display)
-               term-kind (get block :term-kind)
-               edges (get block :edges)
+        (let* [[lbl (string (get block :label))]
+               [display (get block :display)]
+               [term-display (get block :term-display)]
+               [term-kind (get block :term-kind)]
+               [edges (get block :edges)]
                # Choose node shape based on terminator kind
                # All labels are quoted to avoid parser issues with special chars
-               open-delim (cond
+               [open-delim (cond
                              ((= term-kind :branch) "{\"")
                              ((= term-kind :return) "([\"")
                              ((= term-kind :yield)  "{{\"")
-                             (true                  "[\""))
-               close-delim (cond
+                             (true                  "[\""))]
+               [close-delim (cond
                               ((= term-kind :branch) "\"}")
                               ((= term-kind :return) "\"])")
                               ((= term-kind :yield)  "\"}}")
-                              (true                  "\"]"))
+                              (true                  "\"]"))]
                # Build node content with compact instructions
-               content (-> (append "block" lbl)
-                          (append "<br/>"))]
+               [@content (-> (append "block" lbl)
+                          (append "<br/>"))]]
            # Add each instruction
           (each instr display
             (assign content (-> content
@@ -744,12 +743,12 @@
                         (append close-delim)
                         (append "\n")))
           # Apply style class
-          (let [cls (cond
+          (let [[cls (cond
                        ((= lbl (string (get cfg :entry))) "entry")
                        ((= term-kind :return)  "ret")
                        ((= term-kind :branch)  "branch")
                        ((= term-kind :yield)   "yield_block")
-                       (true                   "normal"))]
+                       (true                   "normal"))]]
             (assign result (-> result
                           (append "  class block")
                           (append lbl)
@@ -778,7 +777,7 @@
       (error {:error :type-error :reason :not-a-struct :position :second :message "second argument must be a struct"})
       (if (not (= (mutable? a) (mutable? b)))
         (error {:error :type-error :reason :mutability-mismatch :message "both arguments must be the same mutability"})
-        (let [result (@struct)]
+        (let [[result (@struct)]]
           (each k in (keys a) (put result k (get a k)))
           (each k in (keys b) (put result k (get b k)))
           (if (mutable? a) result (freeze result)))))))
@@ -827,7 +826,7 @@
 (defn stream/into-array [source]
   "Collect all values yielded by source into a mutable array.
    Signal: errors only (no user callback)."
-  (let [result @[]]
+  (let [[result @[]]]
     (coro/resume source)
     (while (not (coro/done? source))
       (push result (coro/value source))
@@ -904,11 +903,11 @@
   (coro/new (fn []
     (forever
       (var done false)
-      (let [vals (map (fn [s]
+      (let [[vals (map (fn [s]
                         (coro/resume s)
                         (when (coro/done? s) (assign done true))
                         (coro/value s))
-                      sources)]
+                      sources)]]
         (when done (break))
         (yield (apply array vals)))))))
 
@@ -924,7 +923,7 @@
    Must be called inside a scheduler context (ev/spawn)."
   (coro/new (fn []
     (forever
-      (let [line (port/read-line port)]
+      (let [[line (port/read-line port)]]
         (if (nil? line)
           (begin (port/close port) (break))
           (yield line)))))))
@@ -934,7 +933,7 @@
    Must be called inside a scheduler context."
   (coro/new (fn []
     (forever
-      (let [chunk (port/read port size)]
+      (let [[chunk (port/read port size)]]
         (if (nil? chunk)
           (begin (port/close port) (break))
           (yield chunk)))))))
@@ -944,7 +943,7 @@
    Resume with nil to close the port. Must be called inside a scheduler context."
   (coro/new (fn []
     (forever
-      (let [val (yield nil)]
+      (let [[val (yield nil)]]
         (if (nil? val)
           (begin (port/close port) (break))
           (port/write port val)))))))
@@ -965,25 +964,25 @@
 
 (defn print [& args]
   "Write values to *stdout*, no newline. Respects *stdout* rebinding."
-  (let [stdout (*stdout*)]
+  (let [[stdout (*stdout*)]]
     (port/write stdout (apply string args))
     (port/flush stdout)))
 
 (defn println [& args]
   "Write values to *stdout* with trailing newline. Respects *stdout* rebinding."
-  (let [stdout (*stdout*)]
+  (let [[stdout (*stdout*)]]
     (port/write stdout (string (apply string args) "\n"))
     (port/flush stdout)))
 
 (defn eprint [& args]
   "Write values to *stderr*, no newline. Respects *stderr* rebinding."
-  (let [stderr (*stderr*)]
+  (let [[stderr (*stderr*)]]
     (port/write stderr (apply string args))
     (port/flush stderr)))
 
 (defn eprintln [& args]
   "Write values to *stderr* with trailing newline. Respects *stderr* rebinding."
-  (let [stderr (*stderr*)]
+  (let [[stderr (*stderr*)]]
     (port/write stderr (string (apply string args) "\n"))
     (port/flush stderr)))
 
@@ -991,7 +990,7 @@
 
 (defn ev/spawn [closure]
     "Spawn a closure in a new fiber managed by the current scheduler."
-    (let [fiber (fiber/new closure |:error :io :exec :wait|)]
+    (let [[fiber (fiber/new closure |:error :io :exec :wait|)]]
       ((*spawn*) fiber)))
 
 ## ── Async scheduler ─────────────────────────────────────────────────
@@ -1001,16 +1000,16 @@
    :spawn — (fn [fiber]) registers fiber for async execution.
    :pump — (fn []) pumps event loop until all fibers complete.
    :shutdown — (fn [timeout-ms]) signal shutdown; pump-fn executes it."
-  (let [backend       (io/backend :async)
-        runnable      @[]
-        pending       @{}        # id → fiber (I/O submissions)
-        fiber-io      @{}        # fiber → id (reverse lookup for io/cancel)
-        waiters       @{}        # target-fiber → @[waiting-fibers...]
-        select-sets   @{}        # waiting-fiber → @{:candidates [...] :woken @[false]}
-        completed     @{}        # fiber → :ok | :error (already-completed fibers)
-        joined        @|  |      # set of fibers whose result was observed
-        shutdown-req  @[nil]     # nil = running, integer = shutdown requested with timeout
-        park-queues   @{}]       # key → @[parked-fibers...] (futex park/notify)
+  (let [[backend       (io/backend :async)]
+        [runnable      @[]]
+        [pending       @{}]        # id → fiber (I/O submissions)
+        [fiber-io      @{}]        # fiber → id (reverse lookup for io/cancel)
+        [waiters       @{}]        # target-fiber → @[waiting-fibers...]
+        [select-sets   @{}]        # waiting-fiber → @{:candidates [...] :woken @[false]}
+        [completed     @{}]        # fiber → :ok | :error (already-completed fibers)
+        [joined        @|  |]      # set of fibers whose result was observed
+        [shutdown-req  @[nil]]     # nil = running, integer = shutdown requested with timeout
+        [park-queues   @{}]]       # key → @[parked-fibers...] (futex park/notify)
 
     (defn cleanup-select [waiter entry]
       "Delete a select-set entry after resolution."
@@ -1020,7 +1019,7 @@
       "Wake any select-set waiter that includes fiber as a candidate."
       (each [waiter entry] in (pairs select-sets)
         (when (not (nil? (find (fn [candidate] (= candidate fiber)) (get entry :candidates))))
-          (let [woken (get entry :woken)]
+          (let ([woken (get entry :woken)])
             (when (not (get woken 0))
               (put woken 0 true)
               (cleanup-select waiter entry)
@@ -1032,14 +1031,14 @@
       # Record completion
       (put completed fiber status)
       # Clean up fiber-io mapping
-      (let [id (get fiber-io fiber)]
+      (let ([id (get fiber-io fiber)])
         (when (not (nil? id))
           (del fiber-io fiber)))
       # Wake join waiters with [ok? value] pair
-      (let [ws (get waiters fiber)]
+      (let ([ws (get waiters fiber)])
         (when (not (nil? ws))
           (del waiters fiber)
-          (let [pair [(= status :ok) (fiber/value fiber)]]
+          (let ([pair [(= status :ok) (fiber/value fiber)]])
             (each w in ws
               (fiber/resume w pair)
               (handle-fiber-after-resume w))))
@@ -1054,7 +1053,7 @@
        record the completion atomically the first time we inspect it. This
        keeps `completed` in sync with reality and lets handle-abort /
        handle-join / handle-select make consistent decisions."
-      (let [recorded (get completed fiber)]
+      (let ([recorded (get completed fiber)])
         (if (not (nil? recorded))
           recorded
           (case (fiber/status fiber)
@@ -1065,29 +1064,29 @@
     (defn handle-join [caller target]
       "Handle a :join wait request. Resumes caller with [ok? value]."
       (add joined target)
-      (let [comp (get-completion target)]
+      (let ([comp (get-completion target)])
         (if (not (nil? comp))
           # Already completed — resume immediately
           (begin (fiber/resume caller [(= comp :ok) (fiber/value target)])
                  (handle-fiber-after-resume caller))
           # Still running — park caller on target's join waiter list
-          (let [ws (or (get waiters target)
-                        (let [w @[]] (put waiters target w) w))]
+          (let ([ws (or (get waiters target)
+                        (let ([w @[]]) (put waiters target w) w))])
             (push ws caller)))))
 
     (defn handle-select [caller candidates]
       "Handle a :select wait request."
       # Check if any candidate already completed (records completion lazily
       # via get-completion so the scheduler stays consistent).
-      (let [done (find (fn [f] (not (nil? (get-completion f))))
-                        candidates)]
+      (let ([done (find (fn [f] (not (nil? (get-completion f))))
+                        candidates)])
         (if done
           # Immediate: resume with the completed fiber
           (begin (fiber/resume caller done)
                  (handle-fiber-after-resume caller))
           # Park with a select set — wake-select-waiters scans select-sets directly,
           # so we don't add to the waiters map (that's for join waiters only).
-          (let [entry @{:candidates candidates :woken @[false]}]
+          (let ([entry @{:candidates candidates :woken @[false]}])
             (put select-sets caller entry)))))
 
     (defn handle-abort [caller target]
@@ -1101,7 +1100,7 @@
       # wrong on a dead fiber).
       (when (nil? (get-completion target))
         # Cancel pending I/O if any
-        (let [id (get fiber-io target)]
+        (let ([id (get fiber-io target)])
           (when (not (nil? id))
             (io/cancel backend id)
             (del pending id)
@@ -1117,13 +1116,13 @@
     (defn handle-park [caller request]
       "Handle a :park wait request (futex wait).
        If cell value == expected, park caller. Otherwise resume immediately."
-      (let* [key      (request :key)
-             val-cell (request :val)
-             expected (request :expected)]
+      (let* [[key      (request :key)]
+             [val-cell (request :val)]
+             [expected (request :expected)]]
         (if (= (get val-cell 0) expected)
           # Value matches — park the fiber (stays suspended)
-          (let [q (or (park-queues key)
-                       (let [q @[]] (put park-queues key q) q))]
+          (let [[q (or (park-queues key)
+                       (let [[q @[]]] (put park-queues key q) q))]]
             (push q caller))
           # Value changed — spurious wakeup avoidance, resume immediately
           (begin (fiber/resume caller :ok)
@@ -1132,14 +1131,14 @@
     (defn handle-notify [caller request]
       "Handle a :notify wait request (futex wake).
        Wake min(count, queue-length) parked fibers, resume caller with woken count."
-      (let* [key   (request :key)
-             count (request :count)
-             q     (or (park-queues key) @[])
-             n     (min count (length q))
-             woken 0]
+      (let* [[key   (request :key)]
+             [count (request :count)]
+             [q     (or (park-queues key) @[])]
+             [n     (min count (length q))]
+             [@woken 0]]
         (var i 0)
         (while (< i n)
-          (let [fiber (q 0)]
+          (let [[fiber (q 0)]]
             (remove q 0)
             (fiber/resume fiber true)
             (push runnable fiber))
@@ -1168,12 +1167,12 @@
       (case (fiber/status fiber)
         :dead   (complete-fiber fiber :ok)
         :error  (complete-fiber fiber :error)
-        :paused (let [bits (fiber/bits fiber)]
+        :paused (let ([bits (fiber/bits fiber)])
                   (cond
                     ((not (= 0 (bit/and bits 1)))       # SIG_ERROR
                      (complete-fiber fiber :error))
                     ((not (= 0 (bit/and bits 512)))     # SIG_IO
-                     (let [[ok? result] (protect (io/submit backend (fiber/value fiber)))]
+                     (let [[[ok? result] (protect (io/submit backend (fiber/value fiber)))]]
                        (if ok?
                          (begin
                            (put pending result fiber)
@@ -1189,8 +1188,8 @@
     (defn drain-runnable []
       "Run all runnable fibers. Guard against externally-killed fibers."
       (while (> (length runnable) 0)
-        (let [fiber (pop runnable)]
-          (let [status (fiber/status fiber)]
+        (let [[fiber (pop runnable)]]
+          (let ([status (fiber/status fiber)])
             (cond
               ((= status :dead)  (complete-fiber fiber :ok))
               ((= status :error) (complete-fiber fiber :error))
@@ -1199,10 +1198,10 @@
 
     (defn process-completions []
       "Wait for I/O completions and route fibers."
-      (let [completions (io/wait backend (- 0 1))]
+      (let [[completions (io/wait backend (- 0 1))]]
         (each c in completions
-          (let* [id    (get c :id)
-                 fiber (get pending id)]
+          (let* [[id    (get c :id)]
+                 [fiber (get pending id)]]
             (when (not (nil? fiber))
               (del pending id)
               (del fiber-io fiber)
@@ -1223,19 +1222,19 @@
         (del pending id)
         (del fiber-io fiber)
         (io/cancel backend id)
-        (let [[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]
+        (let [[[ok? _] (protect (fiber/abort fiber {:error :shutdown}))]]
           (when ok? (handle-fiber-after-resume fiber))))
       # Phase 2: drain cancel CQEs and let aborted fibers unwind
       (when (> timeout-ms 0)
-        (let [deadline (+ (clock/monotonic) (/ timeout-ms 1000.0))]
+        (let [[deadline (+ (clock/monotonic) (/ timeout-ms 1000.0))]]
           (while (and (> (+ (length runnable) (length pending)) 0)
                       (< (clock/monotonic) deadline))
             (drain-runnable)
             (when (> (length pending) 0)
-              (let [completions (io/wait backend 10)]
+              (let [[completions (io/wait backend 10)]]
                 (each c in completions
-                  (let* [id    (get c :id)
-                         fiber (get pending id)]
+                  (let* [[id    (get c :id)]
+                         [fiber (get pending id)]]
                     (when (not (nil? fiber))
                       (del pending id)
                       (del fiber-io fiber)
@@ -1249,7 +1248,7 @@
         (io/cancel backend id)
         (protect (fiber/cancel fiber {:error :shutdown})))
       (while (> (length runnable) 0)
-        (let [fiber (pop runnable)]
+        (let [[fiber (pop runnable)]]
           (protect (fiber/cancel fiber {:error :shutdown})))))
 
     {:spawn
@@ -1269,7 +1268,7 @@
                        (= (length park-queues) 0))
               (break :loop nil))
             # Check for shutdown request
-            (let [timeout (get shutdown-req 0)]
+            (let [[timeout (get shutdown-req 0)]]
               (unless (nil? timeout)
                 (do-shutdown timeout)
                 (break :loop nil)))
@@ -1292,8 +1291,8 @@
 (defn ev/shutdown [& args]
   "Shut down the current event loop. Optional timeout-ms (default 0) gives
    fibers time to clean up before being hard-killed."
-  (let [timeout-ms (or (get args 0) 0)
-        shutdown-fn (*shutdown*)]
+  (let [[timeout-ms (or (get args 0) 0)]
+        [shutdown-fn (*shutdown*)]]
     (when (nil? shutdown-fn)
       (error {:error :state-error :reason :no-event-loop :message "not inside an event loop"}))
     (shutdown-fn timeout-ms)))
@@ -1314,13 +1313,13 @@
   "Create an async scheduler, run thunks, return the last thunk's result.
    Used internally by the compiler to wrap top-level code in a scheduler.
    Propagates errors from fibers — unjoined errored fibers crash the process."
-  (let [sched (make-async-scheduler)]
+  (let ([sched (make-async-scheduler)])
     (parameterize ((*scheduler* sched)
                    (*spawn* (get sched :spawn))
                    (*shutdown* (get sched :shutdown))
                    (*io-backend* (get sched :backend)))
-      (let [mark (get sched :mark-joined)
-            fibers @[]]
+      (let ([mark (get sched :mark-joined)]
+            [fibers @[]])
         (each t in thunks
           (push fibers (ev/spawn t)))
         ((get sched :pump))
@@ -1330,7 +1329,7 @@
         (var first-error nil)
         (each f in fibers
           (mark f)
-          (let [s (fiber/status f)]
+          (let ([s (fiber/status f)])
             (when (and (nil? first-error)
                        (or (= s :error)
                            (not (= 0 (bit/and (fiber/bits f) 1)))))
@@ -1367,10 +1366,10 @@
    Single fiber: returns value or propagates error.
    Sequence: joins each in order, returns array of results."
   (if (fiber? target)
-    (let [[ok? val] (emit-wait {:op :join :fiber target})]
+    (let [[[ok? val] (emit-wait {:op :join :fiber target})]]
       (if ok? val (error val)))
     # Sequence of fibers
-    (let [results @[]]
+    (let ([results @[]])
       (each f in target
         (push results (ev/join f)))
       (freeze results))))
@@ -1381,7 +1380,7 @@
   (if (fiber? target)
     (emit-wait {:op :join :fiber target})
     # Sequence of fibers
-    (let [results @[]]
+    (let ([results @[]])
       (each f in target
         (push results (ev/join-protected f)))
       (freeze results))))
@@ -1395,13 +1394,13 @@
   "Return [next-fn pool] for iterating fibers in completion order.
    next-fn returns the next completed fiber, or nil when done.
    pool is a mutable array; push new fibers to it for backfill."
-  (let [pool @[]]
+  (let ([pool @[]])
     (each f in fibers (push pool f))
     [(fn []
        (if (empty? pool)
          nil
-         (let [done (emit-wait {:op :select :fibers pool})]
-           (let [i (find-index (fn [f] (= f done)) pool)]
+         (let ([done (emit-wait {:op :select :fibers pool})])
+           (let ([i (find-index (fn [f] (= f done)) pool)])
              (when i (remove pool i)))
            done)))
      pool]))
@@ -1409,21 +1408,21 @@
 (defn ev/select [fibers]
   "Wait for the first of N fibers to complete.
    Returns [completed-fiber remaining-fibers]."
-  (let [[next ignore] (ev/as-completed fibers)]
-    (let [done (next)]
+  (let [[[next ignore] (ev/as-completed fibers)]]
+    (let ([done (next)])
       [done (filter (fn [f] (not (= f done))) fibers)])))
 
 (defn ev/race [fibers]
   "Wait for the first fiber to complete, abort all others, return winner's value."
-  (let [[done remaining] (ev/select fibers)]
+  (let [[[done remaining] (ev/select fibers)]]
     (each f in remaining (ev/abort f))
     (ev/join done)))
 
 (defn ev/timeout [seconds thunk]
   "Run thunk with a time limit. Returns result or signals {:error :timeout}."
-  (let [work  (ev/spawn thunk)
-        timer (ev/spawn (fn [] (ev/sleep seconds)))]
-    (let [[done remaining] (ev/select [work timer])]
+  (let ([work  (ev/spawn thunk)]
+        [timer (ev/spawn (fn [] (ev/sleep seconds)))])
+    (let [[[done remaining] (ev/select [work timer])]]
       (each f in remaining (ev/abort f))
       (if (= done work)
         (ev/join work)
@@ -1434,14 +1433,14 @@
    All spawned fibers must complete before scope exits.
    If any fiber (body or child) errors, all remaining siblings are aborted
    immediately — the scope does not wait for the body to finish first."
-  (let* [scope-fibers @[]
-         [next pool] (ev/as-completed @[])
-         scope-spawn (fn [closure]
-                        (let [f (ev/spawn closure)]
+  (let* ([scope-fibers @[]]
+         [[next pool] (ev/as-completed @[])]
+         [scope-spawn (fn [closure]
+                        (let ([f (ev/spawn closure)])
                           (push scope-fibers f)
                           (push pool f)
-                          f))]
-    (let [body-fiber (ev/spawn (fn [] (body-fn scope-spawn)))]
+                          f))])
+    (let ([body-fiber (ev/spawn (fn [] (body-fn scope-spawn)))])
       (push scope-fibers body-fiber)
       (push pool body-fiber)
       # Monitor all fibers — detect errors from any fiber immediately
@@ -1449,11 +1448,11 @@
       (var first-error nil)
       (block :done
         (forever
-          (let [done (next)]
+          (let ([done (next)])
             (when (nil? done) (break :done nil))
             # Use ev/join-protected to get the scheduler's view of completion
             # status (fiber/status stays :paused for caught errors).
-            (let [[ok? val] (ev/join-protected done)]
+            (let [[[ok? val] (ev/join-protected done)]]
               (when (= done body-fiber)
                 (assign body-val val))
               (when (and (not ok?) (nil? first-error))
@@ -1462,7 +1461,7 @@
                 # and :new (not yet started). handle-abort is a no-op for
                 # already-completed fibers.
                 (each f in scope-fibers
-                  (let [s (fiber/status f)]
+                  (let ([s (fiber/status f)])
                     (when (or (= s :paused) (= s :new))
                       (ev/abort f)))))))))
       (if (not (nil? first-error))
@@ -1478,25 +1477,25 @@
    Results are returned in input order."
   (var todo (apply list items))
   (var n 0)
-  (let [fiber->idx @{}
-        results @{}]
-   (let [[next pool] (ev/as-completed @[])]
+  (let ([fiber->idx @{}]
+        [results @{}])
+   (let [[[next pool] (ev/as-completed @[])]]
     # Seed the pool
     (while (and (not (empty? todo)) (< (length pool) limit))
-      (let* [item (first todo)
-             fiber (ev/spawn (fn [] (f item)))]
+      (let* ([item (first todo)]
+             [fiber (ev/spawn (fn [] (f item)))])
         (assign todo (rest todo))
         (put fiber->idx fiber n)
         (push pool fiber)
         (assign n (+ n 1))))
     # Drain + backfill
     (forever
-      (let [done (next)]
+      (let ([done (next)])
         (when (nil? done) (break nil))
         (put results (get fiber->idx done) (fiber/value done))
         (when (not (empty? todo))
-          (let* [item (first todo)
-                 fiber (ev/spawn (fn [] (f item)))]
+          (let* ([item (first todo)]
+                 [fiber (ev/spawn (fn [] (f item)))])
             (assign todo (rest todo))
             (put fiber->idx fiber n)
             (push pool fiber)
@@ -1544,21 +1543,21 @@
    IMPORTANT: reads pipes BEFORE subprocess/wait to avoid deadlock. If subprocess
    output exceeds the OS pipe buffer (~64KB), the subprocess blocks on write.
    Reading first ensures neither side is blocked."
-  (let* [exec-opts (if (empty? opts)
+  (let* [[exec-opts (if (empty? opts)
                        {:stdin :null}
-                       (merge {:stdin :null} (freeze (first opts))))
-         proc         (subprocess/exec program args exec-opts)
+                       (merge {:stdin :null} (freeze (first opts))))]
+         [proc         (subprocess/exec program args exec-opts)]
          # Drain pipes BEFORE subprocess/wait (deadlock invariant — see docstring).
          # port/read-all returns nil on immediate EOF (empty pipe) — coerce to empty bytes.
-         stdout-bytes (if (nil? (get proc :stdout))
+         [stdout-bytes (if (nil? (get proc :stdout))
                          (bytes)
-                         (let [raw (port/read-all (get proc :stdout))]
-                           (if (nil? raw) (bytes) raw)))
-         stderr-bytes (if (nil? (get proc :stderr))
+                         (let [[raw (port/read-all (get proc :stdout))]]
+                           (if (nil? raw) (bytes) raw)))]
+         [stderr-bytes (if (nil? (get proc :stderr))
                          (bytes)
-                         (let [raw (port/read-all (get proc :stderr))]
-                           (if (nil? raw) (bytes) raw)))
-         exit-code    (subprocess/wait proc)]
+                         (let [[raw (port/read-all (get proc :stderr))]]
+                           (if (nil? raw) (bytes) raw)))]
+         [exit-code    (subprocess/wait proc)]]
     (when (not (nil? (get proc :stdout))) (port/close (get proc :stdout)))
     (when (not (nil? (get proc :stderr))) (port/close (get proc :stderr)))
     {:exit   exit-code
@@ -1570,9 +1569,9 @@
 (defn ffi/pin [b]
   "Copy bytes/string to a malloc'd pointer. Caller must ffi/free.
    (ffi/pin (bytes 1 2 3)) => <pointer ...>"
-  (let* [b (if (string? b) (bytes b) b)
-         len (length b)
-         ptr (ffi/malloc (max len 1))]
+  (let* [[b (if (string? b) (bytes b) b)]
+         [len (length b)]
+         [ptr (ffi/malloc (max len 1))]]
     (when (> len 0)
       (ffi/write ptr (ffi/array :u8 len) b))
     ptr))
@@ -1583,7 +1582,7 @@
   "Build a struct from a sequence of key-value pairs (arrays or lists).
    (from-pairs [[:a 1] [:b 2]]) => {:a 1 :b 2}
    (from-pairs (pairs {:x 1})) => {:x 1}"
-  (let [result @{}]
+  (let [[result @{}]]
     (each pair in pairs
       (put result (first pair) (first (rest pair))))
     (freeze result)))

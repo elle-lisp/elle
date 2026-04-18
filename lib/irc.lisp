@@ -400,7 +400,7 @@
 
   ## ── Connect ───────────────────────────────────────────────────────
 
-  (defn irc/connect [host port &named nick username realname sasl]
+  (defn irc/connect [host port &named nick @username @realname sasl]
     "Connect to an IRC server and complete registration.
      Returns a connection struct with :messages, :send, :close, :nick,
      :caps, :server, :isupport.

@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # Macro desugaring tests
 #
 # Migrated from tests/property/macros.rs
@@ -92,81 +91,81 @@
 
 # let* allows later bindings to reference earlier ones
 (begin
-  (let* [x 5 y (+ x 3)]
+  (let* ((x 5) (y (+ x 3)))
     (assert (= y 8) "let* sequential binding positive")))
 
 (begin
-  (let* [x -10 y (+ x 5)]
+  (let* ((x -10) (y (+ x 5)))
     (assert (= y -5) "let* sequential binding negative")))
 
 (begin
-  (let* [x 0 y (+ x 0)]
+  (let* ((x 0) (y (+ x 0)))
     (assert (= y 0) "let* sequential binding zero")))
 
 # let* is equivalent to nested let
 (begin
-  (let* [x 5 y 3]
+  (let* ((x 5) (y 3))
     (assert (= (+ x y) 8) "let* two bindings")))
 
 (begin
-  (let [x 5]
-    (let [y 3]
+  (let ((x 5))
+    (let ((y 3))
       (assert (= (+ x y) 8) "nested let two bindings"))))
 
 (begin
-  (let* [x 5 y 3]
-    (let [x 5]
-      (let [y 3]
+  (let* ((x 5) (y 3))
+    (let ((x 5))
+      (let ((y 3))
         (assert (= (+ x y) 8) "let* and nested let equivalent")))))
 
 # let* with three sequential bindings
 (begin
-  (let* [x 1 y (+ x 2) z (+ y 3)]
+  (let* ((x 1) (y (+ x 2)) (z (+ y 3)))
     (assert (= z 6) "let* three sequential bindings")))
 
 (begin
-  (let* [x -5 y (+ x 10) z (+ y -2)]
+  (let* ((x -5) (y (+ x 10)) (z (+ y -2)))
     (assert (= z 3) "let* three sequential mixed")))
 
 (begin
-  (let* [x 0 y (+ x 0) z (+ y 0)]
+  (let* ((x 0) (y (+ x 0)) (z (+ y 0)))
     (assert (= z 0) "let* three sequential zero")))
 
 # let* with empty bindings returns body
 (begin
-  (let* [] 42)
-  (assert (= (let* [] 42) 42) "let* empty bindings"))
+  (let* () 42)
+  (assert (= (let* () 42) 42) "let* empty bindings"))
 
 (begin
-  (assert (= (let* [] -10) -10) "let* empty bindings negative"))
+  (assert (= (let* () -10) -10) "let* empty bindings negative"))
 
 (begin
-  (assert (= (let* [] 0) 0) "let* empty bindings zero"))
+  (assert (= (let* () 0) 0) "let* empty bindings zero"))
 
 # let* with single binding
 (begin
-  (let* [y 7]
+  (let* ((y 7))
     (assert (= y 7) "let* single binding")))
 
 (begin
-  (let* [y -3]
+  (let* ((y -3))
     (assert (= y -3) "let* single binding negative")))
 
 (begin
-  (let* [y 0]
+  (let* ((y 0))
     (assert (= y 0) "let* single binding zero")))
 
 # let* with computed bindings
 (begin
-  (let* [y (* 5 2) z (+ y 1)]
+  (let* ((y (* 5 2)) (z (+ y 1)))
     (assert (= z 11) "let* computed bindings positive")))
 
 (begin
-  (let* [y (* -3 2) z (+ y 1)]
+  (let* ((y (* -3 2)) (z (+ y 1)))
     (assert (= z -5) "let* computed bindings negative")))
 
 (begin
-  (let* [y (* 0 2) z (+ y 1)]
+  (let* ((y (* 0 2)) (z (+ y 1)))
     (assert (= z 1) "let* computed bindings zero")))
 
 # ============================================================================
@@ -263,41 +262,41 @@
 
 # break short-circuits
 (begin
-  (let [result (block (break 42) 99)]
+  (let ([result (block (break 42) 99)])
     (assert (= result 42) "break short-circuits positive")))
 
 (begin
-  (let [result (block (break -7) 99)]
+  (let ([result (block (break -7) 99)])
     (assert (= result -7) "break short-circuits negative")))
 
 (begin
-  (let [result (block (break 0) 99)]
+  (let ([result (block (break 0) 99)])
     (assert (= result 0) "break short-circuits zero")))
 
 # named break targets correct block
 (begin
-  (let [result (block :outer (block :inner (break :outer 42) 1) 999)]
+  (let ([result (block :outer (block :inner (break :outer 42) 1) 999)])
     (assert (= result 42) "named break targets outer positive")))
 
 (begin
-  (let [result (block :outer (block :inner (break :outer -5) 1) 999)]
+  (let ([result (block :outer (block :inner (break :outer -5) 1) 999)])
     (assert (= result -5) "named break targets outer negative")))
 
 (begin
-  (let [result (block :outer (block :inner (break :outer 0) 1) 999)]
+  (let ([result (block :outer (block :inner (break :outer 0) 1) 999)])
     (assert (= result 0) "named break targets outer zero")))
 
 # nested break targets inner
 (begin
-  (let [result (block :outer (block :inner (break :inner 10) 1) 2)]
+  (let ([result (block :outer (block :inner (break :inner 10) 1) 2)])
     (assert (= result 2) "nested break targets inner positive")))
 
 (begin
-  (let [result (block :outer (block :inner (break :inner -5) 1) 3)]
+  (let ([result (block :outer (block :inner (break :inner -5) 1) 3)])
     (assert (= result 3) "nested break targets inner negative")))
 
 (begin
-  (let [result (block :outer (block :inner (break :inner 0) 1) 0)]
+  (let ([result (block :outer (block :inner (break :inner 0) 1) 0)])
     (assert (= result 0) "nested break targets inner zero")))
 
 # block with multiple expressions
@@ -312,18 +311,18 @@
 
 # block scope isolation
 (begin
-  (let [x 1]
-    (block (let [x 2] x))
+  (let ((x 1))
+    (block (let ((x 2)) x))
     (assert (= x 1) "block scope isolation positive")))
 
 (begin
-  (let [x -5]
-    (block (let [x 10] x))
+  (let ((x -5))
+    (block (let ((x 10)) x))
     (assert (= x -5) "block scope isolation negative")))
 
 (begin
-  (let [x 0]
-    (block (let [x 0] x))
+  (let ((x 0))
+    (block (let ((x 0)) x))
     (assert (= x 0) "block scope isolation zero")))
 
 # ============================================================================
@@ -372,19 +371,19 @@
 # let* inside defn
 (begin
   (defn f_let1 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       z))
   (assert (= (f_let1 0) 8) "let* inside defn positive"))
 
 (begin
   (defn f_let2 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       z))
   (assert (= (f_let2 -5) 3) "let* inside defn negative"))
 
 (begin
   (defn f_let3 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       z))
   (assert (= (f_let3 -8) 0) "let* inside defn zero"))
 
@@ -434,33 +433,33 @@
 # defn with let* and thread-first
 (begin
   (defn f_combined1 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       (-> z (* 2))))
   (assert (= (f_combined1 0) 16) "defn+let*+thread-first positive"))
 
 (begin
   (defn f_combined2 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       (-> z (* 2))))
   (assert (= (f_combined2 -5) 6) "defn+let*+thread-first negative"))
 
 (begin
   (defn f_combined3 (x)
-    (let* [y (+ x 5) z (+ y 3)]
+    (let* ((y (+ x 5)) (z (+ y 3)))
       (-> z (* 2))))
   (assert (= (f_combined3 -8) 0) "defn+let*+thread-first zero"))
 
 # nested blocks with named breaks
 (begin
-  (let [result (block :a (block :b (block :c (break :b 10) 1) 2) 3)]
+  (let ([result (block :a (block :b (block :c (break :b 10) 1) 2) 3)])
     (assert (= result 3) "nested blocks named breaks positive")))
 
 (begin
-  (let [result (block :a (block :b (block :c (break :b -5) 1) 2) 3)]
+  (let ([result (block :a (block :b (block :c (break :b -5) 1) 2) 3)])
     (assert (= result 3) "nested blocks named breaks negative")))
 
 (begin
-  (let [result (block :a (block :b (block :c (break :b 0) 1) 2) 3)]
+  (let ([result (block :a (block :b (block :c (break :b 0) 1) 2) 3)])
     (assert (= result 3) "nested blocks named breaks zero")))
 
 # defn with block and break
@@ -481,28 +480,28 @@
 
 # let* with thread-first
 (begin
-  (let* [x 5 y (-> x (+ 3))]
+  (let* ((x 5) (y (-> x (+ 3))))
     (assert (= y 8) "let*+thread-first positive")))
 
 (begin
-  (let* [x -10 y (-> x (+ 5))]
+  (let* ((x -10) (y (-> x (+ 5))))
     (assert (= y -5) "let*+thread-first negative")))
 
 (begin
-  (let* [x 0 y (-> x (+ 0))]
+  (let* ((x 0) (y (-> x (+ 0))))
     (assert (= y 0) "let*+thread-first zero")))
 
 # let* with thread-last
 (begin
-  (let* [x 5 y (->> x (- 10))]
+  (let* ((x 5) (y (->> x (- 10))))
     (assert (= y 5) "let*+thread-last positive")))
 
 (begin
-  (let* [x -5 y (->> x (- 10))]
+  (let* ((x -5) (y (->> x (- 10))))
     (assert (= y 15) "let*+thread-last negative")))
 
 (begin
-  (let* [x 0 y (->> x (- 0))]
+  (let* ((x 0) (y (->> x (- 0))))
     (assert (= y 0) "let*+thread-last zero")))
 
 # ============================================================================
@@ -515,9 +514,9 @@
 # The macro's `tmp` must not shadow the caller's `tmp`.
 (begin
   (defmacro my-swap (a b)
-    `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
-  (let [tmp 10 x 1 y 2]
+  (let ((tmp 10) (@x 1) (@y 2))
     (my-swap x y)
     (assert (= tmp 10) "test_macro_no_capture")))
 
@@ -525,17 +524,17 @@
 # be able to see it.
 (begin
   (defmacro with-internal (body)
-    `(let [internal-var 42] ,body))
+    `(let ((internal-var 42)) ,body))
 
   (assert (= (with-internal (+ 1 2)) 3) "test_macro_no_leak"))
 
 # Two different macros both introduce `tmp`. They must not interfere.
 (begin
   (defmacro add-tmp-a (x)
-    `(let [tmp ,x] (+ tmp 1)))
+    `(let ((tmp ,x)) (+ tmp 1)))
 
   (defmacro add-tmp-b (x)
-    `(let [tmp ,x] (+ tmp 2)))
+    `(let ((tmp ,x)) (+ tmp 2)))
 
   (assert (= (+ (add-tmp-a 10) (add-tmp-b 20)) 33) "test_nested_macro_hygiene"))
 
@@ -543,13 +542,13 @@
 
 # Code without macros should work identically.
 (begin
-  (let [x 10 y 20]
+  (let ((x 10) (y 20))
     (assert (= (+ x y) 30) "test_non_macro_code_unchanged")))
 
 # Normal shadowing (no macros) should still work.
 (begin
-  (let [x 10]
-    (let [x 20]
+  (let ((x 10))
+    (let ((x 20))
       (assert (= x 20) "test_non_macro_shadowing_unchanged"))))
 
 # SECTION 3: Macro argument resolution
@@ -559,7 +558,7 @@
   (defmacro double (x)
     `(+ ,x ,x))
 
-  (let [val 7]
+  (let ((val 7))
     (assert (= (double val) 14) "test_macro_with_expression_arg")))
 
 # A macro-generated closure should capture a call-site variable correctly.
@@ -567,8 +566,8 @@
   (defmacro make-adder (n)
     `(fn (x) (+ x ,n)))
 
-  (let [amount 5]
-    (let [f (make-adder amount)]
+  (let ((amount 5))
+    (let ((f (make-adder amount)))
       (assert (= (f 10) 15) "test_macro_closure_captures_callsite"))))
 
 # SECTION 4: Macro with conditional body (regression)
@@ -593,18 +592,18 @@
 # Verify the swap macro actually swaps values, not just that it's hygienic.
 (begin
   (defmacro my-swap2 (a b)
-    `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
-  (let [x 1 y 2]
+  (let ((@x 1) (@y 2))
     (my-swap2 x y)
     (assert (= (list x y) (list 2 1)) "test_swap_actually_swaps")))
 
 # The real hygiene test: swap when caller has a variable named `tmp`.
 (begin
   (defmacro my-swap3 (a b)
-    `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
+    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
 
-  (let [tmp 100 x 1 y 2]
+  (let ((tmp 100) (@x 1) (@y 2))
     (my-swap3 x y)
     (assert (= (list tmp x y) (list 100 2 1)) "test_swap_with_same_named_tmp")))
 
@@ -615,8 +614,8 @@
 # string literals where symbols were needed.
 (begin
   (defmacro with-temp (body)
-    (let [tmp (gensym "tmp")]
-      `(let [,tmp 42] ,body)))
+    (let ((tmp (gensym "tmp")))
+      `(let ((,tmp 42)) ,body)))
 
   (assert (= (with-temp (+ 1 2)) 3) "test_gensym_in_macro"))
 
@@ -631,15 +630,15 @@
   (defmacro outer-add (a b)
     `(inner-add ,a ,b))
 
-  (let [x 10 y 20]
+  (let ((x 10) (y 20))
     (assert (= (outer-add x y) 30) "test_nested_macro_scope_preservation")))
 
 # Two gensym calls produce different symbols, so two macro
 # expansions don't interfere.
 (begin
   (defmacro bind-val (val body)
-    (let [g (gensym "v")]
-      `(let [,g ,val] ,body)))
+    (let ((g (gensym "v")))
+      `(let ((,g ,val)) ,body)))
 
   (assert (= (bind-val 10 (bind-val 20 (+ 1 2))) 3) "test_gensym_produces_unique_bindings"))
 
@@ -649,7 +648,7 @@
 # This is the canonical anaphoric macro use case.
 (begin
   (defmacro aif (test then else)
-    `(let [,(datum->syntax test 'it) ,test]
+    `(let ((,(datum->syntax test 'it) ,test))
        (if ,(datum->syntax test 'it) ,then ,else)))
 
   (assert (= (aif 42 it 0) 42) "test_anaphoric_if"))
@@ -657,7 +656,7 @@
 # When the test is falsy, the else branch is taken.
 (begin
   (defmacro aif2 (test then else)
-    `(let [,(datum->syntax test 'it) ,test]
+    `(let ((,(datum->syntax test 'it) ,test))
        (if ,(datum->syntax test 'it) ,then ,else)))
 
   (assert (= (aif2 false 42 0) 0) "test_anaphoric_if_false_branch"))
@@ -665,7 +664,7 @@
 # datum->syntax works when the test is a compound expression.
 (begin
   (defmacro aif3 (test then else)
-    `(let [,(datum->syntax test 'it) ,test]
+    `(let ((,(datum->syntax test 'it) ,test))
        (if ,(datum->syntax test 'it) ,then ,else)))
 
   (assert (= (aif3 (+ 1 2) (+ it 10) 0) 13) "test_anaphoric_if_with_expression"))
@@ -673,16 +672,16 @@
 # An outer `it` binding should not be affected by the macro's `it`.
 (begin
   (defmacro aif4 (test then else)
-    `(let [,(datum->syntax test 'it) ,test]
+    `(let ((,(datum->syntax test 'it) ,test))
        (if ,(datum->syntax test 'it) ,then ,else)))
 
-  (let [it 999]
+  (let ((it 999))
     (assert (= (aif4 42 it 0) 42) "test_anaphoric_if_no_capture_of_outer_it")))
 
 # datum->syntax with a symbol datum creates a binding visible at call site.
 (begin
   (defmacro bind-as-x (val body)
-    `(let [,(datum->syntax val 'x) ,val] ,body))
+    `(let ((,(datum->syntax val 'x) ,val)) ,body))
 
   (assert (= (bind-as-x 100 (+ x 1)) 101) "test_datum_to_syntax_with_symbol"))
 
@@ -691,7 +690,7 @@
 # being added, so the binding resolves correctly.
 (begin
   (defmacro bind-it (name val body)
-    `(let [,(datum->syntax name 'it) ,val] ,body))
+    `(let ((,(datum->syntax name 'it) ,val)) ,body))
 
   (assert (= (bind-it x 42 (+ it 1)) 43) "test_datum_to_syntax_with_syntax_context"))
 
@@ -699,7 +698,7 @@
 # into the list structure, not just set scopes on the outer node.
 (begin
   (defmacro inject-list (ctx)
-    `(let [,(datum->syntax ctx 'result) (list 1 2 3)] result))
+    `(let ((,(datum->syntax ctx 'result) (list 1 2 3))) result))
 
   (assert (= (inject-list x) (list 1 2 3)) "test_datum_to_syntax_with_compound_datum"))
 

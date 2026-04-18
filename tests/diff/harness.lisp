@@ -246,7 +246,7 @@
 ##   (diff:prop (fn [a b] (+ a b))
 ##              (fn [] [(rng:int -1000 1000) (rng:int -1000 1000)])
 ##              :n 200)
-(defn prop [f gen-fn &named n]
+(defn prop [f gen-fn &named @n]
   (default n 100)
   (each _ in (range n)
     (let [[args (gen-fn)]]

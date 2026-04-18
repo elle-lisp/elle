@@ -690,7 +690,7 @@
          :status    status-line:status
          :headers   resp-headers})))
 
-  (defn sse-get [url &named headers last-event-id reconnect]
+  (defn sse-get [url &named headers last-event-id @reconnect]
     "Open an SSE connection to url and return a coroutine that yields
      events until the stream terminates. Each event is a struct:
        {:event \"message\" :data \"...\" :id \"...\" :retry 3000}
@@ -873,7 +873,7 @@
       (string/format "http: handler error on {} {}: {}\n"
                      request:method request:path err)))
 
-  (defn http-serve [listener handler &named on-error]
+  (defn http-serve [listener handler &named @on-error]
     "Accept connections on listener and handle them with keep-alive.
      Each connection runs in its own fiber via ev/spawn.
      Exits cleanly when the listener is closed.

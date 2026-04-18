@@ -29,7 +29,7 @@
 
   ## ── Core ─────────────────────────────────────────────────────────────
 
-  (defn start [path &named filter recursive]
+  (defn start [path &named filter @recursive]
     "Create a watcher on path, return a handle struct.
      :filter extension string (e.g. \".lisp\"),
      :recursive bool (default true)."

@@ -1,4 +1,3 @@
-(elle/epoch 7)
 # GPU eligibility tests
 #
 # Tests the fn/gpu-eligible? predicate which checks signal and structural
@@ -34,7 +33,7 @@
 
 # ── Not eligible: mutable captures ─────────────────────────────
 (assert (not (fn/gpu-eligible?
-  (let [counter 0]
+  (let [[@counter 0]]
     (fn [] (assign counter (+ counter 1)) counter))))
   "mutable capture is not gpu-eligible")
 

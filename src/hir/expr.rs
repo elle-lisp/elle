@@ -126,6 +126,9 @@ pub enum HirKind {
         doc: Option<Value>,
         /// Original lambda Syntax node for eval environment reconstruction
         syntax: Option<Rc<crate::syntax::Syntax>>,
+        /// True if the function body contains `(numeric!)` assertion.
+        /// The lowerer checks `is_gpu_eligible()` after lowering.
+        assert_numeric: bool,
     },
 
     // === Control Flow ===

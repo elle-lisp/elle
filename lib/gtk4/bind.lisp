@@ -239,7 +239,7 @@
 
 (ffi/defbind g-application-quit libgio "g_application_quit" :void [:ptr])
 
-(defn run-app [app &named quit]
+(defn run-app [app &named @quit]
   "Cooperative GTK event loop. Registers and activates the app, then
    pumps g_main_context_iteration non-blocking, yielding to Elle's
    scheduler between iterations.

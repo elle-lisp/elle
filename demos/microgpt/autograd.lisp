@@ -70,7 +70,7 @@
 
   # ── Fused operations (reduce node count) ───────────────────────
 
-  (defn vdot [avec bvec n &named offset-a offset-b]
+  (defn vdot [avec bvec n &named @offset-a @offset-b]
     "Fused dot product: sum(avec[i]*bvec[i]) for i in 0..n-1.
      Single Value node instead of 2n nodes.
      Optional offset-a/offset-b for sliced access."

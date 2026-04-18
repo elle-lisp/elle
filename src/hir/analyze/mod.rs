@@ -85,6 +85,15 @@ struct ScopedBinding {
     binding: Binding,
 }
 
+/// Strip `@` prefix from a binding name. Returns (actual_name, is_mutable).
+pub(super) fn strip_at_prefix(name: &str) -> (&str, bool) {
+    if let Some(stripped) = name.strip_prefix('@') {
+        (stripped, true)
+    } else {
+        (name, false)
+    }
+}
+
 /// Check if `subset` is a subset of `superset` (all elements of subset appear in superset).
 fn is_scope_subset(subset: &[ScopeId], superset: &[ScopeId]) -> bool {
     subset.iter().all(|s| superset.contains(s))
@@ -168,6 +177,12 @@ pub struct Analyzer<'a> {
     /// signal mismatch) push here and return `Ok(Hir::error(span))` to
     /// continue analysis. The pipeline checks this after analysis.
     errors: Vec<LError>,
+    /// Set by `(silence!)` assertion form. Consumed by `analyze_lambda`.
+    current_silence_assert: bool,
+    /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
+    current_numeric_assert: bool,
+    /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
+    current_immutability_asserts: HashSet<Binding>,
 }
 
 impl<'a> Analyzer<'a> {
@@ -214,6 +229,9 @@ impl<'a> Analyzer<'a> {
             current_declared_ceiling: None,
             current_muffle_bits: crate::value::fiber::SignalBits::EMPTY,
             errors: Vec::new(),
+            current_silence_assert: false,
+            current_numeric_assert: false,
+            current_immutability_asserts: HashSet::new(),
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);

@@ -31,6 +31,7 @@ impl<'a> Analyzer<'a> {
     /// Check if an expression is a var or def form and return all names being defined.
     /// For simple defines like `(def x ...)`, returns one name.
     /// For destructuring like `(def (a b) ...)`, returns all leaf names.
+    /// Names are stripped of `@` prefix (mutability annotation).
     pub(crate) fn is_define_form(syntax: &Syntax) -> Vec<(&str, &[ScopeId])> {
         if let SyntaxKind::List(items) = &syntax.kind {
             if let Some(first) = items.first() {
@@ -39,9 +40,11 @@ impl<'a> Analyzer<'a> {
                         if let Some(second) = items.get(1) {
                             // Simple symbol binding
                             if let Some(sym) = second.as_symbol() {
-                                return vec![(sym, second.scopes.as_slice())];
+                                let (actual, _) = super::strip_at_prefix(sym);
+                                return vec![(actual, second.scopes.as_slice())];
                             }
                             // Destructuring pattern — extract all leaf symbols
+                            // (extract_pattern_names strips @ from leaf names)
                             let mut names = Vec::new();
                             Self::extract_pattern_names(second, &mut names);
                             return names;
@@ -54,6 +57,7 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Recursively extract all symbol names from a syntax pattern (list, array, @array, struct, or @struct).
+    /// Names are stripped of `@` prefix (mutability annotation).
     pub(super) fn extract_pattern_names<'s>(
         syntax: &'s Syntax,
         out: &mut Vec<(&'s str, &'s [ScopeId])>,
@@ -69,7 +73,8 @@ impl<'a> Analyzer<'a> {
                 // Skip wildcard and parameter markers
             }
             SyntaxKind::Symbol(name) => {
-                out.push((name.as_str(), syntax.scopes.as_slice()));
+                let (actual, _) = super::strip_at_prefix(name);
+                out.push((actual, syntax.scopes.as_slice()));
             }
             SyntaxKind::List(items) | SyntaxKind::Array(items) | SyntaxKind::ArrayMut(items) => {
                 for item in items {
@@ -326,7 +331,9 @@ impl<'a> Analyzer<'a> {
     ) -> Result<HirPattern, String> {
         match &syntax.kind {
             SyntaxKind::Symbol(name) if name == "_" => Ok(HirPattern::Wildcard),
-            SyntaxKind::Symbol(name) => {
+            SyntaxKind::Symbol(raw_name) => {
+                let (name, is_mutable) = super::strip_at_prefix(raw_name);
+
                 let in_function = self.scopes.iter().any(|s| s.is_function);
                 let binding_scope = if in_function {
                     BindingScope::Local
@@ -334,7 +341,7 @@ impl<'a> Analyzer<'a> {
                     scope
                 };
 
-                let binding = if let Some(&pre) = self.pre_bindings.get(name.as_str()) {
+                let binding = if let Some(&pre) = self.pre_bindings.get(name) {
                     // Use pre-created binding from letrec pass 1 (avoids
                     // identity mismatch when the same name appears in
                     // multiple file-scope forms).
@@ -349,9 +356,10 @@ impl<'a> Analyzer<'a> {
                     }
                 };
 
-                if immutable {
-                    self.arena.get_mut(binding).is_immutable = true;
-                }
+                // Set immutability: immutable default (from caller) can be
+                // overridden per-leaf by @ prefix. Always assign to handle
+                // pre-bound bindings that may have been set differently.
+                self.arena.get_mut(binding).is_immutable = immutable && !is_mutable;
                 Ok(HirPattern::Var(binding))
             }
             SyntaxKind::List(items) => {

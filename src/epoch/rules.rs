@@ -199,10 +199,17 @@ static MIGRATIONS: &[Migration] = &[
     },
     Migration {
         epoch: 7,
-        summary: "flat let bindings — (let [a 1 b 2] ...) instead of (let [[a 1] [b 2]] ...)",
-        rules: &[MigrationRule::FlattenBindings {
-            symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
-        }],
+        summary: "flat let bindings + var → def @; let/params immutable by default",
+        rules: &[
+            MigrationRule::FlattenBindings {
+                symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
+            },
+            MigrationRule::Replace {
+                symbol: "var",
+                arity: 2,
+                template: "(def @$1 $2)",
+            },
+        ],
     },
 ];
 
