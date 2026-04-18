@@ -110,9 +110,9 @@ test-git:  ## Run git plugin integration tests (requires git, no network)
 
 test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
-	cargo clippy --workspace --all-targets -- -D warnings
-	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-	PROPTEST_CASES=4 cargo test --workspace --lib
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+	PROPTEST_CASES=4 cargo test --workspace --lib --all-features
 
 # ── Clean ───────────────────────────────────────────────────────────
 
