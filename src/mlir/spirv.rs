@@ -240,6 +240,9 @@ fn emit_block_instructions(
                         emit_promote(&pname, &rv, indent, out);
                         (lv, pname, ScalarType::Float)
                     }
+                    // Bool operands: treat as Int (0/1)
+                    (ScalarType::Bool, ScalarType::Bool) => (lv, rv, ScalarType::Int),
+                    (ScalarType::Bool, other) | (other, ScalarType::Bool) => (lv, rv, other),
                 };
 
                 let name = format!("%r{}_{}", block_idx, dst.0);

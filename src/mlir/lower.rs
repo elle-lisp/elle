@@ -379,6 +379,12 @@ pub fn lower_to_module<'c>(
                             let p = block.append_operation(arith::sitofp(rv, f64_type, location));
                             (lv, p.result(0).unwrap().into(), ScalarType::Float)
                         }
+                        // Bool operands: treat as Int (0/1)
+                        (ScalarType::Bool, ScalarType::Bool) => (lv, rv, ScalarType::Int),
+                        (ScalarType::Bool, other) | (other, ScalarType::Bool) => {
+                            // Promote bool to the other operand's type
+                            (lv, rv, other)
+                        }
                     };
 
                     let mlir_op = if result_type == ScalarType::Float {

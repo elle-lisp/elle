@@ -173,6 +173,8 @@ impl VM {
 
         let jit_enabled = rc.jit.enabled();
         let jit_threshold = rc.jit.threshold();
+        #[cfg(feature = "mlir")]
+        let mlir_enabled = rc.mlir.enabled();
 
         VM {
             runtime_config: rc,
@@ -206,7 +208,7 @@ impl VM {
             #[cfg(feature = "wasm")]
             wasm_rejections: FxHashMap::default(),
             #[cfg(feature = "mlir")]
-            mlir_enabled: rc.mlir.enabled(),
+            mlir_enabled,
             #[cfg(feature = "mlir")]
             mlir_cache: None,
         }
