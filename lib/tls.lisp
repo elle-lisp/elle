@@ -178,8 +178,13 @@
           (when (> (length buffered) 0)
             (break buffered)))
         # Plaintext buffer empty — read from network.
+        # Use 16384 to match TLS max record size.
         (let [data (port/read port 16384)]  # async
-          (when (nil? data) (break nil))         # EOF
+          (when (nil? data)
+            # TCP closed. process-fn may have buffered plaintext from
+            # a segment that also contained close_notify. One final drain.
+            (let [final (read-plaintext-fn tls n)]
+              (break (if (> (length final) 0) final nil))))
           (process-fn tls data)
           # INVARIANT: Send outgoing after every tls/process.
           # TLS 1.3 post-handshake messages (NewSessionTicket, KeyUpdate) must
