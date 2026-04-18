@@ -389,17 +389,15 @@ impl VM {
 
         // Force-compile if not already cached.
         let tier = self.wasm_tier.as_mut().unwrap();
-        if !tier.is_compiled(bytecode_ptr) {
-            if !tier.compile(bytecode_ptr, &lir) {
-                // Remove the temporary tier before returning.
-                if !had_tier {
-                    self.wasm_tier = None;
-                }
-                return (
-                    SIG_ERROR,
-                    rejected("wasm", "WASM compilation rejected this closure"),
-                );
+        if !tier.is_compiled(bytecode_ptr) && !tier.compile(bytecode_ptr, &lir) {
+            // Remove the temporary tier before returning.
+            if !had_tier {
+                self.wasm_tier = None;
             }
+            return (
+                SIG_ERROR,
+                rejected("wasm", "WASM compilation rejected this closure"),
+            );
         }
 
         // Call through Wasmtime. The result comes back as (Value, SignalBits).

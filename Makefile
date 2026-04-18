@@ -108,11 +108,16 @@ test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build $(CARGO_PROFILE) -p elle
 	$(ELLE) tests/git.lisp
 
+MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
+MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
+               MLIR_SYS_220_PREFIX=$(MLIR_PREFIX) \
+               TABLEGEN_220_PREFIX=$(MLIR_PREFIX)
+
 test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
-	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-	PROPTEST_CASES=4 cargo test --workspace --lib --all-features
+	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
+	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+	$(MLIR_ENV) PROPTEST_CASES=4 cargo test --workspace --lib --all-features
 
 # ── Clean ───────────────────────────────────────────────────────────
 

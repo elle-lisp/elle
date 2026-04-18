@@ -126,7 +126,7 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
             .unwrap_or(ScalarType::Int);
         // Float results: bitcast f64→i64 for the output buffer.
         let store_val = if rt == ScalarType::Float {
-            let bc = format!("%ret_bc");
+            let bc = "%ret_bc".to_string();
             out.push_str(&format!(
                 "{indent}{bc} = arith.bitcast {result} : f64 to i64\n"
             ));

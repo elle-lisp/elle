@@ -16,6 +16,7 @@ pub use spirv::lower_to_spirv;
 
 #[cfg(test)]
 mod tests {
+    use super::lower;
     use super::*;
     use crate::lir::*;
     use crate::signals::Signal;
