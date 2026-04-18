@@ -78,7 +78,8 @@ smoke-jit:
 			'timeout $(TIMEOUT) $(ELLE) --jit=1 {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke-wasm: elle
+smoke-wasm:
+	cargo build --release -p elle --features wasm -q
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
@@ -101,7 +102,6 @@ smoke-diff:  ## Cross-tier differential agreement tests (compile/run-on)
 		|| { echo "FAILED: differential tests"; exit 1; }
 
 smoke: dev smoke-vm smoke-jit smoke-wasm smoke-diff doctest  ## Run examples + elle scripts (VM, JIT, WASM, differential) + docgen + doctest
-	cargo build --release -p elle --features wasm -q
 	./target/release/elle demos/docgen/generate.lisp
 
 test-git:  ## Run git plugin integration tests (requires git, no network)

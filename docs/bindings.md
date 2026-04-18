@@ -13,7 +13,13 @@ prefix its name with `@`.
 (def x 10)           # immutable
 (def @y 20)          # mutable
 (assign y 30)        # ok
-(assign x 99)        # compile error: cannot assign immutable binding 'x'
+```
+
+Assigning to an immutable binding is a compile error:
+
+```text
+(assign x 99)
+# compile error: cannot assign immutable binding 'x' (use @x to make it mutable)
 ```
 
 The `@` prefix appears only at the binding site — all subsequent uses of

@@ -37,8 +37,8 @@
 
 # ── WASM policy keywords ─────────────────────────────────────────────
 
-# Default WASM policy is :off
-(assert (= (vm/config :wasm) :off) "default WASM policy is :off")
+# Save initial WASM policy (may be :off or :full depending on CLI flags)
+(def @saved-wasm (vm/config :wasm))
 
 # Setting WASM policy
 (vm/config-set :wasm :full)
@@ -47,9 +47,11 @@
 (vm/config-set :wasm :lazy)
 (assert (= (vm/config :wasm) :lazy) "WASM policy set to :lazy")
 
-# Restore
 (vm/config-set :wasm :off)
-(assert (= (vm/config :wasm) :off) "WASM policy restored to :off")
+(assert (= (vm/config :wasm) :off) "WASM policy set to :off")
+
+# Restore
+(vm/config-set :wasm saved-wasm)
 
 # ── Trace keyword sets ────────────────────────────────────────────────
 
