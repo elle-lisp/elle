@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Docstrings — documentation extraction and retrieval
 #
 # Tests for the (doc name) primitive and docstring extraction from function definitions.
@@ -17,25 +18,25 @@
 # === Builtin docstrings ===
 
 # Builtin primitives have documentation
-(let ((doc-str (doc "+")))
+(let [doc-str (doc "+")]
   (assert (string/contains? doc-str "+") "Builtin + should have documentation containing '+'"))
 
 # === Missing docstrings ===
 
 # Undefined variable returns "No documentation found"
-(let ((result (doc "undefined-var-xyz")))
+(let [result (doc "undefined-var-xyz")]
   (assert (string/contains? result "No documentation found") "Undefined variable should return 'No documentation found'"))
 
 # Variable without docstring returns "No documentation found"
 (def x 42)
-(let ((result (doc "x")))
+(let [result (doc "x")]
   (assert (string/contains? result "No documentation found") "Variable without docstring should return 'No documentation found'"))
 
 # === Edge cases ===
 
 # Single-body string is NOT a docstring (it's the return value)
 (def single-string-fn (fn () "hello"))
-(let ((result (doc single-string-fn)))
+(let [result (doc single-string-fn)]
   (assert (string/contains? result "No documentation found") "Single-body string should not be treated as docstring"))
 
 # Docstring with multiple body expressions

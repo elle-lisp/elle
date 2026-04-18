@@ -2272,7 +2272,7 @@ fn prim_compile_add_handler(args: &[Value]) -> (SignalBits, Value) {
                             let call_text = &handle.source[byte_offset..call_end];
                             let wrapped = match signal_kind.as_str() {
                                 "error" => format!(
-                                    "(let [[[ok? result] (protect {})]] \
+                                    "(let [[ok? result] (protect {})] \
                                      (if ok? result (begin (eprintln \"error:\" result) nil)))",
                                     call_text
                                 ),

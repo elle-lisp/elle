@@ -26,6 +26,7 @@ impl<'a> Analyzer<'a> {
 
         // Phase 1: Analyze all value expressions in the OUTER scope.
         // For destructuring bindings, we record the pattern syntax for Phase 2.
+        // Bindings are flat pairs: [name1 value1 name2 value2 ...]
         enum LetBinding<'s> {
             Simple(&'s str, Vec<ScopeId>, Hir),
             Destructure(&'s Syntax, Hir),
@@ -33,27 +34,32 @@ impl<'a> Analyzer<'a> {
         let mut analyzed = Vec::new();
         let mut signal = Signal::silent();
 
-        for binding in bindings_syntax {
-            let pair = binding
-                .as_list_or_tuple()
-                .ok_or_else(|| format!("{}: let binding must be a pair (...) or [...]", span))?;
-            if pair.len() != 2 {
-                return Err(format!("{}: let binding must be (name value)", span));
-            }
+        if bindings_syntax.len() % 2 != 0 {
+            return Err(format!(
+                "{}: let bindings must have an even number of forms (name/value pairs)",
+                span
+            ));
+        }
 
-            let value = self.analyze_expr(&pair[1])?;
+        let mut i = 0;
+        while i < bindings_syntax.len() {
+            let name_syn = &bindings_syntax[i];
+            let value_syn = &bindings_syntax[i + 1];
+
+            let value = self.analyze_expr(value_syn)?;
             signal = signal.combine(value.signal);
 
-            if let Some(name) = pair[0].as_symbol() {
-                analyzed.push(LetBinding::Simple(name, pair[0].scopes.clone(), value));
-            } else if Self::is_destructure_pattern(&pair[0]) {
-                analyzed.push(LetBinding::Destructure(&pair[0], value));
+            if let Some(name) = name_syn.as_symbol() {
+                analyzed.push(LetBinding::Simple(name, name_syn.scopes.clone(), value));
+            } else if Self::is_destructure_pattern(name_syn) {
+                analyzed.push(LetBinding::Destructure(name_syn, value));
             } else {
                 return Err(format!(
                     "{}: let binding name must be a symbol, list, or array",
                     span
                 ));
             }
+            i += 2;
         }
 
         // Phase 2: Push scope and create all bindings
@@ -174,6 +180,8 @@ impl<'a> Analyzer<'a> {
         // duplicate Binding objects, analyze_destructure_pattern checks
         // lookup_in_current_scope for the Local scope case, reusing
         // pre-existing bindings.
+        //
+        // Bindings are flat pairs: [name1 value1 name2 value2 ...]
         enum LetrecEntry<'s> {
             Simple(Binding, &'s Syntax),
             Destructure {
@@ -184,24 +192,28 @@ impl<'a> Analyzer<'a> {
         }
         let mut entries = Vec::new();
 
-        for binding in bindings_syntax {
-            let pair = binding
-                .as_list_or_tuple()
-                .ok_or_else(|| format!("{}: letrec binding must be a pair (...) or [...]", span))?;
-            if pair.len() != 2 {
-                return Err(format!("{}: letrec binding must be (name value)", span));
-            }
+        if bindings_syntax.len() % 2 != 0 {
+            return Err(format!(
+                "{}: letrec bindings must have an even number of forms (name/value pairs)",
+                span
+            ));
+        }
 
-            if let Some(name) = pair[0].as_symbol() {
+        let mut i = 0;
+        while i < bindings_syntax.len() {
+            let name_syn = &bindings_syntax[i];
+            let value_syn = &bindings_syntax[i + 1];
+
+            if let Some(name) = name_syn.as_symbol() {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
                 let b = self.bind(name, &[], BindingScope::Local);
                 self.arena.get_mut(b).is_prebound = true;
-                entries.push(LetrecEntry::Simple(b, &pair[1]));
-            } else if Self::is_destructure_pattern(&pair[0]) {
+                entries.push(LetrecEntry::Simple(b, value_syn));
+            } else if Self::is_destructure_pattern(name_syn) {
                 // Destructure pattern — pre-bind leaf names for mutual visibility
                 let mut names = Vec::new();
-                Self::extract_pattern_names(&pair[0], &mut names);
+                Self::extract_pattern_names(name_syn, &mut names);
                 let mut leaf_bindings = HashMap::new();
                 for (name, _name_scopes) in &names {
                     if *name != "_" {
@@ -211,8 +223,8 @@ impl<'a> Analyzer<'a> {
                     }
                 }
                 entries.push(LetrecEntry::Destructure {
-                    pattern: &pair[0],
-                    value: &pair[1],
+                    pattern: name_syn,
+                    value: value_syn,
                     leaf_bindings,
                 });
             } else {
@@ -221,6 +233,7 @@ impl<'a> Analyzer<'a> {
                     span
                 ));
             }
+            i += 2;
         }
 
         // Second pass: analyze values and build the output.

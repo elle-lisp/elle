@@ -29,7 +29,7 @@ fn test_compile_if() {
 #[test]
 fn test_compile_let() {
     let (mut symbols, _) = setup();
-    let result = compile("(let ((x 10)) x)", &mut symbols, "<test>");
+    let result = compile("(let [x 10] x)", &mut symbols, "<test>");
     assert!(result.is_ok());
 }
 
@@ -174,7 +174,7 @@ fn test_eval_if_false() {
 #[test]
 fn test_eval_let_simple() {
     let (mut symbols, mut vm) = setup();
-    let result = eval("(let ((x 10)) x)", &mut symbols, &mut vm, "<test>");
+    let result = eval("(let [x 10] x)", &mut symbols, &mut vm, "<test>");
     match result {
         Ok(v) => assert_eq!(v, Value::int(10)),
         Err(e) => panic!("Expected Ok(10), got Err: {}", e),
@@ -185,7 +185,7 @@ fn test_eval_let_simple() {
 fn test_eval_let_with_arithmetic() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10) (y 5)) (+ x y))",
+        "(let [x 10 y 5] (+ x y))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -219,7 +219,7 @@ fn test_eval_lambda_add_one() {
 #[test]
 fn test_compile_lambda_with_capture() {
     let (mut symbols, _) = setup();
-    let result = compile("(let ((x 10)) (fn () x))", &mut symbols, "<test>");
+    let result = compile("(let [x 10] (fn () x))", &mut symbols, "<test>");
     match result {
         Ok(_) => {}
         Err(e) => panic!("Failed to compile lambda with capture: {}", e),
@@ -405,7 +405,7 @@ fn test_eval_while_with_mutation() {
 fn test_eval_closure_captures_local() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10)) ((fn () x)))",
+        "(let [x 10] ((fn () x)))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -417,7 +417,7 @@ fn test_eval_closure_captures_local() {
 fn test_eval_closure_captures_multiple() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10) (y 20)) ((fn () (+ x y))))",
+        "(let [x 10 y 20] ((fn () (+ x y))))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -429,7 +429,7 @@ fn test_eval_closure_captures_multiple() {
 fn test_eval_nested_closure() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10)) ((fn () ((fn () x)))))",
+        "(let [x 10] ((fn () ((fn () x)))))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -441,7 +441,7 @@ fn test_eval_nested_closure() {
 fn test_eval_closure_with_param_and_capture() {
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        "(let ((x 10)) ((fn (y) (+ x y)) 5))",
+        "(let [x 10] ((fn (y) (+ x y)) 5))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -651,7 +651,7 @@ fn test_analyze_lambda() {
 fn test_analyze_with_let() {
     let (mut symbols, mut vm) = setup();
     let result = analyze(
-        "(let ((x 1) (y 2)) (+ x y))",
+        "(let [x 1 y 2] (+ x y))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -726,7 +726,7 @@ fn test_nqueens_functions_are_pure() {
   (fn (col remaining row-offset)
     (if (empty? remaining)
       true
-      (let ((placed-col (first remaining)))
+      (let [placed-col (first remaining)]
         (if (or (= col placed-col)
                 (= row-offset (abs (- col placed-col))))
           false
@@ -741,7 +741,7 @@ fn test_nqueens_functions_are_pure() {
     (if (= col n)
       (list)
       (if (safe? col queens)
-        (let ((new-queens (cons col queens)))
+        (let [new-queens (cons col queens)]
           (append (solve-helper n (+ row 1) new-queens)
                   (try-cols-helper n (+ col 1) queens row)))
         (try-cols-helper n (+ col 1) queens row)))))
@@ -778,7 +778,7 @@ fn test_fiber_new_and_status() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        r#"(let ((f (fiber/new (fn () 42) 0)))
+        r#"(let [f (fiber/new (fn () 42) 0)]
              (= (fiber/status f) :new))"#,
         &mut symbols,
         &mut vm,
@@ -796,7 +796,7 @@ fn test_fiber_resume_simple() {
     // A fiber that just returns a value
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(let ((f (fiber/new (fn () 42) 0)))
+        r#"(let [f (fiber/new (fn () 42) 0)]
              (fiber/resume f))"#,
         &mut symbols,
         &mut vm,
@@ -814,7 +814,7 @@ fn test_fiber_resume_dead_status() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        r#"(let ((f (fiber/new (fn () 42) 0)))
+        r#"(let [f (fiber/new (fn () 42) 0)]
              (fiber/resume f)
              (= (fiber/status f) :dead))"#,
         &mut symbols,
@@ -834,7 +834,7 @@ fn test_fiber_emit_and_resume() {
     let (mut symbols, mut vm) = setup();
     // SIG_YIELD = 2, mask catches it
     let result = eval(
-        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
+        r#"(let [f (fiber/new (fn () (emit 2 99) 42) 2)]
              (fiber/resume f)
              (fiber/value f))"#,
         &mut symbols,
@@ -852,7 +852,7 @@ fn test_fiber_emit_resume_continues() {
     // Resume after emit should continue execution and return final value
     let (mut symbols, mut vm) = setup();
     let result = eval(
-        r#"(let ((f (fiber/new (fn () (emit 2 99) 42) 2)))
+        r#"(let [f (fiber/new (fn () (emit 2 99) 42) 2)]
              (fiber/resume f)
              (fiber/resume f))"#,
         &mut symbols,
@@ -898,7 +898,7 @@ fn test_fiber_emit_through_nested_call() {
     let result = eval(
         r#"(begin
              (defn inner () (emit 2 99))
-             (let ((f (fiber/new (fn () (inner) 42) 2)))
+             (let [f (fiber/new (fn () (inner) 42) 2)]
                (fiber/resume f)
                (fiber/value f)))"#,
         &mut symbols,
@@ -1054,7 +1054,7 @@ fn test_arity_in_nested_positions() {
     assert!(result.unwrap_err().contains("arity"));
 
     let mut symbols = SymbolTable::new();
-    let result = compile("(let ((x 1)) (cons x))", &mut symbols, "<test>");
+    let result = compile("(let [x 1] (cons x))", &mut symbols, "<test>");
     assert!(result.is_err(), "(cons x) in let body should fail");
     assert!(result.unwrap_err().contains("arity"));
 
@@ -1184,7 +1184,7 @@ fn test_eval_with_let_in_evald_code() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        "(eval '(let ((x 10)) (+ x 5)))",
+        "(eval '(let [x 10] (+ x 5)))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1198,7 +1198,7 @@ fn test_eval_with_closure_in_evald_code() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        "(eval '(let ((x 1)) ((fn () x))))",
+        "(eval '(let [x 1] ((fn () x))))",
         &mut symbols,
         &mut vm,
         "<test>",
@@ -1222,7 +1222,7 @@ fn test_eval_inside_let() {
     let (mut symbols, mut vm) = setup();
     set_symbol_table(&mut symbols as *mut SymbolTable);
     let result = eval(
-        "(let ((x 10)) (eval '(+ 1 2)))",
+        "(let [x 10] (eval '(+ 1 2)))",
         &mut symbols,
         &mut vm,
         "<test>",

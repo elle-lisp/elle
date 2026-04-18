@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Quasiquote bracket support + when-ok macro
 #
 # Regression test: brackets inside quasiquote templates were quoted
@@ -8,7 +9,7 @@
 # ── 1. Bracket let in macro output ──────────────────────────────────
 
 (defmacro bind1 (name val & body)
-  `(let [[,name ,val]] ,;body))
+  `(let [,name ,val] ,;body))
 
 (bind1 x 42
   (assert (= x 42) "1: bracket let"))
@@ -17,7 +18,7 @@
 # ── 2. Bracket let* in macro output ─────────────────────────────────
 
 (defmacro bind2 (n1 v1 n2 v2 & body)
-  `(let* [[,n1 ,v1] [,n2 ,v2]] ,;body))
+  `(let* [,n1 ,v1 ,n2 ,v2] ,;body))
 
 (bind2 a 1 b 2
   (assert (= (+ a b) 3) "2: bracket let*"))

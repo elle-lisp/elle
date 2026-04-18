@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/rdf/elle.lisp — RDF triple generation for Elle source analysis
 ##
 ## Canonical representation of Elle semantic data as N-Triples.
@@ -130,7 +131,7 @@
 
   # Signal
   (var sig nil)
-  (let [[[ok? val] (protect (compile/signal analysis (keyword name)))]]
+  (let [[ok? val] (protect (compile/signal analysis (keyword name)))]
     (when ok? (assign sig val)))
 
   (when sig
@@ -141,7 +142,7 @@
 
     # Captures
     (var caps nil)
-    (let [[[ok? val] (protect (compile/captures analysis (keyword name)))]]
+    (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
       (when ok? (assign caps val)))
 
     (when caps

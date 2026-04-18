@@ -1,27 +1,28 @@
+(elle/epoch 7)
 # file/stat and file/lstat — error cases and symlink behavior
 
 
 # ── file/stat error cases ────────────────────────────────────────────────────
 
 # not-found → io-error
-(let (([ok? err] (protect ((fn [] (file/stat "/tmp/elle-nonexistent-path-stat-test")))))) (assert (not ok?) "file/stat not-found gives io-error") (assert (= (get err :error) :io-error) "file/stat not-found gives io-error"))
+(let [[ok? err] (protect ((fn [] (file/stat "/tmp/elle-nonexistent-path-stat-test"))))] (assert (not ok?) "file/stat not-found gives io-error") (assert (= (get err :error) :io-error) "file/stat not-found gives io-error"))
 
 # non-string argument → type-error
-(let (([ok? err] (protect ((fn [] (file/stat 42)))))) (assert (not ok?) "file/stat non-string gives type-error") (assert (= (get err :error) :type-error) "file/stat non-string gives type-error"))
+(let [[ok? err] (protect ((fn [] (file/stat 42))))] (assert (not ok?) "file/stat non-string gives type-error") (assert (= (get err :error) :type-error) "file/stat non-string gives type-error"))
 
 # wrong arity → arity-error (use apply to bypass compile-time arity check)
-(let (([ok? err] (protect ((fn [] (apply file/stat ["a" "b"])))))) (assert (not ok?) "file/stat wrong arity gives arity-error") (assert (= (get err :error) :arity-error) "file/stat wrong arity gives arity-error"))
+(let [[ok? err] (protect ((fn [] (apply file/stat ["a" "b"]))))] (assert (not ok?) "file/stat wrong arity gives arity-error") (assert (= (get err :error) :arity-error) "file/stat wrong arity gives arity-error"))
 
 # ── file/lstat error cases ───────────────────────────────────────────────────
 
 # not-found → io-error
-(let (([ok? err] (protect ((fn [] (file/lstat "/tmp/elle-nonexistent-path-lstat-test")))))) (assert (not ok?) "file/lstat not-found gives io-error") (assert (= (get err :error) :io-error) "file/lstat not-found gives io-error"))
+(let [[ok? err] (protect ((fn [] (file/lstat "/tmp/elle-nonexistent-path-lstat-test"))))] (assert (not ok?) "file/lstat not-found gives io-error") (assert (= (get err :error) :io-error) "file/lstat not-found gives io-error"))
 
 # non-string argument → type-error
-(let (([ok? err] (protect ((fn [] (file/lstat 42)))))) (assert (not ok?) "file/lstat non-string gives type-error") (assert (= (get err :error) :type-error) "file/lstat non-string gives type-error"))
+(let [[ok? err] (protect ((fn [] (file/lstat 42))))] (assert (not ok?) "file/lstat non-string gives type-error") (assert (= (get err :error) :type-error) "file/lstat non-string gives type-error"))
 
 # wrong arity → arity-error (use apply to bypass compile-time arity check)
-(let (([ok? err] (protect ((fn [] (apply file/lstat ["a" "b"])))))) (assert (not ok?) "file/lstat wrong arity gives arity-error") (assert (= (get err :error) :arity-error) "file/lstat wrong arity gives arity-error"))
+(let [[ok? err] (protect ((fn [] (apply file/lstat ["a" "b"]))))] (assert (not ok?) "file/lstat wrong arity gives arity-error") (assert (= (get err :error) :arity-error) "file/lstat wrong arity gives arity-error"))
 
 # ── symlink behavior ─────────────────────────────────────────────────────────
 

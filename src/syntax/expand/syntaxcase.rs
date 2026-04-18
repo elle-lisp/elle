@@ -581,7 +581,7 @@ fn make_let(bindings: Vec<(Syntax, Syntax)>, body: Syntax, span: Span) -> Syntax
     make_let_form("let", bindings, body, span)
 }
 
-/// Make `(let* ((b1 e1) (b2 e2) ...) body)` for sequential bindings.
+/// Make `(let* [b1 e1 b2 e2 ...] body)` for sequential bindings.
 fn make_let_star(bindings: Vec<(Syntax, Syntax)>, body: Syntax, span: Span) -> Syntax {
     make_let_form("let*", bindings, body, span)
 }
@@ -592,11 +592,13 @@ fn make_let_form(
     body: Syntax,
     span: Span,
 ) -> Syntax {
-    let binding_list: Vec<Syntax> = bindings
-        .into_iter()
-        .map(|(bsym, expr)| Syntax::new(SyntaxKind::List(vec![bsym, expr]), span.clone()))
-        .collect();
-    let bindings_node = Syntax::new(SyntaxKind::List(binding_list), span.clone());
+    // Epoch 7 flat bindings: [name1 value1 name2 value2 ...]
+    let mut flat_bindings: Vec<Syntax> = Vec::with_capacity(bindings.len() * 2);
+    for (bsym, expr) in bindings {
+        flat_bindings.push(bsym);
+        flat_bindings.push(expr);
+    }
+    let bindings_node = Syntax::new(SyntaxKind::Array(flat_bindings), span.clone());
     Syntax::new(
         SyntaxKind::List(vec![
             Syntax::new(SyntaxKind::Symbol(keyword.to_string()), span.clone()),

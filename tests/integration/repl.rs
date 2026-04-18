@@ -109,7 +109,7 @@ fn multiline_expression() {
 
 #[test]
 fn multiline_let() {
-    let (out, _, code) = elle("(let ((x 10))\n  (+ x 1))\n");
+    let (out, _, code) = elle("(let [x 10]\n  (+ x 1))\n");
     assert_eq!(code, 0);
     assert!(out.contains("⟹ 11"), "multiline let: {}", out);
 }

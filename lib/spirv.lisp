@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/spirv.lisp — SPIR-V bytecode emitter
 ##
 ## Generates SPIR-V compute shaders at runtime. No GLSL, no offline
@@ -108,7 +109,7 @@
   (push buf (bit/and (bit/shift-right w 24) 0xff)))
 
 (defn string-word-count [s]
-  (let [[n (+ (length s) 1)]]
+  (let [n (+ (length s) 1)]
     (int (ceil (/ (float n) 4.0)))))
 
 ## ── Instruction emission ────────────────────────────────────────
@@ -120,9 +121,9 @@
 
 (defn string-to-words [s]
   "Convert string to null-terminated 4-byte-padded SPIR-V word array."
-  (let* [[raw (@bytes s)]
-         [_ (push raw 0)]  ## null terminate
-         [rem (% (length raw) 4)]]
+  (let* [raw (@bytes s)
+         _ (push raw 0)  ## null terminate
+         rem (% (length raw) 4)]
     (when (not (= rem 0))
       (repeat (- 4 rem) (push raw 0)))
     (map (fn [i]
@@ -134,8 +135,8 @@
 
 (defn emit-entry-point [section exec-model fn-id name interface-ids]
   "Emit OpEntryPoint with embedded string."
-  (let* [[str-words (string-to-words name)]
-         [wc (+ 3 (length str-words) (length interface-ids))]]
+  (let* [str-words (string-to-words name)
+         wc (+ 3 (length str-words) (length interface-ids))]
     (push section (bit/or (bit/shift-left wc 16) op-entry-point))
     (push section exec-model)
     (push section fn-id)
@@ -156,7 +157,7 @@
 ## ── Serialization ───────────────────────────────────────────────
 
 (defn serialize [m bound]
-  (let [[buf (@bytes)]]
+  (let [buf (@bytes)]
     (encode-word buf magic)
     (encode-word buf version)
     (encode-word buf 0)
@@ -177,32 +178,32 @@
   "Build a SPIR-V compute shader with f32 storage buffers.
    Returns immutable SPIR-V bytes."
   (var next-id 1)
-  (let* [[m   (make-module)]
-         [id  (fn []
-                (let [[n next-id]]
+  (let* [m   (make-module)
+         id  (fn []
+                (let [n next-id]
                   (assign next-id (+ n 1))
-                  n))]
+                  n))
          ## ── Standard types ──────────────────────────────
-         [void-t         (id)]
-         [f32-t          (id)]
-         [u32-t          (id)]
-         [uvec3-t        (id)]
-         [rta-t          (id)]
-         [fn-void-t      (id)]
-         [ptr-uvec3-in-t (id)]
-         [ptr-f32-sb-t   (id)]
-         [ptr-f32-fn-t  (id)]
-         [ptr-u32-fn-t  (id)]
+         void-t         (id)
+         f32-t          (id)
+         u32-t          (id)
+         uvec3-t        (id)
+         rta-t          (id)
+         fn-void-t      (id)
+         ptr-uvec3-in-t (id)
+         ptr-f32-sb-t   (id)
+         ptr-f32-fn-t  (id)
+         ptr-u32-fn-t  (id)
          ## ── Per-buffer types ────────────────────────────
-         [buf-struct-ids (map (fn [_] (id)) (range num-buffers))]
-         [buf-ptr-ids    (map (fn [_] (id)) (range num-buffers))]
-         [buf-var-ids    (map (fn [_] (id)) (range num-buffers))]
+         buf-struct-ids (map (fn [_] (id)) (range num-buffers))
+         buf-ptr-ids    (map (fn [_] (id)) (range num-buffers))
+         buf-var-ids    (map (fn [_] (id)) (range num-buffers))
          ## ── Constants and special vars ──────────────────
-         [const-zero (id)]
-         [gid-var    (id)]
+         const-zero (id)
+         gid-var    (id)
          ## ── Function ────────────────────────────────────
-         [main-fn    (id)]
-         [entry-lbl  (id)]]
+         main-fn    (id)
+         entry-lbl  (id)]
 
     ## ── Capabilities ────────────────────────────────
     (emit-inst (m :caps) op-capability 1)
@@ -224,8 +225,8 @@
     (emit-inst (m :decorations) op-decorate rta-t dec-array-stride 4)
 
     (each i (range num-buffers)
-      (let* [[struct-id (buf-struct-ids i)]
-             [var-id    (buf-var-ids i)]]
+      (let* [struct-id (buf-struct-ids i)
+             var-id    (buf-var-ids i)]
         (emit-inst (m :decorations) op-decorate struct-id dec-block)
         (emit-inst (m :decorations) op-member-decorate struct-id 0 dec-offset 0)
         (emit-inst (m :decorations) op-decorate var-id dec-descriptor-set 0)
@@ -244,7 +245,7 @@
     (emit-inst (m :types) op-type-pointer ptr-u32-fn-t sc-function u32-t)
 
     (each i (range num-buffers)
-      (let [[struct-id (buf-struct-ids i)]]
+      (let [struct-id (buf-struct-ids i)]
         (emit-inst (m :types) op-type-struct struct-id rta-t)
         (emit-inst (m :types) op-type-pointer (buf-ptr-ids i) sc-storage-buffer struct-id)))
 
@@ -259,42 +260,42 @@
     ## ── Function body ───────────────────────────────
     ## fn-vars: OpVariable with Function storage class (must be first in entry block)
     ## body: all other function instructions (emitted by body-fn)
-    (let* [[fn-vars @[]]
-           [body    @[]]
+    (let* [fn-vars @[]
+           body    @[]
 
-           [binop (fn [opcode result-type a b]
-              (let [[r (id)]]
+           binop (fn [opcode result-type a b]
+              (let [r (id)]
                 (emit-inst body opcode result-type r a b)
-                r))]
+                r))
 
-           [bool-t-cell @[nil]]
+           bool-t-cell @[nil]
 
-           [ensure-bool (fn []
+           ensure-bool (fn []
               (when (nil? (bool-t-cell 0))
-                (let [[bt (id)]]
+                (let [bt (id)]
                   (emit-inst (m :types) op-type-bool bt)
                   (put bool-t-cell 0 bt)))
-              (bool-t-cell 0))]
+              (bool-t-cell 0))
 
-           [cmp-f (fn [opcode a b]
-              (let* [[bt (ensure-bool)]
-                     [r  (id)]]
+           cmp-f (fn [opcode a b]
+              (let* [bt (ensure-bool)
+                     r  (id)]
                 (emit-inst body opcode bt r a b)
-                r))]
+                r))
 
-           [s {:global-id (fn []
-                (let* [[gv (id)] [ix (id)]]
+           s {:global-id (fn []
+                (let* [gv (id) ix (id)]
                   (emit-inst body op-load uvec3-t gv gid-var)
                   (emit-inst body op-composite-extract u32-t ix gv 0)
                   ix))
                :load (fn [buf-idx elem-idx]
-                (let* [[ptr (id)] [val (id)]]
+                (let* [ptr (id) val (id)]
                   (emit-inst body op-access-chain ptr-f32-sb-t ptr
                     (buf-var-ids buf-idx) const-zero elem-idx)
                   (emit-inst body op-load f32-t val ptr)
                   val))
                :store (fn [buf-idx elem-idx val]
-                (let [[ptr (id)]]
+                (let [ptr (id)]
                   (emit-inst body op-access-chain ptr-f32-sb-t ptr
                     (buf-var-ids buf-idx) const-zero elem-idx)
                   (emit-inst body op-store ptr val)))
@@ -315,34 +316,34 @@
                :slt    (fn [a b] (cmp-f op-sless-than a b))
                :sgt    (fn [a b] (cmp-f op-sgreater-than a b))
                :select (fn [cond tv fv]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-select f32-t r cond tv fv) r))
                :select-u (fn [cond tv fv]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-select u32-t r cond tv fv) r))
                :const-f (fn [val]
-                 (let* [[r (id)] [bits (f32-bits val)]]
+                 (let* [r (id) bits (f32-bits val)]
                    (emit-inst (m :types) op-constant f32-t r bits) r))
                :const-u (fn [val]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst (m :types) op-constant u32-t r val) r))
                :u2f (fn [val]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-convert-u-to-f f32-t r val) r))
                :f2u (fn [val]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-convert-f-to-u u32-t r val) r))
                ## ── Local variables ────────────────────────
                :var-f (fn []
-                 (let [[v (id)]]
+                 (let [v (id)]
                    (emit-inst fn-vars op-variable ptr-f32-fn-t v sc-function)
                    {:id v :type f32-t}))
                :var-u (fn []
-                 (let [[v (id)]]
+                 (let [v (id)]
                    (emit-inst fn-vars op-variable ptr-u32-fn-t v sc-function)
                    {:id v :type u32-t}))
                :load-var (fn [v]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-load (v :type) r (v :id))
                    r))
                :store-var (fn [v val]
@@ -361,13 +362,13 @@
                  (emit-inst body op-selection-merge merge 0))
                ## ── Logical ops ────────────────────────────
                :logical-and (fn [a b]
-                 (let* [[bt (ensure-bool)]
-                        [r  (id)]]
+                 (let* [bt (ensure-bool)
+                        r  (id)]
                    (emit-inst body op-logical-and bt r a b)
                    r))
                :logical-not (fn [a]
-                 (let* [[bt (ensure-bool)]
-                        [r  (id)]]
+                 (let* [bt (ensure-bool)
+                        r  (id)]
                    (emit-inst body op-logical-not bt r a)
                    r))
                ## ── Integer bitwise ops ────────────────────
@@ -376,18 +377,18 @@
                :ishl (fn [a b] (binop op-shift-left u32-t a b))
                :ishr (fn [a b] (binop op-shift-right u32-t a b))
                :umin (fn [a b]
-                 (let* [[cmp (cmp-f op-sless-than a b)]]
-                   (let [[r (id)]]
+                 (let* [cmp (cmp-f op-sless-than a b)]
+                   (let [r (id)]
                      (emit-inst body op-select u32-t r cmp a b)
                      r)))
                :bitcast-u2f (fn [val]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-bitcast f32-t r val)
                    r))
                :bitcast-f2u (fn [val]
-                 (let [[r (id)]]
+                 (let [r (id)]
                    (emit-inst body op-bitcast u32-t r val)
-                   r))}]]
+                   r))}]
 
       (body-fn s)
 

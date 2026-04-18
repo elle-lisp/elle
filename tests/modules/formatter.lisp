@@ -1,13 +1,13 @@
-(elle/epoch 1)
+(elle/epoch 7)
 # Parametric string formatter module
 # Accepts :prefix, :suffix, :separator keyword configuration
 # Returns a struct of exported functions that close over the config
 
 (fn (&named prefix suffix separator)
   "Parametric formatter module. Accepts :prefix, :suffix, :separator."
-  (let* ([prefix (if (nil? prefix) "" prefix)]
-         [suffix (if (nil? suffix) "" suffix)]
-         [separator (if (nil? separator) ", " separator)])
+  (let* [prefix (if (nil? prefix) "" prefix)
+         suffix (if (nil? suffix) "" suffix)
+         separator (if (nil? separator) ", " separator)]
 
     (defn wrap [s]
       "Wrap a string with the configured prefix and suffix."

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── compile/add-handler tests ─────────────────────────────────────────
 
 # ── Yield signal wrapping ────────────────────────────────────────────
@@ -30,12 +31,12 @@
 ")
 (def a3 (compile/analyze src2))
 
-(let [[[ok? _] (protect (compile/add-handler a3 :pure :yield))]]
+(let [[ok? _] (protect (compile/add-handler a3 :pure :yield))]
   (assert (not ok?) "add-handler errors when function doesn't emit the signal"))
 
 # ── Non-existent function ────────────────────────────────────────────
 
-(let [[[ok? _] (protect (compile/add-handler a :nonexistent :yield))]]
+(let [[ok? _] (protect (compile/add-handler a :nonexistent :yield))]
   (assert (not ok?) "add-handler errors for nonexistent function"))
 
 (println "all compile/add-handler tests passed")

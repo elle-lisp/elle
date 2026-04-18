@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Page template generation
 
 ## Generate navigation HTML using fold
@@ -5,9 +6,9 @@
   (fn (nav-items current-slug)
     (fold
       (fn (acc item)
-        (let ((slug (get item "slug"))
-              (title (get item "title"))
-              (active-class (if (string-contains? slug current-slug) " active" "")))
+        (let [slug (get item "slug")
+              title (get item "title")
+              active-class (if (string-contains? slug current-slug) " active" "")]
           (-> acc (append "<li><a href=\"") (append slug) (append ".html\" class=\"nav-link") (append active-class) (append "\">") (append title) (append "</a></li>"))))
       ""
       nav-items)))
@@ -15,11 +16,11 @@
 ## Generate the full HTML page
 (var generate-page
   (fn (site page nav css body)
-    (let ((site-title (get site "title"))
-          (page-title (get page "title"))
-          (page-desc (get page "description"))
-          (nav-items (get site "nav"))
-          (current-slug (get page "slug")))
+    (let [site-title (get site "title")
+          page-title (get page "title")
+          page-desc (get page "description")
+          nav-items (get site "nav")
+          current-slug (get page "slug")]
       (-> "<!DOCTYPE html>\n"
         (append "<html lang=\"en\">\n")
         (append "<head>\n")

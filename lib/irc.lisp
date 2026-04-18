@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/irc.lisp -- IRCv3 client for Elle
 ##
 ## Coroutine-based IRC client with IRCv3 capability negotiation and SASL.
@@ -56,11 +57,11 @@
   (defn escape-tag-value [s]
     "Escape an IRCv3 tag value per the message-tags spec.
      \\ -> \\\\ | ; -> \\: | space -> \\s | CR -> \\r | LF -> \\n"
-    (let* [[s (string/replace s "\\" "\\\\")]
-           [s (string/replace s ";" "\\:")]
-           [s (string/replace s " " "\\s")]
-           [s (string/replace s "\r" "\\r")]
-           [s (string/replace s "\n" "\\n")]]
+    (let* [s (string/replace s "\\" "\\\\")
+           s (string/replace s ";" "\\:")
+           s (string/replace s " " "\\s")
+           s (string/replace s "\r" "\\r")
+           s (string/replace s "\n" "\\n")]
       s))
 
   (defn unescape-tag-value [s]
@@ -70,7 +71,7 @@
     (var i 0)
     (while (< i (length s))
       (if (and (= (get s i) "\\") (< (inc i) (length s)))
-        (let [[next (get s (inc i))]]
+        (let [next (get s (inc i))]
           (append result
             (match next
               [":" ";"]
@@ -93,7 +94,7 @@
     (def result @{})
     (each part in (string/split raw ";")
       (when (> (length part) 0)
-        (let [[eq (string/find part "=")]]
+        (let [eq (string/find part "=")]
           (if eq
             (put result (keyword (slice part 0 eq))
                         (unescape-tag-value (slice part (inc eq))))
@@ -105,11 +106,11 @@
      'nick!user@host.com' -> {:nick 'nick' :user 'user' :host 'host.com'}
      'irc.server.net'     -> {:server 'irc.server.net'}
      'justnick'           -> {:nick 'justnick' :user nil :host nil}"
-    (let [[bang (string/find raw "!")]]
+    (let [bang (string/find raw "!")]
       (if bang
-        (let* [[nick (slice raw 0 bang)]
-               [rest (slice raw (inc bang))]
-               [at (string/find rest "@")]]
+        (let* [nick (slice raw 0 bang)
+               rest (slice raw (inc bang))
+               at (string/find rest "@")]
           (if at
             {:nick nick :user (slice rest 0 at) :host (slice rest (inc at))}
             {:nick nick :user rest :host nil}))
@@ -129,7 +130,7 @@
       (when (= (length rest) 0) (break))
       (if (= (get rest 0) ":")
         (begin (push params (slice rest 1)) (break))
-        (let [[sp (string/find rest " ")]]
+        (let [sp (string/find rest " ")]
           (if sp
             (begin (push params (slice rest 0 sp))
                    (assign rest (slice rest (inc sp))))
@@ -145,7 +146,7 @@
 
     # Tags: @key=val;key2 ...
     (when (and (> (length rest) 0) (= (get rest 0) "@"))
-      (let [[sp (string/find rest " ")]]
+      (let [sp (string/find rest " ")]
         (when sp
           (assign tags (parse-tags (slice rest 1 sp)))
           (assign rest (slice rest (inc sp))))))
@@ -156,7 +157,7 @@
 
     # Source: :nick!user@host ...
     (when (and (> (length rest) 0) (= (get rest 0) ":"))
-      (let [[sp (string/find rest " ")]]
+      (let [sp (string/find rest " ")]
         (when sp
           (assign source (parse-source (slice rest 1 sp)))
           (assign rest (slice rest (inc sp))))))
@@ -166,9 +167,9 @@
       (assign rest (slice rest 1)))
 
     # Command and params
-    (let* [[sp (string/find rest " ")]
-           [command (if sp (slice rest 0 sp) rest)]
-           [param-str (if sp (slice rest (inc sp)) "")]]
+    (let* [sp (string/find rest " ")
+           command (if sp (slice rest 0 sp) rest)
+           param-str (if sp (slice rest (inc sp)) "")]
       {:tags tags
        :source source
        :command (string/upcase command)
@@ -182,11 +183,11 @@
      with :, or is empty."
     (if (= (length params) 0)
       command
-      (let* [[n (length params)]
-             [last-param (get params (dec n))]
-             [needs-colon (or (string/contains? last-param " ")
+      (let* [n (length params)
+             last-param (get params (dec n))
+             needs-colon (or (string/contains? last-param " ")
                              (string/starts-with? last-param ":")
-                             (= last-param ""))]]
+                             (= last-param ""))]
         (var parts @[command])
         (each i in (range (dec n))
           (push parts (get params i)))
@@ -220,11 +221,11 @@
     (when msg:source (push parts (string ":" (format-source msg:source))))
     (push parts msg:command)
     (when (> (length msg:params) 0)
-      (let* [[n (length msg:params)]
-             [last-param (get msg:params (dec n))]
-             [needs-colon (or (string/contains? last-param " ")
+      (let* [n (length msg:params)
+             last-param (get msg:params (dec n))
+             needs-colon (or (string/contains? last-param " ")
                              (string/starts-with? last-param ":")
-                             (= last-param ""))]]
+                             (= last-param ""))]
         (each i in (range (dec n))
           (push parts (get msg:params i)))
         (push parts (if needs-colon (string ":" last-param) last-param))))
@@ -238,8 +239,8 @@
     (when (and (string/starts-with? text SOH)
                (string/ends-with? text SOH)
                (> (length text) 1))
-      (let* [[inner (slice text 1 (dec (length text)))]
-             [sp (string/find inner " ")]]
+      (let* [inner (slice text 1 (dec (length text)))
+             sp (string/find inner " ")]
         (if sp
           {:command (slice inner 0 sp) :text (slice inner (inc sp))}
           {:command inner :text nil}))))
@@ -262,7 +263,7 @@
      'CHANTYPES=#&' -> {:chantypes '#&'}. Tokens without = are ignored."
     (def result @{})
     (each token in tokens
-      (let [[eq (string/find token "=")]]
+      (let [eq (string/find token "=")]
         (when eq
           (put result
             (keyword (string/downcase (slice token 0 eq)))
@@ -284,13 +285,13 @@
     "Create a transport struct {:read-line :write :close} for host:port.
      Uses TLS if the tls module was provided to the constructor."
     (if tls
-      (let [[conn (tls:connect host port-num)]]
-        {:read-line (fn [] (let [[line (tls:read-line conn)]]
+      (let [conn (tls:connect host port-num)]
+        {:read-line (fn [] (let [line (tls:read-line conn)]
                              (when line (strip-crlf line))))
          :write     (fn [data] (tls:write conn (string data "\r\n")))
          :close     (fn [] (tls:close conn))})
-      (let* [[ip (first (sys/resolve host))]
-             [port (tcp/connect ip port-num)]]
+      (let* [ip (first (sys/resolve host))
+             port (tcp/connect ip port-num)]
         {:read-line (fn [] (port/read-line port))
          :write     (fn [data] (port/write port (string data "\r\n"))
                                (port/flush port))
@@ -303,7 +304,7 @@
      sasl: [authcid password] or nil. Returns registration result struct."
     (defn send [line] ((get transport :write) line))
     (defn recv []
-      (let [[line ((get transport :read-line))]]
+      (let [line ((get transport :read-line))]
         (when line (parse-message line))))
 
     (send (build-line "CAP" ["LS" "302"]))
@@ -319,17 +320,17 @@
     (var sasl-in-progress false)
 
     (defn handle-cap-ls [msg]
-      (let* [[has-more (and (>= (length msg:params) 4)
-                            (= (get msg:params 2) "*"))]
-             [cap-str (if has-more (get msg:params 3) (get msg:params 2))]]
+      (let* [has-more (and (>= (length msg:params) 4)
+                            (= (get msg:params 2) "*"))
+             cap-str (if has-more (get msg:params 3) (get msg:params 2))]
         (each cap in (string/split cap-str " ")
           (when (> (length cap) 0)
-            (let [[eq (string/find cap "=")]]
+            (let [eq (string/find cap "=")]
               (push server-caps (if eq (slice cap 0 eq) cap)))))
         (unless has-more
-          (let* [[offered (apply set (freeze server-caps))]
-                 [desired (if sasl ["sasl" ;DESIRED-CAPS] DESIRED-CAPS)]
-                 [to-req @[]]]
+          (let* [offered (apply set (freeze server-caps))
+                 desired (if sasl ["sasl" ;DESIRED-CAPS] DESIRED-CAPS)
+                 to-req @[]]
             (each cap in desired
               (when (contains? offered cap) (push to-req cap)))
             (if (> (length to-req) 0)
@@ -338,8 +339,8 @@
               (send (build-line "CAP" ["END"])))))))
 
     (defn handle-cap-ack [msg]
-      (let [[acked (string/split
-                     (get msg:params (dec (length msg:params))) " ")]]
+      (let [acked (string/split
+                     (get msg:params (dec (length msg:params))) " ")]
         (assign negotiated-caps
           (apply set (filter (fn [s] (> (length s) 0)) acked))))
       (if (and sasl (contains? negotiated-caps "sasl"))
@@ -357,7 +358,7 @@
 
     (defn handle-auth [msg]
       (when (and sasl-in-progress (= (get msg:params 0) "+"))
-        (let [[[authcid password] sasl]]
+        (let [[authcid password] sasl]
           (send (build-line "AUTHENTICATE"
                   [(sasl-plain-payload authcid password)])))))
 
@@ -370,12 +371,12 @@
 
     (defn handle-isupport [msg]
       (when (> (length msg:params) 2)
-        (let [[tokens (slice msg:params 1 (dec (length msg:params)))]]
+        (let [tokens (slice msg:params 1 (dec (length msg:params)))]
           (each [k v] in (pairs (parse-isupport [;tokens]))
             (put isupport-map k v)))))
 
     (forever
-      (let [[msg (recv)]]
+      (let [msg (recv)]
         (when (nil? msg)
           (error {:error :irc-error :reason :connection-closed :phase :registration :message "connection closed during registration"}))
         (match msg:command
@@ -415,33 +416,33 @@
     (default username nick)
     (default realname nick)
 
-    (let [[transport (make-transport host port)]]
-      (let [[[ok? result] (protect
+    (let [transport (make-transport host port)]
+      (let [[ok? result] (protect
                             (register transport nick username realname
-                                      :sasl sasl))]]
+                                      :sasl sasl))]
         (unless ok?
           (protect ((get transport :close)))
           (error result))
 
-        (let* [[write-fn (get transport :write)]
-               [read-fn  (get transport :read-line)]
-               [close-fn (get transport :close)]
-               [messages
+        (let* [write-fn (get transport :write)
+               read-fn  (get transport :read-line)
+               close-fn (get transport :close)
+               messages
                 (coro/new (fn []
                   (forever
-                    (let [[line (read-fn)]]
+                    (let [line (read-fn)]
                       (when (nil? line) (break))
-                      (let [[msg (parse-message line)]]
+                      (let [msg (parse-message line)]
                         (if (= msg:command "PING")
                           (write-fn (build-line "PONG"
                                       [(or (get msg:params 0) "")]))
-                          (yield msg)))))))]]
+                          (yield msg)))))))]
 
           {:messages messages
            :send     (fn [command & params]
                        (write-fn (build-line command [;params])))
            :close    (fn [& args]
-                       (let [[message (or (get args 0) "Leaving")]]
+                       (let [message (or (get args 0) "Leaving")]
                          (protect (write-fn (build-line "QUIT" [message])))
                          (close-fn)))
            :nick     result:nick
@@ -481,41 +482,41 @@
 
     ## ── Tag parsing ──
 
-    (let [[tags (parse-tags "time=2024-01-01T00:00:00Z;msgid=abc123")]]
+    (let [tags (parse-tags "time=2024-01-01T00:00:00Z;msgid=abc123")]
       (assert (= tags:time "2024-01-01T00:00:00Z") "parse-tags: time")
       (assert (= tags:msgid "abc123") "parse-tags: msgid"))
 
-    (let [[tags (parse-tags "account")]]
+    (let [tags (parse-tags "account")]
       (assert (= tags:account true) "parse-tags: valueless"))
 
-    (let [[tags (parse-tags "a=hello\\sworld;b=x\\:y")]]
+    (let [tags (parse-tags "a=hello\\sworld;b=x\\:y")]
       (assert (= tags:a "hello world") "parse-tags: escaped space")
       (assert (= tags:b "x;y") "parse-tags: escaped semicolon"))
 
     ## ── Source parsing ──
 
-    (let [[src (parse-source "nick!user@host.com")]]
+    (let [src (parse-source "nick!user@host.com")]
       (assert (= src:nick "nick") "parse-source: nick")
       (assert (= src:user "user") "parse-source: user")
       (assert (= src:host "host.com") "parse-source: host"))
 
-    (let [[src (parse-source "irc.server.net")]]
+    (let [src (parse-source "irc.server.net")]
       (assert (= src:server "irc.server.net") "parse-source: server"))
 
-    (let [[src (parse-source "justnick")]]
+    (let [src (parse-source "justnick")]
       (assert (= src:nick "justnick") "parse-source: nick only")
       (assert (nil? src:user) "parse-source: nick only no user")
       (assert (nil? src:host) "parse-source: nick only no host"))
 
     ## ── Message parsing ──
 
-    (let [[msg (parse-message "PING :token123")]]
+    (let [msg (parse-message "PING :token123")]
       (assert (= msg:command "PING") "parse PING command")
       (assert (= (get msg:params 0) "token123") "parse PING token")
       (assert (nil? msg:source) "parse PING no source")
       (assert (nil? msg:tags) "parse PING no tags"))
 
-    (let [[msg (parse-message ":nick!user@host PRIVMSG #channel :Hello world")]]
+    (let [msg (parse-message ":nick!user@host PRIVMSG #channel :Hello world")]
       (assert (= msg:command "PRIVMSG") "parse PRIVMSG command")
       (assert (= msg:source:nick "nick") "parse PRIVMSG nick")
       (assert (= msg:source:user "user") "parse PRIVMSG user")
@@ -523,13 +524,13 @@
       (assert (= (get msg:params 0) "#channel") "parse PRIVMSG target")
       (assert (= (get msg:params 1) "Hello world") "parse PRIVMSG text"))
 
-    (let [[msg (parse-message "@time=2024-01-01T00:00:00Z :nick!u@h PRIVMSG #ch :hi")]]
+    (let [msg (parse-message "@time=2024-01-01T00:00:00Z :nick!u@h PRIVMSG #ch :hi")]
       (assert (= msg:tags:time "2024-01-01T00:00:00Z") "parse tagged: time")
       (assert (= msg:command "PRIVMSG") "parse tagged: command")
       (assert (= (get msg:params 1) "hi") "parse tagged: text"))
 
     # Multiple middle params + trailing
-    (let [[msg (parse-message ":server 005 bot CHANTYPES=#& PREFIX=(ov)@+ :are supported")]]
+    (let [msg (parse-message ":server 005 bot CHANTYPES=#& PREFIX=(ov)@+ :are supported")]
       (assert (= msg:command "005") "parse 005 command")
       (assert (= (get msg:params 0) "bot") "parse 005 target")
       (assert (= (get msg:params 1) "CHANTYPES=#&") "parse 005 chantypes")
@@ -537,12 +538,12 @@
       (assert (= (get msg:params 3) "are supported") "parse 005 trailing"))
 
     # No params
-    (let [[msg (parse-message "QUIT")]]
+    (let [msg (parse-message "QUIT")]
       (assert (= msg:command "QUIT") "parse no-param command")
       (assert (= (length msg:params) 0) "parse no-param empty"))
 
     # Command only with trailing
-    (let [[msg (parse-message "ERROR :Closing Link")]]
+    (let [msg (parse-message "ERROR :Closing Link")]
       (assert (= msg:command "ERROR") "parse ERROR command")
       (assert (= (get msg:params 0) "Closing Link") "parse ERROR text"))
 
@@ -561,10 +562,10 @@
       "format PING")
 
     # Format/parse structural roundtrip
-    (let* [[original ":nick!user@host PRIVMSG #channel :Hello world"]
-           [parsed (parse-message original)]
-           [formatted (format-message parsed)]
-           [reparsed (parse-message formatted)]]
+    (let* [original ":nick!user@host PRIVMSG #channel :Hello world"
+           parsed (parse-message original)
+           formatted (format-message parsed)
+           reparsed (parse-message formatted)]
       (assert (= reparsed:command parsed:command) "roundtrip: command")
       (assert (= (get reparsed:params 0) (get parsed:params 0)) "roundtrip: target")
       (assert (= (get reparsed:params 1) (get parsed:params 1)) "roundtrip: text")
@@ -572,15 +573,15 @@
 
     ## ── CTCP ──
 
-    (let [[ctcp (parse-ctcp (string SOH "VERSION" SOH))]]
+    (let [ctcp (parse-ctcp (string SOH "VERSION" SOH))]
       (assert (= ctcp:command "VERSION") "ctcp VERSION command")
       (assert (nil? ctcp:text) "ctcp VERSION no text"))
 
-    (let [[ctcp (parse-ctcp (string SOH "PING 12345" SOH))]]
+    (let [ctcp (parse-ctcp (string SOH "PING 12345" SOH))]
       (assert (= ctcp:command "PING") "ctcp PING command")
       (assert (= ctcp:text "12345") "ctcp PING text"))
 
-    (let [[ctcp (parse-ctcp (string SOH "ACTION waves" SOH))]]
+    (let [ctcp (parse-ctcp (string SOH "ACTION waves" SOH))]
       (assert (= ctcp:command "ACTION") "ctcp ACTION command")
       (assert (= ctcp:text "waves") "ctcp ACTION text"))
 
@@ -589,8 +590,8 @@
 
     ## ── SASL ──
 
-    (let* [[payload (sasl-plain-payload "jilles" "sesame")]
-           [decoded (b64:decode payload)]]
+    (let* [payload (sasl-plain-payload "jilles" "sesame")
+           decoded (b64:decode payload)]
       (assert (string? payload) "sasl payload is string")
       (assert (> (length payload) 0) "sasl payload nonempty")
       (assert (= (get decoded 0) 0) "sasl: leading NUL")
@@ -600,12 +601,12 @@
 
     ## ── ISUPPORT ──
 
-    (let [[params (parse-isupport ["CHANTYPES=#&" "PREFIX=(ov)@+" "NETWORK=Libera"])]]
+    (let [params (parse-isupport ["CHANTYPES=#&" "PREFIX=(ov)@+" "NETWORK=Libera"])]
       (assert (= params:chantypes "#&") "isupport: CHANTYPES")
       (assert (= params:prefix "(ov)@+") "isupport: PREFIX")
       (assert (= params:network "Libera") "isupport: NETWORK"))
 
-    (let [[params (parse-isupport ["CHANTYPES=#" "SAFELIST" "NETWORK=Test"])]]
+    (let [params (parse-isupport ["CHANTYPES=#" "SAFELIST" "NETWORK=Test"])]
       (assert (= params:chantypes "#") "isupport: with value")
       (assert (nil? (get params :safelist)) "isupport: no-value skipped")
       (assert (= params:network "Test") "isupport: network"))

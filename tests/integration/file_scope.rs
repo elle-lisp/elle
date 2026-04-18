@@ -378,8 +378,8 @@ fn test_immutable_def_multiple_closures() {
 fn test_immutable_let_captured_by_closure() {
     // let bindings are immutable by default and captured by closures.
     let code = r#"
-        (let ((x 99))
-          (let ((f (fn () x)))
+        (let [x 99]
+          (let [f (fn () x)]
             (f)))
     "#;
     assert_eq!(eval_source(code).unwrap(), Value::int(99));

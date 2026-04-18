@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Comparison operators — string and keyword comparison
 #
 # Tests for <, >, <=, >= on strings and keywords.
@@ -71,27 +72,27 @@
 # ============================================================================
 
 # String vs integer error
-(let ((result (protect (< "a" 1))))
+(let [result (protect (< "a" 1))]
   (assert (not (get result 0)) "string < int should error")
-  (let ((err (get result 1)))
+  (let [err (get result 1)]
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))
 
 # String vs keyword error
-(let ((result (protect (< "a" :b))))
+(let [result (protect (< "a" :b))]
   (assert (not (get result 0)) "string < keyword should error")
-  (let ((err (get result 1)))
+  (let [err (get result 1)]
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))
 
 # Keyword vs integer error
-(let ((result (protect (< :a 1))))
+(let [result (protect (< :a 1))]
   (assert (not (get result 0)) "keyword < int should error")
-  (let ((err (get result 1)))
+  (let [err (get result 1)]
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))
 
 # Buffer comparison error
-(let ((result (protect (< @"a" @"b"))))
+(let [result (protect (< @"a" @"b"))]
   (assert (not (get result 0)) "buffer < buffer should error")
-  (let ((err (get result 1)))
+  (let [err (get result 1)]
     (assert (= (get err :error) :type-error) "error kind should be :type-error")))
 
 # ============================================================================

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── gpu-select: git + disgit + N-ary gpu:map ──────────────────────────
 #
 # Tests the full pipeline:

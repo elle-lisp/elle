@@ -234,7 +234,7 @@ mod tests {
 
         // Wrap in letrec to define free variables used by tail-call tests
         let wrapped = format!(
-            "(letrec ((f (fn (& args) nil)) (g (fn (& args) nil)) (h (fn (& args) nil))) {})",
+            "(letrec [f (fn (& args) nil) g (fn (& args) nil) h (fn (& args) nil)] {})",
             source
         );
         let syntax = read_syntax(&wrapped, "<test>").expect("parse failed");
@@ -387,16 +387,16 @@ mod tests {
 
     #[test]
     fn test_let_body_is_tail() {
-        // (fn () (let ((x 1)) (f x))) - f is in tail position
-        let hir = analyze_and_mark("(fn () (let ((x 1)) (f x)))");
+        // (fn () (let [x 1] (f x))) - f is in tail position
+        let hir = analyze_and_mark("(fn () (let [x 1] (f x)))");
         let calls = find_calls(&hir);
         assert_eq!(calls, vec![true]); // f is tail
     }
 
     #[test]
     fn test_let_binding_not_tail() {
-        // (fn () (let ((x (f))) x)) - f is NOT in tail position
-        let hir = analyze_and_mark("(fn () (let ((x (f))) x))");
+        // (fn () (let [x (f)] x)) - f is NOT in tail position
+        let hir = analyze_and_mark("(fn () (let [x (f)] x))");
         let calls = find_calls(&hir);
         assert_eq!(calls, vec![false]); // binding value is not tail
     }

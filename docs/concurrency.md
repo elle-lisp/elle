@@ -33,7 +33,7 @@ The most common pattern:
 `ev/join-protected` returns `[ok? value]` instead of raising errors:
 
 ```text
-(let [[[ok? val] (ev/join-protected (ev/spawn (fn [] (+ 1 2))))]]
+(let [[ok? val] (ev/join-protected (ev/spawn (fn [] (+ 1 2))))]
   (if ok? val :failed))   # => 3
 ```
 
@@ -55,8 +55,8 @@ others are aborted.
 
 ```text
 (ev/scope (fn [spawn]
-  (let [[a (spawn (fn [] :users))]
-        [b (spawn (fn [] :settings))]]
+  (let [a (spawn (fn [] :users))
+        b (spawn (fn [] :settings))]
     {:users (ev/join a) :settings (ev/join b)})))
 ```
 

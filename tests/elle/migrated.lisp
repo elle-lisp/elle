@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Tests for primitives migrated from Rust to Elle stdlib.
 ## Covers: drop, range
 
@@ -12,14 +13,14 @@
 (assert (= (drop 5 ()) ()) "drop n from empty")
 
 # error: negative count
-(let (([ok? err] (protect ((fn [] (drop -1 (list 1 2)))))))
+(let [[ok? err] (protect ((fn [] (drop -1 (list 1 2)))))]
   (assert (not ok?) "drop negative: errors")
   (assert (= (get err :error) :argument-error) "drop negative: argument-error"))
 
 ## ── range ───────────────────────────────────────────────────────────
 
 # (range end)
-(let ((r (range 5)))
+(let [r (range 5)]
   (assert (array? r) "range 5: is array")
   (assert (not (mutable? r)) "range 5: is immutable")
   (assert (= (length r) 5) "range 5: length")
@@ -27,20 +28,20 @@
   (assert (= (get r 4) 4) "range 5: last"))
 
 # (range start end)
-(let ((r (range 2 5)))
+(let [r (range 2 5)]
   (assert (= (length r) 3) "range 2 5: length")
   (assert (= (get r 0) 2) "range 2 5: first")
   (assert (= (get r 2) 4) "range 2 5: last"))
 
 # (range start end step)
-(let ((r (range 0 10 3)))
+(let [r (range 0 10 3)]
   (assert (= (length r) 4) "range step: length")
   (assert (= (get r 0) 0) "range step: first")
   (assert (= (get r 1) 3) "range step: second")
   (assert (= (get r 3) 9) "range step: last"))
 
 # negative step
-(let ((r (range 5 0 -1)))
+(let [r (range 5 0 -1)]
   (assert (= (length r) 5) "range neg step: length")
   (assert (= (get r 0) 5) "range neg step: first")
   (assert (= (get r 4) 1) "range neg step: last"))
@@ -51,13 +52,13 @@
 (assert (= (length (range 5 3)) 0) "range start>end no step: empty")
 
 # range with float step
-(let ((r (range 0 1.0 0.5)))
+(let [r (range 0 1.0 0.5)]
   (assert (= (length r) 2) "range float step: length")
   (assert (= (get r 0) 0) "range float step: first")
   (assert (= (get r 1) 0.5) "range float step: second"))
 
 # error: step zero
-(let (([ok? err] (protect ((fn [] (range 0 10 0))))))
+(let [[ok? err] (protect ((fn [] (range 0 10 0))))]
   (assert (not ok?) "range step=0: errors")
   (assert (= (get err :error) :argument-error) "range step=0: argument-error"))
 
@@ -73,16 +74,16 @@
 
 ## ── ptr/from-int accepts negative values (bugfix) ───────────────
 
-(let [[p (ptr/from-int -1)]]
+(let [p (ptr/from-int -1)]
   (assert (ptr? p) "ptr/from-int -1 returns a pointer")
   (assert (= (ptr/to-int p) -1) "ptr/from-int -1 roundtrips"))
 
 ## ── bytes idempotency (bugfix) ─────────────────────────────────────────
 
-(let [[b (bytes "hello")]]
+(let [b (bytes "hello")]
   (assert (identical? (bytes b) b) "bytes: idempotent on bytes")
   (assert (= (bytes b) b) "bytes: equal on bytes"))
-(let [[mb (@bytes 1 2 3)]]
+(let [mb (@bytes 1 2 3)]
   (assert (identical? (@bytes mb) mb) "@bytes: idempotent on @bytes"))
 (assert (identical? (bytes (bytes 1 2 3)) (bytes 1 2 3)) "bytes: nested idempotent")
 

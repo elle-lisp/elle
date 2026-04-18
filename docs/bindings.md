@@ -30,14 +30,14 @@ a binding.
 ## let — parallel bindings
 
 All right-hand sides are evaluated in the outer scope. No binding sees
-any other binding in the same `let`. Bracket `[name value]` and paren
-`(name value)` syntax are both accepted.
+any other binding in the same `let`. Bindings are flat pairs inside a
+single bracket form: `[name1 value1 name2 value2 ...]`.
 
 ```lisp
 (def outer-a 100)
-(let ([a 1]
-      [b (+ outer-a 1)])   # b sees outer-a (100), not a
-  b)                        # => 101
+(let [a 1
+      b (+ outer-a 1)]   # b sees outer-a (100), not a
+  b)                       # => 101
 ```
 
 ## let* — sequential bindings
@@ -46,10 +46,10 @@ Each binding sees all previous bindings. Use this when later bindings
 depend on earlier ones.
 
 ```lisp
-(let* ([x 5]
-       [y (* x 2)]       # y sees x
-       [z (+ x y)])      # z sees both x and y
-  z)                      # => 15
+(let* [x 5
+       y (* x 2)         # y sees x
+       z (+ x y)]        # z sees both x and y
+  z)                       # => 15
 ```
 
 ## letrec — recursive bindings
@@ -57,10 +57,10 @@ depend on earlier ones.
 Bindings can reference each other, enabling mutual recursion.
 
 ```lisp
-(letrec ([is-even (fn [n]
-           (if (= n 0) true (is-odd (- n 1))))]
-         [is-odd (fn [n]
-           (if (= n 0) false (is-even (- n 1))))])
+(letrec [is-even (fn [n]
+           (if (= n 0) true (is-odd (- n 1))))
+         is-odd (fn [n]
+           (if (= n 0) false (is-even (- n 1))))]
   (is-even 4))            # => true
 ```
 
@@ -88,7 +88,7 @@ can see outer names.
 
 ```lisp
 (def outer-val 10)
-(let ([inner-val 20])
+(let [inner-val 20]
   (+ outer-val inner-val)) # => 30
 ```
 
@@ -99,7 +99,7 @@ reappears when the inner scope ends.
 
 ```lisp
 (def shade 1)
-(let ([shade 2])
+(let [shade 2]
   shade)                   # => 2
 shade                      # => 1
 ```

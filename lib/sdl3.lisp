@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## std/sdl3 — SDL3 bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libSDL3. No Rust plugin needed.
@@ -427,7 +428,7 @@
    :mouse-y   (read-f32 buf 40)})
 
 (defn marshal-window [buf etype]
-  (let ([subtype (get window-event-names etype)])
+  (let [subtype (get window-event-names etype)]
     {:type      :window
      :subtype   (if (nil? subtype) :unknown subtype)
      :timestamp (read-u64 buf 8)
@@ -436,7 +437,7 @@
      :data2     (read-i32 buf 24)}))
 
 (defn marshal-text-input [buf]
-  (let ([text-ptr (read-ptr buf 24)])
+  (let [text-ptr (read-ptr buf 24)]
     {:type      :text-input
      :timestamp (read-u64 buf 8)
      :window-id (read-u32 buf 16)
@@ -444,7 +445,7 @@
 
 (defn marshal-event [buf]
   "Read one event from a 128-byte buffer. Returns a struct or nil."
-  (let ([etype (read-u32 buf 0)])
+  (let [etype (read-u32 buf 0)]
     (case etype
       event-quit
         {:type :quit :timestamp (read-u64 buf 8)}
@@ -464,15 +465,15 @@
 (defn sdl/init [&named audio video joystick haptic gamepad events sensor camera]
   "Initialize SDL subsystems. Pass keyword flags, e.g. (sdl/init :video true).
    With no arguments, initializes video (which implies events)."
-  (let ([flags (+ (if audio    init-audio    0)
+  (let [flags (+ (if audio    init-audio    0)
                   (if video    init-video    0)
                   (if joystick init-joystick 0)
                   (if haptic   init-haptic   0)
                   (if gamepad  init-gamepad  0)
                   (if events   init-events   0)
                   (if sensor   init-sensor   0)
-                  (if camera   init-camera   0))])
-    (let ([f (if (zero? flags) init-video flags)])
+                  (if camera   init-camera   0))]
+    (let [f (if (zero? flags) init-video flags)]
       (check-bool (sdl-init f) "sdl/init"))))
 
 (defn sdl/quit []
@@ -586,7 +587,7 @@
 (defn sdl/poll-events []
   "Poll all pending events. Returns an array of event structs.
    Each event has at minimum :type and :timestamp."
-  (let ([events @[]])
+  (let [events @[]]
     (while (sdl-poll-event event-buf)
       (push events (marshal-event event-buf)))
     events))
@@ -719,13 +720,13 @@
 (defn sdl/render-geometry [ren vertices &named texture indices]
   "Render triangles. vertices is an array of vertex structs.
    texture is optional. indices is an optional array of ints."
-  (let* ([nv (length vertices)]
-         [buf (ffi/malloc (* nv vertex-size))])
+  (let* [nv (length vertices)
+         buf (ffi/malloc (* nv vertex-size))]
     # Write vertices into contiguous buffer
     (var i 0)
     (while (< i nv)
-      (let ([v (get vertices i)]
-            [off (* i vertex-size)])
+      (let [v (get vertices i)
+            off (* i vertex-size)]
         (ffi/write (ptr/add buf off) vertex-type
           @[(v :x) (v :y) (v :r) (v :g) (v :b) (v :a) (v :tx) (v :ty)]))
       (assign i (+ i 1)))
@@ -739,8 +740,8 @@
       (while (< j ni)
         (ffi/write (ptr/add idx-buf (* j (ffi/size :int))) :int (get indices j))
         (assign j (+ j 1))))
-    (let ([result (sdl-render-geometry ren (if texture texture nil)
-                    buf nv (if idx-buf idx-buf nil) ni)])
+    (let [result (sdl-render-geometry ren (if texture texture nil)
+                    buf nv (if idx-buf idx-buf nil) ni)]
       (ffi/free buf)
       (when idx-buf (ffi/free idx-buf))
       (check-bool result "sdl/render-geometry"))))
@@ -798,10 +799,10 @@
 (defn sdl/draw-text [ren font text x y color]
   "Convenience: render text and blit to renderer at (x,y).
    color is {:r :g :b :a} or use (sdl:rgb r g b)."
-  (let* ([surf (sdl/render-text-blended font text color)]
-         [tex  (sdl/create-texture-from-surface ren surf)])
+  (let* [surf (sdl/render-text-blended font text color)
+         tex  (sdl/create-texture-from-surface ren surf)]
     (sdl/destroy-surface surf)
-    (let ([sz (sdl/texture-size tex)])
+    (let [sz (sdl/texture-size tex)]
       (sdl/render-texture ren tex
         :dst {:x (float x) :y (float y) :w (sz :width) :h (sz :height)}))
     (sdl/destroy-texture tex)))
@@ -830,7 +831,7 @@
 
 (defn sdl/put-audio [stream data]
   "Put audio data into a stream. data is a bytes value."
-  (let ([ptr (ffi/pin data)])
+  (let [ptr (ffi/pin data)]
     (defer (ffi/free ptr)
       (check-bool (sdl-put-audio-data stream ptr (length data)) "sdl/put-audio"))))
 
@@ -848,10 +849,10 @@
                    [audio-ptr :ptr nil]
                    [audio-len :u32 0]]
     (check-bool (sdl-load-wav path spec-buf audio-ptr audio-len) "sdl/load-wav")
-    (let* ([sp (ffi/read spec-buf audio-spec-type)]
-           [ptr (ffi/read audio-ptr :ptr)]
-           [len (ffi/read audio-len :u32)]
-           [data (if (> len 0) (ffi/read ptr (ffi/array :u8 len)) (bytes))])
+    (let* [sp (ffi/read spec-buf audio-spec-type)
+           ptr (ffi/read audio-ptr :ptr)
+           len (ffi/read audio-len :u32)
+           data (if (> len 0) (ffi/read ptr (ffi/array :u8 len)) (bytes))]
       {:spec {:format (get sp 0) :channels (get sp 1) :freq (get sp 2)}
        :data data
        :length len})))
@@ -859,8 +860,8 @@
 (defn sdl/audio-playback-devices []
   "Get list of audio playback device IDs."
   (ffi/with-stack [[count-ptr :int 0]]
-    (let* ([ptr (sdl-get-audio-playback-devices count-ptr)]
-           [count (ffi/read count-ptr :int)])
+    (let* [ptr (sdl-get-audio-playback-devices count-ptr)
+           count (ffi/read count-ptr :int)]
       (when (null? ptr)
         (if (= count 0) (list) (sdl-error "sdl/audio-playback-devices")))
       (var result @[])
@@ -875,13 +876,13 @@
 (defn sdl/key-pressed? [scancode]
   "Check if a key is currently pressed (by scancode)."
   (ffi/with-stack [[n-ptr :int 0]]
-    (let ([state-ptr (sdl-get-keyboard-state n-ptr)])
+    (let [state-ptr (sdl-get-keyboard-state n-ptr)]
       (not (= (ffi/read (ptr/add state-ptr scancode) :u8) 0)))))
 
 (defn sdl/mouse-state []
   "Get mouse position and button state. Returns {:x f :y f :buttons u32}."
   (ffi/with-stack [[xp :float 0.0] [yp :float 0.0]]
-    (let ([buttons (sdl-get-mouse-state xp yp)])
+    (let [buttons (sdl-get-mouse-state xp yp)]
       {:x (ffi/read xp :float) :y (ffi/read yp :float) :buttons buttons})))
 
 (defn sdl/warp-mouse [win x y]
@@ -924,7 +925,7 @@
 
 (defn sdl/get-clipboard []
   "Get clipboard text. Returns a string."
-  (let ([ptr (sdl-get-clipboard)])
+  (let [ptr (sdl-get-clipboard)]
     (if (null? ptr) "" (ffi/string ptr))))
 
 (defn sdl/has-clipboard? []
@@ -946,8 +947,8 @@
 (defn sdl/displays []
   "Get list of display IDs."
   (ffi/with-stack [[count-ptr :int 0]]
-    (let* ([ptr (sdl-get-displays count-ptr)]
-           [count (ffi/read count-ptr :int)])
+    (let* [ptr (sdl-get-displays count-ptr)
+           count (ffi/read count-ptr :int)]
       (when (null? ptr)
         (if (= count 0) (list) (sdl-error "sdl/displays")))
       (var result @[])
@@ -961,7 +962,7 @@
   "Get display bounds as {:x :y :w :h}."
   (ffi/with-stack [[rect-ptr irect-type @[0 0 0 0]]]
     (check-bool (sdl-get-display-bounds display-id rect-ptr) "sdl/display-bounds")
-    (let ([r (ffi/read rect-ptr irect-type)])
+    (let [r (ffi/read rect-ptr irect-type)]
       {:x (get r 0) :y (get r 1) :w (get r 2) :h (get r 3)})))
 
 (defn sdl/disable-screensaver []
@@ -995,13 +996,13 @@
 
 (defn sdl/with-window* [title w h opts body-fn]
   "Open a window, call (body-fn win), destroy on exit. opts: {:flags n}."
-  (let ([win (sdl/create-window title w h :flags (if opts (opts :flags) nil))])
+  (let [win (sdl/create-window title w h :flags (if opts (opts :flags) nil))]
     (defer (sdl/destroy-window win)
       (body-fn win))))
 
 (defn sdl/with-font* [path size body-fn]
   "Open a font, call (body-fn font), close on exit."
-  (let ([font (sdl/open-font path size)])
+  (let [font (sdl/open-font path size)]
     (defer (sdl/close-font font)
       (body-fn font))))
 

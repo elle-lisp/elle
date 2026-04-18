@@ -26,7 +26,7 @@ or `Polymorphic`). Signals propagate upward through the tree.
 ## Example
 
 ```lisp
-(let ((x 10))
+(let [x 10]
   (fn () (+ x 1)))
 ```
 

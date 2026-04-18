@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## tests/elle/contracts.lisp — Tests for lib/contract.lisp
 ## Chunk 1: validators, combinators, validate
 
@@ -20,13 +21,13 @@
 (assert (not (nil? (validate (compile-validator integer?) "x"))) "predicate: integer? fails for string")
 
 # Test 3: predicate failure has :error :validation, :expected, :got
-(let [[f (validate (compile-validator integer?) "x")]]
+(let [f (validate (compile-validator integer?) "x")]
   (assert (= (get f :error) :validation) "predicate fail: :error is :validation")
   (assert (has? f :expected) "predicate fail: has :expected")
   (assert (has? f :got) "predicate fail: has :got"))
 
 # Test 4: predicate failure :got is (type-of value)
-(let [[f (validate (compile-validator integer?) "x")]]
+(let [f (validate (compile-validator integer?) "x")]
   (assert (= (get f :got) (type-of "x")) "predicate fail: :got is (type-of value)"))
 
 # ============================================================================
@@ -47,11 +48,11 @@
 # ============================================================================
 
 # Test 8: validator passthrough — compile-validator is idempotent
-(let [[v (compile-validator integer?)]]
+(let [v (compile-validator integer?)]
   (assert (= (compile-validator v) v) "compile-validator: idempotent on already-compiled validator"))
 
 # Test 9: unsupported expression type signals error
-(let (([ok? _] (protect ((fn [] (compile-validator 42)))))) (assert (not ok?) "compile-validator: signals error on integer input"))
+(let [[ok? _] (protect ((fn [] (compile-validator 42))))] (assert (not ok?) "compile-validator: signals error on integer input"))
 
 # ============================================================================
 # Test 10-11: v/and
@@ -61,7 +62,7 @@
 (assert (= (validate (v/and integer? odd?) 3) nil) "v/and: both pass")
 
 # Test 11: v/and accumulates failures — both validators fail
-(let [[f (validate (v/and integer? odd?) "x")]]
+(let [f (validate (v/and integer? odd?) "x")]
   (assert (not (nil? f)) "v/and: returns failure")
   (assert (has? f :all) "v/and: failure has :all")
   (assert (> (length (get f :all)) 0) "v/and: :all is non-empty"))
@@ -74,7 +75,7 @@
 (assert (= (validate (v/or integer? string?) 42) nil) "v/or: first validator passes, short-circuits")
 
 # Test 13: v/or returns :any when all validators fail
-(let [[f (validate (v/or integer? keyword?) "x")]]
+(let [f (validate (v/or integer? keyword?) "x")]
   (assert (not (nil? f)) "v/or: returns failure when all fail")
   (assert (has? f :any) "v/or: failure has :any")
   (assert (has? f :expected) "v/or: failure has :expected")
@@ -88,7 +89,7 @@
 (assert (= (validate (v/oneof 1 2 3) 2) nil) "v/oneof: member passes")
 
 # Test 15: v/oneof fails for non-member — :got is the actual value
-(let [[f (validate (v/oneof 1 2 3) 99)]]
+(let [f (validate (v/oneof 1 2 3) 99)]
   (assert (not (nil? f)) "v/oneof: non-member fails")
   (assert (has? f :expected) "v/oneof: failure has :expected")
   (assert (= (get f :got) 99) "v/oneof: :got is the actual value, not a type keyword"))
@@ -114,26 +115,26 @@
 (assert (= (validate (compile-validator {:x integer? :y string?}) {:x 1 :y "a"}) nil) "struct shape: correct struct passes")
 
 # Test 20: struct shape fails for wrong key type — failure has :fields
-(let [[f (validate (compile-validator {:x integer? :y string?}) {:x "oops" :y "a"})]]
+(let [f (validate (compile-validator {:x integer? :y string?}) {:x "oops" :y "a"})]
   (assert (not (nil? f)) "struct shape: wrong key type fails")
   (assert (has? f :fields) "struct shape: failure has :fields")
   (assert (= (length (get f :fields)) 1) "struct shape: one field failed"))
 
 # Test 21: struct shape fails for non-struct input
-(let [[f (validate (compile-validator {:x integer?}) 42)]]
+(let [f (validate (compile-validator {:x integer?}) 42)]
   (assert (not (nil? f)) "struct shape: non-struct input fails")
   (assert (= (get f :error) :validation) "struct shape: non-struct :error is :validation")
   (assert (has? f :got) "struct shape: non-struct failure has :got"))
 
 # Test 22: struct shape fails for missing key (nil passed to sub-validator)
-(let [[f (validate (compile-validator {:x integer?}) {})]]
+(let [f (validate (compile-validator {:x integer?}) {})]
   (assert (not (nil? f)) "struct shape: missing key fails"))
 
 # Test 23: nested struct shape — failure path includes nesting
-(let [[f (validate (compile-validator {:a {:b integer?}}) {:a {:b "oops"}})]]
+(let [f (validate (compile-validator {:a {:b integer?}}) {:a {:b "oops"}})]
   (assert (not (nil? f)) "nested struct shape: fails")
   (assert (has? f :fields) "nested struct shape: outer failure has :fields")
-  (let [[outer-field (get (get f :fields) 0)]]
+  (let [outer-field (get (get f :fields) 0)]
     (assert (= (get outer-field :key) :a) "nested struct shape: outer field key is :a")
     (assert (has? (get outer-field :failure) :fields) "nested struct shape: inner failure also has :fields")))
 
@@ -145,15 +146,15 @@
 (assert (= (validate (v/arrayof integer?) [1 2 3]) nil) "v/arrayof: all valid elements pass")
 
 # Test 25: v/arrayof fails for invalid element — failure has :all with :index
-(let [[f (validate (v/arrayof integer?) [1 "x" 3])]]
+(let [f (validate (v/arrayof integer?) [1 "x" 3])]
   (assert (not (nil? f)) "v/arrayof: invalid element fails")
   (assert (has? f :all) "v/arrayof: failure has :all")
-  (let [[entry (get (get f :all) 0)]]
+  (let [entry (get (get f :all) 0)]
     (assert (= (get entry :index) 1) "v/arrayof: :index is 1 (0-based)")
     (assert (has? entry :failure) "v/arrayof: entry has :failure")))
 
 # Test 26: v/arrayof fails for non-array
-(let [[f (validate (v/arrayof integer?) 42)]]
+(let [f (validate (v/arrayof integer?) 42)]
   (assert (not (nil? f)) "v/arrayof: non-array fails")
   (assert (= (get f :error) :validation) "v/arrayof: non-array :error is :validation"))
 
@@ -168,10 +169,10 @@
 (assert (= (validate (v/mapof keyword? integer?) {:a 1 :b 2}) nil) "v/mapof: valid keys and values pass")
 
 # Test 29: v/mapof fails for bad value — failure entry has :kind :value
-(let [[f (validate (v/mapof keyword? integer?) {:a 1 :b "oops"})]]
+(let [f (validate (v/mapof keyword? integer?) {:a 1 :b "oops"})]
   (assert (not (nil? f)) "v/mapof: bad value fails")
   (assert (has? f :all) "v/mapof: failure has :all")
-  (let [[entry (get (get f :all) 0)]]
+  (let [entry (get (get f :all) 0)]
     (assert (has? entry :kind) "v/mapof: entry has :kind")
     (assert (= (get entry :kind) :value) "v/mapof: entry :kind is :value")
     (assert (has? entry :key) "v/mapof: entry has :key")))
@@ -187,17 +188,17 @@
 (assert (= (explain (compile-validator integer?) 42) nil) "explain: returns nil when validation passes")
 
 # Test 32: explain returns a string on fail
-(let [[result (explain (compile-validator integer?) "x")]]
+(let [result (explain (compile-validator integer?) "x")]
   (assert (not (nil? result)) "explain: returns non-nil on failure")
   (assert (string? result) "explain: returns a string on failure"))
 
 # Test 33: explain leaf format contains "expected"
-(let [[result (explain (compile-validator integer?) "x")]]
+(let [result (explain (compile-validator integer?) "x")]
   (assert (not (nil? (string/find result "expected"))) "explain: leaf format contains 'expected'"))
 
 # Test 34: explain struct failure contains field key name
-(let* [[v (compile-validator {:port integer? :host string?})]
-       [result (explain v {:port "oops" :host "localhost"})]]
+(let* [v (compile-validator {:port integer? :host string?})
+       result (explain v {:port "oops" :host "localhost"})]
   (assert (not (nil? result)) "explain: struct failure returns non-nil")
   (assert (string? result) "explain: struct failure returns string")
   (assert (not (nil? (string/find result "port"))) "explain: struct failure string contains key name 'port'"))
@@ -219,13 +220,13 @@
 (assert (= (safe-add 1 2) 3) "contract: valid args produce correct result")
 
 # Test 36: contract arity error signals :contract-error with :blame :caller
-(let [[[ok? err] (protect (safe-add 1))]]
+(let [[ok? err] (protect (safe-add 1))]
   (assert (not ok?) "contract: wrong arity signals error")
   (assert (= (get err :error) :contract-error) "contract: arity error is :contract-error")
   (assert (= (get err :blame) :caller) "contract: arity error blame is :caller"))
 
 # Test 37: contract arg validation failure — :blame :caller, :arg is 0-indexed
-(let [[[ok? err] (protect (safe-add 1 "two"))]]
+(let [[ok? err] (protect (safe-add 1 "two"))]
   (assert (not ok?) "contract: bad arg signals error")
   (assert (= (get err :error) :contract-error) "contract: arg error is :contract-error")
   (assert (= (get err :blame) :caller) "contract: arg error blame is :caller")
@@ -233,7 +234,7 @@
   (assert (has? err :failure) "contract: arg error has :failure"))
 
 # Test 38: contract return blame — :blame :function, no :arg
-(let [[[ok? err] (protect (bad-safe 42))]]
+(let [[ok? err] (protect (bad-safe 42))]
   (assert (not ok?) "contract: bad return signals error")
   (assert (= (get err :error) :contract-error) "contract: return error is :contract-error")
   (assert (= (get err :blame) :function) "contract: return error blame is :function")
@@ -244,11 +245,11 @@
 (assert (= (safe-add -5 5) 0) "contract: preserves behavior with negative")
 
 # Test 40: contract error is catchable via protect
-(let [[[ok? _] (protect (safe-add 1 "x"))]]
+(let [[ok? _] (protect (safe-add 1 "x"))]
   (assert (not ok?) "contract: error is catchable with protect"))
 
 # Test 41: contract error struct shape is complete
-(let [[[_ err] (protect (safe-add 1 "x"))]]
+(let [[_ err] (protect (safe-add 1 "x"))]
   (assert (= (get err :error) :contract-error) "contract: err has :error")
   (assert (= (get err :blame) :caller) "contract: err has :blame")
   (assert (= (get err :function) "safe-add") "contract: err has :function name")
@@ -258,5 +259,5 @@
 # Test 42: contract with nil ret-expr skips return validation
 (def identity-contract (contract (fn [x] x) [integer?] nil "identity-contract"))
 (assert (= (identity-contract 42) 42) "contract: nil ret-expr — valid call returns correct value")
-(let [[[ok? _] (protect (identity-contract "x"))]]
+(let [[ok? _] (protect (identity-contract "x"))]
   (assert (not ok?) "contract: nil ret-expr still validates args"))

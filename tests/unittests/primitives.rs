@@ -1831,7 +1831,7 @@ fn eval_full(input: &str) -> Result<Value, elle::error::LError> {
 
 #[test]
 fn test_call_count_uncalled_closure() {
-    let result = eval_full("(let ((f (fn (x) x))) (call-count f))").unwrap();
+    let result = eval_full("(let [f (fn (x) x)] (call-count f))").unwrap();
     assert_eq!(
         result.as_int(),
         Some(0),
@@ -1841,7 +1841,7 @@ fn test_call_count_uncalled_closure() {
 
 #[test]
 fn test_call_count_after_calls() {
-    let result = eval_full("(let ((f (fn (x) x))) (f 1) (f 2) (f 3) (call-count f))").unwrap();
+    let result = eval_full("(let [f (fn (x) x)] (f 1) (f 2) (f 3) (call-count f))").unwrap();
     assert_eq!(
         result.as_int(),
         Some(3),
@@ -1928,7 +1928,7 @@ fn test_fiber_self_from_root_is_nil() {
 #[test]
 fn test_fiber_self_from_fiber_is_fiber() {
     let result = eval_full(
-        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+        "(let [f (fiber/new (fn () (fiber/self)) 0)]
            (fiber/resume f nil)
            (fiber/value f))",
     )
@@ -1943,7 +1943,7 @@ fn test_fiber_self_from_fiber_is_fiber() {
 fn test_fiber_self_identity() {
     // fiber/self should return the same fiber that the parent holds
     let result = eval_full(
-        "(let ((f (fiber/new (fn () (fiber/self)) 0)))
+        "(let [f (fiber/new (fn () (fiber/self)) 0)]
            (fiber/resume f nil)
             (identical? f (fiber/value f)))",
     )

@@ -112,7 +112,7 @@ Implementation (in `src/primitives/time_def.rs`):
 # time/stopwatch is defined in stdlib as:
 (def my-stopwatch (fn ()
   (coro/new (fn ()
-    (let ((start (clock/monotonic)))
+    (let [start (clock/monotonic)]
       (while true
         (yield (- (clock/monotonic) start))))))))
 ```

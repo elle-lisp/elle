@@ -75,16 +75,16 @@ Bind a value and branch on its truthiness.
   (if (= b 0) nil (/ a b)))
 
 # if-let: two branches
-(if-let ([q (safe-div 10 2)])
+(if-let [q (safe-div 10 2)]
   (+ q 1)
   :fail)                   # => 6
 
-(if-let ([q (safe-div 10 0)])
+(if-let [q (safe-div 10 0)]
   (+ q 1)
   :fail)                   # => :fail
 
 # when-let: one branch, nil otherwise
-(when-let ([q (safe-div 15 3)])
+(when-let [q (safe-div 15 3)]
   (* q 10))                # => 50
 ```
 

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## ── not= ──────────────────────────────────────────────────────────────
 
 (assert (not= 1 2) "not= different ints")
@@ -16,8 +17,8 @@
 
 ## ── deep-freeze ───────────────────────────────────────────────────────
 
-(let* [[m @[@[1 2] @{:a @[3]}]]
-       [f (deep-freeze m)]]
+(let* [m @[@[1 2] @{:a @[3]}]
+       f (deep-freeze m)]
   (assert (immutable? f) "deep-freeze outer")
   (assert (immutable? (get f 0)) "deep-freeze nested array")
   (assert (immutable? (get f 1)) "deep-freeze nested struct")
@@ -26,8 +27,8 @@
 (assert (= (deep-freeze 42) 42) "deep-freeze atom passthrough")
 (assert (= (deep-freeze nil) nil) "deep-freeze nil passthrough")
 
-(let* [[lst (list @[1] @[2])]
-       [f (deep-freeze lst)]]
+(let* [lst (list @[1] @[2])
+       f (deep-freeze lst)]
   (assert (immutable? (first f)) "deep-freeze list element")
   (assert (immutable? (first (rest f))) "deep-freeze list second element"))
 
@@ -145,11 +146,11 @@
 
 ## ── ffi/pin ───────────────────────────────────────────────────────────
 
-(let* [[ptr (ffi/pin (bytes 72 101 108))]]
+(let* [ptr (ffi/pin (bytes 72 101 108))]
   (assert (= (ffi/read ptr :u8) 72) "ffi/pin first byte")
   (ffi/free ptr))
 
-(let* [[ptr (ffi/pin "Hi")]]
+(let* [ptr (ffi/pin "Hi")]
   (assert (= (ffi/read ptr :u8) 72) "ffi/pin string")
   (ffi/free ptr))
 

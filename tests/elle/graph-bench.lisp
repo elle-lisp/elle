@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## graph-bench.lisp — measure compile/* query times
 
 (def src (file/read "stdlib.lisp"))

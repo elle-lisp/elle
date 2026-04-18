@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Regression: block + def + push returned broken heap ref
 #
 # The escape analysis in can_scope_allocate_block treated def bindings
@@ -26,7 +27,7 @@
 (assert (= r4 42) "r4 should be 42")
 
 # let* inside block (was already immune)
-(def r5 (let* [[a @[]]] (push a 1) a))
+(def r5 (let* [a @[]] (push a 1) a))
 (assert (= (type r5) :@array) "r5 should be @array")
 (assert (= (get r5 0) 1) "r5[0] should be 1")
 

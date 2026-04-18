@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 ## Test suite for lib/svg + plugin/svg
 

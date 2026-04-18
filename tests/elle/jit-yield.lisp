@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## JIT Yield Tests
 ##
 ## Tests that verify yield propagates correctly through JIT-compiled
@@ -162,8 +163,8 @@
 (begin
   (def inner (fn [] (yield 1) 2))
   (def outer (fn []
-    (let ((x 10))
-      (let ((y (inner)))
+    (let [x 10]
+      (let [y (inner)]
         (+ x y)))))
   (def run (fn [] (outer)))
 
@@ -189,10 +190,10 @@
 (begin
   (def inner (fn [] (yield 100) 200))
   (def outer (fn []
-    (let ((a 1))
-      (let ((b 2))
-        (let ((c 3))
-          (let ((d (inner)))
+    (let [a 1]
+      (let [b 2]
+        (let [c 3]
+          (let [d (inner)]
             (+ a (+ b (+ c d)))))))))
   (def run (fn [] (outer)))
 

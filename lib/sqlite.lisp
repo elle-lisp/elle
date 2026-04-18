@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -20,7 +21,7 @@
   ## ── C bindings ───────────────────────────────────────────────────
 
   (defn cfn [name ret args]
-    (let [[p (ffi/lookup lib name)] [s (ffi/signature ret args)]]
+    (let [p (ffi/lookup lib name) s (ffi/signature ret args)]
       (fn [& a] (apply ffi/call p s a))))
 
   (def c-open      (cfn "sqlite3_open"          :int @[:string :ptr]))
@@ -50,9 +51,9 @@
 
   (defn prepare [db sql]
     "Prepare a statement. Returns stmt pointer. Caller must finalize."
-    (let [[pp (ffi/malloc 8)]]
+    (let [pp (ffi/malloc 8)]
       (check db (c-prepare db sql -1 pp null-ptr) "prepare")
-      (let [[stmt (ffi/read pp :ptr)]]
+      (let [stmt (ffi/read pp :ptr)]
         (ffi/free pp)
         stmt)))
 
@@ -70,14 +71,14 @@
       (assign i (inc i))))
 
   (defn read-row [stmt ncols col-names]
-    (let [[row @{}]]
+    (let [row @{}]
       (each ci in (range ncols)
-        (let [[name (keyword (col-names ci))]
-              [val (match (c-col-type stmt ci)
+        (let [name (keyword (col-names ci))
+              val (match (c-col-type stmt ci)
                      [1 (c-col-int stmt ci)]
                      [2 (c-col-dbl stmt ci)]
                      [3 (ffi/string (c-col-text stmt ci))]
-                     [_ nil])]]
+                     [_ nil])]
           (put row name val)))
       (freeze row)))
 
@@ -85,9 +86,9 @@
 
   (defn open [path]
     "Open a SQLite database. Use \":memory:\" for in-memory."
-    (let* [[pp (ffi/malloc 8)]
-           [rc (c-open path pp)]
-           [db (ffi/read pp :ptr)]]
+    (let* [pp (ffi/malloc 8)
+           rc (c-open path pp)
+           db (ffi/read pp :ptr)]
       (ffi/free pp)
       (unless (= rc SQLITE_OK)
         (error {:error :sqlite-error
@@ -101,23 +102,23 @@
 
   (defn exec [db sql & opts]
     "Execute SQL (no result rows). Optional params array. Returns rows affected."
-    (let* [[params (if (> (length opts) 0) (first opts) [])]
-           [stmt (prepare db sql)]]
+    (let* [params (if (> (length opts) 0) (first opts) [])
+           stmt (prepare db sql)]
       (bind-params db stmt params)
       (c-step stmt)
-      (let [[n (c-changes db)]]
+      (let [n (c-changes db)]
         (c-finalize stmt)
         n)))
 
   (defn query [db sql & opts]
     "Execute a query. Returns list of structs with keyword keys."
-    (let* [[params (if (> (length opts) 0) (first opts) [])]
-           [stmt (prepare db sql)]]
+    (let* [params (if (> (length opts) 0) (first opts) [])
+           stmt (prepare db sql)]
       (bind-params db stmt params)
-      (let* [[ncols (c-col-count stmt)]
-             [col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
-                                      (->list (range ncols))))]
-             [rows @[]]]
+      (let* [ncols (c-col-count stmt)
+             col-names (->array (map (fn [i] (ffi/string (c-col-name stmt i)))
+                                      (->list (range ncols))))
+             rows @[]]
         (while (= (c-step stmt) SQLITE_ROW)
           (push rows (read-row stmt ncols col-names)))
         (c-finalize stmt)

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/hash.lisp — streaming hash convenience functions
 ##
 ## Provides high-level helpers for hashing ports, coroutine streams,
@@ -38,7 +39,7 @@
     "Hash a file by path. Opens, hashes, and closes the file.
      Returns the digest bytes (or integer for crc32/xxh32/xxh64)."
     (default chunk-size 8192)
-    (let [[p (port/open path :read)]]
+    (let [p (port/open path :read)]
       (defer (port/close p)
         (hash/digest algorithm p :chunk-size chunk-size))))
 

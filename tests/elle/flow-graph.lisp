@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## ════════════════════════════════════════════════════════════════════════════
 ## fn/flow and fn/cfg integration tests
@@ -8,7 +9,7 @@
 
 (assert (struct? (fn/flow (fn (x) x))) "fn/flow returns struct")
 
-(let ((cfg (fn/flow (fn (x y) (+ x y)))))
+(let [cfg (fn/flow (fn (x y) (+ x y)))]
   (assert (not (nil? (get cfg :arity))) "fn/flow has arity")
   (assert (not (nil? (get cfg :regs))) "fn/flow has regs")
   (assert (not (nil? (get cfg :locals))) "fn/flow has locals")
@@ -23,22 +24,22 @@
 
 (assert (> (length (get (fn/flow (fn (x) x)) :blocks)) 0) "fn/flow blocks nonempty")
 
-(let ((block (get (get (fn/flow (fn (x) x)) :blocks) 0)))
+(let [block (get (get (fn/flow (fn (x) x)) :blocks) 0)]
   (assert (not (nil? (get block :label))) "fn/flow block has label")
   (assert (not (nil? (get block :instrs))) "fn/flow block has instrs")
   (assert (not (nil? (get block :term))) "fn/flow block has term")
   (assert (not (nil? (get block :edges))) "fn/flow block has edges"))
 
-(let ((instrs (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :instrs)))
+(let [instrs (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :instrs)]
   (assert (array? instrs) "fn/flow instrs is array of strings"))
 
-(let ((edges (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :edges)))
+(let [edges (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :edges)]
   (assert (array? edges) "fn/flow edges is array"))
 
-(let ((term (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :term)))
+(let [term (get (get (get (fn/flow (fn (x) x)) :blocks) 0) :term)]
   (assert (string? term) "fn/flow term is string"))
 
-(let (([ok? _] (protect ((fn () (fn/flow 42)))))) (assert (not ok?) "fn/flow non-closure errors"))
+(let [[ok? _] (protect ((fn () (fn/flow 42))))] (assert (not ok?) "fn/flow non-closure errors"))
 
 (defn my-add (x y) (+ x y))
 (assert (nil? (get (fn/flow my-add) :name)) "fn/flow named function")
@@ -50,8 +51,8 @@
 
 (assert (nil? (get (fn/flow (fn (x) x)) :doc)) "fn/flow doc without docstring")
 
-(let ((cfg (fn/flow (fn (x) (if x 1 2)))))
-  (let ((blocks (get cfg :blocks)))
+(let [cfg (fn/flow (fn (x) (if x 1 2)))]
+  (let [blocks (get cfg :blocks)]
     (assert (> (length blocks) 1) "fn/flow branching has edges")))
 
 ## ── fn/cfg: DOT format visualization ────────────────────────────────────────
@@ -84,11 +85,11 @@
 
 ## ── fn/cfg: Error handling ──────────────────────────────────────────────────
 
-(let (([ok? _] (protect ((fn () (fn/cfg (fn (k) k) :png)))))) (assert (not ok?) "fn/cfg invalid format errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg (fn (k) k) :png))))] (assert (not ok?) "fn/cfg invalid format errors"))
 
-(let (([ok? _] (protect ((fn () (fn/cfg (fn (l) l) :dot :extra)))))) (assert (not ok?) "fn/cfg too many args errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg (fn (l) l) :dot :extra))))] (assert (not ok?) "fn/cfg too many args errors"))
 
-(let (([ok? _] (protect ((fn () (fn/cfg 42)))))) (assert (not ok?) "fn/cfg non-closure errors"))
+(let [[ok? _] (protect ((fn () (fn/cfg 42))))] (assert (not ok?) "fn/cfg non-closure errors"))
 
 ## ── fn/cfg: Fiber support ───────────────────────────────────────────────────
 

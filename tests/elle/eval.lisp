@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Integration tests for the eval special form
 #
 # Migrated from tests/integration/eval.rs (46 tests)
@@ -6,13 +7,13 @@
 # Helper: assert that an expression errors (uses protect to capture VM-level signals)
 (defn assert-err [thunk msg]
   "Assert that (thunk) signals an error"
-  (let (([ok? _] (protect (thunk))))
+  (let [[ok? _] (protect (thunk))]
     (assert (not ok?) msg)))
 
 # Helper: assert that an expression errors and the message contains a substring
 (defn assert-err-contains [thunk substring msg]
   "Assert that (thunk) signals an error containing substring"
-  (let (([ok? result] (protect (thunk))))
+  (let [[ok? result] (protect (thunk))]
     (assert (not ok?) (append msg " — expected error"))
     (assert (string/contains? (string result) substring) (-> msg (append " — expected '") (append substring) (append "' in error")))))
 
@@ -60,7 +61,7 @@
 (assert (= (eval '(begin (defn f (x) (* x x)) (f 5))) 25) "eval with defn macro")
 
 # test_eval_with_let_star_macro
-(assert (= (eval '(let* ((x 1) (y (+ x 1))) (+ x y))) 3) "eval with let* macro")
+(assert (= (eval '(let* [x 1 y (+ x 1)] (+ x y))) 3) "eval with let* macro")
 
 # test_eval_with_thread_first
 (assert (= (eval '(-> 5 (+ 3) (* 2))) 16) "eval with thread-first")
@@ -70,17 +71,17 @@
 # ============================================================
 
 # test_eval_with_closure
-(assert (= (eval '(let ((x 1)) ((fn () x)))) 1) "eval with closure")
+(assert (= (eval '(let [x 1] ((fn () x)))) 1) "eval with closure")
 
 # test_eval_with_higher_order_function
-(assert (= (eval '(let ((f (fn (x) (+ x 1)))) (f 41))) 42) "eval with higher-order function")
+(assert (= (eval '(let [f (fn (x) (+ x 1))] (f 41))) 42) "eval with higher-order function")
 
 # ============================================================
 # Eval in various contexts
 # ============================================================
 
 # test_eval_inside_let
-(assert (= (let ((x 10)) (eval '(+ 1 2))) 3) "eval inside let")
+(assert (= (let [x 10] (eval '(+ 1 2))) 3) "eval inside let")
 
 # test_eval_inside_lambda
 (assert (= ((fn () (eval '42))) 42) "eval inside lambda")
@@ -89,7 +90,7 @@
 (assert (= (+ 1 (eval '2)) 3) "eval result in computation")
 
 # test_eval_result_in_let_binding
-(assert (= (let ((x (eval '42))) (+ x 1)) 43) "eval result in let binding")
+(assert (= (let [x (eval '42)] (+ x 1)) 43) "eval result in let binding")
 
 # test_eval_in_conditional
 (assert (= (if (eval 'true) 1 2) 1) "eval in conditional")
@@ -106,13 +107,13 @@
 # ============================================================
 
 # test_eval_compilation_error
-(let (([ok? _] (protect ((fn () (eval '(if))))))) (assert (not ok?) "eval compilation error (if with no args)"))
+(let [[ok? _] (protect ((fn () (eval '(if)))))] (assert (not ok?) "eval compilation error (if with no args)"))
 
 # test_eval_runtime_error_in_evald_code
-(let (([ok? _] (protect ((fn () (eval '(/ 1 0))))))) (assert (not ok?) "eval runtime error (division by zero)"))
+(let [[ok? _] (protect ((fn () (eval '(/ 1 0)))))] (assert (not ok?) "eval runtime error (division by zero)"))
 
 # test_eval_undefined_variable
-(let (([ok? _] (protect ((fn () (eval 'undefined_var)))))) (assert (not ok?) "eval undefined variable"))
+(let [[ok? _] (protect ((fn () (eval 'undefined_var))))] (assert (not ok?) "eval undefined variable"))
 
 # ============================================================
 # Sequential evals (expander caching)
@@ -231,5 +232,5 @@
 # test_import_destructuring
 (var import-destr-path "/tmp/elle-test-import-destr.lisp")
 (spit import-destr-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
-(let (({:answer a} (import-file import-destr-path)))
+(let [{:answer a} (import-file import-destr-path)]
   (assert (= a 42) "import destructuring"))

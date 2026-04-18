@@ -1866,8 +1866,7 @@ fn test_jit_mutual_recursion_even_odd() {
 
     let result = eval(
         r#"(letrec
-        ((is-even? (fn (n) (if (= n 0) true (is-odd? (- n 1)))))
-         (is-odd? (fn (n) (if (= n 0) false (is-even? (- n 1))))))
+        [is-even? (fn (n) (if (= n 0) true (is-odd? (- n 1)))) is-odd? (fn (n) (if (= n 0) false (is-even? (- n 1))))]
         (list (is-even? 10) (is-odd? 10) (is-even? 11) (is-odd? 11)))"#,
         &mut symbols,
         &mut vm,
@@ -1909,8 +1908,7 @@ fn test_jit_mutual_recursion_deep() {
     // Both are tail calls, so this should handle deep recursion
     let result = eval(
         r#"(letrec
-        ((ping (fn (n) (if (= n 0) "ping" (pong (- n 1)))))
-         (pong (fn (n) (if (= n 0) "pong" (ping (- n 1))))))
+        [ping (fn (n) (if (= n 0) "ping" (pong (- n 1)))) pong (fn (n) (if (= n 0) "pong" (ping (- n 1))))]
         (list (ping 0) (pong 0) (ping 1) (pong 1) (ping 100) (pong 100)))"#,
         &mut symbols,
         &mut vm,
@@ -1944,39 +1942,31 @@ fn test_jit_mutual_recursion_nqueens_small() {
 
     let result = eval(
         r#"(letrec
-         ((check-safe-helper
+         [check-safe-helper
             (fn (col remaining row-offset)
               (if (empty? remaining)
                 true
-                (let ((placed-col (first remaining)))
+                (let [placed-col (first remaining)]
                   (if (or (= col placed-col)
                           (= row-offset (abs (- col placed-col))))
                     false
-                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
-
-          (safe?
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))) safe?
             (fn (col queens)
-              (check-safe-helper col queens 1)))
-
-         (try-cols-helper
+              (check-safe-helper col queens 1)) try-cols-helper
            (fn (n col queens row)
              (if (= col n)
                (list)
                (if (safe? col queens)
-                 (let ((new-queens (cons col queens)))
+                 (let [new-queens (cons col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
-                 (try-cols-helper n (+ col 1) queens row)))))
-
-         (solve-helper
+                 (try-cols-helper n (+ col 1) queens row)))) solve-helper
            (fn (n row queens)
              (if (= row n)
                (list (reverse queens))
-               (try-cols-helper n 0 queens row))))
-
-         (solve-nqueens
+               (try-cols-helper n 0 queens row))) solve-nqueens
            (fn (n)
-             (solve-helper n 0 (list)))))
+             (solve-helper n 0 (list)))]
 
          (length (solve-nqueens 8)))"#,
         &mut symbols,
@@ -2002,9 +1992,7 @@ fn test_jit_mutual_recursion_three_way() {
 
     let result = eval(
         r#"(letrec
-        ((fa (fn (n) (if (= n 0) "a" (fb (- n 1)))))
-         (fb (fn (n) (if (= n 0) "b" (fc (- n 1)))))
-         (fc (fn (n) (if (= n 0) "c" (fa (- n 1))))))
+        [fa (fn (n) (if (= n 0) "a" (fb (- n 1)))) fb (fn (n) (if (= n 0) "b" (fc (- n 1)))) fc (fn (n) (if (= n 0) "c" (fa (- n 1))))]
         (list (fa 0) (fa 1) (fa 2) (fa 3) (fa 6) (fa 9)))"#,
         &mut symbols,
         &mut vm,
@@ -2114,9 +2102,9 @@ fn test_jit_self_tail_call_with_list_rotation() {
 
     let result = eval(
         r#"(letrec
-            ((count-list (fn (lst acc)
+            [count-list (fn (lst acc)
                (if (empty? lst) acc
-                 (count-list (rest lst) (+ acc 1))))))
+                 (count-list (rest lst) (+ acc 1))))]
             (count-list (range 200) 0))"#,
         &mut symbols,
         &mut vm,
@@ -2144,8 +2132,7 @@ fn test_jit_letrec_mutual_recursion_simple() {
 
     let result = eval(
         r#"(letrec
-            ((f (fn (n) (if (<= n 0) 0 (+ 1 (g (- n 1))))))
-             (g (fn (n) (if (<= n 0) 0 (+ 1 (f (- n 1)))))))
+            [f (fn (n) (if (<= n 0) 0 (+ 1 (g (- n 1))))) g (fn (n) (if (<= n 0) 0 (+ 1 (f (- n 1)))))]
             (f 100))"#,
         &mut symbols,
         &mut vm,
@@ -2163,28 +2150,24 @@ fn test_nqueens_eval_signals_are_silent() {
     use elle::symbol::SymbolTable;
 
     let source = r#"(letrec
-     ((check-safe-helper
+     [check-safe-helper
         (fn (col remaining row-offset)
           (if (empty? remaining) true
-            (let ((placed-col (first remaining)))
+            (let [placed-col (first remaining)]
               (if (or (= col placed-col)
                       (= row-offset (abs (- col placed-col))))
                 false
-                (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
-      (safe? (fn (col queens) (check-safe-helper col queens 1)))
-     (try-cols-helper
+                (check-safe-helper col (rest remaining) (+ row-offset 1)))))) safe? (fn (col queens) (check-safe-helper col queens 1)) try-cols-helper
        (fn (n col queens row)
          (if (= col n) (list)
            (if (safe? col queens)
-             (let ((new-queens (cons col queens)))
+             (let [new-queens (cons col queens)]
                (append (solve-helper n (+ row 1) new-queens)
                        (try-cols-helper n (+ col 1) queens row)))
-             (try-cols-helper n (+ col 1) queens row)))))
-     (solve-helper
+             (try-cols-helper n (+ col 1) queens row)))) solve-helper
        (fn (n row queens)
          (if (= row n) (list (reverse queens))
-           (try-cols-helper n 0 queens row))))
-     (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+           (try-cols-helper n 0 queens row))) solve-nqueens (fn (n) (solve-helper n 0 (list)))]
      (length (solve-nqueens 8)))"#;
 
     let mut symbols = SymbolTable::new();
@@ -2228,28 +2211,24 @@ fn test_nqueens_letrec_no_jit() {
 
     let result = eval(
         r#"(letrec
-         ((check-safe-helper
+         [check-safe-helper
             (fn (col remaining row-offset)
               (if (empty? remaining) true
-                (let ((placed-col (first remaining)))
+                (let [placed-col (first remaining)]
                   (if (or (= col placed-col)
                           (= row-offset (abs (- col placed-col))))
                     false
-                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
-          (safe? (fn (col queens) (check-safe-helper col queens 1)))
-         (try-cols-helper
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))) safe? (fn (col queens) (check-safe-helper col queens 1)) try-cols-helper
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let ((new-queens (cons col queens)))
+                 (let [new-queens (cons col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
-                 (try-cols-helper n (+ col 1) queens row)))))
-         (solve-helper
+                 (try-cols-helper n (+ col 1) queens row)))) solve-helper
            (fn (n row queens)
              (if (= row n) (list (reverse queens))
-               (try-cols-helper n 0 queens row))))
-         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+               (try-cols-helper n 0 queens row))) solve-nqueens (fn (n) (solve-helper n 0 (list)))]
          (length (solve-nqueens 8)))"#,
         &mut symbols,
         &mut vm,
@@ -2275,7 +2254,7 @@ fn test_jit_letrec_single_with_captures() {
 
     let result = eval(
         r#"(letrec
-            ((count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst)))))))
+            [count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst)))))]
             (count (list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)))"#,
         &mut symbols,
         &mut vm,
@@ -2300,11 +2279,10 @@ fn test_jit_letrec_two_closures_with_lists() {
 
     let result = eval(
         r#"(letrec
-            ((count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst))))))
-             (count-after-skip (fn (lst n)
+            [count (fn (lst) (if (empty? lst) 0 (+ 1 (count (rest lst))))) count-after-skip (fn (lst n)
                (if (<= n 0) (count lst)
                  (if (empty? lst) 0
-                   (count-after-skip (rest lst) (- n 1)))))))
+                   (count-after-skip (rest lst) (- n 1)))))]
             (count-after-skip (list 1 2 3 4 5 6 7 8 9 10) 3))"#,
         &mut symbols,
         &mut vm,
@@ -2328,28 +2306,24 @@ fn test_jit_letrec_nqueens_4queens() {
 
     let result = eval(
         r#"(letrec
-         ((check-safe-helper
+         [check-safe-helper
             (fn (col remaining row-offset)
               (if (empty? remaining) true
-                (let ((placed-col (first remaining)))
+                (let [placed-col (first remaining)]
                   (if (or (= col placed-col)
                           (= row-offset (abs (- col placed-col))))
                     false
-                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
-          (safe? (fn (col queens) (check-safe-helper col queens 1)))
-         (try-cols-helper
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))) safe? (fn (col queens) (check-safe-helper col queens 1)) try-cols-helper
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let ((new-queens (cons col queens)))
+                 (let [new-queens (cons col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
-                 (try-cols-helper n (+ col 1) queens row)))))
-         (solve-helper
+                 (try-cols-helper n (+ col 1) queens row)))) solve-helper
            (fn (n row queens)
              (if (= row n) (list (reverse queens))
-               (try-cols-helper n 0 queens row))))
-         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+               (try-cols-helper n 0 queens row))) solve-nqueens (fn (n) (solve-helper n 0 (list)))]
          (length (solve-nqueens 4)))"#,
         &mut symbols,
         &mut vm,
@@ -2373,28 +2347,24 @@ fn test_nqueens_4queens_no_jit() {
 
     let result = eval(
         r#"(letrec
-         ((check-safe-helper
+         [check-safe-helper
             (fn (col remaining row-offset)
               (if (empty? remaining) true
-                (let ((placed-col (first remaining)))
+                (let [placed-col (first remaining)]
                   (if (or (= col placed-col)
                           (= row-offset (abs (- col placed-col))))
                     false
-                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))))
-          (safe? (fn (col queens) (check-safe-helper col queens 1)))
-         (try-cols-helper
+                    (check-safe-helper col (rest remaining) (+ row-offset 1)))))) safe? (fn (col queens) (check-safe-helper col queens 1)) try-cols-helper
            (fn (n col queens row)
              (if (= col n) (list)
                (if (safe? col queens)
-                 (let ((new-queens (cons col queens)))
+                 (let [new-queens (cons col queens)]
                    (append (solve-helper n (+ row 1) new-queens)
                            (try-cols-helper n (+ col 1) queens row)))
-                 (try-cols-helper n (+ col 1) queens row)))))
-         (solve-helper
+                 (try-cols-helper n (+ col 1) queens row)))) solve-helper
            (fn (n row queens)
              (if (= row n) (list (reverse queens))
-               (try-cols-helper n 0 queens row))))
-         (solve-nqueens (fn (n) (solve-helper n 0 (list)))))
+               (try-cols-helper n 0 queens row))) solve-nqueens (fn (n) (solve-helper n 0 (list)))]
          (length (solve-nqueens 4)))"#,
         &mut symbols,
         &mut vm,
@@ -2419,13 +2389,12 @@ fn test_jit_letrec_forward_ref_multiarg() {
 
     let result = eval(
         r#"(letrec
-            ((f (fn (n)
+            [f (fn (n)
                (if (<= n 0) (list)
-                 (append (g n 1 (list n)) (f (- n 1))))))
-             (g (fn (n offset acc)
+                 (append (g n 1 (list n)) (f (- n 1))))) g (fn (n offset acc)
                (if (<= offset n)
                  (g n (+ offset 1) (cons offset acc))
-                 (reverse acc)))))
+                 (reverse acc)))]
             (length (f 5)))"#,
         &mut symbols,
         &mut vm,
@@ -2480,15 +2449,14 @@ fn test_jit_nested_rotation_base_two_deep() {
 
     let result = eval(
         r#"(letrec
-            ((inner-loop (fn (lst acc)
+            [inner-loop (fn (lst acc)
                (if (empty? lst) acc
-                 (inner-loop (rest lst) (+ acc (first lst))))))
-             (outer-loop (fn (n acc-list)
+                 (inner-loop (rest lst) (+ acc (first lst))))) outer-loop (fn (n acc-list)
                (if (= n 0)
                  (inner-loop acc-list 0)
-                 (let ((new-list (cons n acc-list)))
-                   (let ((_ (inner-loop new-list 0)))
-                     (outer-loop (- n 1) new-list)))))))
+                 (let [new-list (cons n acc-list)]
+                   (let [_ (inner-loop new-list 0)]
+                     (outer-loop (- n 1) new-list)))))]
             (outer-loop 50 (list)))"#,
         &mut symbols,
         &mut vm,
@@ -2516,18 +2484,16 @@ fn test_jit_nested_rotation_base_three_deep() {
 
     let result = eval(
         r#"(letrec
-            ((a (fn (n acc)
+            [a (fn (n acc)
                (if (= n 0) acc
-                 (a (- n 1) (+ acc 1)))))
-             (b (fn (n acc)
+                 (a (- n 1) (+ acc 1)))) b (fn (n acc)
                (if (= n 0) acc
-                 (let ((inner-sum (a 10 0)))
-                   (b (- n 1) (+ acc inner-sum))))))
-             (c (fn (n result-list)
+                 (let [inner-sum (a 10 0)]
+                   (b (- n 1) (+ acc inner-sum))))) c (fn (n result-list)
                (if (= n 0) result-list
-                 (let ((val (b 5 0)))
-                   (c (- n 1) (cons val result-list)))))))
-            (let ((result (c 20 (list))))
+                 (let [val (b 5 0)]
+                   (c (- n 1) (cons val result-list)))))]
+            (let [result (c 20 (list))]
               (list (length result) (first result))))"#,
         &mut symbols,
         &mut vm,
@@ -2561,9 +2527,9 @@ fn test_jit_single_self_tail_rotation_control() {
 
     let result = eval(
         r#"(letrec
-            ((sum-list (fn (lst acc)
+            [sum-list (fn (lst acc)
                (if (empty? lst) acc
-                 (sum-list (rest lst) (+ acc (first lst)))))))
+                 (sum-list (rest lst) (+ acc (first lst)))))]
             (sum-list (range 500) 0))"#,
         &mut symbols,
         &mut vm,

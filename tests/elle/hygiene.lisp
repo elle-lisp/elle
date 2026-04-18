@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 ## Macro hygiene tests — counter-factual tests that verify template symbols
 ## resolve to their definition-site bindings, not call-site shadows.
@@ -8,7 +9,7 @@
 ## Counter-factual: without hygiene, `rest` in the `each` template would
 ## resolve to the user's `& rest` parameter, causing "Cannot call" error.
 (defn iterate-rest [& rest]
-  (let [[out @[]]]
+  (let [out @[]]
     (each item in rest
       (push out item))
     (freeze out)))
@@ -17,7 +18,7 @@
 
 ## Same with `cur` — another name used internally by `each`
 (defn iterate-cur [& cur]
-  (let [[out @[]]]
+  (let [out @[]]
     (each item in cur
       (push out item))
     (freeze out)))
@@ -26,7 +27,7 @@
 
 ## Same with `seq`
 (defn iterate-seq [& seq]
-  (let [[out @[]]]
+  (let [out @[]]
     (each item in seq
       (push out item))
     (freeze out)))
@@ -35,7 +36,7 @@
 
 # ── when/unless: template symbols not captured ───────────────────────
 
-(let [[empty? (fn [x] true)]]
+(let [empty? (fn [x] true)]
   (var reached false)
   (when true (assign reached true))
   (assert reached "when: template not captured by shadowed empty?"))
@@ -43,7 +44,7 @@
 # ── Nested macro expansion ───────────────────────────────────────────
 
 (defn collect-rest [& rest]
-  (let [[result @[]]]
+  (let [result @[]]
     (each x in rest
       (when (> x 0)
         (push result x)))
@@ -53,7 +54,7 @@
 
 # ── Struct iteration ─────────────────────────────────────────────────
 
-(let [[out @[]]]
+(let [out @[]]
   (each [k v] in {:a 1 :b 2}
     (push out [k v]))
   (assert (= (length out) 2) "each: struct iteration"))

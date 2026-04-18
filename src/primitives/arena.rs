@@ -370,7 +370,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Return an opaque checkpoint for the current arena position. Pass to debug/arena-reset only. The return value is an opaque external — do not treat it as an integer. Dangerous: invalidates all Values allocated after the mark.",
         params: &[],
         category: "debug",
-        example: "(let ((m (debug/arena-checkpoint))) (cons 1 2) (debug/arena-reset m))",
+        example: "(let [m (debug/arena-checkpoint)] (cons 1 2) (debug/arena-reset m))",
         aliases: &["arena/checkpoint"],
     },
     PrimitiveDef {
@@ -381,7 +381,7 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         doc: "Reclaim arena objects allocated after checkpoint mark. Runs destructors for freed objects. Bump memory is not reclaimed. Dangerous: any Value pointing into the freed region is now invalid.",
         params: &["mark"],
         category: "debug",
-        example: "(let ((m (debug/arena-checkpoint))) (cons 1 2) (debug/arena-reset m))",
+        example: "(let [m (debug/arena-checkpoint)] (cons 1 2) (debug/arena-reset m))",
         aliases: &["arena/reset"],
     },
     PrimitiveDef {

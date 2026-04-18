@@ -1,4 +1,5 @@
 #!/usr/bin/env elle
+(elle/epoch 7)
 
 # tests/elle/telemetry-export-toplevel.lisp
 #
@@ -28,7 +29,7 @@
 (def rev (telemetry:counter meter "rev" :unit "USD"))
 
 (defn sim [method path status price]
-  (let [[attrs {"m" method "p" path "s" status}]]
+  (let [attrs {"m" method "p" path "s" status}]
     (telemetry:add c 1 :attributes attrs)
     (telemetry:time h
       (fn [] (ev/sleep 0.001))

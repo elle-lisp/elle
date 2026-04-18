@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## tools/aws/aws-codegen.lisp — Generate Elle API module from AWS Smithy model
 ##
 ## Usage:
@@ -28,7 +29,7 @@
       (def prev-upper (and (>= prev "A") (<= prev "Z")))
       (if prev-upper
         (when (and (< (+ i 1) (length s))
-                   (let [[next (get s (+ i 1))]]
+                   (let [next (get s (+ i 1))]
                      (and (>= next "a") (<= next "z"))))
           (push out "-"))
         (push out "-")))

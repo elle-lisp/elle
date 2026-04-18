@@ -197,7 +197,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
     crate::context::set_symbol_table(sym_ptr);
 
     let full_source;
-    let stdlib_form_count;
+    let mut stdlib_form_count;
     let compile_source = if with_stdlib {
         // Count stdlib forms so epoch migration skips them.
         stdlib_form_count = crate::reader::read_syntax_all(STDLIB, "<stdlib>")
@@ -212,11 +212,20 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         // I/O inside fibers propagates SIG_IO to the scheduler; top-level
         // I/O executes inline via maybe_execute_io.
         // Epoch directives are hoisted before stdlib for extract_epoch.
+        // Strip stdlib's own epoch tag to avoid duplicates.
         let (epoch_prefix, body) = if body_spliced.starts_with("(elle/epoch") {
             body_spliced.split_once('\n').unwrap_or((&body_spliced, ""))
         } else {
             ("", body_spliced.as_str())
         };
+        let (stdlib_body, stripped_epoch) = STDLIB
+            .strip_prefix("(elle/epoch 7)\n")
+            .or_else(|| STDLIB.strip_prefix("(elle/epoch 7)\r\n"))
+            .map(|s| (s, true))
+            .unwrap_or((STDLIB, false));
+        if stripped_epoch {
+            stdlib_form_count = stdlib_form_count.saturating_sub(1);
+        }
         let wrapped_body = if crate::config::get().wasm_chunk {
             chunk_user_forms(body, source_name)
         } else {
@@ -224,7 +233,7 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         };
         full_source = format!(
             "{}\n{}\n(ev/run (fn []\n{}\n))",
-            epoch_prefix, STDLIB, wrapped_body
+            epoch_prefix, stdlib_body, wrapped_body
         );
         full_source.as_str()
     } else {

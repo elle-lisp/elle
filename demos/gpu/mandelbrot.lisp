@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## demos/gpu/mandelbrot.lisp — GPU Mandelbrot set
 ##
 ## Computes a Mandelbrot set on the GPU using a SPIR-V compute shader
@@ -28,32 +29,32 @@
 (def dy (/ (- Y-MAX Y-MIN) (float HEIGHT)))
 
 (def cx (map (fn [i]
-  (let [[px (% i WIDTH)]]
+  (let [px (% i WIDTH)]
     (float (+ X-MIN (* (float px) dx)))))
   (range N)))
 
 (def cy (map (fn [i]
-  (let [[py (int (/ i WIDTH))]]
+  (let [py (int (/ i WIDTH))]
     (float (+ Y-MIN (* (float py) dy)))))
   (range N)))
 
 ## ── Compile mandelbrot shader ─────────────────────────────────
 (def shader (gpu:compile ctx 256 3 (fn [s]
-  (let* [[id       (s:global-id)]
-         [cx       (s:load 0 id)]
-         [cy       (s:load 1 id)]
-         [zr       (s:var-f)]
-         [zi       (s:var-f)]
-         [iter     (s:var-u)]
-         [max-iter (s:const-u MAX-ITER)]
-         [four     (s:const-f 4.0)]
-         [zero-f   (s:const-f 0.0)]
-         [zero-u   (s:const-u 0)]
-         [one-u    (s:const-u 1)]
-         [hdr      (s:block)]
-         [body     (s:block)]
-         [cont     (s:block)]
-         [done     (s:block)]]
+  (let* [id       (s:global-id)
+         cx       (s:load 0 id)
+         cy       (s:load 1 id)
+         zr       (s:var-f)
+         zi       (s:var-f)
+         iter     (s:var-u)
+         max-iter (s:const-u MAX-ITER)
+         four     (s:const-f 4.0)
+         zero-f   (s:const-f 0.0)
+         zero-u   (s:const-u 0)
+         one-u    (s:const-u 1)
+         hdr      (s:block)
+         body     (s:block)
+         cont     (s:block)
+         done     (s:block)]
     ## init z = 0
     (s:store-var zr zero-f)
     (s:store-var zi zero-f)
@@ -61,26 +62,26 @@
     (s:branch hdr)
     ## ── loop header ──────────────────────────
     (s:begin-block hdr)
-    (let* [[r   (s:load-var zr)]
-           [i   (s:load-var zi)]
-           [r2  (s:fmul r r)]
-           [i2  (s:fmul i i)]
-           [mag (s:fadd r2 i2)]
-           [ok  (s:flt mag four)]
-           [n   (s:load-var iter)]
-           [lim (s:slt n max-iter)]
-           [go  (s:logical-and ok lim)]]
+    (let* [r   (s:load-var zr)
+           i   (s:load-var zi)
+           r2  (s:fmul r r)
+           i2  (s:fmul i i)
+           mag (s:fadd r2 i2)
+           ok  (s:flt mag four)
+           n   (s:load-var iter)
+           lim (s:slt n max-iter)
+           go  (s:logical-and ok lim)]
       (s:loop-merge done cont)
       (s:branch-cond go body done))
     ## ── loop body: z = z² + c ────────────────
     (s:begin-block body)
-    (let* [[r  (s:load-var zr)]
-           [i  (s:load-var zi)]
-           [ri (s:fmul r i)]
-           [r2 (s:fmul r r)]
-           [i2 (s:fmul i i)]
-           [nr (s:fadd (s:fsub r2 i2) cx)]
-           [ni (s:fadd (s:fadd ri ri) cy)]]
+    (let* [r  (s:load-var zr)
+           i  (s:load-var zi)
+           ri (s:fmul r i)
+           r2 (s:fmul r r)
+           i2 (s:fmul i i)
+           nr (s:fadd (s:fsub r2 i2) cx)
+           ni (s:fadd (s:fadd ri ri) cy)]
       (s:store-var zr nr)
       (s:store-var zi ni)
       (s:store-var iter (s:iadd (s:load-var iter) one-u))

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/resource.lisp — Deterministic resource consumption measurement.
 ##
 ## Measures discrete, deterministic counters (allocation counts, intern table
@@ -46,14 +47,14 @@
      Uses arena/allocs internally for precise heap object counting.
      Peak is adjusted to subtract measurement overhead.
      Before-snapshot uses raw scalars (no struct) to avoid tainting peak."
-    (let* [[b-objects  (arena/count)]
-           [b-bytes    (arena/bytes)]
-           [b-interns  (debug/intern-count)]
-           [b-symbols  (debug/symbol-count)]
-           [b-keywords (debug/keyword-count)]
-           [_          (arena/reset-peak)]
-           [pair       (arena/allocs thunk)]
-           [peak       (- (arena/peak) b-objects peak-overhead)]]
+    (let* [b-objects  (arena/count)
+           b-bytes    (arena/bytes)
+           b-interns  (debug/intern-count)
+           b-symbols  (debug/symbol-count)
+           b-keywords (debug/keyword-count)
+           _          (arena/reset-peak)
+           pair       (arena/allocs thunk)
+           peak       (- (arena/peak) b-objects peak-overhead)]
       {:result   (first pair)
        :allocs   (rest pair)
        :peak     peak
@@ -66,10 +67,10 @@
 
   (defn pad-right [s width]
     "Pad string s with spaces to at least width characters."
-    (let [[n (length s)]]
+    (let [n (length s)]
       (if (>= n width)
         s
-        (let [[buf @""]]
+        (let [buf @""]
           (append buf s)
           (each _ in (range (- width n))
             (append buf " "))
@@ -92,11 +93,11 @@
     "Run an array of [name thunk] pairs, print report for each.
 
      Returns array of [name measurement] results for programmatic use."
-    (let [[results @[]]]
+    (let [results @[]]
       (each entry in scenarios
-        (let* [[name  (entry 0)]
-               [thunk (entry 1)]
-               [m     (measure thunk)]]
+        (let* [name  (entry 0)
+               thunk (entry 1)
+               m     (measure thunk)]
           (println (report name m))
           (push results [name m])))
       (freeze results)))

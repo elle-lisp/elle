@@ -19,7 +19,7 @@ That's it. No Rust changes needed.
 ## my-form - description of what it does
 ## (my-form arg body...) => expansion
 (defmacro my-form (arg & body)
-   `(let ((tmp ,arg))
+   `(let [tmp ,arg]
       (if tmp (begin ,;body) nil)))
 ```
 

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/cli.lisp — CLI argument parsing (pure Elle)
 ##
 ## Declarative argument parsing from a spec struct + argv list.
@@ -30,12 +31,12 @@
     "Normalize an arg spec struct into internal form."
     (unless (struct? spec)
       (error {:error :cli-error :reason :invalid-spec :expected :struct :got (type-of spec) :message "each arg must be a struct"}))
-    (let [[name (require-string spec:name "name" "cli/parse")]]
+    (let [name (require-string spec:name "name" "cli/parse")]
       (unless name
         (error {:error :cli-error :reason :missing-name :message "each arg must have a :name key"}))
-      (let* [[long-name  (require-string spec:long "long" "cli/parse")]
-             [short-name (require-string spec:short "short" "cli/parse")]
-             [action-kw  (let [[v spec:action]]
+      (let* [long-name  (require-string spec:long "long" "cli/parse")
+             short-name (require-string spec:short "short" "cli/parse")
+             action-kw  (let [v spec:action]
                            (if (nil? v) :set
                              (if (keyword? v) v
                                (error {:error :cli-error
@@ -44,9 +45,9 @@
                                        :got (type-of v)
                                        :param :action
                                        :message (string ":action must be a keyword, got "
-                                                        (type-of v))}))))]
-             [default-val (require-string spec:default "default" "cli/parse")]
-             [required?   spec:required]]
+                                                        (type-of v))}))))
+             default-val (require-string spec:default "default" "cli/parse")
+             required?   spec:required]
         (when (and short-name (not (= (length short-name) 1)))
           (error {:error :cli-error
                   :reason :invalid-short
@@ -73,7 +74,7 @@
     (filter (fn [s] (and (nil? s:long) (nil? s:short))) specs))
 
   (defn apply-action [result name action value]
-    (let [[k (keyword name)]]
+    (let [k (keyword name)]
       (match action
         [:set    (put result k value)]
         [:flag   (put result k true)]
@@ -82,9 +83,9 @@
         [_       result])))
 
   (defn init-result [specs]
-    (let [[r @{}]]
+    (let [r @{}]
       (each s in specs
-        (let [[k (keyword s:name)]]
+        (let [k (keyword s:name)]
           (match s:action
             [:flag   (put r k false)]
             [:count  (put r k 0)]
@@ -94,28 +95,28 @@
 
   (defn parse-argv [specs argv]
     "Parse argv list against normalized specs. Returns mutable struct."
-    (let* [[result    (init-result specs)]
-           [pos-specs (positionals specs)]
-           [args      (->array argv)]
-           [argc      (length args)]]
+    (let* [result    (init-result specs)
+           pos-specs (positionals specs)
+           args      (->array argv)
+           argc      (length args)]
       (var pi 0)
       (var i 0)
       (while (< i argc)
-        (let [[arg (args i)]]
+        (let [arg (args i)]
           (cond
             ## --long=value
             ((and (string/starts-with? arg "--") (string/contains? arg "="))
-             (let* [[eq    (string/find arg "=")]
-                    [name  (slice arg 2 eq)]
-                    [value (slice arg (inc eq) (length arg))]
-                    [spec  (find-by-long specs name)]]
+             (let* [eq    (string/find arg "=")
+                    name  (slice arg 2 eq)
+                    value (slice arg (inc eq) (length arg))
+                    spec  (find-by-long specs name)]
                (unless spec
                  (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
                (apply-action result spec:name spec:action value)))
             ## --long
             ((string/starts-with? arg "--")
-             (let* [[name (slice arg 2 (length arg))]
-                    [spec (find-by-long specs name)]]
+             (let* [name (slice arg 2 (length arg))
+                    spec (find-by-long specs name)]
                (unless spec
                  (error {:error :cli-error :reason :unknown-option :option (string "--" name) :message (string "unknown option --" name)}))
                (match spec:action
@@ -130,11 +131,11 @@
                          (apply-action result spec:name spec:action (args i))])))
             ## -x (short) — handles stacked flags like -vvv
             ((and (string/starts-with? arg "-") (> (length arg) 1))
-             (let [[chars (slice arg 1 (length arg))]]
+             (let [chars (slice arg 1 (length arg))]
                (var ci 0)
                (while (< ci (length chars))
-                 (let* [[ch   (chars ci)]
-                        [spec (find-by-short specs ch)]]
+                 (let* [ch   (chars ci)
+                        spec (find-by-short specs ch)]
                    (unless spec
                      (error {:error :cli-error :reason :unknown-option :option (string "-" ch) :message (string "unknown option -" ch)}))
                    (match spec:action
@@ -179,10 +180,10 @@
 
   (defn parse-with-commands [spec argv]
     "Parse argv, handling subcommands if :commands is present."
-    (let* [[args-spec (or spec:args [])]
-           [cmds-spec (or spec:commands [])]
-           [norm-args (map parse-arg-spec args-spec)]
-           [has-cmds  (> (length cmds-spec) 0)]]
+    (let* [args-spec (or spec:args [])
+           cmds-spec (or spec:commands [])
+           norm-args (map parse-arg-spec args-spec)
+           has-cmds  (> (length cmds-spec) 0)]
       (when has-cmds
         (each s in norm-args
           (when (contains? |"command" "command-args"| s:name)
@@ -193,31 +194,31 @@
                                      " conflicts with reserved subcommand key")}))))
       (if (not has-cmds)
         (freeze (parse-argv norm-args argv))
-        (let* [[cmd-names (map (fn [c] (require-string c:name "name" "cli/parse")) cmds-spec)]
-               [result    (init-result norm-args)]
-               [args-arr  (->array argv)]
-               [argc      (length args-arr)]]
+        (let* [cmd-names (map (fn [c] (require-string c:name "name" "cli/parse")) cmds-spec)
+               result    (init-result norm-args)
+               args-arr  (->array argv)
+               argc      (length args-arr)]
           (var i 0)
           (var found nil)
           (var cmd-start nil)
           ## Scan for subcommand name
           (while (and (< i argc) (nil? found))
-            (let [[arg (args-arr i)]]
+            (let [arg (args-arr i)]
               (if (and (not (string/starts-with? arg "-"))
                        (find (fn [n] (= n arg)) cmd-names))
                 (begin (assign found arg) (assign cmd-start (inc i)))
                 (assign i (inc i)))))
           ## Parse parent args (everything before the subcommand)
-          (let [[parent-argv (->list (slice args-arr 0 i))]]
+          (let [parent-argv (->list (slice args-arr 0 i))]
             (each [k v] in (pairs (parse-argv norm-args parent-argv))
               (put result k v)))
           (if (nil? found)
             (begin (put result :command nil) (put result :command-args nil))
             (begin
               (put result :command found)
-              (let* [[sub-spec (find (fn [c] (= c:name found)) cmds-spec)]
-                     [sub-argv (->list (slice args-arr cmd-start argc))]
-                     [sub-result (parse-with-commands sub-spec sub-argv)]]
+              (let* [sub-spec (find (fn [c] (= c:name found)) cmds-spec)
+                     sub-argv (->list (slice args-arr cmd-start argc))
+                     sub-result (parse-with-commands sub-spec sub-argv)]
                 (put result :command-args sub-result))))
           (freeze result)))))
 
@@ -240,7 +241,7 @@
     (unless spec:name
       (error {:error :cli-error :reason :missing-name :message "spec must have a :name key"}))
     ## Skip argv[0] (program name)
-    (let [[user-argv (if (> (length argv) 0) (rest argv) ())]]
+    (let [user-argv (if (> (length argv) 0) (rest argv) ())]
       (parse-with-commands spec (->list user-argv))))
 
   {:parse parse})

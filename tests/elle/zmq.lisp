@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## ZMQ FFI library integration tests
 ## Tests lib/zmq.lisp (FFI bindings to system libzmq)
@@ -5,7 +6,7 @@
 ## Uses inproc:// transport — no network access needed.
 ## Skipped if libzmq.so is not installed.
 
-(let [([ok? _] (protect (ffi/native "libzmq.so")))]
+(let [[ok? _] (protect (ffi/native "libzmq.so"))]
   (unless ok?
     (println "zmq tests skipped: libzmq.so not found")
     (sys/exit 0)))
@@ -19,19 +20,19 @@
 
 ## ── REQ/REP over inproc:// ───────────────────────────────────────
 
-(let* [[rep (zmq:socket ctx :rep)]
-       [req (zmq:socket ctx :req)]]
+(let* [rep (zmq:socket ctx :rep)
+       req (zmq:socket ctx :req)]
   (zmq:bind rep "inproc://test-reqrep")
   (zmq:connect req "inproc://test-reqrep")
 
   # Send from REQ, receive on REP
   (zmq:send req "hello")
-  (let [[msg (zmq:recv-string rep)]]
+  (let [msg (zmq:recv-string rep)]
     (assert (= msg "hello") "REQ->REP: received 'hello'"))
 
   # Reply from REP, receive on REQ
   (zmq:send rep "world")
-  (let [[msg (zmq:recv-string req)]]
+  (let [msg (zmq:recv-string req)]
     (assert (= msg "world") "REP->REQ: received 'world'"))
 
   (zmq:close req)
@@ -39,8 +40,8 @@
 
 ## ── PUSH/PULL over inproc:// ─────────────────────────────────────
 
-(let* [[pull (zmq:socket ctx :pull)]
-       [push (zmq:socket ctx :push)]]
+(let* [pull (zmq:socket ctx :pull)
+       push (zmq:socket ctx :push)]
   (zmq:bind pull "inproc://test-pushpull")
   (zmq:connect push "inproc://test-pushpull")
 
@@ -55,8 +56,8 @@
 
 ## ── PUB/SUB over inproc:// ───────────────────────────────────────
 
-(let* [[pub (zmq:socket ctx :pub)]
-       [sub (zmq:socket ctx :sub)]]
+(let* [pub (zmq:socket ctx :pub)
+       sub (zmq:socket ctx :sub)]
   (zmq:bind pub "inproc://test-pubsub")
   (zmq:subscribe sub "")
   (zmq:connect sub "inproc://test-pubsub")
@@ -69,7 +70,7 @@
   (each _ in (range 10)
     (zmq:send pub "broadcast"))
 
-  (let [[msg (zmq:recv-string sub)]]
+  (let [msg (zmq:recv-string sub)]
     (assert (= msg "broadcast") "PUB/SUB received broadcast"))
 
   (zmq:close sub)
@@ -77,14 +78,14 @@
 
 ## ── Multipart messages ───────────────────────────────────────────
 
-(let* [[rep (zmq:socket ctx :rep)]
-       [req (zmq:socket ctx :req)]]
+(let* [rep (zmq:socket ctx :rep)
+       req (zmq:socket ctx :req)]
   (zmq:bind rep "inproc://test-multipart")
   (zmq:connect req "inproc://test-multipart")
 
   (zmq:send-multipart req ["frame1" "frame2" "frame3"])
 
-  (let [[frames (zmq:recv-multipart rep)]]
+  (let [frames (zmq:recv-multipart rep)]
     (assert (= (length frames) 3) "multipart: 3 frames")
     (assert (= (string (get frames 0)) "frame1") "multipart: frame1")
     (assert (= (string (get frames 1)) "frame2") "multipart: frame2")
@@ -95,7 +96,7 @@
 
 ## ── Socket options ───────────────────────────────────────────────
 
-(let [[sock (zmq:socket ctx :req)]]
+(let [sock (zmq:socket ctx :req)]
   (zmq:set-option sock :linger 0)
   (assert (= (zmq:get-option sock :linger) 0) "linger set to 0")
 
@@ -109,17 +110,17 @@
 
 ## ── Bytes send/recv ──────────────────────────────────────────────
 
-(let* [[rep (zmq:socket ctx :rep)]
-       [req (zmq:socket ctx :req)]]
+(let* [rep (zmq:socket ctx :rep)
+       req (zmq:socket ctx :req)]
   (zmq:bind rep "inproc://test-bytes")
   (zmq:connect req "inproc://test-bytes")
 
   (zmq:send req (bytes 1 2 3 4 5))
-  (let [[msg (zmq:recv rep)]]
+  (let [msg (zmq:recv rep)]
     (assert (= msg (bytes 1 2 3 4 5)) "binary round-trip"))
 
   (zmq:send rep (bytes))
-  (let [[msg (zmq:recv req)]]
+  (let [msg (zmq:recv req)]
     (assert (= msg (bytes)) "empty message round-trip"))
 
   (zmq:close req)

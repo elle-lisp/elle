@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/aws/sigv4.lisp — AWS Signature Version 4 signing
 ##
 ## Pure Elle. Receives crypto and jiff functions as arguments.
@@ -76,35 +77,35 @@
 
      Returns struct with :host :x-amz-date :x-amz-content-sha256
      :authorization, and optionally :x-amz-security-token."
-    (let* [[datetime  (ts-format "%Y%m%dT%H%M%SZ" (ts-now))]
-           [date      (slice datetime 0 8)]
-           [hash      (payload-hash body)]
+    (let* [datetime  (ts-format "%Y%m%dT%H%M%SZ" (ts-now))
+           date      (slice datetime 0 8)
+           hash      (payload-hash body)
            ## Build sorted [name value] pairs for canonical request
-           [base      [["host" host]
+           base      [["host" host]
                        ["x-amz-content-sha256" hash]
-                       ["x-amz-date" datetime]]]
-           [pairs     (if (nil? creds:session-token)
+                       ["x-amz-date" datetime]]
+           pairs     (if (nil? creds:session-token)
                         base
                         (sort (concat base
                                       [["x-amz-security-token"
-                                        creds:session-token]])))]
+                                        creds:session-token]])))
            ## Sign
-           [scope     (string/join [date region service "aws4_request"] "/")]
-           [creq      (canonical-request method path query pairs hash)]
-           [sts       (string-to-sign datetime scope creq)]
-           [key       (derive-key creds:secret-key date region service)]
-           [sig       (bytes->hex (hmac-sha256 key sts))]
-           [auth      (string/join ["AWS4-HMAC-SHA256 Credential="
+           scope     (string/join [date region service "aws4_request"] "/")
+           creq      (canonical-request method path query pairs hash)
+           sts       (string-to-sign datetime scope creq)
+           key       (derive-key creds:secret-key date region service)
+           sig       (bytes->hex (hmac-sha256 key sts))
+           auth      (string/join ["AWS4-HMAC-SHA256 Credential="
                                     creds:access-key "/" scope
                                     ", SignedHeaders="
                                     (signed-header-names pairs)
                                     ", Signature=" sig]
-                                   "")]
+                                   "")
            ## Build result struct
-           [result    {:host                  host
+           result    {:host                  host
                        :x-amz-date            datetime
                        :x-amz-content-sha256  hash
-                       :authorization         auth}]]
+                       :authorization         auth}]
       (if (nil? creds:session-token)
         result
         (merge result {:x-amz-security-token creds:session-token}))))

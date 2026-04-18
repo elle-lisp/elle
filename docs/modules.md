@@ -150,8 +150,8 @@ to the library:
 # (def mqtt-plugin (import "plugin/mqtt"))
 # (def mqtt ((import "std/mqtt") mqtt-plugin))
 #
-# (let [[conn (mqtt:connect "broker.example.com" 1883
-#                           :client-id "elle-client")]]
+# (let [conn (mqtt:connect "broker.example.com" 1883
+#                          :client-id "elle-client")]
 #   (mqtt:subscribe conn [["test/#" 0]])
 #   (println "got:" (mqtt:recv conn))
 #   (mqtt:close conn))

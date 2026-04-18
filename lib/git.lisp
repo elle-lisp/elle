@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/git.lisp — Git repository access via FFI to libgit2
 ##
 ## Usage:
@@ -14,7 +15,7 @@
   (def null-ptr (ptr/from-int 0))
 
   (defn cfn [name ret args]
-    (let [[p (ffi/lookup lib name)] [s (ffi/signature ret args)]]
+    (let [p (ffi/lookup lib name) s (ffi/signature ret args)]
       (fn [& a] (apply ffi/call p s a))))
 
   ## Initialize libgit2
@@ -131,7 +132,7 @@
 
   (defn check [rc ctx]
     (unless (zero? rc)
-      (let [[err-ptr (c-error-last)]]
+      (let [err-ptr (c-error-last)]
         (if (= err-ptr null-ptr)
           (error {:error :git-error :message (string ctx ": error code " rc)})
           (error {:error :git-error
@@ -139,9 +140,9 @@
 
   (defn with-pp [f]
     "Allocate a pointer-sized out-param, call f with it, return the read pointer."
-    (let* [[pp (ffi/malloc 8)]
-           [result (f pp)]
-           [ptr (ffi/read pp :ptr)]]
+    (let* [pp (ffi/malloc 8)
+           result (f pp)
+           ptr (ffi/read pp :ptr)]
       (ffi/free pp)
       ptr))
 
@@ -159,9 +160,9 @@
 
   (defn commit->struct [repo-ptr commit-ptr]
     "Read a git_commit* into a struct."
-    (let* [[nparents (c-commit-parentcount commit-ptr)]
-           [parents (map (fn [i] (oid->str (c-commit-parent-id commit-ptr i)))
-                         (->list (range nparents)))]]
+    (let* [nparents (c-commit-parentcount commit-ptr)
+           parents (map (fn [i] (oid->str (c-commit-parent-id commit-ptr i)))
+                         (->list (range nparents)))]
       {:oid       (oid->str (c-object-id commit-ptr))
        :message   (maybe-str (c-commit-message commit-ptr))
        :summary   (maybe-str (c-commit-summary commit-ptr))
@@ -173,15 +174,15 @@
   ## ── Repository lifecycle ─────────────────────────────────────────
 
   (defn open [path]
-    (let [[repo (with-pp (fn [pp] (check (c-repo-open pp path) "git/open")))]]
+    (let [repo (with-pp (fn [pp] (check (c-repo-open pp path) "git/open")))]
       repo))
 
   (defn init [path]
-    (let [[repo (with-pp (fn [pp] (check (c-repo-init pp path 0) "git/init")))]]
+    (let [repo (with-pp (fn [pp] (check (c-repo-init pp path 0) "git/init")))]
       repo))
 
   (defn clone-repo [url path]
-    (let [[repo (with-pp (fn [pp] (check (c-clone pp url path null-ptr) "git/clone")))]]
+    (let [repo (with-pp (fn [pp] (check (c-clone pp url path null-ptr) "git/clone")))]
       repo))
 
   (defn close [repo] (c-repo-free repo) nil)
@@ -199,52 +200,52 @@
       [_  :unknown]))
 
   (defn head [repo]
-    (let* [[ref-ptr (with-pp (fn [pp] (check (c-repo-head pp repo) "git/head")))]
-           [result {:name     (maybe-str (c-ref-name ref-ptr))
-                    :oid      (let [[t (c-ref-target ref-ptr)]]
+    (let* [ref-ptr (with-pp (fn [pp] (check (c-repo-head pp repo) "git/head")))
+           result {:name     (maybe-str (c-ref-name ref-ptr))
+                    :oid      (let [t (c-ref-target ref-ptr)]
                                 (if (= t null-ptr) nil (oid->str t)))
-                    :symbolic (not (zero? (c-ref-is-branch ref-ptr)))}]]
+                    :symbolic (not (zero? (c-ref-is-branch ref-ptr)))}]
       (c-ref-free ref-ptr)
       result))
 
   (defn resolve [repo refname]
-    (let* [[obj (with-pp (fn [pp] (check (c-revparse pp repo refname) "git/resolve")))]
-           [oid (oid->str (c-object-id obj))]]
+    (let* [obj (with-pp (fn [pp] (check (c-revparse pp repo refname) "git/resolve")))
+           oid (oid->str (c-object-id obj))]
       (c-object-free obj)
       oid))
 
   ## ── Commits ──────────────────────────────────────────────────────
 
   (defn commit-info [repo oid-str]
-    (let* [[oid-buf (ffi/malloc GIT_OID_SIZE)]
-           [_ (check (c-oid-fromstr oid-buf oid-str) "git/commit-info")]
-           [commit (with-pp (fn [pp] (check (c-commit-lookup pp repo oid-buf) "git/commit-info")))]
-           [result (commit->struct repo commit)]]
+    (let* [oid-buf (ffi/malloc GIT_OID_SIZE)
+           _ (check (c-oid-fromstr oid-buf oid-str) "git/commit-info")
+           commit (with-pp (fn [pp] (check (c-commit-lookup pp repo oid-buf) "git/commit-info")))
+           result (commit->struct repo commit)]
       (c-commit-free commit)
       (ffi/free oid-buf)
       result))
 
   (defn log [repo & opts]
-    (let* [[opt (if (> (length opts) 0) (first opts) {})]
-           [from-ref (or opt:from nil)]
-           [limit (or opt:limit 50)]
-           [walker (with-pp (fn [pp] (check (c-revwalk-new pp repo) "git/log")))]]
+    (let* [opt (if (> (length opts) 0) (first opts) {})
+           from-ref (or opt:from nil)
+           limit (or opt:limit 50)
+           walker (with-pp (fn [pp] (check (c-revwalk-new pp repo) "git/log")))]
       (c-revwalk-sorting walker (bit/or GIT_SORT_TIME GIT_SORT_TOPOLOGICAL))
       (if from-ref
-        (let [[obj (with-pp (fn [pp] (check (c-revparse pp repo from-ref) "git/log")))]]
+        (let [obj (with-pp (fn [pp] (check (c-revparse pp repo from-ref) "git/log")))]
           (check (c-revwalk-push walker (c-object-id obj)) "git/log")
           (c-object-free obj))
         (check (c-revwalk-push-head walker) "git/log"))
-      (let* [[oid-buf (ffi/malloc GIT_OID_SIZE)]
-             [results @[]]]
+      (let* [oid-buf (ffi/malloc GIT_OID_SIZE)
+             results @[]]
         (var i 0)
         (var done false)
         (while (and (not done) (< i limit))
-          (let [[rc (c-revwalk-next oid-buf walker)]]
+          (let [rc (c-revwalk-next oid-buf walker)]
             (if (not (zero? rc))
               (assign done true)
-              (let* [[commit (with-pp (fn [pp] (check (c-commit-lookup pp repo oid-buf) "git/log")))]
-                     [entry (commit->struct repo commit)]]
+              (let* [commit (with-pp (fn [pp] (check (c-commit-lookup pp repo oid-buf) "git/log")))
+                     entry (commit->struct repo commit)]
                 (c-commit-free commit)
                 (push results entry)
                 (assign i (inc i))))))
@@ -253,53 +254,53 @@
         (->list results))))
 
   (defn commit [repo message & opts]
-    (let* [[opt (if (> (length opts) 0) (first opts) {})]
+    (let* [opt (if (> (length opts) 0) (first opts) {})
            ## Get index and write tree
-           [index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/commit")))]
-           [tree-oid (ffi/malloc GIT_OID_SIZE)]
-           [_ (check (c-index-write-tree tree-oid index) "git/commit")]
-           [tree (with-pp (fn [pp] (check (c-tree-lookup pp repo tree-oid) "git/commit")))]
+           index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/commit")))
+           tree-oid (ffi/malloc GIT_OID_SIZE)
+           _ (check (c-index-write-tree tree-oid index) "git/commit")
+           tree (with-pp (fn [pp] (check (c-tree-lookup pp repo tree-oid) "git/commit")))
            ## Get parent (HEAD commit, if any)
-           [parent-ref-pp (ffi/malloc 8)]
-           [has-parent (zero? (c-repo-head parent-ref-pp repo))]
-           [parent-commit (if has-parent
-                            (let* [[head-ref (ffi/read parent-ref-pp :ptr)]
-                                   [head-oid (c-ref-target head-ref)]
-                                   [pc (with-pp (fn [pp] (check (c-commit-lookup pp repo head-oid) "git/commit")))]]
+           parent-ref-pp (ffi/malloc 8)
+           has-parent (zero? (c-repo-head parent-ref-pp repo))
+           parent-commit (if has-parent
+                            (let* [head-ref (ffi/read parent-ref-pp :ptr)
+                                   head-oid (c-ref-target head-ref)
+                                   pc (with-pp (fn [pp] (check (c-commit-lookup pp repo head-oid) "git/commit")))]
                               (c-ref-free head-ref)
                               pc)
-                            nil)]
+                            nil)
            ## Author/committer signatures
-           [author-name (or (and opt:author opt:author:name) nil)]
-           [author-email (or (and opt:author opt:author:email) nil)]
-           [committer-name (or (and opt:committer opt:committer:name) nil)]
-           [committer-email (or (and opt:committer opt:committer:email) nil)]
+           author-name (or (and opt:author opt:author:name) nil)
+           author-email (or (and opt:author opt:author:email) nil)
+           committer-name (or (and opt:committer opt:committer:name) nil)
+           committer-email (or (and opt:committer opt:committer:email) nil)
            ## If no explicit name/email, read from config
-           [config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/commit")))]
-           [snap (with-pp (fn [pp] (check (c-config-snapshot pp config) "git/commit")))]
-           [cfg-name-pp (ffi/malloc 8)]
-           [cfg-email-pp (ffi/malloc 8)]
-           [_ (c-config-get-string cfg-name-pp snap "user.name")]
-           [_ (c-config-get-string cfg-email-pp snap "user.email")]
-           [cfg-name (maybe-str (ffi/read cfg-name-pp :ptr))]
-           [cfg-email (maybe-str (ffi/read cfg-email-pp :ptr))]
-           [a-name (or author-name cfg-name "Unknown")]
-           [a-email (or author-email cfg-email "unknown@unknown")]
-           [c-name (or committer-name cfg-name "Unknown")]
-           [c-email (or committer-email cfg-email "unknown@unknown")]
-           [author-sig (with-pp (fn [pp] (check (c-sig-now pp a-name a-email) "git/commit")))]
-           [committer-sig (with-pp (fn [pp] (check (c-sig-now pp c-name c-email) "git/commit")))]
+           config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/commit")))
+           snap (with-pp (fn [pp] (check (c-config-snapshot pp config) "git/commit")))
+           cfg-name-pp (ffi/malloc 8)
+           cfg-email-pp (ffi/malloc 8)
+           _ (c-config-get-string cfg-name-pp snap "user.name")
+           _ (c-config-get-string cfg-email-pp snap "user.email")
+           cfg-name (maybe-str (ffi/read cfg-name-pp :ptr))
+           cfg-email (maybe-str (ffi/read cfg-email-pp :ptr))
+           a-name (or author-name cfg-name "Unknown")
+           a-email (or author-email cfg-email "unknown@unknown")
+           c-name (or committer-name cfg-name "Unknown")
+           c-email (or committer-email cfg-email "unknown@unknown")
+           author-sig (with-pp (fn [pp] (check (c-sig-now pp a-name a-email) "git/commit")))
+           committer-sig (with-pp (fn [pp] (check (c-sig-now pp c-name c-email) "git/commit")))
            ## Create commit
-           [new-oid (ffi/malloc GIT_OID_SIZE)]
-           [parents-arr (if parent-commit
-                          (let [[pa (ffi/malloc 8)]]
+           new-oid (ffi/malloc GIT_OID_SIZE)
+           parents-arr (if parent-commit
+                          (let [pa (ffi/malloc 8)]
                             (ffi/write pa :ptr parent-commit) pa)
-                          null-ptr)]
-           [nparents (if parent-commit 1 0)]
-           [rc (c-commit-create new-oid repo "HEAD" author-sig committer-sig
-                                null-ptr message tree nparents parents-arr)]
-           [_ (check rc "git/commit")]
-           [result (oid->str new-oid)]]
+                          null-ptr)
+           nparents (if parent-commit 1 0)
+           rc (c-commit-create new-oid repo "HEAD" author-sig committer-sig
+                                null-ptr message tree nparents parents-arr)
+           _ (check rc "git/commit")
+           result (oid->str new-oid)]
       (when parent-commit (c-commit-free parent-commit)
                           (ffi/free parents-arr))
       (c-sig-free author-sig)
@@ -319,7 +320,7 @@
 
   (defn status-keyword [flags index?]
     "Convert git status bits to a keyword."
-    (let [[check (fn [bit kw] (when (not (zero? (bit/and flags bit))) kw))]]
+    (let [check (fn [bit kw] (when (not (zero? (bit/and flags bit))) kw))]
       (if index?
         (or (check 1 :new) (check 2 :modified) (check 4 :deleted)
             (check 8 :renamed) (check 16 :typechange) nil)
@@ -327,17 +328,17 @@
             (check 1024 :renamed) (check 2048 :typechange) nil))))
 
   (defn status [repo]
-    (let* [[slist (with-pp (fn [pp] (check (c-status-list-new pp repo null-ptr) "git/status")))]
-           [count (c-status-list-entrycount slist)]
-           [results @[]]]
+    (let* [slist (with-pp (fn [pp] (check (c-status-list-new pp repo null-ptr) "git/status")))
+           count (c-status-list-entrycount slist)
+           results @[]]
       (each i in (range count)
-        (let* [[entry (c-status-byindex slist i)]
+        (let* [entry (c-status-byindex slist i)
                ## git_status_entry: status (u32 at 0), head_to_index (ptr at 8), index_to_workdir (ptr at 16)
-               [flags (ffi/read entry :u32)]
+               flags (ffi/read entry :u32)
                ## diff_delta has old_file.path at offset 8 (after flags u32 + similarity u16 + nfiles u16)
                ## Actually easier: just read from head_to_index or index_to_workdir delta
-               [h2i (ffi/read (ptr/add entry 8) :ptr)]
-               [i2w (ffi/read (ptr/add entry 16) :ptr)]
+               h2i (ffi/read (ptr/add entry 8) :ptr)
+               i2w (ffi/read (ptr/add entry 16) :ptr)
                ## delta->new_file.path is at offset 96 on x86_64 (after old_file which is 88 bytes)
                ## Actually, git_diff_file is: oid(20) + path_ptr(8) + size(8) + flags(4) + mode(2) + id_abbrev(2) = 44, padded to 48?
                ## Let me just read the path from the delta's old_file.path
@@ -347,8 +348,8 @@
                ## old_file starts at 16 (aligned). old_file.oid is 20 bytes, path is at old_file+24 (after oid+padding).
                ## Actually oid is a struct { unsigned char id[20]; } so old_file.path is at offset 16+20+4(pad)=40? This is fragile.
                ## Better: just get the path from whichever delta is non-null
-               [path-delta (if (not (= h2i null-ptr)) h2i
-                             (if (not (= i2w null-ptr)) i2w null-ptr))]]
+               path-delta (if (not (= h2i null-ptr)) h2i
+                             (if (not (= i2w null-ptr)) i2w null-ptr))]
           (when (not (= path-delta null-ptr))
             ## Read path: the new_file.path is simpler to get. git_diff_delta layout varies by version.
             ## Safest approach: we know the entry has a path, just skip struct details for now.
@@ -358,8 +359,8 @@
       (->list results)))
 
   (defn add [repo paths]
-    (let* [[index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/add")))]
-           [path-list (if (string? paths) (list paths) (->list paths))]]
+    (let* [index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/add")))
+           path-list (if (string? paths) (list paths) (->list paths))]
       (each p in path-list
         (check (c-index-add-bypath index p) "git/add"))
       (check (c-index-write index) "git/add")
@@ -367,8 +368,8 @@
       nil))
 
   (defn remove [repo paths]
-    (let* [[index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/remove")))]
-           [path-list (if (string? paths) (list paths) (->list paths))]]
+    (let* [index (with-pp (fn [pp] (check (c-repo-index pp repo) "git/remove")))
+           path-list (if (string? paths) (list paths) (->list paths))]
       (each p in path-list
         (check (c-index-remove-bypath index p) "git/remove"))
       (check (c-index-write index) "git/remove")
@@ -378,29 +379,29 @@
   ## ── Branches ─────────────────────────────────────────────────────
 
   (defn branches [repo & opts]
-    (let* [[filter (if (> (length opts) 0)
+    (let* [filter (if (> (length opts) 0)
                      (match (first opts)
                        [:local GIT_BRANCH_LOCAL]
                        [:remote GIT_BRANCH_REMOTE]
                        [_ GIT_BRANCH_ALL])
-                     GIT_BRANCH_ALL)]
-           [iter (with-pp (fn [pp] (check (c-branch-iterator-new pp repo filter) "git/branches")))]
-           [results @[]]
-           [ref-pp (ffi/malloc 8)]
-           [type-pp (ffi/malloc 4)]]
+                     GIT_BRANCH_ALL)
+           iter (with-pp (fn [pp] (check (c-branch-iterator-new pp repo filter) "git/branches")))
+           results @[]
+           ref-pp (ffi/malloc 8)
+           type-pp (ffi/malloc 4)]
       (var done false)
       (while (not done)
-        (let [[rc (c-branch-next ref-pp type-pp iter)]]
+        (let [rc (c-branch-next ref-pp type-pp iter)]
           (if (= rc GIT_ITEROVER) (assign done true)
             (begin
               (check rc "git/branches")
-              (let* [[ref-ptr (ffi/read ref-pp :ptr)]
-                     [kind (ffi/read type-pp :i32)]
-                     [name-pp (ffi/malloc 8)]
-                     [_ (c-branch-name name-pp ref-ptr)]
-                     [name (ffi/string (ffi/read name-pp :ptr))]
-                     [target (c-ref-target ref-ptr)]
-                     [oid (if (= target null-ptr) nil (oid->str target))]]
+              (let* [ref-ptr (ffi/read ref-pp :ptr)
+                     kind (ffi/read type-pp :i32)
+                     name-pp (ffi/malloc 8)
+                     _ (c-branch-name name-pp ref-ptr)
+                     name (ffi/string (ffi/read name-pp :ptr))
+                     target (c-ref-target ref-ptr)
+                     oid (if (= target null-ptr) nil (oid->str target))]
                 (push results {:name name :oid oid
                                :kind (if (= kind GIT_BRANCH_LOCAL) :local :remote)})
                 (c-ref-free ref-ptr)
@@ -411,19 +412,19 @@
       (->list results)))
 
   (defn branch-create [repo name & opts]
-    (let* [[target-str (if (> (length opts) 0) (first opts) "HEAD")]
-           [obj (with-pp (fn [pp] (check (c-revparse pp repo target-str) "git/branch-create")))]
-           [commit (with-pp (fn [pp] (check (c-commit-lookup pp repo (c-object-id obj)) "git/branch-create")))]
-           [branch-ref (with-pp (fn [pp] (check (c-branch-create pp repo name commit 0) "git/branch-create")))]
-           [target (c-ref-target branch-ref)]
-           [oid (if (= target null-ptr) nil (oid->str target))]]
+    (let* [target-str (if (> (length opts) 0) (first opts) "HEAD")
+           obj (with-pp (fn [pp] (check (c-revparse pp repo target-str) "git/branch-create")))
+           commit (with-pp (fn [pp] (check (c-commit-lookup pp repo (c-object-id obj)) "git/branch-create")))
+           branch-ref (with-pp (fn [pp] (check (c-branch-create pp repo name commit 0) "git/branch-create")))
+           target (c-ref-target branch-ref)
+           oid (if (= target null-ptr) nil (oid->str target))]
       (c-ref-free branch-ref)
       (c-commit-free commit)
       (c-object-free obj)
       oid))
 
   (defn branch-delete [repo name]
-    (let [[branch (with-pp (fn [pp] (check (c-branch-lookup pp repo name GIT_BRANCH_LOCAL) "git/branch-delete")))]]
+    (let [branch (with-pp (fn [pp] (check (c-branch-lookup pp repo name GIT_BRANCH_LOCAL) "git/branch-delete")))]
       (check (c-branch-delete branch) "git/branch-delete")
       nil))
 
@@ -431,30 +432,30 @@
 
   (defn tags [repo]
     ## git_strarray: strings (ptr) at 0, count (size_t) at 8
-    (let* [[sa (ffi/malloc 16)]
-           [_ (check (c-tag-list sa repo) "git/tags")]
-           [count (ffi/read (ptr/add sa 8) :size)]
-           [strings-ptr (ffi/read sa :ptr)]
-           [results @[]]]
+    (let* [sa (ffi/malloc 16)
+           _ (check (c-tag-list sa repo) "git/tags")
+           count (ffi/read (ptr/add sa 8) :size)
+           strings-ptr (ffi/read sa :ptr)
+           results @[]]
       (each i in (range count)
-        (let [[s (ffi/read (ptr/add strings-ptr (* i 8)) :ptr)]]
+        (let [s (ffi/read (ptr/add strings-ptr (* i 8)) :ptr)]
           (push results (ffi/string s))))
       (c-strarray-free sa)
       (ffi/free sa)
       (->list results)))
 
   (defn tag-create [repo name & opts]
-    (let* [[target-str (if (> (length opts) 0) (first opts) "HEAD")]
-           [message (if (> (length opts) 1) (nth 1 opts) nil)]
-           [obj (with-pp (fn [pp] (check (c-revparse pp repo target-str) "git/tag-create")))]
-           [new-oid (ffi/malloc GIT_OID_SIZE)]
-           [rc (if message
-                 (let [[sig (with-pp (fn [pp] (check (c-sig-now pp "tagger" "tagger@local") "git/tag-create")))]]
-                   (let [[r (c-tag-create new-oid repo name obj sig message 0)]]
+    (let* [target-str (if (> (length opts) 0) (first opts) "HEAD")
+           message (if (> (length opts) 1) (nth 1 opts) nil)
+           obj (with-pp (fn [pp] (check (c-revparse pp repo target-str) "git/tag-create")))
+           new-oid (ffi/malloc GIT_OID_SIZE)
+           rc (if message
+                 (let [sig (with-pp (fn [pp] (check (c-sig-now pp "tagger" "tagger@local") "git/tag-create")))]
+                   (let [r (c-tag-create new-oid repo name obj sig message 0)]
                      (c-sig-free sig) r))
-                 (c-tag-create-lightweight new-oid repo name obj 0))]
-           [_ (check rc "git/tag-create")]
-           [result (oid->str new-oid)]]
+                 (c-tag-create-lightweight new-oid repo name obj 0))
+           _ (check rc "git/tag-create")
+           result (oid->str new-oid)]
       (c-object-free obj)
       (ffi/free new-oid)
       result))
@@ -466,11 +467,11 @@
   ## ── Remotes ──────────────────────────────────────────────────────
 
   (defn remotes [repo]
-    (let* [[sa (ffi/malloc 16)]
-           [_ (check (c-remote-list sa repo) "git/remotes")]
-           [count (ffi/read (ptr/add sa 8) :size)]
-           [strings-ptr (ffi/read sa :ptr)]
-           [results @[]]]
+    (let* [sa (ffi/malloc 16)
+           _ (check (c-remote-list sa repo) "git/remotes")
+           count (ffi/read (ptr/add sa 8) :size)
+           strings-ptr (ffi/read sa :ptr)
+           results @[]]
       (each i in (range count)
         (push results (ffi/string (ffi/read (ptr/add strings-ptr (* i 8)) :ptr))))
       (c-strarray-free sa)
@@ -478,15 +479,15 @@
       (->list results)))
 
   (defn remote-info [repo name]
-    (let* [[remote (with-pp (fn [pp] (check (c-remote-lookup pp repo name) "git/remote-info")))]
-           [result {:name name
+    (let* [remote (with-pp (fn [pp] (check (c-remote-lookup pp repo name) "git/remote-info")))
+           result {:name name
                     :url (maybe-str (c-remote-url remote))
-                    :push-url (maybe-str (c-remote-pushurl remote))}]]
+                    :push-url (maybe-str (c-remote-pushurl remote))}]
       (c-remote-free remote)
       result))
 
   (defn fetch [repo remote-name]
-    (let [[remote (with-pp (fn [pp] (check (c-remote-lookup pp repo remote-name) "git/fetch")))]]
+    (let [remote (with-pp (fn [pp] (check (c-remote-lookup pp repo remote-name) "git/fetch")))]
       (check (c-remote-fetch remote null-ptr null-ptr null-ptr) "git/fetch")
       (c-remote-free remote)
       nil))
@@ -494,18 +495,18 @@
   ## ── Config ───────────────────────────────────────────────────────
 
   (defn config-get [repo key]
-    (let* [[config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/config-get")))]
-           [snap (with-pp (fn [pp] (check (c-config-snapshot pp config) "git/config-get")))]
-           [val-pp (ffi/malloc 8)]
-           [rc (c-config-get-string val-pp snap key)]
-           [result (if (zero? rc) (ffi/string (ffi/read val-pp :ptr)) nil)]]
+    (let* [config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/config-get")))
+           snap (with-pp (fn [pp] (check (c-config-snapshot pp config) "git/config-get")))
+           val-pp (ffi/malloc 8)
+           rc (c-config-get-string val-pp snap key)
+           result (if (zero? rc) (ffi/string (ffi/read val-pp :ptr)) nil)]
       (ffi/free val-pp)
       (c-config-free snap)
       (c-config-free config)
       result))
 
   (defn config-set [repo key val]
-    (let [[config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/config-set")))]]
+    (let [config (with-pp (fn [pp] (check (c-repo-config pp repo) "git/config-set")))]
       (check (c-config-set-string config key val) "git/config-set")
       (c-config-free config)
       nil))

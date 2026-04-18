@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Git module tests (FFI to libgit2)
 
 (def [ok? _] (protect ((fn [] (ffi/native "libgit2.so")))))
@@ -9,19 +10,19 @@
 (def repo (git:open "."))
 
 ## Head
-(let [[h (git:head repo)]]
+(let [h (git:head repo)]
   (assert (string? h:name) "head name is string")
   (assert (string? h:oid) "head oid is string")
   (assert (= (length h:oid) 40) "oid is 40 hex chars"))
 
 ## Resolve
-(let* [[oid (git:resolve repo "HEAD")]
-       [h (git:head repo)]]
+(let* [oid (git:resolve repo "HEAD")
+       h (git:head repo)]
   (assert (= oid h:oid) "resolve HEAD matches head oid"))
 
 ## Commit info
-(let* [[oid (git:resolve repo "HEAD")]
-       [info (git:commit-info repo oid)]]
+(let* [oid (git:resolve repo "HEAD")
+       info (git:commit-info repo oid)]
   (assert (= info:oid oid) "commit-info oid matches")
   (assert (string? info:summary) "has summary")
   (assert (string? info:author:name) "has author name")
@@ -30,16 +31,16 @@
   (assert (list? info:parents) "has parents list"))
 
 ## Log
-(let [[entries (git:log repo {:limit 3})]]
+(let [entries (git:log repo {:limit 3})]
   (assert (> (length entries) 0) "log has entries")
   (assert (<= (length entries) 3) "log respects limit")
-  (let [[e (first entries)]] (assert (string? e:summary) "log entry has summary")))
+  (let [e (first entries)] (assert (string? e:summary) "log entry has summary")))
 
 ## Branches
-(let [[bs (git:branches repo :local)]]
+(let [bs (git:branches repo :local)]
   (assert (list? bs) "branches returns list")
   (when (> (length bs) 0)
-    (let [[b (first bs)]] (assert (string? b:name) "branch has name"))))
+    (let [b (first bs)] (assert (string? b:name) "branch has name"))))
 
 ## Tags
 (assert (list? (git:tags repo)) "tags returns list")
@@ -70,13 +71,13 @@
 ## Branch
 (def branch-oid (git:branch-create tmp "feature"))
 (assert (= branch-oid oid) "branch points to HEAD")
-(let [[bs (git:branches tmp :local)]]
+(let [bs (git:branches tmp :local)]
   (assert (>= (length bs) 2) "two branches"))
 (git:branch-delete tmp "feature")
 
 ## Tag
 (git:tag-create tmp "v1.0")
-(let [[ts (git:tags tmp)]]
+(let [ts (git:tags tmp)]
   (assert (find (fn [t] (= t "v1.0")) ts) "tag created"))
 (git:tag-delete tmp "v1.0")
 

@@ -1,4 +1,4 @@
-(elle/epoch 6)
+(elle/epoch 7)
 
 # N-Queens Problem Solver — mutable array version
 #
@@ -10,8 +10,8 @@
   "Check col against queens[idx..row)."
   (if (= idx row)
     true
-    (let* ([placed-col (get queens idx)]
-           [row-dist (- row idx)])
+    (let* [placed-col (get queens idx)
+           row-dist (- row idx)]
       (if (or (= col placed-col)
               (= row-dist (abs (- col placed-col))))
         false
@@ -28,7 +28,7 @@
     (if (safe? col queens row)
       (begin
         (push queens col)
-        (let* ([solutions (solve n (+ row 1) queens)])
+        (let* [solutions (solve n (+ row 1) queens)]
           (pop queens)
           (concat solutions (try-cols n (+ col 1) queens row))))
       (try-cols n (+ col 1) queens row))))
@@ -43,7 +43,7 @@
   (solve n 0 @[]))
 
 (defn benchmark [n]
-  (let* ([solutions (solve-nqueens n)])
+  (let* [solutions (solve-nqueens n)]
     (println "Solving N-Queens for N=" n "... Found " (length solutions) " solution(s)")))
 
 (println "=== N-Queens Solver (Elle, array) ===")

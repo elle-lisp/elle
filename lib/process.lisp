@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/process.lisp — Erlang-inspired process module
 ##
 ## Loaded via: (def process ((import-file "lib/process.lisp")))
@@ -49,7 +50,7 @@
 (defn make-ref-gen []
   (var counter 0)
   (fn []
-    (let ([r counter])
+    (let [r counter]
       (assign counter (+ counter 1))
       r)))
 
@@ -59,27 +60,27 @@
 # ============================================================================
 
 (defn make-scheduler [&named fuel backend]
-  (let ([quantum    (or fuel 1000)]
-        [procs      @[]]       # @array of @struct (per-process state)
-        [ready      @[]]       # PIDs ready to run
-        [waiting    @[]]       # PIDs blocked on recv
-        [io-pending @{}]       # submission-id → {:pid pid} or {:fiber fiber :pid pid}
-        [names      @{}]       # name → pid
-        [timers     @[]]       # @array of @struct {:ref :fire-at :pid :msg}
-        [tick       (box 0)]   # logical tick (boxed for mutation in closures)
-        [gen-ref    (make-ref-gen)]
-        [backend    (or backend (io/backend :async))]
+  (let [quantum    (or fuel 1000)
+        procs      @[]       # @array of @struct (per-process state)
+        ready      @[]       # PIDs ready to run
+        waiting    @[]       # PIDs blocked on recv
+        io-pending @{}       # submission-id → {:pid pid} or {:fiber fiber :pid pid}
+        names      @{}       # name → pid
+        timers     @[]       # @array of @struct {:ref :fire-at :pid :msg}
+        tick       (box 0)   # logical tick (boxed for mutation in closures)
+        gen-ref    (make-ref-gen)
+        backend    (or backend (io/backend :async))
         # ---- structured concurrency state ----
-        [sub-runnable  @[]]    # @array of @struct {:fiber :pid} — child fibers to resume
-        [sub-completed @{}]    # fiber → :ok | :error
-        [join-waiting  @{}]    # target-fiber → @[pid ...] — who's joining
-        [select-sets   @{}])   # pid → @{:candidates @[fiber...] :woken false}
+        sub-runnable  @[]    # @array of @struct {:fiber :pid} — child fibers to resume
+        sub-completed @{}    # fiber → :ok | :error
+        join-waiting  @{}    # target-fiber → @[pid ...] — who's joining
+        select-sets   @{}]   # pid → @{:candidates @[fiber...] :woken false}
 
     # ---- process creation ----
 
     (var sched-spawn (fn [closure]
-      (let ([pid   (length procs)]
-            [fiber (fiber/new closure |:yield :error :fuel :io :exec :wait|)])
+      (let [pid   (length procs)
+            fiber (fiber/new closure |:yield :error :fuel :io :exec :wait|)]
         (push procs @{:pid pid :fiber fiber :mbox @[] :resume nil
                       :status :alive :links @||
                       :monitors @{} :monitored-by @{}
@@ -105,29 +106,29 @@
     # ---- links & monitors ----
 
     (var add-link (fn [a b]
-      (let ([la (get (proc-get a) :links)]
-            [lb (get (proc-get b) :links)])
+      (let [la (get (proc-get a) :links)
+            lb (get (proc-get b) :links)]
         (put la b)
         (put lb a))))
 
     (var remove-link (fn [a b]
-      (let ([la (get (proc-get a) :links)]
-            [lb (get (proc-get b) :links)])
+      (let [la (get (proc-get a) :links)
+            lb (get (proc-get b) :links)]
         (del la b)
         (del lb a))))
 
     (var add-monitor (fn [watcher target]
-      (let ([ref (fresh-ref)]
-            [wp (proc-get watcher)]
-            [tp (proc-get target)])
+      (let [ref (fresh-ref)
+            wp (proc-get watcher)
+            tp (proc-get target)]
         (put (get wp :monitors) ref target)
         (put (get tp :monitored-by) ref watcher)
         ref)))
 
     (var remove-monitor (fn [ref watcher-pid]
-      (let ([wp (proc-get watcher-pid)])
+      (let [wp (proc-get watcher-pid)]
         (when (has? (get wp :monitors) ref)
-          (let ([target (get (get wp :monitors) ref)])
+          (let [target (get (get wp :monitors) ref)]
             (del (get wp :monitors) ref)
             (when (alive? target)
               (del (get (proc-get target) :monitored-by) ref)))))))
@@ -146,14 +147,14 @@
 
     (var notify-monitors (fn [dead-pid reason]
       (each ref in (keys (get (proc-get dead-pid) :monitored-by))
-        (let ([watcher (get (get (proc-get dead-pid) :monitored-by) ref)])
+        (let [watcher (get (get (proc-get dead-pid) :monitored-by) ref)]
           (when (alive? watcher)
             (deliver watcher [:DOWN ref dead-pid reason])
             (del (get (proc-get watcher) :monitors) ref))))))
 
     (var unregister-name (fn [pid]
-      (let* ([p (proc-get pid)]
-             [n (get p :name)])
+      (let* [p (proc-get pid)
+             n (get p :name)]
         (when n
           (del names n)
           (put p :name nil)))))
@@ -178,8 +179,8 @@
     # ---- timers ----
 
     (var fire-timers (fn []
-      (let ([still @[]]
-            [now (unbox tick)])
+      (let [still @[]
+            now (unbox tick)]
         (each timer in timers
           (if (>= now (get timer :fire-at))
             (deliver (get timer :pid) (get timer :msg))
@@ -190,12 +191,12 @@
 
     # Scan mailbox for a message matching pred, moving non-matches to save-queue
     (var scan-mbox (fn [pid pred]
-      (let* ([p (proc-get pid)]
-             [mbox (get p :mbox)]
-             [save (get p :save-queue)])
+      (let* [p (proc-get pid)
+             mbox (get p :mbox)
+             save (get p :save-queue)]
         (var found nil)
         (while (and (nil? found) (> (length mbox) 0))
-          (let ([msg (get mbox 0)])
+          (let [msg (get mbox 0)]
             (remove mbox 0)
             (if (pred msg)
               (assign found msg)
@@ -204,14 +205,14 @@
 
     # Restore save-queue to front of mailbox
     (var restore-save-queue (fn [pid]
-      (let* ([p (proc-get pid)]
-             [save (get p :save-queue)]
-             [mbox (get p :mbox)])
+      (let* [p (proc-get pid)
+             save (get p :save-queue)
+             mbox (get p :mbox)]
         # Prepend save-queue items back to mbox (in order)
         (var i (- (length save) 1))
         (while (>= i 0)
           # Insert at front of mbox
-          (let ([tmp @[]])
+          (let [tmp @[]]
             (push tmp (get save i))
             (each m in mbox (push tmp m))
             # Replace mbox contents
@@ -225,24 +226,24 @@
     # ---- waking ----
 
     (var wake-waiting (fn []
-      (let ([still @[]])
+      (let [still @[]]
         (each pid in waiting
           (if (not (alive? pid))
             nil  # skip dead
-            (let* ([p (proc-get pid)]
-                   [mbox (get p :mbox)]
-                   [pred (get p :recv-pred)])
+            (let* [p (proc-get pid)
+                   mbox (get p :mbox)
+                   pred (get p :recv-pred)]
               (if (nil? pred)
                 # Plain recv — take first message
                 (if (> (length mbox) 0)
                   (begin
-                    (let ([msg (get mbox 0)])
+                    (let [msg (get mbox 0)]
                       (remove mbox 0)
                       (put p :resume msg)
                       (push ready pid)))
                   (push still pid))
                 # Selective recv — scan for matching message
-                (let ([found (scan-mbox pid pred)])
+                (let [found (scan-mbox pid pred)]
                   (if (not (nil? found))
                     (begin
                       (restore-save-queue pid)
@@ -258,10 +259,10 @@
       (put sub-completed fiber status)
 
       # Wake join waiters
-      (let ([waiters (get join-waiting fiber)])
+      (let [waiters (get join-waiting fiber)]
         (when (not (nil? waiters))
           (del join-waiting fiber)
-          (let ([pair [(= status :ok) (fiber/value fiber)]])
+          (let [pair [(= status :ok) (fiber/value fiber)]]
             (each pid in waiters
               (when (alive? pid)
                 (put (proc-get pid) :resume pair)
@@ -283,12 +284,12 @@
       (case (fiber/status fiber)
         :dead   (complete-sub-fiber fiber :ok)
         :error  (complete-sub-fiber fiber :error)
-        :paused (let ([bits (fiber/bits fiber)])
+        :paused (let [bits (fiber/bits fiber)]
                   (cond
                     ((not (= 0 (bit/and bits 1)))       # SIG_ERROR
                       (complete-sub-fiber fiber :error))
                     ((not (= 0 (bit/and bits 512)))     # SIG_IO
-                      (let ([[ok? result] (protect (io/submit backend (fiber/value fiber)))])
+                      (let [[ok? result] (protect (io/submit backend (fiber/value fiber)))]
                         (if ok?
                           (put io-pending result @{:fiber fiber :pid pid})
                           (begin
@@ -300,10 +301,10 @@
     # Drain sub-fiber runnable queue
     (var drain-sub-runnable (fn []
       (while (> (length sub-runnable) 0)
-        (let* ([entry (pop sub-runnable)]
-               [fiber (get entry :fiber)]
-               [pid   (get entry :pid)]
-               [status (fiber/status fiber)])
+        (let* [entry (pop sub-runnable)
+               fiber (get entry :fiber)
+               pid   (get entry :pid)
+               status (fiber/status fiber)]
           (cond
             ((= status :dead)  (complete-sub-fiber fiber :ok))
             ((= status :error) (complete-sub-fiber fiber :error))
@@ -315,15 +316,15 @@
     (var handle-wait (fn [pid request]
       (case (get request :op)
         :join
-          (let ([target (get request :fiber)])
-            (let ([comp (get sub-completed target)])
+          (let [target (get request :fiber)]
+            (let [comp (get sub-completed target)]
               (if (not (nil? comp))
                 # Already completed
                 (begin
                   (put (proc-get pid) :resume [(= comp :ok) (fiber/value target)])
                   (push ready pid))
                 # Check raw fiber status
-                (let ([status (fiber/status target)])
+                (let [status (fiber/status target)]
                   (cond
                     ((= status :dead)
                       (put (proc-get pid) :resume [true (fiber/value target)])
@@ -332,20 +333,20 @@
                       (put (proc-get pid) :resume [false (fiber/value target)])
                       (push ready pid))
                     (true
-                      (let ([ws (or (get join-waiting target)
-                                    (let ([w @[]]) (put join-waiting target w) w))])
+                      (let [ws (or (get join-waiting target)
+                                    (let [w @[]] (put join-waiting target w) w))]
                         (push ws pid)
                         # Ensure the target fiber gets pumped
                         (when (nil? (get sub-completed target))
                           (push sub-runnable @{:fiber target :pid pid})))))))))
 
         :select
-          (let ([candidates (get request :fibers)])
+          (let [candidates (get request :fibers)]
             # Check if any candidate already completed
-            (let ([done (find (fn [f] (or (not (nil? (get sub-completed f)))
+            (let [done (find (fn [f] (or (not (nil? (get sub-completed f)))
                                           (= (fiber/status f) :dead)
                                           (= (fiber/status f) :error)))
-                              candidates)])
+                              candidates)]
               (if (not (nil? done))
                 (begin
                   (put (proc-get pid) :resume done)
@@ -358,8 +359,8 @@
                       (push sub-runnable @{:fiber f :pid pid})))))))
 
         :abort
-          (let ([target (get request :fiber)])
-            (let ([comp (get sub-completed target)])
+          (let [target (get request :fiber)]
+            (let [comp (get sub-completed target)]
               (if (not (nil? comp))
                 # Already completed — no-op
                 (begin
@@ -377,31 +378,31 @@
     # ---- command dispatch ----
 
     (var handle-cmd (fn [pid cmd]
-      (let ([tag (get cmd 0)])
+      (let [tag (get cmd 0)]
         (case tag
 
           :send
-            (let ([target (get cmd 1)]
-                  [msg    (get cmd 2)])
+            (let [target (get cmd 1)
+                  msg    (get cmd 2)]
               (deliver target msg)
               (put (proc-get pid) :resume :ok)
               (push ready pid))
 
           :recv
-            (let* ([p (proc-get pid)]
-                   [mbox (get p :mbox)])
+            (let* [p (proc-get pid)
+                   mbox (get p :mbox)]
               (if (> (length mbox) 0)
                 (begin
-                  (let ([msg (get mbox 0)])
+                  (let [msg (get mbox 0)]
                     (remove mbox 0)
                     (put p :resume msg)
                     (push ready pid)))
                 (push waiting pid)))
 
           :recv-match
-            (let* ([pred (get cmd 1)]
-                   [p (proc-get pid)]
-                   [found (scan-mbox pid pred)])
+            (let* [pred (get cmd 1)
+                   p (proc-get pid)
+                   found (scan-mbox pid pred)]
               (if (not (nil? found))
                 (begin
                   (restore-save-queue pid)
@@ -412,17 +413,17 @@
                   (push waiting pid))))
 
           :recv-timeout
-            (let* ([ticks (get cmd 1)]
-                   [p (proc-get pid)]
-                   [mbox (get p :mbox)])
+            (let* [ticks (get cmd 1)
+                   p (proc-get pid)
+                   mbox (get p :mbox)]
               (if (> (length mbox) 0)
                 (begin
-                  (let ([msg (get mbox 0)])
+                  (let [msg (get mbox 0)]
                     (remove mbox 0)
                     (put p :resume msg)
                     (push ready pid)))
-                (let ([ref (fresh-ref)]
-                      [fire-at (+ (unbox tick) ticks)])
+                (let [ref (fresh-ref)
+                      fire-at (+ (unbox tick) ticks)]
                   (push timers @{:ref ref :fire-at fire-at
                                  :pid pid :msg :timeout})
                   (push waiting pid))))
@@ -433,19 +434,19 @@
               (push ready pid))
 
           :spawn
-            (let ([new-pid (sched-spawn (get cmd 1))])
+            (let [new-pid (sched-spawn (get cmd 1))]
               (put (proc-get pid) :resume new-pid)
               (push ready pid))
 
           :spawn-link
-            (let ([new-pid (sched-spawn (get cmd 1))])
+            (let [new-pid (sched-spawn (get cmd 1))]
               (add-link pid new-pid)
               (put (proc-get pid) :resume new-pid)
               (push ready pid))
 
           :spawn-monitor
-            (let* ([new-pid (sched-spawn (get cmd 1))]
-                   [ref (add-monitor pid new-pid)])
+            (let* [new-pid (sched-spawn (get cmd 1))
+                   ref (add-monitor pid new-pid)]
               (put (proc-get pid) :resume [new-pid ref])
               (push ready pid))
 
@@ -462,7 +463,7 @@
               (push ready pid))
 
           :monitor
-            (let ([ref (add-monitor pid (get cmd 1))])
+            (let [ref (add-monitor pid (get cmd 1))]
               (put (proc-get pid) :resume ref)
               (push ready pid))
 
@@ -479,8 +480,8 @@
               (push ready pid))
 
           :exit
-            (let ([target (get cmd 1)]
-                  [reason (get cmd 2)])
+            (let [target (get cmd 1)
+                  reason (get cmd 2)]
               (if (= target pid)
                 # Self-exit
                 (process-exit pid reason)
@@ -495,47 +496,47 @@
                 (push ready pid)))
 
           :register
-            (let ([name (get cmd 1)])
+            (let [name (get cmd 1)]
               (put names name pid)
               (put (proc-get pid) :name name)
               (put (proc-get pid) :resume :ok)
               (push ready pid))
 
           :unregister
-            (let ([name (get cmd 1)])
+            (let [name (get cmd 1)]
               (del names name)
               (put (proc-get pid) :name nil)
               (put (proc-get pid) :resume :ok)
               (push ready pid))
 
           :whereis
-            (let ([name (get cmd 1)])
+            (let [name (get cmd 1)]
               (put (proc-get pid) :resume (get names name nil))
               (push ready pid))
 
           :send-named
-            (let* ([name (get cmd 1)]
-                   [msg  (get cmd 2)]
-                   [target (get names name nil)])
+            (let* [name (get cmd 1)
+                   msg  (get cmd 2)
+                   target (get names name nil)]
               (when target (deliver target msg))
               (put (proc-get pid) :resume :ok)
               (push ready pid))
 
           :send-after
-            (let* ([ticks  (get cmd 1)]
-                   [target (get cmd 2)]
-                   [msg    (get cmd 3)]
-                   [ref    (fresh-ref)]
-                   [fire-at (+ (unbox tick) ticks)])
+            (let* [ticks  (get cmd 1)
+                   target (get cmd 2)
+                   msg    (get cmd 3)
+                   ref    (fresh-ref)
+                   fire-at (+ (unbox tick) ticks)]
               (push timers @{:ref ref :fire-at fire-at
                              :pid target :msg msg})
               (put (proc-get pid) :resume ref)
               (push ready pid))
 
           :cancel-timer
-            (let ([ref (get cmd 1)]
-                  [found false]
-                  [still @[]])
+            (let [ref (get cmd 1)
+                  found false
+                  still @[]]
               (each timer in timers
                 (if (= (get timer :ref) ref)
                   (assign found true)
@@ -545,24 +546,24 @@
               (push ready pid))
 
           :put-dict
-            (let* ([p (proc-get pid)]
-                   [key (get cmd 1)]
-                   [val (get cmd 2)]
-                   [old (get (get p :dict) key nil)])
+            (let* [p (proc-get pid)
+                   key (get cmd 1)
+                   val (get cmd 2)
+                   old (get (get p :dict) key nil)]
               (put (get p :dict) key val)
               (put p :resume old)
               (push ready pid))
 
           :get-dict
-            (let* ([p (proc-get pid)]
-                   [key (get cmd 1)])
+            (let* [p (proc-get pid)
+                   key (get cmd 1)]
               (put p :resume (get (get p :dict) key nil))
               (push ready pid))
 
           :erase-dict
-            (let* ([p (proc-get pid)]
-                   [key (get cmd 1)]
-                   [old (get (get p :dict) key nil)])
+            (let* [p (proc-get pid)
+                   key (get cmd 1)
+                   old (get (get p :dict) key nil)]
               (del (get p :dict) key)
               (put p :resume old)
               (push ready pid))
@@ -574,7 +575,7 @@
 
     (var dispatch-signal nil)
     (assign dispatch-signal (fn [pid f]
-      (let ([bits (fiber/bits f)])
+      (let [bits (fiber/bits f)]
         (cond
           # Completed normally
           ((= (fiber/status f) :dead)
@@ -590,7 +591,7 @@
 
           # I/O — submit to async backend, park process
           ((not (= 0 (bit/and bits 512)))
-            (let ([[ok? id] (protect (io/submit backend (fiber/value f)))])
+            (let [[ok? id] (protect (io/submit backend (fiber/value f)))]
               (if ok?
                 (put io-pending id @{:pid pid})
                 (begin (fiber/abort f id) (dispatch-signal pid f)))))
@@ -611,9 +612,9 @@
 
     (var run-one (fn [pid]
       (when (alive? pid)
-        (let* ([p (proc-get pid)]
-               [f (get p :fiber)]
-               [resume-val (get p :resume)])
+        (let* [p (proc-get pid)
+               f (get p :fiber)
+               resume-val (get p :resume)]
           (put p :resume nil)
           (fiber/set-fuel f quantum)
           (fiber/resume f resume-val)
@@ -624,12 +625,12 @@
     # Process a batch of completions, resuming/aborting process and sub-fibers.
     (var complete-io (fn [completions]
       (each completion in completions
-        (let* ([id    (get completion :id)]
-               [entry (get io-pending id)])
+        (let* [id    (get completion :id)
+               entry (get io-pending id)]
           (del io-pending id)
           (when (not (nil? entry))
-            (let ([pid (get entry :pid)]
-                  [sub-fiber (get entry :fiber)])
+            (let [pid (get entry :pid)
+                  sub-fiber (get entry :fiber)]
               (if (not (nil? sub-fiber))
                 # Sub-fiber I/O completion
                 (begin
@@ -639,8 +640,8 @@
                   (handle-sub-fiber-after-resume sub-fiber pid))
                 # Process fiber I/O completion
                 (when (alive? pid)
-                  (let* ([p (proc-get pid)]
-                         [f (get p :fiber)])
+                  (let* [p (proc-get pid)
+                         f (get p :fiber)]
                     (fiber/set-fuel f quantum)
                     (if (nil? (get completion :error))
                       (fiber/resume f (get completion :value))
@@ -701,7 +702,7 @@
               (error {:error :deadlock
                       :message "all processes waiting, no messages pending"}))))
 
-        (let ([batch ready])
+        (let [batch ready]
           (assign ready @[])
           (each pid in batch
             (run-one pid))))))
@@ -714,7 +715,7 @@
 
     (var sched-process-info (fn [pid]
       (when (< pid (length procs))
-        (let ([p (proc-get pid)])
+        (let [p (proc-get pid)]
           {:pid (get p :pid)
            :status (get p :status)
            :name (get p :name)
@@ -745,7 +746,7 @@
    Blocks until all processes complete. Returns the scheduler.
    This is the primary entry point for most programs. Use `run` instead
    when you need to pre-configure or reuse a scheduler."
-  (let ([sched (make-scheduler :fuel fuel :backend backend)])
+  (let [sched (make-scheduler :fuel fuel :backend backend)]
     ((get sched :run) init)
     sched))
 
@@ -782,14 +783,14 @@
 
 (defn gen-make-ref []
   "Per-process monotonic ref for call correlation."
-  (let ([n (or (get-dict :$gen-call-ref) 0)])
+  (let [n (or (get-dict :$gen-call-ref) 0)]
     (put-dict :$gen-call-ref (+ n 1))
     n))
 
 (defn gen-resolve [server]
   "Resolve server — pid passes through, keyword does whereis."
   (if (keyword? server)
-    (let ([pid (whereis server)])
+    (let [pid (whereis server)]
       (when (nil? pid)
         (error {:error :noproc
                 :message (string "no process registered as " server)}))
@@ -804,17 +805,17 @@
 
 (defn gen-server-call [server request &named timeout]
   "Synchronous request-response. Blocks until the server replies."
-  (let* ([pid (gen-resolve server)]
-         [ref (gen-make-ref)]
-         [me  (self)]
-         [timer-ref (when (not (nil? timeout))
-                      (send-after timeout me [:$call-timeout ref]))])
+  (let* [pid (gen-resolve server)
+         ref (gen-make-ref)
+         me  (self)
+         timer-ref (when (not (nil? timeout))
+                      (send-after timeout me [:$call-timeout ref]))]
     (send pid [:$call me ref request])
-    (let ([reply (recv-match (fn [m]
+    (let [reply (recv-match (fn [m]
                    (and (array? m)
                         (>= (length m) 3)
                         (or (and (= (get m 0) :$reply)        (= (get m 1) ref))
-                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))])
+                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))]
       (when (not (nil? timer-ref))
         (cancel-timer timer-ref))
       (when (= (get reply 0) :$call-timeout)
@@ -829,18 +830,18 @@
 
 (defn gen-server-stop [server &named reason timeout]
   "Request graceful shutdown. Blocks until the server acknowledges."
-  (let* ([pid (gen-resolve server)]
-         [ref (gen-make-ref)]
-         [me  (self)]
-         [rsn (or reason :normal)]
-         [timer-ref (when (not (nil? timeout))
-                      (send-after timeout me [:$call-timeout ref]))])
+  (let* [pid (gen-resolve server)
+         ref (gen-make-ref)
+         me  (self)
+         rsn (or reason :normal)
+         timer-ref (when (not (nil? timeout))
+                      (send-after timeout me [:$call-timeout ref]))]
     (send pid [:$stop me ref rsn])
-    (let ([reply (recv-match (fn [m]
+    (let [reply (recv-match (fn [m]
                    (and (array? m)
                         (>= (length m) 3)
                         (or (and (= (get m 0) :$reply)        (= (get m 1) ref))
-                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))])
+                            (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))))))]
       (when (not (nil? timer-ref))
         (cancel-timer timer-ref))
       (when (= (get reply 0) :$call-timeout)
@@ -852,20 +853,20 @@
 
 (defn gen-server-start-link [callbacks init-arg &named name]
   "Spawn a linked GenServer. Returns the pid."
-  (let* ([handle-call (get callbacks :handle-call)]
-         [handle-cast (get callbacks :handle-cast)]
-         [handle-info (or (get callbacks :handle-info)
-                          (fn [_msg state] [:noreply state]))]
-         [on-terminate (or (get callbacks :terminate)
-                           (fn [_reason _state] nil))]
-         [init-fn     (get callbacks :init)])
+  (let* [handle-call (get callbacks :handle-call)
+         handle-cast (get callbacks :handle-cast)
+         handle-info (or (get callbacks :handle-info)
+                          (fn [_msg state] [:noreply state]))
+         on-terminate (or (get callbacks :terminate)
+                           (fn [_reason _state] nil))
+         init-fn     (get callbacks :init)]
 
     (spawn-link (fn []
       (when (not (nil? name)) (register name))
 
       # Initialize
       (var state
-        (let ([result (init-fn init-arg)])
+        (let [result (init-fn init-arg)]
           (if (and (array? result) (> (length result) 0))
             (case (get result 0)
               :ok   (get result 1)
@@ -877,11 +878,11 @@
 
       # Main loop
       (forever
-        (let ([msg (recv)])
+        (let [msg (recv)]
           (match msg
 
             ([:$call caller ref request]
-              (let ([result (handle-call request [caller ref] state)])
+              (let [result (handle-call request [caller ref] state)]
                 (match result
                   ([:reply reply new-state]
                     (send caller [:$reply ref reply])
@@ -896,7 +897,7 @@
                              :message "handle-call returned invalid result"})))))
 
             ([:$cast request]
-              (let ([result (handle-cast request state)])
+              (let [result (handle-cast request state)]
                 (match result
                   ([:noreply new-state]
                     (assign state new-state))
@@ -912,7 +913,7 @@
               (exit (self) reason))
 
             (_
-              (let ([result (handle-info msg state)])
+              (let [result (handle-info msg state)]
                 (match result
                   ([:noreply new-state]
                     (assign state new-state))
@@ -934,7 +935,7 @@
      :handle-call (fn [request _from state]
                     (case (get request 0)
                       :get    [:reply ((get request 1) state) state]
-                      :update (let ([new-state ((get request 1) state)])
+                      :update (let [new-state ((get request 1) state)]
                                 [:reply :ok new-state])))
      :handle-cast (fn [request state]
                     (case (get request 0)
@@ -963,26 +964,26 @@
 
 (defn task-async [fun]
   "Spawn a linked process that runs fun and sends the result back. Returns [pid ref]."
-  (let* ([me (self)]
-         [ref (gen-make-ref)]
-         [[child-pid mon-ref] (spawn-monitor (fn []
-           (let ([result (fun)])
-             (send me [:$task-result ref result]))))])
+  (let* [me (self)
+         ref (gen-make-ref)
+         [child-pid mon-ref] (spawn-monitor (fn []
+           (let [result (fun)]
+             (send me [:$task-result ref result]))))]
     [child-pid ref]))
 
 (defn task-await [task &named timeout]
   "Wait for a task's result. task is [pid ref] from task-async."
-  (let* ([ref (get task 1)]
-         [timer-ref (when (not (nil? timeout))
-                      (send-after timeout (self) [:$call-timeout ref]))])
-    (let ([reply (recv-match (fn [m]
+  (let* [ref (get task 1)
+         timer-ref (when (not (nil? timeout))
+                      (send-after timeout (self) [:$call-timeout ref]))]
+    (let [reply (recv-match (fn [m]
                    (and (array? m)
                         (>= (length m) 3)
                         (or (and (= (get m 0) :$task-result)   (= (get m 1) ref))
                             (and (= (get m 0) :DOWN)           (= (get m 1) (get task 1))))
                         (or (nil? timer-ref)
                             (and (= (get m 0) :$call-timeout)  (= (get m 1) ref))
-                            true))))])
+                            true))))]
       (when (not (nil? timer-ref))
         (cancel-timer timer-ref))
       (match reply
@@ -1022,11 +1023,11 @@
 
 (defn supervisor-start-link [children &named name strategy max-restarts max-ticks logger]
   "Spawn a linked Supervisor managing the given child specs."
-  (let ([parent (self)]
-        [strat  (or strategy :one-for-one)]
-        [intensity-max max-restarts]
-        [intensity-period (or max-ticks 5)]
-        [log (or logger (fn [_] nil))])
+  (let [parent (self)
+        strat  (or strategy :one-for-one)
+        intensity-max max-restarts
+        intensity-period (or max-ticks 5)
+        log (or logger (fn [_] nil))]
     (spawn-link (fn []
       (when (not (nil? name)) (register name))
       (trap-exit true)
@@ -1043,35 +1044,35 @@
       (var sup-self (self))
 
       (var start-child (fn [spec]
-        (let* ([start-fn (get spec :start)]
-               [needs-ready (get spec :ready)]
-               [wrapped (if needs-ready
+        (let* [start-fn (get spec :start)
+               needs-ready (get spec :ready)
+               wrapped (if needs-ready
                           (fn []
                             (put-dict :$supervisor-pid sup-self)
                             (start-fn))
-                          start-fn)]
-               [child-pid (spawn-link wrapped)]
-               [ref       (monitor child-pid)])
+                          start-fn)
+               child-pid (spawn-link wrapped)
+               ref       (monitor child-pid)]
           (put kids (get spec :id)
                @{:pid child-pid :ref ref :spec spec})
           (log {:event :child-started :id (get spec :id) :pid child-pid})
           # If child declares readiness, wait for it before proceeding
           (when needs-ready
-            (let ([signal (recv-match (fn [m]
+            (let [signal (recv-match (fn [m]
                     (and (array? m)
                          (>= (length m) 2)
                          (or (and (= (get m 0) :$sup-ready)
                                   (= (get m 1) child-pid))
                              (and (>= (length m) 3)
                                   (= (get m 0) :DOWN)
-                                  (= (get m 2) child-pid))))))])
+                                  (= (get m 2) child-pid))))))]
               (when (= (get signal 0) :$sup-ready)
                 (log {:event :child-ready :id (get spec :id) :pid child-pid}))))
           child-pid)))
 
       (var stop-child (fn [id]
         (when (has? kids id)
-          (let ([info (get kids id)])
+          (let [info (get kids id)]
             (exit (get info :pid) :shutdown)
             (del kids id)))))
 
@@ -1087,7 +1088,7 @@
         (if (nil? intensity-max)
           true  # no limit configured
           (begin
-            (let ([history (or (get restart-history id) @[])])
+            (let [history (or (get restart-history id) @[])]
               # Prune old entries outside the window
               (var recent @[])
               (each t in history
@@ -1120,12 +1121,12 @@
         (match (recv)
 
           ([:DOWN _ref dead-pid reason]
-            (let ([dead-id (find-dead-id dead-pid)])
+            (let [dead-id (find-dead-id dead-pid)]
               (when (not (nil? dead-id))
                 (log {:event :child-exited :id dead-id :pid dead-pid :reason reason})
-                (let* ([info (get kids dead-id)]
-                       [spec (get info :spec)]
-                       [policy (or (get spec :restart) :permanent)])
+                (let* [info (get kids dead-id)
+                       spec (get info :spec)
+                       policy (or (get spec :restart) :permanent)]
 
                   (if (and (should-restart? policy reason)
                            (check-intensity dead-id))
@@ -1145,7 +1146,7 @@
                             # Clear and restart all from specs in order
                             (assign kids @{})
                             (each id in child-order
-                              (let ([spec (find (fn [s] (= (get s :id) id)) children)])
+                              (let [spec (find (fn [s] (= (get s :id) id)) children)]
                                 (when (not (nil? spec))
                                   (start-child spec)))))
 
@@ -1162,15 +1163,15 @@
                             # Stop children after the dead one
                             (var i (+ pos 1))
                             (while (< i (length child-order))
-                              (let ([id (get child-order i)])
+                              (let [id (get child-order i)]
                                 (stop-child id))
                               (assign i (+ i 1)))
                             # Restart dead child and all after it
                             (del kids dead-id)
                             (assign i pos)
                             (while (< i (length child-order))
-                              (let* ([id (get child-order i)]
-                                     [spec (find (fn [s] (= (get s :id) id)) children)])
+                              (let* [id (get child-order i)
+                                     spec (find (fn [s] (= (get s :id) id)) children)]
                                 (when (not (nil? spec))
                                   (start-child spec)))
                               (assign i (+ i 1))))))
@@ -1179,7 +1180,7 @@
 
           ([:$sup-start-child caller ref spec]
             # DynamicSupervisor: add child at runtime
-            (let ([child-pid (start-child spec)])
+            (let [child-pid (start-child spec)]
               (push child-order (get spec :id))
               (send caller [:$reply ref child-pid])))
 
@@ -1206,39 +1207,39 @@
 
 (defn supervisor-start-child [sup spec]
   "Add a child to a running supervisor. Returns the child pid."
-  (let* ([pid (gen-resolve sup)]
-         [ref (gen-make-ref)]
-         [me  (self)])
+  (let* [pid (gen-resolve sup)
+         ref (gen-make-ref)
+         me  (self)]
     (send pid [:$sup-start-child me ref spec])
-    (let ([reply (recv-match (fn [m]
-                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+    (let [reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-stop-child [sup id]
   "Remove and stop a child by id."
-  (let* ([pid (gen-resolve sup)]
-         [ref (gen-make-ref)]
-         [me  (self)])
+  (let* [pid (gen-resolve sup)
+         ref (gen-make-ref)
+         me  (self)]
     (send pid [:$sup-stop-child me ref id])
-    (let ([reply (recv-match (fn [m]
-                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+    (let [reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-which-children [sup]
   "List active children as [{:id :pid} ...]."
-  (let* ([pid (gen-resolve sup)]
-         [ref (gen-make-ref)]
-         [me  (self)])
+  (let* [pid (gen-resolve sup)
+         ref (gen-make-ref)
+         me  (self)]
     (send pid [:$sup-which-children me ref])
-    (let ([reply (recv-match (fn [m]
-                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))])
+    (let [reply (recv-match (fn [m]
+                   (and (array? m) (= (get m 0) :$reply) (= (get m 1) ref))))]
       (get reply 2))))
 
 (defn supervisor-notify-ready []
   "Signal to the supervisor that this child is ready to serve.
    Call from within a child process whose spec has :ready true.
    The supervisor blocks on this signal before starting the next child."
-  (let ([sup-pid (get-dict :$supervisor-pid)])
+  (let [sup-pid (get-dict :$supervisor-pid)]
     (when (not (nil? sup-pid))
       (send sup-pid [:$sup-ready (self)]))))
 
@@ -1259,28 +1260,28 @@
      :handle-call (fn [request _from handlers]
        (match request
          ([:add-handler mod init-arg]
-           (let ([ref (gen-make-ref)]
-                 [handler-state ((get mod :init) init-arg)])
+           (let [ref (gen-make-ref)
+                 handler-state ((get mod :init) init-arg)]
              (push handlers @{:id ref :mod mod :state handler-state})
              [:reply ref handlers]))
          ([:remove-handler ref]
            (var remaining @[])
            (each h in handlers
              (if (= (get h :id) ref)
-               (let ([term (get (get h :mod) :terminate)])
+               (let [term (get (get h :mod) :terminate)]
                  (when (not (nil? term)) (term :remove (get h :state))))
                (push remaining h)))
            [:reply :ok remaining])
          ([:sync-notify event]
            (var remaining @[])
            (each h in handlers
-             (let ([result ((get (get h :mod) :handle-event) event (get h :state))])
+             (let [result ((get (get h :mod) :handle-event) event (get h :state))]
                (match result
                  ([:ok new-state]
                    (put h :state new-state)
                    (push remaining h))
                  ([:remove _new-state]
-                   (let ([term (get (get h :mod) :terminate)])
+                   (let [term (get (get h :mod) :terminate)]
                      (when (not (nil? term)) (term :remove (get h :state)))))
                  (_ (push remaining h)))))
            [:reply :ok remaining])
@@ -1295,13 +1296,13 @@
          ([:notify event]
            (var remaining @[])
            (each h in handlers
-             (let ([result ((get (get h :mod) :handle-event) event (get h :state))])
+             (let [result ((get (get h :mod) :handle-event) event (get h :state))]
                (match result
                  ([:ok new-state]
                    (put h :state new-state)
                    (push remaining h))
                  ([:remove _new-state]
-                   (let ([term (get (get h :mod) :terminate)])
+                   (let [term (get (get h :mod) :terminate)]
                      (when (not (nil? term)) (term :remove (get h :state)))))
                  (_ (push remaining h)))))
            [:noreply remaining])
@@ -1344,8 +1345,8 @@
   {:id id
    :restart (or restart :permanent)
    :start (fn []
-     (let ([proc (subprocess/exec bin args (or opts @{}))])
-       (let ([code (subprocess/wait proc)])
+     (let [proc (subprocess/exec bin args (or opts @{}))]
+       (let [code (subprocess/wait proc)]
          (when (not (= code 0))
            (error {:error :subprocess-exit
                    :message (string id " exited with code " code)

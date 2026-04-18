@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/uuid.lisp — UUID generation and parsing (pure Elle)
 ##
 ## Implements UUID v4 (random), parsing, nil, and version detection.
@@ -34,21 +35,21 @@
           (error {:error :uuid-error :message (string "uuid: invalid hex char '" c "'")})))))
 
   (defn bytes->hex [b start len]
-    (let [[acc @""]]
+    (let [acc @""]
       (each i in (range start (+ start len))
         (append acc (byte->hex (b i))))
       (freeze acc)))
 
   (defn random-bytes [n]
     "Read n bytes from /dev/urandom."
-    (let [[p (port/open-bytes "/dev/urandom" :read)]]
-      (let [[b (port/read p n)]]
+    (let [p (port/open-bytes "/dev/urandom" :read)]
+      (let [b (port/read p n)]
         (port/close p)
         b)))
 
   (defn v4 []
     "Generate a random UUID (version 4)."
-    (let [[b (thaw (random-bytes 16))]]
+    (let [b (thaw (random-bytes 16))]
       ## Set version: byte 6 = 0100xxxx
       (put b 6 (bit/or (bit/and (b 6) 15) 64))
       ## Set variant: byte 8 = 10xxxxxx
@@ -64,13 +65,13 @@
     (unless (string? s)
       (error {:error :type-error
               :message (string "uuid/parse: expected string, got " (type-of s))}))
-    (let [[lower (string/downcase s)]]
+    (let [lower (string/downcase s)]
       ## Validate format: 8-4-4-4-12 hex with hyphens
       (unless (= (length lower) 36)
         (error {:error :uuid-error
                 :message (string "uuid/parse: invalid UUID: " s)}))
       (each i in (range 36)
-        (let [[c (lower i)]]
+        (let [c (lower i)]
           (if (or (= i 8) (= i 13) (= i 18) (= i 23))
             (unless (= c "-")
               (error {:error :uuid-error
@@ -89,9 +90,9 @@
     (unless (string? uuid-str)
       (error {:error :type-error
               :message (string "uuid/version: expected string, got " (type-of uuid-str))}))
-    (let [[parsed (parse-uuid uuid-str)]]
+    (let [parsed (parse-uuid uuid-str)]
       ## Version is the high nibble of byte 6, which is char at position 14
-      (let [[v (hex->nibble (parsed 14))]]
+      (let [v (hex->nibble (parsed 14))]
         (if (zero? v) nil v))))
 
   ## ── v5 (requires hash plugin) ─────────────────────────────────
@@ -104,8 +105,8 @@
 
   (defn uuid->bytes [uuid-str]
     "Parse a UUID string into 16 raw bytes."
-    (let [[s (parse-uuid uuid-str)]
-          [acc @[]]]
+    (let [s (parse-uuid uuid-str)
+          acc @[]]
       ## 8-4-4-4-12 hex → skip dashes at 8,13,18,23
       (each i in [0 2 4 6 9 11 14 16 19 21 24 26 28 30 32 34]
         (push acc (parse-hex-byte s i)))
@@ -116,16 +117,16 @@
     (unless hash-plugin
       (error {:error :uuid-error
               :message "uuid/v5: hash plugin required — pass it to (import \"std/uuid\")"}))
-    (let* [[ns-bytes (uuid->bytes namespace)]
-           [name-bytes (bytes name)]
+    (let* [ns-bytes (uuid->bytes namespace)
+           name-bytes (bytes name)
            ## Concatenate namespace + name
-           [input (@bytes)]
-           [_ (each i in (range (length ns-bytes)) (push input (ns-bytes i)))]
-           [_ (each i in (range (length name-bytes)) (push input (name-bytes i)))]
+           input (@bytes)
+           _ (each i in (range (length ns-bytes)) (push input (ns-bytes i)))
+           _ (each i in (range (length name-bytes)) (push input (name-bytes i)))
            ## SHA-1 hash
-           [digest (thaw (hash-plugin:sha1 (freeze input)))]
+           digest (thaw (hash-plugin:sha1 (freeze input)))
            ## Take first 16 bytes, set version and variant
-           [b (thaw (slice digest 0 16))]]
+           b (thaw (slice digest 0 16))]
       ## Set version: byte 6 = 0101xxxx (version 5)
       (put b 6 (bit/or (bit/and (b 6) 15) 80))
       ## Set variant: byte 8 = 10xxxxxx

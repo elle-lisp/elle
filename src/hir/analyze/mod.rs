@@ -598,9 +598,13 @@ mod tests {
         let mut arena = BindingArena::new();
         let mut analyzer = Analyzer::new(&mut symbols, &mut arena);
 
+        // Flat bindings: (let [x 10] x)
         let syntax = make_list(vec![
             make_symbol("let"),
-            make_list(vec![make_list(vec![make_symbol("x"), make_int(10)])]),
+            Syntax::new(
+                SyntaxKind::Array(vec![make_symbol("x"), make_int(10)]),
+                make_span(),
+            ),
             make_symbol("x"),
         ]);
 

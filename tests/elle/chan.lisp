@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Channel Tests
 #
 # Tests for Elle's channel primitives (chan, chan/send, chan/recv, chan/select, etc.)
@@ -9,22 +10,22 @@
 # Test 1: chan unbounded
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (assert (array? [s r]) "chan should return an array"))
 
 # ============================================================================
 # Test 2: chan bounded
 # ============================================================================
 
-(let (([s r] (chan 10)))
+(let [[s r] (chan 10)]
   (assert (array? [s r]) "chan with capacity should return an array"))
 
 # ============================================================================
 # Test 3: chan/send ok
 # ============================================================================
 
-(let (([s r] (chan)))
-  (let ((result (chan/send s 42)))
+(let [[s r] (chan)]
+  (let [result (chan/send s 42)]
     (assert (array? result) "chan/send should return an array")
     (assert (= (length result) 1) "send result should have 1 element")
     (assert (= (get result 0) :ok) "send result should be [:ok]")))
@@ -33,9 +34,9 @@
 # Test 4: chan/recv ok
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (chan/send s 42)
-  (let ((result (chan/recv r)))
+  (let [result (chan/recv r)]
     (assert (array? result) "chan/recv should return an array")
     (assert (= (length result) 2) "recv result should have 2 elements")
     (assert (= (get result 0) :ok) "recv status should be :ok")
@@ -45,8 +46,8 @@
 # Test 5: chan/recv empty
 # ============================================================================
 
-(let (([s r] (chan)))
-  (let ((result (chan/recv r)))
+(let [[s r] (chan)]
+  (let [result (chan/recv r)]
     (assert (array? result) "chan/recv should return an array")
     (assert (= (length result) 1) "empty recv result should have 1 element")
     (assert (= (get result 0) :empty) "empty recv should return [:empty]")))
@@ -55,9 +56,9 @@
 # Test 6: chan/send full
 # ============================================================================
 
-(let (([s r] (chan 1)))
+(let [[s r] (chan 1)]
   (chan/send s 1)
-  (let ((result (chan/send s 2)))
+  (let [result (chan/send s 2)]
     (assert (array? result) "chan/send to full should return an array")
     (assert (= (length result) 1) "full send result should have 1 element")
     (assert (= (get result 0) :full) "full send should return [:full]")))
@@ -66,9 +67,9 @@
 # Test 7: disconnected send
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (chan/close-recv r)
-  (let ((result (chan/send s 42)))
+  (let [result (chan/send s 42)]
     (assert (array? result) "chan/send to closed receiver should return an array")
     (assert (= (length result) 1) "disconnected send result should have 1 element")
     (assert (= (get result 0) :disconnected) "disconnected send should return [:disconnected]")))
@@ -77,9 +78,9 @@
 # Test 8: disconnected recv
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (chan/close s)
-  (let ((result (chan/recv r)))
+  (let [result (chan/recv r)]
     (assert (array? result) "chan/recv from closed sender should return an array")
     (assert (= (length result) 1) "disconnected recv result should have 1 element")
     (assert (= (get result 0) :disconnected) "disconnected recv should return [:disconnected]")))
@@ -88,12 +89,12 @@
 # Test 9: chan/clone
 # ============================================================================
 
-(let* (([s r] (chan))
-       (s2 (chan/clone s)))
+(let* [[s r] (chan)
+       s2 (chan/clone s)]
   (chan/send s 1)
   (chan/send s2 2)
-  (let* ((r1 (chan/recv r))
-         (r2 (chan/recv r)))
+  (let* [r1 (chan/recv r)
+         r2 (chan/recv r)]
     (assert (= (length r1) 2) "r1 should have 2 elements")
     (assert (= (get r1 0) :ok) "r1 status should be :ok")
     (assert (= (get r1 1) 1) "r1 message should be 1")
@@ -105,15 +106,15 @@
 # Test 10: keyword messages
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (chan/send s :empty)
   (chan/send s :full)
   (chan/send s :ok)
   (chan/send s :disconnected)
-  (let* ((r1 (chan/recv r))
-         (r2 (chan/recv r))
-         (r3 (chan/recv r))
-         (r4 (chan/recv r)))
+  (let* [r1 (chan/recv r)
+         r2 (chan/recv r)
+         r3 (chan/recv r)
+         r4 (chan/recv r)]
     # r1 should be [:ok :empty]
     (assert (= (length r1) 2) "r1 should have 2 elements")
     (assert (= (get r1 0) :ok) "r1 status should be :ok")
@@ -135,9 +136,9 @@
 # Test 11: chan/select ready
 # ============================================================================
 
-(let (([s r] (chan)))
+(let [[s r] (chan)]
   (chan/send s 99)
-  (let ((result (chan/select @[r] 1000)))
+  (let [result (chan/select @[r] 1000)]
     (assert (array? result) "chan/select should return a tuple")
     (assert (= (length result) 2) "select ready result should have 2 elements")
     (assert (= (get result 0) 0) "select ready should return index 0")
@@ -147,8 +148,8 @@
 # Test 12: chan/select timeout
 # ============================================================================
 
-(let (([s r] (chan)))
-  (let ((result (chan/select @[r] 10)))
+(let [[s r] (chan)]
+  (let [result (chan/select @[r] 10)]
     (assert (array? result) "chan/select should return a tuple")
     (assert (= (length result) 1) "select timeout result should have 1 element")
     (assert (= (get result 0) :timeout) "select timeout should return [:timeout]")))

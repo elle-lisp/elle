@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## String and @string Type Tests
 ##
 ## Tests for immutable string and mutable @string types.
@@ -50,9 +51,9 @@
 # @string put
 # ============================================================================
 
-(let (([ok? _] (protect ((fn () (put @"hello" 10 "x")))))) (assert (not ok?) "put out of bounds errors"))
+(let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))] (assert (not ok?) "put out of bounds errors"))
 (assert (= (freeze (begin (var s @"hello") (put s -1 "x") s)) "hellx") "put negative index wraps")
-(let (([ok? _] (protect ((fn () (put @"" 0 "x")))))) (assert (not ok?) "put on empty @string errors"))
+(let [[ok? _] (protect ((fn () (put @"" 0 "x"))))] (assert (not ok?) "put on empty @string errors"))
 
 # ============================================================================
 # @string grapheme-consistent indexing
@@ -64,38 +65,38 @@
 (assert (= (length @"naïve") 5) "length @\"naïve\" counts combining sequence as one grapheme")
 
 # put replaces grapheme cluster at the given position
-(let ((s @"café"))
+(let [s @"café"]
   (put s 3 "E")
   (assert (= (freeze s) "cafE") "put replaces grapheme at index 3"))
 
-(let ((s @"hello"))
+(let [s @"hello"]
   (put s 0 "H")
   (assert (= (freeze s) "Hello") "put replaces first grapheme"))
 
-(let ((s @"hello"))
+(let [s @"hello"]
   (put s 4 "O")
   (assert (= (freeze s) "hellO") "put replaces last grapheme"))
 
 # put accepts multi-byte replacement string
-(let ((s @"cafe"))
+(let [s @"cafe"]
   (put s 3 "é")
   (assert (= (freeze s) "café") "put can replace with multi-byte grapheme"))
 
 # round-trip: get then put restores original
-(let ((s @"café"))
-  (let ((g (get s 3)))
+(let [s @"café"]
+  (let [g (get s 3)]
     (put s 3 "E")
     (put s 3 g)
     (assert (= (freeze s) "café") "get/put round-trip preserves original value")))
 
 # put type errors
-(let (([ok? _] (protect ((fn () (put @"hello" 0 88)))))) (assert (not ok?) "put @string rejects integer value"))
-(let (([ok? _] (protect ((fn () (put @"hello" "a" "b")))))) (assert (not ok?) "put @string rejects non-integer index"))
+(let [[ok? _] (protect ((fn () (put @"hello" 0 88))))] (assert (not ok?) "put @string rejects integer value"))
+(let [[ok? _] (protect ((fn () (put @"hello" "a" "b"))))] (assert (not ok?) "put @string rejects non-integer index"))
 
 # put bounds errors (use string values, matching new semantics)
-(let (([ok? _] (protect ((fn () (put @"hello" 10 "x")))))) (assert (not ok?) "put out of bounds errors (new)"))
+(let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))] (assert (not ok?) "put out of bounds errors (new)"))
 (assert (= (freeze (begin (var s2 @"hello") (put s2 -1 "x") s2)) "hellx") "put negative index wraps (new)")
-(let (([ok? _] (protect ((fn () (put @"" 0 "x")))))) (assert (not ok?) "put on empty @string errors (new)"))
+(let [[ok? _] (protect ((fn () (put @"" 0 "x"))))] (assert (not ok?) "put on empty @string errors (new)"))
 
 # ============================================================================
 # @string pop
@@ -103,7 +104,7 @@
 
 (assert (= (begin (var b @"hi") (pop b)) "i") "pop returns last grapheme as string")
 (assert (= (begin (var b @"café") (pop b)) "é") "pop returns last multibyte grapheme")
-(let (([ok? _] (protect ((fn () (begin (var b @"") (pop b))))))) (assert (not ok?) "pop on empty @string errors"))
+(let [[ok? _] (protect ((fn () (begin (var b @"") (pop b)))))] (assert (not ok?) "pop on empty @string errors"))
 
 # ============================================================================
 # @string push
@@ -112,7 +113,7 @@
 (assert (string? (begin (var b @"hi") (push b "!") b)) "push returns @string")
 (assert (= (freeze (begin (var b @"hi") (push b "!") b)) "hi!") "push appends string to @string")
 (assert (= (freeze (begin (var b @"café") (push b "x") b)) "caféx") "push appends to multibyte @string")
-(let (([ok? _] (protect ((fn () (begin (var b @"hi") (push b 33))))))) (assert (not ok?) "push rejects integer for @string"))
+(let [[ok? _] (protect ((fn () (begin (var b @"hi") (push b 33)))))] (assert (not ok?) "push rejects integer for @string"))
 
 # ============================================================================
 # @string append
@@ -197,6 +198,6 @@
 (assert (= (length (concat (list) (list 1 2))) 2) "concat with empty list")
 
 # Verify original lists unchanged
-(assert (= (let ((a (list 1 2)))
-             (let ((b (concat a (list 3 4))))
+(assert (= (let [a (list 1 2)]
+             (let [b (concat a (list 3 4))]
                (list (length a) (length b)))) (list 2 4)) "concat doesn't modify original lists")

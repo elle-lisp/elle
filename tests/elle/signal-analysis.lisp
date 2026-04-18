@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # ── Signal analysis tests ─────────────────────────────────────────────
 #
 # Lock down expectations for compute_inferred_signal: which functions

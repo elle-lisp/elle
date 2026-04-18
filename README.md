@@ -135,9 +135,9 @@ If you know [Janet](https://janet-lang.org), think Janet on steroids — the sam
 
   ```lisp
   (defmacro my-swap (a b)
-    `(let ((tmp ,a)) (assign ,a ,b) (assign ,b tmp)))
+    `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (let ((tmp 100) (x 1) (y 2))
+  (let [tmp 100 x 1 y 2]
     (my-swap x y)
     tmp)  # => 100, not 1
   ```

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## syn plugin integration tests
 
@@ -44,10 +45,10 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (assert (not (nil? file)) "parse-file: returns non-nil for valid source")
 
 ## Error: invalid Rust source returns parse-error
-(let (([ok? err] (protect ((fn () (parse-file-fn "fn broken( {}")))))) (assert (not ok?) "parse-file: invalid Rust returns parse-error") (assert (= (get err :error) :parse-error) "parse-file: invalid Rust returns parse-error"))
+(let [[ok? err] (protect ((fn () (parse-file-fn "fn broken( {}"))))] (assert (not ok?) "parse-file: invalid Rust returns parse-error") (assert (= (get err :error) :parse-error) "parse-file: invalid Rust returns parse-error"))
 
 ## Error: non-string argument returns type-error
-(let (([ok? err] (protect ((fn () (parse-file-fn 42)))))) (assert (not ok?) "parse-file: non-string returns type-error") (assert (= (get err :error) :type-error) "parse-file: non-string returns type-error"))
+(let [[ok? err] (protect ((fn () (parse-file-fn 42))))] (assert (not ok?) "parse-file: non-string returns type-error") (assert (= (get err :error) :type-error) "parse-file: non-string returns type-error"))
 
 # ── syn/parse-expr ─────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (assert (not (nil? (parse-expr-fn "1 + 2"))) "parse-expr: returns non-nil for valid expr")
 
 ## Error: invalid expression returns parse-error
-(let (([ok? err] (protect ((fn () (parse-expr-fn "fn")))))) (assert (not ok?) "parse-expr: invalid expr returns parse-error") (assert (= (get err :error) :parse-error) "parse-expr: invalid expr returns parse-error"))
+(let [[ok? err] (protect ((fn () (parse-expr-fn "fn"))))] (assert (not ok?) "parse-expr: invalid expr returns parse-error") (assert (= (get err :error) :parse-error) "parse-expr: invalid expr returns parse-error"))
 
 # ── syn/parse-type ─────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (assert (= (length items) 8) "items: 8-item source yields list of 8")
 
 ## Error: non-file argument returns type-error
-(let (([ok? err] (protect ((fn () (items-fn "not-a-file")))))) (assert (not ok?) "items: non-file returns type-error") (assert (= (get err :error) :type-error) "items: non-file returns type-error"))
+(let [[ok? err] (protect ((fn () (items-fn "not-a-file"))))] (assert (not ok?) "items: non-file returns type-error") (assert (= (get err :error) :type-error) "items: non-file returns type-error"))
 
 # ── syn/item-kind ──────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 (assert (= (item-kind-fn (get items 7)) :impl) "item-kind: impl item returns :impl")
 
 ## Error: non-item argument returns type-error
-(let (([ok? err] (protect ((fn () (item-kind-fn "not-an-item")))))) (assert (not ok?) "item-kind: non-item returns type-error") (assert (= (get err :error) :type-error) "item-kind: non-item returns type-error"))
+(let [[ok? err] (protect ((fn () (item-kind-fn "not-an-item"))))] (assert (not ok?) "item-kind: non-item returns type-error") (assert (= (get err :error) :type-error) "item-kind: non-item returns type-error"))
 
 # ── syn/item-name ──────────────────────────────────────────────────
 
@@ -106,29 +107,29 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 # ── syn/fn-info ────────────────────────────────────────────────────
 
 ## fn-info on add returns expected struct
-(let ((info (fn-info-fn (get items 0))))
+(let [info (fn-info-fn (get items 0))]
   (assert (= (get info :name) "add") "fn-info: :name is add")
   (assert (not (get info :async?)) "fn-info: :async? is false for add")
   (assert (not (get info :unsafe?)) "fn-info: :unsafe? is false for add")
   (assert (not (get info :const?)) "fn-info: :const? is false for add"))
 
 ## fn-info on async fn has :async? true
-(let ((info (fn-info-fn (get items 1))))
+(let [info (fn-info-fn (get items 1))]
   (assert (get info :async?) "fn-info: :async? is true for async fn"))
 
 ## fn-info on unsafe fn has :unsafe? true
-(let ((info (fn-info-fn (get items 2))))
+(let [info (fn-info-fn (get items 2))]
   (assert (get info :unsafe?) "fn-info: :unsafe? is true for unsafe fn"))
 
 ## Error: fn-info on struct item returns type-error
-(let (([ok? err] (protect ((fn () (fn-info-fn (get items 3))))))) (assert (not ok?) "fn-info: struct item returns type-error") (assert (= (get err :error) :type-error) "fn-info: struct item returns type-error"))
+(let [[ok? err] (protect ((fn () (fn-info-fn (get items 3)))))] (assert (not ok?) "fn-info: struct item returns type-error") (assert (= (get err :error) :type-error) "fn-info: struct item returns type-error"))
 
 # ── syn/fn-args ────────────────────────────────────────────────────
 
 ## fn-args on add returns two arguments with correct names and types
-(let ((args (fn-args-fn (get items 0))))
+(let [args (fn-args-fn (get items 0))]
   (assert (= (length args) 2) "fn-args: add has 2 args")
-  (let ((first-arg (get args 0)))
+  (let [first-arg (get args 0)]
     (assert (= (get first-arg :name) "x") "fn-args: first arg name is x")
     (assert (= (get first-arg :type) "i32") "fn-args: first arg type is i32")))
 
@@ -146,49 +147,49 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 # ── syn/struct-fields ──────────────────────────────────────────────
 
 ## Named struct: Point has :kind :named with two named fields
-(let ((result (struct-fields-fn (get items 3))))
+(let [result (struct-fields-fn (get items 3))]
   (assert (= (get result :kind) :named) "struct-fields: Point kind is :named")
   (assert (= (length (get result :fields)) 2) "struct-fields: Point has 2 fields")
-  (let ((field (get (get result :fields) 0)))
+  (let [field (get (get result :fields) 0)]
     (assert (= (get field :name) "x") "struct-fields: first field name is x")
     (assert (= (get field :type) "f64") "struct-fields: first field type is f64")))
 
 ## Unit struct: Unit has :kind :unit with empty fields
-(let ((result (struct-fields-fn (get items 4))))
+(let [result (struct-fields-fn (get items 4))]
   (assert (= (get result :kind) :unit) "struct-fields: Unit kind is :unit")
   (assert (= (length (get result :fields)) 0) "struct-fields: Unit has 0 fields"))
 
 ## Tuple struct: Pair has :kind :tuple with nil names
-(let ((result (struct-fields-fn (get items 5))))
+(let [result (struct-fields-fn (get items 5))]
   (assert (= (get result :kind) :tuple) "struct-fields: Pair kind is :tuple")
   (assert (= (length (get result :fields)) 2) "struct-fields: Pair has 2 fields")
-  (let ((field (get (get result :fields) 0)))
+  (let [field (get (get result :fields) 0)]
     (assert (= (get field :name) nil) "struct-fields: tuple field name is nil")))
 
 ## Error: struct-fields on fn item returns type-error
-(let (([ok? err] (protect ((fn () (struct-fields-fn (get items 0))))))) (assert (not ok?) "struct-fields: fn item returns type-error") (assert (= (get err :error) :type-error) "struct-fields: fn item returns type-error"))
+(let [[ok? err] (protect ((fn () (struct-fields-fn (get items 0)))))] (assert (not ok?) "struct-fields: fn item returns type-error") (assert (= (get err :error) :type-error) "struct-fields: fn item returns type-error"))
 
 # ── syn/enum-variants ──────────────────────────────────────────────
 
 ## Color enum has 3 variants; Green has :discriminant "1"
-(let ((result (enum-variants-fn (get items 6))))
+(let [result (enum-variants-fn (get items 6))]
   (assert (= (get result :name) "Color") "enum-variants: name is Color")
-  (let ((variants (get result :variants)))
+  (let [variants (get result :variants)]
     (assert (= (length variants) 3) "enum-variants: Color has 3 variants")
-    (let ((red (get variants 0)))
+    (let [red (get variants 0)]
       (assert (= (get red :name) "Red") "enum-variants: first variant is Red")
       (assert (= (get red :kind) :unit) "enum-variants: Red kind is :unit"))
-    (let ((green (get variants 1)))
+    (let [green (get variants 1)]
       (assert (= (get green :name) "Green") "enum-variants: second variant is Green")
       (assert (not (nil? (get green :discriminant))) "enum-variants: Green has discriminant"))))
 
 ## Error: enum-variants on fn item returns type-error
-(let (([ok? err] (protect ((fn () (enum-variants-fn (get items 0))))))) (assert (not ok?) "enum-variants: fn item returns type-error") (assert (= (get err :error) :type-error) "enum-variants: fn item returns type-error"))
+(let [[ok? err] (protect ((fn () (enum-variants-fn (get items 0)))))] (assert (not ok?) "enum-variants: fn item returns type-error") (assert (= (get err :error) :type-error) "enum-variants: fn item returns type-error"))
 
 # ── syn/attributes ─────────────────────────────────────────────────
 
 ## Point has one #[derive(Debug)] attribute
-(let ((attrs (attributes-fn (get items 3))))
+(let [attrs (attributes-fn (get items 3))]
   (assert (= (length attrs) 1) "attributes: Point has 1 attribute")
   (assert (not (nil? (get attrs 0))) "attributes: attribute is non-nil string"))
 
@@ -209,31 +210,31 @@ impl Point { fn new() -> Self { Point { x: 0.0, y: 0.0 } } }
 # ── syn/to-string ──────────────────────────────────────────────────
 
 ## to-string on a parsed item returns a string
-(let ((s (to-string-fn (get items 0))))
+(let [s (to-string-fn (get items 0))]
   (assert (string? s) "to-string: item returns a string")
   (assert (> (length s) 0) "to-string: string is non-empty"))
 
 ## to-string on a parsed expr returns a string
-(let ((s (to-string-fn (parse-expr-fn "1 + 2"))))
+(let [s (to-string-fn (parse-expr-fn "1 + 2"))]
   (assert (string? s) "to-string: expr returns a string"))
 
 ## to-string on a parsed file returns a string
-(let ((s (to-string-fn file)))
+(let [s (to-string-fn file)]
   (assert (string? s) "to-string: file returns a string"))
 
 ## Error: to-string on a non-syn value returns type-error
-(let (([ok? err] (protect ((fn () (to-string-fn "not-a-node")))))) (assert (not ok?) "to-string: non-syn value returns type-error") (assert (= (get err :error) :type-error) "to-string: non-syn value returns type-error"))
+(let [[ok? err] (protect ((fn () (to-string-fn "not-a-node"))))] (assert (not ok?) "to-string: non-syn value returns type-error") (assert (= (get err :error) :type-error) "to-string: non-syn value returns type-error"))
 
 # ── syn/to-pretty-string ───────────────────────────────────────────
 
 ## to-pretty-string on a parsed item returns a formatted string
-(let ((s (to-pretty-string-fn (get items 0))))
+(let [s (to-pretty-string-fn (get items 0))]
   (assert (string? s) "to-pretty-string: item returns a string")
   (assert (> (length s) 0) "to-pretty-string: string is non-empty"))
 
 ## to-pretty-string on a parsed file returns a formatted string
-(let ((s (to-pretty-string-fn file)))
+(let [s (to-pretty-string-fn file)]
   (assert (string? s) "to-pretty-string: file returns a string"))
 
 ## Error: to-pretty-string on an expr returns type-error
-(let (([ok? err] (protect ((fn () (to-pretty-string-fn (parse-expr-fn "1 + 2"))))))) (assert (not ok?) "to-pretty-string: expr returns type-error") (assert (= (get err :error) :type-error) "to-pretty-string: expr returns type-error"))
+(let [[ok? err] (protect ((fn () (to-pretty-string-fn (parse-expr-fn "1 + 2")))))] (assert (not ok?) "to-pretty-string: expr returns type-error") (assert (= (get err :error) :type-error) "to-pretty-string: expr returns type-error"))

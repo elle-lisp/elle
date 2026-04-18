@@ -1,8 +1,9 @@
+(elle/epoch 7)
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]
   "Assert that (thunk) signals an error"
-  (let (([ok? _] (protect (thunk))))
+  (let [[ok? _] (protect (thunk))]
     (assert (not ok?) msg)))
 
 # ============================================================================
@@ -77,10 +78,10 @@
 (assert (= (number->string 42) "42") "no radix still works")
 
 # Error cases
-(let (([ok? _] (protect ((fn () (number->string 3.14 16)))))) (assert (not ok?) "float with radix errors"))
-(let (([ok? _] (protect ((fn () (number->string 42 1)))))) (assert (not ok?) "radix 1 errors"))
-(let (([ok? _] (protect ((fn () (number->string 42 37)))))) (assert (not ok?) "radix 37 errors"))
-(let (([ok? _] (protect ((fn () (number->string "hello")))))) (assert (not ok?) "non-number errors"))
+(let [[ok? _] (protect ((fn () (number->string 3.14 16))))] (assert (not ok?) "float with radix errors"))
+(let [[ok? _] (protect ((fn () (number->string 42 1))))] (assert (not ok?) "radix 1 errors"))
+(let [[ok? _] (protect ((fn () (number->string 42 37))))] (assert (not ok?) "radix 37 errors"))
+(let [[ok? _] (protect ((fn () (number->string "hello"))))] (assert (not ok?) "non-number errors"))
 
 # ============================================================================
 # string variadic (Issue #495)

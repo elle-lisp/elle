@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/glob.lisp — Glob pattern matching and file discovery (pure Elle)
 ##
 ## Supports *, ?, [abc], [!abc], ** (recursive), and character ranges.
@@ -14,9 +15,9 @@
 
   (defn match-class [pat pi ch]
     "Match a [...] class starting after '['. Returns index past ']' or nil."
-    (let* [[negated (= (pat pi) "!")]
-           [i (if negated (inc pi) pi)]
-           [plen (length pat)]]
+    (let* [negated (= (pat pi) "!")
+           i (if negated (inc pi) pi)
+           plen (length pat)]
       (var ci i)
       (var matched false)
       (while (and (< ci plen) (not (= (pat ci) "]")))
@@ -38,16 +39,16 @@
 
   (defn glob-match [pat text sep?]
     "Match text against glob pattern. sep? means * won't cross /."
-    (let [[plen (length pat)]
-          [tlen (length text)]]
+    (let [plen (length pat)
+          tlen (length text)]
       (defn go [pi ti]
         (cond
           ((and (>= pi plen) (>= ti tlen)) true)
           ((>= pi plen) false)
           ## **
           ((and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
-           (let [[npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
-                        (+ pi 3) (+ pi 2))]]
+           (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
+                        (+ pi 3) (+ pi 2))]
              (var k ti)
              (var found false)
              (while (and (<= k tlen) (not found))
@@ -72,7 +73,7 @@
              (go (inc pi) (inc ti))))
           ## [...]
           ((= (pat pi) "[")
-           (let [[new-pi (match-class pat (inc pi) (text ti))]]
+           (let [new-pi (match-class pat (inc pi) (text ti))]
              (if (nil? new-pi) false (go new-pi (inc ti)))))
           ## literal
           ((= (pat pi) (text ti)) (go (inc pi) (inc ti)))
@@ -102,9 +103,9 @@
 
   (defn split-pattern [pattern]
     "Split into [fixed-prefix glob-suffix]."
-    (let [[parts (string/split pattern "/")]
-          [prefix @[]]
-          [rest @[]]]
+    (let [parts (string/split pattern "/")
+          prefix @[]
+          rest @[]]
       (var in-glob false)
       (each p in parts
         (if in-glob (push rest p)
@@ -116,12 +117,12 @@
 
   (defn list-recursive [dir]
     "List all files under dir recursively."
-    (let [[acc @[]]]
+    (let [acc @[]]
       (defn walk [d]
-        (let [[[ok? entries] (protect ((fn [] (file/ls d))))]]
+        (let [[ok? entries] (protect ((fn [] (file/ls d))))]
           (when ok?
             (each entry in entries
-              (let [[full (join-path d entry)]]
+              (let [full (join-path d entry)]
                 (push acc full)
                 (when (path/dir? full) (walk full)))))))
       (walk dir)
@@ -129,14 +130,14 @@
 
   (defn glob-find [pattern]
     "Return array of file paths matching a glob pattern."
-    (let [[[base glob-part] (split-pattern pattern)]]
+    (let [[base glob-part] (split-pattern pattern)]
       (if (= glob-part "")
         (if (path/exists? pattern) @[pattern] @[])
-        (let* [[files (if (string/contains? glob-part "/")
+        (let* [files (if (string/contains? glob-part "/")
                         (list-recursive base)
-                        (let [[[ok? entries] (protect ((fn [] (file/ls base))))]]
-                          (if ok? (map (fn [e] (join-path base e)) entries) @[])))]
-               [acc @[]]]
+                        (let [[ok? entries] (protect ((fn [] (file/ls base))))]
+                          (if ok? (map (fn [e] (join-path base e)) entries) @[])))
+               acc @[]]
           (each f in files
             (when (match-path? glob-part (strip-base base f))
               (push acc f)))

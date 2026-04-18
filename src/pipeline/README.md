@@ -35,7 +35,7 @@ match compile(source) {
 let bytecode = compile("(+ 1 2)")?;
 
 // Analyze without lowering
-let hir = analyze("(let ((x 10)) (+ x 1))")?;
+let hir = analyze("(let [x 10] (+ x 1))")?;
 
 // Compile and execute
 let result = eval("(+ 1 2)")?;

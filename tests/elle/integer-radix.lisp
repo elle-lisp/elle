@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Tests for (integer str radix) — radix-aware string-to-integer conversion
 
 # ── Basic radix parsing ──────────────────────────────────────────────
@@ -25,7 +26,7 @@
 (assert (= (integer "-7") -7) "no-radix negative")
 (assert (= (integer 3.14) 3) "float truncation")
 (assert (= (integer 42) 42) "int passthrough")
-(let [([ok? _] (protect (integer :keyword)))]
+(let [[ok? _] (protect (integer :keyword))]
   (assert (not ok?) "keyword to integer signals error"))
 
 # ── Error cases ──────────────────────────────────────────────────────

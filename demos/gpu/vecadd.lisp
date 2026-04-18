@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## demos/gpu/vecadd.lisp — GPU vector addition
 ##
 ## Adds two 1024-element float arrays on the GPU. The compute shader
@@ -11,9 +12,9 @@
 
 ## ── Compile shader at runtime ───────────────────────────────────
 (def shader (gpu:compile ctx 256 3 (fn [s]
-  (let* [[id (s:global-id)]
-         [a  (s:load 0 id)]
-         [b  (s:load 1 id)]]
+  (let* [id (s:global-id)
+         a  (s:load 0 id)
+         b  (s:load 1 id)]
     (s:store 2 id (s:fadd a b))))))
 (println "Shader compiled (SPIR-V emitted at runtime)")
 

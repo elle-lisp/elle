@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/watch.lisp — event-driven filesystem watcher
 ##
 ## Uses the built-in watch primitives (inotify on Linux, kqueue on macOS).
@@ -41,15 +42,15 @@
     "Wait for filesystem events. Yields to the scheduler (zero polling).
      Returns a list of event structs [{:kind :modify :path \"...\"}].
      Filters by extension if :filter was set on the handle."
-    (let [[raw (watch-next (get handle :watcher))]
-          [ext (get handle :filter)]]
+    (let [raw (watch-next (get handle :watcher))
+          ext (get handle :filter)]
       (filter-events raw ext)))
 
   (defn each-event [handle callback]
     "Loop calling callback on each event. Yields between batches.
      Runs forever until the watcher is closed."
     (forever
-      (let [[events (next-events handle)]]
+      (let [events (next-events handle)]
         (each event in events
           (callback event)))))
 

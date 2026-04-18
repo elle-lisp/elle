@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/rdf/rust.lisp — RDF triple generation for Rust source
 ##
 ## Parses .rs files with the syn plugin and emits N-Triples for functions,
@@ -90,9 +91,9 @@
     (triple buf subj (pred "attribute") (lit attr))))
 
 (defn emit-fn [buf item file]
-  (let* [[info (syn:fn-info item)]
-         [name (get info :name)]
-         [subj (rust-iri "fn" name)]]
+  (let* [info (syn:fn-info item)
+         name (get info :name)
+         subj (rust-iri "fn" name)]
     (triple buf subj rdf-type (iri (string/format "{}:Fn" ns)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "file") (lit file))
@@ -110,16 +111,16 @@
       (triple buf subj (pred "unsafe") (lit "true")))
     (emit-visibility buf subj item)
     (emit-attributes buf subj item)
-    (let [[[ok? calls] (protect (syn:fn-calls item))]]
+    (let [[ok? calls] (protect (syn:fn-calls item))]
       (when ok?
         (each callee in calls
           (triple buf subj (pred "calls") (rust-iri "fn" callee)))))))
 
 (defn emit-struct [buf item file]
-  (let* [[info (syn:struct-fields item)]
-         [name (get info :name)]
-         [subj (rust-iri "struct" name)]
-         [line (syn:item-line item)]]
+  (let* [info (syn:struct-fields item)
+         name (get info :name)
+         subj (rust-iri "struct" name)
+         line (syn:item-line item)]
     (triple buf subj rdf-type (iri (string/format "{}:Struct" ns)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "file") (lit file))
@@ -134,10 +135,10 @@
     (emit-attributes buf subj item)))
 
 (defn emit-enum [buf item file]
-  (let* [[info (syn:enum-variants item)]
-         [name (get info :name)]
-         [subj (rust-iri "enum" name)]
-         [line (syn:item-line item)]]
+  (let* [info (syn:enum-variants item)
+         name (get info :name)
+         subj (rust-iri "enum" name)
+         line (syn:item-line item)]
     (triple buf subj rdf-type (iri (string/format "{}:Enum" ns)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "file") (lit file))
@@ -148,9 +149,9 @@
     (emit-attributes buf subj item)))
 
 (defn emit-named [buf kind-str item file]
-  (let* [[name (syn:item-name item)]
-         [subj (rust-iri kind-str name)]
-         [line (syn:item-line item)]]
+  (let* [name (syn:item-name item)
+         subj (rust-iri kind-str name)
+         line (syn:item-line item)]
     (triple buf subj rdf-type (iri (string/format "{}:{}" ns kind-str)))
     (triple buf subj (pred "name") (lit name))
     (triple buf subj (pred "file") (lit file))
@@ -159,8 +160,8 @@
     (emit-attributes buf subj item)))
 
 (defn emit-use [buf item file]
-  (let* [[path (syn:to-string item)]
-         [subj (iri (string/format "{}:use:{}:{}" ns (encode-name file) (encode-name path)))]]
+  (let* [path (syn:to-string item)
+         subj (iri (string/format "{}:use:{}:{}" ns (encode-name file) (encode-name path)))]
     (triple buf subj rdf-type (iri (string/format "{}:Use" ns)))
     (triple buf subj (pred "path") (lit path))
     (triple buf subj (pred "file") (lit file))
@@ -197,7 +198,7 @@
   (each item in (syn:items tree)
     (when (and (= (syn:item-kind item) :const)
                (= (syn:item-name item) "PRIMITIVES"))
-      (let [[[ok? defs] (protect (syn:primitive-defs item))]]
+      (let [[ok? defs] (protect (syn:primitive-defs item))]
         (when ok?
           (each def in defs
             (var elle-name (get def :name))

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 
 ## CSV plugin integration tests
 
@@ -76,6 +77,6 @@
 
 ## ── error cases ─────────────────────────────────────────────────
 
-(let (([ok? _] (protect ((fn () (parse-fn 42)))))) (assert (not ok?) "csv/parse wrong type"))
+(let [[ok? _] (protect ((fn () (parse-fn 42))))] (assert (not ok?) "csv/parse wrong type"))
 
-(let (([ok? _] (protect ((fn () (write-fn 42)))))) (assert (not ok?) "csv/write non-array"))
+(let [[ok? _] (protect ((fn () (write-fn 42))))] (assert (not ok?) "csv/write non-array"))

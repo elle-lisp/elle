@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/mqtt.lisp — MQTT client for Elle
 ##
 ## MQTT client using the elle-mqtt plugin for packet encode/decode.
@@ -30,9 +31,9 @@
     "Feed and poll until pred matches a packet. Returns the matching packet.
      Non-matching packets are discarded."
     (forever
-      (if-let [[pkt (plugin:poll conn:mqtt)]]
+      (if-let [pkt (plugin:poll conn:mqtt)]
         (when (pred pkt) (break pkt))
-        (let [[data (port/read conn:tcp 16384)]]
+        (let [data (port/read conn:tcp 16384)]
           (when (nil? data)
             (error {:error :mqtt-error :reason :connection-closed :message "connection closed unexpectedly"}))
           (plugin:feed conn:mqtt data)))))
@@ -51,19 +52,19 @@
   (defn mqtt/connect [host port-num &named client-id username password clean-session keep-alive]
     "Connect to an MQTT broker. Returns {:tcp port :mqtt mqtt-state}."
     (default clean-session true)
-    (let* [[opts {:client-id client-id :username username :password password
-                  :clean-session clean-session :keep-alive keep-alive}]
-           [tcp-port (tcp/connect host port-num)]
-           [mqtt (plugin:state opts)]
-           [conn {:tcp tcp-port :mqtt mqtt}]]
-      (let [[[ok? err] (protect
+    (let* [opts {:client-id client-id :username username :password password
+                  :clean-session clean-session :keep-alive keep-alive}
+           tcp-port (tcp/connect host port-num)
+           mqtt (plugin:state opts)
+           conn {:tcp tcp-port :mqtt mqtt}]
+      (let [[ok? err] (protect
                          (send-packet conn (plugin:encode-connect mqtt opts))
-                         (let [[ack (drive-until conn (packet-type? :connack))]]
+                         (let [ack (drive-until conn (packet-type? :connack))]
                            (unless (zero? ack:code)
                              (error {:error :mqtt-error
                                      :reason :connack-rejected :code ack:code
                                      :message (concat "CONNACK rejected, code="
-                                                      (string ack:code))}))))]]
+                                                      (string ack:code))}))))]
         (unless ok?
           (port/close tcp-port)
           (error err)))
@@ -72,7 +73,7 @@
   (defn mqtt/publish [conn topic payload &named qos retain]
     "Publish a message. :qos 0/1/2 (default 0), :retain true/false."
     (default qos 0)
-    (let [[opts {:qos qos :retain retain}]]
+    (let [opts {:qos qos :retain retain}]
       (send-packet conn (plugin:encode-publish conn:mqtt topic payload opts))
       (when (>= qos 1)
         (drive-until conn (packet-type? :puback)))))
@@ -92,20 +93,20 @@
   (defn mqtt/recv [conn]
     "Receive one MQTT message (typically a PUBLISH).
      Blocks until a packet is available. Returns the packet struct, or nil on EOF."
-    (if-let [[pkt (plugin:poll conn:mqtt)]]
+    (if-let [pkt (plugin:poll conn:mqtt)]
       pkt
       (forever
-        (let [[data (port/read conn:tcp 16384)]]
+        (let [data (port/read conn:tcp 16384)]
           (when (nil? data) (break))
           (plugin:feed conn:mqtt data)
-          (when-let [[pkt (plugin:poll conn:mqtt)]]
+          (when-let [pkt (plugin:poll conn:mqtt)]
             (break pkt))))))
 
   (defn mqtt/listen [conn callback]
     "Loop receiving messages, calling (callback msg) for each.
      Runs until the connection is closed (port/read returns nil)."
     (forever
-      (if-let [[pkt (mqtt/recv conn)]]
+      (if-let [pkt (mqtt/recv conn)]
         (callback pkt)
         (break))))
 

@@ -27,7 +27,7 @@ Integration tests use `eval_source()` from [`tests/common/`](../common/) to comp
 #[test]
 fn test_closure_capture() {
     let result = eval_source("
-        (let ((x 10))
+        (let [x 10]
           (fn () (+ x 1)))
     ").unwrap();
     

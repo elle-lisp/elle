@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/gpu.lisp — GPU compute library
 ##
 ## Wraps the vulkan plugin and SPIR-V emitter.
@@ -34,7 +35,7 @@
    local-size-x: workgroup size (threads per workgroup).
    num-buffers: number of f32 storage buffer bindings.
    body-fn: (fn [s] ...) receives shader builder context s."
-  (let [[bytecode (spv:compute local-size-x num-buffers body-fn plugin:f32-bits)]]
+  (let [bytecode (spv:compute local-size-x num-buffers body-fn plugin:f32-bits)]
     (plugin:shader ctx bytecode num-buffers)))
 
 (defn gpu-load-shader [ctx path num-buffers]
@@ -62,10 +63,10 @@
    workgroups: [x y z] dispatch dimensions.
    buffers: array of specs from gpu-input, gpu-output, gpu-inout.
    Fiber suspends on GPU fence fd — no thread pool thread consumed."
-  (let* [[handle (plugin:dispatch shader
+  (let* [handle (plugin:dispatch shader
                    (workgroups 0) (workgroups 1) (workgroups 2)
-                   buffers)]
-         [_ (plugin:wait handle)]]
+                   buffers)
+         _ (plugin:wait handle)]
     (plugin:decode (plugin:collect handle) :f32)))
 
 ## ── Compiler-generated GPU map ────────────────────────────────
@@ -79,7 +80,7 @@
     (push inputs (first xs))
     (assign xs (rest xs)))
   (var kw @{})
-  (let [[pairs (->array xs)]]
+  (let [pairs (->array xs)]
     (var i 0)
     (while (< i (length pairs))
       (put kw (pairs i) (pairs (+ i 1)))
@@ -107,29 +108,29 @@
      (gpu:map (fn [x] (* x x)) [1 2 3 4])
      (gpu:map (fn [a b] (+ a b)) [1 2 3] [4 5 6])
      (gpu:map select [1 0 1 0] [10 20 30 40] [100 200 300 400])"
-  (let* [[parts      (split-kwargs rest-args)]
-         [inputs     (parts 0)]
-         [opts       (parts 1)]
-         [ctx        (or (get opts :ctx) (plugin:init))]
-         [dtype      (or (get opts :dtype) :i64)]
-         [wg-size    (or (get opts :wg-size) 256)]]
+  (let* [parts      (split-kwargs rest-args)
+         inputs     (parts 0)
+         opts       (parts 1)
+         ctx        (or (get opts :ctx) (plugin:init))
+         dtype      (or (get opts :dtype) :i64)
+         wg-size    (or (get opts :wg-size) 256)]
     (assert (= (length inputs) (fn/arity f))
             "gpu:map: number of input arrays must match function arity")
-    (let* [[n          (length (inputs 0))]
-           [_          (each inp in inputs
+    (let* [n          (length (inputs 0))
+           _          (each inp in inputs
                         (assert (= (length inp) n)
-                                "gpu:map: all input arrays must have the same length"))]
-           [num-bufs   (+ (length inputs) 1)]
-           [spirv      (if (fn/git? f) (disgit f) (mlir/compile-spirv f wg-size))]
-           [shader     (plugin:shader ctx spirv num-bufs)]
-           [wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))]
-           [elem-size  (if (= dtype :i64) 8 4)]
-           [in-bufs    (map (fn [data] {:data data :usage :input :dtype dtype}) inputs)]
-           [out-buf    {:size (* n elem-size) :usage :output}]
-           [bufs       (push (concat in-bufs) out-buf)]
-           [handle     (plugin:dispatch shader wg-count 1 1 bufs)]
-           [_          (plugin:wait handle)]
-           [result     (plugin:decode (plugin:collect handle) dtype)]]
+                                "gpu:map: all input arrays must have the same length"))
+           num-bufs   (+ (length inputs) 1)
+           spirv      (if (fn/git? f) (disgit f) (mlir/compile-spirv f wg-size))
+           shader     (plugin:shader ctx spirv num-bufs)
+           wg-count   (+ (/ n wg-size) (if (= (rem n wg-size) 0) 0 1))
+           elem-size  (if (= dtype :i64) 8 4)
+           in-bufs    (map (fn [data] {:data data :usage :input :dtype dtype}) inputs)
+           out-buf    {:size (* n elem-size) :usage :output}
+           bufs       (push (concat in-bufs) out-buf)
+           handle     (plugin:dispatch shader wg-count 1 1 bufs)
+           _          (plugin:wait handle)
+           result     (plugin:decode (plugin:collect handle) dtype)]
       result)))
 
 ## ── Export ─────────────────────────────────────────────────────

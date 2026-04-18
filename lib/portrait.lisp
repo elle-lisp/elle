@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
@@ -40,11 +41,11 @@
   (var phases @[])
 
   (each callee in callees
-    (let* [[name (get callee :name)]
-           [sig-result (protect (compile/signal analysis (keyword name)))]]
-      (let [[kind (if (get sig-result 0)
+    (let* [name (get callee :name)
+           sig-result (protect (compile/signal analysis (keyword name)))]
+      (let [kind (if (get sig-result 0)
                     (classify-phase (get sig-result 1))
-                    :pure)]]
+                    :pure)]
         (when (not (= kind current-kind))
           (when (not (empty? current-fns))
             (push phases {:kind current-kind :functions (freeze current-fns)}))
@@ -64,10 +65,10 @@
   (var modes @[])
 
   (each callee in callees
-    (let* [[name (get callee :name)]
-           [sig-result (protect (compile/signal analysis (keyword name)))]]
+    (let* [name (get callee :name)
+           sig-result (protect (compile/signal analysis (keyword name)))]
       (when (get sig-result 0)
-        (let [[sig (get sig-result 1)]]
+        (let [sig (get sig-result 1)]
           (when (contains? (get sig :bits) :error)
             (push modes {:source name
                          :line (get callee :line)
@@ -79,10 +80,10 @@
 
 (defn assess-composition [sig captures]
   "Determine composition properties from signal and captures."
-  (let* [[has-mutable-capture (not (empty? (filter (fn [c] (get c :mutated))
-                                                   captures)))]
-         [has-io (get sig :io)]
-         [has-any-capture (not (empty? captures))]]
+  (let* [has-mutable-capture (not (empty? (filter (fn [c] (get c :mutated))
+                                                   captures)))
+         has-io (get sig :io)
+         has-any-capture (not (empty? captures))]
     {:retry-safe       (not has-io)
      :timeout-safe     (not has-mutable-capture)
      :parallelizable   (not has-mutable-capture)
@@ -97,15 +98,15 @@
   (var obs @[])
 
   # 1. Almost-pure: only one I/O callee
-  (let [[io-callees (filter
+  (let [io-callees (filter
                       (fn [c]
-                        (let [[r (protect (compile/signal analysis
-                                           (keyword (get c :name))))]]
+                        (let [r (protect (compile/signal analysis
+                                           (keyword (get c :name))))]
                           (and (get r 0) (get (get r 1) :io))))
-                      callees)]]
+                      callees)]
     (when (and (not (get sig :silent))
                (= 1 (length io-callees)))
-      (let [[io-callee (first io-callees)]]
+      (let [io-callee (first io-callees)]
         (push obs {:kind :almost-pure
                    :message (string/format
                      "Only I/O source is {} at line {}. Factoring it out makes the rest JIT-eligible."
@@ -114,8 +115,8 @@
   # 2. Mutable capture shared across closures
   (each cap in captures
     (when (get cap :mutated)
-      (let [[captured-by (protect (compile/captured-by analysis
-                                    (keyword (get cap :name))))]]
+      (let [captured-by (protect (compile/captured-by analysis
+                                    (keyword (get cap :name))))]
         (when (and (get captured-by 0)
                    (> (length (get captured-by 1)) 1))
           (push obs {:kind :shared-mutable
@@ -143,8 +144,8 @@
   (each cap in captures
     (when (and (= (get cap :kind) :value)
                (not (get cap :mutated)))
-      (let [[binding-result (protect (compile/binding analysis
-                                       (keyword (get cap :name))))]]
+      (let [binding-result (protect (compile/binding analysis
+                                       (keyword (get cap :name))))]
         (when (and (get binding-result 0)
                    (get (get binding-result 1) :mutated))
           (push obs {:kind :stale-capture
@@ -158,14 +159,14 @@
 
 (defn function-portrait [analysis name]
   "Build a semantic portrait of a named function."
-  (let* [[sig      (compile/signal analysis name)]
-         [caps     (compile/captures analysis name)]
-         [callers  (compile/callers analysis name)]
-         [callees  (compile/callees analysis name)]
-         [phases   (classify-phases analysis callees)]
-         [failures (detect-failure-modes analysis callees)]
-         [comp     (assess-composition sig caps)]
-         [obs      (find-observations analysis name sig caps callees)]]
+  (let* [sig      (compile/signal analysis name)
+         caps     (compile/captures analysis name)
+         callers  (compile/callers analysis name)
+         callees  (compile/callees analysis name)
+         phases   (classify-phases analysis callees)
+         failures (detect-failure-modes analysis callees)
+         comp     (assess-composition sig caps)
+         obs      (find-observations analysis name sig caps callees)]
 
     {:name         (string name)
      :signal       sig
@@ -181,8 +182,8 @@
 
 (defn module-portrait [analysis]
   "Build a signal topology for an entire module."
-  (let* [[syms (compile/symbols analysis)]
-         [fns  (filter (fn [s] (= (get s :kind) :function)) syms)]]
+  (let* [syms (compile/symbols analysis)
+         fns  (filter (fn [s] (= (get s :kind) :function)) syms)]
 
     (var pure @[])
     (var io-boundary @[])
@@ -190,10 +191,10 @@
     (var yielding @[])
 
     (each sym in fns
-      (let* [[name (get sym :name)]
-             [sig-result (protect (compile/signal analysis (keyword name)))]]
+      (let* [name (get sym :name)
+             sig-result (protect (compile/signal analysis (keyword name)))]
         (when (get sig-result 0)
-          (let [[sig (get sig-result 1)]]
+          (let [sig (get sig-result 1)]
             (cond
               ((get sig :silent)                         (push pure name))
               ((not (empty? (get sig :propagates)))      (push delegating name))
@@ -203,18 +204,18 @@
 
     # Find signal boundaries
     (var boundaries @[])
-    (let [[graph (compile/call-graph analysis)]]
+    (let [graph (compile/call-graph analysis)]
       (each node in (get graph :nodes)
-        (let* [[caller-name (get node :name)]
-               [caller-result (protect (compile/signal analysis
-                                         (keyword caller-name)))]]
+        (let* [caller-name (get node :name)
+               caller-result (protect (compile/signal analysis
+                                         (keyword caller-name)))]
           (when (get caller-result 0)
-            (let [[caller-sig (get caller-result 1)]]
+            (let [caller-sig (get caller-result 1)]
               (each callee-name in (get node :callees)
-                (let [[callee-result (protect (compile/signal analysis
-                                               (keyword callee-name)))]]
+                (let [callee-result (protect (compile/signal analysis
+                                               (keyword callee-name)))]
                   (when (get callee-result 0)
-                    (let [[callee-sig (get callee-result 1)]]
+                    (let [callee-sig (get callee-result 1)]
                       (when (not (= (get caller-sig :silent)
                                     (get callee-sig :silent)))
                         (push boundaries
@@ -235,7 +236,7 @@
 
 (defn format-signal [sig]
   "Format a signal struct as a readable string."
-  (let [[bits (get sig :bits)]]
+  (let [bits (get sig :bits)]
     (if (empty? bits)
       (if (empty? (get sig :propagates))
         "silent"
@@ -257,10 +258,10 @@
 (defn render-function [portrait]
   "Render a function portrait as text."
   (var out @"")
-  (let [[name (get portrait :name)]
-        [sig  (get portrait :signal)]
-        [caps (get portrait :captures)]
-        [comp (get portrait :composition)]]
+  (let [name (get portrait :name)
+        sig  (get portrait :signal)
+        caps (get portrait :captures)
+        comp (get portrait :composition)]
 
     (push out (string/format "{}\n\n" name))
     (push out (string/format "  Effects:       {}\n" (format-signal sig)))
@@ -320,7 +321,7 @@
       (push out (string/format "    {} → {} ({})\n"
                  (get b :caller) (get b :callee) (get b :transition)))))
 
-  (let [[graph (get portrait :graph)]]
+  (let [graph (get portrait :graph)]
     (when (not (empty? (get graph :roots)))
       (push out (string/format "\n  Roots:        {}\n"
         (string/join (->list (get graph :roots)) ", "))))

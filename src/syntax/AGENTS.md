@@ -113,9 +113,9 @@ Analyzer uses scope-set subset matching to prevent accidental capture:
 
 ```lisp
 (defmacro swap (a b)
-  `(let ((tmp ,a)) (set ,a ,b) (set ,b tmp)))
+  `(let [tmp ,a] (set ,a ,b) (set ,b tmp)))
 
-(let ((tmp 10) (x 1) (y 2))
+(let [tmp 10 x 1 y 2]
   (swap x y)
   tmp)  ; Still 10, not affected by macro's tmp
 ```
@@ -142,7 +142,7 @@ resolves at the call site. Used for anaphoric macros:
 
 ```lisp
 (defmacro aif (test then else)
-  `(let ((,(datum->syntax test 'it) ,test))
+  `(let [,(datum->syntax test 'it) ,test]
      (if ,(datum->syntax test 'it) ,then ,else)))
 ```
 

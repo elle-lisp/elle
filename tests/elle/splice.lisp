@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Tests for splice (;expr) — spreading indexed types into calls and literals
 
 
@@ -16,10 +17,10 @@
 # Splice in data constructors
 # ============================================================================
 
-(let ([a @[1 ;@[2 3] 4]])
+(let [a @[1 ;@[2 3] 4]]
   (assert (= (length a) 4) "splice in array literal"))
 
-(let ([t [1 ;@[2 3] 4]])
+(let [t [1 ;@[2 3] 4]]
   (assert (= (length t) 4) "splice in array literal"))
 
 # ============================================================================
@@ -31,10 +32,10 @@
   (def args @[1 2 3])
   (assert (= (add3 ;args) 6) "splice with closure"))
 
-(letrec ((apply-helper (fn [nums]
+(letrec [apply-helper (fn [nums]
             (if (empty? nums) 0
-                (+ (first nums) (apply-helper (rest nums))))))
-         (sum (fn [& nums] (apply-helper nums))))
+                (+ (first nums) (apply-helper (rest nums)))))
+         sum (fn [& nums] (apply-helper nums))]
   (assert (= (sum ;@[1 2 3 4 5]) 15) "splice with variadic fn"))
 
 # ============================================================================
@@ -65,12 +66,12 @@
 
 (begin
   (defn f3 [a b c] (+ a b c))
-  (let ([result (protect (f3 ;@[1 2]))])
+  (let [result (protect (f3 ;@[1 2]))]
     (assert (= (get result 0) false) "splice too few args errors")))
 
 (begin
   (defn f2 [a b] (+ a b))
-  (let ([result (protect (f2 ;@[1 2 3]))])
+  (let [result (protect (f2 ;@[1 2 3]))]
     (assert (= (get result 0) false) "splice too many args errors")))
 
 # ============================================================================
@@ -102,7 +103,7 @@
 (assert (= (+ 10 ;(list 1 2 3)) 16) "splice list into arithmetic with leading arg")
 (assert (= (+ ;(list 1 2) ;(list 3 4)) 10) "splice multiple lists")
 
-(let ([result (list 0 ;(list 1 2 3) 4)])
+(let [result (list 0 ;(list 1 2 3) 4)]
   (assert (= result (list 0 1 2 3 4)) "splice list into list constructor"))
 
 (begin
@@ -119,8 +120,8 @@
 # Compile-time error cases
 # ============================================================================
 
-(let (([ok? _] (protect ((fn () (eval '(;@[1 2 3]))))))) (assert (not ok?) "splice at top level should error"))
+(let [[ok? _] (protect ((fn () (eval '(;@[1 2 3])))))] (assert (not ok?) "splice at top level should error"))
 
-(let (([ok? _] (protect ((fn () (eval '(+ ;42))))))) (assert (not ok?) "splicing an integer should error"))
+(let [[ok? _] (protect ((fn () (eval '(+ ;42)))))] (assert (not ok?) "splicing an integer should error"))
 
-(let (([ok? _] (protect ((fn () (eval '(;;@[1 2]))))))) (assert (not ok?) "nested splice should error"))
+(let [[ok? _] (protect ((fn () (eval '(;;@[1 2])))))] (assert (not ok?) "nested splice should error"))

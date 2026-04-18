@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## model.lisp — GPT model: initialization, forward pass, loss
 ##
 ## Architecture: GPT-2 style transformer (RMSNorm, no biases, ReLU
@@ -28,10 +29,10 @@
 
   (defn init-model [vocab-size]
     "Initialize all model parameters. Returns an @struct of named weight matrices."
-    (let ([scale (/ 1.0 (sqrt (float *n-embd*)))])
-      (let ([model @{:wte (init-weight vocab-size *n-embd* scale)
+    (let [scale (/ 1.0 (sqrt (float *n-embd*)))]
+      (let [model @{:wte (init-weight vocab-size *n-embd* scale)
                      :wpe (init-weight *block-size* *n-embd* scale)
-                     :lm-head (init-weight vocab-size *n-embd* scale)}])
+                     :lm-head (init-weight vocab-size *n-embd* scale)}]
         (each layer in (range *n-layer*)
           (put model (layer-key layer "attn-wq") (init-weight *n-embd* *n-embd* scale))
           (put model (layer-key layer "attn-wk") (init-weight *n-embd* *n-embd* scale))
@@ -45,7 +46,7 @@
 
   (defn collect-params [model]
     "Collect all Value parameter nodes from the model into a flat array."
-    (let ([params @[]])
+    (let [params @[]]
       (each key in (keys model)
         (each row in (model key)
           (each val in row
@@ -57,14 +58,14 @@
   (defn mat-vec-mul [mat vec-in]
     "Matrix-vector multiply: mat[rows x cols] * vec-in[cols] → result[rows].
      Uses fused dot product — one Value node per output element."
-    (let ([n (length vec-in)] [result @[]])
+    (let [n (length vec-in) result @[]]
       (each row in mat
         (push result (ag:vdot row vec-in n)))
       result))
 
   (defn vec-add [a b]
     "Element-wise autograd addition of two vectors."
-    (let ([result @[]])
+    (let [result @[]]
       (var i 0)
       (while (< i (length a))
         (push result (ag:v+ (a i) (b i)))
@@ -73,9 +74,9 @@
 
   (defn rms-norm [vec-in]
     "RMS normalization: x / sqrt(mean(x^2) + eps)."
-    (let* ([squares (map (fn [v] (ag:v* v v)) vec-in)]
-           [sum-sq (ag:vsum squares)]
-           [rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*) 0.5)])
+    (let* [squares (map (fn [v] (ag:v* v v)) vec-in)
+           sum-sq (ag:vsum squares)
+           rms (ag:vpow (ag:v+s (ag:v*s sum-sq (/ 1.0 (length vec-in))) *eps*) 0.5)]
       (thaw (->array (map (fn [v] (ag:v/ v rms)) vec-in)))))
 
   (defn softmax-values [scores]
@@ -85,7 +86,7 @@
       (when (> (ag:v-data s) max-val)
         (assign max-val (ag:v-data s))))
     (var sum-exp (ag:make-value 0.0))
-    (let ([exps (->array (map (fn [s] (ag:vexp (ag:v+s s (- 0.0 max-val)))) scores))])
+    (let [exps (->array (map (fn [s] (ag:vexp (ag:v+s s (- 0.0 max-val)))) scores))]
       (each e in exps
         (assign sum-exp (ag:v+ sum-exp e)))
       (thaw (->array (map (fn [e] (ag:v/ e sum-exp)) exps)))))
@@ -103,9 +104,9 @@
 
   (defn attn-head [h q layer-keys layer-vals n-t x-attn]
     "Compute one attention head and write results into x-attn."
-    (let* ([hs (* h *head-dim*)]
-           [sf (/ 1.0 (sqrt (float *head-dim*)))]
-           [attn-logits @[]])
+    (let* [hs (* h *head-dim*)
+           sf (/ 1.0 (sqrt (float *head-dim*)))
+           attn-logits @[]]
       # Q·K dot products (fused — one node per past position)
       (var ti 0)
       (while (< ti n-t)
@@ -113,7 +114,7 @@
                                            :offset-a hs :offset-b hs) sf))
         (assign ti (inc ti)))
       # Weighted sum of cached values
-      (let ([aw (softmax-values attn-logits)])
+      (let [aw (softmax-values attn-logits)]
         (each j in (range *head-dim*)
           (var acc (ag:make-value 0.0))
           (var t2 0)
@@ -125,23 +126,23 @@
 
   (defn attn-block [x weights kv-keys kv-values li]
     "Multi-head attention with KV cache. Returns updated x with residual."
-    (let* ([x-norm (rms-norm x)]
-           [q (mat-vec-mul weights:wq x-norm)]
-           [k (mat-vec-mul weights:wk x-norm)]
-           [v (mat-vec-mul weights:wv x-norm)]
-           [layer-keys (begin (push (kv-keys li) k) (kv-keys li))]
-           [layer-vals (begin (push (kv-values li) v) (kv-values li))]
-           [n-t (length layer-keys)]
-           [x-attn (array/new *n-embd* (ag:make-value 0.0))])
+    (let* [x-norm (rms-norm x)
+           q (mat-vec-mul weights:wq x-norm)
+           k (mat-vec-mul weights:wk x-norm)
+           v (mat-vec-mul weights:wv x-norm)
+           layer-keys (begin (push (kv-keys li) k) (kv-keys li))
+           layer-vals (begin (push (kv-values li) v) (kv-values li))
+           n-t (length layer-keys)
+           x-attn (array/new *n-embd* (ag:make-value 0.0))]
       (each h in (range *n-head*)
         (attn-head h q layer-keys layer-vals n-t x-attn))
       (vec-add (mat-vec-mul weights:wo x-attn) x)))
 
   (defn mlp-block [x weights]
     "MLP block with residual connection."
-    (let* ([h (mat-vec-mul weights:fc1 (rms-norm x))]
-           [h (thaw (->array (map ag:vrelu h)))]
-           [h (mat-vec-mul weights:fc2 h)])
+    (let* [h (mat-vec-mul weights:fc1 (rms-norm x))
+           h (thaw (->array (map ag:vrelu h)))
+           h (mat-vec-mul weights:fc2 h)]
       (vec-add h x)))
 
   (defn gpt-forward-token [token-id pos-id kv-keys kv-values model]
@@ -150,7 +151,7 @@
      Returns a 1D array of logit Value nodes."
     (var x (rms-norm (vec-add (model:wte token-id) (model:wpe pos-id))))
     (each li in (range *n-layer*)
-      (let ([weights (layer-weights model li)])
+      (let [weights (layer-weights model li)]
         (assign x (attn-block x weights kv-keys kv-values li))
         (assign x (mlp-block x weights))))
     (mat-vec-mul model:lm-head x))
@@ -160,13 +161,13 @@
   (defn cross-entropy-loss-incremental [model tokens]
     "Compute cross-entropy loss over a token sequence using incremental forward.
      Returns a single Value node (the mean loss)."
-    (let* ([n (min *block-size* (dec (length tokens)))]
-           [[kv-keys kv-values] (helpers:make-kv-caches *n-layer*)]
-           [total-loss (ag:make-value 0.0)])
+    (let* [n (min *block-size* (dec (length tokens)))
+           [kv-keys kv-values] (helpers:make-kv-caches *n-layer*)
+           total-loss (ag:make-value 0.0)]
       (var pos 0)
       (while (< pos n)
-        (let* ([logits (gpt-forward-token (tokens pos) pos kv-keys kv-values model)]
-               [probs (softmax-values logits)])
+        (let* [logits (gpt-forward-token (tokens pos) pos kv-keys kv-values model)
+               probs (softmax-values logits)]
           (assign total-loss (ag:v+ total-loss (ag:vneg (ag:vlog (probs (tokens (inc pos))))))))
         (assign pos (inc pos)))
       (ag:v*s total-loss (/ 1.0 (float n)))))

@@ -1,3 +1,4 @@
+(elle/epoch 7)
 ## Arithmetic Law Tests
 ##
 ## Migrated from tests/property/arithmetic.rs
@@ -101,9 +102,9 @@
 # div_by_zero_is_error: division by zero signals an error
 # ============================================================================
 
-(let (([ok? _] (protect ((fn [] (/ 0 0)))))) (assert (not ok?) "div_by_zero_is_error: zero divided by zero"))
-(let (([ok? _] (protect ((fn [] (/ 42 0)))))) (assert (not ok?) "div_by_zero_is_error: positive divided by zero"))
-(let (([ok? _] (protect ((fn [] (/ -1 0)))))) (assert (not ok?) "div_by_zero_is_error: negative divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ 0 0))))] (assert (not ok?) "div_by_zero_is_error: zero divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ 42 0))))] (assert (not ok?) "div_by_zero_is_error: positive divided by zero"))
+(let [[ok? _] (protect ((fn [] (/ -1 0))))] (assert (not ok?) "div_by_zero_is_error: negative divided by zero"))
 
 # ============================================================================
 # eq_reflexive: (= a a) == true
@@ -125,15 +126,15 @@
 # lt_antisymmetric: for a != b, exactly one of (< a b) or (< b a) is true
 # ============================================================================
 
-(let ([a 3] [b 5])
+(let [a 3 b 5]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: 3 vs 5 - one is true")
   (assert (not (and (< a b) (< b a))) "lt_antisymmetric: 3 vs 5 - not both true"))
 
-(let ([a -7] [b 4])
+(let [a -7 b 4]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: -7 vs 4 - one is true")
   (assert (not (and (< a b) (< b a))) "lt_antisymmetric: -7 vs 4 - not both true"))
 
-(let ([a 0] [b 1])
+(let [a 0 b 1]
   (assert (or (< a b) (< b a)) "lt_antisymmetric: 0 vs 1 - one is true")
   (assert (not (and (< a b) (< b a))) "lt_antisymmetric: 0 vs 1 - not both true"))
 
@@ -141,16 +142,16 @@
 # mod_range: (rem a b) has |result| < b (b > 0)
 # ============================================================================
 
-(let ([result (rem 10 3)])
+(let [result (rem 10 3)]
   (assert (< (abs result) 3) "mod_range: 10 rem 3 is in range"))
 
-(let ([result (rem -10 3)])
+(let [result (rem -10 3)]
   (assert (< (abs result) 3) "mod_range: -10 rem 3 is in range"))
 
-(let ([result (rem 7 7)])
+(let [result (rem 7 7)]
   (assert (< (abs result) 7) "mod_range: 7 rem 7 is in range"))
 
-(let ([result (rem 0 5)])
+(let [result (rem 0 5)]
   (assert (< (abs result) 5) "mod_range: 0 rem 5 is in range"))
 
 # ============================================================================

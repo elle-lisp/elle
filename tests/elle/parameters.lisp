@@ -1,3 +1,4 @@
+(elle/epoch 7)
 # Parameters — Racket-style dynamic bindings
 #
 # Tests for parameter, parameter?, parameterize, and fiber inheritance.
@@ -60,14 +61,14 @@
 
 (def p5 (parameter 1))
 (assert (= (parameterize ((p5 42))
-    (let ((f (fiber/new (fn () (p5)) 1)))
+    (let [f (fiber/new (fn () (p5)) 1)]
       (fiber/resume f nil)
       (fiber/value f))) 42) "child fiber inherits parent parameterize")
 
 # === Fiber inheritance outside parameterize ===
 
 (def p6 (parameter 99))
-(assert (= (let ((f (fiber/new (fn () (p6)) 1)))
+(assert (= (let [f (fiber/new (fn () (p6)) 1)]
     (fiber/resume f nil)
     (fiber/value f)) 99) "child fiber sees parent default outside parameterize")
 
@@ -82,7 +83,7 @@
 (assert (= (type (parameter 0)) :parameter) "type-of parameter is :parameter")
 
 # parameter_call_with_args_errors
-(let (([ok? _] (protect ((fn () ((parameter 42) 1)))))) (assert (not ok?) "parameter call with args errors"))
+(let [[ok? _] (protect ((fn () ((parameter 42) 1))))] (assert (not ok?) "parameter call with args errors"))
 
 # parameterize_non_parameter_errors
-(let (([ok? _] (protect ((fn () (eval '(parameterize ((42 1)) 0))))))) (assert (not ok?) "parameterize with non-parameter errors"))
+(let [[ok? _] (protect ((fn () (eval '(parameterize ((42 1)) 0)))))] (assert (not ok?) "parameterize with non-parameter errors"))

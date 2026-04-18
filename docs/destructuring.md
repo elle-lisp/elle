@@ -96,12 +96,12 @@ target    # => :target
 ## In let / let*
 
 ```lisp
-(let ([(a b) (list 10 20)])
+(let [(a b) (list 10 20)]
   (+ a b))                 # => 30
 
 # let* — sequential: second binding depends on first
-(let* ([(a b) (list 3 4)]
-       [total (+ a b)])
+(let* [(a b) (list 3 4)
+       total (+ a b)]
   total)                    # => 7
 ```
 
