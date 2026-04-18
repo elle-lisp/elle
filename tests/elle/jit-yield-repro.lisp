@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Minimal repro: parameter in range + print + apply-yield
 
 (defn emit [& parts]
@@ -8,7 +8,7 @@
   (print (string/join (map (fn [_] " ") (range 0 (* n 2))) ""))
   (apply emit parts))
 
-(var i 0)
+(def @i 0)
 (while (< i 15)
   (wrapper 1 "line " i)
   (assign i (+ i 1)))

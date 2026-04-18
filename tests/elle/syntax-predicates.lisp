@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Syntax predicate and accessor integration tests (issue #581)
 #
 # These tests exercise syntax-pair?, syntax-list?, syntax-symbol?,

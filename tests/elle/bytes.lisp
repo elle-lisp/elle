@@ -1,3 +1,4 @@
+(elle/epoch 8)
 ## Bytes and @bytes Type Tests
 ##
 ## Tests for the immutable bytes and mutable @bytes types.
@@ -54,10 +55,10 @@
 # ============================================================================
 
 (assert (= (get (bytes 72 101 108) 1) 101) "bytes get")
-(let (([ok? _] (protect ((fn () (get (bytes 72 101 108) 10)))))) (assert (not ok?) "bytes get out of bounds errors"))
+(let [[ok? _] (protect ((fn () (get (bytes 72 101 108) 10))))] (assert (not ok?) "bytes get out of bounds errors"))
 
 (assert (= (get (@bytes 72 101 108) 1) 101) "@bytes get")
-(let (([ok? _] (protect ((fn () (get (@bytes 72 101 108) 10)))))) (assert (not ok?) "@bytes get out of bounds errors"))
+(let [[ok? _] (protect ((fn () (get (@bytes 72 101 108) 10))))] (assert (not ok?) "@bytes get out of bounds errors"))
 
 # ============================================================================
 # URI encoding
@@ -71,20 +72,20 @@
 # @bytes mutations
 # ============================================================================
 
-(assert (bytes? (let ((b (@bytes 1 2))) (push b 3) b)) "@bytes push returns @bytes")
-(assert (= (let ((b (@bytes 1 2 3))) (pop b)) 3) "@bytes pop returns byte")
-(assert (= (let ((b (@bytes 1 2 3))) (put b 1 99) (get b 1)) 99) "@bytes put and get")
+(assert (bytes? (let [b (@bytes 1 2)] (push b 3) b)) "@bytes push returns @bytes")
+(assert (= (let [b (@bytes 1 2 3)] (pop b)) 3) "@bytes pop returns byte")
+(assert (= (let [b (@bytes 1 2 3)] (put b 1 99) (get b 1)) 99) "@bytes put and get")
 
 # ============================================================================
 # Each over bytes and blob
 # ============================================================================
 
-(assert (= (let ((@sum 0))
+(assert (= (let [@sum 0]
              (each b (bytes 1 2 3)
                (assign sum (+ sum b)))
              sum) 6) "each over bytes")
 
-(assert (= (let ((@sum 0))
+(assert (= (let [@sum 0]
              (each b (@bytes 10 20 30)
                (assign sum (+ sum b)))
              sum) 60) "each over @bytes")
@@ -144,7 +145,7 @@
 (assert (= (seq->hex 255) "ff") "seq->hex 255")
 (assert (= (seq->hex 256) "0100") "seq->hex 256")
 (assert (= (seq->hex 65535) "ffff") "seq->hex 65535")
-(let (([ok? err] (protect ((fn () (seq->hex -1)))))) (assert (not ok?) "seq->hex negative int errors") (assert (= (get err :error) :value-error) "seq->hex negative int errors"))
+(let [[ok? err] (protect ((fn () (seq->hex -1))))] (assert (not ok?) "seq->hex negative int errors") (assert (= (get err :error) :value-error) "seq->hex negative int errors"))
 
 # ============================================================================
 # seq->hex — array input
@@ -154,8 +155,8 @@
 (assert (= (type (seq->hex [72 101 108])) :string) "seq->hex array is immutable")
 (assert (= (freeze (seq->hex @[72 101 108])) "48656c") "seq->hex @array value")
 (assert (= (type (seq->hex @[72 101 108])) :@string) "seq->hex @array is mutable")
-(let (([ok? err] (protect ((fn () (seq->hex [256])))))) (assert (not ok?) "seq->hex array element out of range") (assert (= (get err :error) :value-error) "seq->hex array element out of range"))
-(let (([ok? err] (protect ((fn () (seq->hex ["x"])))))) (assert (not ok?) "seq->hex array element not int") (assert (= (get err :error) :type-error) "seq->hex array element not int"))
+(let [[ok? err] (protect ((fn () (seq->hex [256]))))] (assert (not ok?) "seq->hex array element out of range") (assert (= (get err :error) :value-error) "seq->hex array element out of range"))
+(let [[ok? err] (protect ((fn () (seq->hex ["x"]))))] (assert (not ok?) "seq->hex array element not int") (assert (= (get err :error) :type-error) "seq->hex array element not int"))
 
 # ============================================================================
 # seq->hex — list input
@@ -163,8 +164,8 @@
 
 (assert (= (seq->hex '(72 101 108)) "48656c") "seq->hex list")
 (assert (= (type (seq->hex '(72 101 108))) :string) "seq->hex list is immutable")
-(let (([ok? err] (protect ((fn () (seq->hex '(256))))))) (assert (not ok?) "seq->hex list element out of range") (assert (= (get err :error) :value-error) "seq->hex list element out of range"))
-(let (([ok? err] (protect ((fn () (seq->hex '("x"))))))) (assert (not ok?) "seq->hex list element not int") (assert (= (get err :error) :type-error) "seq->hex list element not int"))
+(let [[ok? err] (protect ((fn () (seq->hex '(256)))))] (assert (not ok?) "seq->hex list element out of range") (assert (= (get err :error) :value-error) "seq->hex list element out of range"))
+(let [[ok? err] (protect ((fn () (seq->hex '("x")))))] (assert (not ok?) "seq->hex list element not int") (assert (= (get err :error) :type-error) "seq->hex list element not int"))
 
 # ============================================================================
 # seq->hex — bytes->hex still works as alias

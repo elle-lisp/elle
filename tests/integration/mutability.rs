@@ -25,7 +25,7 @@ fn test_def_at_allows_assign() {
 
 #[test]
 fn test_let_immutable_rejects_assign() {
-    let result = eval_source("(let [[x 1]] (assign x 2))");
+    let result = eval_source("(let [x 1] (assign x 2))");
     assert!(result.is_err(), "let without @ should reject assign");
     let err = result.unwrap_err();
     assert!(
@@ -36,7 +36,7 @@ fn test_let_immutable_rejects_assign() {
 
 #[test]
 fn test_let_at_allows_assign() {
-    let result = eval_source("(let [[@x 1]] (assign x 2) x)").unwrap();
+    let result = eval_source("(let [@x 1] (assign x 2) x)").unwrap();
     assert_eq!(result, Value::int(2));
 }
 
@@ -168,6 +168,6 @@ fn test_destructure_def_immutable_rejects() {
 #[test]
 fn test_destructure_let_at() {
     let result =
-        eval_source("(let [[[@x y] [1 2]]] (assign x 99) (+ x y))").unwrap();
+        eval_source("(let [[@x y] [1 2]] (assign x 99) (+ x y))").unwrap();
     assert_eq!(result, Value::int(101));
 }

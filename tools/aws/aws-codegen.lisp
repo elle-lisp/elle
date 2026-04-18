@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tools/aws/aws-codegen.lisp — Generate Elle API module from AWS Smithy model
 ##
 ## Usage:
@@ -20,7 +20,7 @@
 
 (defn camel->kebab [s]
   (def out @"")
-  (var i 0)
+  (def @i 0)
   (while (< i (length s))
     (def ch (get s i))
     (def upper (and (>= ch "A") (<= ch "Z")))
@@ -62,7 +62,7 @@
 
 (defn build-path-expr [path-template labels]
   (def parts @[])
-  (var remaining path-template)
+  (def @remaining path-template)
   (forever
     (def open (string/find remaining "{"))
     (when (nil? open)
@@ -115,10 +115,10 @@
 
 # ── Detect protocol ──────────────────────────────────────────────────
 
-(var protocol nil)
-(var json-version nil)
-(var target-prefix nil)
-(var api-version nil)
+(def @protocol nil)
+(def @json-version nil)
+(def @target-prefix nil)
+(def @api-version nil)
 
 (each [name shape] in (pairs shapes)
   (when (= (get shape "type") "service")
@@ -330,14 +330,14 @@
 
 # ── Main: collect ops, emit module ───────────────────────────────────
 
-(var ops @[])
+(def @ops @[])
 (each [name shape] in (pairs shapes)
   (when (= (get shape "type") "operation")
     (push ops [name shape])))
 (assign ops (sort ops))
 
 # For REST protocols, only count ops with HTTP bindings
-(var emitted-names @[])
+(def @emitted-names @[])
 (each [name shape] in ops
   (cond
     ((or (= protocol :rest-xml) (= protocol :rest-json))

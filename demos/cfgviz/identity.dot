@@ -1,5 +1,5 @@
 digraph {
-  label="The simplest function — one block, one return. arity:1 regs:1 locals:1";
+  label="The simplest function — one block, one return. arity:1 regs:2 locals:1";
   node [shape=record fontname="monospace" fontsize=10];
-  block0 [color="#4444cc" label="{block0|r0 ← cap[0] @15:3\l|return r0}"];
+  block0 [color="#4444cc" label="{block0|r0 ← cap[0] (raw) @13:1\llocal[0] ← r0 @13:1\lr1 ← local[0] @15:3\l|return r1}"];
 }

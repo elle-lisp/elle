@@ -1,3 +1,4 @@
+(elle/epoch 8)
 ## String Operation Law Tests
 ##
 ## Migrated from tests/property/strings.rs (input-invariant laws only).
@@ -88,7 +89,7 @@
 (assert (= (string/replace "hello world" "o" "o") "hello world") "replace o with o is identity")
 
 # replace_empty_old_errors: replacing empty string should error
-(let (([ok? _] (protect ((fn [] (string/replace "hello" "" "x")))))) (assert (not ok?) "replace with empty old string errors"))
+(let [[ok? _] (protect ((fn [] (string/replace "hello" "" "x"))))] (assert (not ok?) "replace with empty old string errors"))
 
 # ============================================================================
 # Trim
@@ -171,9 +172,9 @@
 (assert (= (parse-int "0") 0) "parse-int from string: 0")
 
 # string_to_integer_invalid_returns_error: non-numeric string errors
-(let (([ok? _] (protect ((fn [] (parse-int "abc")))))) (assert (not ok?) "parse-int from string errors on abc"))
-(let (([ok? _] (protect ((fn [] (parse-int "hello")))))) (assert (not ok?) "parse-int from string errors on hello"))
-(let (([ok? _] (protect ((fn [] (parse-int "xyz")))))) (assert (not ok?) "parse-int from string errors on xyz"))
+(let [[ok? _] (protect ((fn [] (parse-int "abc"))))] (assert (not ok?) "parse-int from string errors on abc"))
+(let [[ok? _] (protect ((fn [] (parse-int "hello"))))] (assert (not ok?) "parse-int from string errors on hello"))
+(let [[ok? _] (protect ((fn [] (parse-int "xyz"))))] (assert (not ok?) "parse-int from string errors on xyz"))
 
 # ============================================================================
 # Index/get operations (migrated from property tests)
@@ -273,30 +274,30 @@
 # ============================================================================
 
 # Positional arg count mismatch
-(let (([ok? _] (protect ((fn [] (string/format "{} {}" 1)))))) (assert (not ok?) "format positional too few args"))
+(let [[ok? _] (protect ((fn [] (string/format "{} {}" 1))))] (assert (not ok?) "format positional too few args"))
 
-(let (([ok? _] (protect ((fn [] (string/format "{}" 1 2)))))) (assert (not ok?) "format positional too many args"))
+(let [[ok? _] (protect ((fn [] (string/format "{}" 1 2))))] (assert (not ok?) "format positional too many args"))
 
 # Named arg missing
-(let (([ok? _] (protect ((fn [] (string/format "{name}" :other "value")))))) (assert (not ok?) "format named missing key"))
+(let [[ok? _] (protect ((fn [] (string/format "{name}" :other "value"))))] (assert (not ok?) "format named missing key"))
 
 # Named arg extra
-(let (([ok? _] (protect ((fn [] (string/format "{name}" :name "Alice" :extra "Bob")))))) (assert (not ok?) "format named extra key"))
+(let [[ok? _] (protect ((fn [] (string/format "{name}" :name "Alice" :extra "Bob"))))] (assert (not ok?) "format named extra key"))
 
 # Mixed positional and named
-(let (([ok? _] (protect ((fn [] (string/format "{} {name}" 1 :name "Alice")))))) (assert (not ok?) "format mixed positional and named"))
+(let [[ok? _] (protect ((fn [] (string/format "{} {name}" 1 :name "Alice"))))] (assert (not ok?) "format mixed positional and named"))
 
 # Odd keyword args
-(let (([ok? _] (protect ((fn [] (string/format "{name}" :name)))))) (assert (not ok?) "format odd keyword args"))
+(let [[ok? _] (protect ((fn [] (string/format "{name}" :name))))] (assert (not ok?) "format odd keyword args"))
 
 # Non-keyword in named position
-(let (([ok? _] (protect ((fn [] (string/format "{name}" 42 "Alice")))))) (assert (not ok?) "format non-keyword in named position"))
+(let [[ok? _] (protect ((fn [] (string/format "{name}" 42 "Alice"))))] (assert (not ok?) "format non-keyword in named position"))
 
 # Template not a string
-(let (([ok? _] (protect ((fn [] (string/format 42)))))) (assert (not ok?) "format template not string"))
+(let [[ok? _] (protect ((fn [] (string/format 42))))] (assert (not ok?) "format template not string"))
 
 # Invalid format spec
-(let (([ok? _] (protect ((fn [] (string/format "{:z}" 42)))))) (assert (not ok?) "format invalid spec"))
+(let [[ok? _] (protect ((fn [] (string/format "{:z}" 42))))] (assert (not ok?) "format invalid spec"))
 
 # Type mismatch: string with integer spec
-(let (([ok? _] (protect ((fn [] (string/format "{:d}" "hello")))))) (assert (not ok?) "format type mismatch string as d"))
+(let [[ok? _] (protect ((fn [] (string/format "{:d}" "hello"))))] (assert (not ok?) "format type mismatch string as d"))

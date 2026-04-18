@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/glob.lisp — Glob pattern matching and file discovery (pure Elle)
 ##
 ## Supports *, ?, [abc], [!abc], ** (recursive), and character ranges.
@@ -18,8 +18,8 @@
     (let* [negated (= (pat pi) "!")
            i (if negated (inc pi) pi)
            plen (length pat)]
-      (var ci i)
-      (var matched false)
+      (def @ci i)
+      (def @matched false)
       (while (and (< ci plen) (not (= (pat ci) "]")))
         (if (and (< (+ ci 2) plen) (= (pat (inc ci)) "-"))
           (begin
@@ -49,8 +49,8 @@
           ((and (< (inc pi) plen) (= (pat pi) "*") (= (pat (inc pi)) "*"))
            (let [npi (if (and (< (+ pi 2) plen) (= (pat (+ pi 2)) "/"))
                         (+ pi 3) (+ pi 2))]
-             (var k ti)
-             (var found false)
+             (def @k ti)
+             (def @found false)
              (while (and (<= k tlen) (not found))
                (when (go npi k) (assign found true))
                (assign k (inc k)))
@@ -59,8 +59,8 @@
            (if (= (pat pi) "*") (go (inc pi) ti) false))
           ## *
           ((= (pat pi) "*")
-           (var k ti)
-           (var found false)
+           (def @k ti)
+           (def @found false)
            (while (and (<= k tlen) (not found))
              (when (go (inc pi) k) (assign found true))
              (when (and (not found) (< k tlen) sep? (= (text k) "/"))
@@ -106,7 +106,7 @@
     (let [parts (string/split pattern "/")
           prefix @[]
           rest @[]]
-      (var in-glob false)
+      (def @in-glob false)
       (each p in parts
         (if in-glob (push rest p)
           (if (has-glob? p)

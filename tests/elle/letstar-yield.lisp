@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Reproducer for let*-ffi-signature bug (#673 remaining)
 #
 # TRIGGER: let* + yield + &named + large letrec env from import
@@ -29,9 +29,9 @@
   42)
 
 (defn time-var [thunk &named attributes]
-  (var start (clock/monotonic))
-  (var result (thunk))
-  (var elapsed (- (clock/monotonic) start))
+  (def @start (clock/monotonic))
+  (def @result (thunk))
+  (def @elapsed (- (clock/monotonic) start))
   {:elapsed elapsed :result result :attrs attributes})
 
 (let [r (time-var yielding-thunk :attributes {:a 1})]

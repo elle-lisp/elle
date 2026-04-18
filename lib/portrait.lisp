@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/portrait.lisp — semantic portraits from compile/analyze
 ##
 ## Builds structured descriptions of functions and modules from analysis
@@ -19,7 +19,7 @@
 
 (defn ->list [coll]
   "Convert any collection to a list for string/join."
-  (var result ())
+  (def @result ())
   (each x in coll
     (assign result (cons x result)))
   result)
@@ -36,9 +36,9 @@
 
 (defn classify-phases [analysis callees]
   "Group callees into sequential phases by effect type."
-  (var current-kind nil)
-  (var current-fns @[])
-  (var phases @[])
+  (def @current-kind nil)
+  (def @current-fns @[])
+  (def @phases @[])
 
   (each callee in callees
     (let* [name (get callee :name)
@@ -62,7 +62,7 @@
 
 (defn detect-failure-modes [analysis callees]
   "Identify how a function can fail."
-  (var modes @[])
+  (def @modes @[])
 
   (each callee in callees
     (let* [name (get callee :name)
@@ -95,7 +95,7 @@
 
 (defn find-observations [analysis name sig captures callees]
   "Generate observations about non-obvious properties."
-  (var obs @[])
+  (def @obs @[])
 
   # 1. Almost-pure: only one I/O callee
   (let [io-callees (filter
@@ -185,10 +185,10 @@
   (let* [syms (compile/symbols analysis)
          fns  (filter (fn [s] (= (get s :kind) :function)) syms)]
 
-    (var pure @[])
-    (var io-boundary @[])
-    (var delegating @[])
-    (var yielding @[])
+    (def @pure @[])
+    (def @io-boundary @[])
+    (def @delegating @[])
+    (def @yielding @[])
 
     (each sym in fns
       (let* [name (get sym :name)
@@ -203,7 +203,7 @@
               (true                                      (push io-boundary name)))))))
 
     # Find signal boundaries
-    (var boundaries @[])
+    (def @boundaries @[])
     (let [graph (compile/call-graph analysis)]
       (each node in (get graph :nodes)
         (let* [caller-name (get node :name)
@@ -257,7 +257,7 @@
 
 (defn render-function [portrait]
   "Render a function portrait as text."
-  (var out @"")
+  (def @out @"")
   (let [name (get portrait :name)
         sig  (get portrait :signal)
         caps (get portrait :captures)
@@ -297,7 +297,7 @@
 
 (defn render-module [portrait]
   "Render a module portrait as text."
-  (var out @"")
+  (def @out @"")
 
   (when (not (empty? (get portrait :pure)))
     (push out (string/format "  Pure:         {}\n"

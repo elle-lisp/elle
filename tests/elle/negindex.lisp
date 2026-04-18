@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Negative Indexing + Sequence Accessor Widening Tests
 
 # ── get with negative indices ────────────────────────────────────────
@@ -49,7 +49,7 @@
 (assert (= (get (put @[1 2 3] -1 99) -1) 99) "put @array -1")
 (assert (= (put "hello" -1 "a") "hella") "put string -1")
 (assert (= (put "hello" -5 "H") "Hello") "put string -len")
-(assert (= (freeze (begin (var s @"hello") (put s -1 "X") s)) "hellX") "put @string -1")
+(assert (= (freeze (begin (def @s @"hello") (put s -1 "X") s)) "hellX") "put @string -1")
 
 # ── callable form with negative index ────────────────────────────────
 
@@ -70,11 +70,11 @@
 
 # ── insert with negative index ───────────────────────────────────────
 
-(assert (= (begin (var a @[1 2 3]) (insert a -1 99) a) @[1 2 99 3]) "insert @array -1")
+(assert (= (begin (def @a @[1 2 3]) (insert a -1 99) a) @[1 2 99 3]) "insert @array -1")
 
 # ── remove with negative index ───────────────────────────────────────
 
-(assert (= (begin (var a @[1 2 3]) (remove a -1) a) @[1 2]) "remove @array -1")
+(assert (= (begin (def @a @[1 2 3]) (remove a -1) a) @[1 2]) "remove @array -1")
 
 # ── first on all sequence types ──────────────────────────────────────
 

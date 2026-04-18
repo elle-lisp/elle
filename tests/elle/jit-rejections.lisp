@@ -1,8 +1,8 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## jit/rejections — test JIT rejection tracking
 
 ## Record initial rejections (stdlib functions with SuspendingCall may be rejected)
-(var initial-count (length (jit/rejections)))
+(def @initial-count (length (jit/rejections)))
 
 ## A function containing eval gets rejected when hot.
 (defn has-eval (n)
@@ -11,14 +11,14 @@
 
 (has-eval 20)
 
-(var rejections (jit/rejections))
+(def @rejections (jit/rejections))
 
 ## At least one new rejection recorded
 (assert (> (length rejections) initial-count)
   "expected new rejection from has-eval")
 
 ## Each rejection is a struct with :name, :reason, :calls
-(var r (first rejections))
+(def @r (first rejections))
 (assert (has-key? r :name) "rejection has :name")
 (assert (has-key? r :reason) "rejection has :reason")
 (assert (has-key? r :calls) "rejection has :calls")

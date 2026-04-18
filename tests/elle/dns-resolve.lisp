@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # DNS resolution tests
 
 # Test 1: sys/resolve sync

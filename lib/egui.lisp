@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/egui.lisp — immediate-mode GUI for Elle
 ##
 ## Wraps the elle-egui plugin (egui + winit + glow) with fiber-friendly
@@ -69,7 +69,7 @@
     "Immediate-mode GUI loop. render-fn: (fn [interactions] tree).
      Renders first frame immediately (Wayland needs a buffer commit
      before the window is visible), then waits for events between frames."
-    (var ix (frame handle (render-fn (empty-ix))))
+    (def @ix (frame handle (render-fn (empty-ix))))
     (forever
       (when ix:closed (break))
       (unless (open? handle) (break))

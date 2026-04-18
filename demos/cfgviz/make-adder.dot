@@ -1,5 +1,5 @@
 digraph {
-  label="Returns a closure — shows captured variable in LIR. arity:1 regs:2 locals:1";
+  label="Returns a closure — shows captured variable in LIR. arity:1 regs:3 locals:1";
   node [shape=record fontname="monospace" fontsize=10];
-  block0 [color="#4444cc" label="{block0|r0 ← cap[0] @33:4\lr1 ← closure(r0) @33:16\l|return r1}"];
+  block0 [color="#4444cc" label="{block0|r0 ← cap[0] (raw) @31:1\llocal[0] ← r0 @31:1\lr1 ← local[0] @33:3\lr2 ← closure(r1) @33:16\l|return r2}"];
 }

@@ -219,6 +219,8 @@ pub fn compile_file_to_lir(
         meta.signals.clone(),
         meta.arities.clone(),
     );
+    let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
+    analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
@@ -367,6 +369,8 @@ fn compile_file_inner(
         meta.signals.clone(),
         meta.arities.clone(),
     );
+    let effective_epoch = source_epoch.unwrap_or(crate::epoch::CURRENT_EPOCH);
+    analyzer.set_immutable_by_default(effective_epoch >= 8);
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## examples/portrait-demo.lisp — deep analysis of the pipeline example
 ##
 ## Shows how the living model follows data relationships across the
@@ -45,13 +45,13 @@
 (def graph (compile/call-graph a))
 
 (each node in (get graph :nodes)
-  (var name (get node :name))
-  (var callees (get node :callees))
+  (def @name (get node :name))
+  (def @callees (get node :callees))
   (when (not (empty? callees))
     (println (string/format "  {} calls:" name))
     (each callee in callees
       # Classify: is this callee a Rust primitive or an Elle function?
-      (var is-prim false)
+      (def @is-prim false)
       (each p in (compile/primitives)
         (when (= (get p :name) callee)
           (assign is-prim true)))
@@ -62,11 +62,11 @@
 
 (section "Rust primitives called from this module")
 
-(var prim-names @{})
+(def @prim-names @{})
 (each p in (compile/primitives)
   (put prim-names (get p :name) (get p :signal)))
 
-(var used-prims @{})
+(def @used-prims @{})
 (each node in (get graph :nodes)
   (each callee in (get node :callees)
     (when (not (nil? (get prim-names callee)))
@@ -83,8 +83,8 @@
 (def callers (compile/callers a :parse-record))
 (println "  Direct callers of parse-record:")
 (each c in callers
-  (var caller-name (get c :name))
-  (var caller-sig (compile/signal a (keyword caller-name)))
+  (def @caller-name (get c :name))
+  (def @caller-sig (compile/signal a (keyword caller-name)))
   (println (string/format "    {} — currently silent={} jit={}"
     caller-name (get caller-sig :silent) (get caller-sig :jit-eligible)))
   (when (get caller-sig :jit-eligible)
@@ -99,7 +99,7 @@
 (def syms (compile/symbols a))
 (each sym in syms
   (when (= (get sym :kind) :function)
-    (var caps (compile/captures a (keyword (get sym :name))))
+    (def @caps (compile/captures a (keyword (get sym :name))))
     (when (not (empty? caps))
       (println (string/format "  {} captures:" (get sym :name)))
       (each cap in caps
@@ -111,8 +111,8 @@
 (section "RDF: unified graph sample")
 
 (def triples (rdf:file a "examples/pipeline.lisp"))
-(var lines (string/split triples "\n"))
-(var shown 0)
+(def @lines (string/split triples "\n"))
+(def @shown 0)
 (each line in lines
   (when (and (< shown 15)
              (or (string/contains? line "calls")

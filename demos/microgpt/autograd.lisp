@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## autograd.lisp — Scalar autograd engine
 ##
 ## Each Value node is a mutable @struct with:
@@ -12,7 +12,7 @@
 
   # ── Value construction ─────────────────────────────────────────
 
-  (var *next-id* 0)
+  (def @*next-id* 0)
 
   (defn make-value [data]
     "Create a leaf Value node (no children)."
@@ -76,9 +76,9 @@
      Optional offset-a/offset-b for sliced access."
     (default offset-a 0)
     (default offset-b 0)
-    (var sum 0.0)
+    (def @sum 0.0)
     (let* [children @[] grads @[]]
-      (var i 0)
+      (def @i 0)
       (while (< i n)
         (let* [a (avec (+ offset-a i))
                b (bvec (+ offset-b i))]
@@ -92,7 +92,7 @@
 
   (defn vsum [vec]
     "Fused sum: single Value node with all inputs as children."
-    (var sum 0.0)
+    (def @sum 0.0)
     (let [grads @[]]
       (each v in vec
         (assign sum (+ sum v:data))
@@ -124,7 +124,7 @@
         (let* [children   node:children
                local-grads node:local-grads
                node-grad  node:grad]
-          (var j 0)
+          (def @j 0)
           (while (< j (length children))
             (let* [child (children j)
                    lg    (local-grads j)]

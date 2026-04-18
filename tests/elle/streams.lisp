@@ -1,3 +1,4 @@
+(elle/epoch 8)
 # Stream combinators — sinks, transforms, port-to-stream converters
 
 
@@ -6,7 +7,7 @@
 (defn make-range [n]
   "Return a coroutine that yields integers 0..n-1."
   (coro/new (fn []
-    (var i 0)
+    (def @i 0)
     (while (< i n)
       (yield i)
       (assign i (+ i 1))))))
@@ -14,7 +15,7 @@
 (defn make-from-list [lst]
   "Return a coroutine that yields each element of lst."
   (coro/new (fn []
-    (var remaining lst)
+    (def @remaining lst)
     (while (not (empty? remaining))
       (yield (first remaining))
       (assign remaining (rest remaining))))))
@@ -34,7 +35,7 @@
 (assert (= (stream/fold + 99 (make-range 0)) 99) "stream/fold: empty source returns init")
 
 # stream/for-each: side effects accumulate into mutable array
-(let [[acc @[]]]
+(let [acc @[]]
   (stream/for-each (fn [v] (push acc v)) (make-range 4))
   (assert (= (length acc) 4) "stream/for-each: correct element count")
   (assert (= (get acc 0) 0) "stream/for-each: first element")
@@ -44,7 +45,7 @@
 (assert (= (stream/for-each (fn [v] v) (make-range 3)) nil) "stream/for-each: returns nil")
 
 # stream/into-array: basic
-(let [[result (stream/into-array (make-from-list (list 10 20 30)))]]
+(let [result (stream/into-array (make-from-list (list 10 20 30)))]
   (assert (= (length result) 3) "stream/into-array: length")
   (assert (= (get result 0) 10) "stream/into-array: first element")
   (assert (= (get result 2) 30) "stream/into-array: last element"))
@@ -101,7 +102,7 @@
 
 # stream/concat: dead (pre-exhausted) coroutine as first argument
 # The dead coroutine must be skipped gracefully, no error.
-(let [[dead (make-range 2)]]
+(let [dead (make-range 2)]
   # Exhaust it
   (stream/collect dead)
   (assert (= (stream/collect (stream/concat dead (make-from-list (list 99)))) (list 99)) "stream/concat: dead first source skipped"))
@@ -150,7 +151,7 @@
 
 # port/lines: port is closed after collect exhausts the stream
 (spit "/tmp/elle-test-streams-close-478" "one\ntwo")
-(let [[p (port/open "/tmp/elle-test-streams-close-478" :read)]]
+(let [p (port/open "/tmp/elle-test-streams-close-478" :read)]
   (stream/collect (port/lines p))
   (assert (not (port/open? p)) "port/lines: port is closed after stream is exhausted"))
 
@@ -161,7 +162,7 @@
 
 # port/chunks: remainder chunk — 10-byte file with 4-byte chunks yields [4, 4, 2]
 (spit "/tmp/elle-test-streams-chunks2-478" "abcdefghij")
-(let [[result (stream/collect (port/chunks (port/open "/tmp/elle-test-streams-chunks2-478" :read) 4))]]
+(let [result (stream/collect (port/chunks (port/open "/tmp/elle-test-streams-chunks2-478" :read) 4))]
   (assert (= (length result) 3) "port/chunks: remainder — 3 chunks")
   (assert (= (get result 0) "abcd") "port/chunks: remainder — first chunk")
   (assert (= (get result 1) "efgh") "port/chunks: remainder — second chunk")
@@ -169,13 +170,13 @@
 
 # port/chunks: port is closed after stream is exhausted
 (spit "/tmp/elle-test-streams-chunkclose-478" "hello")
-(let [[p (port/open "/tmp/elle-test-streams-chunkclose-478" :read)]]
+(let [p (port/open "/tmp/elle-test-streams-chunkclose-478" :read)]
   (stream/collect (port/chunks p 3))
   (assert (not (port/open? p)) "port/chunks: port is closed after stream is exhausted"))
 
 # port/writer: write values and read back
-(let* [[p (port/open "/tmp/elle-test-streams-writer-478" :write)]
-       [w (port/writer p)]]
+(let* [p (port/open "/tmp/elle-test-streams-writer-478" :write)
+       w (port/writer p)]
   (coro/resume w)          # start: advance to first yield nil
   (coro/resume w "hello ") # write "hello "
   (coro/resume w "world")  # write "world"
@@ -183,8 +184,8 @@
 (assert (= (slurp "/tmp/elle-test-streams-writer-478") "hello world") "port/writer: writes values to port")
 
 # port/writer: port is closed after nil resume
-(let* [[p (port/open "/tmp/elle-test-streams-writerclose-478" :write)]
-       [w (port/writer p)]]
+(let* [p (port/open "/tmp/elle-test-streams-writerclose-478" :write)
+       w (port/writer p)]
   (coro/resume w)         # start
   (coro/resume w "data")  # write
   (coro/resume w nil))    # close
@@ -207,7 +208,7 @@
       (stream/filter (fn [row] (> (get row :value) 150))
         (stream/map
           (fn [line]
-            (let [[parts (string/split line ",")]]
+            (let [parts (string/split line ",")]
               {:id    (parse-int (get parts 0))
                :value (parse-int (get parts 1))}))
           (stream/drop 1
@@ -223,30 +224,30 @@
 # === Error propagation ===
 
 # stream/for-each with a callback that errors — error propagates to caller
-(let (([ok? _] (protect ((fn []
+(let [[ok? _] (protect ((fn []
     (stream/for-each
       (fn [v] (when (= v 2) (error {:error :test-error :message "stop at 2"})))
-      (make-range 5))))))) (assert (not ok?) "stream/for-each: callback error propagates"))
+      (make-range 5)))))] (assert (not ok?) "stream/for-each: callback error propagates"))
 
 # stream/fold with a callback that errors — error propagates
-(let (([ok? _] (protect ((fn []
+(let [[ok? _] (protect ((fn []
     (stream/fold
       (fn [acc v] (when (= v 3) (error {:error :test-error :message "stop at 3"})) (+ acc v))
       0
-      (make-range 5))))))) (assert (not ok?) "stream/fold: callback error propagates"))
+      (make-range 5)))))] (assert (not ok?) "stream/fold: callback error propagates"))
 
 # stream/map with a transform that errors — error propagates through collect
-(let (([ok? _] (protect ((fn []
+(let [[ok? _] (protect ((fn []
     (stream/collect
       (stream/map
         (fn [v] (when (= v 1) (error {:error :test-error :message "stop at 1"})) v)
-        (make-range 3)))))))) (assert (not ok?) "stream/map: transform error propagates through collect"))
+        (make-range 3))))))] (assert (not ok?) "stream/map: transform error propagates through collect"))
 
 # Closed port: port/lines yields the io-error as a value (not signaled)
 (spit "/tmp/elle-test-streams-closederror-478" "some data")
-(let (([ok? val] (protect ((fn []
-    (let [[p (port/open "/tmp/elle-test-streams-closederror-478" :read)]]
+(let [[ok? val] (protect ((fn []
+    (let [p (port/open "/tmp/elle-test-streams-closederror-478" :read)]
       (port/close p)
-      (stream/collect (port/lines p))))))))
+      (stream/collect (port/lines p))))))]
   (assert ok? "closed port: stream/collect succeeds (error yielded as value)")
   (assert (= (get (first val) :error) :io-error) "closed port: collected element is io-error"))

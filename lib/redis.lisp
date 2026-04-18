@@ -1,3 +1,4 @@
+(elle/epoch 8)
 ## lib/redis.lisp — Pure Elle Redis client (RESP2)
 ##
 ## Loaded via: (def redis ((import-file "lib/redis.lisp")))
@@ -16,7 +17,7 @@
   (def buf @"")
   (push buf (string "*" (length args) "\r\n"))
   (each arg in args
-    (let [[s (string arg)]]
+    (let [s (string arg)]
       (push buf (string "$" (string/size-of s) "\r\n" s "\r\n"))))
   (freeze buf))
 
@@ -25,11 +26,11 @@
 (defn resp-read [port]
   "Read a single RESP2 reply from port. Signals on error replies.
    Returns Elle values: string, integer, array, or nil."
-  (let [[line (port/read-line port)]]
+  (let [line (port/read-line port)]
     (when (nil? line)
       (error {:error :redis-error :reason :unexpected-eof :message "unexpected EOF"}))
-    (let [[prefix (get line 0)]
-          [body   (slice line 1)]]
+    (let [prefix (get line 0)
+          body   (slice line 1)]
       (case prefix
         # Simple string
         "+" body
@@ -41,22 +42,22 @@
         ":" (parse-int body)
 
         # Bulk string
-        "$" (let [[len (parse-int body)]]
+        "$" (let [len (parse-int body)]
               (if (= len -1)
                 nil
-                (let [[data (port/read port (+ len 2))]]
+                (let [data (port/read port (+ len 2))]
                   # data includes trailing \r\n; slice bytes first (byte-indexed), then convert
                   (when (nil? data)
                     (error {:error :redis-error :reason :unexpected-eof :phase :bulk-string :message "unexpected EOF reading bulk string"}))
                   (string (slice data 0 len)))))
 
         # Array
-        "*" (let [[count (parse-int body)]]
+        "*" (let [count (parse-int body)]
               (if (= count -1)
                 nil
                 (block
                   (def result @[])
-                  (var i 0)
+                  (def @i 0)
                   (while (< i count)
                     (push result (resp-read port))
                     (assign i (+ i 1)))
@@ -69,7 +70,7 @@
 (defn resp-read-raw [port]
   "Read a RESP2 reply, returning errors as structs instead of signaling.
    Used for pipelining where one bad reply shouldn't corrupt state."
-  (let [[[ok? val] (protect (resp-read port))]]
+  (let [[ok? val] (protect (resp-read port))]
     (if ok? val val)))
 
 ## ── Command helpers ───────────────────────────────────────────────────
@@ -88,7 +89,7 @@
 
 (defn redis-cmd [& args]
   "Send a command on the current Redis port and read the reply."
-  (let [[port (*redis-port*)]]
+  (let [port (*redis-port*)]
     (when (nil? port)
       (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
     (port/write port (apply resp-encode args))
@@ -115,7 +116,7 @@
 (defn default-terminal? [err]
   "Default predicate for terminal errors. Auth failures and protocol
    corruption are terminal; everything else is retryable."
-  (let [[kind (get err :error)]]
+  (let [kind (get err :error)]
     (or (= kind :auth-error)
         (= kind :protocol-error))))
 
@@ -125,20 +126,20 @@
    Returns a struct {:run run :port-param *redis-port*}
    where run is a function that takes a thunk and executes it
    with the managed connection."
-  (let [[is-terminal (or terminal? default-terminal?)]
-        [retries     (or max-retries 3)]
-        [param       (parameter nil)]]
+  (let [is-terminal (or terminal? default-terminal?)
+        retries     (or max-retries 3)
+        param       (parameter nil)]
     (defn run-with-manager [thunk]
       "Execute thunk with a managed Redis connection."
-      (var conn (redis-connect host port))
-      (var attempts 0)
+      (def @conn (redis-connect host port))
+      (def @attempts 0)
       (defer (port/close conn)
-        (var result nil)
-        (var done false)
+        (def @result nil)
+        (def @done false)
         (while (not done)
-          (let [[[ok? val] (protect
+          (let [[ok? val] (protect
                             (parameterize ((param conn))
-                              (thunk)))]]
+                              (thunk)))]
             (if ok?
               (begin
                 (assign result val)
@@ -150,7 +151,7 @@
                   (when (>= attempts retries)
                     (error val))
                   # Reconnect
-                  (let [[[close-ok? _] (protect (port/close conn))]])
+                  (let [[close-ok? _] (protect (port/close conn))])
                   (assign conn (redis-connect host port)))))))))
 
     {:run        run-with-manager
@@ -160,7 +161,7 @@
 
 (defn redis-with [host port thunk]
   "Open a Redis connection, run thunk with *redis-port* bound, close on exit."
-  (let [[conn (redis-connect host port)]]
+  (let [conn (redis-connect host port)]
     (defer (port/close conn)
       (parameterize ((*redis-port* conn))
         (thunk)))))
@@ -278,7 +279,7 @@
   (def args @["SCAN" (string cursor)])
   (when match (push args "MATCH") (push args match))
   (when count (push args "COUNT") (push args (string count)))
-  (let [[result (apply redis-cmd (freeze args))]]
+  (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
 (defn redis-hscan [key cursor &named match count]
@@ -287,7 +288,7 @@
   (def args @["HSCAN" key (string cursor)])
   (when match (push args "MATCH") (push args match))
   (when count (push args "COUNT") (push args (string count)))
-  (let [[result (apply redis-cmd (freeze args))]]
+  (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
 (defn redis-sscan [key cursor &named match count]
@@ -296,7 +297,7 @@
   (def args @["SSCAN" key (string cursor)])
   (when match (push args "MATCH") (push args match))
   (when count (push args "COUNT") (push args (string count)))
-  (let [[result (apply redis-cmd (freeze args))]]
+  (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
 (defn redis-zscan [key cursor &named match count]
@@ -305,7 +306,7 @@
   (def args @["ZSCAN" key (string cursor)])
   (when match (push args "MATCH") (push args match))
   (when count (push args "COUNT") (push args (string count)))
-  (let [[result (apply redis-cmd (freeze args))]]
+  (let [result (apply redis-cmd (freeze args))]
     [(get result 0) (get result 1)]))
 
 (defn redis-scan-all [scan-fn & scan-args]
@@ -314,11 +315,11 @@
    scan-args: remaining args to scan-fn (excluding cursor).
    Example: (redis:scan-all redis:scan :match \"user:*\")"
   (def acc @[])
-  (var cursor "0")
-  (var first true)
+  (def @cursor "0")
+  (def @first true)
   (while (or first (not (= cursor "0")))
     (assign first false)
-    (let [[[next-cursor items] (apply scan-fn (cons cursor scan-args))]]
+    (let [[next-cursor items] (apply scan-fn (cons cursor scan-args))]
       (assign cursor next-cursor)
       (each item in items
         (push acc item))))
@@ -344,9 +345,9 @@
 
 (defn redis-hgetall [key]
   "HGETALL key — returns struct with string keys."
-  (let [[arr (redis-cmd "HGETALL" key)]
-        [result @{}]]
-    (var i 0)
+  (let [arr (redis-cmd "HGETALL" key)
+        result @{}]
+    (def @i 0)
     (while (< i (length arr))
       (put result (get arr i) (get arr (+ i 1)))
       (assign i (+ i 2)))
@@ -570,15 +571,15 @@
            (redis:multi)
            (redis:set \"counter\" (string (+ val 1))))))
    => [true]"
-  (var attempts 0)
-  (var result nil)
-  (var done false)
+  (def @attempts 0)
+  (def @result nil)
+  (def @done false)
   (while (not done)
     (when (not (empty? watch-keys))
       (apply redis-watch watch-keys))
-    (let [[[ok? val] (protect (body-fn))]]
+    (let [[ok? val] (protect (body-fn))]
       (if ok?
-        (let [[exec-result (redis-exec)]]
+        (let [exec-result (redis-exec)]
           (if (nil? exec-result)
             (begin
               # WATCH was violated — retry
@@ -591,7 +592,7 @@
               (assign done true))))
         # body-fn errored — discard and re-raise
         (begin
-          (let [[[_ _] (protect (redis-discard))]])
+          (let [[_ _] (protect (redis-discard))])
           (error val)))))
   result)
 
@@ -633,7 +634,7 @@
 (defn redis-recv [port]
   "Read next pub/sub message from a subscribed port.
    Returns {:channel string :data string} or nil on EOF."
-  (let [[[ok? msg] (protect (resp-read port))]]
+  (let [[ok? msg] (protect (resp-read port))]
     (if (not ok?)
       nil
       (if (and (array? msg) (>= (length msg) 3) (= (get msg 0) "message"))
@@ -674,7 +675,7 @@
    Each command is a list like (list 'GET' 'key').
    Uses resp-read-raw so error replies don't corrupt state.
    Returns array of results."
-  (let [[port (*redis-port*)]]
+  (let [port (*redis-port*)]
     (when (nil? port)
       (error {:error :redis-error :reason :no-connection :message "no active Redis connection"}))
     # Send all commands
@@ -712,51 +713,51 @@
 
   # resp-read: simple string
   (spit "/tmp/elle-redis-test-simple" "+OK\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-simple" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-simple" :read)]
     (defer (port/close p)
       (assert (= (resp-read p) "OK") "resp-read simple string")))
 
   # resp-read: integer
   (spit "/tmp/elle-redis-test-int" ":42\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-int" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-int" :read)]
     (defer (port/close p)
       (assert (= (resp-read p) 42) "resp-read integer")))
 
   # resp-read: bulk string
   (spit "/tmp/elle-redis-test-bulk" "$5\r\nhello\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-bulk" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-bulk" :read)]
     (defer (port/close p)
       (assert (= (resp-read p) "hello") "resp-read bulk string")))
 
   # resp-read: nil bulk string
   (spit "/tmp/elle-redis-test-nil" "$-1\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-nil" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-nil" :read)]
     (defer (port/close p)
       (assert (nil? (resp-read p)) "resp-read nil bulk string")))
 
   # resp-read: array
   (spit "/tmp/elle-redis-test-arr" "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-arr" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-arr" :read)]
     (defer (port/close p)
-      (let [[result (resp-read p)]]
+      (let [result (resp-read p)]
         (assert (= (length result) 2) "resp-read array length")
         (assert (= (get result 0) "foo") "resp-read array element 0")
         (assert (= (get result 1) "bar") "resp-read array element 1"))))
 
   # resp-read: error
   (spit "/tmp/elle-redis-test-err" "-ERR unknown command\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-err" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-err" :read)]
     (defer (port/close p)
-      (let [[[ok? val] (protect (resp-read p))]]
+      (let [[ok? val] (protect (resp-read p))]
         (assert (not ok?) "resp-read error signals")
         (assert (= (get val :error) :redis-error) "resp-read error kind")
         (assert (= (get val :message) "ERR unknown command") "resp-read error message"))))
 
   # resp-read-raw: error returns struct instead of signaling
   (spit "/tmp/elle-redis-test-raw-err" "-ERR bad\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-raw-err" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-raw-err" :read)]
     (defer (port/close p)
-      (let [[result (resp-read-raw p)]]
+      (let [result (resp-read-raw p)]
         (assert (struct? result) "resp-read-raw error is struct")
         (assert (= (get result :error) :redis-error) "resp-read-raw error kind"))))
 
@@ -770,18 +771,18 @@
 
   # resp-read: nested array
   (spit "/tmp/elle-redis-test-nested" "*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-nested" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-nested" :read)]
     (defer (port/close p)
-      (let [[result (resp-read p)]]
+      (let [result (resp-read p)]
         (assert (= (length result) 2) "nested array length")
         (assert (= (get (get result 0) 0) 1) "nested array [0][0]")
         (assert (= (get (get result 1) 1) 4) "nested array [1][1]"))))
 
   # resp-read: empty array
   (spit "/tmp/elle-redis-test-empty-arr" "*0\r\n")
-  (let [[p (port/open "/tmp/elle-redis-test-empty-arr" :read)]]
+  (let [p (port/open "/tmp/elle-redis-test-empty-arr" :read)]
     (defer (port/close p)
-      (let [[result (resp-read p)]]
+      (let [result (resp-read p)]
         (assert (= (length result) 0) "empty array"))))
 
   true)

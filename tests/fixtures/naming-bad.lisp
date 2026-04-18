@@ -1,7 +1,7 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Bad naming conventions - should be flagged by linter
 
-(var myVariable 10)
-(var camelCase 42)
-(var PascalCase 100)
-(var snake_case 5)
+(def @myVariable 10)
+(def @camelCase 42)
+(def @PascalCase 100)
+(def @snake_case 5)

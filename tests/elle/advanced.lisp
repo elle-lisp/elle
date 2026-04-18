@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Advanced Runtime Features and Pattern Matching Tests
 ##
 ## Migrated from tests/integration/advanced.rs
@@ -489,7 +489,7 @@
               (_ :none)) :deep) "decision tree deeply nested")
 
 # decision tree match in loop
-(var test-result (list))
+(def @test-result (list))
 (each i (list 1 2 3)
   (assign test-result (cons (match i
                            (1 :one)

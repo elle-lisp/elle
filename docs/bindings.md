@@ -3,25 +3,36 @@
 Bindings associate names with values. Elle provides several binding forms,
 each with different scope and mutability rules.
 
-## def — immutable binding
+## Immutable by default
 
-`def` creates a name that cannot be reassigned. Attempting to `assign` a
-`def` binding is a compile-time error.
+All bindings are **immutable by default**. Attempting to `assign` an
+immutable binding is a compile-time error. To make a binding mutable,
+prefix its name with `@`.
 
 ```lisp
-(def pi 3.14159)
-pi                   # => 3.14159
+(def x 10)           # immutable
+(def @y 20)          # mutable
+(assign y 30)        # ok
+(assign x 99)        # compile error: cannot assign immutable binding 'x'
 ```
 
-## var — mutable binding
-
-`var` creates a name that can be reassigned with `assign`.
+The `@` prefix appears only at the binding site — all subsequent uses of
+the name omit it:
 
 ```lisp
-(var counter 0)
-(assign counter 1)
+(def @counter 0)
+(assign counter 1)   # no @ here
+counter              # => 1
+```
+
+## def — top-level binding
+
+`def` creates a top-level binding. Without `@`, it is immutable.
+
+```lisp
+(def pi 3.14159)     # immutable
+(def @counter 0)     # mutable
 (assign counter (+ counter 1))
-counter              # => 2
 ```
 
 **`assign` is not `set`.** `set` creates a set collection. `assign` mutates
@@ -33,6 +44,8 @@ All right-hand sides are evaluated in the outer scope. No binding sees
 any other binding in the same `let`. Bindings are flat pairs inside a
 single bracket form: `[name1 value1 name2 value2 ...]`.
 
+Bindings are immutable unless prefixed with `@`.
+
 ```lisp
 (def outer-a 100)
 (let [a 1
@@ -40,10 +53,16 @@ single bracket form: `[name1 value1 name2 value2 ...]`.
   b)                       # => 101
 ```
 
+```lisp
+(let [@x 0]
+  (assign x 10)
+  x)                      # => 10
+```
+
 ## let* — sequential bindings
 
 Each binding sees all previous bindings. Use this when later bindings
-depend on earlier ones.
+depend on earlier ones. Bindings are immutable unless prefixed with `@`.
 
 ```lisp
 (let* [x 5
@@ -54,7 +73,8 @@ depend on earlier ones.
 
 ## letrec — recursive bindings
 
-Bindings can reference each other, enabling mutual recursion.
+Bindings can reference each other, enabling mutual recursion. Bindings
+are immutable unless prefixed with `@`.
 
 ```lisp
 (letrec [is-even (fn [n]
@@ -116,11 +136,11 @@ shade                      # => 1
 
 ### Mutable captures
 
-When a `var` is captured, mutations are visible to all closures sharing
-that binding.
+When a mutable (`@`) binding is captured, mutations are visible to all
+closures sharing that binding.
 
 ```lisp
-(var tally 0)
+(def @tally 0)
 (def bump (fn [] (assign tally (+ tally 1))))
 (bump)
 (bump)

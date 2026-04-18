@@ -183,6 +183,9 @@ pub struct Analyzer<'a> {
     current_numeric_assert: bool,
     /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
     current_immutability_asserts: HashSet<Binding>,
+    /// When true, bindings without `@` prefix are immutable.
+    /// Gated on epoch >= 8; epoch <= 7 files are mutable-by-default.
+    immutable_by_default: bool,
 }
 
 impl<'a> Analyzer<'a> {
@@ -232,6 +235,7 @@ impl<'a> Analyzer<'a> {
             current_silence_assert: false,
             current_numeric_assert: false,
             current_immutability_asserts: HashSet::new(),
+            immutable_by_default: true,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -255,6 +259,12 @@ impl<'a> Analyzer<'a> {
     /// Return accumulated errors (for the pipeline to check).
     pub fn take_errors(&mut self) -> Vec<LError> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// Set whether bindings without `@` are immutable by default.
+    /// Epoch >= 8 enables this; epoch <= 7 disables it.
+    pub fn set_immutable_by_default(&mut self, v: bool) {
+        self.immutable_by_default = v;
     }
 
     /// Levenshtein edit distance between two strings.

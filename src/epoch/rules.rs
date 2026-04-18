@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 /// Current language epoch. Bump this when making a breaking change
 /// and add a corresponding entry to `MIGRATIONS`.
-pub const CURRENT_EPOCH: u64 = 7;
+pub const CURRENT_EPOCH: u64 = 8;
 
 /// A set of changes introduced at a given epoch.
 #[derive(Debug, Clone)]
@@ -199,17 +199,19 @@ static MIGRATIONS: &[Migration] = &[
     },
     Migration {
         epoch: 7,
-        summary: "flat let bindings + var → def @; let/params immutable by default",
-        rules: &[
-            MigrationRule::FlattenBindings {
-                symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
-            },
-            MigrationRule::Replace {
-                symbol: "var",
-                arity: 2,
-                template: "(def @$1 $2)",
-            },
-        ],
+        summary: "flat let bindings — (let [a 1 b 2] ...) instead of (let [[a 1] [b 2]] ...)",
+        rules: &[MigrationRule::FlattenBindings {
+            symbols: &["let", "letrec", "let*", "if-let", "when-let", "when-ok"],
+        }],
+    },
+    Migration {
+        epoch: 8,
+        summary: "var → def @; let/params immutable by default",
+        rules: &[MigrationRule::Replace {
+            symbol: "var",
+            arity: 2,
+            template: "(def @$1 $2)",
+        }],
     },
 ];
 

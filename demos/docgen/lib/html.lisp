@@ -1,6 +1,5 @@
-(elle/epoch 7)
-(var html-escape
-  (fn (str)
+(elle/epoch 8)
+(def @html-escape (fn (str)
     (var s1 (string-replace str "&" "&amp;"))
     (var s2 (string-replace s1 "<" "&lt;"))
     (var s3 (string-replace s2 ">" "&gt;"))

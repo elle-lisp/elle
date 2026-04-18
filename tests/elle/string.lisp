@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## String and @string Type Tests
 ##
 ## Tests for immutable string and mutable @string types.
@@ -52,7 +52,7 @@
 # ============================================================================
 
 (let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))] (assert (not ok?) "put out of bounds errors"))
-(assert (= (freeze (begin (var s @"hello") (put s -1 "x") s)) "hellx") "put negative index wraps")
+(assert (= (freeze (begin (def @s @"hello") (put s -1 "x") s)) "hellx") "put negative index wraps")
 (let [[ok? _] (protect ((fn () (put @"" 0 "x"))))] (assert (not ok?) "put on empty @string errors"))
 
 # ============================================================================
@@ -95,31 +95,31 @@
 
 # put bounds errors (use string values, matching new semantics)
 (let [[ok? _] (protect ((fn () (put @"hello" 10 "x"))))] (assert (not ok?) "put out of bounds errors (new)"))
-(assert (= (freeze (begin (var s2 @"hello") (put s2 -1 "x") s2)) "hellx") "put negative index wraps (new)")
+(assert (= (freeze (begin (def @s2 @"hello") (put s2 -1 "x") s2)) "hellx") "put negative index wraps (new)")
 (let [[ok? _] (protect ((fn () (put @"" 0 "x"))))] (assert (not ok?) "put on empty @string errors (new)"))
 
 # ============================================================================
 # @string pop
 # ============================================================================
 
-(assert (= (begin (var b @"hi") (pop b)) "i") "pop returns last grapheme as string")
-(assert (= (begin (var b @"café") (pop b)) "é") "pop returns last multibyte grapheme")
-(let [[ok? _] (protect ((fn () (begin (var b @"") (pop b)))))] (assert (not ok?) "pop on empty @string errors"))
+(assert (= (begin (def @b @"hi") (pop b)) "i") "pop returns last grapheme as string")
+(assert (= (begin (def @b @"café") (pop b)) "é") "pop returns last multibyte grapheme")
+(let [[ok? _] (protect ((fn () (begin (def @b @"") (pop b)))))] (assert (not ok?) "pop on empty @string errors"))
 
 # ============================================================================
 # @string push
 # ============================================================================
 
-(assert (string? (begin (var b @"hi") (push b "!") b)) "push returns @string")
-(assert (= (freeze (begin (var b @"hi") (push b "!") b)) "hi!") "push appends string to @string")
-(assert (= (freeze (begin (var b @"café") (push b "x") b)) "caféx") "push appends to multibyte @string")
-(let [[ok? _] (protect ((fn () (begin (var b @"hi") (push b 33)))))] (assert (not ok?) "push rejects integer for @string"))
+(assert (string? (begin (def @b @"hi") (push b "!") b)) "push returns @string")
+(assert (= (freeze (begin (def @b @"hi") (push b "!") b)) "hi!") "push appends string to @string")
+(assert (= (freeze (begin (def @b @"café") (push b "x") b)) "caféx") "push appends to multibyte @string")
+(let [[ok? _] (protect ((fn () (begin (def @b @"hi") (push b 33)))))] (assert (not ok?) "push rejects integer for @string"))
 
 # ============================================================================
 # @string append
 # ============================================================================
 
-(assert (string? (begin (var b @"hello") (append b @" world") b)) "append returns @string")
+(assert (string? (begin (def @b @"hello") (append b @" world") b)) "append returns @string")
 
 # ============================================================================
 # @string concat
@@ -138,20 +138,20 @@
 # @string insert
 # ============================================================================
 
-(assert (string? (begin (var b @"hllo") (insert b 1 101) b)) "insert returns @string")
+(assert (string? (begin (def @b @"hllo") (insert b 1 101) b)) "insert returns @string")
 
 # ============================================================================
 # @string remove
 # ============================================================================
 
-(assert (string? (begin (var b @"hello") (remove b 1) b)) "remove returns @string")
-(assert (string? (begin (var b @"hello") (remove b 1 2) b)) "remove multiple returns @string")
+(assert (string? (begin (def @b @"hello") (remove b 1) b)) "remove returns @string")
+(assert (string? (begin (def @b @"hello") (remove b 1 2) b)) "remove multiple returns @string")
 
 # ============================================================================
 # @string popn
 # ============================================================================
 
-(assert (string? (begin (var b @"hello") (popn b 2))) "popn returns @string")
+(assert (string? (begin (def @b @"hello") (popn b 2))) "popn returns @string")
 
 # ============================================================================
 # String operations on @strings

@@ -69,7 +69,7 @@ impl<'a> Analyzer<'a> {
             if let Some(raw_name) = param.as_symbol() {
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
-                if !is_mutable {
+                if self.immutable_by_default && !is_mutable {
                     self.arena.get_mut(binding).is_immutable = true;
                 }
                 params.push(binding);
@@ -77,8 +77,12 @@ impl<'a> Analyzer<'a> {
                 let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
                 params.push(tmp);
                 // Immutable by default; individual leaves with @ opt into mutability
-                let pattern =
-                    self.analyze_destructure_pattern(param, BindingScope::Local, true, &span)?;
+                let pattern = self.analyze_destructure_pattern(
+                    param,
+                    BindingScope::Local,
+                    self.immutable_by_default,
+                    &span,
+                )?;
                 // Required params: strict — wrong type should error
                 param_destructures.push((pattern, tmp, true));
             } else {
@@ -95,7 +99,7 @@ impl<'a> Analyzer<'a> {
             if let Some(raw_name) = param.as_symbol() {
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
-                if !is_mutable {
+                if self.immutable_by_default && !is_mutable {
                     self.arena.get_mut(binding).is_immutable = true;
                 }
                 params.push(binding);
@@ -103,8 +107,12 @@ impl<'a> Analyzer<'a> {
                 let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
                 params.push(tmp);
                 // Immutable by default; individual leaves with @ opt into mutability
-                let pattern =
-                    self.analyze_destructure_pattern(param, BindingScope::Local, true, &span)?;
+                let pattern = self.analyze_destructure_pattern(
+                    param,
+                    BindingScope::Local,
+                    self.immutable_by_default,
+                    &span,
+                )?;
                 // Optional params: strict=false — absent (nil) produces nil, not error
                 param_destructures.push((pattern, tmp, false));
             } else {
@@ -126,7 +134,7 @@ impl<'a> Analyzer<'a> {
                     .ok_or_else(|| format!("{}: rest parameter after & must be a symbol", span))?;
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, rest_syn.scopes.as_slice(), BindingScope::Parameter);
-                if !is_mutable {
+                if self.immutable_by_default && !is_mutable {
                     self.arena.get_mut(binding).is_immutable = true;
                 }
                 params.push(binding);
@@ -138,7 +146,7 @@ impl<'a> Analyzer<'a> {
                     let (name, is_mutable) = super::strip_at_prefix(raw_name);
                     let binding =
                         self.bind(name, keys_syn.scopes.as_slice(), BindingScope::Parameter);
-                    if !is_mutable {
+                    if self.immutable_by_default && !is_mutable {
                         self.arena.get_mut(binding).is_immutable = true;
                     }
                     params.push(binding);
@@ -150,7 +158,7 @@ impl<'a> Analyzer<'a> {
                     let pattern = self.analyze_destructure_pattern(
                         keys_syn,
                         BindingScope::Local,
-                        true,
+                        self.immutable_by_default,
                         &span,
                     )?;
                     // &keys {:k v} destructures strictly: missing keys signal an error.
@@ -180,7 +188,7 @@ impl<'a> Analyzer<'a> {
                     // Create a binding for each named param
                     let binding =
                         self.bind(name, sym_syntax.scopes.as_slice(), BindingScope::Local);
-                    if !is_mutable {
+                    if self.immutable_by_default && !is_mutable {
                         self.arena.get_mut(binding).is_immutable = true;
                     }
                     entries.push((

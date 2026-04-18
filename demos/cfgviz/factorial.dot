@@ -1,12 +1,12 @@
 digraph {
-  label="Recursive factorial — branching and self-call. arity:1 regs:12 locals:2";
+  label="Recursive factorial — branching and self-call. arity:1 regs:13 locals:2";
   node [shape=record fontname="monospace" fontsize=10];
-  block0 [color="#cc8800" label="{block0|r0 ← cap[1] @19:10\lr1 ← 2 @19:12\lr2 ← r0 \< r1 @19:12\l|branch r2 → block1 / block2}"];
+  block0 [color="#cc8800" label="{block0|r0 ← cap[1] (raw) @17:1\llocal[0] ← r0 @17:1\lr1 ← local[0] @19:10\lr2 ← 2 @19:12\lr3 ← r1 \< r2 @19:12\l|branch r3 → block1 / block2}"];
   block0 -> block1;
   block0 -> block2;
-  block1 [color="#444444" label="{block1|r4 ← 1 @20:5\llocal[1] ← r4 @20:5\l|jump → block3}"];
+  block1 [color="#444444" label="{block1|r5 ← 1 @20:5\llocal[1] ← r5 @20:5\l|jump → block3}"];
   block1 -> block3;
-  block2 [color="#444444" label="{block2|r5 ← cap[1] @21:8\lr6 ← cap[1] @21:24\lr7 ← 1 @21:26\lr8 ← r6 - r7 @21:26\lr9 ← cap[0] @21:11\lr10 ← r9(r8) @21:11\lr11 ← r5 * r10 @21:11\llocal[1] ← r11 @21:11\l|jump → block3}"];
+  block2 [color="#444444" label="{block2|r6 ← local[0] @21:8\lr7 ← local[0] @21:24\lr8 ← 1 @21:26\lr9 ← r7 - r8 @21:26\lr10 ← cap[0] @21:11\lr11 ← r10(r9) @21:11\lr12 ← r6 * r11 @21:11\llocal[1] ← r12 @21:11\l|jump → block3}"];
   block2 -> block3;
-  block3 [color="#4444cc" label="{block3|r3 ← local[1] @21:11\l|return r3}"];
+  block3 [color="#4444cc" label="{block3|r4 ← local[1] @21:11\l|return r4}"];
 }

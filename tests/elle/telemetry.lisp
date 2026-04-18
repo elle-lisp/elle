@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # tests/elle/telemetry.lisp — Unit tests for lib/telemetry.lisp
 #
@@ -257,9 +257,9 @@
 (def sdk-attrs (get (get (get (get sdk-payload "resourceMetrics") 0) "resource") "attributes"))
 
 # Find SDK attributes in the encoded array
-(var found-sdk-name false)
-(var found-sdk-version false)
-(var found-sdk-lang false)
+(def @found-sdk-name false)
+(def @found-sdk-version false)
+(def @found-sdk-lang false)
 (each kv in sdk-attrs
   (cond
     ((= (get kv "key") "telemetry.sdk.name")

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Tests for named blocks with break
 #
 # Note: block expressions containing break must be bound to a var before
@@ -64,7 +64,7 @@
   (assert (= result 99) "break in if false"))
 
 (begin
-  (var i 0)
+  (def @i 0)
   (let [result
     (block :done
       (while true
@@ -78,8 +78,8 @@
 # ============================================================================
 
 (assert (= ((fn ()
-     (var x 1)
-     (block (var x 2) x)
+     (def @x 1)
+     (block (def @x 2) x)
      x)) 1) "block creates scope")
 
 # ============================================================================
@@ -110,7 +110,7 @@
 # ============================================================================
 
 (begin
-  (var i 0)
+  (def @i 0)
   (let [result
     (while true
       (begin
@@ -119,7 +119,7 @@
     (assert (= result 5) "break in while")))
 
 (begin
-  (var i 0)
+  (def @i 0)
   (while true
     (begin
       (if (= i 3) (break nil) nil)
@@ -127,7 +127,7 @@
   (assert (= i 3) "break in while unnamed"))
 
 (begin
-  (var i 0)
+  (def @i 0)
   (let [result (while (< i 3) (assign i (+ i 1)))]
     (assert (= result nil) "while without break")))
 
@@ -136,7 +136,7 @@
 # ============================================================================
 
 (begin
-  (var i 0)
+  (def @i 0)
   (let [result
     (while true
       (begin
@@ -145,11 +145,11 @@
     (assert (= result 42) "break in while with value")))
 
 (begin
-  (var total 0)
-  (var outer 0)
+  (def @total 0)
+  (def @outer 0)
   (while (< outer 3)
     (begin
-      (var inner 0)
+      (def @inner 0)
       (while true
         (begin
           (if (= inner 2) (break) nil)
@@ -172,8 +172,8 @@
 (let [[ok? _] (protect ((fn () (eval '(block :done ((fn () (break :done 42))))))))] (assert (not ok?) "break across function boundary is compile error"))
 
 (begin
-  (var sum 0)
-  (var i 0)
+  (def @sum 0)
+  (def @i 0)
   (while (< i 3)
     (begin
       (let [inner-result (while true (break 10))]
@@ -186,7 +186,7 @@
 # ============================================================================
 
 (begin
-  (var last nil)
+  (def @last nil)
   (each x '(1 2 3 4 5)
     (begin
       (assign last x)
@@ -207,7 +207,7 @@
   (assert (= result 300) "break in each array"))
 
 (begin
-  (var count 0)
+  (def @count 0)
   (let [result
     (each ch "hello"
       (begin

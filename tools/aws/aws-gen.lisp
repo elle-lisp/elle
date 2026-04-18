@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tools/aws/aws-gen.lisp — Fetch Smithy models and generate Elle API modules
 ##
 ## Usage:
@@ -64,7 +64,7 @@
 
     # ── Fetch model if missing ────────────────────────────────────────
 
-    (var model-stat (file/stat model-path))
+    (def @model-stat (file/stat model-path))
     (when (nil? model-stat)
       (eprintln service ": fetching model...")
       (def path (concat "/awslabs/aws-sdk-rust/main/aws-models/" service ".json"))

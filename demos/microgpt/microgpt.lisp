@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 # ── microgpt: minimal GPT in Elle ───────────────────────────────
 #
 # Port of https://github.com/karpathy/microgpt
@@ -32,7 +32,7 @@
     (each name in names
       (each ch in name
         (put chars ch true)))
-    (var idx 0)
+    (def @idx 0)
     (each ch in (sort (keys chars))
       (put char->id ch idx)
       (put id->char idx ch)
@@ -63,7 +63,7 @@
   "One Adam update step."
   (let [step (inc opt:step)]
     (put opt :step step)
-    (var i 0)
+    (def @i 0)
     (while (< i (length opt:params))
       (let* [p (opt:params i)
              g (ag:v-grad p)
@@ -84,7 +84,7 @@
          opt (make-adam params lr 0.85 0.99 0.00000001)
          n-names (length names)]
     (println "Parameters: " (length params))
-    (var step 0)
+    (def @step 0)
     (while (< step num-steps)
       (let* [tokens (tokenize (names (mod step n-names)) tokenizer)
              tokens (if (> (length tokens) (inc gpt:*block-size*))
@@ -104,7 +104,7 @@
 
 (defn softmax-floats [scores]
   "Numerically stable softmax over an array of floats."
-  (var max-val (scores 0))
+  (def @max-val (scores 0))
   (each s in scores
     (when (> s max-val) (assign max-val s)))
   (map (fn [s] (exp (- s max-val))) scores))
@@ -120,8 +120,8 @@
   (repeat n-samples
     (let* [chars @[]
            [kv-keys kv-values] (helpers:make-kv-caches gpt:*n-layer*)]
-      (var token-id tokenizer:bos)
-      (var pos 0)
+      (def @token-id tokenizer:bos)
+      (def @pos 0)
       (block :gen
         (while (< pos max-len)
           (let* [logits (gpt:gpt-forward-token token-id pos kv-keys kv-values model)

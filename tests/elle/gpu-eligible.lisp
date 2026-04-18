@@ -1,3 +1,4 @@
+(elle/epoch 8)
 # GPU eligibility tests
 #
 # Tests the fn/gpu-eligible? predicate which checks signal and structural
@@ -22,10 +23,10 @@
 (assert (not (fn/gpu-eligible? (fn [x] (map inc x))))
   "map is not gpu-eligible (polymorphic)")
 
-# ── Eligible: closures with numeric captures ─────────────────
+# ── Eligible: immutable capture is constant-propagated ─────────
 (def outer 10)
 (assert (fn/gpu-eligible? (fn [x] (+ x outer)))
-  "capturing numeric outer is gpu-eligible")
+  "immutable capture is gpu-eligible (constant-propagated)")
 
 # ── Not eligible: variadic ─────────────────────────────────────
 (assert (not (fn/gpu-eligible? (fn [x & rest] x)))
@@ -33,7 +34,7 @@
 
 # ── Not eligible: mutable captures ─────────────────────────────
 (assert (not (fn/gpu-eligible?
-  (let [[@counter 0]]
+  (let [@counter 0]
     (fn [] (assign counter (+ counter 1)) counter))))
   "mutable capture is not gpu-eligible")
 

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/spirv.lisp — SPIR-V bytecode emitter
 ##
 ## Generates SPIR-V compute shaders at runtime. No GLSL, no offline
@@ -177,7 +177,7 @@
 (defn compute [local-size-x num-buffers body-fn f32-bits]
   "Build a SPIR-V compute shader with f32 storage buffers.
    Returns immutable SPIR-V bytes."
-  (var next-id 1)
+  (def @next-id 1)
   (let* [m   (make-module)
          id  (fn []
                 (let [n next-id]

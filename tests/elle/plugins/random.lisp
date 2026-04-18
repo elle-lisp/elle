@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## Random plugin integration tests
 

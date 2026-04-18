@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## JIT Yield Tests
 ##
 ## Tests that verify yield propagates correctly through JIT-compiled
@@ -18,7 +18,7 @@
 
   # Warm up: run calls outer via call_inner (profiling outer),
   # outer calls inner via call_inner (profiling inner).
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -43,7 +43,7 @@
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -65,7 +65,7 @@
   (def outer (fn [] (inner)))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -91,7 +91,7 @@
   (def outer (fn [] (+ 1 (inner))))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -116,7 +116,7 @@
   (def outer (fn [] (middle)))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -141,7 +141,7 @@
   (def outer (fn [] ((make-gen 10))))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -168,7 +168,7 @@
         (+ x y)))))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))
@@ -197,7 +197,7 @@
             (+ a (+ b (+ c d)))))))))
   (def run (fn [] (outer)))
 
-  (var warmup-i 0)
+  (def @warmup-i 0)
   (forever
     (if (>= warmup-i 15) (break))
     (def warmup-c (make-coroutine run))

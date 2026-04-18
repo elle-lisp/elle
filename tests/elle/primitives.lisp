@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## ── not= ──────────────────────────────────────────────────────────────
 
 (assert (not= 1 2) "not= different ints")
@@ -85,11 +85,11 @@
 
 ## ── repeat macro ──────────────────────────────────────────────────────
 
-(var count 0)
+(def @count 0)
 (repeat 5 (assign count (+ count 1)))
 (assert (= count 5) "repeat runs N times")
 
-(var count2 0)
+(def @count2 0)
 (repeat 0 (assign count2 (+ count2 1)))
 (assert (= count2 0) "repeat 0 runs nothing")
 

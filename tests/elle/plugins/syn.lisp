@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## syn plugin integration tests
 

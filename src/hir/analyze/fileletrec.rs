@@ -346,7 +346,7 @@ impl<'a> Analyzer<'a> {
         };
 
         self.arena.get_mut(binding).is_prebound = true;
-        if immutable && !at_mutable {
+        if immutable && self.immutable_by_default && !at_mutable {
             self.arena.get_mut(binding).is_immutable = true;
         }
 
@@ -401,7 +401,7 @@ impl<'a> Analyzer<'a> {
                 self.bind(name, name_scopes, BindingScope::Local)
             };
             self.arena.get_mut(b).is_prebound = true;
-            if immutable {
+            if immutable && self.immutable_by_default {
                 self.arena.get_mut(b).is_immutable = true;
             }
             leaf_bindings.insert(name.to_string(), b);

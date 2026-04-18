@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Epoch 7: flat let bindings
 ##
 ## Exercises flat (Clojure-style) binding syntax for let, let*, letrec,

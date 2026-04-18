@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/mqtt.lisp — MQTT client for Elle
 ##
 ## MQTT client using the elle-mqtt plugin for packet encode/decode.

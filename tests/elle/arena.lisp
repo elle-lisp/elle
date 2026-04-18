@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Integration tests for arena/stats, arena/count, arena/allocs, and fiber heap isolation
 #
 # Migrated from tests/integration/arena.rs
@@ -339,12 +339,12 @@
 # Resume a coroutine 50 times, each time yielding a heap value (list).
 # Exercises M2 — many shared allocs accumulate in owned_shared.
 # All yielded values must be readable at the end.
-(var gen (coro/new (fn ()
+(def @gen (coro/new (fn ()
   (var i 0)
   (while (< i 50)
     (yield (list i (+ i 1)))
     (assign i (+ i 1))))))
-(var results @[])
+(def @results @[])
 (while (not (coro/done? gen))
   (coro/resume gen nil)
   (when (not (coro/done? gen))

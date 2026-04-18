@@ -19,10 +19,10 @@ all: elle docs  ## Build everything
 # ── Build ───────────────────────────────────────────────────────────
 
 elle:  ## Build the Elle binary (release)
-	cargo build --release -p elle --features wasm
+	cargo build --release -p elle
 
 dev:  ## Build the Elle binary (debug, fast compile)
-	cargo build -p elle --features wasm
+	cargo build -p elle
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 

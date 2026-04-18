@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/git.lisp — Git repository access via FFI to libgit2
 ##
 ## Usage:
@@ -238,8 +238,8 @@
         (check (c-revwalk-push-head walker) "git/log"))
       (let* [oid-buf (ffi/malloc GIT_OID_SIZE)
              results @[]]
-        (var i 0)
-        (var done false)
+        (def @i 0)
+        (def @done false)
         (while (and (not done) (< i limit))
           (let [rc (c-revwalk-next oid-buf walker)]
             (if (not (zero? rc))
@@ -389,7 +389,7 @@
            results @[]
            ref-pp (ffi/malloc 8)
            type-pp (ffi/malloc 4)]
-      (var done false)
+      (def @done false)
       (while (not done)
         (let [rc (c-branch-next ref-pp type-pp iter)]
           (if (= rc GIT_ITEROVER) (assign done true)

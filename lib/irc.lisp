@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/irc.lisp -- IRCv3 client for Elle
 ##
 ## Coroutine-based IRC client with IRCv3 capability negotiation and SASL.
@@ -67,8 +67,8 @@
   (defn unescape-tag-value [s]
     "Unescape an IRCv3 tag value. Character-by-character scan to avoid
      multi-pass replacement ambiguity."
-    (var result @"")
-    (var i 0)
+    (def @result @"")
+    (def @i 0)
     (while (< i (length s))
       (if (and (= (get s i) "\\") (< (inc i) (length s)))
         (let [next (get s (inc i))]
@@ -123,7 +123,7 @@
      Middle params are space-delimited. A param starting with : is trailing
      (contains the rest of the line as a single param)."
     (def params @[])
-    (var rest s)
+    (def @rest s)
     (forever
       (while (and (> (length rest) 0) (= (get rest 0) " "))
         (assign rest (slice rest 1)))
@@ -140,9 +140,9 @@
   (defn parse-message [line]
     "Parse an IRC protocol line into {:tags :source :command :params}.
      Tags and source are nil if absent. Command is uppercased."
-    (var rest line)
-    (var tags nil)
-    (var source nil)
+    (def @rest line)
+    (def @tags nil)
+    (def @source nil)
 
     # Tags: @key=val;key2 ...
     (when (and (> (length rest) 0) (= (get rest 0) "@"))
@@ -188,7 +188,7 @@
              needs-colon (or (string/contains? last-param " ")
                              (string/starts-with? last-param ":")
                              (= last-param ""))]
-        (var parts @[command])
+        (def @parts @[command])
         (each i in (range (dec n))
           (push parts (get params i)))
         (push parts (if needs-colon (string ":" last-param) last-param))
@@ -216,7 +216,7 @@
   (defn format-message [msg]
     "Format a parsed message struct back to an IRC protocol line.
      Inverse of parse-message (modulo command case and optional : on trailing)."
-    (var parts @[])
+    (def @parts @[])
     (when msg:tags   (push parts (string "@" (format-tags msg:tags))))
     (when msg:source (push parts (string ":" (format-source msg:source))))
     (push parts msg:command)
@@ -311,13 +311,13 @@
     (send (build-line "NICK" [nick]))
     (send (build-line "USER" [username "0" "*" realname]))
 
-    (var server-caps @[])
-    (var negotiated-caps ||)
-    (var current-nick nick)
-    (var nick-retries 3)
-    (var server-name nil)
-    (var isupport-map @{})
-    (var sasl-in-progress false)
+    (def @server-caps @[])
+    (def @negotiated-caps ||)
+    (def @current-nick nick)
+    (def @nick-retries 3)
+    (def @server-name nil)
+    (def @isupport-map @{})
+    (def @sasl-in-progress false)
 
     (defn handle-cap-ls [msg]
       (let* [has-more (and (>= (length msg:params) 4)

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/readline-long.lisp — Verify port/read-line handles lines > 4096 bytes
 ##
 ## This tests the fix for the 4096-byte-per-read limit in the async backend.
@@ -6,7 +6,7 @@
 # Build a string that exceeds 4096 bytes by repeated concatenation
 (defn make-long-string [n]
   (def buf @"")
-  (var i 0)
+  (def @i 0)
   (while (< i n)
     (push buf "x")
     (assign i (+ i 1)))

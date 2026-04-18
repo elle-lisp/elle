@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## Oxigraph plugin integration tests
 ## Tests the oxigraph plugin (.so loaded via import-file)

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Regression tests for JIT compilation behavior.
 ## Covers: side-exit through yielding primitives called from hot (JIT-compiled) functions.
 
@@ -12,8 +12,8 @@
 (def out (port/stdout))
 (defn ewrite [s]
   (port/write out s))
-(var jit-lines @[])
-(var i 0)
+(def @jit-lines @[])
+(def @i 0)
 (while (< i 10)
   (push jit-lines (string/join ["line " (string i)] ""))
   (ewrite (string/join ["line " (string i) "\n"] ""))

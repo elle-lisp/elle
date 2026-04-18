@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # vm/config tests
 #
 # Tests the unified runtime configuration system: vm/config read/write,
@@ -70,28 +70,6 @@
 # Clearing trace
 (vm/config-set :trace ||)
 (assert (empty? (vm/config :trace)) "trace set cleared")
-
-# ── MLIR policy keywords ─────────────────────────────────────────────
-
-# Default MLIR policy is :adaptive
-(assert (= (vm/config :mlir) :adaptive) "default MLIR policy is :adaptive")
-
-# Setting MLIR policy to :off
-(vm/config-set :mlir :off)
-(assert (= (vm/config :mlir) :off) "MLIR policy set to :off")
-
-# Setting MLIR policy to :eager
-(vm/config-set :mlir :eager)
-(assert (= (vm/config :mlir) :eager) "MLIR policy set to :eager")
-
-# Restore to :adaptive
-(vm/config-set :mlir :adaptive)
-(assert (= (vm/config :mlir) :adaptive) "MLIR policy restored to :adaptive")
-
-# ── Config struct includes :mlir key ────────────────────────────────
-
-(let [[cfg (vm/config)]]
-  (assert (has-key? cfg :mlir) "config has :mlir key"))
 
 # ── Future feature flags — accepted without error ─────────────────────
 

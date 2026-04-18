@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Resource consumption measurement tests
 #
 # Uses lib/resource.lisp to measure deterministic resource counters
@@ -49,7 +49,7 @@
 
    ["struct-assoc-100"
     (fn []
-      (var s {:a 0 :b 0 :c 0})
+      (def @s {:a 0 :b 0 :c 0})
       (each i in (range 100)
         (assign s (put s :a i)))
       s)]

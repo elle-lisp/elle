@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/gpu.lisp — GPU compute library
 ##
 ## Wraps the vulkan plugin and SPIR-V emitter.
@@ -74,14 +74,14 @@
 ## Split a rest-args list at the first keyword: return [inputs kw-struct].
 ## Keyword args follow (kw val kw val ...) after the positional args.
 (defn split-kwargs [args]
-  (var xs args)
-  (var inputs @[])
+  (def @xs args)
+  (def @inputs @[])
   (while (and (not (empty? xs)) (not (keyword? (first xs))))
     (push inputs (first xs))
     (assign xs (rest xs)))
-  (var kw @{})
+  (def @kw @{})
   (let [pairs (->array xs)]
-    (var i 0)
+    (def @i 0)
     (while (< i (length pairs))
       (put kw (pairs i) (pairs (+ i 1)))
       (assign i (+ i 2))))

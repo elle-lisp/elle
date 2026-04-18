@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 (def ox (import "oxigraph"))
 (def store (ox:store-open ".elle-mcp/store"))
 

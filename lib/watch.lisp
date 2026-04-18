@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/watch.lisp — event-driven filesystem watcher
 ##
 ## Uses the built-in watch primitives (inotify on Linux, kqueue on macOS).

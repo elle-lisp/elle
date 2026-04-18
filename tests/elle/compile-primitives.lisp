@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## compile/primitives — verify Rust primitive metadata is accessible
 
 (def prims (compile/primitives))
@@ -22,7 +22,7 @@
 # ── Find primitives by name ────────────────────────────────────────────
 
 (defn find-prim [name]
-  (var result nil)
+  (def @result nil)
   (each p in prims
     (when (= (get p :name) name)
       (assign result p)))

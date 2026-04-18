@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 ## Rename (elle N) to (elle/epoch N) in all .lisp files.
 
 (def glob-plugin (import "target/release/libelle_glob.so"))
@@ -11,7 +11,7 @@
     (do-glob "examples/**/*.lisp"))
   (do-glob "scripts/**/*.lisp")))
 
-(var count 0)
+(def @count 0)
 
 (each f in files
   (when (not (string/contains? f "AGENTS"))

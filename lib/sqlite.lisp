@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/sqlite.lisp — SQLite database access via FFI to libsqlite3
 ##
 ## Usage:
@@ -58,7 +58,7 @@
         stmt)))
 
   (defn bind-params [db stmt params]
-    (var i 1)
+    (def @i 1)
     (each p in params
       (match (type-of p)
         [:nil     (check db (c-bind-null stmt i) "bind")]

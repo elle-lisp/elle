@@ -1,3 +1,4 @@
+(elle/epoch 8)
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert (= (sort (list 3 1 2)) (list 1 2 3)) "sort: list")
@@ -5,14 +6,14 @@
 (assert (= (sort (list 1)) (list 1)) "sort: single element")
 (assert (= (sort (list 3 1 4 1 5 9 2 6)) (list 1 1 2 3 4 5 6 9)) "sort: duplicates")
 (assert (= (sort (list 1.5 0.5 2.5)) (list 0.5 1.5 2.5)) "sort: floats")
-(let ((arr @[3 1 2]))
-  (let ((result (sort arr)))
+(let [arr @[3 1 2]]
+  (let [result (sort arr)]
     (assert (array? result) "sort: array returns array")
     (assert (= (get result 0) 1) "sort: array sorted first")
     (assert (= (get result 1) 2) "sort: array sorted second")
     (assert (= (get result 2) 3) "sort: array sorted third")
     (assert (identical? result arr) "sort: array mutated in place")))
-(let ((result (sort [3 1 2])))
+(let [result (sort [3 1 2])]
   (assert (array? result) "sort: array returns array")
   (assert (= (get result 0) 1) "sort: array sorted first")
   (assert (= (get result 1) 2) "sort: array sorted second")
@@ -22,7 +23,7 @@
 (assert (= (sort (list "banana" "apple" "cherry")) (list "apple" "banana" "cherry")) "sort: strings")
 (assert (= (sort (list :b :a :c)) (list :a :b :c)) "sort: keywords")
 # Cross-type ordering: nil < bool < int < ... (Value::Ord rank order)
-(let ((result (sort [nil true 1])))
+(let [result (sort [nil true 1])]
   (assert (= (get result 0) nil) "sort: cross-type nil first")
   (assert (= (get result 1) true) "sort: cross-type bool second")
   (assert (= (get result 2) 1) "sort: cross-type int third"))
@@ -38,31 +39,31 @@
 (assert (= (compare nil false) -1) "compare: nil rank < bool rank")
 (assert (= (compare false true) -1) "compare: false < true")
 # Use apply to bypass compile-time arity checking; the runtime arity-error is what we test
-(let (([ok? err] (protect ((fn [] (apply compare [1])))))) (assert (not ok?) "compare: arity error on 1 arg") (assert (= (get err :error) :arity-error) "compare: arity error on 1 arg"))
+(let [[ok? err] (protect ((fn [] (apply compare [1]))))] (assert (not ok?) "compare: arity error on 1 arg") (assert (= (get err :error) :arity-error) "compare: arity error on 1 arg"))
 
 ## ── range ───────────────────────────────────────────────────────────
-(let ((r (range 5)))
+(let [r (range 5)]
   (assert (array? r) "range: returns array")
   (assert (= (length r) 5) "range: length")
   (assert (= (get r 0) 0) "range: first")
   (assert (= (get r 4) 4) "range: last"))
-(let ((r (range 2 5)))
+(let [r (range 2 5)]
   (assert (= (length r) 3) "range: start end length")
   (assert (= (get r 0) 2) "range: start end first")
   (assert (= (get r 2) 4) "range: start end last"))
-(let ((r (range 0 10 3)))
+(let [r (range 0 10 3)]
   (assert (= (length r) 4) "range: with step length")
   (assert (= (get r 0) 0) "range: step first")
   (assert (= (get r 1) 3) "range: step second")
   (assert (= (get r 3) 9) "range: step last"))
-(let ((r (range 5 0 -1)))
+(let [r (range 5 0 -1)]
   (assert (= (length r) 5) "range: negative step length")
   (assert (= (get r 0) 5) "range: negative step first")
   (assert (= (get r 4) 1) "range: negative step last"))
-(let ((r (range 0)))
+(let [r (range 0)]
   (assert (array? r) "range: zero returns array")
   (assert (= (length r) 0) "range: zero is empty"))
-(let ((r (range 5 5)))
+(let [r (range 5 5)]
   (assert (= (length r) 0) "range: start=end is empty"))
 
 ## ── apply ───────────────────────────────────────────────────────────
@@ -162,24 +163,24 @@
 (assert (= (nth 1 [10 20 30]) 20) "nth: tuple")
 
 ## ── zip ─────────────────────────────────────────────────────────────
-(let ((z (zip (list 1 2 3) (list :a :b :c))))
+(let [z (zip (list 1 2 3) (list :a :b :c))]
   (assert (= (length z) 3) "zip: length")
   (assert (= (first z) (list 1 :a)) "zip: first pair")
   (assert (= (first (rest z)) (list 2 :b)) "zip: second pair"))
-(let ((z (zip (list 1 2) (list :a :b :c))))
+(let [z (zip (list 1 2) (list :a :b :c))]
   (assert (= (length z) 2) "zip: stops at shortest"))
 (assert (= (zip) ()) "zip: no args")
-(let ((z (zip @[1 2 3] @[:a :b :c])))
+(let [z (zip @[1 2 3] @[:a :b :c])]
   (assert (array? z) "zip: array input returns array")
   (assert (= (length z) 3) "zip: array length"))
-(let ((z (zip [1 2] [:a :b])))
+(let [z (zip [1 2] [:a :b])]
   (assert (array? z) "zip: array input returns array"))
 
 ## ── flatten ─────────────────────────────────────────────────────────
 (assert (= (flatten (list 1 (list 2 3) (list 4 (list 5)))) (list 1 2 3 4 5)) "flatten: nested lists")
 (assert (= (flatten ()) ()) "flatten: empty")
 (assert (= (flatten (list 1 2 3)) (list 1 2 3)) "flatten: already flat")
-(let ((f (flatten @[1 @[2 3] @[4]])))
+(let [f (flatten @[1 @[2 3] @[4]])]
   (assert (array? f) "flatten: array returns array")
   (assert (= (length f) 4) "flatten: array length"))
 
@@ -187,74 +188,74 @@
 (assert (= (take-while even? (list 2 4 5 6)) (list 2 4)) "take-while: list")
 (assert (= (take-while even? (list 1 2 3)) ()) "take-while: none match")
 (assert (= (take-while even? ()) ()) "take-while: empty")
-(let ((tw (take-while even? @[2 4 5 6])))
+(let [tw (take-while even? @[2 4 5 6])]
   (assert (array? tw) "take-while: array returns array")
   (assert (= (length tw) 2) "take-while: array length"))
-(let ((tw (take-while even? [2 4 5 6])))
+(let [tw (take-while even? [2 4 5 6])]
   (assert (array? tw) "take-while: array returns array"))
 
 ## ── drop-while ──────────────────────────────────────────────────────
 (assert (= (drop-while even? (list 2 4 5 6)) (list 5 6)) "drop-while: list")
 (assert (= (drop-while even? (list 1 2 3)) (list 1 2 3)) "drop-while: none dropped")
 (assert (= (drop-while even? ()) ()) "drop-while: empty")
-(let ((dw (drop-while even? @[2 4 5 6])))
+(let [dw (drop-while even? @[2 4 5 6])]
   (assert (array? dw) "drop-while: array returns array")
   (assert (= (length dw) 2) "drop-while: array length"))
-(let ((dw (drop-while even? [2 4 5 6])))
+(let [dw (drop-while even? [2 4 5 6])]
   (assert (array? dw) "drop-while: array returns array"))
 
 ## ── distinct ────────────────────────────────────────────────────────
 (assert (= (distinct (list 1 2 1 3 2 4)) (list 1 2 3 4)) "distinct: list")
 (assert (= (distinct ()) ()) "distinct: empty")
-(let ((d (distinct @[1 2 1 3 2 4])))
+(let [d (distinct @[1 2 1 3 2 4])]
   (assert (array? d) "distinct: array returns array")
   (assert (= (length d) 4) "distinct: array deduped"))
-(let ((d (distinct [1 2 1 3 2 4])))
+(let [d (distinct [1 2 1 3 2 4])]
   (assert (array? d) "distinct: array returns array"))
 
 ## ── frequencies ─────────────────────────────────────────────────────
-(let ((freq (frequencies (list :a :b :a :c :b :a))))
+(let [freq (frequencies (list :a :b :a :c :b :a))]
   (assert (struct? freq) "frequencies: returns struct")
   (assert (= (get freq :a) 3) "frequencies: a=3")
   (assert (= (get freq :b) 2) "frequencies: b=2")
   (assert (= (get freq :c) 1) "frequencies: c=1"))
-(let ((freq (frequencies @[:a :b :a])))
+(let [freq (frequencies @[:a :b :a])]
   (assert (struct? freq) "frequencies: array input")
   (assert (= (get freq :a) 2) "frequencies: array a=2"))
-(let ((freq (frequencies ())))
+(let [freq (frequencies ())]
   (assert (struct? freq) "frequencies: empty"))
 
 ## ── mapcat ──────────────────────────────────────────────────────────
 (assert (= (mapcat (fn (x) (list x (* x 10))) (list 1 2 3)) (list 1 10 2 20 3 30)) "mapcat: list")
 (assert (= (mapcat (fn (x) ()) (list 1 2 3)) ()) "mapcat: empty results")
-(let ((mc (mapcat (fn (x) @[x (* x 10)]) @[1 2 3])))
+(let [mc (mapcat (fn (x) @[x (* x 10)]) @[1 2 3])]
   (assert (array? mc) "mapcat: array returns array")
   (assert (= (length mc) 6) "mapcat: array length"))
 
 ## ── group-by ────────────────────────────────────────────────────────
-(let ((groups (group-by even? (list 1 2 3 4 5 6))))
+(let [groups (group-by even? (list 1 2 3 4 5 6))]
   (assert (struct? groups) "group-by: returns table")
   (assert (= (length (get groups true)) 3) "group-by: evens count")
   (assert (= (length (get groups false)) 3) "group-by: odds count"))
-(let ((groups (group-by even? @[1 2 3 4 5 6])))
+(let [groups (group-by even? @[1 2 3 4 5 6])]
   (assert (struct? groups) "group-by: array input")
   (assert (= (length (get groups true)) 3) "group-by: array evens"))
 
 ## ── map-indexed ─────────────────────────────────────────────────────
 (assert (= (map-indexed (fn (i x) (list i x)) (list :a :b :c)) (list (list 0 :a) (list 1 :b) (list 2 :c))) "map-indexed: list")
 (assert (= (map-indexed (fn (i x) (list i x)) ()) ()) "map-indexed: empty")
-(let ((mi (map-indexed (fn (i x) (+ i x)) @[10 20 30])))
+(let [mi (map-indexed (fn (i x) (+ i x)) @[10 20 30])]
   (assert (array? mi) "map-indexed: array returns array")
   (assert (= (get mi 0) 10) "map-indexed: 0+10")
   (assert (= (get mi 1) 21) "map-indexed: 1+20")
   (assert (= (get mi 2) 32) "map-indexed: 2+30"))
 
 ## ── partition ───────────────────────────────────────────────────────
-(let ((p (partition 2 (list 1 2 3 4 5))))
+(let [p (partition 2 (list 1 2 3 4 5))]
   (assert (= (length p) 3) "partition: list count")
   (assert (= (first p) (list 1 2)) "partition: first group")
   (assert (= (last p) (list 5)) "partition: last group partial"))
-(let ((p (partition 2 @[1 2 3 4 5])))
+(let [p (partition 2 @[1 2 3 4 5])]
   (assert (array? p) "partition: array returns array")
   (assert (= (length p) 3) "partition: array count")
   (assert (array? (get p 0)) "partition: array chunks are arrays"))
@@ -264,7 +265,7 @@
 (assert (= (interpose :sep (list 1 2 3)) (list 1 :sep 2 :sep 3)) "interpose: list")
 (assert (= (interpose :sep (list 1)) (list 1)) "interpose: single")
 (assert (= (interpose :sep ()) ()) "interpose: empty")
-(let ((ip (interpose :sep @[1 2 3])))
+(let [ip (interpose :sep @[1 2 3])]
   (assert (array? ip) "interpose: array returns array")
   (assert (= (length ip) 5) "interpose: array length"))
 
@@ -275,10 +276,10 @@
 (assert (= (max-key identity 5 3 8 1) 8) "max-key: identity")
 
 ## ── memoize ─────────────────────────────────────────────────────────
-(let* ((@call-count 0)
-       (mf (memoize (fn (x)
+(let* [@call-count 0
+       mf (memoize (fn (x)
                       (assign call-count (+ call-count 1))
-                      (* x x)))))
+                      (* x x)))]
   (assert (= (mf 3) 9) "memoize: compute 3*3")
   (assert (= (mf 3) 9) "memoize: cached 3*3")
   (assert (= (mf 4) 16) "memoize: compute 4*4")
@@ -288,12 +289,12 @@
 (assert (= (sort-by abs (list -3 1 -2)) (list 1 -2 -3)) "sort-by: abs list")
 (assert (= (sort-by identity (list 3 1 2)) (list 1 2 3)) "sort-by: identity = sort")
 (assert (= (sort-by identity ()) ()) "sort-by: empty")
-(let ((result (sort-by abs @[-3 1 -2])))
+(let [result (sort-by abs @[-3 1 -2])]
   (assert (array? result) "sort-by: array returns array")
   (assert (= (get result 0) 1) "sort-by: array first")
   (assert (= (get result 1) -2) "sort-by: array second")
   (assert (= (get result 2) -3) "sort-by: array third"))
-(let ((result (sort-by abs [3 1 2])))
+(let [result (sort-by abs [3 1 2])]
   (assert (array? result) "sort-by: array returns array"))
 
 ## ── sort-with ────────────────────────────────────────────────────────
@@ -310,14 +311,14 @@
 # Ascending with subtraction comparator
 (assert (= (sort-with (fn (a b) (- a b)) (list 3 1 2)) (list 1 2 3)) "sort-with: ascending subtraction")
 # Mutable array sorted returns new mutable array
-(let ((orig @[1 3 2])
-      (result (sort-with (fn (a b) (compare b a)) @[1 3 2])))
+(let [orig @[1 3 2]
+      result (sort-with (fn (a b) (compare b a)) @[1 3 2])]
   (assert (mutable? result) "sort-with: @array returns mutable")
   (assert (= (get result 0) 3) "sort-with: @array first")
   (assert (= (get result 1) 2) "sort-with: @array second")
   (assert (= (get result 2) 1) "sort-with: @array third"))
 # Immutable array returns new immutable array
-(let ((result (sort-with (fn (a b) (- a b)) [3 1 2])))
+(let [result (sort-with (fn (a b) (- a b)) [3 1 2])]
   (assert (array? result) "sort-with: array returns array")
   (assert (not (mutable? result)) "sort-with: array returns immutable")
   (assert (= (get result 0) 1) "sort-with: array first"))
@@ -327,28 +328,28 @@
 (assert (= (sort-by-cmp compare (list 3 1 2)) (list 1 2 3)) "sort-by-cmp: alias works")
 
 ## ── freeze / thaw: structs ───────────────────────────────────────────
-(let ((t @{:a 1 :b 2}))
-  (let ((s (freeze t)))
+(let [t @{:a 1 :b 2}]
+  (let [s (freeze t)]
     (assert (struct? s) "freeze: returns struct")
     (assert (= (get s :a) 1) "freeze: preserves values")
     (assert (= (get s :b) 2) "freeze: preserves all keys")))
 
-(let ((s {:a 1 :b 2}))
-  (let ((t (thaw s)))
+(let [s {:a 1 :b 2}]
+  (let [t (thaw s)]
     (assert (struct? t) "thaw: returns @struct")
     (assert (= (get t :a) 1) "thaw: preserves values")
     (put t :c 3)
     (assert (= (get t :c) 3) "thaw: result is mutable")))
 
 ## ── freeze / thaw: arrays ───────────────────────────────────────────
-(let ((ma @[1 2 3]))
-  (let ((a (freeze ma)))
+(let [ma @[1 2 3]]
+  (let [a (freeze ma)]
     (assert (array? a) "freeze @array: returns array")
     (assert (= (get a 0) 1) "freeze @array: preserves values")
     (assert (= (length a) 3) "freeze @array: preserves length")))
 
-(let ((a [1 2 3]))
-  (let ((ma (thaw a)))
+(let [a [1 2 3]]
+  (let [ma (thaw a)]
     (assert (= (type-of ma) :@array) "thaw array: returns @array")
     (assert (= (get ma 0) 1) "thaw array: preserves values")
     (push ma 4)
@@ -367,13 +368,13 @@
 (assert (= (type-of (thaw (thaw "hello"))) :@string) "thaw: idempotent on @string")
 
 ## ── freeze / thaw: bytes ────────────────────────────────────────────
-(let ((mb (@bytes 1 2 3)))
-  (let ((b (freeze mb)))
+(let [mb (@bytes 1 2 3)]
+  (let [b (freeze mb)]
     (assert (bytes? b) "freeze @bytes: returns bytes")
     (assert (= (get b 0) 1) "freeze @bytes: preserves values")))
 
-(let ((b (bytes 1 2 3)))
-  (let ((mb (thaw b)))
+(let [b (bytes 1 2 3)]
+  (let [mb (thaw b)]
     (assert (= (type-of mb) :@bytes) "thaw bytes: returns @bytes")
     (assert (= (get mb 0) 1) "thaw bytes: preserves values")))
 
@@ -381,4 +382,4 @@
 (assert (= (type-of (thaw (thaw (bytes 1 2 3)))) :@bytes) "thaw: idempotent on @bytes")
 
 ## ── freeze @string: invalid UTF-8 ──────────────────────────────────
-(let (([ok? _] (protect ((fn [] (freeze (@string 255 254))))))) (assert (not ok?) "freeze @string with invalid UTF-8 signals error"))
+(let [[ok? _] (protect ((fn [] (freeze (@string 255 254)))))] (assert (not ok?) "freeze @string with invalid UTF-8 signals error"))

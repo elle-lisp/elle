@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # ── MLIR tier-2 backend tests ─────────────────────────────────────────
 #
 # Verifies that GPU-eligible functions compile and execute correctly
@@ -51,18 +51,19 @@
 (assert (= (ml-max 10 5) 10) "MLIR max reversed")
 (assert (= (ml-max 4 4) 4) "MLIR max equal")
 
-# ── Captures now eligible for MLIR ───────────────────────────────────
+# ── Non-eligible functions still work ────────────────────────────────
+# These use I/O or captures, so they go through Cranelift or bytecode.
 
 (def outer 100)
 (defn ml-with-capture [x] (+ x outer))
 (repeat 15 (ml-with-capture 1))
-(assert (= (ml-with-capture 5) 105) "captured var works via MLIR or fallback")
+(assert (= (ml-with-capture 5) 105) "captured var works (not MLIR)")
 
 # ── Verify GPU eligibility predicates ────────────────────────────────
 
 (assert (fn/gpu-eligible? ml-add) "ml-add is GPU-eligible")
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
-(assert (fn/gpu-eligible? ml-with-capture) "numeric capture is GPU-eligible")
+(assert (fn/gpu-eligible? ml-with-capture) "immutable capture is constant-propagated")
 
 # ── Branching with even values ────────────────────────────────────────
 # Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result

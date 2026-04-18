@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/rdf/elle.lisp — RDF triple generation for Elle source analysis
 ##
 ## Canonical representation of Elle semantic data as N-Triples.
@@ -54,7 +54,7 @@
 
 (defn lit [s]
   "Escape a string for use as an N-Triples literal."
-  (var escaped (-> (string s)
+  (def @escaped (-> (string s)
                  (string/replace "\\" "\\\\")
                  (string/replace "\"" "\\\"")
                  (string/replace "\n" "\\n")))
@@ -85,8 +85,8 @@
 
 (defn emit-primitive [buf prim]
   "Emit triples for a single Rust primitive."
-  (var name (get prim :name))
-  (var subj (elle-iri "fn" name))
+  (def @name (get prim :name))
+  (def @subj (elle-iri "fn" name))
 
   (triple buf subj rdf-type (iri (string/format "{}:Primitive" ns)))
   (triple buf subj (pred "name") (lit name))
@@ -106,7 +106,7 @@
 
 (defn primitives []
   "Generate N-Triples for all Rust-defined primitives."
-  (var buf (make-buffer))
+  (def @buf (make-buffer))
   (each prim in (compile/primitives)
     (emit-primitive buf prim))
   (freeze buf))
@@ -115,8 +115,8 @@
 
 (defn emit-function [buf analysis path sym]
   "Emit triples for an Elle-defined function."
-  (var name (get sym :name))
-  (var subj (elle-iri "fn" name))
+  (def @name (get sym :name))
+  (def @subj (elle-iri "fn" name))
 
   (triple buf subj rdf-type (iri (string/format "{}:Fn" ns)))
   (triple buf subj (pred "name") (lit name))
@@ -130,7 +130,7 @@
     (triple buf subj (pred "line") (lit (string (get sym :line)))))
 
   # Signal
-  (var sig nil)
+  (def @sig nil)
   (let [[ok? val] (protect (compile/signal analysis (keyword name)))]
     (when ok? (assign sig val)))
 
@@ -141,7 +141,7 @@
       (triple buf subj (pred "signal-propagates") (lit (string idx))))
 
     # Captures
-    (var caps nil)
+    (def @caps nil)
     (let [[ok? val] (protect (compile/captures analysis (keyword name)))]
       (when ok? (assign caps val)))
 
@@ -151,7 +151,7 @@
         (triple buf subj (pred "capture-kind") (lit (string (get cap :kind)))))
 
       # Composition
-      (var comp (portrait-lib:composition sig caps))
+      (def @comp (portrait-lib:composition sig caps))
       (triple buf subj (pred "stateless") (lit (string (get comp :stateless))))
       (triple buf subj (pred "retry-safe") (lit (string (get comp :retry-safe))))
       (triple buf subj (pred "parallelizable") (lit (string (get comp :parallelizable))))
@@ -162,32 +162,32 @@
 
 (defn file [analysis path]
   "Generate N-Triples for an analyzed Elle file."
-  (var buf (make-buffer))
-  (var syms (compile/symbols analysis))
-  (var graph (compile/call-graph analysis))
+  (def @buf (make-buffer))
+  (def @syms (compile/symbols analysis))
+  (def @graph (compile/call-graph analysis))
 
   (each sym in syms
-    (var kind (get sym :kind))
-    (var name (get sym :name))
+    (def @kind (get sym :kind))
+    (def @name (get sym :name))
 
     (when (= kind :function)
       (emit-function buf analysis path sym))
 
     (when (= kind :variable)
-      (var subj (elle-iri "def" name))
+      (def @subj (elle-iri "def" name))
       (triple buf subj rdf-type (iri (string/format "{}:Def" ns)))
       (triple buf subj (pred "name") (lit name))
       (triple buf subj (pred "file") (lit path)))
 
     (when (= kind :macro)
-      (var subj (elle-iri "macro" name))
+      (def @subj (elle-iri "macro" name))
       (triple buf subj rdf-type (iri (string/format "{}:Macro" ns)))
       (triple buf subj (pred "name") (lit name))
       (triple buf subj (pred "file") (lit path))))
 
   # Call graph edges
   (each node in (get graph :nodes)
-    (var caller-iri (elle-iri "fn" (get node :name)))
+    (def @caller-iri (elle-iri "fn" (get node :name)))
     (each callee-name in (get node :callees)
       (triple buf caller-iri (pred "calls") (elle-iri "fn" callee-name))))
 

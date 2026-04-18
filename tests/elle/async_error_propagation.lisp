@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Async error propagation tests
 #
 # These tests document the expected behavior of error propagation through
@@ -9,7 +9,7 @@
 
 (defn make-range [n]
   (coro/new (fn []
-    (var i 0)
+    (def @i 0)
     (while (< i n)
       (yield i)
       (assign i (+ i 1))))))

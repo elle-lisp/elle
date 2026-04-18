@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tools/aws/fetch-model.lisp — Download AWS Smithy models via HTTPS
 ##
 ## Usage:

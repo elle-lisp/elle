@@ -232,3 +232,28 @@ pair laid out flat inside a single bracket form.
 Destructuring is unambiguous: each form occupies exactly one syntactic
 position, alternating pattern then value. `elle rewrite` handles the
 migration mechanically.
+
+### Epoch 8 — immutable-by-default bindings
+
+All bindings (`def`, `let`, `let*`, `letrec`, function parameters) are
+immutable by default. `var` is replaced by `def @`, and mutable bindings
+use the `@` prefix:
+
+| Old (epoch ≤ 7) | New (epoch 8) |
+|-----------------|---------------|
+| `(var x 0)` | `(def @x 0)` |
+| `(let [x 0] (assign x 1) ...)` | `(let [@x 0] (assign x 1) ...)` |
+| `(defn f [n] (assign n 10))` | `(defn f [@n] (assign n 10))` |
+
+The `@` prefix appears only at the binding site. All subsequent references
+omit it. Assigning to a binding without `@` is a compile-time error:
+
+```
+cannot assign immutable binding 'x' (use @x to make it mutable)
+```
+
+Immutable bindings enable constant propagation by the compiler and
+eliminate the need for cell indirection when captured by closures.
+
+`elle rewrite` handles the `var → def @` migration. Mutable `let` and
+parameter bindings require manual `@` annotation, guided by compile errors.

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 ## Add (elle N) declaration to all .lisp files that don't already have one.
 ## Usage: elle tools/add-epoch.lisp -- <epoch>
 
@@ -18,7 +18,7 @@
   (do-glob "examples/**/*.lisp")))
 
 (def tag (string "(elle " (string epoch) ")"))
-(var count 0)
+(def @count 0)
 
 (each f in files
   (when (not (string/contains? f "AGENTS"))

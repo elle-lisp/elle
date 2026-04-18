@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Tests for tail call optimization
 #
 # Comprehensive tests for tail call optimization including:
@@ -239,8 +239,8 @@
 
 # Tail call in loop body (via while)
 (begin
-  (var result 0)
-  (var i 0)
+  (def @result 0)
+  (def @i 0)
   (while (< i 10)
     (begin
       (assign result (+ result i))

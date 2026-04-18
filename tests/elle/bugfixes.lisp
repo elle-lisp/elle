@@ -1,3 +1,4 @@
+(elle/epoch 8)
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs
@@ -16,13 +17,13 @@
 
 # let binding inside lambda preserves value
 (begin
-  (def f (fn (x) (let ((y x)) y)))
+  (def f (fn (x) (let [y x] y)))
   (assert (= (f 42) 42) "let binding preserves positive value")
   (assert (= (f -7) -7) "let binding preserves negative value"))
 
 # let binding with arithmetic
 (begin
-  (def f (fn (a b) (let ((x a) (y b)) (+ x y))))
+  (def f (fn (a b) (let [x a y b] (+ x y))))
   (assert (= (f 10 -3) 7) "let binding with arithmetic"))
 
 # recursive function with let inside
@@ -30,7 +31,7 @@
   (def f (fn (x)
     (if (= x 0)
         (list)
-        (let ((y x))
+        (let [y x]
           (cons y (f (- x 1)))))))
   (assert (= (length (f 5)) 5) "recursive function with let inside"))
 
@@ -39,29 +40,29 @@
   (def f (fn (x)
     (if (= x 0)
         (list)
-        (let ((y x))
+        (let [y x]
           (append (list y) (f (- x 1)))))))
   (assert (= (length (f 5)) 5) "append inside let inside lambda"))
 
 # multiple let bindings
 (begin
   (def f (fn (a b c)
-    (let ((x a) (y b) (z c))
+    (let [x a y b z c]
       (+ x (+ y z)))))
   (assert (= (f 1 2 3) 6) "multiple let bindings"))
 
 # nested let bindings
 (begin
   (def f (fn (a b)
-    (let ((x a))
-      (let ((y b))
+    (let [x a]
+      (let [y b]
         (+ x y)))))
   (assert (= (f 10 20) 30) "nested let bindings"))
 
 # let with computation
 (begin
   (def f (fn (x)
-    (let ((y (* x 2)) (z (+ x 1)))
+    (let [y (* x 2) z (+ x 1)]
       (+ y z))))
   (assert (= (f 5) 16) "let with computation (y=10, z=6, result=16)"))
 
@@ -90,7 +91,7 @@
 # defn with let body
 (begin
   (defn double (x)
-    (let ((y x))
+    (let [y x]
       (+ y y)))
   (assert (= (double 21) 42) "defn with let body"))
 
@@ -100,12 +101,12 @@
 
 # list display no dot terminator
 (begin
-  (var list-str (string (list 1 2 3)))
+  (def @list-str (string (list 1 2 3)))
   (assert (not (string/contains? list-str ". ()")) "list display no dot terminator"))
 
 # cons chain display
 (begin
-  (var cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
+  (def @cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
   (assert (not (string/contains? cons-str ". ()")) "cons chain display"))
 
 # list length matches
@@ -115,12 +116,12 @@
 
 # nested list display
 (begin
-  (var nested-str (string (list (list 1) (list 2))))
+  (def @nested-str (string (list (list 1) (list 2))))
   (assert (not (string/contains? nested-str ". ()")) "nested list display"))
 
 # append result display
 (begin
-  (var append-str (string (append (list 1 2) (list 3 4))))
+  (def @append-str (string (append (list 1 2) (list 3 4))))
   (assert (not (string/contains? append-str ". ()")) "append result display"))
 
 # ============================================================================
@@ -129,15 +130,13 @@
 
 # or expression in recursive predicate
 (begin
-  (var check
-    (fn (x remaining)
+  (def @check (fn (x remaining)
       (if (empty? remaining)
           true
           (if (or (= x 1) (= x 2))
               false
               (check x (rest remaining))))))
-  (var foo
-    (fn (n seen)
+  (def @foo (fn (n seen)
       (if (= n 0)
           (list)
           (if (check n seen)
@@ -154,9 +153,9 @@
   (defn make-list (x)
     (if (= x 0)
         (list)
-        (let ((y x))
+        (let [y x]
           (cons y (make-list (- x 1))))))
-  (var result-str (string (make-list 5)))
+  (def @result-str (string (make-list 5)))
   (assert (not (string/contains? result-str ". ()")) "defn + let + list display"))
 
 # defn + recursive + list display
@@ -164,7 +163,7 @@
   (defn build (n)
     (if (= n 0)
         (list)
-        (let ((rest-list (build (- n 1))))
+        (let [rest-list (build (- n 1))]
           (cons n rest-list))))
   (assert (= (length (build 10)) 10) "defn + recursive + list display"))
 
@@ -183,7 +182,7 @@
   (defn do-write (port msg)
     (port/write port msg))
 
-  (let ((p (port/open "/tmp/elle_bugfix5_test" :write)))
+  (let [p (port/open "/tmp/elle_bugfix5_test" :write)]
     (do-write p "hello")
     (assert (= (type p) :port) "fiber locals not corrupted after yield through nested tail-call-to-native")
     (port/close p)))
@@ -207,14 +206,14 @@
   # Minimal reproduction: deep call chain with many locals, fiber inside defer
   # doing I/O (port/write to a real port). Caused LoadLocal panic before fix.
   (defn inner-with-many-locals (port msg)
-    (let ((a 1) (b 2) (c 3) (d 4) (e 5) (f 6) (g 7) (h 8)
-          (i 9) (j 10) (k 11) (l 12) (m 13) (n 14) (o 15) (p 16))
+    (let [a 1 b 2 c 3 d 4 e 5 f 6 g 7 h 8
+          i 9 j 10 k 11 l 12 m 13 n 14 o 15 p 16]
       (port/write port msg)
       (+ a b c d e f g h i j k l m n o p)))
 
-  (let ((port (port/open "/tmp/elle_bugfix6_test" :write)))
-    (let ((result (defer (port/close port)
-                    (inner-with-many-locals port "hello"))))
+  (let [port (port/open "/tmp/elle_bugfix6_test" :write)]
+    (let [result (defer (port/close port)
+                    (inner-with-many-locals port "hello"))]
       (assert (= result 136) "locals not corrupted after defer body fiber propagates SIG_IO (Bug 6)"))))
 
 # ============================================================================
@@ -229,25 +228,25 @@
 # ============================================================================
 
 (begin
-  (let ((listener (tcp/listen "127.0.0.1" 0)))
-    (let ((addr (port/path listener)))
-      (let ((port-num (parse-int (get (string/split addr ":") 1))))
-        (let ((server-got @[nil]) (client-got @[nil]))
-          (let ((server-fiber
+  (let [listener (tcp/listen "127.0.0.1" 0)]
+    (let [addr (port/path listener)]
+      (let [port-num (parse-int (get (string/split addr ":") 1))]
+        (let [server-got @[nil] client-got @[nil]]
+          (let [server-fiber
                   (ev/spawn (fn ()  # server: accept, read, write, close via defer
-                    (let ((conn (tcp/accept listener)))
+                    (let [conn (tcp/accept listener)]
                       (defer (port/close conn)
-                        (let ((data (port/read conn 4)))
+                        (let [data (port/read conn 4)]
                           (put server-got 0 data)
-                          (port/write conn "pong")))))))
-                (client-fiber
+                          (port/write conn "pong"))))))
+                client-fiber
                   (ev/spawn (fn ()  # client: connect, write, read
-                    (let ((c (tcp/connect "127.0.0.1" port-num)))
+                    (let [c (tcp/connect "127.0.0.1" port-num)]
                       (port/write c "ping")
                       (port/flush c)
-                      (let ((resp (port/read c 4)))
+                      (let [resp (port/read c 4)]
                         (put client-got 0 resp)
-                        (port/close c)))))))
+                        (port/close c)))))]
             (ev/join server-fiber)
             (ev/join client-fiber))
           (port/close listener)
