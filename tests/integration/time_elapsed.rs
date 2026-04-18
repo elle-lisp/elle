@@ -39,7 +39,7 @@ proptest! {
     #[test]
     fn elapsed_time_is_non_negative(_seed in 0u32..50) {
         let expr = r#"
-            (let [result (time/elapsed (fn () 42))]
+            (let ((result (time/elapsed (fn () 42))))
               (first (rest result)))
         "#;
 
@@ -61,7 +61,7 @@ proptest! {
 #[test]
 fn elapsed_time_captures_result() {
     let expr = r#"
-        (let [result (time/elapsed (fn () 42))]
+        (let ((result (time/elapsed (fn () 42))))
           (first result))
     "#;
 
@@ -77,7 +77,9 @@ fn elapsed_time_captures_result() {
 #[test]
 fn stopwatch_samples_are_monotonic() {
     let expr = r#"
-        (let [sw (time/stopwatch) samples (list) i 0]
+        (let ((sw (time/stopwatch))
+              (@samples (list))
+              (@i 0))
           (while (< i 20)
             (begin
               (assign samples (cons (coro/resume sw) samples))

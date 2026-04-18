@@ -111,22 +111,22 @@ fn test_or_multiple() {
 
 #[test]
 fn test_let_simple() {
-    assert!(compiles("(let [x 10] x)"));
+    assert!(compiles("(let ((x 10)) x)"));
 }
 
 #[test]
 fn test_let_multiple_bindings() {
-    assert!(compiles("(let [x 1 y 2] x)"));
+    assert!(compiles("(let ((x 1) (y 2)) x)"));
 }
 
 #[test]
 fn test_let_nested() {
-    assert!(compiles("(let [x 1] (let [y 2] x))"));
+    assert!(compiles("(let ((x 1)) (let ((y 2)) x))"));
 }
 
 #[test]
 fn test_letrec_simple() {
-    assert!(compiles("(letrec [x 10] x)"));
+    assert!(compiles("(letrec ((x 10)) x)"));
 }
 
 #[test]
@@ -195,13 +195,13 @@ fn test_while_simple() {
 
 #[test]
 fn test_each_simple() {
-    let result = eval_source("(let [sum 0] (each x '(1 2 3) (assign sum (+ sum x))) sum)");
+    let result = eval_source("(let ((@sum 0)) (each x '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
 #[test]
 fn test_each_with_in() {
-    let result = eval_source("(let [sum 0] (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
+    let result = eval_source("(let ((@sum 0)) (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
@@ -257,20 +257,20 @@ fn test_yield() {
 
 #[test]
 fn test_closure_capture() {
-    assert!(compiles("(let [x 10] (fn () x))"));
+    assert!(compiles("(let ((x 10)) (fn () x))"));
 }
 
 #[test]
 fn test_mutual_recursion_setup() {
     assert!(compiles(
-        "(letrec [f (fn (n) (if (= n 0) 0 (g (- n 1)))) g (fn (n) (f n))] f)"
+        "(letrec ((f (fn (n) (if (= n 0) 0 (g (- n 1))))) (g (fn (n) (f n)))) f)"
     ));
 }
 
 #[test]
 fn test_nested_lets_and_lambdas() {
     assert!(compiles(
-        "(let [x 1] (let [y 2] (fn (z) (+ x (+ y z)))))"
+        "(let ((x 1)) (let ((y 2)) (fn (z) (+ x (+ y z)))))"
     ));
 }
 
@@ -353,8 +353,8 @@ fn test_same_code_same_bytecode() {
     let mut symbols1 = SymbolTable::new();
     let mut symbols2 = SymbolTable::new();
 
-    let result1 = compile("(let [x 10] x)", &mut symbols1, "<test>").unwrap();
-    let result2 = compile("(let [x 10] x)", &mut symbols2, "<test>").unwrap();
+    let result1 = compile("(let ((x 10)) x)", &mut symbols1, "<test>").unwrap();
+    let result2 = compile("(let ((x 10)) x)", &mut symbols2, "<test>").unwrap();
 
     // Both should compile successfully
     assert!(!result1.bytecode.instructions.is_empty());
@@ -364,7 +364,7 @@ fn test_same_code_same_bytecode() {
 #[test]
 fn test_complex_nested_structure() {
     assert!(compiles(
-        "(let [f (fn (x) (if (> x 0) (+ x 1) 0))] (f 5))"
+        "(let ((f (fn (x) (if (> x 0) (+ x 1) 0)))) (f 5))"
     ));
 }
 
@@ -430,14 +430,14 @@ fn test_unquote_splicing() {
 
 #[test]
 fn test_let_shadowing() {
-    assert!(compiles("(let [x 1] (let [x 2] x))"));
+    assert!(compiles("(let ((x 1)) (let ((x 2)) x))"));
 }
 
 #[test]
 fn test_let_with_complex_init() {
     // Note: Function calls to built-in symbols like + may fail during lowering
     let mut symbols = SymbolTable::new();
-    let result = compile("(let [x (+ 1 2)] x)", &mut symbols, "<test>");
+    let result = compile("(let ((x (+ 1 2))) x)", &mut symbols, "<test>");
     match result {
         Ok(_) => {}                                    // Success is fine
         Err(e) if e.contains("Unbound variable") => {} // Expected during integration
@@ -447,7 +447,7 @@ fn test_let_with_complex_init() {
 
 #[test]
 fn test_letrec_with_lambda() {
-    assert!(compiles("(letrec [f (fn (n) n)] (f 42))"));
+    assert!(compiles("(letrec ((f (fn (n) n))) (f 42))"));
 }
 
 // ============ Function Definition Edge Cases ============
