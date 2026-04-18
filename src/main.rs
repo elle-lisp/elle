@@ -508,33 +508,22 @@ fn print_jit_stats(vm: &VM) {
 }
 
 fn main() {
-    // Ensure enough static TLS space for dlopen'd plugins.
-    // GLIBC_TUNABLES is read by the dynamic linker before main(), so if
-    // it's missing we must re-exec ourselves with it set.
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-
-        let key = "GLIBC_TUNABLES";
-        let needed = "glibc.rtld.optional_static_tls=65536";
-        let already_set = env::var(key)
-            .map(|v| v.contains("glibc.rtld.optional_static_tls"))
-            .unwrap_or(false);
-        if !already_set {
-            // Merge with any existing tunables
-            let new_val = match env::var(key) {
-                Ok(existing) if !existing.is_empty() => format!("{}:{}", existing, needed),
-                _ => needed.to_string(),
-            };
-            let exe = env::current_exe().expect("failed to get current exe path");
-            let err = std::process::Command::new(exe)
-                .args(&env::args().collect::<Vec<_>>()[1..])
-                .env(key, &new_val)
-                .exec();
-            eprintln!("elle: re-exec failed: {}", err);
-            std::process::exit(1);
-        }
-    }
+    // DISABLED (2026-04-18): static TLS re-exec hack for dlopen'd plugins.
+    //
+    // Was: set GLIBC_TUNABLES=glibc.rtld.optional_static_tls=65536 and
+    // re-exec the process so the dynamic linker sees it before main().
+    // This reserved 64KB of optional static TLS for C++ plugins loaded
+    // via dlopen (e.g. oxigraph).
+    //
+    // Removed because:
+    //   - Linux/glibc only; no-op on musl, Bionic (Android), macOS
+    //   - The re-exec changes PID, breaking strace/gdb workflows
+    //   - current_exe() can fail in chroots/containers
+    //   - MCP server and all plugins load fine without it on glibc 2.39+
+    //
+    // If plugin loading fails with "cannot allocate memory in static TLS
+    // block", restore the block from git (commit 9ed7b880) or set
+    // GLIBC_TUNABLES manually before launching elle.
 
     let args: Vec<String> = env::args().collect();
 

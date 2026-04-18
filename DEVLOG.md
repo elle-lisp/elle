@@ -95,6 +95,35 @@ end-devlog-instructions -->
 
 Per-PR entries capturing significant development work, generated from
 git history by reading actual diffs. Most recent first.
+
+## [#737](https://github.com/elle-lisp/elle/pull/737) — MLIR/SPIR-V float support, differential testing harness, epoch 8 immutable-by-default bindings
+[`19fd778a`](https://github.com/elle-lisp/elle/commit/19fd778a) · 2026-04-18 · `compiler` `lir` `jit` `epoch`
+
+Massive multi-front commit spanning execution backends and language semantics. Adds a `compile/run-on` primitive that force-dispatches closures on any of four tiers (:bytecode, :jit, :wasm, :mlir-cpu), enabling a differential testing harness (`tests/diff/`) that runs the same closure on all eligible tiers and asserts agreement. MLIR-CPU and SPIR-V backends gain full float support (typed arithmetic, mixed int/float promotion, float comparisons, bool returns, captures as extra parameters, within-block type reassignment). The JIT gains a tail-call trampoline, and squelch enforcement is added to the compile/run-on dispatch path. Introduces `integer`/`float` as numeric-only coercion (string parsing split to `parse-int`/`parse-float`), a `LirInstr::Convert` for type conversions that makes them GPU-eligible, and immutable constant propagation in the lowerer via `ValueConst`. Epoch 8 introduces immutable-by-default bindings with `@` prefix for opt-in mutability, gated on source epoch so older files remain compatible. 363 files changed.
+
+---
+
+## [#746](https://github.com/elle-lisp/elle/pull/746) — Add DEVLOG.md and CHANGELOG.md from git history
+[`f13573ea`](https://github.com/elle-lisp/elle/commit/f13573ea) · 2026-04-18 · `docs`
+
+Generates two project history documents from the full commit log. DEVLOG.md contains per-PR entries for all 368 squash-merged PRs with narrative summaries written from the actual diffs. CHANGELOG.md provides an agent-optimized summary grouped by narrative arc (memory model, execution backends, signal system, compiler pipeline, etc.). Both files are self-documenting with embedded generation instructions and are linked from README.md and QUICKSTART.md.
+
+---
+
+## [#745](https://github.com/elle-lisp/elle/pull/745) — Fix TLS read silently dropping final plaintext segment on TCP close
+[`fcc70ef2`](https://github.com/elle-lisp/elle/commit/fcc70ef2) · 2026-04-18 · `tls` `bugfix`
+
+When a TLS peer sends `close_notify` in the same record as application data, `port/read` returned nil before draining the plaintext buffer, silently dropping the last segment. The fix adds one final `read-plaintext-fn` call on EOF to flush any remaining buffered plaintext before signaling end-of-stream. A one-file, six-line change in `lib/tls.lisp`.
+
+---
+
+## [#742](https://github.com/elle-lisp/elle/pull/742) — Epoch 7: flat let bindings (Clojure-style alternating name/value)
+[`4b8a2f1d`](https://github.com/elle-lisp/elle/commit/4b8a2f1d) · 2026-04-17 · `language` `epoch` `compiler`
+
+Switches `let`, `let*`, `letrec`, `if-let`, `when-let`, and `when-ok` from nested-pair bindings `[[a 1] [b 2]]` to flat alternating name/value pairs `[a 1 b 2]`, matching Clojure style. Destructuring patterns (which start with `[`) are still recognized unambiguously. Epoch 6 files are migrated transparently at compile time via a new `FlattenBindings` epoch transform. The change touches 314 files: stride-2 iteration in the HIR binding analyzer, flat `Array` generation in syntax-case expansion, all 18 prelude macros rewritten, and mechanical migration of ~280 `.lisp` files across stdlib, lib, tests, demos, and tools. Backward compatibility is verified by `tests/elle/epoch6.lisp`.
+
+---
+
 ## [#744](https://github.com/elle-lisp/elle/pull/744) — Plugins submodule bump (second pass)
 [`107ea501`](https://github.com/elle-lisp/elle/commit/107ea501) · 2026-04-17 · `submodule`
 
