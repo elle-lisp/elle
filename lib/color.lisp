@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/color.lisp — Color science library (pure Elle)
 ##
 ## Color space conversions, mixing, gradients, and perceptual distance.

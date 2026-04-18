@@ -105,6 +105,9 @@ mod dump_cli {
 mod flip_cli {
     include!("flip_cli.rs");
 }
+mod mutability {
+    include!("mutability.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

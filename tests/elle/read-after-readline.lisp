@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/read-after-readline.lisp — port/read must return exact byte
 ## count after port/read-line buffered excess data from the same fd.
 ##
@@ -46,7 +46,7 @@
 (defn make-bulk-sequence [n]
   "Build a string of n concatenated RESP bulk strings: $1\\r\\n0\\r\\n$1\\r\\n1\\r\\n..."
   (def buf @"")
-  (var i 0)
+  (def @i 0)
   (while (< i n)
     (let [val (string i)]
       (push buf (string/join ["$" (string (string/size-of val)) "\r\n" val "\r\n"] "")))
@@ -57,12 +57,12 @@
 
 (let [p (port/open "/tmp/elle-test-read-after-readline-multi" :read)]
   (defer (port/close p)
-    (var i 0)
+    (def @i 0)
     (while (< i 20)
       (let [header (port/read-line p)]
         (assert (not (nil? header))
           (string/join ["round " (string i) ": header is nil"] ""))
-        (let [expected-len (integer (slice header 1))]
+        (let [expected-len (parse-int (slice header 1))]
           (let [body (port/read p (+ expected-len 2))]
             (let [val (slice (string body) 0 expected-len)]
               (assert (= val (string i))

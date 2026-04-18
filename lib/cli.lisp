@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/cli.lisp — CLI argument parsing (pure Elle)
 ##
 ## Declarative argument parsing from a spec struct + argv list.
@@ -99,8 +99,8 @@
            pos-specs (positionals specs)
            args      (->array argv)
            argc      (length args)]
-      (var pi 0)
-      (var i 0)
+      (def @pi 0)
+      (def @i 0)
       (while (< i argc)
         (let [arg (args i)]
           (cond
@@ -132,7 +132,7 @@
             ## -x (short) — handles stacked flags like -vvv
             ((and (string/starts-with? arg "-") (> (length arg) 1))
              (let [chars (slice arg 1 (length arg))]
-               (var ci 0)
+               (def @ci 0)
                (while (< ci (length chars))
                  (let* [ch   (chars ci)
                         spec (find-by-short specs ch)]
@@ -198,9 +198,9 @@
                result    (init-result norm-args)
                args-arr  (->array argv)
                argc      (length args-arr)]
-          (var i 0)
-          (var found nil)
-          (var cmd-start nil)
+          (def @i 0)
+          (def @found nil)
+          (def @cmd-start nil)
           ## Scan for subcommand name
           (while (and (< i argc) (nil? found))
             (let [arg (args-arr i)]

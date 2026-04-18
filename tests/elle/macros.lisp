@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Macro desugaring tests
 #
 # Migrated from tests/property/macros.rs
@@ -517,7 +517,7 @@
   (defmacro my-swap (a b)
     `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (let [tmp 10 x 1 y 2]
+  (let [tmp 10 @x 1 @y 2]
     (my-swap x y)
     (assert (= tmp 10) "test_macro_no_capture")))
 
@@ -595,7 +595,7 @@
   (defmacro my-swap2 (a b)
     `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (let [x 1 y 2]
+  (let [@x 1 @y 2]
     (my-swap2 x y)
     (assert (= (list x y) (list 2 1)) "test_swap_actually_swaps")))
 
@@ -604,7 +604,7 @@
   (defmacro my-swap3 (a b)
     `(let [tmp ,a] (assign ,a ,b) (assign ,b tmp)))
 
-  (let [tmp 100 x 1 y 2]
+  (let [tmp 100 @x 1 @y 2]
     (my-swap3 x y)
     (assert (= (list tmp x y) (list 100 2 1)) "test_swap_with_same_named_tmp")))
 

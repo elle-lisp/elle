@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Markdown-to-HTML parser for the documentation generator
 ##
 ## Parses standard markdown: headings, code fences, tables, lists,
@@ -25,8 +25,8 @@
   "Find delimiter in text starting from character position."
   (let* [dlen (length delimiter)
          tlen (length text)]
-    (var pos start)
-    (var result nil)
+    (def @pos start)
+    (def @result nil)
     (while (< pos tlen)
       (when (and (<= (+ pos dlen) tlen)
                  (= (slice text pos (+ pos dlen)) delimiter))
@@ -37,8 +37,8 @@
 
 (defn format-links [text]
   "Convert [text](url) to HTML anchor tags."
-  (var result "")
-  (var src text)
+  (def @result "")
+  (def @src text)
   (while (not (= src ""))
     (let [bp (find-closing src 0 "[")]
       (if (nil? bp)
@@ -102,7 +102,7 @@
   (if (not (string/starts-with? line "#"))
     nil
     (let* [len (length line)]
-      (var level 0)
+      (def @level 0)
       (while (and (< level len) (= (slice line level (+ level 1)) "#"))
         (assign level (+ level 1)))
       (if (and (<= level 6)
@@ -154,11 +154,11 @@
 (defn parse [text]
   "Parse markdown text. Returns {:title str :body str :description str}."
   (let [lines (string/split text "\n")]
-    (var n (length lines))
-    (var i 0)
-    (var title nil)
-    (var desc nil)
-    (var body @"")
+    (def @n (length lines))
+    (def @i 0)
+    (def @title nil)
+    (def @desc nil)
+    (def @body @"")
 
     (while (< i n)
       (let [line (get lines i)]
@@ -171,7 +171,7 @@
           ((string/starts-with? line "```")
            (let [lang (string/trim (slice line 3 (length line)))]
              (assign i (+ i 1))
-             (var code-lines @[])
+             (def @code-lines @[])
              (while (and (< i n)
                          (not (string/starts-with? (get lines i) "```")))
                (push code-lines (get lines i))
@@ -197,7 +197,7 @@
                             (not (= (string/trim (get lines i)) ""))
                             (nil? (heading-level (get lines i)))
                             (not (string/starts-with? (get lines i) "```")))
-                   (var desc-lines @[])
+                   (def @desc-lines @[])
                    (while (and (< i n)
                                (not (= (string/trim (get lines i)) ""))
                                (not (is-block-boundary? (get lines i))))
@@ -221,7 +221,7 @@
 
           # ── Table ──
           ((string/starts-with? (string/trim line) "|")
-           (var table-lines @[])
+           (def @table-lines @[])
            (while (and (< i n)
                        (string/starts-with? (string/trim (get lines i)) "|"))
              (push table-lines (get lines i))
@@ -246,7 +246,7 @@
 
           # ── Unordered list ──
           ((is-list-item? line)
-           (var items @[])
+           (def @items @[])
            (while (and (< i n) (is-list-item? (get lines i)))
              (push items (slice (get lines i) 2 (length (get lines i))))
              (assign i (+ i 1)))
@@ -257,7 +257,7 @@
 
           # ── Blockquote ──
           ((string/starts-with? line "> ")
-           (var quote-lines @[])
+           (def @quote-lines @[])
            (while (and (< i n) (string/starts-with? (get lines i) "> "))
              (push quote-lines (slice (get lines i) 2 (length (get lines i))))
              (assign i (+ i 1)))
@@ -274,7 +274,7 @@
 
           # ── Paragraph ──
           (true
-           (var para-lines @[])
+           (def @para-lines @[])
            (while (and (< i n)
                        (not (is-block-boundary? (get lines i))))
              (push para-lines (get lines i))

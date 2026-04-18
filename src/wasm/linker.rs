@@ -768,6 +768,30 @@ pub fn dispatch_data_op(op: i32, args: &[Value]) -> (crate::value::fiber::Signal
                 (SIG_OK, Value::struct_from_sorted(vec![]))
             }
         }
+        x if x == DataOp::IntToFloat as i32 => {
+            if let Some(n) = args[0].as_int() {
+                (SIG_OK, Value::float(n as f64))
+            } else if args[0].as_float().is_some() {
+                (SIG_OK, args[0])
+            } else {
+                err(
+                    "type-error",
+                    &format!("float: expected number, got {}", args[0].type_name()),
+                )
+            }
+        }
+        x if x == DataOp::FloatToInt as i32 => {
+            if let Some(f) = args[0].as_float() {
+                (SIG_OK, Value::int(f as i64))
+            } else if args[0].as_int().is_some() {
+                (SIG_OK, args[0])
+            } else {
+                err(
+                    "type-error",
+                    &format!("integer: expected number, got {}", args[0].type_name()),
+                )
+            }
+        }
         _ => err("internal-error", &format!("rt_data_op: unknown op {op}")),
     }
 }

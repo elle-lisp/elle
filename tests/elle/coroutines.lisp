@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Coroutine Tests
 ##
 ## Migrated from tests/property/coroutines.rs (behavioral property tests).
@@ -13,7 +13,7 @@
 # sequential_yields_in_order: yields produce values in order
 (begin
   (def gen1 (fn [] (yield 1) (yield 2) (yield 3) 4))
-  (var co1 (make-coroutine gen1))
+  (def @co1 (make-coroutine gen1))
   (assert (= (coro/resume co1) 1) "sequential yields: first")
   (assert (= (coro/resume co1) 2) "sequential yields: second")
   (assert (= (coro/resume co1) 3) "sequential yields: third")
@@ -21,7 +21,7 @@
 
 (begin
   (def gen1b (fn [] (yield -100) (yield 0) (yield 100) 999))
-  (var co1b (make-coroutine gen1b))
+  (def @co1b (make-coroutine gen1b))
   (assert (= (coro/resume co1b) -100) "sequential yields: negative")
   (assert (= (coro/resume co1b) 0) "sequential yields: zero")
   (assert (= (coro/resume co1b) 100) "sequential yields: positive")
@@ -30,7 +30,7 @@
 # single yield
 (begin
   (def gen1c (fn [] (yield 42) 99))
-  (var co1c (make-coroutine gen1c))
+  (def @co1c (make-coroutine gen1c))
   (assert (= (coro/resume co1c) 42) "single yield: value")
   (assert (= (coro/resume co1c) 99) "single yield: final return"))
 
@@ -41,20 +41,20 @@
 # resume_values_flow_into_yield: resume values become yield return values
 (begin
   (def gen2 (fn []
-    (let [acc 0]
+    (let [@acc 0]
       (assign acc (+ acc (yield acc)))
       acc)))
-  (var co2 (make-coroutine gen2))
+  (def @co2 (make-coroutine gen2))
   (coro/resume co2)
   (assert (= (coro/resume co2 10) 10) "resume value flows into yield: 0 + 10 = 10"))
 
 (begin
   (def gen2b (fn []
-    (let [acc 0]
+    (let [@acc 0]
       (assign acc (+ acc (yield acc)))
       (assign acc (+ acc (yield acc)))
       acc)))
-  (var co2b (make-coroutine gen2b))
+  (def @co2b (make-coroutine gen2b))
   (coro/resume co2b)
   (coro/resume co2b 5)
   (assert (= (coro/resume co2b 3) 8) "resume values accumulate: 0 + 5 + 3 = 8"))
@@ -66,12 +66,12 @@
 # yield_in_conditional: yield inside if branches
 (begin
   (def gen3t (fn [] (if true (yield 1) (yield 2))))
-  (var co3t (make-coroutine gen3t))
+  (def @co3t (make-coroutine gen3t))
   (assert (= (coro/resume co3t) 1) "yield in conditional: true branch"))
 
 (begin
   (def gen3f (fn [] (if false (yield 1) (yield 2))))
-  (var co3f (make-coroutine gen3f))
+  (def @co3f (make-coroutine gen3f))
   (assert (= (coro/resume co3f) 2) "yield in conditional: false branch"))
 
 # ============================================================================
@@ -81,13 +81,13 @@
 # yield_in_loop: yield inside while loop
 (begin
   (def gen4 (fn []
-    (let [i 0]
+    (let [@i 0]
       (while (< i 3)
         (begin
           (yield i)
           (assign i (+ i 1))))
       i)))
-  (var co4 (make-coroutine gen4))
+  (def @co4 (make-coroutine gen4))
   (assert (= (coro/resume co4) 0) "yield in loop: i=0")
   (assert (= (coro/resume co4) 1) "yield in loop: i=1")
   (assert (= (coro/resume co4) 2) "yield in loop: i=2")
@@ -95,13 +95,13 @@
 
 (begin
   (def gen4b (fn []
-    (let [i 0]
+    (let [@i 0]
       (while (< i 5)
         (begin
           (yield i)
           (assign i (+ i 1))))
       i)))
-  (var co4b (make-coroutine gen4b))
+  (def @co4b (make-coroutine gen4b))
   (assert (= (coro/resume co4b) 0) "yield in loop 5: i=0")
   (assert (= (coro/resume co4b) 1) "yield in loop 5: i=1")
   (assert (= (coro/resume co4b) 2) "yield in loop 5: i=2")
@@ -116,7 +116,7 @@
 # coroutine_state_transitions: state machine progression
 (begin
   (def gen5 (fn [] (yield 1) (yield 2) 3))
-  (var co5 (make-coroutine gen5))
+  (def @co5 (make-coroutine gen5))
   (assert (= (string (coro/status co5)) "new") "state: initial is new")
   (coro/resume co5)
   (assert (= (string (coro/status co5)) "paused") "state: after first yield is paused")
@@ -128,7 +128,7 @@
 # single yield state transitions
 (begin
   (def gen5b (fn [] (yield 1) 2))
-  (var co5b (make-coroutine gen5b))
+  (def @co5b (make-coroutine gen5b))
   (assert (= (string (coro/status co5b)) "new") "state single: initial is new")
   (coro/resume co5b)
   (assert (= (string (coro/status co5b)) "paused") "state single: after yield is paused")
@@ -142,8 +142,8 @@
 # interleaved_coroutines: multiple coroutines interleaved
 (begin
   (def make-gen6 (fn [start] (fn [] (yield (+ start 0)) (yield (+ start 1)) (+ start 2))))
-  (var co6a (make-coroutine (make-gen6 0)))
-  (var co6b (make-coroutine (make-gen6 100)))
+  (def @co6a (make-coroutine (make-gen6 0)))
+  (def @co6b (make-coroutine (make-gen6 100)))
   (assert (= (coro/resume co6a) 0) "interleaved: co1 first yield")
   (assert (= (coro/resume co6b) 100) "interleaved: co2 first yield")
   (assert (= (coro/resume co6a) 1) "interleaved: co1 second yield")
@@ -154,9 +154,9 @@
 # three coroutines interleaved
 (begin
   (def make-gen6b (fn [start] (fn [] (yield start) (+ start 10))))
-  (var co6c (make-coroutine (make-gen6b 0)))
-  (var co6d (make-coroutine (make-gen6b 50)))
-  (var co6e (make-coroutine (make-gen6b 100)))
+  (def @co6c (make-coroutine (make-gen6b 0)))
+  (def @co6d (make-coroutine (make-gen6b 50)))
+  (def @co6e (make-coroutine (make-gen6b 100)))
   (assert (= (coro/resume co6c) 0) "interleaved 3: co1 yield")
   (assert (= (coro/resume co6d) 50) "interleaved 3: co2 yield")
   (assert (= (coro/resume co6e) 100) "interleaved 3: co3 yield")
@@ -171,13 +171,13 @@
 # yielding_closure_has_correct_signal: yield marks closure as yielding
 (begin
   (def gen7 (fn [] (yield 42) 999))
-  (var co7 (make-coroutine gen7))
+  (def @co7 (make-coroutine gen7))
   (assert (= (coro/resume co7) 42) "signal threading: first resume yields value")
   (assert (= (string (coro/status co7)) "paused") "signal threading: status is paused after yield"))
 
 (begin
   (def gen7b (fn [] (yield -100) 0))
-  (var co7b (make-coroutine gen7b))
+  (def @co7b (make-coroutine gen7b))
   (assert (= (coro/resume co7b) -100) "signal threading: negative yield value")
   (assert (= (string (coro/status co7b)) "paused") "signal threading: paused after negative yield"))
 
@@ -187,12 +187,12 @@
 
 # test_simple_yield
 (begin
-  (var co (make-coroutine (fn [] (yield 42))))
+  (def @co (make-coroutine (fn [] (yield 42))))
   (assert (= (coro/resume co) 42) "simple yield"))
 
 # test_multiple_yields
 (begin
-  (var co (make-coroutine (fn [] (yield 1) (yield 2) (yield 3) 4)))
+  (def @co (make-coroutine (fn [] (yield 1) (yield 2) (yield 3) 4)))
   (assert (= (coro/resume co) 1) "multiple yields: first")
   (assert (= (coro/resume co) 2) "multiple yields: second")
   (assert (= (coro/resume co) 3) "multiple yields: third")
@@ -200,7 +200,7 @@
 
 # test_yield_with_resume_value
 (begin
-  (var co (make-coroutine (fn [] (+ 10 (yield 1)))))
+  (def @co (make-coroutine (fn [] (+ 10 (yield 1)))))
   (assert (= (coro/resume co) 1) "yield with resume value: first")
   (assert (= (coro/resume co 5) 15) "yield with resume value: second"))
 
@@ -210,18 +210,18 @@
 
 # test_coroutine_status_created
 (begin
-  (var co (make-coroutine (fn [] 42)))
+  (def @co (make-coroutine (fn [] 42)))
   (assert (= (string (coro/status co)) "new") "status: new"))
 
 # test_coroutine_status_done
 (begin
-  (var co (make-coroutine (fn [] 42)))
+  (def @co (make-coroutine (fn [] 42)))
   (coro/resume co)
   (assert (= (string (coro/status co)) "dead") "status: dead"))
 
 # test_coroutine_done_predicate
 (begin
-  (var co (make-coroutine (fn [] 42)))
+  (def @co (make-coroutine (fn [] 42)))
   (assert (not (coro/done? co)) "done predicate: initially false")
   (coro/resume co)
   (assert (coro/done? co) "done predicate: true after resume"))
@@ -229,13 +229,13 @@
 # test_coroutine_status_suspended_after_yield
 (begin
   (def gen (fn [] (yield 1) (yield 2)))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (coro/resume co)
   (assert (= (string (coro/status co)) "paused") "status: paused after yield"))
 
 # test_coroutine_value_after_yield
 (begin
-  (var co (make-coroutine (fn [] (yield 42))))
+  (def @co (make-coroutine (fn [] (yield 42))))
   (coro/resume co)
   (assert (= (coro/value co) 42) "value after yield"))
 
@@ -256,7 +256,7 @@
   (def gen (fn []
     (yield 1)
     (yield 2)))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 1) "yielding function detected"))
 
 # test_calling_yielding_function_propagates_effect
@@ -266,7 +266,7 @@
   (def g (fn []
     (f)
     (yield 2)))
-  (var co (make-coroutine g))
+  (def @co (make-coroutine g))
   (assert (= (coro/resume co) 1) "signal propagation: first yield"))
 
 # ============================================================================
@@ -277,21 +277,21 @@
 (begin
   (def inner-gen (fn [] (yield 10)))
   (def outer-gen (fn []
-    (var inner-co (make-coroutine inner-gen))
+    (def @inner-co (make-coroutine inner-gen))
     (yield (coro/resume inner-co))))
-  (var co (make-coroutine outer-gen))
+  (def @co (make-coroutine outer-gen))
   (assert (= (coro/resume co) 10) "nested coroutines"))
 
 # test_nested_coroutines_multiple_levels
 (begin
   (def level3 (fn [] (yield 3)))
   (def level2 (fn []
-    (var co3 (make-coroutine level3))
+    (def @co3 (make-coroutine level3))
     (yield (coro/resume co3))))
   (def level1 (fn []
-    (var co2 (make-coroutine level2))
+    (def @co2 (make-coroutine level2))
     (yield (coro/resume co2))))
-  (var co1 (make-coroutine level1))
+  (def @co1 (make-coroutine level1))
   (assert (= (coro/resume co1) 3) "nested coroutines: 3 levels"))
 
 # ============================================================================
@@ -301,19 +301,19 @@
 # test_coroutine_with_captured_variables
 (begin
   (let [x 10]
-    (var co (make-coroutine (fn [] (yield x))))
+    (def @co (make-coroutine (fn [] (yield x))))
     (assert (= (coro/resume co) 10) "captured variables")))
 
 # test_coroutine_with_multiple_captured_variables
 (begin
   (let [x 10 y 20]
-    (var co (make-coroutine (fn [] (yield (+ x y)))))
+    (def @co (make-coroutine (fn [] (yield (+ x y)))))
     (assert (= (coro/resume co) 30) "multiple captured variables")))
 
 # test_coroutine_captures_mutable_state
 (begin
   (let [counter (box 0)]
-    (var co (make-coroutine (fn []
+    (def @co (make-coroutine (fn []
       (rebox counter (+ (unbox counter) 1))
       (yield (unbox counter)))))
     (assert (= (coro/resume co) 1) "mutable state capture")))
@@ -325,7 +325,7 @@
       (yield start)
       (yield (+ start 1))
       (yield (+ start 2)))))
-  (var co-100 (make-coroutine (make-counter 100)))
+  (def @co-100 (make-coroutine (make-counter 100)))
   (assert (= (coro/resume co-100) 100) "issue #258: first yield")
   (assert (= (coro/resume co-100) 101) "issue #258: second yield")
   (assert (= (coro/resume co-100) 102) "issue #258: third yield"))
@@ -341,8 +341,8 @@
       (yield start)
       (yield (+ start 1))
       (yield (+ start 2)))))
-  (var co-100 (make-coroutine (make-counter 100)))
-  (var co-200 (make-coroutine (make-counter 200)))
+  (def @co-100 (make-coroutine (make-counter 100)))
+  (def @co-200 (make-coroutine (make-counter 200)))
   (assert (= (coro/resume co-100) 100) "interleaved #259: co1 first")
   (assert (= (coro/resume co-200) 200) "interleaved #259: co2 first")
   (assert (= (coro/resume co-100) 101) "interleaved #259: co1 second")
@@ -354,8 +354,8 @@
 (begin
   (def gen1 (fn [] (yield 'a) (yield 'b)))
   (def gen2 (fn [] (yield 'x) (yield 'y)))
-  (var co1 (make-coroutine gen1))
-  (var co2 (make-coroutine gen2))
+  (def @co1 (make-coroutine gen1))
+  (def @co2 (make-coroutine gen2))
   (assert (= (coro/resume co1) 'a) "independent state: co1 first")
   (assert (= (coro/resume co2) 'x) "independent state: co2 first")
   (assert (= (coro/resume co1) 'b) "independent state: co1 second")
@@ -365,10 +365,10 @@
 (begin
   (def inner-gen (fn [] (yield 10) (yield 20)))
   (def outer-gen (fn []
-    (var inner-co (make-coroutine inner-gen))
+    (def @inner-co (make-coroutine inner-gen))
     (yield (+ 1 (coro/resume inner-co)))
     (yield (+ 1 (coro/resume inner-co)))))
-  (var outer-co (make-coroutine outer-gen))
+  (def @outer-co (make-coroutine outer-gen))
   (assert (= (coro/resume outer-co) 11) "nested resume from coroutine: first")
   (assert (= (coro/resume outer-co) 21) "nested resume from coroutine: second"))
 
@@ -384,7 +384,7 @@
 
 # test_coroutine_predicate
 (begin
-  (var co (make-coroutine (fn [] 42)))
+  (def @co (make-coroutine (fn [] 42)))
   (assert (coro? co) "coroutine predicate: true for coroutine")
   (assert (not (coro? 42)) "coroutine predicate: false for int")
   (assert (not (coro? (fn [] 42))) "coroutine predicate: false for function"))
@@ -401,12 +401,12 @@
       (begin
         (yield n)
         (countdown (- n 1))))))
-  (var co (make-coroutine (fn [] (countdown 3))))
+  (def @co (make-coroutine (fn [] (countdown 3))))
   (assert (= (coro/resume co) 3) "recursion in coroutine"))
 
 # test_coroutine_with_higher_order_functions
 (begin
-  (var co (make-coroutine (fn []
+  (def @co (make-coroutine (fn []
     (yield (map (fn (x) (* x 2)) (list 1 2 3))))))
   (coro/resume co)
   (assert true "higher-order functions in coroutine"))
@@ -417,24 +417,24 @@
 
 # test_coroutine_with_no_yield
 (begin
-  (var co (make-coroutine (fn [] 42)))
+  (def @co (make-coroutine (fn [] 42)))
   (assert (= (coro/resume co) 42) "no yield: returns value"))
 
 # test_coroutine_with_nil_yield
 (begin
-  (var co (make-coroutine (fn [] (yield nil))))
+  (def @co (make-coroutine (fn [] (yield nil))))
   (assert (= (coro/resume co) nil) "nil yield"))
 
 # test_coroutine_with_complex_yielded_value
 (begin
-  (var co (make-coroutine (fn []
+  (def @co (make-coroutine (fn []
     (yield (list 1 2 3)))))
   (coro/resume co)
   (assert true "complex yielded value"))
 
 # test_coroutine_with_empty_body
 (begin
-  (var co (make-coroutine (fn [] nil)))
+  (def @co (make-coroutine (fn [] nil)))
   (assert (= (coro/resume co) nil) "empty body"))
 
 # ============================================================================
@@ -444,7 +444,7 @@
 # test_cps_simple_yield
 (begin
   (def gen (fn [] (yield 42)))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 42) "CPS: simple yield"))
 
 # test_cps_yield_in_if
@@ -453,7 +453,7 @@
     (if true
       (yield 1)
       (yield 2))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 1) "CPS: yield in if true"))
 
 # test_cps_yield_in_else
@@ -462,7 +462,7 @@
     (if false
       (yield 1)
       (yield 2))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 2) "CPS: yield in if false"))
 
 # test_cps_yield_in_begin
@@ -471,14 +471,14 @@
     (begin
       (yield 1)
       (yield 2))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 1) "CPS: yield in begin"))
 
 # test_cps_yield_with_computation
 (begin
   (def gen (fn []
     (yield (+ 10 20 12))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 42) "CPS: yield with computation"))
 
 # test_cps_yield_in_let
@@ -486,28 +486,28 @@
   (def gen (fn []
     (let [x 10]
       (yield x))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 10) "CPS: yield in let"))
 
 # test_cps_yield_with_captured_var
 (begin
   (let [x 42]
     (def gen (fn [] (yield x)))
-    (var co (make-coroutine gen))
+    (def @co (make-coroutine gen))
     (assert (= (coro/resume co) 42) "CPS: yield with captured var")))
 
 # test_cps_yield_in_and
 (begin
   (def gen (fn []
     (and true (yield 42))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 42) "CPS: yield in and"))
 
 # test_cps_yield_in_or
 (begin
   (def gen (fn []
     (or false (yield 42))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 42) "CPS: yield in or"))
 
 # test_cps_yield_in_cond
@@ -517,7 +517,7 @@
       (false (yield 1))
       (true (yield 2))
       (else (yield 3)))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (= (coro/resume co) 2) "CPS: yield in cond"))
 
 # ============================================================================
@@ -526,15 +526,15 @@
 
 # test_coroutine_with_large_yielded_value
 (begin
-  (var co (make-coroutine (fn []
+  (def @co (make-coroutine (fn []
     (yield (list 1 2 3 4 5 6 7 8 9 10)))))
   (coro/resume co)
   (assert true "large yielded value"))
 
 # test_multiple_coroutines_independent
 (begin
-  (var co1 (make-coroutine (fn [] (yield 1))))
-  (var co2 (make-coroutine (fn [] (yield 2))))
+  (def @co1 (make-coroutine (fn [] (yield 1))))
+  (def @co2 (make-coroutine (fn [] (yield 2))))
   (assert (= (coro/resume co1) 1) "multiple independent: co1")
   (assert (= (coro/resume co2) 2) "multiple independent: co2"))
 
@@ -545,7 +545,7 @@
 # test_yield_quoted_symbol_issue_260
 (begin
   (def gen-sym (fn [] (yield 'a) (yield 'b) (yield 'c)))
-  (var co (make-coroutine gen-sym))
+  (def @co (make-coroutine gen-sym))
   (assert (= (coro/resume co) 'a) "quoted symbol: first")
   (assert (= (coro/resume co) 'b) "quoted symbol: second")
   (assert (= (coro/resume co) 'c) "quoted symbol: third"))
@@ -553,8 +553,8 @@
 # test_yield_quoted_symbol_is_value_not_variable
 (begin
   (def gen (fn [] (yield 'test-symbol)))
-  (var co (make-coroutine gen))
-  (var result (coro/resume co))
+  (def @co (make-coroutine gen))
+  (def @result (coro/resume co))
   (assert (symbol? result) "quoted symbol is symbol value"))
 
 # test_yield_various_literal_types
@@ -565,7 +565,7 @@
     (yield "string")
     (yield true)
     (yield nil)))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (assert (symbol? (coro/resume co)) "literal types: symbol")
   (assert (number? (coro/resume co)) "literal types: number")
   (assert (string? (coro/resume co)) "literal types: string")
@@ -575,7 +575,7 @@
 # test_yield_quoted_list
 (begin
   (def gen (fn [] (yield '(1 2 3))))
-  (var co (make-coroutine gen))
+  (def @co (make-coroutine gen))
   (coro/resume co)
   (assert true "quoted list yield"))
 
@@ -585,25 +585,25 @@
 
 # test_yield_with_intermediate_values_on_stack
 (begin
-  (var co (make-coroutine (fn [] (+ 1 (yield 2) 3))))
+  (def @co (make-coroutine (fn [] (+ 1 (yield 2) 3))))
   (assert (= (coro/resume co) 2) "intermediate values: first yield")
   (assert (= (coro/resume co 10) 14) "intermediate values: 1+10+3=14"))
 
 # test_yield_with_multiple_intermediate_values
 (begin
-  (var co (make-coroutine (fn [] (+ 1 2 (yield 3) 4 5))))
+  (def @co (make-coroutine (fn [] (+ 1 2 (yield 3) 4 5))))
   (assert (= (coro/resume co) 3) "multiple intermediate: first yield")
   (assert (= (coro/resume co 100) 112) "multiple intermediate: 1+2+100+4+5=112"))
 
 # test_yield_in_nested_call_with_intermediate_values
 (begin
-  (var co (make-coroutine (fn [] (* 2 (+ 1 (yield 5) 3)))))
+  (def @co (make-coroutine (fn [] (* 2 (+ 1 (yield 5) 3)))))
   (assert (= (coro/resume co) 5) "nested intermediate: first yield")
   (assert (= (coro/resume co 10) 28) "nested intermediate: 2*(1+10+3)=28"))
 
 # test_multiple_yields_with_intermediate_values
 (begin
-  (var co (make-coroutine (fn []
+  (def @co (make-coroutine (fn []
     (+ (+ 1 (yield 2) 3)
        (+ 4 (yield 5) 6)))))
   (assert (= (coro/resume co) 2) "multiple yields intermediate: first")
@@ -636,7 +636,7 @@
 
 # test_coroutine_resume_silent_closure_completes_immediately
 (begin
-  (var co (make-coroutine (fn [] (+ 1 2 3))))
+  (def @co (make-coroutine (fn [] (+ 1 2 3))))
   (assert (= (coro/resume co) 6) "silent closure completes: value")
   (assert (= (string (coro/status co)) "dead") "silent closure completes: status"))
 
@@ -649,13 +649,13 @@
   (def a (fn (x) (yield (* x 2))))
   (def b (fn (x) (+ (a x) 1)))
   (def c (fn (x) (+ (b x) 1)))
-  (var co (make-coroutine (fn [] (c 10))))
+  (def @co (make-coroutine (fn [] (c 10))))
   (assert (= (coro/resume co) 20) "three call levels: first yield")
   (assert (= (coro/resume co 20) 22) "three call levels: final return"))
 
 # test_yield_in_tail_position
 (begin
-  (var co (make-coroutine (fn []
+  (def @co (make-coroutine (fn []
     (yield 1)
     (yield 2))))
   (assert (= (coro/resume co) 1) "tail position: first")
@@ -675,7 +675,7 @@
   (def level1 (fn []
     (yield 1)
     (level2)))
-  (var co (make-coroutine level1))
+  (def @co (make-coroutine level1))
   (assert (= (coro/resume co) 1) "deep call chain: first")
   (assert (= (coro/resume co) 2) "deep call chain: second")
   (assert (= (coro/resume co) 3) "deep call chain: third")

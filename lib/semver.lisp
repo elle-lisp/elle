@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/semver.lisp — Semantic versioning (pure Elle)
 ##
 ## Implements semver 2.0.0 parsing, comparison, and requirement matching.
@@ -19,7 +19,7 @@
       (error {:error :semver-error :message (string ctx ": empty version component")}))
     (when (and (> (length s) 1) (string/starts-with? s "0"))
       (error {:error :semver-error :message (string ctx ": leading zero in \"" s "\"")}))
-    (let [n (integer s)]
+    (let [n (parse-int s)]
       (when (nil? n)
         (error {:error :semver-error :message (string ctx ": non-numeric \"" s "\"")}))
       (when (< n 0)
@@ -65,7 +65,7 @@
                 (if (>= ai (length as)) -1
                   (if (>= bi (length bs)) 1
                     (let* [av (as ai) bv (bs bi)
-                           an (integer av) bn (integer bv)
+                           an (parse-int av) bn (parse-int bv)
                            r (match [an bn]
                                 [[nil nil] (compare av bv)]
                                 [[nil _]   1]

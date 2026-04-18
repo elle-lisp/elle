@@ -305,6 +305,13 @@ impl WasmEmitter {
             LirInstr::PopParamFrame => {
                 f.instruction(&Instruction::Call(FN_RT_POP_PARAM));
             }
+            LirInstr::Convert { dst, op, src } => {
+                let op_code = match op {
+                    crate::lir::ConvOp::IntToFloat => OP_INT_TO_FLOAT,
+                    crate::lir::ConvOp::FloatToInt => OP_FLOAT_TO_INT,
+                };
+                self.emit_data_op1(f, *dst, op_code, *src);
+            }
             LirInstr::CheckSignalBound { .. } => {}
             LirInstr::StructRest {
                 dst,

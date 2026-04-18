@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## String Operation Law Tests
 ##
 ## Migrated from tests/property/strings.rs (input-invariant laws only).
@@ -161,20 +161,20 @@
 # Conversion roundtrips (migrated from property tests)
 # ============================================================================
 
-# number_to_string_roundtrip: number->string->integer roundtrip
-(assert (= (integer (number->string 42)) 42) "number->string->integer roundtrip: 42")
-(assert (= (integer (number->string -100)) -100) "number->string->integer roundtrip: -100")
-(assert (= (integer (number->string 0)) 0) "number->string->integer roundtrip: 0")
+# number_to_string_roundtrip: number->string->parse-int roundtrip
+(assert (= (parse-int (number->string 42)) 42) "number->string->parse-int roundtrip: 42")
+(assert (= (parse-int (number->string -100)) -100) "number->string->parse-int roundtrip: -100")
+(assert (= (parse-int (number->string 0)) 0) "number->string->parse-int roundtrip: 0")
 
-# string_to_integer_roundtrip: integer from string
-(assert (= (integer "42") 42) "integer from string: 42")
-(assert (= (integer "-100") -100) "integer from string: -100")
-(assert (= (integer "0") 0) "integer from string: 0")
+# string_to_integer_roundtrip: parse-int from string
+(assert (= (parse-int "42") 42) "parse-int from string: 42")
+(assert (= (parse-int "-100") -100) "parse-int from string: -100")
+(assert (= (parse-int "0") 0) "parse-int from string: 0")
 
 # string_to_integer_invalid_returns_error: non-numeric string errors
-(let [[ok? _] (protect ((fn [] (integer "abc"))))] (assert (not ok?) "integer from string errors on abc"))
-(let [[ok? _] (protect ((fn [] (integer "hello"))))] (assert (not ok?) "integer from string errors on hello"))
-(let [[ok? _] (protect ((fn [] (integer "xyz"))))] (assert (not ok?) "integer from string errors on xyz"))
+(let [[ok? _] (protect ((fn [] (parse-int "abc"))))] (assert (not ok?) "parse-int from string errors on abc"))
+(let [[ok? _] (protect ((fn [] (parse-int "hello"))))] (assert (not ok?) "parse-int from string errors on hello"))
+(let [[ok? _] (protect ((fn [] (parse-int "xyz"))))] (assert (not ok?) "parse-int from string errors on xyz"))
 
 # ============================================================================
 # Index/get operations (migrated from property tests)

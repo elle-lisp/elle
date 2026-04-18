@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Mandelbrot Explorer — GTK4 + Cairo, GPU-accelerated with CPU fallback
 #
@@ -57,18 +57,18 @@
 (def BPP       4)
 (def STRIDE    (* WIDTH BPP))
 (def NPIXELS   (* WIDTH HEIGHT))
-(def NCPU      (integer (or (sys/env "NCPU") "16")))
+(def NCPU      (parse-int (or (sys/env "NCPU") "16")))
 (def BLACK     (bit/shl 0xFF 24))
 (def LN2       (math/log 2.0))
 
 # ── Mutable state ────────────────────────────────────────────────
 
-(var view @{:cx -0.5  :cy 0.0  :scale 3.5  :iter (if gpu-ctx 256 32)})
-(var da-widget  nil)
-(var app-window nil)
-(var quit?      false)
-(var actual-w   WIDTH)
-(var actual-h   HEIGHT)
+(def @view @{:cx -0.5  :cy 0.0  :scale 3.5  :iter (if gpu-ctx 256 32)})
+(def @da-widget nil)
+(def @app-window nil)
+(def @quit? false)
+(def @actual-w WIDTH)
+(def @actual-h HEIGHT)
 
 # ── Viewport ─────────────────────────────────────────────────────
 
@@ -201,7 +201,7 @@
 # ── CPU backend (thread pool) ────────────────────────────────────
 
 (defn compute-row [buf ci x-min dx max-iter]
-  (var px 0)
+  (def @px 0)
   (while (< px WIDTH)
     (def cr (+ x-min (* (float px) dx)))
     (def q (+ (* (- cr 0.25) (- cr 0.25)) (* ci ci)))
@@ -210,7 +210,7 @@
               (<= (+ (* (+ cr 1.0) (+ cr 1.0)) (* ci ci)) 0.0625))
         BLACK
         (begin
-          (var zr 0.0) (var zi 0.0) (var zr2 0.0) (var zi2 0.0) (var iter 0)
+          (def @zr 0.0) (def @zi 0.0) (def @zr2 0.0) (def @zi2 0.0) (def @iter 0)
           (while (and (< iter max-iter) (<= (+ zr2 zi2) 4.0))
             (assign zi  (+ (* 2.0 zr zi) ci))
             (assign zr  (+ (- zr2 zi2) cr))
@@ -229,8 +229,8 @@
 (defn recv-blocking [rx]
   (let [sel (chan/select @[rx])] (sel 1)))
 
-(var work-txs @[])
-(var done-rx  nil)
+(def @work-txs @[])
+(def @done-rx nil)
 
 (defn init-workers []
   (def [dtx drx] (chan))
@@ -244,7 +244,7 @@
         (match (recv-blocking wrx)
           ([paddr y-min dy x-min dx max-iter y-start y-end]
             (def pbuf (ptr/from-int paddr))
-            (var py y-start)
+            (def @py y-start)
             (while (< py y-end)
               (compute-row buf (+ y-min (* (float py) dy)) x-min dx max-iter)
               (ffi/write (ptr/add pbuf (* py STRIDE)) row-type buf)
@@ -256,7 +256,7 @@
   (def vp (viewport))
   (def paddr (ptr/to-int pixel-buf))
   (def rows-per (/ HEIGHT NCPU))
-  (var t 0)
+  (def @t 0)
   (while (< t NCPU)
     (def y-start (* t rows-per))
     (def y-end (if (= t (- NCPU 1)) HEIGHT (* (+ t 1) rows-per)))

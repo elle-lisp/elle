@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Regression test: upvalue indices must be u16, not u8.
 #
 # When a closure captures more than 255 variables, indices above 255
@@ -70,7 +70,7 @@
   # Before the fix, the mutable local generated StoreUpvalue with a u8 index
   # that wrapped around, corrupting the wrong slot.
   (defn test-fn [x &named flag]
-    (var result nil)
+    (def @result nil)
     (when flag
       (assign result (+ d0 d255 d259 x)))
     result)

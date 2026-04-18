@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/dns.lisp — Pure Elle DNS client (RFC 1035)
 ##
 ## Loaded via: (def dns ((import-file "lib/dns.lisp")))
@@ -77,11 +77,11 @@
   "Decode a DNS wire-format name starting at offset.
    Returns {:name string :offset next-byte-after-name}.
    Handles compression pointers (0xC0 | offset)."
-  (var parts @[])
-  (var pos offset)
-  (var jumped false)
-  (var return-offset nil)
-  (var safety 0)
+  (def @parts @[])
+  (def @pos offset)
+  (def @jumped false)
+  (def @return-offset nil)
+  (def @safety 0)
   (forever
     (when (>= safety 128)
       (error {:error :dns-format-error
@@ -178,8 +178,8 @@
 
 (defn format-ipv6 [buf offset]
   "Format 16 bytes at offset as colon-separated IPv6 address (full form)."
-  (var groups @[])
-  (var i 0)
+  (def @groups @[])
+  (def @i 0)
   (while (< i 8)
     (let [val (read-u16 buf (+ offset (* i 2)))]
       (push groups (number->string val 16)))
@@ -189,9 +189,9 @@
 (defn parse-records [buf offset count]
   "Parse 'count' resource records starting at offset.
    Returns {:records [...] :offset next-offset}."
-  (var records @[])
-  (var pos offset)
-  (var i 0)
+  (def @records @[])
+  (def @pos offset)
+  (def @i 0)
   (while (< i count)
     (let* [name-result (decode-name buf pos)
            name name-result:name
@@ -253,7 +253,7 @@
 
 (defn parse-resolv-conf [text]
   "Parse /etc/resolv.conf and return a list of nameserver IP strings."
-  (var servers @[])
+  (def @servers @[])
   (each line in (string/split text "\n")
     (let [trimmed (string/trim line)]
       (when (string/starts-with? trimmed "nameserver")
@@ -277,7 +277,7 @@
 
 ## ── Transaction ID generation ─────────────────────────────────────────
 
-(var next-txid 1)
+(def @next-txid 1)
 
 (defn gen-txid []
   "Generate a monotonically increasing 16-bit transaction ID."
@@ -332,8 +332,8 @@
 
 (defn query-with-retries [server name qtype timeout retries]
   "Query with retries. Returns parsed response or signals error."
-  (var last-err nil)
-  (var attempt 0)
+  (def @last-err nil)
+  (def @attempt 0)
   (while (< attempt retries)
     (let [[ok? result] (protect (do-query server name qtype timeout))]
       (if ok?
@@ -353,9 +353,9 @@
 
 (defn resolve-type [name qtype server timeout retries]
   "Resolve a name to records of a specific type, following CNAMEs."
-  (var current-name name)
-  (var depth 0)
-  (var all-records @[])
+  (def @current-name name)
+  (def @depth 0)
+  (def @all-records @[])
   (forever
     (when (>= depth MAX-CNAME-DEPTH)
       (error {:error :dns-error

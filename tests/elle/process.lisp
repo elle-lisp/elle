@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/process.lisp — Tests for lib/process.lisp
 ##
 ## Run: ./target/debug/elle tests/elle/process.lisp
@@ -35,7 +35,7 @@
 
 (process:start (fn ()
   (let [me (process:self)]
-    (var make-forwarder (fn [next]
+    (def @make-forwarder (fn [next]
       (fn ()
         (let [msg (process:recv)]
           (process:send next (+ msg 1))))))
@@ -55,13 +55,13 @@
 
 (process:start (fn ()
   (let [me (process:self)]
-    (var i 0)
+    (def @i 0)
     (while (< i 5)
       (let [id i]
         (process:spawn (fn () (process:send me id))))
       (assign i (+ i 1)))
 
-    (var total 0)
+    (def @total 0)
     (assign i 0)
     (while (< i 5)
       (assign total (+ total (process:recv)))
@@ -424,7 +424,7 @@
 # ============================================================================
 
 (let [sched (process:make-scheduler :backend backend)]
-  (var got-msg nil)
+  (def @got-msg nil)
   (process:inject sched 0 :external-msg)  # inject before any process exists — harmless
 
   (process:run sched (fn ()
@@ -454,9 +454,9 @@
     (process:spawn (fn ()
       (process:send me :b-done)))
 
-    (var got-a false)
-    (var got-b false)
-    (var remaining 2)
+    (def @got-a false)
+    (def @got-b false)
+    (def @remaining 2)
     (while (> remaining 0)
       (match (process:recv)
         (:a-done (assign got-a true) (assign remaining (- remaining 1)))

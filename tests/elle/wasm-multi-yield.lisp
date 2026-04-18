@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Test: multiple yielding calls in the same function
 # Regression test for the WASM drive_resume_chain stale-frame bug.
 # When a resumed WASM closure yields again, old outer frames must
@@ -24,7 +24,7 @@
   (assert (= result 99) "three-yields: expected 99"))
 
 # Yielding call + mutation via LBox + yielding call
-(defn yield-mutate-yield [n]
+(defn yield-mutate-yield [@n]
   (let [inc (fn [] (assign n (+ n 1)))]
     (println "before:" n)
     (inc)

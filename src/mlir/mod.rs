@@ -11,11 +11,12 @@ mod spirv;
 
 pub use cache::MlirCache;
 pub use execute::mlir_call;
-pub use lower::lower_to_mlir;
+pub use lower::{check_slot_types, lower_to_mlir, ScalarType};
 pub use spirv::lower_to_spirv;
 
 #[cfg(test)]
 mod tests {
+    use super::lower;
     use super::*;
     use crate::lir::*;
     use crate::signals::Signal;
@@ -254,6 +255,204 @@ mod tests {
         assert_eq!(mlir_call(&make_abs(), &[0]).unwrap(), 0);
     }
 
+    // ── Mixed-type slot rejection ─────────────────────────────────
+
+    /// Build LIR: fn(x) { var s = 0; if x > 0 then s = 1.5 else s = 2; return s }
+    /// This has a mixed-type local slot (Int in one branch, Float in another).
+    fn make_mixed_type_slot() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("mixed_slot".to_string());
+        func.signal = Signal::errors();
+        func.num_locals = 1;
+
+        // Block 0: entry — load param, store 0 to slot, compare, branch
+        let mut b0 = BasicBlock::new(Label(0));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(1),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Compare {
+                dst: Reg(2),
+                op: CmpOp::Gt,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        b0.terminator = SpannedTerminator::new(
+            Terminator::Branch {
+                cond: Reg(2),
+                then_label: Label(1),
+                else_label: Label(2),
+            },
+            s(),
+        );
+
+        // Block 1: then — store 1.5 (Float) to slot, jump to merge
+        let mut b1 = BasicBlock::new(Label(1));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(3),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        b1.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(3),
+            },
+            s(),
+        ));
+        b1.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
+
+        // Block 2: else — store 2 (Int) to slot, jump to merge
+        let mut b2 = BasicBlock::new(Label(2));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(4),
+                value: LirConst::Int(2),
+            },
+            s(),
+        ));
+        b2.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(4),
+            },
+            s(),
+        ));
+        b2.terminator = SpannedTerminator::new(Terminator::Jump(Label(3)), s());
+
+        // Block 3: merge — load slot, return
+        let mut b3 = BasicBlock::new(Label(3));
+        b3.instructions.push(SpannedInstr::new(
+            LirInstr::LoadLocal {
+                dst: Reg(5),
+                slot: 0,
+            },
+            s(),
+        ));
+        b3.terminator = SpannedTerminator::new(Terminator::Return(Reg(5)), s());
+
+        func.blocks = vec![b0, b1, b2, b3];
+        func.num_regs = 6;
+        func
+    }
+
+    #[test]
+    fn test_reject_mixed_type_slot() {
+        let func = make_mixed_type_slot();
+        // Use check_slot_types directly to avoid partially constructing
+        // MLIR ops (melior cleanup of partial modules can crash).
+        let err = check_slot_types(&func, 0, 0, 0).unwrap_err();
+        assert!(
+            err.contains("mixed-type local slot"),
+            "should reject cross-block mixed-type slot: {}",
+            err
+        );
+    }
+
+    /// Build LIR: fn(x) { var s = 0; s = 1.5; return s }
+    /// Sequential reassignment within a single block — should succeed.
+    fn make_sequential_reassign() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("seq_reassign".to_string());
+        func.signal = Signal::errors();
+        func.num_locals = 1;
+
+        let mut b0 = BasicBlock::new(Label(0));
+        // Load param (unused, just for arity)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        // var s = 0 (Int)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(1),
+            },
+            s(),
+        ));
+        // s = 1.5 (Float — same block, sequential reassignment)
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::StoreLocal {
+                slot: 0,
+                src: Reg(2),
+            },
+            s(),
+        ));
+        // Load and return s
+        b0.instructions.push(SpannedInstr::new(
+            LirInstr::LoadLocal {
+                dst: Reg(3),
+                slot: 0,
+            },
+            s(),
+        ));
+        b0.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
+
+        func.blocks = vec![b0];
+        func.num_regs = 4;
+        func
+    }
+
+    #[test]
+    fn test_accept_sequential_reassign() {
+        let func = make_sequential_reassign();
+        // Should lower successfully — sequential reassignment in same block is fine.
+        let mlir_text = lower_to_mlir(&func).expect("sequential reassignment should succeed");
+        assert!(
+            mlir_text.contains("func.func"),
+            "should produce valid MLIR: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_execute_sequential_reassign() {
+        let func = make_sequential_reassign();
+        let result = mlir_call(&func, &[0]).expect("execution should succeed");
+        // s was reassigned from 0 (Int) to 1.5 (Float); result is f64 bits
+        assert_eq!(result, 1.5f64.to_bits() as i64);
+    }
+
     // ── SPIR-V tests ─────────────────────────────────────────────
 
     #[test]
@@ -290,6 +489,220 @@ mod tests {
         assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
     }
 
+    /// Build LIR: fn(x) { return x + 1.5 }  (float constant + mixed promotion)
+    fn make_float_add() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("float_add".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Float(1.5),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(2),
+                op: BinOp::Add,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_spirv_float_add() {
+        let func = make_float_add();
+        let spirv_bytes = lower_to_spirv(&func, 256).expect("float SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
+    /// Build LIR: fn(x) { return 2.0 * 3.0 }  (pure float arithmetic)
+    fn make_float_mul() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("float_mul".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Float(2.0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(2),
+                value: LirConst::Float(3.0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(3),
+                op: BinOp::Mul,
+                lhs: Reg(1),
+                rhs: Reg(2),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(3)), s());
+        func.blocks.push(block);
+        func.num_regs = 4;
+        func
+    }
+
+    #[test]
+    fn test_spirv_float_mul() {
+        let func = make_float_mul();
+        let spirv_bytes =
+            lower_to_spirv(&func, 256).expect("pure-float SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
+    /// Build LIR: fn(x) { return float(x) }
+    fn make_int_to_float() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("int_to_float".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Convert {
+                dst: Reg(1),
+                op: ConvOp::IntToFloat,
+                src: Reg(0),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), s());
+        func.blocks.push(block);
+        func.num_regs = 2;
+        func
+    }
+
+    /// Build LIR: fn(x) { return int(x) }
+    fn make_float_to_int() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("float_to_int".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Convert {
+                dst: Reg(1),
+                op: ConvOp::FloatToInt,
+                src: Reg(0),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(1)), s());
+        func.blocks.push(block);
+        func.num_regs = 2;
+        func
+    }
+
+    #[test]
+    fn test_lower_int_to_float() {
+        let mlir_text = lower_to_mlir(&make_int_to_float()).expect("lowering should succeed");
+        assert!(
+            mlir_text.contains("arith.sitofp"),
+            "should contain arith.sitofp: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_lower_float_to_int() {
+        // Float arg via param_types bitmask
+        let context = lower::create_context();
+        let (module, _) = lower::lower_to_module(&context, &make_float_to_int(), 0, 0, 1)
+            .expect("lowering should succeed");
+        let mlir_text = module.as_operation().to_string();
+        assert!(
+            mlir_text.contains("arith.fptosi"),
+            "should contain arith.fptosi: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_execute_int_to_float() {
+        let result = mlir_call(&make_int_to_float(), &[42]).expect("execution should succeed");
+        assert_eq!(result, 42.0f64.to_bits() as i64);
+    }
+
+    #[test]
+    fn test_execute_float_to_int() {
+        let func = make_float_to_int();
+        let bits = 3.7f64.to_bits() as i64;
+        // Need to call with param_types=1 to mark arg as float
+        let context = lower::create_context();
+        let (mut module, _) =
+            lower::lower_to_module(&context, &func, 0, 0, 1).expect("lowering should succeed");
+        let pm = melior::pass::PassManager::new(&context);
+        pm.add_pass(melior::pass::conversion::create_to_llvm());
+        pm.run(&mut module).expect("LLVM conversion should succeed");
+        let engine = melior::ExecutionEngine::new(&module, 2, &[], false, false);
+        let mut arg: i64 = bits;
+        let mut result: i64 = 0;
+        unsafe {
+            engine
+                .invoke_packed(
+                    "float_to_int",
+                    &mut [
+                        &mut arg as *mut i64 as *mut (),
+                        &mut result as *mut i64 as *mut (),
+                    ],
+                )
+                .unwrap();
+        }
+        assert_eq!(result, 3, "fptosi(3.7) should be 3");
+    }
+
+    #[test]
+    fn test_spirv_int_to_float() {
+        let func = make_int_to_float();
+        let spirv_bytes = lower_to_spirv(&func, 256).expect("SPIR-V lowering should succeed");
+        assert!(spirv_bytes.len() >= 20);
+        assert_eq!(&spirv_bytes[0..4], &[0x03, 0x02, 0x23, 0x07]);
+    }
+
     #[test]
     fn bench_mlir() {
         use super::lower::{create_context, lower_to_module};
@@ -304,7 +717,7 @@ mod tests {
         let ctx_time = start.elapsed();
 
         let start = Instant::now();
-        let mut module = lower_to_module(&context, &func).unwrap();
+        let (mut module, _) = lower_to_module(&context, &func, 0, 0, 0).unwrap();
         let lower_time = start.elapsed();
 
         let start = Instant::now();
@@ -373,6 +786,174 @@ mod tests {
         eprintln!(
             "    compile total:     {:?}",
             cranelift_init + cranelift_compile
+        );
+    }
+
+    // ── Bool return tests ──────────────────────────────────────────
+
+    /// Build LIR: fn(x) { return x > 0 }
+    fn make_compare() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("compare_gt".to_string());
+        func.signal = Signal::errors();
+        let mut block = BasicBlock::new(Label(0));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Const {
+                dst: Reg(1),
+                value: LirConst::Int(0),
+            },
+            s(),
+        ));
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::Compare {
+                dst: Reg(2),
+                op: CmpOp::Gt,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_lower_compare() {
+        let mlir_text = lower_to_mlir(&make_compare()).expect("lowering should succeed");
+        assert!(
+            mlir_text.contains("arith.cmpi"),
+            "should contain arith.cmpi: {}",
+            mlir_text
+        );
+    }
+
+    #[test]
+    fn test_execute_compare_positive() {
+        let result = mlir_call(&make_compare(), &[5]).expect("execution should succeed");
+        assert_eq!(result, 1, "5 > 0 should be 1 (true)");
+    }
+
+    #[test]
+    fn test_execute_compare_negative() {
+        let result = mlir_call(&make_compare(), &[-1]).expect("execution should succeed");
+        assert_eq!(result, 0, "-1 > 0 should be 0 (false)");
+    }
+
+    #[test]
+    fn test_compare_return_type_is_bool() {
+        let context = lower::create_context();
+        let func = make_compare();
+        let (_, ret_type) =
+            lower::lower_to_module(&context, &func, 0, 0, 0).expect("lowering should succeed");
+        assert_eq!(ret_type, ScalarType::Bool, "compare return should be Bool");
+    }
+
+    // ── Capture tests ──────────────────────────────────────────────
+
+    /// Build LIR: fn(x) { return cap[0] + x } with num_captures=1
+    fn make_capture_add() -> LirFunction {
+        let mut func = LirFunction::new(Arity::Exact(1));
+        func.name = Some("capture_add".to_string());
+        func.signal = Signal::errors();
+        func.num_captures = 1;
+        // Env layout: [cap0, param0]
+        let mut block = BasicBlock::new(Label(0));
+        // Load capture (index 0 = first capture)
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCapture {
+                dst: Reg(0),
+                index: 0,
+            },
+            s(),
+        ));
+        // Load param (index 1 = first param, since 1 capture)
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::LoadCaptureRaw {
+                dst: Reg(1),
+                index: 1,
+            },
+            s(),
+        ));
+        // cap + param
+        block.instructions.push(SpannedInstr::new(
+            LirInstr::BinOp {
+                dst: Reg(2),
+                op: BinOp::Add,
+                lhs: Reg(0),
+                rhs: Reg(1),
+            },
+            s(),
+        ));
+        block.terminator = SpannedTerminator::new(Terminator::Return(Reg(2)), s());
+        func.blocks.push(block);
+        func.num_regs = 3;
+        func
+    }
+
+    #[test]
+    fn test_lower_capture_add() {
+        let context = lower::create_context();
+        let func = make_capture_add();
+        // num_captures=1, capture_types=0 (int), param_types=0 (int)
+        let result = lower::lower_to_module(&context, &func, 1, 0, 0);
+        assert!(result.is_ok(), "capture_add lowering should succeed");
+        let (module, _) = result.unwrap();
+        let text = module.as_operation().to_string();
+        // 2-param MLIR function (1 capture + 1 param)
+        assert!(
+            text.contains("arith.addi"),
+            "should contain arith.addi: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn test_execute_capture_add() {
+        let context = lower::create_context();
+        let func = make_capture_add();
+        // num_captures=1, capture_types=0, param_types=0
+        let (mut module, _) =
+            lower::lower_to_module(&context, &func, 1, 0, 0).expect("lowering should succeed");
+        let pm = melior::pass::PassManager::new(&context);
+        pm.add_pass(melior::pass::conversion::create_to_llvm());
+        pm.run(&mut module).expect("LLVM conversion should succeed");
+        let engine = melior::ExecutionEngine::new(&module, 2, &[], false, false);
+        // Call with capture=5, arg=3 → should return 8
+        let mut cap: i64 = 5;
+        let mut arg: i64 = 3;
+        let mut result: i64 = 0;
+        unsafe {
+            engine
+                .invoke_packed(
+                    "capture_add",
+                    &mut [
+                        &mut cap as *mut i64 as *mut (),
+                        &mut arg as *mut i64 as *mut (),
+                        &mut result as *mut i64 as *mut (),
+                    ],
+                )
+                .unwrap();
+        }
+        assert_eq!(result, 8, "capture(5) + arg(3) should be 8");
+    }
+
+    #[test]
+    fn test_spirv_rejects_captures() {
+        let func = make_capture_add();
+        let result = lower_to_spirv(&func, 256);
+        assert!(result.is_err(), "SPIR-V should reject captures");
+        assert!(
+            result.unwrap_err().contains("captures not supported"),
+            "error should mention captures"
         );
     }
 }

@@ -249,7 +249,8 @@ fn for_each_def(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::LoadResumeValue { dst, .. }
         | LirInstr::Eval { dst, .. }
         | LirInstr::ArrayMutExtend { dst, .. }
-        | LirInstr::ArrayMutPush { dst, .. } => f(*dst),
+        | LirInstr::ArrayMutPush { dst, .. }
+        | LirInstr::Convert { dst, .. } => f(*dst),
 
         LirInstr::StoreLocal { .. }
         | LirInstr::StoreCapture { .. }
@@ -347,7 +348,8 @@ fn for_each_use(instr: &LirInstr, mut f: impl FnMut(Reg)) {
         | LirInstr::StructRest { src, .. }
         | LirInstr::CarOrNil { src, .. }
         | LirInstr::CdrOrNil { src, .. }
-        | LirInstr::ArrayMutRefOrNil { src, .. } => f(*src),
+        | LirInstr::ArrayMutRefOrNil { src, .. }
+        | LirInstr::Convert { src, .. } => f(*src),
 
         LirInstr::MakeCaptureCell { value, .. } => f(*value),
         LirInstr::LoadCaptureCell { cell, .. } => f(*cell),

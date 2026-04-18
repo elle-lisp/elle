@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## === Shebang Handling ===
 
@@ -123,9 +123,9 @@
 
 (assert (= (let [x 10 y 20] (+ x y)) 30) "let parallel binding")
 
-(assert (= (begin (var x 999) (let [x 10 y x] y)) 999) "let parallel binding shadowing")
+(assert (= (begin (def @x 999) (let [x 10 y x] y)) 999) "let parallel binding shadowing")
 
-(assert (= (begin (var x 999) (let* [x 10 y x] y)) 10) "let* sequential binding")
+(assert (= (begin (def @x 999) (let* [x 10 y x] y)) 10) "let* sequential binding")
 
 (assert (= (let [x 42] x) 42) "let body sees bindings")
 
@@ -274,17 +274,17 @@
 (assert (= (rebox (box 1) 42) 42) "rebox returns value")
 
 (assert (= (begin
-             (var b (box 1))
+             (def @b (box 1))
              (rebox b 2)
              (unbox b)) 2) "rebox updates cell")
 
 (assert (= (begin
-             (var b (box 1))
+             (def @b (box 1))
              (rebox b "hello")
              (unbox b)) "hello") "rebox with different types")
 
 (assert (= (begin
-             (var b (box 1))
+             (def @b (box 1))
              (rebox b nil)
              (unbox b)) nil) "rebox with nil")
 
@@ -304,7 +304,7 @@
 (assert (= (length (push @[] 1)) 1) "push empty array")
 
 (assert (= (begin
-             (var a @[])
+             (def @a @[])
              (push a 1)
              (push a 2)
              (push a 3)
@@ -320,14 +320,14 @@
 (assert (= (pop @[1 2 3]) 3) "pop single element")
 
 (assert (= (begin
-             (var a @[1 2 3])
+             (def @a @[1 2 3])
              (pop a)
              (length a)) 2) "pop mutates array")
 
 (let [[ok? _] (protect ((fn () (pop @[]))))] (assert (not ok?) "pop empty array errors"))
 
 (assert (= (begin
-             (var a @[42])
+             (def @a @[42])
              (pop a)
              (length a)) 0) "pop single element array")
 
@@ -340,17 +340,17 @@
 (assert (= (length (popn @[1 2 3 4] 2)) 2) "popn two elements")
 
 (assert (= (begin
-             (var a @[1 2 3 4])
+             (def @a @[1 2 3 4])
              (popn a 2)
              (length a)) 2) "popn mutates original")
 
 (assert (= (begin
-             (var a @[1 2 3])
+             (def @a @[1 2 3])
              (popn a 3)
              (length a)) 0) "popn all elements")
 
 (assert (= (begin
-             (var a @[1 2])
+             (def @a @[1 2])
              (popn a 5)
              (length a)) 0) "popn more than available")
 
@@ -588,9 +588,9 @@
 
 ## === Loop iteration ===
 
-(assert (= (let [sum 0] (each x '(1 2 3) (assign sum (+ sum x))) sum) 6) "each simple")
+(assert (= (let [@sum 0] (each x '(1 2 3) (assign sum (+ sum x))) sum) 6) "each simple")
 
-(assert (= (let [sum 0] (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6) "each with in")
+(assert (= (let [@sum 0] (each x in '(1 2 3) (assign sum (+ sum x))) sum) 6) "each with in")
 
 ## === describe ===
 

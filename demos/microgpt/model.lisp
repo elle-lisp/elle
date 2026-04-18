@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## model.lisp — GPT model: initialization, forward pass, loss
 ##
 ## Architecture: GPT-2 style transformer (RMSNorm, no biases, ReLU
@@ -66,7 +66,7 @@
   (defn vec-add [a b]
     "Element-wise autograd addition of two vectors."
     (let [result @[]]
-      (var i 0)
+      (def @i 0)
       (while (< i (length a))
         (push result (ag:v+ (a i) (b i)))
         (assign i (inc i)))
@@ -81,11 +81,11 @@
 
   (defn softmax-values [scores]
     "Softmax over an array of Value nodes."
-    (var max-val (ag:v-data (scores 0)))
+    (def @max-val (ag:v-data (scores 0)))
     (each s in scores
       (when (> (ag:v-data s) max-val)
         (assign max-val (ag:v-data s))))
-    (var sum-exp (ag:make-value 0.0))
+    (def @sum-exp (ag:make-value 0.0))
     (let [exps (->array (map (fn [s] (ag:vexp (ag:v+s s (- 0.0 max-val)))) scores))]
       (each e in exps
         (assign sum-exp (ag:v+ sum-exp e)))
@@ -108,7 +108,7 @@
            sf (/ 1.0 (sqrt (float *head-dim*)))
            attn-logits @[]]
       # Q·K dot products (fused — one node per past position)
-      (var ti 0)
+      (def @ti 0)
       (while (< ti n-t)
         (push attn-logits (ag:v*s (ag:vdot q (layer-keys ti) *head-dim*
                                            :offset-a hs :offset-b hs) sf))
@@ -116,8 +116,8 @@
       # Weighted sum of cached values
       (let [aw (softmax-values attn-logits)]
         (each j in (range *head-dim*)
-          (var acc (ag:make-value 0.0))
-          (var t2 0)
+          (def @acc (ag:make-value 0.0))
+          (def @t2 0)
           (while (< t2 n-t)
             (assign acc (ag:v+ acc (ag:v* (aw t2)
                                           ((layer-vals t2) (+ hs j)))))
@@ -149,7 +149,7 @@
     "Forward pass for a single token at position pos-id.
      Mutates kv-keys and kv-values by appending new k/v vectors.
      Returns a 1D array of logit Value nodes."
-    (var x (rms-norm (vec-add (model:wte token-id) (model:wpe pos-id))))
+    (def @x (rms-norm (vec-add (model:wte token-id) (model:wpe pos-id))))
     (each li in (range *n-layer*)
       (let [weights (layer-weights model li)]
         (assign x (attn-block x weights kv-keys kv-values li))
@@ -163,8 +163,8 @@
      Returns a single Value node (the mean loss)."
     (let* [n (min *block-size* (dec (length tokens)))
            [kv-keys kv-values] (helpers:make-kv-caches *n-layer*)
-           total-loss (ag:make-value 0.0)]
-      (var pos 0)
+           @total-loss (ag:make-value 0.0)]
+      (def @pos 0)
       (while (< pos n)
         (let* [logits (gpt-forward-token (tokens pos) pos kv-keys kv-values model)
                probs (softmax-values logits)]

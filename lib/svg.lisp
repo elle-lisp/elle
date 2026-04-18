@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/svg.lisp — SVG construction and emission (pure Elle)
 ##
 ## Build SVG documents as struct trees, emit as XML strings.
@@ -94,7 +94,7 @@
   # ── Text ───────────────────────────────────────────────────────────
 
   (defn text [x y & rest]
-    (let [attrs {:x (float x) :y (float y)}
+    (let [@attrs {:x (float x) :y (float y)}
           children @[]]
       (each item in rest
         (cond

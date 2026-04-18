@@ -454,6 +454,35 @@ impl<'a> Lowerer<'a> {
         slot
     }
 
+    /// Extract a compile-time constant value from an HIR node.
+    /// Returns `Some(value)` for literals and references to already-known
+    /// constants. Used to seed `immutable_values` so reads of immutable
+    /// bindings emit `LoadConst` instead of `LoadLocal`.
+    fn hir_const_value(&self, hir: &Hir) -> Option<Value> {
+        match &hir.kind {
+            HirKind::Int(n) => Some(Value::int(*n)),
+            HirKind::Float(f) => Some(Value::float(*f)),
+            HirKind::Bool(b) => Some(Value::bool(*b)),
+            HirKind::Nil => Some(Value::NIL),
+            HirKind::Keyword(k) => Some(Value::keyword(k)),
+            HirKind::Quote(v) => Some(*v),
+            // Propagate through references to known constants
+            HirKind::Var(b) => self.immutable_values.get(b).copied(),
+            _ => None,
+        }
+    }
+
+    /// If `binding` is immutable and `init` is a compile-time constant,
+    /// record it in `immutable_values` so that subsequent reads of this
+    /// binding emit `LoadConst` instead of slot loads.
+    fn try_seed_immutable(&mut self, binding: Binding, init: &Hir) {
+        if self.arena.get(binding).is_immutable {
+            if let Some(val) = self.hir_const_value(init) {
+                self.immutable_values.insert(binding, val);
+            }
+        }
+    }
+
     fn emit(&mut self, instr: LirInstr) {
         self.current_block
             .instructions

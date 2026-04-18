@@ -71,7 +71,11 @@ impl<'a> Analyzer<'a> {
         for item in analyzed {
             match item {
                 LetBinding::Simple(name, name_scopes, value) => {
-                    let binding = self.bind(name, &name_scopes, BindingScope::Local);
+                    let (actual_name, is_mutable) = super::strip_at_prefix(name);
+                    let binding = self.bind(actual_name, &name_scopes, BindingScope::Local);
+                    if self.immutable_by_default && !is_mutable {
+                        self.arena.get_mut(binding).is_immutable = true;
+                    }
                     // Track signal and arity for interprocedural analysis
                     if let HirKind::Lambda {
                         params: lambda_params,
@@ -96,10 +100,11 @@ impl<'a> Analyzer<'a> {
                     let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
                     bindings.push((tmp, value));
                     // Analyze the pattern (creates leaf bindings in this scope)
+                    // Immutable by default; individual leaves with @ opt into mutability
                     let pattern = self.analyze_destructure_pattern(
                         pattern_syntax,
                         BindingScope::Local,
-                        false,
+                        self.immutable_by_default,
                         &span,
                     )?;
                     destructures.push((pattern, tmp));
@@ -204,11 +209,15 @@ impl<'a> Analyzer<'a> {
             let name_syn = &bindings_syntax[i];
             let value_syn = &bindings_syntax[i + 1];
 
-            if let Some(name) = name_syn.as_symbol() {
+            if let Some(raw_name) = name_syn.as_symbol() {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
+                let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let b = self.bind(name, &[], BindingScope::Local);
                 self.arena.get_mut(b).is_prebound = true;
+                if self.immutable_by_default && !is_mutable {
+                    self.arena.get_mut(b).is_immutable = true;
+                }
                 entries.push(LetrecEntry::Simple(b, value_syn));
             } else if Self::is_destructure_pattern(name_syn) {
                 // Destructure pattern — pre-bind leaf names for mutual visibility
@@ -219,6 +228,7 @@ impl<'a> Analyzer<'a> {
                     if *name != "_" {
                         let b = self.bind(name, &[], BindingScope::Local);
                         self.arena.get_mut(b).is_prebound = true;
+                        // Immutability set later by analyze_destructure_pattern
                         leaf_bindings.insert(name.to_string(), b);
                     }
                 }
@@ -296,11 +306,12 @@ impl<'a> Analyzer<'a> {
                     let tmp = self.bind("__destructure_tmp", &[], BindingScope::Local);
                     bindings.push((tmp, value));
                     // Analyze the pattern using pre-created bindings from pass 1
+                    // Immutable by default; individual leaves with @ opt into mutability
                     self.pre_bindings.clone_from(leaf_bindings);
                     let pattern = self.analyze_destructure_pattern(
                         pattern_syntax,
                         BindingScope::Local,
-                        false,
+                        self.immutable_by_default,
                         &span,
                     )?;
                     self.pre_bindings.clear();
@@ -389,9 +400,10 @@ impl<'a> Analyzer<'a> {
             ));
         }
 
-        let name = items[1]
+        let raw_name = items[1]
             .as_symbol()
             .ok_or_else(|| format!("{}: {} name must be a symbol", span, form))?;
+        let (name, at_mutable) = super::strip_at_prefix(raw_name);
 
         // Check if we're inside a function scope
         let in_function = self.scopes.iter().any(|s| s.is_function);
@@ -414,7 +426,7 @@ impl<'a> Analyzer<'a> {
                 self.bind(name, name_scopes, BindingScope::Local)
             };
 
-            if immutable {
+            if immutable && self.immutable_by_default && !at_mutable {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
@@ -468,7 +480,7 @@ impl<'a> Analyzer<'a> {
             let binding = self.bind(name, name_scopes, BindingScope::Local);
             self.arena.get_mut(binding).is_prebound = true;
 
-            if immutable {
+            if immutable && self.immutable_by_default && !at_mutable {
                 self.arena.get_mut(binding).is_immutable = true;
             }
 
@@ -531,11 +543,15 @@ impl<'a> Analyzer<'a> {
             }
         };
 
-        // Check for immutable binding
+        // Reject assignment to immutable bindings
         if self.arena.get(target).is_immutable {
+            let binding_name = self
+                .symbols
+                .name(self.arena.get(target).name)
+                .unwrap_or("?");
             return Err(format!(
-                "{}: cannot assign immutable binding '{}'",
-                span, name
+                "{}: cannot assign immutable binding '{}' (use @{} to make it mutable)",
+                span, binding_name, binding_name
             ));
         }
 

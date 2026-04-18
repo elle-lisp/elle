@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Bytes and @bytes Type Tests
 ##
 ## Tests for the immutable bytes and mutable @bytes types.
@@ -80,12 +80,12 @@
 # Each over bytes and blob
 # ============================================================================
 
-(assert (= (let [sum 0]
+(assert (= (let [@sum 0]
              (each b (bytes 1 2 3)
                (assign sum (+ sum b)))
              sum) 6) "each over bytes")
 
-(assert (= (let [sum 0]
+(assert (= (let [@sum 0]
              (each b (@bytes 10 20 30)
                (assign sum (+ sum b)))
              sum) 60) "each over @bytes")

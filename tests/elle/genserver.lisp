@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/genserver.lisp — Tests for GenServer, Agent, and Supervisor
 ##
 ## Run: ./target/debug/elle tests/elle/genserver.lisp
@@ -248,7 +248,7 @@
          (process:recv))}]
       :name :sup)
 
-    (var started @||)
+    (def @started @||)
     (match (process:recv) ([:started id] (put started id)) (_ nil))
     (match (process:recv) ([:started id] (put started id)) (_ nil))
     (assert (has? started :a) "supervisor: worker-a started")
@@ -260,7 +260,7 @@
 
 (process:start (fn []
   (let [me (process:self)]
-    (var crash-count 0)
+    (def @crash-count 0)
     (process:supervisor-start-link
       [{:id :fragile :restart :permanent
         :start (fn []
@@ -363,7 +363,7 @@
           (process:send me :kv-ready)
           # Run a genserver loop inline
           (process:register :kv-sup)
-          (var state @{})
+          (def @state @{})
           (forever
             (let [msg (process:recv)]
               (match msg
@@ -418,7 +418,7 @@
 
 (process:start (fn []
   (let [me (process:self)]
-    (var starts @[])
+    (def @starts @[])
     (process:supervisor-start-link
       [{:id :a :restart :permanent
         :start (fn []
@@ -443,7 +443,7 @@
         (process:send (get (get starts 1) 1) :crash)))
 
     # Wait for both restarts
-    (var restarts @[])
+    (def @restarts @[])
     (match (process:recv) ([:started id pid] (push restarts id)) (_ nil))
     (match (process:recv) ([:started id pid] (push restarts id)) (_ nil))
     (assert (= (length restarts) 2) "one-for-all: both restarted"))))
@@ -470,7 +470,7 @@
       :name :rfo-sup :strategy :rest-for-one)
 
     # Wait for all 3 to start
-    (var pids @{})
+    (def @pids @{})
     (repeat 3
       (match (process:recv)
         ([:started id pid] (put pids id pid))
@@ -480,7 +480,7 @@
     (process:send (get pids :x) :crash)
 
     # Wait for 3 restarts
-    (var restarts @||)
+    (def @restarts @||)
     (repeat 3
       (match (process:recv)
         ([:started id _pid] (put restarts id))
@@ -541,8 +541,7 @@
     (process:event-manager-start-link :name :events)
 
     # A handler that collects events
-    (var collector-mod
-      {:init         (fn [_] @[])
+    (def @collector-mod {:init         (fn [_] @[])
        :handle-event (fn [event state]
          (push state event)
          [:ok state])})
@@ -570,7 +569,7 @@
     (process:event-manager-start-link :name :multi-events)
 
     # Two handlers that forward events to us
-    (var forwarder (fn [tag]
+    (def @forwarder (fn [tag]
       {:init         (fn [_] nil)
        :handle-event (fn [event _state]
          (process:send me [tag event])
@@ -581,7 +580,7 @@
 
     (process:event-manager-sync-notify :multi-events :ping)
 
-    (var got @||)
+    (def @got @||)
     (match (process:recv) ([tag _event] (put got tag)) (_ nil))
     (match (process:recv) ([tag _event] (put got tag)) (_ nil))
     (assert (has? got :h1) "multi-event: h1 received")
@@ -595,8 +594,7 @@
   (process:event-manager-start-link :name :remove-events)
 
   # Handler that removes itself after seeing :done
-  (var once-mod
-    {:init         (fn [_] nil)
+  (def @once-mod {:init         (fn [_] nil)
      :handle-event (fn [event state]
        (if (= event :done)
          [:remove state]

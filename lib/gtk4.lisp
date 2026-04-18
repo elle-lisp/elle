@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/gtk4.lisp — GTK4 bindings for Elle via FFI
 ##
 ## Pure Elle module. No plugin, no subprocess. Calls GTK4's C API
@@ -175,8 +175,8 @@
 (defn add-grid-children (handle grid props children)
   "Attach children to a grid with auto-flow."
   (let [cols (or props:columns 1)]
-    (var auto-col 0)
-    (var auto-row 0)
+    (def @auto-col 0)
+    (def @auto-row 0)
     (each child in children
       (let* [cw    (build-widget handle child)
              cp    (if (and (> (length child) 1) (struct? (child 1))) (child 1) {})

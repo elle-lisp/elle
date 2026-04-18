@@ -46,6 +46,8 @@ pub(crate) struct RuntimeHelpers {
     pub(crate) neg: FuncId,
     pub(crate) not: FuncId,
     pub(crate) bit_not: FuncId,
+    pub(crate) int_to_float: FuncId,
+    pub(crate) float_to_int: FuncId,
     pub(crate) eq: FuncId,
     pub(crate) ne: FuncId,
     pub(crate) lt: FuncId,
@@ -122,6 +124,14 @@ pub(crate) fn register_symbols(builder: &mut JITBuilder) {
     builder.symbol("elle_jit_neg", runtime::elle_jit_neg as *const u8);
     builder.symbol("elle_jit_not", runtime::elle_jit_not as *const u8);
     builder.symbol("elle_jit_bit_not", runtime::elle_jit_bit_not as *const u8);
+    builder.symbol(
+        "elle_jit_int_to_float",
+        runtime::elle_jit_int_to_float as *const u8,
+    );
+    builder.symbol(
+        "elle_jit_float_to_int",
+        runtime::elle_jit_float_to_int as *const u8,
+    );
     builder.symbol("elle_jit_eq", runtime::elle_jit_eq as *const u8);
     builder.symbol("elle_jit_ne", runtime::elle_jit_ne as *const u8);
     builder.symbol("elle_jit_lt", runtime::elle_jit_lt as *const u8);
@@ -404,6 +414,8 @@ pub(crate) fn declare_helpers(module: &mut JITModule) -> Result<RuntimeHelpers, 
         neg: declare(module, "elle_jit_neg", &value_unary)?,
         not: declare(module, "elle_jit_not", &value_unary)?,
         bit_not: declare(module, "elle_jit_bit_not", &value_unary)?,
+        int_to_float: declare(module, "elle_jit_int_to_float", &value_unary)?,
+        float_to_int: declare(module, "elle_jit_float_to_int", &value_unary)?,
         eq: declare(module, "elle_jit_eq", &value_binary)?,
         ne: declare(module, "elle_jit_ne", &value_binary)?,
         lt: declare(module, "elle_jit_lt", &value_binary)?,

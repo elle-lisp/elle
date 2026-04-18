@@ -195,13 +195,13 @@ fn test_while_simple() {
 
 #[test]
 fn test_each_simple() {
-    let result = eval_source("(let [sum 0] (each x '(1 2 3) (assign sum (+ sum x))) sum)");
+    let result = eval_source("(let [@sum 0] (each x '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 
 #[test]
 fn test_each_with_in() {
-    let result = eval_source("(let [sum 0] (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
+    let result = eval_source("(let [@sum 0] (each x in '(1 2 3) (assign sum (+ sum x))) sum)");
     assert_eq!(result.unwrap().as_int().unwrap(), 6);
 }
 

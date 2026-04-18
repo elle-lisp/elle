@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Stream I/O stress tests
 ##
 ## Tests sustained port/lines, stream/collect, and ReadLine EOF handling.
@@ -33,12 +33,12 @@
 # Sustained sequential stream reads (15 files)
 # ============================================================================
 
-(let [i 0]
+(let [@i 0]
   (while (< i 15)
     (spit (string "/tmp/elle-test-io-stress-seq-" i) (string "content-" i "\n"))
     (assign i (+ i 1))))
 
-(let [i 0]
+(let [@i 0]
   (while (< i 15)
     (let [lines (stream/collect
                    (port/lines (port/open (string "/tmp/elle-test-io-stress-seq-" i) :read)))]
@@ -51,7 +51,7 @@
 # ============================================================================
 
 (let [p (port/open "/tmp/elle-test-io-stress-write" :write)]
-  (let [i 0]
+  (let [@i 0]
     (while (< i 20)
       (port/write p (string "line " i "\n"))
       (assign i (+ i 1))))
@@ -68,7 +68,7 @@
 # Repeated reads (was "nested ev/run")
 # ============================================================================
 
-(let [i 0]
+(let [@i 0]
   (while (< i 15)
     (let [lines (stream/collect
                    (port/lines (port/open "/tmp/elle-test-io-stress-1" :read)))]
@@ -80,7 +80,7 @@
 # protect around reads (success path)
 # ============================================================================
 
-(let [i 0]
+(let [@i 0]
   (while (< i 15)
     (let [[ok? val] (protect
       (let [lines (stream/collect

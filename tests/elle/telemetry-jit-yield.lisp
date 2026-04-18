@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # tests/elle/telemetry-jit-yield.lisp
 #
@@ -29,7 +29,7 @@
 
 (let [listener (tcp/listen "127.0.0.1" 0)]
   (let* [addr (port/path listener)
-         port-num (integer (get (string/split addr ":") 1))
+         port-num (parse-int (get (string/split addr ":") 1))
          url (string "http://127.0.0.1:" port-num "/v1/metrics")]
 
     (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
@@ -51,7 +51,7 @@
 
     # 16 sim calls — exceeds JIT threshold (10).
     # Before the fix, this crashed around call 10.
-    (var i 0)
+    (def @i 0)
     (while (< i 16)
       (sim "GET" "/a" 200 nil)
       (assign i (+ i 1)))

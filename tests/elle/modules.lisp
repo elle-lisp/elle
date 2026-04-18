@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Module system — parametric modules, qualified symbols, selective import
 
 # ============================================================================

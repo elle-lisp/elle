@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## jit-medium-instructions — verify JIT support for 7 medium instructions
 
 ## Helper: scan rejection list for instruction name
@@ -81,7 +81,7 @@
 
 ## ===== PushParamFrame =====
 ## (parameterize ...) emits PushParamFrame + PopParamFrame.
-(var p (make-parameter 0))
+(def @p (make-parameter 0))
 
 (defn with-p (val)
   (parameterize ((p val))

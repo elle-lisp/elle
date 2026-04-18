@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Lua compatibility prelude
 ##
 ## Provides Lua standard library functions mapped to Elle primitives.
@@ -29,9 +29,9 @@
 (def tonumber (fn (v)
   (if (number? v) v
     (if (string? v)
-      (let [[ok result] (protect ((fn () (integer v))))]
+      (let [[ok result] (protect ((fn () (parse-int v))))]
         (if ok result
-          (let [[ok2 result2] (protect ((fn () (float v))))]
+          (let [[ok2 result2] (protect ((fn () (parse-float v))))]
             (if ok2 result2 nil))))
       nil))))
 
@@ -109,7 +109,7 @@
 
 # ipairs: iterate array with 0-based index, yields [i, value] pairs
 (def ipairs (fn (t)
-  (var i 0)
+  (def @i 0)
   (def result @[])
   (each v in t
     (push result (list i v))

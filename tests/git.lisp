@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # elle-git integration tests
 # Requires: libelle_git.so built at target/release/libelle_git.so
 

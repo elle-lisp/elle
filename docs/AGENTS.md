@@ -33,6 +33,23 @@ Design documents, language references, and contributor guides for Elle.
 | `fibers.md` | Fiber architecture: execution contexts, signals, suspension/resumption, parent/child chains | Root AGENTS.md |
 | `ffi.md` | FFI design: type descriptors, signatures, calling C functions, callbacks, marshalling | Root AGENTS.md |
 
+### Implementation Backends (`impl/`)
+
+| File | Description |
+|------|-------------|
+| `impl/reader.md` | Lexer, parser, source locations, markdown literate mode |
+| `impl/hir.md` | Binding resolution, signal inference |
+| `impl/lir.md` | SSA form, virtual registers, basic blocks |
+| `impl/bytecode.md` | Instruction set and encoding |
+| `impl/vm.md` | Stack machine, dispatch loop, fiber integration |
+| `impl/jit.md` | Cranelift JIT compilation |
+| `impl/wasm.md` | WebAssembly backend (Wasmtime) |
+| `impl/mlir.md` | MLIR/LLVM tier-2 CPU backend |
+| `impl/spirv.md` | SPIR-V emission (compiler-generated + hand-written DSL) |
+| `impl/gpu.md` | End-to-end GPU compute (MLIR + SPIR-V + Vulkan) |
+| `impl/differential.md` | Cross-tier agreement harness (`compile/run-on`) |
+| `impl/values.md` | Value representation, tagged union |
+
 ### Reference Material
 
 | File | Description | Status |

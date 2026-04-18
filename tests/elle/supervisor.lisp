@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/supervisor.lisp — Tests for supervisor improvements
 ##
 ## Tests for: max-restarts, logger, make-subprocess-child,
@@ -71,9 +71,9 @@
         (process:send (get (get kids 0) :pid) :crash)))
 
     # Should get: exit log, restarting log, started log, then :started msg
-    (var got-exit false)
-    (var got-restarting false)
-    (var count 0)
+    (def @got-exit false)
+    (def @got-restarting false)
+    (def @count 0)
     (while (< count 10)
       (let [msg (process:recv)]
         (match msg
@@ -98,7 +98,7 @@
 
 (process:start (fn []
   (let [me (process:self)]
-    (var start-count 0)
+    (def @start-count 0)
 
     (process:supervisor-start-link
       [{:id :fragile :restart :permanent
@@ -114,9 +114,9 @@
           (process:send me [:max-reached]))))
 
     # Count starts — should get initial + up to 3 restarts = 4 total max
-    (var starts 0)
-    (var max-reached false)
-    (var done false)
+    (def @starts 0)
+    (def @max-reached false)
+    (def @done false)
     (while (not done)
       (match (process:recv-timeout 5)
         (:started (assign starts (+ starts 1)))
@@ -191,7 +191,7 @@
 
 (process:start (fn []
   (let [me (process:self)]
-    (var attempts 0)
+    (def @attempts 0)
     (process:supervisor-start-link
       [{:id :bad-start :restart :permanent
         :start (fn []
@@ -205,9 +205,9 @@
           (process:send me :max-reached))))
 
     # Child crashes on startup, supervisor retries, hits max-restarts
-    (var attempt-count 0)
-    (var got-max false)
-    (var done false)
+    (def @attempt-count 0)
+    (def @got-max false)
+    (def @done false)
     (while (not done)
       (match (process:recv-timeout 5)
         (:attempt (assign attempt-count (+ attempt-count 1)))
@@ -239,7 +239,7 @@
       :strategy :one-for-all)
 
     # Wait for both to start
-    (var pids @{})
+    (def @pids @{})
     (repeat 2
       (match (process:recv)
         ([:started id pid] (put pids id pid))
@@ -250,8 +250,8 @@
     (process:send (get pids :b) :crash)
 
     # Should get restarts for both (one-for-all restarts all)
-    (var restarts @||)
-    (var count 0)
+    (def @restarts @||)
+    (def @count 0)
     (while (< count 4)
       (match (process:recv-timeout 5)
         ([:started id _pid] (put restarts id))
@@ -270,7 +270,7 @@
 
 (process:start (fn []
   (let [me (process:self)]
-    (var crash-count 0)
+    (def @crash-count 0)
     (process:supervisor-start-link
       [{:id :unlimited :restart :permanent
         :start (fn []
@@ -283,8 +283,8 @@
       :name :no-limit-sup)
 
     # Should restart 5 times without hitting any limit
-    (var starts 0)
-    (var done false)
+    (def @starts 0)
+    (def @done false)
     (while (not done)
       (match (process:recv-timeout 5)
         (:started (assign starts (+ starts 1))
@@ -318,8 +318,8 @@
       :name :ready-sup)
 
     # Collect events — wait for all 3 messages
-    (var events @[])
-    (var count 0)
+    (def @events @[])
+    (def @count 0)
     (while (< count 3)
       (match (process:recv-timeout 50)
         ([:starting id] (push events [:starting id]))
@@ -357,8 +357,8 @@
 
     # Supervisor should not deadlock — it should detect the child death
     # and proceed. Collect some events to prove it didn't hang.
-    (var got-exit false)
-    (var count 0)
+    (def @got-exit false)
+    (def @count 0)
     (while (< count 5)
       (match (process:recv-timeout 3)
         ([:log event]

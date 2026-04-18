@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Regression test: let* + yield + calls that store heap objects externally.
 #
@@ -25,13 +25,13 @@
     (store-in-table table "latest" elapsed)
     result))
 
-(var table (make-table))
-(var errors @[])
+(def @table (make-table))
+(def @errors @[])
 
 # Background fiber that reads the table
 (def reader
   (ev/spawn (fn []
-    (var checks 0)
+    (def @checks 0)
     (while (< checks 200)
       (ev/sleep 0.001)
       (let [entry (get table "latest")]
@@ -43,7 +43,7 @@
       (assign checks (+ checks 1))))))
 
 # Run many timed operations
-(var i 0)
+(def @i 0)
 (while (< i 50)
   (timed-op table
     (fn [] (ev/sleep 0.001) :done)

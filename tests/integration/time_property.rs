@@ -36,7 +36,7 @@ fn extract_float_list(list_val: Value) -> Vec<f64> {
 #[test]
 fn clock_monotonic_never_decreases() {
     let expr = r#"
-        (let [times (list) i 0]
+        (let [@times (list) @i 0]
           (while (< i 100)
             (begin
               (assign times (cons (clock/monotonic) times))
@@ -117,7 +117,7 @@ proptest! {
 #[test]
 fn clock_realtime_multiple_reads_are_monotonic() {
     let expr = r#"
-        (let [times (list) i 0]
+        (let [@times (list) @i 0]
           (while (< i 50)
             (begin
               (assign times (cons (clock/realtime) times))

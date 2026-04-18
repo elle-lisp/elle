@@ -294,6 +294,36 @@ pub extern "C" fn elle_jit_bit_not(tag: u64, payload: u64) -> JitValue {
 }
 
 // =============================================================================
+// Conversion Operations
+// =============================================================================
+
+/// Convert to float: int → float, float → identity, else type error.
+#[no_mangle]
+pub extern "C" fn elle_jit_int_to_float(tag: u64, payload: u64) -> JitValue {
+    let a = Value { tag, payload };
+    if let Some(n) = a.as_int() {
+        JitValue::from_value(Value::float(n as f64))
+    } else if a.as_float().is_some() {
+        JitValue::from_value(a)
+    } else {
+        type_error_jv("number")
+    }
+}
+
+/// Convert to int: float → truncate to int, int → identity, else type error.
+#[no_mangle]
+pub extern "C" fn elle_jit_float_to_int(tag: u64, payload: u64) -> JitValue {
+    let a = Value { tag, payload };
+    if let Some(f) = a.as_float() {
+        JitValue::from_value(Value::int(f as i64))
+    } else if a.as_int().is_some() {
+        JitValue::from_value(a)
+    } else {
+        type_error_jv("number")
+    }
+}
+
+// =============================================================================
 // Comparison Operations
 // =============================================================================
 

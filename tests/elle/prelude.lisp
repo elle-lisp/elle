@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Tests for prelude macros: when, unless, try/catch, protect, defer, with,
 # butlast, hygiene, case, if-let, when-let, while, forever
 
@@ -64,17 +64,17 @@
 
 # defer runs cleanup
 (begin
-  (var cleaned false)
+  (def @cleaned false)
   (defer (assign cleaned true) 42)
   (assert cleaned "defer runs cleanup"))
 
 # defer returns body value
-(let [result (begin (var x 0) (defer (assign x 1) 42))]
+(let [result (begin (def @x 0) (defer (assign x 1) 42))]
   (assert (= result 42) "defer returns body value"))
 
 # defer runs cleanup on error
 (begin
-  (var cleaned false)
+  (def @cleaned false)
   (try (defer (assign cleaned true) (/ 1 0)) (catch e nil))
   (assert cleaned "defer runs cleanup on error"))
 
@@ -93,7 +93,7 @@
 
 # with cleanup runs
 (begin
-  (var cleaned false)
+  (def @cleaned false)
   (defn make [] :resource)
   (defn cleanup [r] (assign cleaned true))
   (with r (make) cleanup
@@ -122,7 +122,7 @@
 # defer macro uses internal binding `f` — user's `f` should not be affected
 (let [result
   (begin
-    (var cleaned false)
+    (def @cleaned false)
     (let [f 99]
       (defer (assign cleaned true) (+ f 1))))]
   (assert (= result 100) "defer hygiene: user binding f not captured"))
@@ -137,7 +137,7 @@
 
 # case should not double-evaluate the test expression
 (begin
-  (var counter 0)
+  (def @counter 0)
   (case (begin (assign counter (+ counter 1)) counter)
     1 :one 2 :two)
   (assert (= counter 1) "case no double eval"))
@@ -173,8 +173,8 @@
 
 # while with multiple body forms
 (begin
-  (var n 0)
-  (var sum 0)
+  (def @n 0)
+  (def @sum 0)
   (while (< n 3)
     (assign sum (+ sum n))
     (assign n (+ n 1)))
@@ -182,7 +182,7 @@
 
 # while with single body
 (begin
-  (var n 0)
+  (def @n 0)
   (while (< n 5) (assign n (+ n 1)))
   (assert (= n 5) "while single body"))
 
@@ -192,7 +192,7 @@
 
 # forever with break
 (begin
-  (var n 0)
+  (def @n 0)
   (forever
     (assign n (+ n 1))
     (if (= n 5) (break)))
@@ -201,7 +201,7 @@
 # forever break with value
 (let [result
   (begin
-    (var n 0)
+    (def @n 0)
     (forever
       (assign n (+ n 1))
       (if (= n 3) (break :while :done))))]

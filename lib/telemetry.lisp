@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/telemetry.lisp — OpenTelemetry metrics (OTLP/HTTP JSON export)
 ##
 ## Loaded via: (def telemetry ((import-file "lib/telemetry.lisp")))
@@ -72,8 +72,8 @@
 (defn find-bucket [boundaries value]
   "Return index of first boundary >= value, or (length boundaries) for overflow.
    Boundaries must be sorted ascending."
-  (var lo 0)
-  (var hi (length boundaries))
+  (def @lo 0)
+  (def @hi (length boundaries))
   (while (< lo hi)
     (let [mid (integer (/ (+ lo hi) 2))]
       (if (<= value (get boundaries mid))
@@ -166,7 +166,7 @@
           (put agg :time now))
         (begin
           (let [counts @[]]
-            (var i 0)
+            (def @i 0)
             (while (<= i (length bounds))
               (push counts 0)
               (assign i (+ i 1)))
@@ -319,7 +319,7 @@
                   (put l :count (+ l:count agg:count))
                   (put l :min (min l:min agg:min))
                   (put l :max (max l:max agg:max))
-                  (var i 0)
+                  (def @i 0)
                   (while (< i (length l:counts))
                     (put l:counts i (+ (get l:counts i) (get agg:counts i)))
                     (assign i (+ i 1))))
@@ -341,8 +341,8 @@
           (when meter:on-export
             (meter:on-export payload))
           # Export with retry (up to 3 attempts, backoff 1s/2s)
-          (var attempts 0)
-          (var success false)
+          (def @attempts 0)
+          (def @success false)
           (while (and (< attempts 3) (not success))
             (let [[ok? result] (protect
                     (http:post endpoint body

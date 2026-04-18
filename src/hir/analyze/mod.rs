@@ -85,6 +85,15 @@ struct ScopedBinding {
     binding: Binding,
 }
 
+/// Strip `@` prefix from a binding name. Returns (actual_name, is_mutable).
+pub(super) fn strip_at_prefix(name: &str) -> (&str, bool) {
+    if let Some(stripped) = name.strip_prefix('@') {
+        (stripped, true)
+    } else {
+        (name, false)
+    }
+}
+
 /// Check if `subset` is a subset of `superset` (all elements of subset appear in superset).
 fn is_scope_subset(subset: &[ScopeId], superset: &[ScopeId]) -> bool {
     subset.iter().all(|s| superset.contains(s))
@@ -168,6 +177,15 @@ pub struct Analyzer<'a> {
     /// signal mismatch) push here and return `Ok(Hir::error(span))` to
     /// continue analysis. The pipeline checks this after analysis.
     errors: Vec<LError>,
+    /// Set by `(silence!)` assertion form. Consumed by `analyze_lambda`.
+    current_silence_assert: bool,
+    /// Set by `(numeric!)` assertion form. Consumed by `analyze_lambda`.
+    current_numeric_assert: bool,
+    /// Set by `(immutable! x)` assertion form. Consumed by `analyze_lambda`.
+    current_immutability_asserts: HashSet<Binding>,
+    /// When true, bindings without `@` prefix are immutable.
+    /// Gated on epoch >= 8; epoch <= 7 files are mutable-by-default.
+    immutable_by_default: bool,
 }
 
 impl<'a> Analyzer<'a> {
@@ -214,6 +232,10 @@ impl<'a> Analyzer<'a> {
             current_declared_ceiling: None,
             current_muffle_bits: crate::value::fiber::SignalBits::EMPTY,
             errors: Vec::new(),
+            current_silence_assert: false,
+            current_numeric_assert: false,
+            current_immutability_asserts: HashSet::new(),
+            immutable_by_default: true,
         };
         // Initialize with a global scope so top-level bindings can be registered
         analyzer.push_scope(false);
@@ -237,6 +259,12 @@ impl<'a> Analyzer<'a> {
     /// Return accumulated errors (for the pipeline to check).
     pub fn take_errors(&mut self) -> Vec<LError> {
         std::mem::take(&mut self.errors)
+    }
+
+    /// Set whether bindings without `@` are immutable by default.
+    /// Epoch >= 8 enables this; epoch <= 7 disables it.
+    pub fn set_immutable_by_default(&mut self, v: bool) {
+        self.immutable_by_default = v;
     }
 
     /// Levenshtein edit distance between two strings.

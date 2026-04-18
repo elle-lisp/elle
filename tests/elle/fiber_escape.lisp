@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Fiber escape analysis: shared allocator is installed only when needed.
 ##
 ## Tests that child fibers correctly handle heap values that escape to
@@ -72,13 +72,13 @@
 # ============================================================================
 
 # Captured mutable variable set to heap value inside fiber
-(var box nil)
+(def @box nil)
 (let [f (fiber/new (fn [] (assign box "escaped") 42) |:yield|)]
   (fiber/resume f)
   (assert (= box "escaped") "fiber outward mutation string"))
 
 # Captured mutable variable set to array inside fiber
-(var holder nil)
+(def @holder nil)
 (let [f (fiber/new (fn [] (assign holder [1 2 3]) :ok) |:yield|)]
   (fiber/resume f)
   (assert (= (length holder) 3) "fiber outward mutation array length")

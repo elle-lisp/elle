@@ -751,7 +751,7 @@ fn no_region_for_inner_let_with_outward_set() {
     // in the outer let's scope (not outward for the outer let).
     // So has_region returns true (the outer let emits RegionEnter/Exit).
     assert!(has_region(
-        "(let [holder nil] (let [x (list 1 2 3)] (assign holder x) 42))"
+        "(let [@holder nil] (let [x (list 1 2 3)] (assign holder x) 42))"
     ));
 }
 
@@ -803,7 +803,7 @@ fn region_emitted_for_inner_let_set_to_inner_binding() {
     // Inner let sets its own binding — not outward for the inner let.
     // Tier 8: inner bindings are extended into scope_bindings.
     assert!(has_region(
-        "(let [x 1] (let [y 2] (assign y (+ y 1)) (+ x y)))"
+        "(let [x 1] (let [@y 2] (assign y (+ y 1)) (+ x y)))"
     ));
 }
 
@@ -869,7 +869,7 @@ fn correct_inner_let_set_own_binding() {
     // Inner let sets its own binding — must work correctly.
     let result = eval_source(
         "(let [x 10]
-           (let [y 5]
+           (let [@y 5]
              (assign y (+ y x))
              (+ x y)))",
     )
@@ -1224,7 +1224,7 @@ fn correct_let_with_inner_break_returns_last_expr() {
 fn correct_while_in_scoped_let() {
     let result = eval_source(
         "(var sum 0)
-         (let [x 10]
+         (let [@x 10]
            (while (> x 0)
              (assign sum (+ sum x))
              (assign x (- x 1)))

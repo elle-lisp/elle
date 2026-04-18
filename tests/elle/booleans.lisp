@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Booleans — boolean literals, predicates, and match behavior
 
 
@@ -15,9 +15,9 @@
 (assert (boolean? false) "boolean? on false")
 
 # Match on boolean values
-(var match-false (match false (true "yes") (false "no")))
+(def @match-false (match false (true "yes") (false "no")))
 (assert (= match-false "no") "match false")
-(var match-true (match true (true "yes") (false "no")))
+(def @match-true (match true (true "yes") (false "no")))
 (assert (= match-true "yes") "match true")
 
 # Quoted booleans

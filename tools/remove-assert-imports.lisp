@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 ## Remove assertion import forms from all test/example files.
 ## Handles both single-line and multi-line (def {...} ((import-file "...assert...")))
 
@@ -41,7 +41,7 @@
             (string/join [(slice content 0 idx)
                           (slice content end2 (length content))] "")))))))
 
-(var cleaned 0)
+(def @cleaned 0)
 
 (each f in files
   (when (and (not (string/ends-with? f "assert.lisp"))

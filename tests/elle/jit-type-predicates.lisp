@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## jit-type-predicates — verify IsArray, IsStruct, IsSet compile via JIT
 
 ## Functions using type predicates — should JIT-compile without rejection
@@ -32,7 +32,7 @@
       true
       (has-rejection-for? (rest reasons) instr-name))))
 
-(var reasons (map (fn (r) (get r :reason)) (jit/rejections)))
+(def @reasons (map (fn (r) (get r :reason)) (jit/rejections)))
 (assert (not (has-rejection-for? reasons "IsArray")) "IsArray not rejected")
 (assert (not (has-rejection-for? reasons "IsStruct")) "IsStruct not rejected")
 (assert (not (has-rejection-for? reasons "IsSet")) "IsSet not rejected")

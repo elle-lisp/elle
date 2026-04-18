@@ -1,24 +1,24 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Elle Documentation Generator
 ## Renders docs/*.md as HTML pages + auto-generated API reference
 ## with signal profiles from compile/analyze and portrait system.
 
 # ── Configuration ──────────────────────────────────────────────────
 
-(var docs-root "docs")
-(var output-dir "site")
-(var docs-dir "demos/docgen/docs")
-(var github-base "https://github.com/anthropics/elle/blob/main")
+(def @docs-root "docs")
+(def @output-dir "site")
+(def @docs-dir "demos/docgen/docs")
+(def @github-base "https://github.com/anthropics/elle/blob/main")
 
 # ── Imports ────────────────────────────────────────────────────────
 
 (def md ((import "demos/docgen/lib/markdown.lisp")))
 (def css-mod ((import "demos/docgen/lib/css.lisp")))
 
-(var html-escape md:html-escape)
-(var format-inline md:format-inline)
-(var parse-markdown md:parse)
-(var generate-css css-mod:generate-css)
+(def @html-escape md:html-escape)
+(def @format-inline md:format-inline)
+(def @parse-markdown md:parse)
+(def @generate-css css-mod:generate-css)
 
 # ── Signal display ─────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@
 
 (defn render-nav [nav-items current-slug]
   "Generate sidebar HTML from nav items."
-  (var html @"")
+  (def @html @"")
   (each item in nav-items
     (if (get item :section)
       (push html (string "      <li class=\"nav-section\">"
@@ -91,9 +91,9 @@
 
 (defn rewrite-md-links [html source-dir slug-map]
   "Rewrite .md href links to .html using the slug map."
-  (var result @"")
-  (var pos 0)
-  (var len (length html))
+  (def @result @"")
+  (def @pos 0)
+  (def @len (length html))
   (while (< pos len)
     (let [found (string/find html "href=\"" pos)]
       (if (nil? found)
@@ -151,8 +151,7 @@
     ((= cat "bit") "Bitwise Operations")
     (true cat)))
 
-(var category-order
-  ["" "math" "string" "array" "struct" "json"
+(def @category-order ["" "math" "string" "array" "struct" "json"
    "file" "fn" "fiber" "coro" "clock" "time"
    "meta" "debug" "bit" "os" "pkg" "module" "ffi"])
 
@@ -171,7 +170,7 @@
             (push items meta)
             (put groups cat items)))))
 
-    (var html @"")
+    (def @html @"")
     # Render in preferred order
     (each cat in category-order
       (let [metas (get groups cat)]
@@ -220,14 +219,14 @@
 (defn generate-prelude-html []
   "Generate HTML for prelude macros."
   (let [source (slurp "prelude.lisp")]
-    (var html @"")
+    (def @html @"")
     (push html "<p>Macros loaded automatically before user code. These expand at compile time.</p>\n")
     (push html "<table><thead><tr><th>Macro</th><th>Description</th></tr></thead><tbody>\n")
 
     (let [lines (string/split source "\n")]
-      (var comment-lines @[])
-      (var i 0)
-      (var n (length lines))
+      (def @comment-lines @[])
+      (def @i 0)
+      (def @n (length lines))
       (while (< i n)
         (let [line (get lines i)]
           (cond
@@ -272,19 +271,19 @@
          fn-syms (filter (fn [s] (= (get s :kind) :function)) syms)
          lines (string/split source "\n")]
 
-    (var html @"")
+    (def @html @"")
     (push html "<p>Runtime functions loaded at startup after primitives.</p>\n")
 
     # Parse source to find section headers and defn lines
-    (var current-section nil)
-    (var sections @[])
-    (var section-fns @{})
-    (var fn-comments @{})
-    (var fn-lines @{})
+    (def @current-section nil)
+    (def @sections @[])
+    (def @section-fns @{})
+    (def @fn-comments @{})
+    (def @fn-lines @{})
 
-    (var comment-lines @[])
-    (var i 0)
-    (var n (length lines))
+    (def @comment-lines @[])
+    (def @i 0)
+    (def @n (length lines))
     (while (< i n)
       (let [line (get lines i)]
         (let [section-name (extract-section-name line)]
@@ -350,14 +349,14 @@
   (let* [result (subprocess/system "find" ["lib" "-maxdepth" "1" "-name" "*.lisp" "-type" "f"])
          files (filter (fn [f] (not (= f "")))
                   (string/split result:stdout "\n"))]
-    (var html @"")
+    (def @html @"")
     (push html "<p>Reusable libraries in <code>lib/</code>. Each exports a struct of functions.</p>\n")
 
     (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
       (let* [source (slurp file)
              lines (string/split source "\n")
              # Extract first ## comment as description
-             desc (let [first-comment nil]
+             desc (let [@first-comment nil]
                      (each line in lines
                        (when (and (nil? first-comment) (string/starts-with? line "## "))
                          (assign first-comment (slice line 3 (length line)))))
@@ -411,7 +410,7 @@
          files (filter (fn [f] (and (not (= f ""))
                                      (not (= f "plugins/README.md"))))
                   (string/split result:stdout "\n"))]
-    (var html @"")
+    (def @html @"")
     (push html "<p>Available plugins. Each provides primitives accessible after import.</p>\n")
 
     (each file in (sort-with (fn [a b] (if (< a b) -1 (if (> a b) 1 0))) files)
@@ -446,9 +445,9 @@
 (spit (path/join output-dir "style.css") (generate-css))
 
 # Build all pages and navigation
-(var all-pages @[])
-(var nav-items @[])
-(var slug-map @{})
+(def @all-pages @[])
+(def @nav-items @[])
+(def @slug-map @{})
 
 # Home page from docs/README.md
 (let* [home-name (get site-config "home")
@@ -521,8 +520,7 @@
          desc (get page :description)
          source-dir (get page :source-dir)
          api-name (get page :api)]
-    (var body-html
-      (if api-name
+    (def @body-html (if api-name
         # Auto-generated API content
         (cond
           ((= api-name "primitives") (generate-primitives-html))

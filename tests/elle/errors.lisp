@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # tests/elle/errors.lisp
 # Smoke-tests that specific error keywords are produced.
 # Each assert-err-kind call verifies the :error field keyword.
@@ -9,8 +9,8 @@
 (let [[ok? err] (protect ((fn [] (range 0 10 0))))] (assert (not ok?) "range zero step") (assert (= (get err :error) :argument-error) "range zero step"))
 
 # ── parse-error ──────────────────────────────────────────────────────────────
-(let [[ok? err] (protect ((fn [] (float "nope"))))] (assert (not ok?) "float parse bad input") (assert (= (get err :error) :parse-error) "float parse bad input"))
-(let [[ok? err] (protect ((fn [] (integer "nope"))))] (assert (not ok?) "integer parse bad input") (assert (= (get err :error) :parse-error) "integer parse bad input"))
+(let [[ok? err] (protect ((fn [] (parse-float "nope"))))] (assert (not ok?) "parse-float bad input") (assert (= (get err :error) :parse-error) "parse-float bad input"))
+(let [[ok? err] (protect ((fn [] (parse-int "nope"))))] (assert (not ok?) "parse-int bad input") (assert (= (get err :error) :parse-error) "parse-int bad input"))
 
 # ── encoding-error ───────────────────────────────────────────────────────────
 (let [[ok? err] (protect ((fn [] (string (bytes 0xff 0xfe)))))] (assert (not ok?) "bytes->string bad utf8") (assert (= (get err :error) :encoding-error) "bytes->string bad utf8"))

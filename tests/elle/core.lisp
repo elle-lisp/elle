@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Core integration tests
 #
 # Migrated from tests/integration/core.rs
@@ -63,7 +63,7 @@
 (assert (= (length (list 1 2 3)) 3) "list construction length")
 
 # test_cons
-(var cons-list (cons 1 (cons 2 (cons 3 nil))))
+(def @cons-list (cons 1 (cons 2 (cons 3 nil))))
 (assert (list? cons-list) "cons builds list")
 (assert (= (first cons-list) 1) "cons first")
 (assert (= (first (rest cons-list)) 2) "cons second")
@@ -75,7 +75,7 @@
 (assert (= (first (rest (rest (list 10 20 30)))) 30) "third of list")
 
 # test_nested_lists
-(var nested (list (list 1 2) (list 3 4)))
+(def @nested (list (list 1 2) (list 3 4)))
 (assert (= (length nested) 2) "nested lists length")
 (assert (list? (first nested)) "nested list first is list")
 (assert (list? (first (rest nested))) "nested list second is list")
@@ -107,13 +107,13 @@
 # ============================================================================
 
 # test_define_and_use
-(var x-def 42)
+(def @x-def 42)
 (assert (= (+ x-def 10) 52) "define and use")
 
 # test_multiple_defines
-(var a-def 10)
-(var b-def 20)
-(var c-def 30)
+(def @a-def 10)
+(def @b-def 20)
+(def @c-def 30)
 (assert (= (+ a-def b-def c-def) 60) "multiple defines")
 
 # ============================================================================
@@ -124,7 +124,7 @@
 (assert (= (begin 1 2 3) 3) "begin returns last")
 
 # test_begin_with_side_effects
-(assert (= (begin (var x-begin 10) (var y-begin 20) (+ x-begin y-begin)) 30) "begin with side effects")
+(assert (= (begin (def @x-begin 10) (def @y-begin 20) (+ x-begin y-begin)) 30) "begin with side effects")
 
 # ============================================================================
 # Complex expressions
@@ -162,7 +162,7 @@
 # ============================================================================
 
 # test_large_list — create list with 100 elements
-(var large-list (list 0 1 2 3 4 5 6 7 8 9
+(def @large-list (list 0 1 2 3 4 5 6 7 8 9
                       10 11 12 13 14 15 16 17 18 19
                       20 21 22 23 24 25 26 27 28 29
                       30 31 32 33 34 35 36 37 38 39
@@ -276,9 +276,9 @@
 (assert (keyword? (type-of "hello")) "type-of string is keyword")
 
 # test_type_of_list_consistency (Issue #308)
-(var type-empty (type-of ()))
-(var type-proper (type-of (list 1 2)))
-(var type-cons (type-of (cons 1 2)))
+(def @type-empty (type-of ()))
+(def @type-proper (type-of (list 1 2)))
+(def @type-cons (type-of (cons 1 2)))
 (assert (keyword? type-empty) "type-of empty list is keyword")
 (assert (keyword? type-proper) "type-of proper list is keyword")
 (assert (keyword? type-cons) "type-of cons cell is keyword")
@@ -322,7 +322,7 @@
 # ============================================================================
 
 # test_array_creation
-(var arr (@array 1 2 3))
+(def @arr (@array 1 2 3))
 (assert (= (length arr) 3) "array length 3")
 (assert (= (get arr 0) 1) "array get 0")
 (assert (= (get arr 1) 2) "array get 1")
@@ -342,7 +342,7 @@
 (assert (= (get (@array 10 20 30) 2) 30) "array get 2")
 
 # test_array_put
-(var arr-put (put (@array 1 2 3) 1 99))
+(def @arr-put (put (@array 1 2 3) 1 99))
 (assert (= (get arr-put 0) 1) "array put keeps 0")
 (assert (= (get arr-put 1) 99) "array put sets 1")
 (assert (= (get arr-put 2) 3) "array put keeps 2")
@@ -421,17 +421,17 @@
 # ============================================================================
 
 # test_closure_captures_outer_variable
-(var x-outer 100)
+(def @x-outer 100)
 (assert (= ((fn [y] (+ x-outer y)) 20) 120) "closure captures outer")
 
 # test_closure_parameter_shadowing
-(var x-shadow 100)
+(def @x-shadow 100)
 (assert (= ((fn [x-shadow] (+ x-shadow 1)) 50) 51) "closure param shadowing")
 
 # test_closure_captures_multiple_variables
-(var cx 10)
-(var cy 20)
-(var cz 30)
+(def @cx 10)
+(def @cy 20)
+(def @cz 30)
 (assert (= ((fn [a b c] (+ a b c cx cy cz)) 1 2 3) 66) "closure captures multiple")
 
 # test_closure_parameter_in_nested_expression
@@ -447,7 +447,7 @@
 (assert (= ((fn [x y] (add-fn x y)) 10 20) 30) "closure captured function")
 
 # test_closure_with_list_operations
-(var numbers (list 1 2 3 4 5))
+(def @numbers (list 1 2 3 4 5))
 (assert (= ((fn [lst] (first lst)) numbers) 1) "closure with list ops")
 
 # test_closure_parameter_in_conditional
@@ -473,11 +473,11 @@
 (assert (= (let [x (+ 2 3) y (* 4 5)] (+ x y)) 25) "let binding with expressions")
 
 # test_let_shadowing_global
-(var x-let-shadow 10)
+(def @x-let-shadow 10)
 (assert (= (let [x-let-shadow 20] x-let-shadow) 20) "let shadows global")
 
 # test_let_does_not_modify_global
-(var x-let-global 10)
+(def @x-let-global 10)
 (let [x-let-global 20] x-let-global)
 (assert (= x-let-global 10) "let does not modify global")
 
@@ -497,7 +497,7 @@
 (assert (= (let [x 5] (+ x 1) (+ x 2) (+ x 3)) 8) "let multiple body returns last")
 
 # test_let_with_global_reference
-(var y-let-ref 100)
+(def @y-let-ref 100)
 (assert (= (let [x 50] (+ x y-let-ref)) 150) "let with global reference")
 
 # test_let_binding_order
@@ -507,7 +507,7 @@
 (assert (= (let [x '(1 2 3)] (rest x)) (list 2 3)) "let with quoted list")
 
 # test_let_shadowing_with_calculation
-(var x-let-calc 10)
+(def @x-let-calc 10)
 (assert (= (let [x-let-calc (* 2 x-let-calc)] x-let-calc) 20) "let shadowing with calculation")
 
 # test_let_with_builtin_functions
@@ -534,65 +534,65 @@
 # directly inside assert-eq. Bind results to a var first.
 
 # test_cond_single_true_clause
-(var cond-r1 (cond (true 42)))
+(def @cond-r1 (cond (true 42)))
 (assert (= cond-r1 42) "cond single true")
 
 # test_cond_single_false_clause_with_else
-(var cond-r2 (cond (false 42) (else 100)))
+(def @cond-r2 (cond (false 42) (else 100)))
 (assert (= cond-r2 100) "cond false with else")
 
 # test_cond_single_false_clause_without_else
-(var cond-r3 (cond (false 42)))
+(def @cond-r3 (cond (false 42)))
 (assert (= cond-r3 nil) "cond false without else")
 
 # test_cond_first_clause_matches
-(var cond-r4 (cond ((> 5 3) 100) ((> 4 2) 200)))
+(def @cond-r4 (cond ((> 5 3) 100) ((> 4 2) 200)))
 (assert (= cond-r4 100) "cond first matches")
 
 # test_cond_second_clause_matches
-(var cond-r5 (cond ((> 3 5) 100) ((> 4 2) 200)))
+(def @cond-r5 (cond ((> 3 5) 100) ((> 4 2) 200)))
 (assert (= cond-r5 200) "cond second matches")
 
 # test_cond_multiple_clauses_with_else
-(var cond-r6 (cond ((> 3 5) 100) ((> 2 4) 200) (else 300)))
+(def @cond-r6 (cond ((> 3 5) 100) ((> 2 4) 200) (else 300)))
 (assert (= cond-r6 300) "cond multiple with else")
 
 # test_cond_with_expressions_as_conditions
-(var cond-r7 (cond
+(def @cond-r7 (cond
   ((= 1 2) "one-two")
   ((= 2 2) "two-two")
   (else "other")))
 (assert (= cond-r7 "two-two") "cond with expression conditions")
 
 # test_cond_with_complex_bodies
-(var cond-r8 (cond (false (+ 1 1)) (true (+ 2 3)) (else (+ 4 5))))
+(def @cond-r8 (cond (false (+ 1 1)) (true (+ 2 3)) (else (+ 4 5))))
 (assert (= cond-r8 5) "cond complex bodies")
 
 # test_cond_with_multiple_body_expressions
-(var cond-r9 (cond (true (+ 1 1) (+ 2 2) (+ 3 3))))
+(def @cond-r9 (cond (true (+ 1 1) (+ 2 2) (+ 3 3))))
 (assert (= cond-r9 6) "cond multiple body exprs")
 
 # test_cond_nested
-(var cond-r10 (cond (true (cond (true 42) (else 100))) (else 200)))
+(def @cond-r10 (cond (true (cond (true 42) (else 100))) (else 200)))
 (assert (= cond-r10 42) "cond nested")
 
 # test_cond_with_variable_references
-(var x-cond 10)
-(var cond-r11 (cond
+(def @x-cond 10)
+(def @cond-r11 (cond
   ((< x-cond 5) "small")
   ((< x-cond 15) "medium")
   (else "large")))
 (assert (= cond-r11 "medium") "cond with variable references")
 
 # test_cond_respects_clause_order
-(var cond-r12 (cond
+(def @cond-r12 (cond
   ((>= 10 5) "first")
   ((>= 10 3) "second")
   (else "third")))
 (assert (= cond-r12 "first") "cond respects clause order")
 
 # test_cond_with_else_body_multiple_expressions
-(var cond-r13 (cond (false 100) (else (+ 1 1) (+ 2 2) (* 3 3))))
+(def @cond-r13 (cond (false 100) (else (+ 1 1) (+ 2 2) (* 3 3))))
 (assert (= cond-r13 9) "cond else multiple body exprs")
 
 # ============================================================================
@@ -601,12 +601,12 @@
 
 # test_nested_lambda_single_capture
 (def make-const (fn [x] (fn [y] x)))
-(var f-const (make-const 42))
+(def @f-const (make-const 42))
 (assert (= (f-const 100) 42) "nested lambda single capture")
 
 # test_nested_lambda_parameter_only
 (def make-id (fn [x] (fn [y] y)))
-(var f-id (make-id 100))
+(def @f-id (make-id 100))
 (assert (= (f-id 42) 42) "nested lambda parameter only")
 
 # ============================================================================
@@ -706,7 +706,7 @@
 # test_closure_with_local_define_and_param_arithmetic
 (let [outer-fn (fn [x]
                   (begin
-                    (var local (* x 2))
+                    (def @local (* x 2))
                     (fn [y] (+ local y))))]
   (assert (= ((outer-fn 1) 1) 3) "closure with local define and param"))
 

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Integration tests for the eval special form
 #
 # Migrated from tests/integration/eval.rs (46 tests)
@@ -134,7 +134,7 @@
 # ============================================================
 
 # test_eval_with_match — bind match result to var first (known bug workaround)
-(var match-result (eval '(match 42 (42 "found") (_ "not found"))))
+(def @match-result (eval '(match 42 (42 "found") (_ "not found"))))
 (assert (= match-result "found") "eval with match")
 
 # ============================================================
@@ -145,7 +145,7 @@
 (assert (= (eval '(first (list 1 2 3))) 1) "eval list operations (first)")
 
 # test_eval_returns_list
-(var eval-list (eval '(list 1 2 3)))
+(def @eval-list (eval '(list 1 2 3)))
 (assert (= (first eval-list) 1) "eval returns list (first element)")
 
 # ============================================================
@@ -170,7 +170,7 @@
 # ============================================================
 
 # test_eval_with_while
-(assert (= (eval '(begin (var i 0) (while (< i 3) (assign i (+ i 1))) i)) 3) "eval with while loop")
+(assert (= (eval '(begin (def @i 0) (while (< i 3) (assign i (+ i 1))) i)) 3) "eval with while loop")
 
 # ============================================================
 # Eval with recursion
@@ -223,14 +223,14 @@
 
 # test_import_returns_last_value
 # Write a temp file, import it, check the returned struct
-(var import-test-path "/tmp/elle-test-import.lisp")
+(def @import-test-path "/tmp/elle-test-import.lisp")
 (spit import-test-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
-(var import-result (import-file import-test-path))
+(def @import-result (import-file import-test-path))
 (assert (= (get import-result :answer) 42) "import returns last value (:answer)")
 (assert (= (get import-result :double) 84) "import returns last value (:double)")
 
 # test_import_destructuring
-(var import-destr-path "/tmp/elle-test-import-destr.lisp")
+(def @import-destr-path "/tmp/elle-test-import-destr.lisp")
 (spit import-destr-path "(def internal 42)\n{:answer internal :double (* internal 2)}")
 (let [{:answer a} (import-file import-destr-path)]
   (assert (= a 42) "import destructuring"))

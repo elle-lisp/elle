@@ -1,5 +1,5 @@
-.PHONY: all elle dev mcp docs docgen smoke test test-git clean help \
-       smoke-vm smoke-jit smoke-wasm doctest
+.PHONY: all elle dev docs docgen smoke test test-git clean help \
+       smoke-vm smoke-jit smoke-wasm smoke-diff doctest
 
 .DEFAULT_GOAL := all
 
@@ -19,10 +19,10 @@ all: elle docs  ## Build everything
 # ── Build ───────────────────────────────────────────────────────────
 
 elle:  ## Build the Elle binary (release)
-	cargo build --release -p elle --features wasm
+	cargo build --release -p elle
 
 dev:  ## Build the Elle binary (debug, fast compile)
-	cargo build -p elle --features wasm
+	cargo build -p elle
 
 MCP_PATCH := --config 'patch."https://github.com/elle-lisp/elle".elle-plugin.path="elle-plugin"'
 
@@ -78,7 +78,8 @@ smoke-jit:
 			'timeout $(TIMEOUT) $(ELLE) --jit=1 {}' \
 		|| { echo "FAILED: elle scripts JIT pass (JIT was enabled, threshold=1)"; exit 1; }
 
-smoke-wasm: elle
+smoke-wasm:
+	cargo build --release -p elle --features wasm -q
 	@echo "=== elle scripts (WASM backend) ==="
 	@printf '%s\n' tests/elle/*.lisp | \
 		grep -v $(WASM_SKIP) | \
@@ -93,19 +94,30 @@ doctest:  ## Test code examples in documentation (literate mode)
 			'timeout $(TIMEOUT) $(ELLE) {}' \
 		|| { echo "FAILED: doctest"; exit 1; }
 
-smoke: dev smoke-vm smoke-jit smoke-wasm doctest  ## Run examples + elle scripts (VM, JIT, WASM) + docgen + doctest
-	cargo build --release -p elle --features wasm -q
+smoke-diff:  ## Cross-tier differential agreement tests (compile/run-on)
+	@echo "=== differential tier-agreement tests ==="
+	@printf '%s\n' tests/diff/*.lisp | \
+		parallel -j $(JOBS) --halt now,fail=1 --tag \
+			'timeout $(TIMEOUT) $(ELLE) {}' \
+		|| { echo "FAILED: differential tests"; exit 1; }
+
+smoke: dev smoke-vm smoke-jit smoke-wasm smoke-diff doctest  ## Run examples + elle scripts (VM, JIT, WASM, differential) + docgen + doctest
 	./target/release/elle demos/docgen/generate.lisp
 
 test-git:  ## Run git plugin integration tests (requires git, no network)
 	cargo build $(CARGO_PROFILE) -p elle
 	$(ELLE) tests/git.lisp
 
+MLIR_PREFIX ?= $(HOME)/git/tmp/mlir-install
+MLIR_ENV    := LLVM_SYS_220_PREFIX=$(MLIR_PREFIX) \
+               MLIR_SYS_220_PREFIX=$(MLIR_PREFIX) \
+               TABLEGEN_220_PREFIX=$(MLIR_PREFIX)
+
 test: smoke  ## Rust unit tests + clippy + fmt + rustdoc after smoke
 	cargo fmt --check
-	cargo clippy --workspace --all-targets -- -D warnings
-	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-	PROPTEST_CASES=4 cargo test --workspace --lib
+	$(MLIR_ENV) cargo clippy --workspace --all-targets --all-features -- -D warnings
+	$(MLIR_ENV) RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+	$(MLIR_ENV) PROPTEST_CASES=4 cargo test --workspace --lib --all-features
 
 # ── Clean ───────────────────────────────────────────────────────────
 

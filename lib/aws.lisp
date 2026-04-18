@@ -1,7 +1,7 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/aws.lisp — Elle-native AWS client
 
-(var sigv4-mod nil)
+(def @sigv4-mod nil)
 
 (def creds {:access-key    (sys/env "AWS_ACCESS_KEY_ID")
             :secret-key    (sys/env "AWS_SECRET_ACCESS_KEY")
@@ -37,7 +37,7 @@
   ## Read status
   (let* [line (tls:read-line conn)
          parts (string/split (string/trim line) " ")
-         status (integer (get parts 1))]
+         status (parse-int (get parts 1))]
     ## Read headers
     (def resp-headers @{})
     (forever
@@ -59,7 +59,7 @@
                  (def chunks @[])
                  (forever
                    (let* [sz-line (tls:read-line conn)
-                          sz (integer (string/trim sz-line) 16)]
+                          sz (parse-int (string/trim sz-line) 16)]
                      (when (= sz 0)
                        (tls:read-line conn)
                        (break :chunked
@@ -70,7 +70,7 @@
                        (push chunks chunk)
                        (tls:read-line conn))))))
               ((not (nil? cl))
-               (tls:read conn (integer cl)))
+               (tls:read conn (parse-int cl)))
               (true nil))
            decoded (if raw resp-body (decode-body resp-body resp-headers))]
       {:status status :headers resp-headers :body decoded})))

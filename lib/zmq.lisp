@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/zmq.lisp — ZeroMQ bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libzmq. No Rust plugin needed.

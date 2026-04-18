@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Helper for asserting errors
 (defn assert-err [thunk msg]
@@ -18,10 +18,10 @@
 (assert (= (integer -99) -99) "integer(-99) == -99")
 
 # integer_from_string_roundtrip
-# (integer "n") should parse the string to an integer
-(assert (= (integer "42") 42) "integer(\"42\") == 42")
-(assert (= (integer "0") 0) "integer(\"0\") == 0")
-(assert (= (integer "-99") -99) "integer(\"-99\") == -99")
+# (parse-int "n") should parse the string to an integer
+(assert (= (parse-int "42") 42) "integer(\"42\") == 42")
+(assert (= (parse-int "0") 0) "integer(\"0\") == 0")
+(assert (= (parse-int "-99") -99) "integer(\"-99\") == -99")
 
 # float_from_int_preserves_value
 # (float n) should convert integer to float
@@ -30,10 +30,10 @@
 (assert (float? (float -99)) "float(-99) is a float")
 
 # number_to_string_int_roundtrip
-# (integer (number->string n)) should equal n
-(assert (= (integer (number->string 42)) 42) "integer(number->string(42)) == 42")
-(assert (= (integer (number->string 0)) 0) "integer(number->string(0)) == 0")
-(assert (= (integer (number->string -99)) -99) "integer(number->string(-99)) == -99")
+# (parse-int (number->string n)) should equal n
+(assert (= (parse-int (number->string 42)) 42) "integer(number->string(42)) == 42")
+(assert (= (parse-int (number->string 0)) 0) "integer(number->string(0)) == 0")
+(assert (= (parse-int (number->string -99)) -99) "integer(number->string(-99)) == -99")
 
 # string_from_int_matches_format
 # (string n) should format integer as string

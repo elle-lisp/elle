@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Set types test suite
 ##
 ## Comprehensive tests for set types (immutable and mutable).
@@ -438,7 +438,7 @@
 # Each Iteration
 # ============================================================================
 
-(var sum 0)
+(def @sum 0)
 (each x (set 1 2 3)
   (assign sum (+ sum x)))
 (assert (= sum 6) "each iterates over set elements")

@@ -40,6 +40,7 @@ HIR + spans
     │
     ▼
 Lowerer (&BindingArena)
+    ├─► seed immutable_values for constant bindings (emit ValueConst instead of LoadLocal)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
     ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
     ├─► lower control flow to jumps
@@ -106,15 +107,17 @@ stored in `Closure.location_map` and used by the VM for error reporting.
     captures and parameters are upvalues; they use LoadCapture, not LoadLocal.
 
 5. **`capture_params_mask` is set for mutable parameters.** Bit i set means
-     parameter i needs lbox wrapping at call time.
+     parameter i needs lbox wrapping at call time. With immutable-by-default
+     params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
 6. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means
      locally-defined variable i (0-indexed from the first local after params)
      needs lbox wrapping because it's captured by a nested closure or mutated
-     via `set!`. The JIT uses this to skip `CaptureCell` heap allocation for
-     non-captured, non-mutated `let` bindings. The VM interpreter does not
-     use this mask (it lbox-wraps all locals unconditionally). Both masks
-     are limited to 64 entries (`u64`).
+     via `assign`. With immutable-by-default let bindings, only `@`-prefixed
+     bindings can be mutated, so this mask is typically sparser. The JIT uses
+     this to skip `CaptureCell` heap allocation for non-captured, non-mutated
+     `let` bindings. The VM interpreter does not use this mask (it lbox-wraps
+     all locals unconditionally). Both masks are limited to 64 entries (`u64`).
 
 7. **Emit is a block terminator, not an instruction.** `Terminator::Emit { signal: SignalBits, value: Reg, resume_label: Label }`
     splits the block: the current block ends with emit, and a new resume block
@@ -141,6 +144,7 @@ stored in `Closure.location_map` and used by the VM for error reporting.
 
 | Instruction | Stack effect | Notes |
 |-------------|--------------|-------|
+| `ValueConst` | → value | Compile-time constant from `immutable_values` (primitives + immutable literal bindings). GPU-safe for numeric/bool/nil values. |
 | `LoadLocal` | → value | Load from stack slot |
 | `StoreLocal` | value → value | Store to slot, keep on stack |
 | `LoadCapture` | → value | From closure env, auto-unwraps CaptureCell |

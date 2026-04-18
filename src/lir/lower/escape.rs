@@ -288,6 +288,7 @@ impl<'a> Lowerer<'a> {
                 IntrinsicOp::Binary(BinOp::Sub) => args.len() == 2 || args.len() == 1,
                 IntrinsicOp::Binary(_) | IntrinsicOp::Compare(_) => args.len() == 2,
                 IntrinsicOp::Unary(_) => args.len() == 1,
+                IntrinsicOp::Conversion(_) => args.len() == 1,
             };
         }
 

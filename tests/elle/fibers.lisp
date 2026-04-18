@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Fiber Primitive Tests
 ##
 ## Migrated from tests/property/fibers.rs (behavioral property tests).
@@ -156,14 +156,14 @@
 (begin
   (def helper (fn [x] (yield (* x 2))))
   (def caller (fn [x] (+ (helper x) 1)))
-  (var co (make-coroutine (fn [] (caller 5))))
+  (def @co (make-coroutine (fn [] (caller 5))))
   (assert (= (coro/resume co) 10) "multi-frame yield: first yield is 5*2=10")
   (assert (= (coro/resume co 7) 8) "multi-frame yield: resume 7, caller adds 1 = 8"))
 
 (begin
   (def helper2 (fn [x] (yield (* x 2))))
   (def caller2 (fn [x] (+ (helper2 x) 1)))
-  (var co2 (make-coroutine (fn [] (caller2 -25))))
+  (def @co2 (make-coroutine (fn [] (caller2 -25))))
   (assert (= (coro/resume co2) -50) "multi-frame yield: first yield is -25*2=-50")
   (assert (= (coro/resume co2 10) 11) "multi-frame yield: resume 10, caller adds 1 = 11"))
 
@@ -178,7 +178,7 @@
     (rh 10)
     (yield 20)
     42))
-  (var rco (make-coroutine rgen))
+  (def @rco (make-coroutine rgen))
   (assert (= (coro/resume rco) 10) "re-yield: first yield from helper")
   (assert (= (coro/resume rco 5) 20) "re-yield: second yield from gen")
   (assert (= (coro/resume rco) 42) "re-yield: final return"))
@@ -189,7 +189,7 @@
     (rh2 -30)
     (yield 50)
     99))
-  (var rco2 (make-coroutine rgen2))
+  (def @rco2 (make-coroutine rgen2))
   (assert (= (coro/resume rco2) -30) "re-yield: first yield -30")
   (assert (= (coro/resume rco2 0) 50) "re-yield: second yield 50")
   (assert (= (coro/resume rco2) 99) "re-yield: final return 99"))
@@ -204,7 +204,7 @@
     (yield x)
     (/ 1 0)))
   (def egen (fn [] (+ (eh 5) 1)))
-  (var eco (make-coroutine egen))
+  (def @eco (make-coroutine egen))
   (coro/resume eco)
   (let [[ok? _] (protect ((fn [] (coro/resume eco))))] (assert (not ok?) "error during multi-frame resume: division by zero")))
 
@@ -564,7 +564,7 @@
 
 # Basic pattern: fiber created in let, stored into outer @array, accessed after scope
 (begin
-  (var fibers @[])
+  (def @fibers @[])
   (let [f (fiber/new (fn [] (yield :ping) :done) 2)]
     (push fibers f))
   # The let scope has exited. If the escape analysis incorrectly freed f,
@@ -574,7 +574,7 @@
 
 # Multiple fibers pushed from different let scopes into the same outer array
 (begin
-  (var store @[])
+  (def @store @[])
   (let [a (fiber/new (fn [] 1) 0)]
     (push store a))
   (let [b (fiber/new (fn [] 2) 0)]
@@ -584,8 +584,8 @@
 
 # Fiber created in nested let, pushed to outer array, resumed via bits check
 (begin
-  (var bucket @[])
-  (let [pid 0
+  (def @bucket @[])
+  (let [@pid 0
         f (fiber/new (fn [] (yield :hello) :world) 3)]
     (push bucket f)
     (assign pid (length bucket)))

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Elle standard library
 ##
 ## Loaded at startup after primitives are registered.
@@ -25,7 +25,7 @@
     ((or (array? coll) (string? coll) (bytes? coll))
      (let* [len (length coll)
             acc @[]]
-       (var i 0)
+       (def @i 0)
        (while (< i len)
          (push acc (f (get coll i)))
          (assign i (+ i 1)))
@@ -47,7 +47,7 @@
     ((or (array? coll) (string? coll) (bytes? coll))
      (let* [len (length coll)
             acc @[]]
-       (var i 0)
+       (def @i 0)
        (while (< i len)
          (let [item (get coll i)]
            (when (p item) (push acc item)))
@@ -639,7 +639,7 @@
                (string/replace "|" "\\|")
                (string/replace "<" "\\<")
                (string/replace ">" "\\>")))]
-    (let [result (-> "digraph {\n  label=\""
+    (let [@result (-> "digraph {\n  label=\""
                     (append (dot-escape (string/replace (fn/cfg-label cfg) "\n" " ")))
                     (append " arity:")
                     (append (get cfg :arity))
@@ -690,7 +690,7 @@
              (-> s
                (string/replace "&" "&amp;")
                (string/replace "\"" "&quot;")))]
-    (let [result (-> "flowchart TD\n"
+    (let [@result (-> "flowchart TD\n"
                     (append "  %% ")
                     (append (string/replace (fn/cfg-label cfg) "\n" " "))
                     (append " arity:")
@@ -724,7 +724,7 @@
                               ((= term-kind :yield)  "\"}}")
                               (true                  "\"]"))
                # Build node content with compact instructions
-               content (-> (append "block" lbl)
+               @content (-> (append "block" lbl)
                           (append "<br/>"))]
            # Add each instruction
           (each instr display
@@ -806,7 +806,7 @@
   "Reduce values from source with f, starting from init.
    Returns the final accumulator value.
    Signal is polymorphic in f: if f yields, stream/fold yields."
-  (var acc init)
+  (def @acc init)
   (coro/resume source)
   (while (not (coro/done? source))
     (assign acc (f acc (coro/value source)))
@@ -817,7 +817,7 @@
   "Collect all values yielded by source into a list.
    Builds in reverse using cons then reverses — O(n).
    Signal: errors only (no user callback)."
-  (var acc ())
+  (def @acc ())
   (coro/resume source)
   (while (not (coro/done? source))
     (assign acc (cons (coro/value source) acc))
@@ -858,7 +858,7 @@
   "Return a coroutine that yields at most n values from source.
    Signal: Silent (may error)."
   (coro/new (fn []
-    (var remaining n)
+    (def @remaining n)
     (forever
       (when (<= remaining 0) (break))
       (coro/resume source)
@@ -870,7 +870,7 @@
   "Return a coroutine that skips n values from source, then yields the rest.
    Signal: Silent (may error)."
   (coro/new (fn []
-    (var skipped 0)
+    (def @skipped 0)
     # Skip n values
     (while (< skipped n)
       (coro/resume source)
@@ -903,7 +903,7 @@
    Signal: Silent (may error)."
   (coro/new (fn []
     (forever
-      (var done false)
+      (def @done false)
       (let [vals (map (fn [s]
                         (coro/resume s)
                         (when (coro/done? s) (assign done true))
@@ -1136,8 +1136,8 @@
              count (request :count)
              q     (or (park-queues key) @[])
              n     (min count (length q))
-             woken 0]
-        (var i 0)
+             @woken 0]
+        (def @i 0)
         (while (< i n)
           (let [fiber (q 0)]
             (remove q 0)
@@ -1326,8 +1326,8 @@
         ((get sched :pump))
         # Mark all entry-point fibers as joined — they're owned by ev/run,
         # not orphaned.  Propagate the first error we find among them.
-        (var result nil)
-        (var first-error nil)
+        (def @result nil)
+        (def @first-error nil)
         (each f in fibers
           (mark f)
           (let [s (fiber/status f)]
@@ -1445,8 +1445,8 @@
       (push scope-fibers body-fiber)
       (push pool body-fiber)
       # Monitor all fibers — detect errors from any fiber immediately
-      (var body-val nil)
-      (var first-error nil)
+      (def @body-val nil)
+      (def @first-error nil)
       (block :done
         (forever
           (let [done (next)]
@@ -1476,8 +1476,8 @@
 (defn ev/map-limited [f items limit]
   "Like ev/map, but with at most limit fibers in flight at once.
    Results are returned in input order."
-  (var todo (apply list items))
-  (var n 0)
+  (def @todo (apply list items))
+  (def @n 0)
   (let [fiber->idx @{}
         results @{}]
    (let [[next pool] (ev/as-completed @[])]

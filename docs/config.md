@@ -139,13 +139,41 @@ It must return one of:
 - `:wasm` — compile with WASM backend
 - `:skip` — keep in interpreter
 
+### MLIR policy
+
+```bash
+elle --mlir=off script.lisp         # disable MLIR (never fires)
+elle --mlir=eager script.lisp       # compile on first eligible call
+elle --mlir=adaptive script.lisp    # compile after threshold (default)
+```
+
+| Policy | CLI | Behavior |
+|--------|-----|----------|
+| Off | `--mlir=off` | MLIR disabled |
+| Eager | `--mlir=eager` | Compile on first eligible call |
+| Adaptive | `--mlir=adaptive` | Compile after 10 calls (default) |
+
+Integer syntax works too: `--mlir=N` sets threshold to N-1.
+
+The MLIR policy is independent of the JIT policy. When compiled with
+`--features mlir`, GPU-eligible functions are compiled through
+MLIR → LLVM for optimized native execution. The policy controls when
+this compilation happens. Functions not eligible for MLIR fall through
+to the Cranelift JIT regardless of the MLIR policy.
+
+```lisp
+(vm/config :mlir)              # → :adaptive
+(vm/config-set :mlir :off)     # disable MLIR tier
+(vm/config-set :mlir :eager)   # compile immediately
+(vm/config-set :mlir :adaptive) # default behavior
+```
+
 ### Future feature flags
 
 The following keywords are accepted in trace sets without error, for
 forward compatibility:
 
 - `:spirv` — SPIR-V shader compilation
-- `:mlir` — MLIR compilation
 - `:gpu` — GPU offloading
 
 ## Implementation

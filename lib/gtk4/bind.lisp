@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/gtk4/bind.lisp — Raw FFI bindings to GTK4, GLib, GObject, WebKit
 ##
 ## Pure ffi/defbind declarations. No logic.
@@ -239,7 +239,7 @@
 
 (ffi/defbind g-application-quit libgio "g_application_quit" :void [:ptr])
 
-(defn run-app [app &named quit]
+(defn run-app [app &named @quit]
   "Cooperative GTK event loop. Registers and activates the app, then
    pumps g_main_context_iteration non-blocking, yielding to Elle's
    scheduler between iterations.

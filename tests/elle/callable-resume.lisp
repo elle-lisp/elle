@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Callable collection dispatch after fiber suspend/resume
 #
 # Regression test: (cell 0) callable @array syntax fails with

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 (defn check-safe-helper [col remaining row-offset]
   (if (empty? remaining) true
     (let [placed-col (first remaining)]

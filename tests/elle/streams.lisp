@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Stream combinators — sinks, transforms, port-to-stream converters
 
 
@@ -7,7 +7,7 @@
 (defn make-range [n]
   "Return a coroutine that yields integers 0..n-1."
   (coro/new (fn []
-    (var i 0)
+    (def @i 0)
     (while (< i n)
       (yield i)
       (assign i (+ i 1))))))
@@ -15,7 +15,7 @@
 (defn make-from-list [lst]
   "Return a coroutine that yields each element of lst."
   (coro/new (fn []
-    (var remaining lst)
+    (def @remaining lst)
     (while (not (empty? remaining))
       (yield (first remaining))
       (assign remaining (rest remaining))))))
@@ -194,7 +194,7 @@
 (spit "/tmp/elle-test-streams-compose-478" "1\n2\n3\n4\n5")
 (assert (= (stream/collect
     (stream/take 3
-      (stream/map (fn [x] (+ (integer x) 10))
+      (stream/map (fn [x] (+ (parse-int x) 10))
         (port/lines (port/open "/tmp/elle-test-streams-compose-478" :read)))))
   (list 11 12 13)) "composition: port/lines -> map -> take -> collect")
 
@@ -209,8 +209,8 @@
         (stream/map
           (fn [line]
             (let [parts (string/split line ",")]
-              {:id    (integer (get parts 0))
-               :value (integer (get parts 1))}))
+              {:id    (parse-int (get parts 0))
+               :value (parse-int (get parts 1))}))
           (stream/drop 1
             (port/lines (port/open "/tmp/elle-test-streams-pipeline-478" :read)))))))
   (list {:id 2 :value 200} {:id 3 :value 300} {:id 4 :value 400})) "integration: CSV pipeline drop-header map-parse filter take collect")

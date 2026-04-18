@@ -2,17 +2,16 @@
 
 ## fn — anonymous functions
 
-`fn` creates a closure. Brackets delimit the parameter list.
+`fn` creates a closure. Brackets delimit the parameter list. Parameters
+are immutable by default; prefix with `@` to allow mutation via `assign`.
 
 ```lisp
 (def double (fn [x] (* x 2)))
 (double 21)                # => 42
 
-# multi-expression body; last expression is the return value
-(def greet (fn [name]
-  (def line (string "Hello, " name "!"))
-  line))
-(greet "Alice")            # => "Hello, Alice!"
+# mutable parameter
+(def bump (fn [@n] (assign n (+ n 1)) n))
+(bump 10)                  # => 11
 ```
 
 ## defn — named functions

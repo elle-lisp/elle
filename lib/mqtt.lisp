@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/mqtt.lisp — MQTT client for Elle
 ##
 ## MQTT client using the elle-mqtt plugin for packet encode/decode.
@@ -49,7 +49,7 @@
 
   ## ── Public API ────────────────────────────────────────────────────
 
-  (defn mqtt/connect [host port-num &named client-id username password clean-session keep-alive]
+  (defn mqtt/connect [host port-num &named client-id username password @clean-session keep-alive]
     "Connect to an MQTT broker. Returns {:tcp port :mqtt mqtt-state}."
     (default clean-session true)
     (let* [opts {:client-id client-id :username username :password password
@@ -70,7 +70,7 @@
           (error err)))
       conn))
 
-  (defn mqtt/publish [conn topic payload &named qos retain]
+  (defn mqtt/publish [conn topic payload &named @qos retain]
     "Publish a message. :qos 0/1/2 (default 0), :retain true/false."
     (default qos 0)
     (let [opts {:qos qos :retain retain}]

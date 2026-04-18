@@ -77,7 +77,7 @@ fn elapsed_time_captures_result() {
 #[test]
 fn stopwatch_samples_are_monotonic() {
     let expr = r#"
-        (let [sw (time/stopwatch) samples (list) i 0]
+        (let [sw (time/stopwatch) @samples (list) @i 0]
           (while (< i 20)
             (begin
               (assign samples (cons (coro/resume sw) samples))

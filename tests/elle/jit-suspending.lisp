@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # JIT SuspendingCall + polymorphic signal tests
 #
 # Regression tests for JIT compilation of:
@@ -15,7 +15,7 @@
 (def data {:x 42 :y 99 :z 7})
 
 # Hot loop to trigger JIT
-(var i 0)
+(def @i 0)
 (while (< i 200)
   (lookup data :x)
   (assign i (+ i 1)))
@@ -30,7 +30,7 @@
 (defn nth [arr idx] (arr idx))
 (def nums @[10 20 30 40 50])
 
-(var i 0)
+(def @i 0)
 (while (< i 200)
   (nth nums 2)
   (assign i (+ i 1)))
@@ -45,7 +45,7 @@
 (defn char-at [s idx] (s idx))
 (def text "hello")
 
-(var i 0)
+(def @i 0)
 (while (< i 200)
   (char-at text 0)
   (assign i (+ i 1)))
@@ -57,14 +57,14 @@
 # ── 4. Pure computation in hot loop (no SuspendingCall) ──────────────
 
 (defn sum-to [n]
-  (var sum 0)
-  (var i 0)
+  (def @sum 0)
+  (def @i 0)
   (while (< i n)
     (assign sum (+ sum i))
     (assign i (+ i 1)))
   sum)
 
-(var i 0)
+(def @i 0)
 (while (< i 200)
   (sum-to 10)
   (assign i (+ i 1)))
@@ -80,8 +80,8 @@
 # array parameter in a tight loop.
 
 (defn sum-array [arr n]
-  (var sum 0)
-  (var i 0)
+  (def @sum 0)
+  (def @i 0)
   (while (< i n)
     (assign sum (+ sum (arr i)))
     (assign i (+ i 1)))
@@ -89,7 +89,7 @@
 
 (def test-arr @[1 2 3 4 5 6 7 8 9 10])
 
-(var i 0)
+(def @i 0)
 (while (< i 200)
   (sum-array test-arr 10)
   (assign i (+ i 1)))
@@ -107,7 +107,7 @@
 (def rejected-names (map (fn [r] (get r :name)) rejections))
 
 (defn name-rejected? [name]
-  (var found false)
+  (def @found false)
   (each r rejections
     (when (= (get r :name) name)
       (assign found true)))

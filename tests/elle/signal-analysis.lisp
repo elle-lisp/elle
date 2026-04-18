@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # ── Signal analysis tests ─────────────────────────────────────────────
 #
 # Lock down expectations for compute_inferred_signal: which functions
@@ -164,7 +164,7 @@
 
 # var with polymorphic parameter call
 (defn var-poly [f]
-  (var r (f))
+  (def @r (f))
   r)
 (assert (not (silent? var-poly)) "var with param call propagates suspension")
 
@@ -177,29 +177,29 @@
 # var with known-yielding callee
 (defn yielder-for-var [] (yield 42))
 (defn var-known-yield []
-  (var r (yielder-for-var))
+  (def @r (yielder-for-var))
   r)
 (assert (not (silent? var-known-yield)) "var with yielding callee is not silent")
 
 # var with known-pure callee stays silent
 (defn pure-for-var [x] x)
 (defn var-known-pure []
-  (var r (pure-for-var 42))
+  (def @r (pure-for-var 42))
   r)
 (assert (silent? var-known-pure) "var with pure callee stays silent")
 
 # var with arithmetic propagates SIG_ERROR
 (defn var-arith [x]
-  (var r (+ x 1))
+  (def @r (+ x 1))
   r)
 (assert (fn/errors? var-arith) "var with arithmetic propagates SIG_ERROR")
 (assert (silent? var-arith) "var with arithmetic stays silent (error only)")
 
 # Multiple var bindings accumulate signals
 (defn multi-var [f]
-  (var a 1)
-  (var b (f))
-  (var c (+ a b))
+  (def @a 1)
+  (def @b (f))
+  (def @c (+ a b))
   c)
 (assert (not (silent? multi-var)) "multiple vars accumulate yielding signal")
 (assert (fn/errors? multi-var) "multiple vars accumulate SIG_ERROR from arithmetic")
@@ -207,7 +207,7 @@
 # var inside conditional
 (defn var-in-if [x f]
   (if x
-    (begin (var r (f)) r)
+    (begin (def @r (f)) r)
     0))
 (assert (not (silent? var-in-if)) "var in conditional propagates suspension")
 

@@ -245,6 +245,15 @@ impl<'a> Lowerer<'a> {
                 self.emit(LirInstr::UnaryOp { dst, op, src });
                 Ok(Some(dst))
             }
+            IntrinsicOp::Conversion(op) => {
+                if args.len() != 1 {
+                    return Ok(None); // 2-arg (integer str radix) falls through to Call
+                }
+                let src = self.lower_expr(args[0])?;
+                let dst = self.fresh_reg();
+                self.emit(LirInstr::Convert { dst, op, src });
+                Ok(Some(dst))
+            }
         }
     }
 

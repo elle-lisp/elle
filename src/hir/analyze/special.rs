@@ -555,4 +555,76 @@ impl<'a> Analyzer<'a> {
 
         Ok(HirPattern::Or(patterns))
     }
+
+    // === Compile-time assertion forms ===
+
+    /// `(assert-silent)` — assert that the current function is silent (no signals).
+    pub(crate) fn analyze_silence_assert(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: assert-silent must appear inside a function body",
+                span
+            ));
+        }
+        if items.len() != 1 {
+            return Err(format!("{}: assert-silent takes no arguments", span));
+        }
+        self.current_silence_assert = true;
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
+    /// `(assert-numeric)` — assert that the current function is GPU-eligible.
+    pub(crate) fn analyze_numeric_assert(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: assert-numeric must appear inside a function body",
+                span
+            ));
+        }
+        if items.len() != 1 {
+            return Err(format!("{}: assert-numeric takes no arguments", span));
+        }
+        self.current_numeric_assert = true;
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
+
+    /// `(assert-immutable x)` — assert that binding `x` is never assigned in the body.
+    pub(crate) fn analyze_immutable_assert(
+        &mut self,
+        items: &[Syntax],
+        span: Span,
+    ) -> Result<Hir, String> {
+        if self.fn_depth == 0 {
+            return Err(format!(
+                "{}: assert-immutable must appear inside a function body",
+                span
+            ));
+        }
+        if items.len() != 2 {
+            return Err(format!(
+                "{}: assert-immutable requires exactly one argument (a symbol)",
+                span
+            ));
+        }
+        let name = items[1].as_symbol().ok_or_else(|| {
+            format!(
+                "{}: assert-immutable argument must be a symbol, got {}",
+                items[1].span,
+                items[1].kind_label()
+            )
+        })?;
+        let binding = self
+            .lookup(name, items[1].scopes.as_slice())
+            .ok_or_else(|| format!("{}: assert-immutable: undefined variable '{}'", span, name))?;
+        self.current_immutability_asserts.insert(binding);
+        Ok(Hir::silent(HirKind::Nil, span))
+    }
 }

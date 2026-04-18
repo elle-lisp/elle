@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/redis.lisp — Pure Elle Redis client (RESP2)
 ##
 ## Loaded via: (def redis ((import-file "lib/redis.lisp")))
@@ -39,10 +39,10 @@
         "-" (error {:error :redis-error :reason :server-error :body body :message body})
 
         # Integer
-        ":" (integer body)
+        ":" (parse-int body)
 
         # Bulk string
-        "$" (let [len (integer body)]
+        "$" (let [len (parse-int body)]
               (if (= len -1)
                 nil
                 (let [data (port/read port (+ len 2))]
@@ -52,12 +52,12 @@
                   (string (slice data 0 len)))))
 
         # Array
-        "*" (let [count (integer body)]
+        "*" (let [count (parse-int body)]
               (if (= count -1)
                 nil
                 (block
                   (def result @[])
-                  (var i 0)
+                  (def @i 0)
                   (while (< i count)
                     (push result (resp-read port))
                     (assign i (+ i 1)))
@@ -131,11 +131,11 @@
         param       (parameter nil)]
     (defn run-with-manager [thunk]
       "Execute thunk with a managed Redis connection."
-      (var conn (redis-connect host port))
-      (var attempts 0)
+      (def @conn (redis-connect host port))
+      (def @attempts 0)
       (defer (port/close conn)
-        (var result nil)
-        (var done false)
+        (def @result nil)
+        (def @done false)
         (while (not done)
           (let [[ok? val] (protect
                             (parameterize ((param conn))
@@ -315,8 +315,8 @@
    scan-args: remaining args to scan-fn (excluding cursor).
    Example: (redis:scan-all redis:scan :match \"user:*\")"
   (def acc @[])
-  (var cursor "0")
-  (var first true)
+  (def @cursor "0")
+  (def @first true)
   (while (or first (not (= cursor "0")))
     (assign first false)
     (let [[next-cursor items] (apply scan-fn (cons cursor scan-args))]
@@ -347,7 +347,7 @@
   "HGETALL key — returns struct with string keys."
   (let [arr (redis-cmd "HGETALL" key)
         result @{}]
-    (var i 0)
+    (def @i 0)
     (while (< i (length arr))
       (put result (get arr i) (get arr (+ i 1)))
       (assign i (+ i 2)))
@@ -571,9 +571,9 @@
            (redis:multi)
            (redis:set \"counter\" (string (+ val 1))))))
    => [true]"
-  (var attempts 0)
-  (var result nil)
-  (var done false)
+  (def @attempts 0)
+  (def @result nil)
+  (def @done false)
   (while (not done)
     (when (not (empty? watch-keys))
       (apply redis-watch watch-keys))

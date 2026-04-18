@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## TLS library integration tests — Chunk 4: handshake only
 ##
 ## Requires network access (connects to example.com:443).
@@ -128,7 +128,7 @@
         ## Parse the ephemeral port from "127.0.0.1:PORT".
         (def server-port
           (let [parts (string/split server-addr ":")]
-            (int (get parts (- (length parts) 1)))))
+            (parse-int (get parts (- (length parts) 1)))))
 
         (def server-config (tls:server-config cert-path key-path))
 

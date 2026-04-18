@@ -88,7 +88,6 @@ impl ClosureTemplate {
         let non_error_bits = self.signal.bits.subtract(crate::signals::SIG_ERROR);
         non_error_bits.is_empty()
             && self.signal.propagates == 0
-            && self.num_captures == 0
             && matches!(self.arity, Arity::Exact(_))
             && self.capture_params_mask == 0
             && self.capture_locals_mask == 0

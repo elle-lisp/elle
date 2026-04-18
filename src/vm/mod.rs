@@ -17,6 +17,7 @@ pub mod literals;
 #[cfg(feature = "mlir")]
 mod mlir_entry;
 pub mod parameters;
+pub mod run_on;
 pub mod signal;
 pub mod stack;
 pub mod types;

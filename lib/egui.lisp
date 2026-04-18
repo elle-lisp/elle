@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/egui.lisp — immediate-mode GUI for Elle
 ##
 ## Wraps the elle-egui plugin (egui + winit + glow) with fiber-friendly
@@ -30,7 +30,7 @@
 
   ## ── Lifecycle ─────────────────────────────────────────────────────
 
-  (defn open [&named title width height]
+  (defn open [&named @title @width @height]
     "Open a GUI window. Returns a handle.
      Options: :title string, :width int, :height int."
     (default title "Elle")
@@ -69,7 +69,7 @@
     "Immediate-mode GUI loop. render-fn: (fn [interactions] tree).
      Renders first frame immediately (Wayland needs a buffer commit
      before the window is visible), then waits for events between frames."
-    (var ix (frame handle (render-fn (empty-ix))))
+    (def @ix (frame handle (render-fn (empty-ix))))
     (forever
       (when ix:closed (break))
       (unless (open? handle) (break))
@@ -94,7 +94,7 @@
     "Horizontal line separator."
     [:separator])
 
-  (defn spacer [&named size]
+  (defn spacer [&named @size]
     "Vertical space."
     (default size 8.0)
     [:spacer {:size size}])
@@ -109,7 +109,7 @@
     "Single-line text input."
     [:text-input {:id id :hint hint}])
 
-  (defn text-edit [id &named rows]
+  (defn text-edit [id &named @rows]
     "Multi-line text editor."
     (default rows 4)
     [:text-edit {:id id :rows rows}])
@@ -118,7 +118,7 @@
     "Boolean toggle checkbox."
     [:checkbox {:id id} text])
 
-  (defn slider [id &named min max]
+  (defn slider [id &named @min @max]
     "Numeric slider."
     (default min 0)
     (default max 100)

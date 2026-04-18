@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Signal System Tests
 ##
 ## Tests for the signal declaration, silence, and signals introspection
@@ -50,7 +50,7 @@
 # silence with dynamic variable passes for silent function
 (begin
   (def apply-inert3 (fn (f x y) (silence f) (f x y)))
-  (var g +)
+  (def @g +)
   (assert (= (apply-inert3 g 42 1) 43) "silence runtime: dynamic silent passes"))
 
 # ============================================================================
@@ -73,7 +73,7 @@
 
 # silence with dynamic variable fails for yielding closure
 (defn apply-inert5 (f x) (silence f) (f x))
-(var g2 (fn (x) (yield x)))
+(def @g2 (fn (x) (yield x)))
 (def [ok6? _] (protect (apply-inert5 g2 42)))
 (assert (not ok6?) "silence runtime: dynamic yielding closure fails")
 

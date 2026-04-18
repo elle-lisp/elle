@@ -148,6 +148,13 @@ impl fmt::Display for LirInstr {
                 write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
             }
             LirInstr::UnaryOp { dst, op, src } => write!(f, "{} ← {}{}", dst, op, src),
+            LirInstr::Convert { dst, op, src } => {
+                let name = match op {
+                    ConvOp::IntToFloat => "float",
+                    ConvOp::FloatToInt => "int",
+                };
+                write!(f, "{} ← {}({})", dst, name, src)
+            }
             LirInstr::Compare { dst, op, lhs, rhs } => {
                 write!(f, "{} ← {} {} {}", dst, lhs, op, rhs)
             }

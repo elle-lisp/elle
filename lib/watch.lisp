@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/watch.lisp — event-driven filesystem watcher
 ##
 ## Uses the built-in watch primitives (inotify on Linux, kqueue on macOS).
@@ -29,7 +29,7 @@
 
   ## ── Core ─────────────────────────────────────────────────────────────
 
-  (defn start [path &named filter recursive]
+  (defn start [path &named filter @recursive]
     "Create a watcher on path, return a handle struct.
      :filter extension string (e.g. \".lisp\"),
      :recursive bool (default true)."

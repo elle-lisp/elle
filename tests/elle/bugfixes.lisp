@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## Bug Regression Tests
 ##
 ## Migrated from tests/property/bugfixes.rs
@@ -101,12 +101,12 @@
 
 # list display no dot terminator
 (begin
-  (var list-str (string (list 1 2 3)))
+  (def @list-str (string (list 1 2 3)))
   (assert (not (string/contains? list-str ". ()")) "list display no dot terminator"))
 
 # cons chain display
 (begin
-  (var cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
+  (def @cons-str (string (cons 1 (cons 2 (cons 3 (list))))))
   (assert (not (string/contains? cons-str ". ()")) "cons chain display"))
 
 # list length matches
@@ -116,12 +116,12 @@
 
 # nested list display
 (begin
-  (var nested-str (string (list (list 1) (list 2))))
+  (def @nested-str (string (list (list 1) (list 2))))
   (assert (not (string/contains? nested-str ". ()")) "nested list display"))
 
 # append result display
 (begin
-  (var append-str (string (append (list 1 2) (list 3 4))))
+  (def @append-str (string (append (list 1 2) (list 3 4))))
   (assert (not (string/contains? append-str ". ()")) "append result display"))
 
 # ============================================================================
@@ -130,15 +130,13 @@
 
 # or expression in recursive predicate
 (begin
-  (var check
-    (fn (x remaining)
+  (def @check (fn (x remaining)
       (if (empty? remaining)
           true
           (if (or (= x 1) (= x 2))
               false
               (check x (rest remaining))))))
-  (var foo
-    (fn (n seen)
+  (def @foo (fn (n seen)
       (if (= n 0)
           (list)
           (if (check n seen)
@@ -157,7 +155,7 @@
         (list)
         (let [y x]
           (cons y (make-list (- x 1))))))
-  (var result-str (string (make-list 5)))
+  (def @result-str (string (make-list 5)))
   (assert (not (string/contains? result-str ". ()")) "defn + let + list display"))
 
 # defn + recursive + list display
@@ -232,7 +230,7 @@
 (begin
   (let [listener (tcp/listen "127.0.0.1" 0)]
     (let [addr (port/path listener)]
-      (let [port-num (integer (get (string/split addr ":") 1))]
+      (let [port-num (parse-int (get (string/split addr ":") 1))]
         (let [server-got @[nil] client-got @[nil]]
           (let [server-fiber
                   (ev/spawn (fn ()  # server: accept, read, write, close via defer

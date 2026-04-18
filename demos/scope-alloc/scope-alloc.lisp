@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Scope Allocation Workload — measuring escape analysis tiers
 #
@@ -25,8 +25,7 @@
 
 (println "tier 1 — primitive whitelist (length)")
 
-(var tier1-scoped
-  (run (fn []
+(def @tier1-scoped (run (fn []
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
@@ -35,8 +34,7 @@
       (assign i (+ i 1)))
     (- (arena/count) before))))
 
-(var tier1-unscoped
-  (run (fn []
+(def @tier1-unscoped (run (fn []
     (var before (arena/count))
     (var i 0)
     (var last nil)
@@ -59,8 +57,7 @@
 
 (println "tier 3 — returning outer binding")
 
-(var tier3-stats
-  (run (fn []
+(def @tier3-stats (run (fn []
     (var i 0)
     (var outer-val 0)
     (while (< i 10000)
@@ -82,8 +79,7 @@
 
 (println "tier 4 — nested lets reducing to arithmetic")
 
-(var tier4-scoped
-  (run (fn []
+(def @tier4-scoped (run (fn []
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
@@ -103,8 +99,7 @@
 
 (println "tier 5 — match arms returning keywords")
 
-(var tier5-scoped
-  (run (fn []
+(def @tier5-scoped (run (fn []
     (var before (arena/count))
     (var i 0)
     (while (< i 10000)
@@ -128,8 +123,7 @@
 
 (println "tier 8 — immediate outward set in while")
 
-(var tier8-stats
-  (run (fn []
+(def @tier8-stats (run (fn []
     (var counter 0)
     (while (< counter 10000)
       (let [tmp @[1 2 3]]
@@ -149,8 +143,7 @@
 
 (println "combined — all tiers in one fiber")
 
-(var combined
-  (run (fn []
+(def @combined (run (fn []
     (var before (arena/count))
     (var total 0)
     (var i 0)

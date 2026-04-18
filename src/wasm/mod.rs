@@ -218,9 +218,10 @@ fn eval_wasm_raw(source: &str, source_name: &str, with_stdlib: bool) -> Result<V
         } else {
             ("", body_spliced.as_str())
         };
+        let epoch_tag = format!("(elle/epoch {})", crate::epoch::CURRENT_EPOCH);
         let (stdlib_body, stripped_epoch) = STDLIB
-            .strip_prefix("(elle/epoch 7)\n")
-            .or_else(|| STDLIB.strip_prefix("(elle/epoch 7)\r\n"))
+            .strip_prefix(&format!("{}\n", epoch_tag))
+            .or_else(|| STDLIB.strip_prefix(&format!("{}\r\n", epoch_tag)))
             .map(|s| (s, true))
             .unwrap_or((STDLIB, false));
         if stripped_epoch {

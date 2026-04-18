@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Quasiquote bracket support + when-ok macro
 #
 # Regression test: brackets inside quasiquote templates were quoted
@@ -49,7 +49,7 @@
 
 # ── 6. when-ok failure ──────────────────────────────────────────────
 
-(var ran false)
+(def @ran false)
 (when-ok [v (error {:error :test :message "boom"})]
   (assign ran true))
 (assert (not ran) "6: when-ok skip on error")

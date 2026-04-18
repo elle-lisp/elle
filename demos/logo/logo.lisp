@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Logo generator — the elle-lisp glyph rendered as colored fibers
 #
@@ -110,13 +110,13 @@
    segments is an array of bezier segment structs.
    dist is the max normal offset distance (tapered at endpoints).
    nsteps is samples per segment."
-  (var path-str "")
-  (var first-point true)
+  (def @path-str "")
+  (def @first-point true)
   (def nseg (length segments))
   (def total-steps (* nseg nsteps))
-  (var seg-idx 0)
+  (def @seg-idx 0)
   (each seg in segments
-    (var i 0)
+    (def @i 0)
     (while (<= i nsteps)
       (let* [[t (/ (float i) (float nsteps))]
              # global t across all segments for taper
@@ -224,8 +224,8 @@
 
 (defn render-fibers [segments]
   "Render all fibers for a set of bezier segments, returning array of SVG path strings."
-  (var paths @[])
-  (var i 0)
+  (def @paths @[])
+  (def @i 0)
   (while (< i num-fibers)
     (let* [[frac (/ (float i) (float (- num-fibers 1)))]
            # offset ranges from -spread/2 to +spread/2
@@ -240,7 +240,7 @@
 
 (defn build-svg []
   "Assemble the complete SVG document."
-  (var doc "")
+  (def @doc "")
   (assign doc (append doc "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 512 512\">\n"))
 
   # Three strokes — no layering needed, draw order doesn't matter

@@ -32,6 +32,7 @@ impl<'a> Lowerer<'a> {
                 param_bounds,
                 doc,
                 syntax,
+                assert_numeric,
             } => self.lower_lambda_expr(
                 params,
                 *num_required,
@@ -44,6 +45,7 @@ impl<'a> Lowerer<'a> {
                 param_bounds,
                 *doc,
                 syntax.clone(),
+                *assert_numeric,
             ),
 
             HirKind::If {

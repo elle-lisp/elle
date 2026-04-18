@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## stdin + ev/spawn interaction
 ##
 ## Regression test: port/read-line on stdin must work when a long-lived
@@ -11,7 +11,7 @@
 
 (def inner-script
   "(ev/spawn (fn [] (ev/sleep 100000)))
-   (var count 0)
+   (def @count 0)
    (forever
      (let [line (port/read-line (*stdin*))]
        (when (nil? line) (break))

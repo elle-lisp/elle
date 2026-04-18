@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # HTTP module tests
 #
 # Tests the public API of lib/http.lisp. Internal wire-format helpers
@@ -249,7 +249,7 @@
 (def server-addr (port/path listener))
 (def server-port
   (let [parts (string/split server-addr ":")]
-    (int (get parts (- (length parts) 1)))))
+    (parse-int (get parts (- (length parts) 1)))))
 
 # Simple handler: echo request method and path as the body
 (defn test-handler [req]
@@ -299,7 +299,7 @@
 (def chunk-listener (tcp/listen "127.0.0.1" 0))
 (def chunk-port
   (let [parts (string/split (port/path chunk-listener) ":")]
-    (int (get parts (- (length parts) 1)))))
+    (parse-int (get parts (- (length parts) 1)))))
 
 # Two handlers, dispatched on path:
 #  /string — body is a plain string, framed as a single chunk
@@ -348,7 +348,7 @@
 (def redir-listener (tcp/listen "127.0.0.1" 0))
 (def redir-port
   (let [parts (string/split (port/path redir-listener) ":")]
-    (int (get parts (- (length parts) 1)))))
+    (parse-int (get parts (- (length parts) 1)))))
 
 (def redir-count @[0])
 
@@ -444,7 +444,7 @@
 (def sse-listener (tcp/listen "127.0.0.1" 0))
 (def sse-server-port
   (let [parts (string/split (port/path sse-listener) ":")]
-    (int (get parts (- (length parts) 1)))))
+    (parse-int (get parts (- (length parts) 1)))))
 
 (defn sse-test-handler [req]
   (case req:path

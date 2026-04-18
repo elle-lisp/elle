@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/gtk4/widgets.lisp — Per-widget constructors and signal wiring
 ##
 ## Each make-* function creates a GTK widget, applies props, connects

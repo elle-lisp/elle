@@ -119,6 +119,8 @@ pub(super) enum DataOp {
     ArrayLen = 18,
     ArrayRefOrNil = 19,
     StructRest = 20,
+    IntToFloat = 21,
+    FloatToInt = 22,
 }
 
 // Re-export as i32 constants for backward compat in instruction.rs
@@ -142,6 +144,8 @@ pub(super) const OP_ARRAY_PUSH: i32 = DataOp::ArrayPush as i32;
 pub(super) const OP_ARRAY_LEN: i32 = DataOp::ArrayLen as i32;
 pub(super) const OP_ARRAY_REF_OR_NIL: i32 = DataOp::ArrayRefOrNil as i32;
 pub(super) const OP_STRUCT_REST: i32 = DataOp::StructRest as i32;
+pub(super) const OP_INT_TO_FLOAT: i32 = DataOp::IntToFloat as i32;
+pub(super) const OP_FLOAT_TO_INT: i32 = DataOp::FloatToInt as i32;
 
 /// Info about a resume state, used to generate the resume prologue.
 pub(super) struct ResumeStateInfo {

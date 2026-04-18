@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## ── sort ────────────────────────────────────────────────────────────
 (assert (= (sort (list 3 1 2)) (list 1 2 3)) "sort: list")
@@ -276,7 +276,7 @@
 (assert (= (max-key identity 5 3 8 1) 8) "max-key: identity")
 
 ## ── memoize ─────────────────────────────────────────────────────────
-(let* [call-count 0
+(let* [@call-count 0
        mf (memoize (fn (x)
                       (assign call-count (+ call-count 1))
                       (* x x)))]

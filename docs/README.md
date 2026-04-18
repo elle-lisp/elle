@@ -65,7 +65,7 @@ Focused files covering one topic each, all runnable via `elle docs/<file>.md`.
 
 | Directory | Content |
 |-----------|---------|
-| [impl/](impl/) | Reader, HIR, LIR, bytecode, VM, JIT, values |
+| [impl/](impl/) | Reader, HIR, LIR, bytecode, VM, JIT, WASM, MLIR, SPIR-V, GPU, values |
 
 ## Reference
 

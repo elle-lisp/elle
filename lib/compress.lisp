@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/compress.lisp — Gzip, zlib, deflate, and zstd via FFI
 ##
 ## Usage:
@@ -118,10 +118,10 @@
       (ffi/write stream :ptr in-pin)
       (ffi/write (ptr/add stream 8) :u32 in-len)
       ## Decompress in a loop, growing output buffer as needed
-      (var buf-size (max out-size 256))
-      (var out-buf (ffi/malloc buf-size))
-      (var total-out 0)
-      (var done false)
+      (def @buf-size (max out-size 256))
+      (def @out-buf (ffi/malloc buf-size))
+      (def @total-out 0)
+      (def @done false)
       (while (not done)
         (let [space (- buf-size total-out)]
           (ffi/write (ptr/add stream 24) :ptr (ptr/add out-buf total-out))

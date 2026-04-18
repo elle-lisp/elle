@@ -298,6 +298,20 @@ impl<'a> FunctionTranslator<'a> {
                 self.def_var_pair(builder, dst.0, crt, crp);
             }
 
+            LirInstr::Convert { dst, op, src } => {
+                let (st, sp) = self.use_var_pair(builder, src.0);
+                let func_id = match op {
+                    crate::lir::ConvOp::IntToFloat => self.helpers.int_to_float,
+                    crate::lir::ConvOp::FloatToInt => self.helpers.float_to_int,
+                };
+                let func_ref = self.module.declare_func_in_func(func_id, builder.func);
+                let call = builder.ins().call(func_ref, &[st, sp]);
+                let results = builder.inst_results(call);
+                let rt = results[0];
+                let rp = results[1];
+                self.def_var_pair(builder, dst.0, rt, rp);
+            }
+
             LirInstr::IsNil { dst, src } => {
                 let (st, sp) = self.use_var_pair(builder, src.0);
                 let (rt, rp) =

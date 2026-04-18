@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Integration tests for destructuring patterns in def, var, let, let*, fn, defn
 #
 # Migrated from tests/integration/destructuring.rs
@@ -85,13 +85,13 @@
 
 # test_var_list_basic
 (begin
-  (var (a b) (list 1 2))
+  (def (@a @b) (list 1 2))
   (assert (= a 1) "var list basic: a")
   (assert (= b 2) "var list basic: b"))
 
 # test_var_destructured_bindings_are_mutable
 (block
-  (var (a b) (list 1 2))
+  (def (@a @b) (list 1 2))
   (assign a 10)
   (assert (= a 10) "var destructured mutable: a after set"))
 
@@ -421,7 +421,7 @@
 
 # test_var_struct
 (begin
-  (var {:x x3} {:x 99})
+  (def {:x @x3} {:x 99})
   (assert (= x3 99) "var struct"))
 
 # test_let_struct
@@ -446,24 +446,21 @@
     (assert (= a4 99) "struct with mutable @struct"))
 
 # test_struct_in_match — bind match result to var (known bug workaround)
-(var match-circle
-  (match {:type :circle :radius 5}
+(def @match-circle (match {:type :circle :radius 5}
     ({:type :circle :radius r} r)
     ({:type :square :side s} s)
     (_ 0)))
 (assert (= match-circle 5) "struct in match: circle")
 
 # test_struct_match_fallthrough
-(var match-square
-  (match {:type :square :side 7}
+(def @match-square (match {:type :square :side 7}
     ({:type :circle :radius r} r)
     ({:type :square :side s} s)
     (_ 0)))
 (assert (= match-square 7) "struct match fallthrough: square")
 
 # test_struct_match_wildcard_fallback
-(var match-fallback
-  (match 42
+(def @match-fallback (match 42
     ({:x x} x)
     (_ :no-match)))
 (assert (= match-fallback :no-match) "struct match wildcard fallback")
@@ -506,35 +503,35 @@
   (assert (= a :division-by-zero) "let destructure tuple: kind"))
 
 # test_match_tuple_pattern_matches_tuple
-(var match-tuple (match [1 2] ([a b] (+ a b)) (_ :no-match)))
+(def @match-tuple (match [1 2] ([a b] (+ a b)) (_ :no-match)))
 (assert (= match-tuple 3) "match array pattern matches array")
 
 # test_match_tuple_pattern_does_not_match_array
-(var match-tuple-arr (match @[1 2] ([a b] (+ a b)) (_ :no-match)))
+(def @match-tuple-arr (match @[1 2] ([a b] (+ a b)) (_ :no-match)))
 (assert (= match-tuple-arr :no-match) "match array pattern does not match @array")
 
 # test_match_array_pattern_matches_array
-(var match-arr (match @[1 2] (@[a b] (+ a b)) (_ :no-match)))
+(def @match-arr (match @[1 2] (@[a b] (+ a b)) (_ :no-match)))
 (assert (= match-arr 3) "match array pattern matches array")
 
 # test_match_array_pattern_does_not_match_tuple
-(var match-arr-tup (match [1 2] (@[a b] (+ a b)) (_ :no-match)))
+(def @match-arr-tup (match [1 2] (@[a b] (+ a b)) (_ :no-match)))
 (assert (= match-arr-tup :no-match) "match @array pattern does not match array")
 
 # test_match_struct_pattern_matches_struct
-(var match-struct (match {:a 1} ({:a x} x) (_ :no-match)))
+(def @match-struct (match {:a 1} ({:a x} x) (_ :no-match)))
 (assert (= match-struct 1) "match struct pattern matches struct")
 
 # test_match_struct_pattern_does_not_match_mutable_@struct
-(var match-struct-tbl (match @{:a 1} ({:a x} x) (_ :no-match)))
+(def @match-struct-tbl (match @{:a 1} ({:a x} x) (_ :no-match)))
 (assert (= match-struct-tbl :no-match) "match struct pattern does not match @struct")
 
 # test_match_mutable_@struct_pattern_matches_mutable_@struct
-(var match-tbl (match @{:a 1} (@{:a x} x) (_ :no-match)))
+(def @match-tbl (match @{:a 1} (@{:a x} x) (_ :no-match)))
 (assert (= match-tbl 1) "match @struct pattern matches @struct")
 
 # test_match_mutable_@struct_pattern_does_not_match_struct
-(var match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
+(def @match-tbl-str (match {:a 1} (@{:a x} x) (_ :no-match)))
 (assert (= match-tbl-str :no-match) "match @struct pattern does not match struct")
 
 # test_destructure_non_sequential_errors (was: test_destructure_non_sequential_gives_nil)
@@ -722,23 +719,20 @@
 (let [[ok? _] (protect ((fn () (def {'missing m} (struct 'other 1)))))] (assert (not ok?) "symbol key missing: error"))
 
 # test_match_struct_symbol_key
-(var match-sym
-  (match (struct 'a 42)
+(def @match-sym (match (struct 'a 42)
     ({'a v} v)
     (_ :no-match)))
 (assert (= match-sym 42) "match struct symbol key")
 
 # test_match_@struct_symbol_key
-(var match-tbl-sym
-   (match @{'a 42}
+(def @match-tbl-sym (match @{'a 42}
      (@{'a v} v)
      (_ :no-match)))
 (assert (= match-tbl-sym 42) "match @struct symbol key")
 
 # test_match_struct_symbol_key_missing_gives_nil
 # Struct patterns match any struct (IsStruct guard); missing keys give nil
-(var match-sym-missing
-  (match (struct 'b 99)
+(def @match-sym-missing (match (struct 'b 99)
     ({'a v} v)
     (_ :no-match)))
 (assert (= match-sym-missing nil) "match struct symbol key missing gives nil")
@@ -836,29 +830,29 @@
 (let [[ok? _] (protect ((fn () (def {:p {:missing m}} {:p {:x 42}}))))] (assert (not ok?) "nested struct missing inner errors (property)"))
 
 # match_struct_extracts
-(var mt-extract (match {:val 42} ({:val v} v) (_ :fail)))
+(def @mt-extract (match {:val 42} ({:val v} v) (_ :fail)))
 (assert (= mt-extract 42) "match struct extracts (property)")
 
 # match_struct_rejects_non_struct
-(var mt-reject (match 42 ({:a a} a) (_ :no-match)))
+(def @mt-reject (match 42 ({:a a} a) (_ :no-match)))
 (assert (= mt-reject :no-match) "match struct rejects non-struct (property)")
 
 # match_struct_literal_key_discriminates
-(var mt-disc (match {:type :a :val 42}
+(def @mt-disc (match {:type :a :val 42}
   ({:type :b :val v} (+ v 1000))
   ({:type :a :val v} v)
   (_ :fail)))
 (assert (= mt-disc 42) "match struct literal key discriminates (property)")
 
 # match_struct_wrong_literal_falls_through
-(var mt-fall (match {:type :square :val 10}
+(def @mt-fall (match {:type :square :val 10}
   ({:type :circle :val v} v)
   ({:type :square :val v} (+ v 100))
   (_ :fail)))
 (assert (= mt-fall 110) "match struct wrong literal falls through (property)")
 
 # match_mutable_table
-(var mt-mut (match @{:val 42} (@{:val v} v) (_ :fail)))
+(def @mt-mut (match @{:val 42} (@{:val v} v) (_ :fail)))
 (assert (= mt-mut 42) "match mutable @struct (property)")
 
 # ============================================================================

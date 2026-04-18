@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/hash.lisp — streaming hash convenience functions
 ##
 ## Provides high-level helpers for hashing ports, coroutine streams,
@@ -29,13 +29,13 @@
 
   ## ── Convenience ─────────────────────────────────────────────────────
 
-  (defn hash/digest [algorithm port &named chunk-size]
+  (defn hash/digest [algorithm port &named @chunk-size]
     "Hash an open port's remaining contents. Returns the digest bytes.
      Does not close the port."
     (default chunk-size 8192)
     (hash/stream algorithm (port/chunks port chunk-size)))
 
-  (defn hash/file [algorithm path &named chunk-size]
+  (defn hash/file [algorithm path &named @chunk-size]
     "Hash a file by path. Opens, hashes, and closes the file.
      Returns the digest bytes (or integer for crc32/xxh32/xxh64)."
     (default chunk-size 8192)

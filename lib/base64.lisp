@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/base64.lisp — Base64 encoding/decoding (pure Elle)
 ##
 ## Implements RFC 4648 standard and URL-safe alphabets.
@@ -26,7 +26,7 @@
 
   (defn strip-padding [s]
     "Remove trailing '=' characters from a base64 string."
-    (var end (length s))
+    (def @end (length s))
     (while (and (> end 0) (= (s (dec end)) "="))
       (assign end (dec end)))
     (slice s 0 end))
@@ -37,7 +37,7 @@
     (let* [input (bytes data)
            len   (length input)
            acc   @""]
-      (var i 0)
+      (def @i 0)
       (while (<= (+ i 2) (dec len))
         (let [a (input i) b (input (inc i)) c (input (+ i 2))]
           (append acc (chars (bit/shr a 2)))
@@ -82,7 +82,7 @@
                                  :position pos
                                  :message (string "invalid char at " pos)}))
                        v))]
-      (var i 0)
+      (def @i 0)
       (while (<= (+ i 3) (dec slen))
         (let [a (lookup i) b (lookup (inc i)) c (lookup (+ i 2)) d (lookup (+ i 3))]
           (push acc (bit/or (bit/shl a 2) (bit/shr b 4)))

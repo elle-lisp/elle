@@ -209,6 +209,54 @@ pub(crate) fn handle_shl(vm: &mut VM) {
     vm.fiber.stack.push(Value::int(a << shift));
 }
 
+// ---------------------------------------------------------------------------
+// Type conversion ops
+// ---------------------------------------------------------------------------
+
+pub(crate) fn handle_int_to_float(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on IntToFloat");
+    if let Some(n) = val.as_int() {
+        vm.fiber.stack.push(Value::float(n as f64));
+    } else if val.as_float().is_some() {
+        vm.fiber.stack.push(val); // identity
+    } else {
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("float: expected number, got {}", val.type_name()),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+    }
+}
+
+pub(crate) fn handle_float_to_int(vm: &mut VM) {
+    let val = vm
+        .fiber
+        .stack
+        .pop()
+        .expect("VM bug: Stack underflow on FloatToInt");
+    if let Some(f) = val.as_float() {
+        vm.fiber.stack.push(Value::int(f as i64));
+    } else if val.as_int().is_some() {
+        vm.fiber.stack.push(val); // identity
+    } else {
+        vm.fiber.signal = Some((
+            SIG_ERROR,
+            error_val(
+                "type-error",
+                format!("integer: expected number, got {}", val.type_name()),
+            ),
+        ));
+        vm.fiber.stack.push(Value::NIL);
+    }
+}
+
 pub(crate) fn handle_shr(vm: &mut VM) {
     let b_val = vm
         .fiber

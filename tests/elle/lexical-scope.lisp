@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 
 # ============================================================================
 # SECTION 1: Deeply Nested Captures (4+ levels)
@@ -52,33 +52,33 @@
 # SECTION 3: Mutable Capture Edge Cases
 # ============================================================================
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
               (let [inc (fn () (begin (assign x (+ x 1)) x))]
                 (begin (inc) (inc) (inc)))) 3) "test_set_on_let_bound_capture")
 
 (assert (= ((fn ()
               (begin
-                (var counter 0)
+                (def @counter 0)
                  (def inc (fn () (begin (assign counter (+ counter 1)) counter)))
                 (begin (inc) (inc) (inc))))) 3) "test_set_on_locally_defined_capture")
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
               (let [inc (fn () (assign x (+ x 1)))
                     get (fn () x)]
                 (begin (inc) (inc) (get)))) 2) "test_multiple_closures_share_mutable_capture")
 
-(assert (= (let [x 0]
-             (let [f (fn () (let [y 0]
+(assert (= (let [@x 0]
+             (let [f (fn () (let [@y 0]
                                 (fn () (begin (assign x (+ x 1)) (assign y (+ y 1)) (+ x y)))))]
                (let [g (f)]
                  (begin (g) (g) (g))))) 6) "test_nested_mutable_captures")
 
-(assert (= (let [counter 0]
+(assert (= (let [@counter 0]
               (let [f (fn () (fn () (begin (assign counter (+ counter 1)) counter)))]
                (let [g (f)]
                  (begin (g) (g) (g))))) 3) "test_mutable_capture_across_lambda_levels")
 
-(assert (= (let [x 0 y 0]
+(assert (= (let [@x 0 @y 0]
               (let [inc-x (fn () (assign x (+ x 1)))
                     inc-y (fn () (assign y (+ y 1)))
                    sum (fn () (+ x y))]
@@ -105,7 +105,7 @@
                    (let [co (make-coroutine gen)]
                      (coro/resume co)))) 20)) 10) 30) "test_coroutine_captures_multiple_levels")
 
-(assert (= (let [counter 0]
+(assert (= (let [@counter 0]
               (let [gen (fn () (begin (assign counter (+ counter 1)) (yield counter)))]
                (let [co (make-coroutine gen)]
                  (coro/resume co)))) 1) "test_coroutine_with_mutable_capture")
@@ -145,7 +145,7 @@
                (let [g (f true)]
                  (g)))) 10) "test_capture_in_conditional")
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
               (let [f (fn () (begin (assign x (+ x 1)) x))]
                 (begin (f) (f) (f) x))) 3) "test_capture_in_loop_body")
 
@@ -181,7 +181,7 @@
                  (g 30)))) 30) "test_nested_lambda_param_shadowing")
 
 (assert (= (let [x 10]
-             (let [f (fn () (begin (var y (+ x 5)) y))]
+             (let [f (fn () (begin (def @y (+ x 5)) y))]
                (f))) 15) "test_capture_with_define_in_lambda")
 
 (assert (= (let [limit 4]
@@ -205,13 +205,13 @@
 
 (assert (= ((fn ()
               (begin
-                (var x 42)
+                (def @x 42)
                 (def f (fn () x))
                 (f)))) 42) "test_nested_lambda_capturing_locally_defined_variable")
 
 (assert (= ((fn (initial)
               (begin
-                (var value initial)
+                (def @value initial)
                 (def getter (fn () value))
                  (def setter (fn (new-val) (assign value new-val)))
                 (setter 42)
@@ -268,20 +268,20 @@
 # SECTION 9: `assign` form (variable mutation)
 # ============================================================================
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
              (begin (assign x 10) x)) 10) "test_set_basic")
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
              (let [inc (fn () (begin (assign x (+ x 1)) x))]
                (begin (inc) (inc) (inc)))) 3) "test_set_in_closure")
 
-(assert (= (let [x 5]
+(assert (= (let [@x 5]
              (begin (assign x 10) (assign x 20) (assign x 30) x)) 30) "test_set_multiple_times")
 
-(assert (= (let [x 5]
+(assert (= (let [@x 5]
              (begin (assign x (+ x 10)) x)) 15) "test_set_with_expression")
 
-(assert (= (let [x 0]
+(assert (= (let [@x 0]
              (let [inc (fn () (assign x (+ x 1)))
                    get (fn () x)]
                (begin (inc) (inc) (get)))) 2) "test_set_shared_capture")

@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Conway's Game of Life — SDL3 demo
 #
@@ -27,7 +27,7 @@
 
 # ── Simple xorshift PRNG (no plugin needed) ───────────────────────────
 
-(var rng-state 2463534242)
+(def @rng-state 2463534242)
 
 (defn rand-u32 []
   (assign rng-state (bit/xor rng-state (bit/shl rng-state 13)))
@@ -43,7 +43,7 @@
 
 (defn make-grid []
   (def g @[])
-  (var i 0)
+  (def @i 0)
   (while (< i ncells) (push g 0) (assign i (+ i 1)))
   g)
 
@@ -73,8 +73,8 @@
      (get g (+ i off-sw)) (get g (+ i off-s)) (get g (+ i off-se))))
 
 (defn count-alive [g]
-  (var n 0)
-  (var i 0)
+  (def @n 0)
+  (def @i 0)
   (while (< i ncells)
     (when (nonzero? (g i)) (assign n (+ n 1)))
     (assign i (+ i 1)))
@@ -83,10 +83,10 @@
 (defn step [g]
   (def nxt (make-grid))
   # Interior cells — skip border row/col, use direct indexing
-  (var r 1)
+  (def @r 1)
   (while (< r (- rows 1))
-    (var i (+ (* r cols) 1))
-    (var c 1)
+    (def @i (+ (* r cols) 1))
+    (def @c 1)
     (while (< c (- cols 1))
       (let [n (count-neighbors-fast g i)]
         (when (or (= n 3) (and (= (get g i) 1) (= n 2)))
@@ -138,7 +138,7 @@
       (set-cell g (- (+ r 12) dr)  (- (+ c 12) dc)  1))))
 
 (defn randomize [g]
-  (var i 0)
+  (def @i 0)
   (while (< i ncells)
     (put g i (if (< (rand-float) 0.72) 0 1))
     (assign i (+ i 1)))
@@ -150,13 +150,13 @@
   (sdl:set-blend-mode ren sdl:blend-blend)
   (sdl:set-color ren 60 60 80 :a 80)
   # Vertical lines
-  (var c 0)
+  (def @c 0)
   (while (<= c cols)
     (sdl:draw-line ren (float (* c cell)) 0.0
                        (float (* c cell)) (float win-h))
     (assign c (+ c 1)))
   # Horizontal lines
-  (var r 0)
+  (def @r 0)
   (while (<= r rows)
     (sdl:draw-line ren 0.0 (float (* r cell))
                        (float win-w) (float (* r cell)))
@@ -165,7 +165,7 @@
 
 (defn render-cells [ren g]
   (sdl:set-color ren 0 220 100)
-  (var i 0)
+  (def @i 0)
   (while (< i ncells)
     (when (nonzero? (g i))
       (let* [c (mod i cols)
@@ -242,7 +242,7 @@
   (sdl:set-vsync ren 1)
 
   # Seed the grid
-  (var grid (make-grid))
+  (def @grid (make-grid))
   (place-r-pentomino grid 25 35)
   (place-glider grid 3 3)
   (place-glider grid 3 70)
@@ -252,10 +252,10 @@
   (def state @{:running true :paused false :gen 0
                 :grid grid :speed 1 :show-grid false})
 
-  (var last-tick (sdl:ticks))
-  (var frame-count 0)
-  (var fps 0)
-  (var alive 0)
+  (def @last-tick (sdl:ticks))
+  (def @frame-count 0)
+  (def @fps 0)
+  (def @alive 0)
 
   (println "Conway's Game of Life")
   (println "  click/drag to draw, space to pause, g for grid")
@@ -277,7 +277,7 @@
 
     # Simulation steps per frame
     (unless (state :paused)
-      (var s 0)
+      (def @s 0)
       (while (< s (state :speed))
         (put state :grid (step (state :grid)))
         (put state :gen (+ (state :gen) 1))

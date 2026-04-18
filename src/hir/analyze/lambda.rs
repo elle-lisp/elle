@@ -43,6 +43,10 @@ impl<'a> Analyzer<'a> {
             &mut self.current_muffle_bits,
             crate::value::fiber::SignalBits::EMPTY,
         );
+        // Save and reset assertion accumulators
+        let saved_silence_assert = std::mem::replace(&mut self.current_silence_assert, false);
+        let saved_numeric_assert = std::mem::replace(&mut self.current_numeric_assert, false);
+        let saved_immutability_asserts = std::mem::take(&mut self.current_immutability_asserts);
 
         // For nested lambdas, the parent captures are the captures from the enclosing lambda
         self.parent_captures = saved_captures.clone();
@@ -62,14 +66,23 @@ impl<'a> Analyzer<'a> {
         // strict=false: missing/wrong-type values produce nil (&opt patterns, &named)
         let mut param_destructures: Vec<(_, _, bool)> = Vec::new();
         for param in parsed.required.iter() {
-            if let Some(name) = param.as_symbol() {
+            if let Some(raw_name) = param.as_symbol() {
+                let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
+                if self.immutable_by_default && !is_mutable {
+                    self.arena.get_mut(binding).is_immutable = true;
+                }
                 params.push(binding);
             } else if Self::is_destructure_pattern(param) {
                 let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
                 params.push(tmp);
-                let pattern =
-                    self.analyze_destructure_pattern(param, BindingScope::Local, false, &span)?;
+                // Immutable by default; individual leaves with @ opt into mutability
+                let pattern = self.analyze_destructure_pattern(
+                    param,
+                    BindingScope::Local,
+                    self.immutable_by_default,
+                    &span,
+                )?;
                 // Required params: strict — wrong type should error
                 param_destructures.push((pattern, tmp, true));
             } else {
@@ -83,14 +96,23 @@ impl<'a> Analyzer<'a> {
 
         // Bind optional parameters: strict=false because absent opt params receive nil
         for param in parsed.optional.iter() {
-            if let Some(name) = param.as_symbol() {
+            if let Some(raw_name) = param.as_symbol() {
+                let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, param.scopes.as_slice(), BindingScope::Parameter);
+                if self.immutable_by_default && !is_mutable {
+                    self.arena.get_mut(binding).is_immutable = true;
+                }
                 params.push(binding);
             } else if Self::is_destructure_pattern(param) {
                 let tmp = self.bind("__destructure_param", &[], BindingScope::Parameter);
                 params.push(tmp);
-                let pattern =
-                    self.analyze_destructure_pattern(param, BindingScope::Local, false, &span)?;
+                // Immutable by default; individual leaves with @ opt into mutability
+                let pattern = self.analyze_destructure_pattern(
+                    param,
+                    BindingScope::Local,
+                    self.immutable_by_default,
+                    &span,
+                )?;
                 // Optional params: strict=false — absent (nil) produces nil, not error
                 param_destructures.push((pattern, tmp, false));
             } else {
@@ -107,18 +129,26 @@ impl<'a> Analyzer<'a> {
         use crate::hir::VarargKind;
         let (rest_param, vararg_kind) = match parsed.collector {
             Some(CollectorParams::Rest(rest_syn)) => {
-                let name = rest_syn
+                let raw_name = rest_syn
                     .as_symbol()
                     .ok_or_else(|| format!("{}: rest parameter after & must be a symbol", span))?;
+                let (name, is_mutable) = super::strip_at_prefix(raw_name);
                 let binding = self.bind(name, rest_syn.scopes.as_slice(), BindingScope::Parameter);
+                if self.immutable_by_default && !is_mutable {
+                    self.arena.get_mut(binding).is_immutable = true;
+                }
                 params.push(binding);
                 (Some(binding), VarargKind::List)
             }
             Some(CollectorParams::Keys(keys_syn)) => {
-                if let Some(name) = keys_syn.as_symbol() {
+                if let Some(raw_name) = keys_syn.as_symbol() {
                     // &keys opts — simple symbol binding
+                    let (name, is_mutable) = super::strip_at_prefix(raw_name);
                     let binding =
                         self.bind(name, keys_syn.scopes.as_slice(), BindingScope::Parameter);
+                    if self.immutable_by_default && !is_mutable {
+                        self.arena.get_mut(binding).is_immutable = true;
+                    }
                     params.push(binding);
                     (Some(binding), VarargKind::Struct)
                 } else if Self::is_destructure_pattern(keys_syn) {
@@ -128,7 +158,7 @@ impl<'a> Analyzer<'a> {
                     let pattern = self.analyze_destructure_pattern(
                         keys_syn,
                         BindingScope::Local,
-                        true,
+                        self.immutable_by_default,
                         &span,
                     )?;
                     // &keys {:k v} destructures strictly: missing keys signal an error.
@@ -151,12 +181,16 @@ impl<'a> Analyzer<'a> {
                 let mut valid_keys = Vec::new();
                 let mut entries = Vec::new();
                 for sym_syntax in named_syms {
-                    let name = sym_syntax.as_symbol().unwrap(); // validated by parse_params
+                    let raw_name = sym_syntax.as_symbol().unwrap(); // validated by parse_params
+                    let (name, is_mutable) = super::strip_at_prefix(raw_name);
                     valid_keys.push(name.to_string());
 
                     // Create a binding for each named param
                     let binding =
                         self.bind(name, sym_syntax.scopes.as_slice(), BindingScope::Local);
+                    if self.immutable_by_default && !is_mutable {
+                        self.arena.get_mut(binding).is_immutable = true;
+                    }
                     entries.push((
                         PatternKey::Keyword(name.to_string()),
                         HirPattern::Var(binding),
@@ -223,6 +257,33 @@ impl<'a> Analyzer<'a> {
         // compute_inferred_signal reads them for bounded params.
         let mut inferred_signals = self.compute_inferred_signal(&body, &params);
 
+        // Check assert-silent assertion (before ceiling/muffle adjustments)
+        if self.current_silence_assert && (inferred_signals != Signal::silent()) {
+            let reg = registry::global_registry().lock().unwrap();
+            return Err(format!(
+                "{}: assert-silent assertion failed: function may emit {}",
+                span,
+                reg.format_signal_bits(inferred_signals.bits),
+            ));
+        }
+
+        // Check assert-immutable assertions
+        for binding in &self.current_immutability_asserts {
+            if self.arena.get(*binding).is_mutated {
+                let name = self
+                    .symbols
+                    .name(self.arena.get(*binding).name)
+                    .unwrap_or("?");
+                return Err(format!(
+                    "{}: assert-immutable assertion failed: '{}' is assigned in body",
+                    span, name
+                ));
+            }
+        }
+
+        // Read numeric! assertion flag (will be placed on HIR Lambda)
+        let assert_numeric = self.current_numeric_assert;
+
         // Read bound accumulators (populated by analyze_silence during body analysis)
         let param_bounds: Vec<ParamBound> = self
             .current_param_bounds
@@ -268,12 +329,15 @@ impl<'a> Analyzer<'a> {
         let captures = std::mem::replace(&mut self.current_captures, saved_captures);
         self.parent_captures = saved_parent_captures;
 
-        // Restore signal sources and restrict accumulators
+        // Restore signal sources, restrict accumulators, and assertion accumulators
         self.current_signal_sources = saved_signal_sources;
         self.current_lambda_params = saved_lambda_params;
         self.current_param_bounds = saved_param_bounds;
         self.current_declared_ceiling = saved_declared_ceiling;
         self.current_muffle_bits = saved_muffle_bits;
+        self.current_silence_assert = saved_silence_assert;
+        self.current_numeric_assert = saved_numeric_assert;
+        self.current_immutability_asserts = saved_immutability_asserts;
 
         // No need to sync is_mutated — CaptureInfo reads from the shared Binding directly
 
@@ -321,6 +385,7 @@ impl<'a> Analyzer<'a> {
                 param_bounds,
                 doc,
                 syntax: original_syntax,
+                assert_numeric,
             },
             span,
             Signal::silent(),

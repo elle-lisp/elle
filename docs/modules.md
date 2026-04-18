@@ -101,7 +101,7 @@ time:
 
 ```lisp
 # formatter.lisp
-# (fn [&named prefix suffix separator]
+# (fn [&named @prefix @suffix @separator]
 #   (default prefix "")
 #   (default suffix "")
 #   (default separator ", ")

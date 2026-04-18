@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # tests/elle/telemetry-export-toplevel.lisp
 #
@@ -16,7 +16,7 @@
   (http:respond 200 ""))
 
 (def listener (tcp/listen "127.0.0.1" 0))
-(def collector-port (integer (get (string/split (port/path listener) ":") 1)))
+(def collector-port (parse-int (get (string/split (port/path listener) ":") 1)))
 (def collector-url (string "http://127.0.0.1:" collector-port "/v1/metrics"))
 (def server (ev/spawn (fn [] (http:serve listener collector-handler))))
 

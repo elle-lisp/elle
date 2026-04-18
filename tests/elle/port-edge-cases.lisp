@@ -1,12 +1,12 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 # Port I/O edge cases: zero-length reads/writes, negative counts, etc.
 
 # ── Setup: TCP server ───────────────────────────────────────────────
 
 (def listener (tcp/listen "127.0.0.1" 0))
-(def port-num (integer (get (string/split (port/path listener) ":") 1)))
+(def port-num (parse-int (get (string/split (port/path listener) ":") 1)))
 
 (def server-fiber (ev/spawn (fn []
   (forever
@@ -125,7 +125,7 @@
   (http:respond 200 ""))
 
 (def http-listener (tcp/listen "127.0.0.1" 0))
-(def http-port (integer (get (string/split (port/path http-listener) ":") 1)))
+(def http-port (parse-int (get (string/split (port/path http-listener) ":") 1)))
 (def http-url (string "http://127.0.0.1:" http-port "/test"))
 (def http-server (ev/spawn (fn [] (http:serve http-listener handler))))
 

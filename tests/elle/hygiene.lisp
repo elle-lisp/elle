@@ -1,5 +1,5 @@
 #!/usr/bin/env elle
-(elle/epoch 7)
+(elle/epoch 8)
 
 ## Macro hygiene tests — counter-factual tests that verify template symbols
 ## resolve to their definition-site bindings, not call-site shadows.
@@ -37,7 +37,7 @@
 # ── when/unless: template symbols not captured ───────────────────────
 
 (let [empty? (fn [x] true)]
-  (var reached false)
+  (def @reached false)
   (when true (assign reached true))
   (assert reached "when: template not captured by shadowed empty?"))
 

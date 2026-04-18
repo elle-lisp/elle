@@ -352,6 +352,10 @@ impl<'a> Analyzer<'a> {
                         "silence" => return self.analyze_silence(items, span),
                         "muffle" => return self.analyze_muffle(items, span),
 
+                        "assert-silent" => return self.analyze_silence_assert(items, span),
+                        "assert-numeric" => return self.analyze_numeric_assert(items, span),
+                        "assert-immutable" => return self.analyze_immutable_assert(items, span),
+
                         "signal" => {
                             if items.len() != 2 {
                                 return Err(format!(

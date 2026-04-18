@@ -1,8 +1,7 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## CSS stylesheet generation
 
-(var generate-css
-  (fn ()
+(def @generate-css (fn ()
     "/* Elle Documentation Site Stylesheet */
 
 :root {

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/rdf/rust.lisp — RDF triple generation for Rust source
 ##
 ## Parses .rs files with the syn plugin and emits N-Triples for functions,
@@ -67,7 +67,7 @@
 
 (defn lit [s]
   "Escape a string for N-Triples literal."
-  (var escaped (-> (string s)
+  (def @escaped (-> (string s)
                  (string/replace "\\" "\\\\")
                  (string/replace "\"" "\\\"")
                  (string/replace "\n" "\\n")))
@@ -171,9 +171,9 @@
 
 (defn extract-file [file]
   "Parse a Rust file and return N-Triples for all items."
-  (var buf (make-buffer))
-  (var src (file/read file))
-  (var tree (syn:parse-file src))
+  (def @buf (make-buffer))
+  (def @src (file/read file))
+  (def @tree (syn:parse-file src))
   (each item in (syn:items tree)
     (case (syn:item-kind item)
       :fn      (emit-fn buf item file)
@@ -192,17 +192,17 @@
 
 (defn extract-primitive-links [file]
   "Parse a Rust file and return N-Triples linking Elle primitives to Rust fns."
-  (var buf (make-buffer))
-  (var src (file/read file))
-  (var tree (syn:parse-file src))
+  (def @buf (make-buffer))
+  (def @src (file/read file))
+  (def @tree (syn:parse-file src))
   (each item in (syn:items tree)
     (when (and (= (syn:item-kind item) :const)
                (= (syn:item-name item) "PRIMITIVES"))
       (let [[ok? defs] (protect (syn:primitive-defs item))]
         (when ok?
           (each def in defs
-            (var elle-name (get def :name))
-            (var rust-fn   (get def :func))
+            (def @elle-name (get def :name))
+            (def @rust-fn (get def :func))
             (triple buf (elle-iri elle-name)
                     (elle-pred "implemented-by")
                     (rust-iri "fn" rust-fn))

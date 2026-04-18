@@ -20,6 +20,7 @@ impl<'a> Lowerer<'a> {
         param_bounds: &[ParamBound],
         doc: Option<crate::value::Value>,
         syntax: Option<std::rc::Rc<crate::syntax::Syntax>>,
+        assert_numeric: bool,
     ) -> Result<Reg, String> {
         // Collect capture registers
         let mut capture_regs = Vec::new();
@@ -111,6 +112,13 @@ impl<'a> Lowerer<'a> {
             syntax,
         )?;
         nested_lir.closure_id = Some(closure_id);
+
+        // Check assert-numeric assertion after lowering
+        if assert_numeric && !nested_lir.is_gpu_eligible() {
+            return Err(
+                "assert-numeric assertion failed: function is not GPU-eligible".to_string(),
+            );
+        }
 
         // Fill the reserved slot
         self.closures[closure_id.0 as usize] = nested_lir;

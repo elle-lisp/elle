@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # tests/elle/redis.lisp — Redis integration tests
 #
 # Requires a live Redis on 127.0.0.1:6379.
@@ -202,7 +202,7 @@
     (redis:flushdb)
 
     # 100 PINGs
-    (var i 0)
+    (def @i 0)
     (while (< i 100)
       (assert (= (redis:ping) "PONG")
         (concat "ping failed at " (string i)))

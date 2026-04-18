@@ -5,7 +5,9 @@
 //!
 //! Pipeline: LIR → MLIR text → parse → pass pipeline → extract binary
 
-use crate::lir::{BinOp, CmpOp, LirConst, LirFunction, LirInstr, Terminator};
+use crate::lir::{BinOp, CmpOp, ConvOp, LirConst, LirFunction, LirInstr, Terminator, UnaryOp};
+
+use super::lower::ScalarType;
 use melior::ir::Module;
 use melior::pass;
 use std::collections::HashMap;
@@ -61,6 +63,9 @@ pub fn lower_to_spirv_with_context(
 
 /// Generate MLIR text for a gpu.module wrapping the LIR function.
 fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String, String> {
+    if lir.num_captures > 0 {
+        return Err("captures not supported in SPIR-V".to_string());
+    }
     let num_params = lir.arity.fixed_params();
     let buf_size = "?";
     let indent = "      ";
@@ -72,7 +77,7 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     out.push_str("  gpu.container_module,\n");
     out.push_str("  spirv.target_env = #spirv.target_env<\n");
     out.push_str(
-        "    #spirv.vce<v1.0, [Shader, Int64], [SPV_KHR_storage_buffer_storage_class]>,\n",
+        "    #spirv.vce<v1.0, [Shader, Int64, Float64], [SPV_KHR_storage_buffer_storage_class]>,\n",
     );
     out.push_str("    #spirv.resource_limits<>>\n");
     out.push_str("} {\n");
@@ -98,11 +103,13 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     }
 
     let mut regs: HashMap<u32, String> = HashMap::new();
+    let mut reg_types: HashMap<u32, ScalarType> = HashMap::new();
 
     if lir.blocks.len() == 1 {
         emit_block_instructions(
             &lir.blocks[0].instructions,
             &mut regs,
+            &mut reg_types,
             num_params,
             0,
             indent,
@@ -113,12 +120,34 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
             _ => return Err("SPIR-V kernel must end with Return".to_string()),
         };
         let result = regs.get(&result_reg).ok_or("undef result")?;
+        let rt = reg_types
+            .get(&result_reg)
+            .copied()
+            .unwrap_or(ScalarType::Int);
+        // Float results: bitcast f64→i64 for the output buffer.
+        let store_val = if rt == ScalarType::Float {
+            let bc = "%ret_bc".to_string();
+            out.push_str(&format!(
+                "{indent}{bc} = arith.bitcast {result} : f64 to i64\n"
+            ));
+            bc
+        } else {
+            result.clone()
+        };
         out.push_str(&format!(
-            "{indent}memref.store {result}, %out[%gid] : memref<{buf_size}xi64>\n"
+            "{indent}memref.store {store_val}, %out[%gid] : memref<{buf_size}xi64>\n"
         ));
         out.push_str(&format!("{indent}gpu.return\n"));
     } else {
-        emit_multiblock(lir, &mut regs, num_params, buf_size, indent, &mut out)?;
+        emit_multiblock(
+            lir,
+            &mut regs,
+            &mut reg_types,
+            num_params,
+            buf_size,
+            indent,
+            &mut out,
+        )?;
     }
 
     out.push_str("    }\n");
@@ -128,9 +157,17 @@ fn generate_gpu_module(lir: &LirFunction, workgroup_size: u32) -> Result<String,
     Ok(out)
 }
 
+/// Helper: emit a sitofp promotion for a register from i64 to f64.
+fn emit_promote(name: &str, src: &str, indent: &str, out: &mut String) {
+    out.push_str(&format!(
+        "{indent}{name} = arith.sitofp {src} : i64 to f64\n"
+    ));
+}
+
 fn emit_block_instructions(
     instructions: &[crate::lir::SpannedInstr],
     regs: &mut HashMap<u32, String>,
+    reg_types: &mut HashMap<u32, ScalarType>,
     num_params: usize,
     block_idx: usize,
     indent: &str,
@@ -141,77 +178,279 @@ fn emit_block_instructions(
             LirInstr::LoadCaptureRaw { dst, index } | LirInstr::LoadCapture { dst, index } => {
                 if (*index as usize) < num_params {
                     regs.insert(dst.0, format!("%arg{}", index));
+                    reg_types.insert(dst.0, ScalarType::Int);
                 }
             }
             LirInstr::Const { dst, value } => {
                 let name = format!("%c{}_{}", block_idx, dst.0);
-                let n = match value {
-                    LirConst::Int(n) => *n,
-                    LirConst::Bool(b) => i64::from(*b),
-                    LirConst::Nil => 0,
-                    _ => return Err(format!("unsupported constant for SPIR-V: {:?}", value)),
-                };
-                out.push_str(&format!("{indent}{name} = arith.constant {n} : i64\n"));
-                regs.insert(dst.0, name);
+                match value {
+                    LirConst::Float(f) => {
+                        // Format with enough precision to round-trip.
+                        let s = format!("{:.17e}", f);
+                        out.push_str(&format!("{indent}{name} = arith.constant {s} : f64\n"));
+                        regs.insert(dst.0, name);
+                        reg_types.insert(dst.0, ScalarType::Float);
+                    }
+                    _ => {
+                        let n = match value {
+                            LirConst::Int(n) => *n,
+                            LirConst::Bool(b) => i64::from(*b),
+                            LirConst::Nil => 0,
+                            _ => {
+                                return Err(format!("unsupported constant for SPIR-V: {:?}", value))
+                            }
+                        };
+                        out.push_str(&format!("{indent}{name} = arith.constant {n} : i64\n"));
+                        regs.insert(dst.0, name);
+                        reg_types.insert(dst.0, ScalarType::Int);
+                    }
+                }
             }
             LirInstr::BinOp { dst, op, lhs, rhs } => {
-                let name = format!("%r{}_{}", block_idx, dst.0);
                 let lv = regs
                     .get(&lhs.0)
-                    .ok_or_else(|| format!("undef r{}", lhs.0))?;
+                    .ok_or_else(|| format!("undef r{}", lhs.0))?
+                    .clone();
                 let rv = regs
                     .get(&rhs.0)
-                    .ok_or_else(|| format!("undef r{}", rhs.0))?;
-                let op_name = match op {
-                    BinOp::Add => "arith.addi",
-                    BinOp::Sub => "arith.subi",
-                    BinOp::Mul => "arith.muli",
-                    BinOp::Div => "arith.divsi",
-                    BinOp::Rem => "arith.remsi",
-                    BinOp::BitAnd => "arith.andi",
-                    BinOp::BitOr => "arith.ori",
-                    BinOp::BitXor => "arith.xori",
-                    BinOp::Shl => "arith.shli",
-                    BinOp::Shr => "arith.shrsi",
+                    .ok_or_else(|| format!("undef r{}", rhs.0))?
+                    .clone();
+                let lt = reg_types.get(&lhs.0).copied().unwrap_or(ScalarType::Int);
+                let rt = reg_types.get(&rhs.0).copied().unwrap_or(ScalarType::Int);
+
+                let is_bitwise = matches!(
+                    op,
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+                );
+                if is_bitwise && (lt == ScalarType::Float || rt == ScalarType::Float) {
+                    return Err("bitwise ops on float operands not supported in SPIR-V".to_string());
+                }
+
+                // Promote mixed operands: int → float via sitofp
+                let (eff_lv, eff_rv, result_type) = match (lt, rt) {
+                    (ScalarType::Int, ScalarType::Int) => (lv, rv, ScalarType::Int),
+                    (ScalarType::Float, ScalarType::Float) => (lv, rv, ScalarType::Float),
+                    (ScalarType::Int, ScalarType::Float) => {
+                        let pname = format!("%prom{}_{}_l", block_idx, dst.0);
+                        emit_promote(&pname, &lv, indent, out);
+                        (pname, rv, ScalarType::Float)
+                    }
+                    (ScalarType::Float, ScalarType::Int) => {
+                        let pname = format!("%prom{}_{}_r", block_idx, dst.0);
+                        emit_promote(&pname, &rv, indent, out);
+                        (lv, pname, ScalarType::Float)
+                    }
+                    // Bool operands: treat as Int (0/1)
+                    (ScalarType::Bool, ScalarType::Bool) => (lv, rv, ScalarType::Int),
+                    (ScalarType::Bool, other) | (other, ScalarType::Bool) => (lv, rv, other),
                 };
-                out.push_str(&format!("{indent}{name} = {op_name} {lv}, {rv} : i64\n"));
+
+                let name = format!("%r{}_{}", block_idx, dst.0);
+                if result_type == ScalarType::Float {
+                    let op_name = match op {
+                        BinOp::Add => "arith.addf",
+                        BinOp::Sub => "arith.subf",
+                        BinOp::Mul => "arith.mulf",
+                        BinOp::Div => "arith.divf",
+                        BinOp::Rem => "arith.remf",
+                        _ => unreachable!("bitwise on float rejected above"),
+                    };
+                    out.push_str(&format!(
+                        "{indent}{name} = {op_name} {eff_lv}, {eff_rv} : f64\n"
+                    ));
+                } else {
+                    let op_name = match op {
+                        BinOp::Add => "arith.addi",
+                        BinOp::Sub => "arith.subi",
+                        BinOp::Mul => "arith.muli",
+                        BinOp::Div => "arith.divsi",
+                        BinOp::Rem => "arith.remsi",
+                        BinOp::BitAnd => "arith.andi",
+                        BinOp::BitOr => "arith.ori",
+                        BinOp::BitXor => "arith.xori",
+                        BinOp::Shl => "arith.shli",
+                        BinOp::Shr => "arith.shrsi",
+                    };
+                    out.push_str(&format!(
+                        "{indent}{name} = {op_name} {eff_lv}, {eff_rv} : i64\n"
+                    ));
+                }
                 regs.insert(dst.0, name);
+                reg_types.insert(dst.0, result_type);
             }
             LirInstr::Compare { dst, op, lhs, rhs } => {
-                // arith.cmpi produces i1; extend to i64 for consistency with
-                // the rest of the i64-only LIR value domain (matches lower.rs).
-                let cmp_i1 = format!("%cmpi1_{}_{}", block_idx, dst.0);
-                let ext_i64 = format!("%cmp{}_{}", block_idx, dst.0);
                 let lv = regs
                     .get(&lhs.0)
-                    .ok_or_else(|| format!("undef r{}", lhs.0))?;
+                    .ok_or_else(|| format!("undef r{}", lhs.0))?
+                    .clone();
                 let rv = regs
                     .get(&rhs.0)
-                    .ok_or_else(|| format!("undef r{}", rhs.0))?;
-                let pred = match op {
-                    CmpOp::Eq => "eq",
-                    CmpOp::Ne => "ne",
-                    CmpOp::Lt => "slt",
-                    CmpOp::Le => "sle",
-                    CmpOp::Gt => "sgt",
-                    CmpOp::Ge => "sge",
-                };
-                out.push_str(&format!(
-                    "{indent}{cmp_i1} = arith.cmpi {pred}, {lv}, {rv} : i64\n"
-                ));
+                    .ok_or_else(|| format!("undef r{}", rhs.0))?
+                    .clone();
+                let lt = reg_types.get(&lhs.0).copied().unwrap_or(ScalarType::Int);
+                let rt = reg_types.get(&rhs.0).copied().unwrap_or(ScalarType::Int);
+                let use_float = lt == ScalarType::Float || rt == ScalarType::Float;
+
+                let cmp_i1 = format!("%cmpi1_{}_{}", block_idx, dst.0);
+                let ext_i64 = format!("%cmp{}_{}", block_idx, dst.0);
+
+                if use_float {
+                    // Promote mixed operands for float comparison
+                    let (eff_lv, eff_rv) = match (lt, rt) {
+                        (ScalarType::Float, ScalarType::Float) => (lv, rv),
+                        (ScalarType::Int, ScalarType::Float) => {
+                            let pname = format!("%cprom{}_{}_l", block_idx, dst.0);
+                            emit_promote(&pname, &lv, indent, out);
+                            (pname, rv)
+                        }
+                        (ScalarType::Float, ScalarType::Int) => {
+                            let pname = format!("%cprom{}_{}_r", block_idx, dst.0);
+                            emit_promote(&pname, &rv, indent, out);
+                            (lv, pname)
+                        }
+                        _ => unreachable!(),
+                    };
+                    let pred = match op {
+                        CmpOp::Eq => "oeq",
+                        CmpOp::Ne => "one",
+                        CmpOp::Lt => "olt",
+                        CmpOp::Le => "ole",
+                        CmpOp::Gt => "ogt",
+                        CmpOp::Ge => "oge",
+                    };
+                    out.push_str(&format!(
+                        "{indent}{cmp_i1} = arith.cmpf {pred}, {eff_lv}, {eff_rv} : f64\n"
+                    ));
+                } else {
+                    let pred = match op {
+                        CmpOp::Eq => "eq",
+                        CmpOp::Ne => "ne",
+                        CmpOp::Lt => "slt",
+                        CmpOp::Le => "sle",
+                        CmpOp::Gt => "sgt",
+                        CmpOp::Ge => "sge",
+                    };
+                    out.push_str(&format!(
+                        "{indent}{cmp_i1} = arith.cmpi {pred}, {lv}, {rv} : i64\n"
+                    ));
+                }
                 out.push_str(&format!(
                     "{indent}{ext_i64} = arith.extui {cmp_i1} : i1 to i64\n"
                 ));
                 regs.insert(dst.0, ext_i64);
+                reg_types.insert(dst.0, ScalarType::Int);
+            }
+            LirInstr::UnaryOp { dst, op, src } => {
+                let sv = regs
+                    .get(&src.0)
+                    .ok_or_else(|| format!("undef r{}", src.0))?
+                    .clone();
+                let st = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                let name = format!("%u{}_{}", block_idx, dst.0);
+
+                match op {
+                    UnaryOp::Neg => {
+                        if st == ScalarType::Float {
+                            out.push_str(&format!("{indent}{name} = arith.negf {sv} : f64\n"));
+                            reg_types.insert(dst.0, ScalarType::Float);
+                        } else {
+                            let zero = format!("%neg_z{}_{}", block_idx, dst.0);
+                            out.push_str(&format!("{indent}{zero} = arith.constant 0 : i64\n"));
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.subi {zero}, {sv} : i64\n"
+                            ));
+                            reg_types.insert(dst.0, ScalarType::Int);
+                        }
+                    }
+                    UnaryOp::Not => {
+                        // Truthiness: compare to zero, result is always Int
+                        if st == ScalarType::Float {
+                            let zero = format!("%not_z{}_{}", block_idx, dst.0);
+                            let cmp = format!("%not_c{}_{}", block_idx, dst.0);
+                            out.push_str(&format!("{indent}{zero} = arith.constant 0.0 : f64\n"));
+                            out.push_str(&format!(
+                                "{indent}{cmp} = arith.cmpf oeq, {sv}, {zero} : f64\n"
+                            ));
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.extui {cmp} : i1 to i64\n"
+                            ));
+                        } else {
+                            let zero = format!("%not_z{}_{}", block_idx, dst.0);
+                            let cmp = format!("%not_c{}_{}", block_idx, dst.0);
+                            out.push_str(&format!("{indent}{zero} = arith.constant 0 : i64\n"));
+                            out.push_str(&format!(
+                                "{indent}{cmp} = arith.cmpi eq, {sv}, {zero} : i64\n"
+                            ));
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.extui {cmp} : i1 to i64\n"
+                            ));
+                        }
+                        reg_types.insert(dst.0, ScalarType::Int);
+                    }
+                    UnaryOp::BitNot => {
+                        if st == ScalarType::Float {
+                            return Err(
+                                "bitwise not on float operand not supported in SPIR-V".to_string()
+                            );
+                        }
+                        let neg1 = format!("%bn_m1{}_{}", block_idx, dst.0);
+                        out.push_str(&format!("{indent}{neg1} = arith.constant -1 : i64\n"));
+                        out.push_str(&format!("{indent}{name} = arith.xori {sv}, {neg1} : i64\n"));
+                        reg_types.insert(dst.0, ScalarType::Int);
+                    }
+                }
+                regs.insert(dst.0, name);
+            }
+            LirInstr::Convert { dst, op, src } => {
+                let sv = regs
+                    .get(&src.0)
+                    .ok_or_else(|| format!("undef r{}", src.0))?
+                    .clone();
+                let st = reg_types.get(&src.0).copied().unwrap_or(ScalarType::Int);
+                let name = format!("%conv{}_{}", block_idx, dst.0);
+                match op {
+                    ConvOp::IntToFloat => {
+                        if st == ScalarType::Float {
+                            // Identity
+                            regs.insert(dst.0, sv);
+                            reg_types.insert(dst.0, ScalarType::Float);
+                        } else {
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.sitofp {sv} : i64 to f64\n"
+                            ));
+                            regs.insert(dst.0, name);
+                            reg_types.insert(dst.0, ScalarType::Float);
+                        }
+                    }
+                    ConvOp::FloatToInt => {
+                        if st == ScalarType::Int {
+                            // Identity
+                            regs.insert(dst.0, sv);
+                            reg_types.insert(dst.0, ScalarType::Int);
+                        } else {
+                            out.push_str(&format!(
+                                "{indent}{name} = arith.fptosi {sv} : f64 to i64\n"
+                            ));
+                            regs.insert(dst.0, name);
+                            reg_types.insert(dst.0, ScalarType::Int);
+                        }
+                    }
+                }
             }
             LirInstr::StoreLocal { slot, src } => {
                 if let Some(name) = regs.get(&src.0) {
                     regs.insert(*slot as u32, name.clone());
+                    if let Some(t) = reg_types.get(&src.0) {
+                        reg_types.insert(*slot as u32, *t);
+                    }
                 }
             }
             LirInstr::LoadLocal { dst, slot } => {
                 if let Some(name) = regs.get(&(*slot as u32)) {
                     regs.insert(dst.0, name.clone());
+                    if let Some(t) = reg_types.get(&(*slot as u32)) {
+                        reg_types.insert(dst.0, *t);
+                    }
                 }
             }
             _ => return Err(format!("unsupported SPIR-V instruction: {:?}", si.instr)),
@@ -223,6 +462,7 @@ fn emit_block_instructions(
 fn emit_multiblock(
     lir: &LirFunction,
     regs: &mut HashMap<u32, String>,
+    reg_types: &mut HashMap<u32, ScalarType>,
     num_params: usize,
     buf_size: &str,
     indent: &str,
@@ -234,6 +474,7 @@ fn emit_multiblock(
         emit_block_instructions(
             &block.instructions,
             regs,
+            reg_types,
             num_params,
             block_idx,
             indent,
@@ -243,8 +484,18 @@ fn emit_multiblock(
         match &block.terminator.terminator {
             Terminator::Return(reg) => {
                 let result = regs.get(&reg.0).ok_or("undef result in return")?;
+                let rt = reg_types.get(&reg.0).copied().unwrap_or(ScalarType::Int);
+                let store_val = if rt == ScalarType::Float {
+                    let bc = format!("%mret_bc_{}", block_idx);
+                    out.push_str(&format!(
+                        "{indent}{bc} = arith.bitcast {result} : f64 to i64\n"
+                    ));
+                    bc
+                } else {
+                    result.clone()
+                };
                 out.push_str(&format!(
-                    "{indent}memref.store {result}, %out[%gid] : memref<{buf_size}xi64>\n"
+                    "{indent}memref.store {store_val}, %out[%gid] : memref<{buf_size}xi64>\n"
                 ));
                 out.push_str(&format!("{indent}gpu.return\n"));
                 break;
@@ -291,6 +542,7 @@ fn emit_multiblock(
                         return emit_if_return(
                             lir,
                             regs,
+                            reg_types,
                             num_params,
                             IfReturn {
                                 entry_idx: block_idx,
@@ -314,6 +566,7 @@ fn emit_multiblock(
                 let then_result = find_block_result(then_block)?;
                 let else_result = find_block_result(else_block)?;
 
+                // scf.if always yields i64; float branches bitcast before yield.
                 let if_result = format!("%if_result_{}", block_idx);
                 out.push_str(&format!(
                     "{indent}{if_result} = scf.if {cond_val} -> (i64) {{\n"
@@ -321,29 +574,57 @@ fn emit_multiblock(
 
                 let inner = format!("{indent}  ");
                 let mut then_regs = regs.clone();
+                let mut then_types = reg_types.clone();
                 emit_block_instructions(
                     &then_block.instructions,
                     &mut then_regs,
+                    &mut then_types,
                     num_params,
                     then_idx,
                     &inner,
                     out,
                 )?;
                 let then_val = then_regs.get(&then_result).ok_or("undef then result")?;
-                out.push_str(&format!("{inner}scf.yield {then_val} : i64\n"));
+                let then_ty = then_types
+                    .get(&then_result)
+                    .copied()
+                    .unwrap_or(ScalarType::Int);
+                if then_ty == ScalarType::Float {
+                    let bc = format!("%then_bc_{}", block_idx);
+                    out.push_str(&format!(
+                        "{inner}{bc} = arith.bitcast {then_val} : f64 to i64\n"
+                    ));
+                    out.push_str(&format!("{inner}scf.yield {bc} : i64\n"));
+                } else {
+                    out.push_str(&format!("{inner}scf.yield {then_val} : i64\n"));
+                }
                 out.push_str(&format!("{indent}}} else {{\n"));
 
                 let mut else_regs = regs.clone();
+                let mut else_types = reg_types.clone();
                 emit_block_instructions(
                     &else_block.instructions,
                     &mut else_regs,
+                    &mut else_types,
                     num_params,
                     else_idx,
                     &inner,
                     out,
                 )?;
                 let else_val = else_regs.get(&else_result).ok_or("undef else result")?;
-                out.push_str(&format!("{inner}scf.yield {else_val} : i64\n"));
+                let else_ty = else_types
+                    .get(&else_result)
+                    .copied()
+                    .unwrap_or(ScalarType::Int);
+                if else_ty == ScalarType::Float {
+                    let bc = format!("%else_bc_{}", block_idx);
+                    out.push_str(&format!(
+                        "{inner}{bc} = arith.bitcast {else_val} : f64 to i64\n"
+                    ));
+                    out.push_str(&format!("{inner}scf.yield {bc} : i64\n"));
+                } else {
+                    out.push_str(&format!("{inner}scf.yield {else_val} : i64\n"));
+                }
                 out.push_str(&format!("{indent}}}\n"));
 
                 if let Some(store_slot) = find_store_slot(then_block) {
@@ -399,6 +680,7 @@ struct IfReturn<'a> {
 fn emit_if_return(
     lir: &LirFunction,
     regs: &mut HashMap<u32, String>,
+    reg_types: &mut HashMap<u32, ScalarType>,
     num_params: usize,
     idx: IfReturn<'_>,
     out: &mut String,
@@ -418,6 +700,7 @@ fn emit_if_return(
         _ => return Err("expected return in else".to_string()),
     };
 
+    // scf.if always yields i64; float returns bitcast before yield.
     let if_result = format!("%if_ret_{}", idx.entry_idx);
     out.push_str(&format!(
         "{indent}{if_result} = scf.if {cond_val} -> (i64) {{\n"
@@ -426,29 +709,57 @@ fn emit_if_return(
     let inner = format!("{indent}  ");
 
     let mut then_regs = regs.clone();
+    let mut then_types = reg_types.clone();
     emit_block_instructions(
         &then_block.instructions,
         &mut then_regs,
+        &mut then_types,
         num_params,
         idx.then_idx,
         &inner,
         out,
     )?;
     let then_val = then_regs.get(&then_ret).ok_or("undef then ret")?;
-    out.push_str(&format!("{inner}scf.yield {then_val} : i64\n"));
+    let then_ty = then_types
+        .get(&then_ret)
+        .copied()
+        .unwrap_or(ScalarType::Int);
+    if then_ty == ScalarType::Float {
+        let bc = format!("%tret_bc_{}", idx.entry_idx);
+        out.push_str(&format!(
+            "{inner}{bc} = arith.bitcast {then_val} : f64 to i64\n"
+        ));
+        out.push_str(&format!("{inner}scf.yield {bc} : i64\n"));
+    } else {
+        out.push_str(&format!("{inner}scf.yield {then_val} : i64\n"));
+    }
     out.push_str(&format!("{indent}}} else {{\n"));
 
     let mut else_regs = regs.clone();
+    let mut else_types = reg_types.clone();
     emit_block_instructions(
         &else_block.instructions,
         &mut else_regs,
+        &mut else_types,
         num_params,
         idx.else_idx,
         &inner,
         out,
     )?;
     let else_val = else_regs.get(&else_ret).ok_or("undef else ret")?;
-    out.push_str(&format!("{inner}scf.yield {else_val} : i64\n"));
+    let else_ty = else_types
+        .get(&else_ret)
+        .copied()
+        .unwrap_or(ScalarType::Int);
+    if else_ty == ScalarType::Float {
+        let bc = format!("%eret_bc_{}", idx.entry_idx);
+        out.push_str(&format!(
+            "{inner}{bc} = arith.bitcast {else_val} : f64 to i64\n"
+        ));
+        out.push_str(&format!("{inner}scf.yield {bc} : i64\n"));
+    } else {
+        out.push_str(&format!("{inner}scf.yield {else_val} : i64\n"));
+    }
     out.push_str(&format!("{indent}}}\n"));
 
     out.push_str(&format!(

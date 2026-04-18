@@ -82,3 +82,7 @@ src/compiler/bytecode.rs   Instruction enum and encoding
 
 - [impl/vm.md](vm.md) — VM that executes bytecode
 - [impl/lir.md](lir.md) — LIR that bytecode is emitted from
+- [impl/jit.md](jit.md) — JIT alternative
+- [impl/mlir.md](mlir.md) — MLIR/LLVM tier-2 backend
+- [impl/wasm.md](wasm.md) — WebAssembly backend
+- [impl/gpu.md](gpu.md) — GPU compute pipeline

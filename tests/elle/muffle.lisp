@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # ── muffle: compile-time signal absorption ────────────────────────────
 #
 # (muffle :signal) absorbs specific signals from the body, allowing

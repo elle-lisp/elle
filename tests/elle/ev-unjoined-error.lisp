@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## tests/elle/ev-unjoined-error.lisp — unjoined fiber errors must crash
 ##
 ## Verifies that errors in ev/spawn fibers that nobody joins

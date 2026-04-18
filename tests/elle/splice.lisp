@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # Tests for splice (;expr) — spreading indexed types into calls and literals
 
 
@@ -89,7 +89,7 @@
   (defn yielding-fn [a b c]
     (yield (+ a b c))
     (* a b c))
-  (var co (make-coroutine (fn [] (yielding-fn ;@[2 3 4]))))
+  (def @co (make-coroutine (fn [] (yielding-fn ;@[2 3 4]))))
   (def first-resume (coro/resume co))
   (def second-resume (coro/resume co))
   (assert (= first-resume 9) "yield through splice: first resume yields 9")

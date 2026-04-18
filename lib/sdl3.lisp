@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## std/sdl3 — SDL3 bindings for Elle via FFI
 ##
 ## Pure FFI bindings to libSDL3. No Rust plugin needed.
@@ -692,7 +692,7 @@
 (defn sdl/lock-texture [tex &named rect]
   "Lock a streaming texture for pixel access. Returns {:pixels ptr :pitch int}.
    rect is {:x :y :w :h} or nil for entire texture."
-  (var irect-buf nil)
+  (def @irect-buf nil)
   (when rect
     (assign irect-buf (ffi/malloc (ffi/size irect-type)))
     (ffi/write irect-buf irect-type @[(rect :x) (rect :y) (rect :w) (rect :h)]))
@@ -723,7 +723,7 @@
   (let* [nv (length vertices)
          buf (ffi/malloc (* nv vertex-size))]
     # Write vertices into contiguous buffer
-    (var i 0)
+    (def @i 0)
     (while (< i nv)
       (let [v (get vertices i)
             off (* i vertex-size)]
@@ -731,12 +731,12 @@
           @[(v :x) (v :y) (v :r) (v :g) (v :b) (v :a) (v :tx) (v :ty)]))
       (assign i (+ i 1)))
     # Write index buffer if provided
-    (var idx-buf nil)
-    (var ni 0)
+    (def @idx-buf nil)
+    (def @ni 0)
     (when indices
       (assign ni (length indices))
       (assign idx-buf (ffi/malloc (* ni (ffi/size :int))))
-      (var j 0)
+      (def @j 0)
       (while (< j ni)
         (ffi/write (ptr/add idx-buf (* j (ffi/size :int))) :int (get indices j))
         (assign j (+ j 1))))
@@ -864,8 +864,8 @@
            count (ffi/read count-ptr :int)]
       (when (null? ptr)
         (if (= count 0) (list) (sdl-error "sdl/audio-playback-devices")))
-      (var result @[])
-      (var i 0)
+      (def @result @[])
+      (def @i 0)
       (while (< i count)
         (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
         (assign i (+ i 1)))
@@ -951,8 +951,8 @@
            count (ffi/read count-ptr :int)]
       (when (null? ptr)
         (if (= count 0) (list) (sdl-error "sdl/displays")))
-      (var result @[])
-      (var i 0)
+      (def @result @[])
+      (def @i 0)
       (while (< i count)
         (push result (ffi/read (ptr/add ptr (* i 4)) :u32))
         (assign i (+ i 1)))

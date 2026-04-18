@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/http.lisp — Pure Elle HTTP/1.1 client and server
 ##
 ## Plain HTTP only:
@@ -77,7 +77,7 @@
              path+query (if (nil? slash) "/" (slice tail slash))
              colon (string/find auth ":")
              host (if (nil? colon) auth (slice auth 0 colon))
-             port (if (nil? colon) info:default-port (integer (slice auth (inc colon))))]
+             port (if (nil? colon) info:default-port (parse-int (slice auth (inc colon))))]
         (when (empty? tail)
           (error {:error :http-error :reason :missing-host :url url :message "missing host"}))
         (when (empty? host)
@@ -268,7 +268,7 @@
         (error {:error :http-error :reason :malformed-status-line :line line
                 :message "malformed status line"}))
       (let* [[version status-str & reason-parts] parts
-             status (integer status-str)
+             status (parse-int status-str)
              reason (if (empty? reason-parts) "" (string/join reason-parts " "))]
         {:version version :status status :reason reason})))
 
@@ -284,8 +284,8 @@
     (if (= n 0)
       ""
       (begin
-        (var remaining n)
-        (var buf (@bytes))
+        (def @remaining n)
+        (def @buf (@bytes))
         (while (pos? remaining)
           (let [chunk (t-read t remaining)]
             (when (nil? chunk)
@@ -307,13 +307,13 @@
       (when (empty? hex)
         (error {:error :http-error :reason :malformed-chunk-size :line line
                 :message "malformed chunk size"}))
-      (integer hex 16)))
+      (parse-int hex 16)))
 
   (defn read-chunked-body [t]
     "Read an HTTP/1.1 Transfer-Encoding: chunked body from transport.
      Reads chunks until the terminating 0-chunk, discards chunk extensions
      and trailers, returns the reassembled body as a string."
-    (var buf (@bytes))
+    (def @buf (@bytes))
     (block :chunks
       (forever
         (let [size (chunk-size (t-read-line t))]
@@ -323,7 +323,7 @@
               (let [line (t-read-line t)]
                 (when (or (nil? line) (empty? line)) (break))))
             (break :chunks nil))
-          (var remaining size)
+          (def @remaining size)
           (while (pos? remaining)
             (let [chunk (t-read t remaining)]
               (when (nil? chunk)
@@ -349,7 +349,7 @@
      if neither framing header is present."
     (cond
       ((chunked? headers) (read-chunked-body t))
-      (headers:content-length (read-fixed-body t (integer headers:content-length)))
+      (headers:content-length (read-fixed-body t (parse-int headers:content-length)))
       (true nil)))
 
   (defn write-chunk [t data]
@@ -496,12 +496,12 @@
      Per RFC 9110, 301/302/303 are followed with GET and an empty body;
      307/308 preserve the original method and body. The Location header
      may be absolute, scheme-relative, or an absolute path."
-    (var current-method method)
-    (var current-body   body)
-    (var current-query  query)
-    (var current-parsed (parse-url url))
-    (var remaining      (redirect-limit follow-redirects))
-    (var last-response  nil)
+    (def @current-method method)
+    (def @current-body body)
+    (def @current-query query)
+    (def @current-parsed (parse-url url))
+    (def @remaining (redirect-limit follow-redirects))
+    (def @last-response nil)
     (block :redirects
       (forever
         (let [resp (do-request current-method current-parsed headers
@@ -594,7 +594,7 @@
   (defn sse-drain-buffered-lines [buf on-line]
     "Yield all complete lines already present in buf. Returns the new
      buf value with the last (incomplete) line left behind."
-    (var remaining buf)
+    (def @remaining buf)
     (block :drain
       (forever
         (let [nl (string/find remaining "\n")]
@@ -607,7 +607,7 @@
             (assign remaining (slice remaining (inc nl))))))))
 
   (defn sse-for-each-body-line-chunked [t on-line]
-    (var buf "")
+    (def @buf "")
     (block :chunks
       (forever
         (let [size (chunk-size (t-read-line t))]
@@ -617,7 +617,7 @@
                 (when (or (nil? line) (empty? line)) (break))))
             (unless (empty? buf) (on-line buf))
             (break :chunks))
-          (var remaining size)
+          (def @remaining size)
           (while (pos? remaining)
             (let [data (t-read t remaining)]
               (when (nil? data)
@@ -654,7 +654,7 @@
             "data"  (push state:data-lines parsed:value)
             "id"    (unless (string/contains? parsed:value "\0")
                       (put state :last-id parsed:value))
-            "retry" (let [[ok? n] (protect (integer parsed:value))]
+            "retry" (let [[ok? n] (protect (parse-int parsed:value))]
                       (when (and ok? n (pos? n))
                         (put state :retry n))))))))
 
@@ -691,7 +691,7 @@
          :status    status-line:status
          :headers   resp-headers})))
 
-  (defn sse-get [url &named headers last-event-id reconnect]
+  (defn sse-get [url &named headers last-event-id @reconnect]
     "Open an SSE connection to url and return a coroutine that yields
      events until the stream terminates. Each event is a struct:
        {:event \"message\" :data \"...\" :id \"...\" :retry 3000}
@@ -705,8 +705,8 @@
     (default reconnect true)
     (coro/new
       (fn []
-        (var current-id last-event-id)
-        (var retry-ms   sse-default-retry-ms)
+        (def @current-id last-event-id)
+        (def @retry-ms sse-default-retry-ms)
         (block :session
           (forever
             (let* [[ok? result]
@@ -874,7 +874,7 @@
       (string/format "http: handler error on {} {}: {}\n"
                      request:method request:path err)))
 
-  (defn http-serve [listener handler &named on-error]
+  (defn http-serve [listener handler &named @on-error]
     "Accept connections on listener and handle them with keep-alive.
      Each connection runs in its own fiber via ev/spawn.
      Exits cleanly when the listener is closed.

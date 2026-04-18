@@ -326,12 +326,13 @@ impl<'a> Analyzer<'a> {
     /// Duplicate names are deferred to Pass 2 for sequential shadowing.
     fn prebind_simple<'s>(
         &mut self,
-        name: &str,
+        raw_name: &str,
         name_syntax: &'s Syntax,
         value_syntax: &'s Syntax,
         immutable: bool,
         seen_names: &mut HashSet<String>,
     ) -> PreBound<'s> {
+        let (name, at_mutable) = super::strip_at_prefix(raw_name);
         let is_duplicate = !seen_names.insert(name.to_string());
         let (binding, deferred) = if is_duplicate {
             // Duplicate name: create binding but don't register in scope yet.
@@ -345,7 +346,7 @@ impl<'a> Analyzer<'a> {
         };
 
         self.arena.get_mut(binding).is_prebound = true;
-        if immutable {
+        if immutable && self.immutable_by_default && !at_mutable {
             self.arena.get_mut(binding).is_immutable = true;
         }
 
@@ -400,7 +401,7 @@ impl<'a> Analyzer<'a> {
                 self.bind(name, name_scopes, BindingScope::Local)
             };
             self.arena.get_mut(b).is_prebound = true;
-            if immutable {
+            if immutable && self.immutable_by_default {
                 self.arena.get_mut(b).is_immutable = true;
             }
             leaf_bindings.insert(name.to_string(), b);

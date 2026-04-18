@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 ## lib/sync.lisp — Concurrency primitives built on futex (park/notify)
 ##
 ## Loaded via: (def sync ((import-file "lib/sync.lisp")))
@@ -11,7 +11,7 @@
 
 ## ── Layer 1: Futex ──────────────────────────────────────────────────
 
-(var *futex-id* 0)
+(def @*futex-id* 0)
 
 (defn make-futex [initial]
   "Low-level futex cell. Wraps a mutable array cell with park/notify."

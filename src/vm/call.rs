@@ -256,7 +256,7 @@ impl VM {
             // Checked before Cranelift — MLIR produces better optimized code
             // for numeric functions (LLVM vectorization, LICM, GVN).
             #[cfg(feature = "mlir")]
-            if closure.template.lir_function.is_some() {
+            if self.mlir_enabled && closure.template.lir_function.is_some() {
                 if let Some(bits) = self.try_mlir_call(closure, &args) {
                     self.fiber.call_depth -= 1;
                     self.fiber.call_stack.pop();

@@ -1,4 +1,4 @@
-(elle/epoch 7)
+(elle/epoch 8)
 # ── MLIR tier-2 backend tests ─────────────────────────────────────────
 #
 # Verifies that GPU-eligible functions compile and execute correctly
@@ -63,7 +63,7 @@
 
 (assert (fn/gpu-eligible? ml-add) "ml-add is GPU-eligible")
 (assert (fn/gpu-eligible? ml-abs) "ml-abs is GPU-eligible")
-(assert (not (fn/gpu-eligible? ml-with-capture)) "capture disqualifies")
+(assert (fn/gpu-eligible? ml-with-capture) "immutable capture is constant-propagated")
 
 # ── Branching with even values ────────────────────────────────────────
 # Before the cmpi-ne fix in MLIR, trunci took the LSB: comparison result
