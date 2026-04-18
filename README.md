@@ -856,6 +856,8 @@ Start with [QUICKSTART.md](QUICKSTART.md) for the full table of contents.
 | `docs/cookbook/` | Recipes for common codebase changes |
 | `docs/analysis/` | Testing, debugging, semantic portraits |
 | `docs/impl/` | Implementation internals (reader, HIR, LIR, VM, JIT) |
+| [DEVLOG.md](DEVLOG.md) | Per-PR development log (368 entries from diffs) |
+| [CHANGELOG.md](CHANGELOG.md) | Changelog by subsystem arc (agent-optimized) |
 
 ## For Agent Developers
 
