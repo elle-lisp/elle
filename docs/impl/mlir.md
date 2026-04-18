@@ -33,8 +33,9 @@ The eligibility check (`LirFunction::is_gpu_eligible`) is layered:
    Immutable captures are allowed — they become extra parameters in
    the MLIR signature.
 3. **Instruction whitelist** — every `LirInstr` and `Terminator` must
-   be GPU-safe (constants, arithmetic, comparison, local slots,
-   parameter/capture loads, `Jump` / `Branch` / `Return`).
+   be GPU-safe (constants, `ValueConst` with numeric/bool/nil values,
+   arithmetic, comparison, local slots, parameter/capture loads,
+   `Jump` / `Branch` / `Return`).
 
 A second, stricter predicate `is_mlir_cpu_eligible` additionally
 checks that the returned register is reachable from numeric

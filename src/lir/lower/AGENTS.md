@@ -37,6 +37,7 @@ HIR + spans
     │
     ▼
 Lowerer (&BindingArena)
+    ├─► seed immutable_values for constant bindings (emit ValueConst instead of LoadLocal)
     ├─► allocate slots for bindings (HashMap<Binding, u16>)
     ├─► emit MakeCaptureCell for captured locals (arena.get(b).needs_capture())
     ├─► lower control flow to jumps
@@ -48,7 +49,31 @@ Lowerer (&BindingArena)
 LirFunction (basic blocks with SpannedInstr)
 ```
 
-The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`): `arena.get(b).needs_capture()`, `arena.get(b).name`, etc. The arena reference is immutable during lowering, ensuring analysis-phase metadata cannot be modified.
+The lowerer reads binding metadata via `&BindingArena` (passed to `Lowerer::new`): `arena.get(b).needs_capture()`, `arena.get(b).name`, `arena.get(b).is_immutable`, etc. The arena reference is immutable during lowering, ensuring analysis-phase metadata cannot be modified.
+
+## Immutable constant propagation
+
+The lowerer maintains `immutable_values: HashMap<Binding, Value>` mapping
+bindings to their compile-time constant values. When `lower_var` encounters
+a binding in this map, it emits `ValueConst` (LoadConst) instead of
+`LoadLocal`, avoiding slot indirection entirely.
+
+Sources of immutable values:
+- **Primitives**: Seeded by `with_primitive_values` at construction from
+  `Analyzer::primitive_values()`. Covers `+`, `map`, `inc`, etc.
+- **User constants**: `try_seed_immutable(binding, init)` seeds immutable
+  bindings (let, def) whose initializer is a literal (Int, Float, Bool,
+  Nil, Keyword, Quote) or a reference to another known constant.
+
+Eviction: `lower_bind_value` and `lower_assign` evict from `immutable_values`
+when a binding is re-stored. This handles file-scope duplicate names where
+the same Binding identity is reused by a later destructure.
+
+The map is NOT saved/restored across lambda boundaries, so constants from
+the parent scope are visible inside nested lambdas. A captured binding
+in `immutable_values` emits `ValueConst` in the lambda body instead of
+`LoadCapture` — the capture slot still exists (for the capture mechanism)
+but is never read.
 
 ## Source location tracking
 
@@ -148,6 +173,7 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 | Instruction | Stack effect | Notes |
 |-------------|--------------|-------|
+| `ValueConst` | → value | Compile-time constant (from `immutable_values`); used for immutable bindings with literal inits and primitives. GPU-safe for numeric/bool/nil values. |
 | `LoadLocal` | → value | Load from stack slot |
 | `StoreLocal` | value → value | Store to slot, keep on stack |
 | `LoadCapture` | → value | From closure env, auto-unwraps CaptureCell |
@@ -183,9 +209,9 @@ No new bytecode instructions — break compiles to existing Move + Jump + Region
 
 5. **Dual address space inside lambdas.** `allocate_slot` returns env-relative indices for LBox locals (`num_captures + num_locals`) and stack-relative indices for non-LBox locals (`num_locals`). Both increment `num_locals` to keep env placeholder slots aligned. The bytecode emitter's `non_cell_local_slot` converts LoadCapture → LoadLocal for non-cell locals. The JIT's `local_slot_to_var` maps stack-relative slots to the JIT variable space. The WASM emitter uses dedicated WASM locals for stack-relative slots.
 
-6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time.
+6. **`capture_params_mask` is set for mutable parameters.** Bit i set means parameter i needs lbox wrapping at call time. With immutable-by-default params, only `@`-prefixed params can be mutated, so this mask is typically 0.
 
-7. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `set!`. The JIT uses this to skip `CaptureCell` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
+7. **`capture_locals_mask` is set for locals that need lboxes.** Bit i set means locally-defined variable i (0-indexed from the first local after params) needs lbox wrapping because it's captured by a nested closure or mutated via `assign`. With immutable-by-default let bindings, only `@`-prefixed bindings can be mutated, so this mask is typically sparser than before. The JIT uses this to skip `CaptureCell` heap allocation for non-captured, non-mutated `let` bindings. The VM interpreter does not use this mask (it lbox-wraps all locals unconditionally). Both masks are limited to 64 entries (`u64`).
 
 8. **Docstring is threaded from HIR.** `LirFunction.doc` is copied from `HirKind::Lambda.doc` during lowering. The emitter preserves it into `Closure.doc` without encoding it in bytecode.
 

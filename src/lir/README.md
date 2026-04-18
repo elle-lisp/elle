@@ -35,20 +35,26 @@ LIR:                          Bytecode:
 ## LBox Boxing
 
 When a variable is both captured by a closure AND mutated, it needs lbox
-boxing so mutations are visible across closure boundaries:
+boxing so mutations are visible across closure boundaries. With
+immutable-by-default bindings, this only applies to `@`-prefixed bindings:
 
 ```lisp
-(let [counter 0]
-  (def inc (fn () (set counter (+ counter 1))))
+(let [@counter 0]
+  (def inc (fn () (assign counter (+ counter 1))))
   (inc)
   counter)  ; Should be 1, not 0
 ```
 
 The lowerer:
-1. Detects that `counter` is captured and mutated
+1. Detects that `counter` is captured and mutated (`needs_capture()` = true)
 2. Emits `MakeCaptureCell` to wrap the initial value
 3. Emits `LoadCaptureCell`/`StoreCaptureCell` for access in the outer scope
 4. Emits `LoadCapture`/`StoreCapture` for access in the closure
+
+Immutable bindings (no `@`) skip lbox boxing entirely — they are captured
+by value. Immutable bindings with constant initializers go further: the
+lowerer seeds them into `immutable_values`, and references emit `ValueConst`
+(LoadConst) instead of `LoadLocal` or `LoadCapture`.
 
 ## Lambda Lowering
 
