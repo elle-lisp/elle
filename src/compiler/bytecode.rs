@@ -281,6 +281,11 @@ pub struct Bytecode {
     /// correct signal metadata for fiber scheduling and shared allocator
     /// provisioning.
     pub signal: crate::signals::Signal,
+    /// Signal projection: maps keyword field names to the signals of exported
+    /// closures. Populated by `compute_signal_projection` during file-scope
+    /// compilation. When an importing file sees `module:field`, the analyzer
+    /// uses this projection instead of the conservative `Polymorphic` fallback.
+    pub signal_projection: Option<std::collections::HashMap<String, crate::signals::Signal>>,
 }
 
 impl Bytecode {
@@ -291,6 +296,7 @@ impl Bytecode {
             symbol_names: std::collections::HashMap::new(),
             location_map: LocationMap::new(),
             signal: crate::signals::Signal::silent(),
+            signal_projection: None,
         }
     }
 

@@ -257,9 +257,10 @@ The function's external signal excludes muffled bits — callers see it as silen
 | `(silence f)` | parameter | `f` must be silent when passed |
 | `(muffle :error)` | specific signal | absorb `:error` from body; abort if it fires |
 
-### Runtime Signal Enforcement with squelch
+### Signal Enforcement with squelch
 
-`squelch` is a **runtime closure transform primitive** that takes a closure and returns a new closure with runtime signal enforcement:
+`squelch` is a **closure transform primitive** with both runtime
+enforcement and compile-time signal inference:
 
 ```lisp
 (defn f [] (yield 42))
@@ -271,17 +272,24 @@ The function's external signal excludes muffled bits — callers see it as silen
 (def f2 (squelch f |:yield :io|))
 ```
 
-When a squelched closure is called, if it emits a squelched signal, a `signal-violation` error is raised instead. Non-squelched signals pass through normally. Errors are never affected by squelch (they pass through unchanged).
+At runtime, when a squelched closure is called, if it emits a squelched
+signal, a `signal-violation` error is raised instead. Non-squelched
+signals pass through normally. Errors are never affected by squelch.
 
-**Signature:** `(squelch closure :kw1 :kw2 ...)`
+At compile time, when both arguments are statically known, the analyzer
+computes the resulting signal using the same algebra as the runtime
+`effective_signal()`. This enables `(silence)` on functions that call
+squelched closures. See [inference.md](inference.md) for details.
+
+**Signature:** `(squelch closure signals)`
 - **First argument:** must be a closure
-- **Remaining arguments:** signal keywords to squelch (at least one required)
+- **Second argument:** signal keyword or set of keywords
 - **Returns:** a new closure with the squelch mask applied
 - **Signal:** `Signal::errors()` (can error on bad arguments, otherwise silent)
-- **Arity:** `AtLeast(2)` — closure + at least one keyword
+- **Arity:** `Exact(2)` — closure + keyword or set
 
 **Error cases:**
-- `(squelch f)` with no keywords → arity error
+- `(squelch f)` with no mask → arity error
 - `(squelch non-closure :yield)` → type error
 - `(squelch f :unknown-signal)` → error (signal not registered)
 

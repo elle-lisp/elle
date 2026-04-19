@@ -374,6 +374,7 @@ fn compile_file_inner(
     analyzer.bind_primitives(&meta);
     let mut hir = analyzer.analyze_file_letrec(forms, span)?;
     let prim_values = analyzer.primitive_values().clone();
+    let signal_projection = analyzer.take_signal_projection();
     let errors = analyzer.take_errors();
     drop(analyzer);
 
@@ -416,6 +417,7 @@ fn compile_file_inner(
     let mut emitter = Emitter::new_with_symbols(symbol_names);
     let (mut bytecode, _, _) = emitter.emit_module(&lir_module);
     bytecode.signal = signal;
+    bytecode.signal_projection = signal_projection;
 
     Ok((CompileResult { bytecode }, expander))
 }

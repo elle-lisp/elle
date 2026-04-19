@@ -108,6 +108,9 @@ mod flip_cli {
 mod mutability {
     include!("mutability.rs");
 }
+mod projection {
+    include!("projection.rs");
+}
 
 // Temporarily disabled while sorting out compilation caching.
 // mod fn_flow {

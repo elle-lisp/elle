@@ -174,6 +174,7 @@ impl<'a> Analyzer<'a> {
                         self.arity_env.insert(*binding, arity);
                         lambda_entries.push((bindings_idx, *binding, *value_syntax));
                     }
+                    self.apply_transient_binding_state(*binding);
 
                     bindings.push((*binding, value));
                     last_binding = Some(*binding);
@@ -302,6 +303,12 @@ impl<'a> Analyzer<'a> {
             self.errors = merged;
         }
 
+        // Compute signal projection from the last binding's init value.
+        // This must happen before pop_scope so signal_env is still populated.
+        let projection = bindings
+            .last()
+            .and_then(|(_, value)| self.compute_signal_projection(value));
+
         // Body: reference to the last binding (the file's return value).
         let body = match last_binding {
             Some(binding) => Hir::silent(HirKind::Var(binding), span.clone()),
@@ -309,6 +316,9 @@ impl<'a> Analyzer<'a> {
         };
 
         self.pop_scope();
+
+        // Stash the projection on the Analyzer for the pipeline to retrieve.
+        self.last_signal_projection = projection;
 
         Ok(Hir::new(
             HirKind::Letrec {
@@ -424,6 +434,106 @@ impl<'a> Analyzer<'a> {
                 .is_some_and(|s| s == "fn")
         } else {
             false
+        }
+    }
+
+    /// Compute a signal projection for a file's return expression.
+    ///
+    /// A signal projection maps keyword field names to the signals of the
+    /// closures they hold. This enables cross-file signal inference: when
+    /// an importing file accesses `module:field`, the analyzer uses the
+    /// projected signal instead of the conservative `Polymorphic` fallback.
+    ///
+    /// The return expression is the last binding's init value. We unwrap
+    /// through Lambda bodies and Begin blocks to find the struct literal.
+    pub(crate) fn compute_signal_projection(
+        &self,
+        hir: &crate::hir::expr::Hir,
+    ) -> Option<HashMap<String, Signal>> {
+        self.extract_struct_projection(hir)
+    }
+
+    /// Extract field→signal mapping from an expression, unwrapping through
+    /// Lambda, Begin, If, and Let/Letrec bodies.
+    fn extract_struct_projection(
+        &self,
+        hir: &crate::hir::expr::Hir,
+    ) -> Option<HashMap<String, Signal>> {
+        use crate::hir::expr::HirKind;
+        match &hir.kind {
+            // Struct literal: (struct :key1 val1 :key2 val2 ...)
+            HirKind::Call { func, args, .. } => {
+                if let HirKind::Var(binding) = &func.kind {
+                    let name = self.symbols.name(self.arena.get(*binding).name)?;
+                    if name != "struct" {
+                        return None;
+                    }
+                    // Parse alternating keyword-value pairs
+                    let mut projection = HashMap::new();
+                    let mut i = 0;
+                    while i + 1 < args.len() {
+                        if let HirKind::Keyword(key) = &args[i].expr.kind {
+                            let val = &args[i + 1].expr;
+                            let sig = self.hir_signal(val);
+                            projection.insert(key.clone(), sig);
+                        }
+                        i += 2;
+                    }
+                    if projection.is_empty() {
+                        None
+                    } else {
+                        Some(projection)
+                    }
+                } else {
+                    None
+                }
+            }
+            // Lambda: unwrap body
+            HirKind::Lambda { body, .. } => self.extract_struct_projection(body),
+            // Begin: unwrap last expression
+            HirKind::Begin(exprs) => exprs.last().and_then(|e| self.extract_struct_projection(e)),
+            // Let/Letrec: unwrap body
+            HirKind::Let { body, .. } | HirKind::Letrec { body, .. } => {
+                self.extract_struct_projection(body)
+            }
+            // If: union of both branches
+            HirKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
+                let a = self.extract_struct_projection(then_branch);
+                let b = self.extract_struct_projection(else_branch);
+                match (a, b) {
+                    (Some(mut a), Some(b)) => {
+                        for (k, sig) in b {
+                            let entry = a.entry(k).or_insert(Signal::silent());
+                            *entry = entry.combine(sig);
+                        }
+                        Some(a)
+                    }
+                    (Some(a), None) | (None, Some(a)) => Some(a),
+                    (None, None) => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the signal of an HIR value expression — either its inferred
+    /// signal (for lambdas) or its binding's signal from signal_env.
+    fn hir_signal(&self, hir: &crate::hir::expr::Hir) -> Signal {
+        use crate::hir::expr::HirKind;
+        match &hir.kind {
+            HirKind::Lambda {
+                inferred_signals, ..
+            } => *inferred_signals,
+            HirKind::Var(binding) => self
+                .signal_env
+                .get(binding)
+                .copied()
+                .unwrap_or(Signal::yields()),
+            _ => Signal::yields(),
         }
     }
 }

@@ -51,27 +51,58 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
   (map f xs))
 ```
 
-### `squelch` Primitive: Runtime Closure Transform
+### `squelch` Primitive: Closure Transform with Compile-Time Inference
 
-`squelch` is a **primitive function** that takes a closure and returns a new closure with runtime signal enforcement. It is NOT a preamble declaration.
+`squelch` is a **primitive function** that takes a closure and a signal
+specifier and returns a new closure with signal enforcement. It is NOT a
+preamble declaration.
 
-**Syntax:** `(squelch closure :keyword)`
+**Syntax:** `(squelch closure :keyword)` or `(squelch closure |:kw1 :kw2|)`
 
-**Semantics:**
+**Arity:** Exactly 2 — closure + keyword or set.
 
-- Takes a closure as the first argument and a signal keyword as the second
-- Returns a **new** closure that, when called, intercepts signals matching the keyword and converts them to `:error` with kind `"signal-violation"`
+**Runtime semantics:**
+
+- Returns a **new** closure that, when called, intercepts signals matching
+  the mask and converts them to `:error` with kind `"signal-violation"`
 - The returned closure shares the same bytecode and environment (Rc clones)
   — near-zero cost, just swaps the closure header
-- Accepts a keyword or a set: `(squelch f |:yield :io|)`
 - Composable: layering squelch calls ORs the masks together
-- The returned closure's `effective_signal()` reflects the squelch mask (squelched bits are cleared, `SIG_ERROR` is added only if the original closure could emit those bits)
+- The returned closure's `effective_signal()` reflects the squelch mask
+  (squelched bits are cleared, `SIG_ERROR` is added only if the original
+  closure could emit those bits)
+
+**Compile-time semantics:**
+
+When the analyzer sees `(squelch f :kw)` where both arguments are
+statically known, it computes the resulting signal at compile time using
+the same algebra as `Closure::effective_signal()`:
+
+1. Get `f`'s compile-time signal (from `signal_env` or `projection_env`)
+2. Resolve the mask from the keyword or set literal
+3. Compute: `result = f_signal.squelch(mask)`
+
+The computed signal is propagated to the binding:
+
+```text
+(defn producer [] (yield 1))      # signal: {:yield}
+(def safe (squelch producer :yield))
+# safe's compile-time signal: {:error}  (yield removed, error added)
+```
+
+This enables `(silence)` on functions that call squelched imports — the
+compiler can prove the function is silent without waiting for runtime.
 
 **Contrast with `silence`:**
 
-`silence` is a **compile-time total suppressor**: `(silence f)` means f must be completely silent — no signals at all. It is a preamble declaration inside lambda bodies.
+`silence` is a **compile-time total suppressor**: `(silence f)` means f
+must be completely silent — no signals at all. It is a preamble
+declaration inside lambda bodies.
 
-`squelch` is a **runtime blacklist** (open-world): `(squelch f :yield)` returns a new closure that forbids `:yield` at the call boundary. Everything else is allowed, including user-defined signals not listed. It is a primitive function that can appear anywhere an expression is valid.
+`squelch` is a **runtime blacklist** (open-world): `(squelch f :yield)`
+returns a new closure that forbids `:yield` at the call boundary.
+Everything else is allowed, including user-defined signals not listed.
+It is a primitive function that can appear anywhere an expression is valid.
 
 **Examples:**
 ```text
@@ -88,11 +119,13 @@ Declares signal bounds on a function or its parameters. Appears as a preamble de
 
 | Condition | Error |
 |-----------|-------|
-| `(squelch f)` with no keyword | arity error |
+| `(squelch f)` with no mask | arity error |
 | `(squelch non-closure :yield)` | type-error |
 | `(squelch f non-keyword)` | type-error |
 
-**Known limitation:** Squelch enforcement does not fire when the squelched closure is invoked in tail position (tracked as issue #588). The squelch boundary is at the call site in `call_inner`; tail calls bypass this check.
+**Known limitation:** Squelch enforcement does not fire when the squelched
+closure is invoked in tail position (tracked as issue #588). The squelch
+boundary is at the call site in `call_inner`; tail calls bypass this check.
 
 
 ## Compile-Time Verification
@@ -165,70 +198,111 @@ When a concrete function is passed to a parameter with a bound, the analyzer che
 # => error: argument violates signal bound
 ```
 
-## Cross-File Signal Inference: Design Constraint
+## Cross-File Signal Inference: Signal Projection
 
-Elle's signal inference operates within a single file via the **fixpoint loop** (see [pipeline.md](../pipeline.md)). This enables accurate inference for mutually recursive top-level definitions within a file. Mutual recursion across file boundaries is a different problem.
+Elle's signal inference operates within a single file via the **fixpoint
+loop** (see [pipeline.md](../pipeline.md)). Cross-file signal inference
+uses a different mechanism: **signal projection**.
 
-**Note for agents:** This per-file limitation is mitigated by the global [MCP knowledge graph](../mcp.md). While each file's signal inference is independent, the RDF store captures the entire codebase's structure, allowing agents to reason about cross-file impact via SPARQL queries. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for how to query cross-file dependencies and understand cascading changes.
+### Signal Projection
 
-### The Limitation
+When a file returns a struct of closures (the standard module convention),
+the compiler extracts a **signal projection** — a mapping from keyword
+field names to the signals of the closures they hold. This projection is
+cached by file path and reused by all importers.
 
-When module A imports module B:
-- The return value of `(import "b.lisp")` is unknown to the analyzer (it depends on runtime computation)
-- A call to a function from module B is treated as `Polymorphic` signal — the analyzer cannot see B's signal inference
-- Even if B's functions are actually silent, A will treat them as yielding
+**The load-bearing convention:** Signal projection only works when the
+file's return expression is a struct literal (or a lambda whose body is a
+struct literal). This is exactly the closure-as-module convention
+documented in [modules.md](../modules.md). If a file returns a dynamic
+or computed value, projection falls back to conservative (Polymorphic).
+
+| Return shape | Projectable? |
+|---|---|
+| `{:add add :double double}` (struct literal) | Yes |
+| `(fn [] {:add add :double double})` (closure-as-module) | Yes |
+| `(begin ... {:add add})` | Yes (last expression) |
+| `(if flag a b)` | Yes (union of branches) |
+| Dynamic / computed | No — Polymorphic (same as before) |
+
+**How it works:**
+
+1. `compile_file` analyzes the file and calls `compute_signal_projection`
+   on the last binding's value expression
+2. The projection is stored on `Bytecode.signal_projection` and cached
+   in a thread-local `PROJECTION_CACHE` by resolved file path
+3. When the importing file's analyzer sees `((import "std/math"))` — a
+   call wrapping a call to `import` with a literal string — it looks up
+   the target file's cached projection
+4. The projection is recorded on the binding in `projection_env`
+5. When the analyzer desugars `math:add` → `(get math :add)`, it looks
+   up `:add` in the binding's projection and uses the projected signal
 
 **Example:**
-```text
-# b.lisp
-(defn silent-add [x y]
-  (silence)
-  (+ x y))
 
-# Returns a struct of functions
-(fn [] {:add silent-add})
+```text
+# math.lisp — projection: {:add → {:error}, :double → {:error}}
+(defn add [x y] (+ x y))
+(defn double [x] (* x 2))
+(fn [] {:add add :double double})
 ```
 
 ```text
-# a.lisp
-(def b ((import "b.lisp")))
+# user.lisp — projection gives the compiler cross-file signal data
+(def math ((import "std/math")))
 
-(defn use-b [x y]
-  (silence)                 # error! This contradicts the call below
-  (b:add x y))              # => treated as Polymorphic, not Silent
-# => Compile error: function must be silent but calls polymorphic function
+# math:add has signal {:error}, not Polymorphic
+(defn compute [x]
+  (silence)           # compiler can prove this!
+  (+ (math:add x 10) (math:double x)))
 ```
 
-### Why: Preserving Dynamic Module Semantics
+### Composition with Compile-Time Squelch
 
-The module system intentionally allows:
-1. **Parameterized module creation** — `(import "module") :config :value`
-2. **Dynamic instantiation** — different instantiations have different state
-3. **Stateful modules** — modules with `var` and `assign` (independent per import)
-
-These features require treating imports as fully dynamic: the return value is unknown until runtime. To enable cross-file signal inference, Elle would need either:
-
-- **Whole-program analysis** — defeats the purpose of separate files
-- **Module type system** — adds significant complexity to declare module signatures
-- **Import result caching with signal annotation** — complicates state independence
-
-The tradeoff: Single-file fixpoint convergence is simple and gives accurate signal inference for mutually recursive definitions within a file. Across files, treat imports conservatively (Polymorphic).
-
-### Workaround: Explicit Bounds
-
-If you need a function from an imported module to be used in a silence-bounded context, use `squelch` to enforce the boundary at the call site:
+Signal projection and compile-time squelch compose: projection gives the
+compiler cross-file signal data, squelch gives it effect subtraction.
 
 ```text
-# a.lisp
+(def math ((import "std/math")))
+(def safe-add (squelch math:add :error))
+# Compile-time squelch:
+#   math:add signal = {:error} (from projection)
+#   squelch mask = {:error}
+#   result signal = {} (silent!)
+
+(defn compute [x]
+  (silence)           # compiler proves this!
+  (safe-add x 10))
+```
+
+### Mutual Recursion Across Files
+
+Fixpoint convergence for mutually recursive definitions operates within
+a single file. Mutual recursion across file boundaries does not benefit
+from cross-form convergence — each import is a separate compilation.
+This is a design choice: files are the unit of compilation, and the
+module system's dynamic semantics (parameterized modules, stateful
+modules) require treating each import as independent.
+
+### Fallback: Dynamic Modules
+
+When projection is not available (the file returns a computed value, or
+the import path is not a literal string), the analyzer falls back to
+treating imported values as Polymorphic. Use `squelch` at the call site
+to establish signal bounds:
+
+```text
 (def b ((import "b.lisp")))
 
 (defn use-b [x y]
   (silence)
-  # Dynamically enforce that b:add must not yield
   ((squelch b:add |:yield :io|) x y))
 ```
 
-This gives you runtime assurance without changing the module system's design.
+**Note for agents:** The [MCP knowledge graph](../mcp.md) provides
+additional cross-file visibility via SPARQL queries. See
+[Agent Reasoning in Elle](../analysis/agent-reasoning.md) for how to
+query cross-file dependencies.
 
 
 ## Runtime Verification
@@ -328,14 +402,17 @@ When a closure is passed to a function with a signal bound, the runtime checks t
   (silence f) # f must have no signals
   (map f xs))
 
-# Runtime squelch transform
+# Squelch: runtime enforcement + compile-time inference
 (defn safe-apply (f x)
   (let [safe-f (squelch f :yield)]  # returns a new closure
-    (safe-f x)))
+    (safe-f x)))                    # safe-f's signal: {:error}
 
-(defn safe-iterate (f xs)
-  (let [safe-f (squelch f :yield)]  # f must not yield; other signals allowed
-    (map safe-f xs)))
+# Squelch with imported module (projection + squelch compose)
+(def math ((import "std/math")))
+(def safe-add (squelch math:add :error))
+(defn compute [x]
+  (silence)           # compiler proves this via projection + squelch
+  (safe-add x 10))
 ```
 
 ---

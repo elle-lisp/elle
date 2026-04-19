@@ -1,10 +1,13 @@
-//! Compilation cache: thread-local VM, Expander, and PrimitiveMeta.
+//! Compilation cache: thread-local VM, Expander, PrimitiveMeta, and
+//! signal projection cache.
 
 use crate::primitives::def::PrimitiveMeta;
 use crate::primitives::register_primitives;
+use crate::signals::Signal;
 use crate::symbol::SymbolTable;
 use crate::syntax::Expander;
 use crate::vm::VM;
+use std::collections::HashMap;
 
 /// Cached compilation state for pipeline functions.
 ///
@@ -29,6 +32,12 @@ struct CompilationCache {
 thread_local! {
     static COMPILATION_CACHE: std::cell::RefCell<Option<CompilationCache>> =
         const { std::cell::RefCell::new(None) };
+
+    /// Signal projection cache: maps resolved file paths to their
+    /// keyword→signal projections. Populated lazily when the analyzer
+    /// encounters `(import "...")` with a literal string argument.
+    static PROJECTION_CACHE: std::cell::RefCell<HashMap<String, Option<HashMap<String, Signal>>>> =
+        std::cell::RefCell::new(HashMap::new());
 }
 
 /// Run a closure with access to the cached macro-expansion VM.
@@ -163,4 +172,33 @@ pub fn update_cache_with_stdlib(
             c.meta.functions.insert(*sym_id, *value);
         }
     });
+}
+
+/// Look up or compute the signal projection for a file.
+///
+/// If the file has already been compiled and its projection cached, returns
+/// the cached result. Otherwise, compiles the file (via `compile_file`),
+/// caches the projection from the resulting bytecode, and returns it.
+///
+/// Returns `None` if the file's return value is not a projectable struct.
+pub fn get_or_compile_projection(resolved_path: &str) -> Option<HashMap<String, Signal>> {
+    // Check cache first (outside the compilation cache borrow)
+    let cached = PROJECTION_CACHE.with(|pc| pc.borrow().get(resolved_path).cloned());
+    if let Some(proj) = cached {
+        return proj;
+    }
+
+    // Read the file and compile it
+    let source = std::fs::read_to_string(resolved_path).ok()?;
+    let mut symbols = SymbolTable::new();
+    let result = super::compile::compile_file(&source, &mut symbols, resolved_path).ok()?;
+    let projection = result.bytecode.signal_projection;
+
+    // Cache the result (even if None, to avoid re-compiling)
+    PROJECTION_CACHE.with(|pc| {
+        pc.borrow_mut()
+            .insert(resolved_path.to_string(), projection.clone());
+    });
+
+    projection
 }
