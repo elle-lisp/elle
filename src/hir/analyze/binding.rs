@@ -202,6 +202,8 @@ impl<'a> Analyzer<'a> {
         // Destructure leaf names are pre-bound so that other initializers
         // (e.g., recursive functions) can reference them.
         //
+        // Duplicate names are rejected at compile time.
+        //
         // The double-binding problem: analyze_destructure_pattern in pass 2
         // also calls self.bind() for the same names. To prevent creating
         // duplicate Binding objects, analyze_destructure_pattern checks
@@ -218,6 +220,7 @@ impl<'a> Analyzer<'a> {
             },
         }
         let mut entries = Vec::new();
+        let mut seen_names: HashMap<String, Span> = HashMap::new();
 
         if bindings_syntax.len() % 2 != 0 {
             return Err(format!(
@@ -235,6 +238,13 @@ impl<'a> Analyzer<'a> {
                 // Simple binding — bind immediately for mutual recursion.
                 // Marked prebound: may be captured before initialization.
                 let (name, is_mutable) = super::strip_at_prefix(raw_name);
+                if let Some(prev_span) = seen_names.get(name) {
+                    return Err(format!(
+                        "{}: duplicate binding '{}' (previously defined at {})",
+                        name_syn.span, name, prev_span
+                    ));
+                }
+                seen_names.insert(name.to_string(), name_syn.span.clone());
                 let b = self.bind(name, &[], BindingScope::Local);
                 self.arena.get_mut(b).is_prebound = true;
                 if self.immutable_by_default && !is_mutable {
@@ -248,6 +258,13 @@ impl<'a> Analyzer<'a> {
                 let mut leaf_bindings = HashMap::new();
                 for (name, _name_scopes) in &names {
                     if *name != "_" {
+                        if let Some(prev_span) = seen_names.get(*name) {
+                            return Err(format!(
+                                "{}: duplicate binding '{}' (previously defined at {})",
+                                name_syn.span, name, prev_span
+                            ));
+                        }
+                        seen_names.insert(name.to_string(), name_syn.span.clone());
                         let b = self.bind(name, &[], BindingScope::Local);
                         self.arena.get_mut(b).is_prebound = true;
                         // Immutability set later by analyze_destructure_pattern
