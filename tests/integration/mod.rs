@@ -31,6 +31,7 @@ mod signal_enforcement {
 mod signal_unsoundness {
     include!("signal_unsoundness.rs");
 }
+#[cfg(feature = "jit")]
 mod jit {
     include!("jit.rs");
 }

@@ -17,6 +17,7 @@ mod bytecode_debug {
 mod hir_debug {
     include!("hir_debug.rs");
 }
+#[cfg(feature = "jit")]
 mod jit {
     include!("jit.rs");
 }

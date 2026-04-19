@@ -18,6 +18,7 @@
 //!
 //! SIG_TERMINAL signals are uncatchable — they pass through mask checks.
 
+#[cfg(feature = "jit")]
 use crate::jit::JitValue;
 use crate::value::error_val;
 use crate::value::fiber::FiberStatus;
@@ -754,6 +755,7 @@ impl VM {
     // primitive returns SIG_RESUME/SIG_PROPAGATE/SIG_ABORT in JIT context.
 
     /// Handle SIG_RESUME from a fiber primitive in JIT context.
+    #[cfg(feature = "jit")]
     ///
     /// Runs the child fiber synchronously and returns the result as `JitValue`.
     /// On error: sets fiber.signal, returns `JitValue::nil()`.
@@ -823,6 +825,7 @@ impl VM {
     }
 
     /// Handle SIG_PROPAGATE from fiber/propagate in JIT context.
+    #[cfg(feature = "jit")]
     pub(crate) fn handle_fiber_propagate_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
 
@@ -862,6 +865,7 @@ impl VM {
     }
 
     /// Handle SIG_ABORT from fiber/abort in JIT context.
+    #[cfg(feature = "jit")]
     pub(crate) fn handle_fiber_abort_signal_jit(&mut self, fiber_value: Value) -> JitValue {
         use crate::jit::YIELD_SENTINEL;
 

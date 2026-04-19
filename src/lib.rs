@@ -47,6 +47,7 @@ pub mod ffi;
 pub mod formatter;
 pub mod hir;
 pub mod io;
+#[cfg(feature = "jit")]
 pub mod jit;
 pub mod lint;
 pub mod lir;

@@ -593,6 +593,7 @@ impl VM {
                     }
                 }
             }
+            #[cfg(feature = "jit")]
             "jit/rejections" => {
                 use crate::value::heap::TableKey;
                 use std::collections::BTreeMap;
@@ -623,6 +624,9 @@ impl VM {
                     .collect();
                 (SIG_OK, crate::value::list(structs))
             }
+            #[cfg(not(feature = "jit"))]
+            "jit/rejections" => (SIG_OK, crate::value::list(vec![])),
+            #[cfg(feature = "jit")]
             "jit?" => {
                 if let Some(closure) = arg.as_closure() {
                     let ptr = closure.template.bytecode.as_ptr();
@@ -631,6 +635,8 @@ impl VM {
                     (SIG_OK, Value::FALSE)
                 }
             }
+            #[cfg(not(feature = "jit"))]
+            "jit?" => (SIG_OK, Value::FALSE),
             "vm/config" => self.dispatch_vm_config_read(arg),
             #[cfg(feature = "mlir")]
             "mlir/compile-spirv" => {

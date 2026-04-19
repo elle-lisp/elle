@@ -136,6 +136,7 @@ fn eval_with_cache(
 
         // Reset per-case state
         c.vm.reset_fiber();
+        #[cfg(feature = "jit")]
         c.vm.jit_cache.clear();
 
         // Set context pointers (may have been cleared after previous eval)
