@@ -35,7 +35,7 @@ impl WatchEventKind {
 
 // ─── Linux: inotify ────────────────────────────────────────────────────
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod platform {
     use super::{WatchEvent, WatchEventKind};
     use std::cell::RefCell;
@@ -448,4 +448,5 @@ mod platform {
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
 pub(crate) use platform::FsWatcher;

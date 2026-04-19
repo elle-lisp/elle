@@ -150,6 +150,30 @@ jobs:
       - name: Run smoke tests
         run: make smoke
 
+  android:
+    name: Android Cross-Check
+    needs: changes
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+      - name: Cross-check Android target
+        run: cargo check --target aarch64-linux-android --no-default-features -p elle
+      - name: Install GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: Build host binary (no JIT)
+        run: cargo build --release --no-default-features -p elle
+      - name: Run smoke tests (VM only)
+        run: make smoke-vm
+
   macos:
     name: macOS Build & Smoke
     needs: changes
@@ -170,7 +194,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, tests-combined, tests, mlir, aarch64, macos]
+    needs: [changes, qa, tests-combined, tests, mlir, aarch64, android, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -188,6 +212,9 @@ jobs:
         run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'
+        run: exit 1
+      - name: Check Android
+        if: needs.android.result == 'failure'
         run: exit 1
       - name: Check macOS
         if: needs.macos.result == 'failure'
