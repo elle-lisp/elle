@@ -135,7 +135,7 @@ mod platform {
                 .remove(&path)
                 .ok_or_else(|| format!("watch-remove: not watched: \"{}\"", path.display()))?;
             inner.wd_to_path.remove(&wd);
-            unsafe { libc::inotify_rm_watch(inner.fd, wd) };
+            unsafe { libc::inotify_rm_watch(inner.fd, wd as _) };
             Ok(())
         }
 

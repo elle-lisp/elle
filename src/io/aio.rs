@@ -221,11 +221,11 @@ impl AsyncBackend {
                     })
                     .collect();
 
-                for op_id in ids_to_cancel {
+                for _op_id in ids_to_cancel {
                     match inner.platform {
                         #[cfg(target_os = "linux")]
                         PlatformBackend::Uring(ref mut ring) => {
-                            let _ = crate::io::uring::submit_uring_cancel(ring, op_id);
+                            let _ = crate::io::uring::submit_uring_cancel(ring, _op_id);
                         }
                         PlatformBackend::ThreadPool(_) => {
                             // Thread pool: shutdown the fd to unblock any thread
@@ -607,6 +607,7 @@ impl AsyncBackend {
 
     /// Submit a Connect operation. Connect creates a new port, so
     /// request.port is Value::NIL — we handle it separately.
+    #[allow(unused_variables)]
     fn submit_connect(&self, addr: &ConnectAddr, timeout: Option<Duration>) -> Result<u64, String> {
         let mut inner = self.inner.borrow_mut();
         let id = inner.next_id;
@@ -782,6 +783,7 @@ impl AsyncBackend {
     }
 
     /// Submit a watch-next operation. Reads from the inotify fd.
+    #[allow(unused_variables)]
     fn submit_watch_next(&self, watcher_val: &Value) -> Result<u64, String> {
         use crate::io::watch::FsWatcher;
 
@@ -825,6 +827,7 @@ impl AsyncBackend {
 
     /// Submit a file open operation. Open creates a new port, so
     /// request.port is Value::NIL — we handle it before the port guard.
+    #[allow(unused_variables)]
     fn submit_open(
         &self,
         path: &str,
@@ -905,6 +908,7 @@ impl AsyncBackend {
         Ok(id)
     }
 
+    #[allow(unused_variables)]
     fn submit_task(&self, task_fn: &TaskFn) -> Result<u64, String> {
         let closure = task_fn
             .take()
