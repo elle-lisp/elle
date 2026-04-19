@@ -2,8 +2,9 @@
 
 Elle ships with an [MCP](https://modelcontextprotocol.io) (Model Context
 Protocol) server that gives AI coding assistants deep, structured access
-to an Elle codebase. The server is itself written in Elle
-([`tools/mcp-server.lisp`](../tools/mcp-server.lisp)) and communicates via JSON-RPC 2.0 on stdio.
+to an Elle codebase. The server is written in Elle and maintained in a
+[separate repository](https://github.com/elle-lisp/mcp), included as a
+git submodule under `mcp/`. It communicates via JSON-RPC 2.0 on stdio.
 
 **See also:** [Agent Reasoning in Elle](analysis/agent-reasoning.md) for how to use MCP + portrait together. [Portrait](analysis/portrait.md) for local file analysis. [Analysis directory](analysis/) for an overview of code understanding tools.
 

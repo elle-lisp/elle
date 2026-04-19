@@ -12,6 +12,7 @@ pattern and are imported via `(import "std/<name>")`.
 | dns | `(import "std/dns")` | Pure Elle DNS client (RFC 1035) |
 | aws | `(import "std/aws")` | Elle-native AWS client (S3, etc.) |
 | redis | `(import "std/redis")` | Pure Elle Redis client (RESP2) |
+| irc | `(import "std/irc")` | Coroutine-based IRCv3 client with SASL |
 | mqtt | `(import "std/mqtt")` | MQTT client (wraps mqtt plugin) |
 | zmq | `(import "std/zmq")` | ZeroMQ bindings via FFI |
 
@@ -35,6 +36,17 @@ pattern and are imported via `(import "std/<name>")`.
 | Module | Import | Description |
 |--------|--------|-------------|
 | telemetry | `(import "std/telemetry")` | OpenTelemetry metrics (OTLP/HTTP JSON export) |
+| resource | `(import "std/resource")` | Deterministic resource consumption measurement |
+
+## GPU and Graphics
+
+| Module | Import | Description |
+|--------|--------|-------------|
+| gpu | `(import "std/gpu")` | GPU compute via MLIR → SPIR-V → Vulkan (`gpu:map`) |
+| spirv | `(import "std/spirv")` | Hand-written SPIR-V compute shader DSL |
+| gtk4 | `(import "std/gtk4")` | GTK4 bindings via FFI (30 widget types, WebKit) |
+| sdl3 | `(import "std/sdl3")` | SDL3 bindings via FFI (events, textures, audio, TTF) |
+| wayland | `(import "std/wayland")` | Wayland compositor bindings via FFI |
 
 ## Utilities
 
@@ -42,8 +54,10 @@ pattern and are imported via `(import "std/<name>")`.
 |--------|--------|-------------|
 | hash | `(import "std/hash")` | Streaming hash convenience functions |
 | watch | `(import "std/watch")` | Event-driven filesystem watcher (inotify/kqueue) |
+| color | `(import "std/color")` | Color spaces, mixing, gradients, perceptual distance |
 | egui | `(import "std/egui")` | Immediate-mode GUI (wraps egui plugin) |
 | lua | `(import "std/lua")` | Lua compatibility prelude |
+| svg | `(import "std/svg")` | SVG construction and emission (pure Elle) |
 
 ### Utilities (pure Elle / FFI)
 
