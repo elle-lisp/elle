@@ -11,7 +11,8 @@ enum PreBound<'s> {
         value_syntax: &'s Syntax,
         /// Name and scopes for deferred bindings (duplicate names).
         /// When set, Pass 2 registers this binding in the scope
-        /// before analyzing the value, achieving sequential shadowing.
+        /// AFTER analyzing the value, so the RHS sees the previous
+        /// binding rather than the new uninitialized one.
         deferred: Option<(String, Vec<ScopeId>)>,
     },
     Destructure {
@@ -23,7 +24,8 @@ enum PreBound<'s> {
         /// ensure binding identity matches.
         leaf_bindings: HashMap<String, Binding>,
         /// Leaf bindings that were deferred (duplicate names).
-        /// Maps name → (scopes, binding) for registration in Pass 2.
+        /// Maps name → (scopes, binding) for registration in Pass 2
+        /// AFTER analyzing the value.
         deferred_leaves: Vec<(String, Vec<ScopeId>, Binding)>,
     },
 }
@@ -36,6 +38,9 @@ impl<'a> Analyzer<'a> {
     /// - Pass 1: pre-bind all names (enables mutual recursion)
     /// - Pass 2: analyze initializers sequentially
     /// - Pass 3: fixpoint loop for signal propagation through mutual recursion
+    ///
+    /// Duplicate names use sequential shadowing: the RHS of a redefinition
+    /// sees the previous binding, and subsequent forms see the new one.
     ///
     /// Returns a single `HirKind::Letrec` node. The body is a reference
     /// to the last binding (the file's return value).
@@ -150,10 +155,13 @@ impl<'a> Analyzer<'a> {
                     value_syntax,
                     deferred,
                 } => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    // Register deferred (duplicate-name) bindings AFTER analyzing
+                    // the RHS so the RHS sees the previous binding, not the new
+                    // uninitialized one.
                     if let Some((name, scopes)) = deferred {
                         self.register_binding(name, scopes, *binding);
                     }
-                    let value = self.analyze_expr(value_syntax)?;
                     signal = signal.combine(value.signal);
 
                     let bindings_idx = bindings.len();
@@ -186,10 +194,12 @@ impl<'a> Analyzer<'a> {
                     leaf_bindings,
                     deferred_leaves,
                 } => {
+                    let value = self.analyze_expr(value_syntax)?;
+                    // Register deferred leaves AFTER analyzing the RHS (same
+                    // reasoning as the Simple case above).
                     for (name, scopes, binding) in deferred_leaves {
                         self.register_binding(name, scopes, *binding);
                     }
-                    let value = self.analyze_expr(value_syntax)?;
                     signal = signal.combine(value.signal);
 
                     self.pre_bindings.clone_from(leaf_bindings);
@@ -346,7 +356,8 @@ impl<'a> Analyzer<'a> {
         let is_duplicate = !seen_names.insert(name.to_string());
         let (binding, deferred) = if is_duplicate {
             // Duplicate name: create binding but don't register in scope yet.
-            // Pass 2 will register it via register_binding for sequential shadowing.
+            // Pass 2 will register it via register_binding AFTER analyzing
+            // the RHS, so the RHS sees the previous binding.
             let sym = self.symbols.intern(name);
             let b = self.arena.alloc(sym, BindingScope::Local);
             (b, Some((name.to_string(), name_syntax.scopes.clone())))
