@@ -36,6 +36,7 @@
 //! `Box` provides pointer stability — the raw pointer remains valid even when
 //! `owned_shared` grows. Teardown happens on `clear()` or `Drop`.
 
+#[cfg(feature = "ffi")]
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -1085,10 +1086,13 @@ impl FiberHeap {
                 obj: obj.clone(),
                 traits: *traits,
             }),
-            HeapObject::FFISignature(sig, cif) => outbox.alloc(HeapObject::FFISignature(
-                sig.clone(),
-                RefCell::new(cif.borrow().clone()),
-            )),
+            HeapObject::FFISignature(sig, cif) => {
+                #[cfg(feature = "ffi")]
+                let new_cif = RefCell::new(cif.borrow().clone());
+                #[cfg(not(feature = "ffi"))]
+                let new_cif = *cif;
+                outbox.alloc(HeapObject::FFISignature(sig.clone(), new_cif))
+            }
             HeapObject::FFIType(t) => outbox.alloc(HeapObject::FFIType(t.clone())),
             HeapObject::ThreadHandle { handle, traits } => outbox.alloc(HeapObject::ThreadHandle {
                 handle: handle.clone(),

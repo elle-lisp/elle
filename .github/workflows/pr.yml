@@ -149,10 +149,26 @@ jobs:
         run: cargo build --release -p elle
       - name: Run smoke tests
         run: make smoke
-      - name: Build release binary (no JIT)
+
+  aarch64-noffi:
+    name: AArch64 No-FFI Smoke
+    needs: changes
+    runs-on: ubuntu-24.04-arm
+    if: needs.changes.outputs.source == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: aarch64-noffi
+      - name: Install GNU parallel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y parallel
+      - name: Build release binary (no JIT, no FFI)
         run: cargo build --release --no-default-features -p elle
-      - name: Run smoke tests (VM only, no JIT)
-        run: make smoke-vm
+      - name: Run smoke tests (VM only, no JIT, no FFI)
+        run: make smoke-noffi
 
   android:
     name: Android Cross-Check
@@ -196,7 +212,7 @@ jobs:
 
   all-checks:
     name: All Checks Passed
-    needs: [changes, qa, tests-combined, tests, mlir, aarch64, android, macos]
+    needs: [changes, qa, tests-combined, tests, mlir, aarch64, aarch64-noffi, android, macos]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -214,6 +230,9 @@ jobs:
         run: exit 1
       - name: Check aarch64
         if: needs.aarch64.result == 'failure'
+        run: exit 1
+      - name: Check aarch64-noffi
+        if: needs.aarch64-noffi.result == 'failure'
         run: exit 1
       - name: Check Android
         if: needs.android.result == 'failure'

@@ -90,6 +90,7 @@ mod tests {
     use crate::value::fiber::{SIG_ERROR, SIG_OK};
     use crate::value::Value;
 
+    #[cfg(feature = "ffi")]
     use super::super::calling::prim_ffi_call;
     use super::super::loading::{prim_ffi_native, prim_ffi_signature};
     use super::super::memory::{
@@ -202,6 +203,7 @@ mod tests {
         assert_eq!(result.0, SIG_ERROR);
     }
 
+    #[cfg(feature = "ffi")]
     #[test]
     fn test_ffi_call_arity_error() {
         let result = prim_ffi_call(&[]);
@@ -230,6 +232,7 @@ mod tests {
         assert_eq!(sig.fixed_args, Some(2));
     }
 
+    #[cfg(feature = "ffi")]
     #[test]
     fn test_ffi_signature_cif_caching() {
         let result = prim_ffi_signature(&[

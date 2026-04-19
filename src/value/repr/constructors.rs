@@ -311,9 +311,12 @@ impl Value {
     /// Create an FFI signature value.
     #[inline]
     pub fn ffi_signature(sig: crate::ffi::types::Signature) -> Self {
-        use crate::value::heap::{alloc, HeapObject};
-        use std::cell::RefCell;
-        alloc(HeapObject::FFISignature(sig, RefCell::new(None)))
+        use crate::value::heap::{alloc, CifCache, HeapObject};
+        #[cfg(feature = "ffi")]
+        let cache: CifCache = std::cell::RefCell::new(None);
+        #[cfg(not(feature = "ffi"))]
+        let cache: CifCache = ();
+        alloc(HeapObject::FFISignature(sig, cache))
     }
 
     /// Create an FFI compound type descriptor value.

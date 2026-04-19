@@ -3,6 +3,28 @@
 ## FFI integration tests
 ## Tests the full pipeline: Elle source → compiler → VM → libffi → C
 
+## ── ffi/with-stack ────────────────────────────────────────────────────
+
+(ffi/with-stack [[p :int 42]]
+  (assert (= (ffi/read p :int) 42) "ffi/with-stack typed scalar"))
+
+(ffi/with-stack [[buf 16]]
+  (ffi/write buf :int 99)
+  (assert (= (ffi/read buf :int) 99) "ffi/with-stack raw buffer"))
+
+(ffi/with-stack [[a :int 10] [b :int 20]]
+  (assert (= (+ (ffi/read a :int) (ffi/read b :int)) 30) "ffi/with-stack multiple"))
+
+## ── ffi/pin ───────────────────────────────────────────────────────────
+
+(let* [ptr (ffi/pin (bytes 72 101 108))]
+  (assert (= (ffi/read ptr :u8) 72) "ffi/pin first byte")
+  (ffi/free ptr))
+
+(let* [ptr (ffi/pin "Hi")]
+  (assert (= (ffi/read ptr :u8) 72) "ffi/pin string")
+  (ffi/free ptr))
+
 ## ── Type introspection ──────────────────────────────────────────────
 
 (assert (= (ffi/size :i32) 4) "ffi/size :i32")

@@ -2,17 +2,22 @@ use crate::symbol::SymbolTable;
 use crate::value::Value;
 use crate::vm::VM;
 
+#[cfg(feature = "ffi")]
+use super::calling;
 use super::def::{Doc, PrimitiveDef, PrimitiveMeta};
 use super::{
-    allocator, arena, arithmetic, array, bitwise, bytes, calling, chan, comparison, compile,
-    concurrency, config, convert, coroutines, debug, disassembly, display, fiber_introspect,
-    fibers, fileio, format, introspection, io, json, list, loading, logic, lstruct, math, memory,
-    meta, modules, net, package, parameters, path, ports, r#box, read, sets, sort, stream, string,
-    structs, subprocess, time, traits, types, unix, watch,
+    allocator, arena, arithmetic, array, bitwise, bytes, chan, comparison, compile, concurrency,
+    config, convert, coroutines, debug, disassembly, display, fiber_introspect, fibers, fileio,
+    format, introspection, io, json, list, loading, logic, lstruct, math, memory, meta, modules,
+    net, package, parameters, path, ports, r#box, read, sets, sort, stream, string, structs,
+    subprocess, time, traits, types, unix, watch,
 };
 
 /// All primitive tables. Each module exports a `const PRIMITIVES`
 /// array; this list is the single place that enumerates them.
+///
+/// Tables gated behind `ffi` are appended via `ffi_tables()` below
+/// because `const` arrays cannot contain conditional entries.
 pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     allocator::PRIMITIVES,
     arena::PRIMITIVES,
@@ -20,7 +25,6 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     array::PRIMITIVES,
     bitwise::PRIMITIVES,
     bytes::PRIMITIVES,
-    calling::PRIMITIVES,
     r#box::PRIMITIVES,
     chan::PRIMITIVES,
     compile::PRIMITIVES,
@@ -66,11 +70,22 @@ pub(crate) const ALL_TABLES: &[&[PrimitiveDef]] = &[
     watch::PRIMITIVES,
 ];
 
+/// Primitive tables that require the `ffi` feature (libffi).
+#[cfg(feature = "ffi")]
+fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
+    &[calling::PRIMITIVES, loading::CALLBACK_PRIMITIVES]
+}
+
+#[cfg(not(feature = "ffi"))]
+fn ffi_tables() -> &'static [&'static [PrimitiveDef]] {
+    &[]
+}
+
 /// Register all primitive functions with the VM and build metadata.
 pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
 
-    for table in ALL_TABLES {
+    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
             let sym_id = symbols.intern(def.name);
             let native_val = Value::native_fn(def);
@@ -114,7 +129,7 @@ pub fn register_primitives(vm: &mut VM, symbols: &mut SymbolTable) -> PrimitiveM
 pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
     let mut meta = PrimitiveMeta::new();
 
-    for table in ALL_TABLES {
+    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
             let sym_id = symbols.intern(def.name);
             meta.signals.insert(sym_id, def.signal);
@@ -140,7 +155,7 @@ pub fn build_primitive_meta(symbols: &mut SymbolTable) -> PrimitiveMeta {
 /// with a SymbolTable that hasn't had `register_primitives` called on it.
 /// Idempotent — safe to call multiple times.
 pub fn intern_primitive_names(symbols: &mut SymbolTable) {
-    for table in ALL_TABLES {
+    for table in ALL_TABLES.iter().chain(ffi_tables().iter()) {
         for def in *table {
             symbols.intern(def.name);
             for alias in def.aliases {

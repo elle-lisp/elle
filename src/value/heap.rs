@@ -18,6 +18,16 @@ use crate::value::Value;
 pub use crate::value::closure::Closure;
 pub use crate::value::types::{Arity, NativeFn, PrimFn, TableKey};
 
+/// CIF cache type for FFI signatures.
+///
+/// When the `ffi` feature is enabled, this holds a lazily-prepared libffi CIF.
+/// When disabled, it is a zero-cost unit type — FFI signatures can still be
+/// created and stored, but `ffi/call` (which needs the CIF) is unavailable.
+#[cfg(feature = "ffi")]
+pub type CifCache = RefCell<Option<libffi::middle::Cif>>;
+#[cfg(not(feature = "ffi"))]
+pub type CifCache = ();
+
 /// Cons cell for list construction.
 pub struct Cons {
     pub first: Value,
@@ -235,10 +245,8 @@ pub enum HeapObject {
 
     /// Reified FFI function signature with optional cached CIF.
     /// The CIF is lazily prepared on first use and reused thereafter.
-    FFISignature(
-        crate::ffi::types::Signature,
-        RefCell<Option<libffi::middle::Cif>>,
-    ),
+    /// When the `ffi` feature is disabled, the CIF cache is a unit type.
+    FFISignature(crate::ffi::types::Signature, CifCache),
 
     /// Reified FFI compound type descriptor (struct or array layout)
     FFIType(crate::ffi::types::TypeDesc),

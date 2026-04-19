@@ -211,6 +211,7 @@ pub(crate) fn prim_ffi_signature(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::ffi_signature(sig))
 }
 
+#[cfg(feature = "ffi")]
 pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 2 {
         return (
@@ -295,6 +296,7 @@ pub(crate) fn prim_ffi_callback(args: &[Value]) -> (SignalBits, Value) {
     (SIG_OK, Value::pointer(code_ptr))
 }
 
+#[cfg(feature = "ffi")]
 pub(crate) fn prim_ffi_callback_free(args: &[Value]) -> (SignalBits, Value) {
     if args.len() != 1 {
         return (
@@ -379,6 +381,11 @@ pub(crate) const PRIMITIVES: &[PrimitiveDef] = &[
         example: "(ffi/signature :int [:ptr :size :ptr :int] 3)",
         aliases: &[],
     },
+];
+
+/// Callback primitives (require libffi).
+#[cfg(feature = "ffi")]
+pub(crate) const CALLBACK_PRIMITIVES: &[PrimitiveDef] = &[
     PrimitiveDef {
         name: "ffi/callback",
         func: prim_ffi_callback,
