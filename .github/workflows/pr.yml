@@ -166,8 +166,8 @@ jobs:
       - name: Configure NDK toolchain
         run: |
           NDK=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* 2>/dev/null | sort -V | tail -1)
-          HOST_TAG=$(uname -m)-linux
-          echo "$NDK/toolchains/llvm/prebuilt/linux-$HOST_TAG/bin" >> "$GITHUB_PATH"
+          PREBUILT=$(ls -d "$NDK/toolchains/llvm/prebuilt/"* | head -1)
+          echo "$PREBUILT/bin" >> "$GITHUB_PATH"
           echo "CC_aarch64_linux_android=aarch64-linux-android24-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=llvm-ar" >> "$GITHUB_ENV"
       - name: Cross-check Android target
