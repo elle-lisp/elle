@@ -161,11 +161,17 @@
   ## plain TCP ports and TLS connections.
 
   (defn tcp-transport [port]
-    "Wrap a plain TCP (or file) port as a transport."
+    "Wrap a plain TCP (or file) port as a transport.
+     Writes are buffered in user space; flush sends a single port/write
+     to avoid per-line scheduler yields on the io_uring path."
+    (def @wbuf @"")
     {:read      (fn [n] (port/read port n))
      :read-line (fn [] (port/read-line port))
-     :write     (fn [data] (port/write port data))
-     :flush     (fn [] (port/flush port))
+     :write     (fn [data] (push wbuf (if (string? data) data (string data))))
+     :flush     (fn []
+                  (when (> (string/size-of wbuf) 0)
+                    (port/write port (string wbuf))
+                    (assign wbuf @"")))
      :close     (fn [] (port/close port))})
 
   (defn strip-line-terminator [s]

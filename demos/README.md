@@ -18,6 +18,7 @@ Demonstration programs that dogfood Elle with non-trivial algorithms and serve a
 | [microgpt/](microgpt/) | Micro GPT — scalar autograd + character-level transformer |
 | [nqueens/](nqueens/) | N-Queens backtracking algorithm (cons-list and array variants) |
 | [scope-alloc/](scope-alloc/) | Scope allocation workload measuring escape analysis tiers |
+| [webserver/](webserver/) | HTTP server + concurrent load generator with latency stats |
 
 ## Running Demos
 
@@ -32,6 +33,10 @@ elle demos/scope-alloc/scope-alloc.lisp
 elle demos/logo/logo.lisp
 elle demos/docgen/generate.lisp
 elle demos/egui/smoke.lisp
+
+# Networking (requires two terminals)
+elle demos/webserver/server.lisp          # terminal 1
+elle demos/webserver/loadgen.lisp         # terminal 2
 
 # Interactive (require display + libraries)
 elle demos/conway/conway.lisp         # SDL2
