@@ -634,8 +634,8 @@ impl StdinThread {
     }
 }
 
-/// Blocking read on an inotify fd (Linux).
-#[cfg(target_os = "linux")]
+/// Blocking read on an inotify fd (Linux/Android).
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn watch_read_blocking(fd: RawFd) -> (i32, Vec<u8>) {
     let mut buf = vec![0u8; 4096];
     let ret = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
