@@ -163,10 +163,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: android
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27d
       - name: Configure NDK toolchain
         run: |
-          NDK=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* 2>/dev/null | sort -V | tail -1)
-          PREBUILT=$(ls -d "$NDK/toolchains/llvm/prebuilt/"* | head -1)
+          PREBUILT=$(ls -d "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/"* | head -1)
           echo "$PREBUILT/bin" >> "$GITHUB_PATH"
           echo "CC_aarch64_linux_android=aarch64-linux-android24-clang" >> "$GITHUB_ENV"
           echo "AR_aarch64_linux_android=llvm-ar" >> "$GITHUB_ENV"
