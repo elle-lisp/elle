@@ -228,6 +228,7 @@ mod tests {
         use crate::value::ClosureTemplate;
         use std::collections::HashMap;
         use std::rc::Rc;
+        use std::sync::Arc;
 
         let bytecode = Rc::new(bytecode);
         let constants = Rc::new(constants);
@@ -270,7 +271,7 @@ mod tests {
         let bytecode_ptr = template.bytecode.as_ptr();
         let closure_val = Value::closure(closure);
 
-        let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
+        let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
         vm.jit_cache.insert(bytecode_ptr, jit_code);
 
         (vm, closure_val)
@@ -291,6 +292,7 @@ mod tests {
         use crate::value::ClosureTemplate;
         use std::collections::HashMap;
         use std::rc::Rc;
+        use std::sync::Arc;
 
         let bytecode = Rc::new(bytecode);
         let constants = Rc::new(constants);
@@ -333,7 +335,7 @@ mod tests {
         let bytecode_ptr = template.bytecode.as_ptr();
         let closure_val = Value::closure(closure);
 
-        let jit_code = Rc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
+        let jit_code = Arc::new(crate::jit::JitCode::test_with_yield_points(yield_points));
         vm.jit_cache.insert(bytecode_ptr, jit_code);
 
         (vm, closure_val)

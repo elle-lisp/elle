@@ -2119,8 +2119,10 @@ fn test_jit_letrec_mutual_recursion_simple() {
     // Minimal mutual recursion via letrec expression.
     // f calls g (non-tail), g calls f (non-tail). Both are silent.
     //
-    // Depth 100: non-tail mutual recursion uses native stack frames.
-    // Same limit as test_jit_mutual_recursion_deep.
+    // Depth 20: non-tail mutual recursion uses native stack frames.
+    // With background JIT, the interpreter runs during the compilation
+    // window, so depth must be safe for interpreted execution in debug
+    // builds (each non-tail call adds a Rust stack frame).
     use elle::pipeline::eval;
     use elle::primitives::register_primitives;
     use elle::symbol::SymbolTable;
@@ -2133,13 +2135,13 @@ fn test_jit_letrec_mutual_recursion_simple() {
     let result = eval(
         r#"(letrec
             [f (fn (n) (if (<= n 0) 0 (+ 1 (g (- n 1))))) g (fn (n) (if (<= n 0) 0 (+ 1 (f (- n 1)))))]
-            (f 100))"#,
+            (f 20))"#,
         &mut symbols,
         &mut vm,
         "<test>",
     );
     assert!(result.is_ok(), "mutual recursion failed: {:?}", result);
-    assert_eq!(result.unwrap().as_int(), Some(100));
+    assert_eq!(result.unwrap().as_int(), Some(20));
 }
 
 #[test]

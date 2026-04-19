@@ -43,6 +43,7 @@ mod suspend;
 mod translate;
 mod value;
 mod vtable;
+pub(crate) mod worker;
 
 pub use code::JitCode;
 pub use compiler::{BatchMember, JitCompiler};

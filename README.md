@@ -616,8 +616,10 @@ annotations needed.
 
 The default backend emits bytecode from LIR and runs it on a stack-based
 VM. Hot functions are automatically compiled to native code via Cranelift
-at runtime — no annotations, no opt-in. The compiler's signal system
-identifies eligible functions; the JIT fires transparently.
+on a background thread — no annotations, no opt-in, no event-loop stall.
+The compiler's signal system identifies eligible functions; the JIT fires
+transparently. The interpreter continues running hot functions while
+Cranelift compiles them; compiled code is picked up on the next call.
 
 ### MLIR-CPU (tier-2, optional)
 

@@ -15,6 +15,25 @@ builds a `SuspendedFrame` and returns `YIELD_SENTINEL` to the interpreter.
 LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 ```
 
+### Background compilation
+
+JIT compilation runs on a dedicated background thread (`elle-jit`).
+When a function becomes hot (called `jit_hotness_threshold` times,
+default 10), its LIR is cloned, stripped of non-Send fields (`syntax`,
+`doc`), and sent to the worker via `crossbeam_channel`. The interpreter
+continues running the function while Cranelift compiles it.
+
+The worker thread has a persistent `FiberHeap` (installed once, never
+freed) so `translate_const` can allocate String/Keyword/Symbol Values
+for constants embedded in native code.
+
+On every call to `try_jit_call`, the VM polls for completed
+compilations via non-blocking `try_recv()`. Compiled code is inserted
+into `jit_cache`; rejections are recorded in `jit_rejections`.
+
+Diagnostics (`jit/rejections`, `--stats`) call `drain_jit_pending()`
+to block until all pending compilations finish before reporting.
+
 ## Interface
 
 | Type | Purpose |
@@ -26,6 +45,9 @@ LirFunction -> JitCompiler -> Cranelift IR -> Native code -> JitCode
 | `YieldPointMeta` | Metadata for a yield point: resume IP and spilled register count |
 | `YIELD_SENTINEL` | Sentinel value indicating JIT function yielded (side-exited) |
 | `discover_compilation_group` | Discover call peers for batch JIT compilation |
+| `JitWorker` | Background compilation thread with persistent `FiberHeap` |
+| `JitTask` | Compilation request (cloned LIR + cache key) |
+| `JitResult` | Compilation result (JitCode or JitError) |
 
 ## Calling Convention
 
@@ -103,6 +125,7 @@ Supported in yielding functions (via side-exit):
 | `fastpath.rs` | ~250 | Inline integer fast paths for arithmetic/comparison |
 | `group.rs` | ~590 | Compilation group discovery for batch JIT (no Cranelift dependency) |
 | `helpers.rs` | ~368 | Helper methods on `FunctionTranslator` (call emission, exception checks) |
+| `worker.rs` | ~130 | Background JIT worker thread: `JitWorker`, `JitTask`, `JitResult` |
 
 ## Runtime Helpers
 

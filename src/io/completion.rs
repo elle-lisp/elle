@@ -9,7 +9,22 @@ use crate::port::{Encoding, Port, PortKind};
 use crate::value::heap::TableKey;
 use crate::value::{error_val, Value};
 use std::collections::HashMap;
+use std::os::unix::io::AsRawFd;
 use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
+
+/// Set TCP_NODELAY on a TCP stream fd to disable Nagle's algorithm.
+fn set_tcp_nodelay(fd: &OwnedFd) {
+    unsafe {
+        let opt: libc::c_int = 1;
+        libc::setsockopt(
+            fd.as_raw_fd(),
+            libc::IPPROTO_TCP,
+            libc::TCP_NODELAY,
+            &opt as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        );
+    }
+}
 
 /// Convert an errno to a human-readable message via strerror.
 fn errno_message(errno: i32) -> String {
@@ -162,7 +177,10 @@ pub(super) fn process_raw_completion(
                 ConnectAddr::Unix { path } => path.clone(),
             };
             let new_port = match addr {
-                ConnectAddr::Tcp { .. } => Port::new_tcp_stream(fd, peer_addr),
+                ConnectAddr::Tcp { .. } => {
+                    set_tcp_nodelay(&fd);
+                    Port::new_tcp_stream(fd, peer_addr)
+                }
                 ConnectAddr::Unix { .. } => Port::new_unix_stream(fd, peer_addr),
             };
             Completion {
@@ -418,7 +436,10 @@ pub(super) fn process_raw_completion(
                     let peer_addr = crate::io::sockaddr::peer_address(fd);
                     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
                     let new_port = match listener_kind {
-                        Some(PortKind::TcpListener) => Port::new_tcp_stream(fd, peer_addr),
+                        Some(PortKind::TcpListener) => {
+                            set_tcp_nodelay(&fd);
+                            Port::new_tcp_stream(fd, peer_addr)
+                        }
                         Some(PortKind::UnixListener) => Port::new_unix_stream(fd, peer_addr),
                         _ => {
                             return Completion {

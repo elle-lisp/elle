@@ -16,8 +16,10 @@
 //! the tier rather than failing.
 
 use crate::value::{error_val_extra, SignalBits, Value, SIG_ERROR, SIG_OK};
-#[cfg(any(feature = "jit", feature = "wasm"))]
+#[cfg(feature = "wasm")]
 use std::rc::Rc;
+#[cfg(feature = "jit")]
+use std::sync::Arc;
 
 use super::core::VM;
 
@@ -161,7 +163,7 @@ impl VM {
                     Vec::new(),
                 ) {
                     Ok(jc) => {
-                        let jc = Rc::new(jc);
+                        let jc = Arc::new(jc);
                         self.jit_cache.insert(bytecode_ptr, jc.clone());
                         jc
                     }
