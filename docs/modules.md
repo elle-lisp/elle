@@ -93,6 +93,15 @@ What the closure does not return is private. `greeting` and
 `format-greeting` are not visible to the caller. Encapsulation comes from
 lexical scope, not from access modifiers.
 
+**This convention is load-bearing.** The compiler's signal projection
+system depends on the return expression being a struct literal (or a
+closure whose body is a struct literal). When a file follows this
+convention, the compiler can extract a signal profile for each exported
+closure — enabling cross-file signal inference. If a file returns a
+dynamic or computed value, cross-file signal inference falls back to the
+conservative Polymorphic. See [signals/inference.md](signals/inference.md)
+for details.
+
 
 ## Parametric Modules
 
@@ -323,25 +332,50 @@ import: circular dependency detected for 'a.lisp'
 
 **Consequence**: Circular import bugs surface at runtime, not compile-time. This is acceptable because circular imports are design errors, not programming mistakes—they should never happen in correct code.
 
-### Cross-file signal inference is per-file
+### Cross-file signal inference via projection
 
-The fixpoint loop converges signal inference within a single file. Mutual recursion across imported modules doesn't benefit from cross-form convergence—each import is treated as returning a Polymorphic signal.
+Signal inference within a file uses the fixpoint loop (mutual recursion
+converges). Cross-file signal inference uses a different mechanism:
+**signal projection**.
 
-**Why**: Fixpoint convergence requires re-analyzing all forms in the file until signals stabilize. Extending this across file boundaries would require either whole-program analysis (defeating modularity) or a module type system (adding significant complexity). Per-file convergence is a clean boundary.
+When a file returns a struct of closures — the standard closure-as-module
+convention — the compiler extracts a signal projection: a mapping from
+keyword field names to the signals of the closures they hold. This is the
+**load-bearing convention**: signal projection depends on the file's return
+expression being a struct literal (or a closure whose body is a struct
+literal). Dynamic or computed return values fall back to Polymorphic.
 
-**Consequence for humans**: You cannot rely on cross-file signal inference. Use `(silence)` and `squelch` at module boundaries if you need performance guarantees.
+When an importing file sees `((import "std/math"))` with a literal string
+argument, the compiler looks up (or compiles and caches) the target file's
+projection. Qualified access like `math:add` then uses the projected
+signal instead of the conservative Polymorphic fallback.
 
-**Solution for agents**: This limitation is solved by the [MCP knowledge graph](../mcp.md). While each file's compilation is independent, the RDF store captures the entire codebase's call graph and signal profiles. Agents can query cross-file dependencies via SPARQL. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for how agents reason about module composition.
+See [signals/inference.md](signals/inference.md) for the full mechanism,
+including composition with compile-time squelch.
 
-### Static analysis cannot see through imports
+**Consequence**: Cross-file signal inference works automatically for
+modules following the closure-as-module convention. Modules returning
+dynamic values are treated conservatively.
 
-The analyzer processes one file at a time. When it encounters `(import ...)`, it sees a function call that returns an unknown value. No cross-file signal tracking, arity checking, or static IDE features for imported symbols.
+**Mutual recursion across files**: Fixpoint convergence is per-file.
+Mutual recursion across file boundaries does not benefit from cross-form
+convergence — each import is a separate compilation.
 
-**Why**: Imports are fully dynamic. The return value depends on runtime parameters and computation. Static analysis would require a separate module type system or whole-program analysis, both incompatible with the goal of making modules first-class, parameterizable values.
+### Static analysis is limited across imports
 
-**Consequence for humans**: IDE features like completion and refactoring don't work across module boundaries. Read the documentation or source code for imported modules.
+The analyzer processes one file at a time. Signal projection provides
+cross-file signal data for qualified access. Other static features
+(arity checking, IDE completion, refactoring) do not cross import
+boundaries.
 
-**Solution for agents**: The [MCP knowledge graph](../mcp.md) provides complete cross-file visibility. When a file is analyzed, all its function definitions, calls, and captures are stored in the RDF graph. Agents can query module composition via SPARQL without relying on static type information. See [Agent Reasoning in Elle](../analysis/agent-reasoning.md) for cross-file reasoning patterns.
+**Why**: Imports are fully dynamic. The return value depends on runtime
+parameters and computation. Signal projection works because it only
+requires analyzing the return expression's shape, not executing the file.
+
+**Solution for agents**: The [MCP knowledge graph](../mcp.md) provides
+complete cross-file visibility via SPARQL queries. See
+[Agent Reasoning in Elle](../analysis/agent-reasoning.md) for cross-file
+reasoning patterns.
 
 
 ## Implementation
@@ -350,9 +384,13 @@ The analyzer processes one file at a time. When it encounters `(import ...)`, it
 |------|------|
 | `src/primitives/modules.rs` | `import-file` primitive: file I/O, compilation, execution, circular import detection, plugin caching |
 | `src/plugin.rs` | `.so` plugin loading: `dlsym`, `elle_plugin_init`, primitive registration |
-| `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`) |
+| `src/hir/analyze/forms.rs` | Qualified symbol desugaring (`a:b` → `(get a :b)`), projection lookup for cross-file signal inference |
+| `src/hir/analyze/call.rs` | Import pattern detection, compile-time squelch inference |
+| `src/hir/analyze/fileletrec.rs` | `compute_signal_projection`: extracts keyword→signal mapping from struct-returning files |
+| `src/pipeline/cache.rs` | Signal projection cache (`PROJECTION_CACHE`), `get_or_compile_projection` |
 | `src/reader/lexer.rs` | Qualified symbol lexing (`a:b` as single token) |
-| `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing |
+| `src/pipeline/compile.rs` | `compile_file`: file-as-letrec compilation, `include`/`include-file` splicing, projection threading |
+| `tests/integration/projection.rs` | Signal projection and compile-time squelch tests |
 | `tests/elle/modules.lisp` | Behavioral tests for module patterns |
 | `tests/elle/include.lisp` | Behavioral tests for compile-time inclusion |
 | `tests/modules/` | Module fixtures (formatter, counter, test) |

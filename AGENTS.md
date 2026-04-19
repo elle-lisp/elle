@@ -120,7 +120,7 @@ compile-time signal (`Silent`, `Yields`, `Polymorphic`) inferred by the
 analyzer. When a function calls `(emit :yield val)`, the signal propagates
 up through the call chain. The compiler uses this to decide calling
 convention (direct call vs suspending call). `silence` declares a ceiling;
-`squelch` wraps at runtime.
+`squelch` wraps at runtime and narrows the signal at compile time.
 
 **Capabilities flow down** — from parent fiber to child. When creating a
 fiber with `(fiber/new body mask :deny |:io :ffi|)`, the parent withholds
