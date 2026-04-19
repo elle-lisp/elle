@@ -66,22 +66,23 @@ pub const SIG_FUEL: SignalBits = SignalBits::new(1 << 12); // instruction budget
 pub const SIG_SWITCH: SignalBits = SignalBits::new(1 << 13); // fiber switch trampoline (VM-internal)
 pub const SIG_WAIT: SignalBits = SignalBits::new(1 << 14); // structured concurrency wait request
 
-/// Capability mask: which signal bits represent deniable operations.
+/// VM-internal signal bits: infrastructure signals that user code cannot
+/// produce. These are emitted exclusively by the VM's own dispatch machinery.
+const VM_INTERNAL: SignalBits = SIG_RESUME
+    .union(SIG_PROPAGATE)
+    .union(SIG_QUERY)
+    .union(SIG_TERMINAL)
+    .union(SIG_FUEL)
+    .union(SIG_SWITCH)
+    .union(SIG_WAIT);
+
+/// Capability mask: all signals that user code can produce.
 ///
-/// These are the bits checked during capability enforcement. A primitive's
-/// signal bits AND the fiber's `withheld` AND this mask determines whether
-/// the primitive is blocked.
-///
-/// Includes: error (0), yield (1), debug (2), ffi (4), halt (8), io (9), exec (11).
-/// Excludes VM-internal infrastructure: resume (3), propagate (5), abort (6),
-/// query (7), terminal (10), fuel (12), switch (13), wait (14).
-pub const CAP_MASK: SignalBits = SIG_ERROR
-    .union(SIG_YIELD)
-    .union(SIG_DEBUG)
-    .union(SIG_FFI)
-    .union(SIG_HALT)
-    .union(SIG_IO)
-    .union(SIG_EXEC);
+/// Defined as the complement of VM-internal bits within the 32-bit signal
+/// space (bits 0-15 compiler-reserved, bits 16-31 user-defined). Used for
+/// capability enforcement (which operations a fiber can be denied) and for
+/// static analysis (what an unknown callee might emit).
+pub const CAP_MASK: SignalBits = SignalBits::new(VM_INTERNAL.raw() ^ 0xFFFF_FFFF);
 
 /// Signal classification for expressions and functions.
 ///
@@ -162,6 +163,20 @@ impl Signal {
     pub const fn ffi_errors() -> Self {
         Signal {
             bits: SIG_FFI.union(SIG_ERROR),
+            propagates: 0,
+        }
+    }
+
+    /// Maximally conservative signal for a callee whose effects are unknown.
+    /// Includes all user-facing signal bits (CAP_MASK): the callee could
+    /// error, yield, do I/O, call foreign code, exec subprocesses, halt
+    /// the VM, or trigger a debug breakpoint. Used when calling a value
+    /// whose origin is opaque to static analysis (e.g., a local bound to
+    /// a dynamic expression, or calling the result of an arbitrary
+    /// expression).
+    pub const fn unknown() -> Self {
+        Signal {
+            bits: CAP_MASK,
             propagates: 0,
         }
     }

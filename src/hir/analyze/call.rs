@@ -226,14 +226,31 @@ impl<'a> Analyzer<'a> {
             HirKind::Var(binding) => {
                 if let Some(signal) = self.signal_env.get(binding) {
                     *signal
+                } else if let Some(signal) = self
+                    .primitive_signals
+                    .get(&self.arena.get(*binding).name)
+                    .cloned()
+                {
+                    signal
+                } else if matches!(self.arena.get(*binding).scope, BindingScope::Parameter)
+                    && self.current_lambda_params.contains(binding)
+                {
+                    // Parameter call: signal depends on what the caller passes.
+                    // SIG_YIELD triggers the polymorphic inference path in
+                    // compute_inferred_signal; SIG_ERROR is inherently sound
+                    // because calling an unknown value can always fail (not
+                    // callable, wrong arity, callback errors).
+                    Signal::yields_errors()
                 } else {
-                    self.primitive_signals
-                        .get(&self.arena.get(*binding).name)
-                        .cloned()
-                        .unwrap_or(Signal::yields())
+                    // Calling a value whose origin is opaque to static analysis
+                    // (e.g., bound to a dynamic expression result). We cannot
+                    // determine its effects — use the sound conservative signal.
+                    Signal::unknown()
                 }
             }
-            _ => Signal::yields(),
+            // Opaque expression in callee position (result of a call, conditional,
+            // etc.) — effects are statically indeterminate.
+            _ => Signal::unknown(),
         }
     }
 
@@ -293,8 +310,8 @@ impl<'a> Analyzer<'a> {
                 if param_idx < args.len() {
                     resolved = resolved.combine(self.resolve_arg_signal(args[param_idx]));
                 } else {
-                    // Parameter index out of bounds - conservatively Yields
-                    return Signal::yields();
+                    // Parameter index out of bounds — sound conservative signal.
+                    return Signal::unknown();
                 }
             }
             resolved
@@ -320,9 +337,9 @@ impl<'a> Analyzer<'a> {
                         .get(&self.arena.get(*binding).name)
                         .cloned()
                 })
-                .unwrap_or(Signal::yields()),
-            // Unknown argument signal - conservatively Yields for soundness
-            _ => Signal::yields(),
+                .unwrap_or(Signal::unknown()),
+            // Opaque expression as argument — effects are indeterminate.
+            _ => Signal::unknown(),
         }
     }
 
